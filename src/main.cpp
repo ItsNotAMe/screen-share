@@ -2,6 +2,7 @@
 #include "H264FileEncoder.h"
 #include "H264StreamEncoder.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -21,7 +22,7 @@ struct Options {
     int height = 0;
     int fps = 60;
     int seconds = 10;
-    uint32_t bitrate = 12'000'000;
+    uint32_t bitrate = 0;
     std::string recordPath;
     bool streamEncode = false;
 };
@@ -37,7 +38,8 @@ void PrintHelp()
         << "Examples:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
-        << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15 --record out.mp4\n";
+        << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
+        << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15 --record 1080p.mp4\n";
 }
 
 int ParseInt(const char* value, const char* name)
@@ -58,6 +60,28 @@ uint32_t ParseBitrateMbps(const char* value)
         throw std::invalid_argument(std::string("Invalid value for --bitrate-mbps: ") + value);
     }
     return static_cast<uint32_t>(parsed * 1'000'000.0);
+}
+
+uint32_t SelectBitrate(const Options& options, int width, int height)
+{
+    if (options.bitrate > 0) {
+        return options.bitrate;
+    }
+
+    const uint64_t pixelsPerSecond =
+        static_cast<uint64_t>(width) *
+        static_cast<uint64_t>(height) *
+        static_cast<uint64_t>(options.fps);
+
+    const uint64_t estimated = pixelsPerSecond * 16 / 100;
+    constexpr uint64_t minBitrate = 8'000'000;
+    constexpr uint64_t maxBitrate = 80'000'000;
+    return static_cast<uint32_t>(std::clamp(estimated, minBitrate, maxBitrate));
+}
+
+double Mbps(uint32_t bitrate)
+{
+    return static_cast<double>(bitrate) / 1'000'000.0;
 }
 
 Options ParseOptions(int argc, char** argv)
@@ -113,10 +137,7 @@ Options ParseOptions(int argc, char** argv)
     if (options.width < 0 || options.height < 0) {
         throw std::invalid_argument("--width and --height must be positive");
     }
-    if ((!options.recordPath.empty() || options.streamEncode) && (options.width == 0 || options.height == 0)) {
-        throw std::invalid_argument("--record and --stream-encode currently require --width and --height");
-    }
-    if (options.streamEncode && ((options.width % 2) != 0 || (options.height % 2) != 0)) {
+    if (options.width > 0 && options.streamEncode && ((options.width % 2) != 0 || (options.height % 2) != 0)) {
         throw std::invalid_argument("--stream-encode requires even --width and --height for NV12");
     }
 
@@ -230,7 +251,7 @@ void RunCaptureStats(const Options& options)
                     encoderConfig.width = lastFrame.width;
                     encoderConfig.height = lastFrame.height;
                     encoderConfig.fps = options.fps;
-                    encoderConfig.bitrate = options.bitrate;
+                    encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
 
                     const std::filesystem::path recordPath(options.recordPath);
                     if (recordPath.has_parent_path()) {
@@ -239,6 +260,10 @@ void RunCaptureStats(const Options& options)
 
                     fileEncoder = std::make_unique<screenshare::H264FileEncoder>();
                     fileEncoder->Start(encoderConfig);
+                    std::cout
+                        << "File encoder output=" << encoderConfig.width << "x" << encoderConfig.height
+                        << " bitrate_mbps=" << Mbps(encoderConfig.bitrate)
+                        << "\n";
                 }
 
                 fileEncoder->WriteFrame(lastFrame);
@@ -251,10 +276,14 @@ void RunCaptureStats(const Options& options)
                     encoderConfig.width = lastFrame.width;
                     encoderConfig.height = lastFrame.height;
                     encoderConfig.fps = options.fps;
-                    encoderConfig.bitrate = options.bitrate;
+                    encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
 
                     streamEncoder = std::make_unique<screenshare::H264StreamEncoder>();
                     streamEncoder->Start(encoderConfig);
+                    std::cout
+                        << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
+                        << " bitrate_mbps=" << Mbps(encoderConfig.bitrate)
+                        << "\n";
                 }
 
                 const auto packets = streamEncoder->EncodeFrame(lastFrame);

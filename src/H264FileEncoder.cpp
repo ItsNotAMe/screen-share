@@ -1,6 +1,7 @@
 #include "H264FileEncoder.h"
 
 #include <Windows.h>
+#include <codecapi.h>
 #include <mfapi.h>
 #include <mferror.h>
 
@@ -90,6 +91,7 @@ void H264FileEncoder::Start(const H264EncoderConfig& config)
     ThrowIfFailed(outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "IMFMediaType::SetGUID(MF_MT_MAJOR_TYPE)");
     ThrowIfFailed(outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264), "IMFMediaType::SetGUID(MF_MT_SUBTYPE)");
     ThrowIfFailed(outputType->SetUINT32(MF_MT_AVG_BITRATE, config_.bitrate), "IMFMediaType::SetUINT32(MF_MT_AVG_BITRATE)");
+    ThrowIfFailed(outputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High), "IMFMediaType::SetUINT32(MF_MT_MPEG2_PROFILE)");
     ThrowIfFailed(outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(MF_MT_INTERLACE_MODE)");
     SetVideoSize(outputType.Get(), MF_MT_FRAME_SIZE, config_.width, config_.height);
     SetVideoRatio(outputType.Get(), MF_MT_FRAME_RATE, config_.fps, 1);

@@ -39,7 +39,13 @@ Capture monitor 0 at a 60 FPS target and request 1080p output:
 .\build\debug\ScreenShare.exe --display 0 --width 1920 --height 1080 --fps 60 --seconds 15
 ```
 
-Capture and encode a short H.264 MP4:
+Capture and encode a short full-resolution H.264 MP4:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --fps 60 --seconds 15 --record native.mp4
+```
+
+Capture and encode a downscaled H.264 MP4:
 
 ```powershell
 .\build\debug\ScreenShare.exe --display 0 --width 1920 --height 1080 --fps 60 --seconds 15 --record out.mp4 --bitrate-mbps 16
@@ -60,9 +66,17 @@ ffmpeg -y -ss 00:00:01 -i out.mp4 -frames:v 1 out-frame.png
 
 The current executable prints capture stats, performs GPU scaling, can write an H.264 MP4 through
 Media Foundation, and can produce streamable H.264 packets through the Microsoft H.264 encoder MFT.
-The encoder paths are validation paths: they still use CPU readback after scaling. The MP4 path
-accounts for Media Foundation RGB row orientation so recordings play upright. The future streaming
-encoder should consume GPU textures directly.
+Omit `--width` and `--height` to record or stream-encode at the selected display's native
+resolution. Provide them only when you want to downscale. If `--bitrate-mbps` is omitted, the app
+chooses a resolution-aware default; increase it manually if text or motion looks soft. The H.264
+validation encoders request High Profile for better quality than the default baseline profile. The
+encoder paths are validation paths: they still use CPU readback after scaling. The MP4 path accounts
+for Media Foundation RGB row orientation so recordings play upright. The future streaming encoder
+should consume GPU textures directly.
+
+The `--stream-encode` path is CPU-heavy at native high resolutions because it currently converts
+BGRA to NV12 on the CPU. Use `--width`/`--height` for that validation path until GPU color
+conversion and real hardware encoding are added.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
