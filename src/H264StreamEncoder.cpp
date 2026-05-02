@@ -262,21 +262,38 @@ std::vector<EncodedPacket> H264StreamEncoder::ReadAvailablePackets()
         ThrowIfFailed(transform_->GetOutputStreamInfo(outputStreamId_, &streamInfo), "IMFTransform::GetOutputStreamInfo");
 
         Microsoft::WRL::ComPtr<IMFMediaBuffer> outputBuffer;
-        ThrowIfFailed(MFCreateMemoryBuffer(streamInfo.cbSize == 0 ? 1'048'576 : streamInfo.cbSize, &outputBuffer), "MFCreateMemoryBuffer(output)");
-
         Microsoft::WRL::ComPtr<IMFSample> outputSample;
-        ThrowIfFailed(MFCreateSample(&outputSample), "MFCreateSample(output)");
-        ThrowIfFailed(outputSample->AddBuffer(outputBuffer.Get()), "IMFSample::AddBuffer(output)");
+        HRESULT outputResult = S_OK;
+        DWORD outputBufferSize = streamInfo.cbSize == 0 ? 1'048'576 : streamInfo.cbSize;
 
-        MFT_OUTPUT_DATA_BUFFER outputData{};
-        outputData.dwStreamID = outputStreamId_;
-        outputData.pSample = outputSample.Get();
+        while (true) {
+            outputBuffer.Reset();
+            outputSample.Reset();
 
-        DWORD status = 0;
-        const HRESULT outputResult = transform_->ProcessOutput(0, 1, &outputData, &status);
+            ThrowIfFailed(MFCreateMemoryBuffer(outputBufferSize, &outputBuffer), "MFCreateMemoryBuffer(output)");
+            ThrowIfFailed(MFCreateSample(&outputSample), "MFCreateSample(output)");
+            ThrowIfFailed(outputSample->AddBuffer(outputBuffer.Get()), "IMFSample::AddBuffer(output)");
 
-        if (outputData.pEvents != nullptr) {
-            outputData.pEvents->Release();
+            MFT_OUTPUT_DATA_BUFFER outputData{};
+            outputData.dwStreamID = outputStreamId_;
+            outputData.pSample = outputSample.Get();
+
+            DWORD status = 0;
+            outputResult = transform_->ProcessOutput(0, 1, &outputData, &status);
+
+            if (outputData.pEvents != nullptr) {
+                outputData.pEvents->Release();
+            }
+
+            if (outputResult != MF_E_BUFFERTOOSMALL) {
+                break;
+            }
+
+            if (outputBufferSize >= 64 * 1'048'576) {
+                ThrowIfFailed(outputResult, "IMFTransform::ProcessOutput");
+            }
+
+            outputBufferSize *= 2;
         }
 
         if (outputResult == MF_E_TRANSFORM_NEED_MORE_INPUT) {
