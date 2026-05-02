@@ -146,10 +146,13 @@ void H264FileEncoder::WriteFrame(const CapturedFrame& frame)
     const DWORD sourceStride = frame.rowPitch;
     const DWORD copyStride = std::min(stride, sourceStride);
 
+    // Media Foundation's RGB sink-writer path expects bottom-up RGB rows here.
+    // Captured D3D textures map top-down, so flip the diagnostic MP4 input.
     for (int y = 0; y < config_.height; ++y) {
+        const int sourceY = config_.height - 1 - y;
         std::memcpy(
             destination + static_cast<size_t>(stride) * y,
-            source + static_cast<size_t>(sourceStride) * y,
+            source + static_cast<size_t>(sourceStride) * sourceY,
             copyStride);
     }
 

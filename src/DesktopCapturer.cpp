@@ -410,7 +410,7 @@ void DesktopCapturer::EnsureScaledTexture(const D3D11_TEXTURE2D_DESC& sourceDesc
     if (scaledTexture_ &&
         scaledDesc_.Width == static_cast<UINT>(width) &&
         scaledDesc_.Height == static_cast<UINT>(height) &&
-        scaledDesc_.Format == sourceDesc.Format) {
+        scaledDesc_.Format == DXGI_FORMAT_B8G8R8A8_UNORM) {
         return;
     }
 

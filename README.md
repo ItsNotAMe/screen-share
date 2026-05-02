@@ -52,8 +52,9 @@ Capture and run the streamable H.264 packet encoder:
 
 The current executable prints capture stats, performs GPU scaling, can write an H.264 MP4 through
 Media Foundation, and can produce streamable H.264 packets through the Microsoft H.264 encoder MFT.
-The encoder paths are validation paths: they still use CPU readback after scaling. The future
-streaming encoder should consume GPU textures directly.
+The encoder paths are validation paths: they still use CPU readback after scaling. The MP4 path
+accounts for Media Foundation RGB row orientation so recordings play upright. The future streaming
+encoder should consume GPU textures directly.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
