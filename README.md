@@ -18,6 +18,7 @@ Requirements:
 - Windows 10/11
 - MSYS2/MinGW-w64 or Visual Studio with the Desktop development with C++ workload
 - CMake 3.24+
+- Optional: FFmpeg for inspecting generated MP4 files
 
 ```powershell
 cmake --preset debug
@@ -48,6 +49,13 @@ Capture and run the streamable H.264 packet encoder:
 
 ```powershell
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --bitrate-mbps 8
+```
+
+Inspect a recording with FFmpeg:
+
+```powershell
+ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,avg_frame_rate,duration -of default=noprint_wrappers=1 out.mp4
+ffmpeg -y -ss 00:00:01 -i out.mp4 -frames:v 1 out-frame.png
 ```
 
 The current executable prints capture stats, performs GPU scaling, can write an H.264 MP4 through
