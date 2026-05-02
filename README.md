@@ -44,10 +44,16 @@ Capture and encode a short H.264 MP4:
 .\build\debug\ScreenShare.exe --display 0 --width 1920 --height 1080 --fps 60 --seconds 15 --record out.mp4 --bitrate-mbps 16
 ```
 
-The current executable prints capture stats, performs GPU scaling, and can write an H.264 MP4
-through Media Foundation. The recording path is a validation path: it avoids forcing hardware
-transforms and still uses CPU readback after scaling. The future streaming encoder should consume
-GPU textures directly.
+Capture and run the streamable H.264 packet encoder:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --bitrate-mbps 8
+```
+
+The current executable prints capture stats, performs GPU scaling, can write an H.264 MP4 through
+Media Foundation, and can produce streamable H.264 packets through the Microsoft H.264 encoder MFT.
+The encoder paths are validation paths: they still use CPU readback after scaling. The future
+streaming encoder should consume GPU textures directly.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -61,6 +67,7 @@ Planned pipeline:
 DXGI/Windows Graphics Capture
  -> GPU scaling
  -> Media Foundation H.264 file encode for validation
+ -> Microsoft H.264 MFT packet encode for transport validation
  -> future real-time hardware encode path
  -> native real-time transport
  -> decode and Direct3D render on receiver

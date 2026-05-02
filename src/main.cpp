@@ -1,5 +1,6 @@
 #include "DesktopCapturer.h"
 #include "H264FileEncoder.h"
+#include "H264StreamEncoder.h"
 
 #include <chrono>
 #include <cstdint>
@@ -22,6 +23,7 @@ struct Options {
     int seconds = 10;
     uint32_t bitrate = 12'000'000;
     std::string recordPath;
+    bool streamEncode = false;
 };
 
 void PrintHelp()
@@ -31,7 +33,7 @@ void PrintHelp()
         << "Usage:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
-        << "              [--record PATH] [--bitrate-mbps Mbps]\n\n"
+        << "              [--record PATH] [--stream-encode] [--bitrate-mbps Mbps]\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
@@ -90,6 +92,8 @@ Options ParseOptions(int argc, char** argv)
             options.seconds = ParseInt(requireValue("--seconds"), "--seconds");
         } else if (arg == "--record") {
             options.recordPath = requireValue("--record");
+        } else if (arg == "--stream-encode") {
+            options.streamEncode = true;
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else {
@@ -109,8 +113,11 @@ Options ParseOptions(int argc, char** argv)
     if (options.width < 0 || options.height < 0) {
         throw std::invalid_argument("--width and --height must be positive");
     }
-    if (!options.recordPath.empty() && (options.width == 0 || options.height == 0)) {
-        throw std::invalid_argument("--record currently requires --width and --height");
+    if ((!options.recordPath.empty() || options.streamEncode) && (options.width == 0 || options.height == 0)) {
+        throw std::invalid_argument("--record and --stream-encode currently require --width and --height");
+    }
+    if (options.streamEncode && ((options.width % 2) != 0 || (options.height % 2) != 0)) {
+        throw std::invalid_argument("--stream-encode requires even --width and --height for NV12");
     }
 
     return options;
@@ -161,6 +168,9 @@ void RunCaptureStats(const Options& options)
     if (!options.recordPath.empty()) {
         std::cout << ", recording H.264 to " << options.recordPath;
     }
+    if (options.streamEncode) {
+        std::cout << ", stream-encoding H.264 packets";
+    }
     std::cout << ".\n";
 
     using Clock = std::chrono::steady_clock;
@@ -178,8 +188,12 @@ void RunCaptureStats(const Options& options)
     int lastOutputHeight = 0;
     bool hasFrame = false;
     screenshare::CapturedFrame lastFrame;
-    std::unique_ptr<screenshare::H264FileEncoder> encoder;
-    uint64_t encodedFrames = 0;
+    std::unique_ptr<screenshare::H264FileEncoder> fileEncoder;
+    std::unique_ptr<screenshare::H264StreamEncoder> streamEncoder;
+    uint64_t fileEncodedFrames = 0;
+    uint64_t streamEncodedFrames = 0;
+    uint64_t streamPackets = 0;
+    uint64_t streamBytes = 0;
 
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
     auto nextFrameAt = Clock::now();
@@ -210,7 +224,7 @@ void RunCaptureStats(const Options& options)
             }
 
             if (!options.recordPath.empty()) {
-                if (!encoder) {
+                if (!fileEncoder) {
                     screenshare::H264EncoderConfig encoderConfig;
                     encoderConfig.outputPath = screenshare::Widen(options.recordPath);
                     encoderConfig.width = lastFrame.width;
@@ -223,12 +237,32 @@ void RunCaptureStats(const Options& options)
                         std::filesystem::create_directories(recordPath.parent_path());
                     }
 
-                    encoder = std::make_unique<screenshare::H264FileEncoder>();
-                    encoder->Start(encoderConfig);
+                    fileEncoder = std::make_unique<screenshare::H264FileEncoder>();
+                    fileEncoder->Start(encoderConfig);
                 }
 
-                encoder->WriteFrame(lastFrame);
-                ++encodedFrames;
+                fileEncoder->WriteFrame(lastFrame);
+                ++fileEncodedFrames;
+            }
+
+            if (options.streamEncode) {
+                if (!streamEncoder) {
+                    screenshare::H264StreamEncoderConfig encoderConfig;
+                    encoderConfig.width = lastFrame.width;
+                    encoderConfig.height = lastFrame.height;
+                    encoderConfig.fps = options.fps;
+                    encoderConfig.bitrate = options.bitrate;
+
+                    streamEncoder = std::make_unique<screenshare::H264StreamEncoder>();
+                    streamEncoder->Start(encoderConfig);
+                }
+
+                const auto packets = streamEncoder->EncodeFrame(lastFrame);
+                ++streamEncodedFrames;
+                streamPackets += packets.size();
+                for (const auto& packet : packets) {
+                    streamBytes += packet.bytes.size();
+                }
             }
         }
 
@@ -245,7 +279,10 @@ void RunCaptureStats(const Options& options)
                 << " repeated_frames=" << intervalRepeatedFrames
                 << " total_output_frames=" << totalOutputFrames
                 << " total_desktop_updates=" << totalDesktopUpdates
-                << " encoded_frames=" << encodedFrames
+                << " file_encoded_frames=" << fileEncodedFrames
+                << " stream_encoded_frames=" << streamEncodedFrames
+                << " stream_packets=" << streamPackets
+                << " stream_bytes=" << streamBytes
                 << "\n";
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
@@ -254,7 +291,16 @@ void RunCaptureStats(const Options& options)
         }
     }
 
-    encoder.reset();
+    if (streamEncoder) {
+        const auto drainedPackets = streamEncoder->Drain();
+        streamPackets += drainedPackets.size();
+        for (const auto& packet : drainedPackets) {
+            streamBytes += packet.bytes.size();
+        }
+    }
+
+    streamEncoder.reset();
+    fileEncoder.reset();
     capturer.Stop();
 
     const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
@@ -262,7 +308,10 @@ void RunCaptureStats(const Options& options)
         << "Done. Average output FPS: " << (static_cast<double>(totalOutputFrames) / totalElapsed)
         << ", average desktop update FPS: " << (static_cast<double>(totalDesktopUpdates) / totalElapsed)
         << ", repeated frames: " << totalRepeatedFrames
-        << ", encoded frames: " << encodedFrames
+        << ", file encoded frames: " << fileEncodedFrames
+        << ", stream encoded frames: " << streamEncodedFrames
+        << ", stream packets: " << streamPackets
+        << ", stream bytes: " << streamBytes
         << "\n";
 }
 
