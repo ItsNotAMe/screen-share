@@ -1,6 +1,7 @@
 #include "DesktopCapturer.h"
 #include "H264FileEncoder.h"
 #include "H264StreamEncoder.h"
+#include "UdpSender.h"
 
 #include <algorithm>
 #include <chrono>
@@ -25,6 +26,7 @@ struct Options {
     uint32_t bitrate = 0;
     std::string recordPath;
     bool streamEncode = false;
+    std::string udpSendTarget;
 };
 
 void PrintHelp()
@@ -34,12 +36,13 @@ void PrintHelp()
         << "Usage:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
-        << "              [--record PATH] [--stream-encode] [--bitrate-mbps Mbps]\n\n"
+        << "              [--record PATH] [--stream-encode] [--udp-send HOST:PORT]\n"
+        << "              [--bitrate-mbps Mbps]\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
-        << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15 --record 1080p.mp4\n";
+        << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
 int ParseInt(const char* value, const char* name)
@@ -118,6 +121,9 @@ Options ParseOptions(int argc, char** argv)
             options.recordPath = requireValue("--record");
         } else if (arg == "--stream-encode") {
             options.streamEncode = true;
+        } else if (arg == "--udp-send") {
+            options.udpSendTarget = requireValue("--udp-send");
+            options.streamEncode = true;
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else {
@@ -139,6 +145,9 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.width > 0 && options.streamEncode && ((options.width % 2) != 0 || (options.height % 2) != 0)) {
         throw std::invalid_argument("--stream-encode requires even --width and --height for NV12");
+    }
+    if (!options.udpSendTarget.empty()) {
+        static_cast<void>(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
     }
 
     return options;
@@ -192,6 +201,9 @@ void RunCaptureStats(const Options& options)
     if (options.streamEncode) {
         std::cout << ", stream-encoding H.264 packets";
     }
+    if (!options.udpSendTarget.empty()) {
+        std::cout << ", UDP sending to " << options.udpSendTarget;
+    }
     std::cout << ".\n";
 
     using Clock = std::chrono::steady_clock;
@@ -215,6 +227,7 @@ void RunCaptureStats(const Options& options)
     uint64_t streamEncodedFrames = 0;
     uint64_t streamPackets = 0;
     uint64_t streamBytes = 0;
+    std::unique_ptr<screenshare::UdpSender> udpSender;
 
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
     auto nextFrameAt = Clock::now();
@@ -280,6 +293,12 @@ void RunCaptureStats(const Options& options)
 
                     streamEncoder = std::make_unique<screenshare::H264StreamEncoder>();
                     streamEncoder->Start(encoderConfig);
+
+                    if (!options.udpSendTarget.empty()) {
+                        udpSender = std::make_unique<screenshare::UdpSender>();
+                        udpSender->Open(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
+                    }
+
                     std::cout
                         << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
                         << " bitrate_mbps=" << Mbps(encoderConfig.bitrate)
@@ -291,6 +310,9 @@ void RunCaptureStats(const Options& options)
                 streamPackets += packets.size();
                 for (const auto& packet : packets) {
                     streamBytes += packet.bytes.size();
+                    if (udpSender) {
+                        udpSender->SendFrame(packet);
+                    }
                 }
             }
         }
@@ -312,6 +334,8 @@ void RunCaptureStats(const Options& options)
                 << " stream_encoded_frames=" << streamEncodedFrames
                 << " stream_packets=" << streamPackets
                 << " stream_bytes=" << streamBytes
+                << " udp_datagrams=" << (udpSender ? udpSender->stats().datagramsSent : 0)
+                << " udp_wire_bytes=" << (udpSender ? udpSender->stats().wireBytesSent : 0)
                 << "\n";
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
@@ -325,9 +349,14 @@ void RunCaptureStats(const Options& options)
         streamPackets += drainedPackets.size();
         for (const auto& packet : drainedPackets) {
             streamBytes += packet.bytes.size();
+            if (udpSender) {
+                udpSender->SendFrame(packet);
+            }
         }
     }
 
+    const screenshare::UdpSenderStats udpStats = udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
+    udpSender.reset();
     streamEncoder.reset();
     fileEncoder.reset();
     capturer.Stop();
@@ -341,6 +370,8 @@ void RunCaptureStats(const Options& options)
         << ", stream encoded frames: " << streamEncodedFrames
         << ", stream packets: " << streamPackets
         << ", stream bytes: " << streamBytes
+        << ", UDP datagrams: " << udpStats.datagramsSent
+        << ", UDP wire bytes: " << udpStats.wireBytesSent
         << "\n";
 }
 
