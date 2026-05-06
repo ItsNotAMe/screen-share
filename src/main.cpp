@@ -1,6 +1,7 @@
 #include "DesktopCapturer.h"
 #include "H264FileEncoder.h"
 #include "H264StreamEncoder.h"
+#include "UdpReceiver.h"
 #include "UdpSender.h"
 
 #include <algorithm>
@@ -27,6 +28,7 @@ struct Options {
     std::string recordPath;
     bool streamEncode = false;
     std::string udpSendTarget;
+    uint16_t udpReceivePort = 0;
 };
 
 void PrintHelp()
@@ -35,6 +37,7 @@ void PrintHelp()
         << "ScreenShare native C++ capture prototype\n\n"
         << "Usage:\n"
         << "  ScreenShare --list\n"
+        << "  ScreenShare --udp-recv PORT [--seconds S]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--udp-send HOST:PORT]\n"
         << "              [--bitrate-mbps Mbps]\n\n"
@@ -42,6 +45,7 @@ void PrintHelp()
         << "  ScreenShare --list\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
+        << "  ScreenShare --udp-recv 5000 --seconds 15\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -124,6 +128,8 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--udp-send") {
             options.udpSendTarget = requireValue("--udp-send");
             options.streamEncode = true;
+        } else if (arg == "--udp-recv") {
+            options.udpReceivePort = screenshare::ParseUdpReceivePort(requireValue("--udp-recv"));
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else {
@@ -148,6 +154,10 @@ Options ParseOptions(int argc, char** argv)
     }
     if (!options.udpSendTarget.empty()) {
         static_cast<void>(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
+    }
+    if (options.udpReceivePort != 0 &&
+        (options.listDisplays || !options.recordPath.empty() || options.streamEncode || !options.udpSendTarget.empty())) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --record, --stream-encode, or --udp-send");
     }
 
     return options;
@@ -375,6 +385,85 @@ void RunCaptureStats(const Options& options)
         << "\n";
 }
 
+void RunUdpReceiverStats(const Options& options)
+{
+    screenshare::UdpReceiver receiver;
+    screenshare::UdpReceiverConfig config;
+    config.port = options.udpReceivePort;
+    receiver.Open(config);
+
+    std::cout << "Listening for UDP H.264 packet fragments on port " << options.udpReceivePort << ".\n";
+
+    using Clock = std::chrono::steady_clock;
+    const auto startedAt = Clock::now();
+    auto lastReportAt = startedAt;
+    uint64_t lastDatagramsReceived = 0;
+    uint64_t lastFramesCompleted = 0;
+    uint64_t latestFrameId = 0;
+    uint64_t latestFrameBytes = 0;
+    uint16_t latestFragmentCount = 0;
+    bool hasCompletedFrame = false;
+
+    while (Clock::now() - startedAt < std::chrono::seconds(options.seconds)) {
+        if (auto frame = receiver.ReceiveFrame(std::chrono::milliseconds(100))) {
+            latestFrameId = frame->frameId;
+            latestFrameBytes = frame->bytes.size();
+            latestFragmentCount = frame->fragmentCount;
+            hasCompletedFrame = true;
+        }
+
+        const auto now = Clock::now();
+        if (now - lastReportAt >= std::chrono::seconds(1)) {
+            const double elapsed = std::chrono::duration<double>(now - lastReportAt).count();
+            const auto& stats = receiver.stats();
+            const double datagramsPerSecond = static_cast<double>(stats.datagramsReceived - lastDatagramsReceived) / elapsed;
+            const double completedFps = static_cast<double>(stats.framesCompleted - lastFramesCompleted) / elapsed;
+
+            std::cout
+                << "udp_datagrams=" << stats.datagramsReceived
+                << " udp_datagrams_per_second=" << datagramsPerSecond
+                << " accepted_datagrams=" << stats.datagramsAccepted
+                << " invalid_datagrams=" << stats.invalidDatagrams
+                << " duplicate_fragments=" << stats.duplicateFragments
+                << " completed_frames=" << stats.framesCompleted
+                << " completed_fps=" << completedFps
+                << " pending_frames=" << receiver.pendingFrameCount()
+                << " incomplete_dropped=" << stats.incompleteFramesDropped
+                << " payload_bytes=" << stats.payloadBytesReceived
+                << " completed_bytes=" << stats.completedFrameBytes;
+
+            if (hasCompletedFrame) {
+                std::cout
+                    << " latest_frame=" << latestFrameId
+                    << " latest_frame_bytes=" << latestFrameBytes
+                    << " latest_fragments=" << latestFragmentCount;
+            }
+
+            std::cout << "\n";
+
+            lastDatagramsReceived = stats.datagramsReceived;
+            lastFramesCompleted = stats.framesCompleted;
+            lastReportAt = now;
+        }
+    }
+
+    const screenshare::UdpReceiverStats stats = receiver.stats();
+    receiver.Close();
+
+    const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
+    std::cout
+        << "Done. UDP datagrams: " << stats.datagramsReceived
+        << ", accepted datagrams: " << stats.datagramsAccepted
+        << ", invalid datagrams: " << stats.invalidDatagrams
+        << ", duplicate fragments: " << stats.duplicateFragments
+        << ", completed frames: " << stats.framesCompleted
+        << ", average completed FPS: " << (static_cast<double>(stats.framesCompleted) / totalElapsed)
+        << ", incomplete frames dropped: " << stats.incompleteFramesDropped
+        << ", payload bytes: " << stats.payloadBytesReceived
+        << ", completed bytes: " << stats.completedFrameBytes
+        << "\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -384,6 +473,11 @@ int main(int argc, char** argv)
 
         if (options.listDisplays) {
             PrintDisplays();
+            return 0;
+        }
+
+        if (options.udpReceivePort != 0) {
+            RunUdpReceiverStats(options);
             return 0;
         }
 

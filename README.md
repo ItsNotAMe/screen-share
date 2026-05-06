@@ -63,6 +63,12 @@ Capture, stream-encode, and send H.264 packets over UDP:
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8
 ```
 
+Listen for UDP H.264 packet fragments and reassemble complete encoded frames:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15
+```
+
 Inspect a recording with FFmpeg:
 
 ```powershell
@@ -84,8 +90,10 @@ The `--stream-encode` path is CPU-heavy at native high resolutions because it cu
 BGRA to NV12 on the CPU. Use `--width`/`--height` for that validation path until GPU color
 conversion and real hardware encoding are added.
 
-The `--udp-send` path is sender-only for now. It fragments each encoded H.264 packet into
-MTU-friendly UDP datagrams with a small header. A native receiver/decoder is a future milestone.
+The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
+small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
+complete encoded frames, and prints transport diagnostics. It does not decode or display video yet.
+A native decoder/renderer is a future milestone.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -100,8 +108,8 @@ DXGI/Windows Graphics Capture
  -> GPU scaling
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
+ -> UDP sender/receiver transport diagnostics
  -> future real-time hardware encode path
- -> native real-time transport
- -> decode and Direct3D render on receiver
+ -> future native decoder and Direct3D renderer
 ```
 An app to share your screen with others
