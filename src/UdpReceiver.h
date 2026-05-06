@@ -56,6 +56,11 @@ private:
     using Clock = std::chrono::steady_clock;
 
     struct PendingFrame {
+        struct FragmentRange {
+            uint32_t begin = 0;
+            uint32_t end = 0;
+        };
+
         uint64_t frameId = 0;
         uint64_t timestamp100ns = 0;
         uint32_t frameBytes = 0;
@@ -64,6 +69,7 @@ private:
         uint32_t receivedBytes = 0;
         std::vector<std::byte> bytes;
         std::vector<uint8_t> fragmentReceived;
+        std::vector<FragmentRange> receivedRanges;
         Clock::time_point lastUpdated;
     };
 

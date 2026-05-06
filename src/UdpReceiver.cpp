@@ -249,11 +249,24 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
         return std::nullopt;
     }
 
+    const uint32_t fragmentEnd = fragmentOffset + payloadBytes;
+    for (const auto& range : pending.receivedRanges) {
+        if (fragmentOffset < range.end && fragmentEnd > range.begin) {
+            ++stats_.invalidDatagrams;
+            return std::nullopt;
+        }
+    }
+    if (payloadBytes > pending.frameBytes - pending.receivedBytes) {
+        ++stats_.invalidDatagrams;
+        return std::nullopt;
+    }
+
     ++stats_.datagramsAccepted;
     stats_.payloadBytesReceived += payloadBytes;
 
     std::memcpy(pending.bytes.data() + fragmentOffset, datagram + headerBytes, payloadBytes);
     pending.fragmentReceived[fragmentIndex] = 1;
+    pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
     ++pending.receivedFragments;
     pending.receivedBytes += payloadBytes;
 
