@@ -6,6 +6,7 @@ add_executable(ScreenShare
     src/DesktopCapturer.cpp
     src/H264FileEncoder.cpp
     src/H264StreamEncoder.cpp
+    src/UdpSender.cpp
     src/main.cpp
 )
 
@@ -33,4 +34,5 @@ target_link_libraries(ScreenShare PRIVATE
     mfplat
     mfreadwrite
     mfuuid
+    ws2_32
 )

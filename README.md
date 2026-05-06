@@ -57,6 +57,12 @@ Capture and run the streamable H.264 packet encoder:
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --bitrate-mbps 8
 ```
 
+Capture, stream-encode, and send H.264 packets over UDP:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8
+```
+
 Inspect a recording with FFmpeg:
 
 ```powershell
@@ -77,6 +83,9 @@ should consume GPU textures directly.
 The `--stream-encode` path is CPU-heavy at native high resolutions because it currently converts
 BGRA to NV12 on the CPU. Use `--width`/`--height` for that validation path until GPU color
 conversion and real hardware encoding are added.
+
+The `--udp-send` path is sender-only for now. It fragments each encoded H.264 packet into
+MTU-friendly UDP datagrams with a small header. A native receiver/decoder is a future milestone.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
