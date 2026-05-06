@@ -38,7 +38,13 @@ public:
     [[nodiscard]] const UdpSenderStats& stats() const noexcept { return stats_; }
 
 private:
-    void SendDatagram(const std::byte* payload, uint32_t payloadBytes, uint16_t fragmentIndex, uint16_t fragmentCount, const EncodedPacket& packet);
+    void SendDatagram(
+        const std::byte* payload,
+        uint32_t payloadBytes,
+        uint32_t fragmentOffset,
+        uint16_t fragmentIndex,
+        uint16_t fragmentCount,
+        const EncodedPacket& packet);
 
     uintptr_t socket_ = 0;
     std::vector<std::byte> address_;

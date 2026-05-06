@@ -1,0 +1,93 @@
+#pragma once
+
+#include <bit>
+#include <cstdint>
+
+namespace screenshare::udp_protocol {
+
+constexpr uint32_t PacketMagic = 0x53535631; // "SSV1"
+constexpr uint16_t PacketVersion = 1;
+constexpr uint16_t MaxFragmentsPerFrame = 4096;
+
+#pragma pack(push, 1)
+struct PacketHeader {
+    uint32_t magic = 0;
+    uint16_t version = 0;
+    uint16_t headerBytes = 0;
+    uint64_t frameId = 0;
+    uint64_t timestamp100ns = 0;
+    uint32_t frameBytes = 0;
+    uint32_t fragmentOffset = 0;
+    uint16_t fragmentIndex = 0;
+    uint16_t fragmentCount = 0;
+    uint32_t payloadBytes = 0;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(PacketHeader) == 40);
+
+constexpr uint16_t ByteSwap16(uint16_t value) noexcept
+{
+    return static_cast<uint16_t>((value >> 8) | (value << 8));
+}
+
+constexpr uint32_t ByteSwap32(uint32_t value) noexcept
+{
+    return ((value & 0x000000FFU) << 24) |
+           ((value & 0x0000FF00U) << 8) |
+           ((value & 0x00FF0000U) >> 8) |
+           ((value & 0xFF000000U) >> 24);
+}
+
+constexpr uint64_t ByteSwap64(uint64_t value) noexcept
+{
+    return ((value & 0x00000000000000FFULL) << 56) |
+           ((value & 0x000000000000FF00ULL) << 40) |
+           ((value & 0x0000000000FF0000ULL) << 24) |
+           ((value & 0x00000000FF000000ULL) << 8) |
+           ((value & 0x000000FF00000000ULL) >> 8) |
+           ((value & 0x0000FF0000000000ULL) >> 24) |
+           ((value & 0x00FF000000000000ULL) >> 40) |
+           ((value & 0xFF00000000000000ULL) >> 56);
+}
+
+constexpr uint16_t ToNetwork16(uint16_t value) noexcept
+{
+    if constexpr (std::endian::native == std::endian::little) {
+        return ByteSwap16(value);
+    }
+    return value;
+}
+
+constexpr uint32_t ToNetwork32(uint32_t value) noexcept
+{
+    if constexpr (std::endian::native == std::endian::little) {
+        return ByteSwap32(value);
+    }
+    return value;
+}
+
+constexpr uint64_t ToNetwork64(uint64_t value) noexcept
+{
+    if constexpr (std::endian::native == std::endian::little) {
+        return ByteSwap64(value);
+    }
+    return value;
+}
+
+constexpr uint16_t FromNetwork16(uint16_t value) noexcept
+{
+    return ToNetwork16(value);
+}
+
+constexpr uint32_t FromNetwork32(uint32_t value) noexcept
+{
+    return ToNetwork32(value);
+}
+
+constexpr uint64_t FromNetwork64(uint64_t value) noexcept
+{
+    return ToNetwork64(value);
+}
+
+} // namespace screenshare::udp_protocol
