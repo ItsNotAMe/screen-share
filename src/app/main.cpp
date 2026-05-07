@@ -1,4 +1,5 @@
 #include "capture/DesktopCapturer.h"
+#include "codec/H264EncoderProbe.h"
 #include "codec/H264FileEncoder.h"
 #include "codec/H264StreamDecoder.h"
 #include "codec/H264StreamEncoder.h"
@@ -26,6 +27,7 @@ namespace {
 
 struct Options {
     bool listDisplays = false;
+    bool listH264Encoders = false;
     int displayIndex = 0;
     int width = 0;
     int height = 0;
@@ -54,6 +56,7 @@ void PrintHelp()
         << "ScreenShare native C++ capture prototype\n\n"
         << "Usage:\n"
         << "  ScreenShare --list\n"
+        << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
@@ -64,6 +67,7 @@ void PrintHelp()
         << "              [--hdr-sdr-white-nits N] [--hdr-sdr-exposure N]\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
+        << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
         << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
@@ -284,6 +288,8 @@ Options ParseOptions(int argc, char** argv)
         }
         if (arg == "--list") {
             options.listDisplays = true;
+        } else if (arg == "--list-h264-encoders") {
+            options.listH264Encoders = true;
         } else if (arg == "--display") {
             options.displayIndex = ParseInt(requireValue("--display"), "--display");
         } else if (arg == "--width") {
@@ -352,9 +358,9 @@ Options ParseOptions(int argc, char** argv)
         throw std::invalid_argument("--width and --height must be positive");
     }
     if (options.width > 0 &&
-        (!options.recordPath.empty() || options.streamEncode) &&
+        (options.listH264Encoders || !options.recordPath.empty() || options.streamEncode) &&
         ((options.width % 2) != 0 || (options.height % 2) != 0)) {
-        throw std::invalid_argument("--record and --stream-encode require even --width and --height for NV12");
+        throw std::invalid_argument("--list-h264-encoders, --record, and --stream-encode require even --width and --height for NV12");
     }
     if (!options.udpSendTarget.empty()) {
         static_cast<void>(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
@@ -366,9 +372,14 @@ Options ParseOptions(int argc, char** argv)
         throw std::invalid_argument("--hdr-sdr-exposure must be between 0.25 and 2.0");
     }
     if (options.udpReceivePort != 0 &&
-        (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
+        (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || !options.udpSendTarget.empty())) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --record, --dump-capture-bmp, --stream-encode, or --udp-send");
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, or --udp-send");
+    }
+    if (options.listH264Encoders &&
+        (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
+         options.streamEncode || !options.udpSendTarget.empty() || options.decodeH264 || options.previewWindow)) {
+        throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
         throw std::invalid_argument("--dump-h264 requires --udp-recv");
@@ -406,6 +417,50 @@ void PrintDisplays()
             << " adapter=\"" << screenshare::Narrow(display.adapterName) << "\""
             << " attached=" << (display.attachedToDesktop ? "yes" : "no")
             << "\n";
+    }
+}
+
+void PrintH264Encoders(const Options& options)
+{
+    screenshare::H264EncoderProbeConfig config;
+    config.width = options.width > 0 ? options.width : 1280;
+    config.height = options.height > 0 ? options.height : 720;
+    config.fps = options.fps;
+    config.bitrate = SelectBitrate(options, config.width, config.height);
+
+    const auto encoders = screenshare::ProbeH264Encoders(config);
+    std::cout
+        << "H.264 encoder probe for " << config.width << "x" << config.height
+        << " at " << config.fps << " FPS, bitrate " << Mbps(config.bitrate) << " Mbps.\n";
+    if (encoders.empty()) {
+        std::cout << "No H.264 encoders found.\n";
+        return;
+    }
+
+    for (size_t index = 0; index < encoders.size(); ++index) {
+        const auto& encoder = encoders[index];
+        std::cout
+            << "[" << index << "] " << (encoder.friendlyName.empty() ? "(unnamed encoder)" : encoder.friendlyName)
+            << "\n    kind=" << (encoder.hardware ? "hardware" : "software")
+            << " async=" << (encoder.async ? "yes" : "no")
+            << " async_unlocked=" << (encoder.asyncUnlocked ? "yes" : "no")
+            << " d3d11_aware=" << (encoder.d3d11Aware ? "yes" : "no")
+            << " d3d_manager=" << (encoder.d3dManagerAccepted ? "accepted" : (encoder.d3d11Aware ? "rejected" : "not_requested"))
+            << " stream_types=" << (encoder.streamTypesAccepted ? "accepted" : "rejected")
+            << "\n    clsid=" << (encoder.clsid.empty() ? "(unknown)" : encoder.clsid);
+        if (!encoder.hardwareUrl.empty()) {
+            std::cout << "\n    hardware_url=" << encoder.hardwareUrl;
+        }
+        if (!encoder.activationError.empty()) {
+            std::cout << "\n    activation_error=" << encoder.activationError;
+        }
+        if (!encoder.d3dManagerError.empty()) {
+            std::cout << "\n    d3d_manager_error=" << encoder.d3dManagerError;
+        }
+        if (!encoder.streamTypeError.empty()) {
+            std::cout << "\n    stream_type_error=" << encoder.streamTypeError;
+        }
+        std::cout << "\n";
     }
 }
 
@@ -944,6 +999,11 @@ int main(int argc, char** argv)
 
         if (options.listDisplays) {
             PrintDisplays();
+            return 0;
+        }
+
+        if (options.listH264Encoders) {
+            PrintH264Encoders(options);
             return 0;
         }
 

@@ -6,6 +6,7 @@ add_executable(ScreenShare
     src/app/main.cpp
     src/capture/DesktopCapturer.cpp
     src/codec/H264FileEncoder.cpp
+    src/codec/H264EncoderProbe.cpp
     src/codec/H264StreamDecoder.cpp
     src/codec/H264StreamEncoder.cpp
     src/render/ReceiverPreviewWindow.cpp

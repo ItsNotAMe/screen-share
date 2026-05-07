@@ -132,6 +132,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     SetVideoSize(inputType.Get(), MF_MT_FRAME_SIZE, config_.width, config_.height);
     SetVideoRatio(inputType.Get(), MF_MT_FRAME_RATE, config_.fps, 1);
     SetVideoRatio(inputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    ThrowIfFailed(transform_->SetOutputType(outputStreamId_, outputType.Get(), 0), "IMFTransform::SetOutputType");
     ThrowIfFailed(transform_->SetInputType(inputStreamId_, inputType.Get(), 0), "IMFTransform::SetInputType");
 
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0), "IMFTransform::ProcessMessage(BEGIN_STREAMING)");

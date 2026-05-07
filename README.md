@@ -76,6 +76,13 @@ Capture and run the streamable H.264 packet encoder:
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --bitrate-mbps 8
 ```
 
+List Media Foundation H.264 encoders and probe whether they accept the app's NV12/H.264 stream
+types for a chosen output shape:
+
+```powershell
+.\build\debug\ScreenShare.exe --list-h264-encoders --width 1920 --height 1080 --fps 60
+```
+
 Capture, stream-encode, and send H.264 packets over UDP:
 
 ```powershell
@@ -162,7 +169,11 @@ fallback exposure is 0.88 and can be adjusted with `--hdr-sdr-exposure N`.
 
 The `--stream-encode` path can still be heavy at native high resolutions because it reads converted
 frames back to the CPU and feeds the encoder through system-memory samples. Use `--width`/`--height`
-for that validation path until direct GPU-texture hardware encoding is added.
+for that validation path until direct GPU-texture hardware encoding is added. Use
+`--list-h264-encoders` to inspect available Media Foundation encoders; hardware MFTs are reported
+with async/D3D11-manager support and whether they accept the app's current NV12 input and H.264
+output media types. The live stream path still uses the stable software encoder MFT until the
+hardware path handles asynchronous MFT events and D3D samples directly.
 
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
@@ -189,6 +200,7 @@ Windows Graphics Capture
  -> GPU scaling and stream NV12 conversion
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
+ -> H.264 hardware encoder capability probe
  -> UDP sender/receiver transport diagnostics
  -> Media Foundation H.264 decode validation
  -> native Direct3D receiver preview
