@@ -286,13 +286,9 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
 
             ThrowIfFailed(outputResult, "IMFTransform::ProcessOutput(decoder)");
 
-            DWORD totalLength = 0;
-            ThrowIfFailed(outputSample->GetTotalLength(&totalLength), "IMFSample::GetTotalLength(decoder output)");
-
             DecodedFrameInfo frame;
             frame.width = outputWidth_;
             frame.height = outputHeight_;
-            frame.bytes = totalLength;
 
             LONGLONG sampleTime = 0;
             LONGLONG sampleDuration = 0;
@@ -302,6 +298,21 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             if (SUCCEEDED(outputSample->GetSampleDuration(&sampleDuration))) {
                 frame.duration100ns = sampleDuration;
             }
+
+            Microsoft::WRL::ComPtr<IMFMediaBuffer> contiguousBuffer;
+            ThrowIfFailed(outputSample->ConvertToContiguousBuffer(&contiguousBuffer), "IMFSample::ConvertToContiguousBuffer(decoder output)");
+
+            DWORD currentLength = 0;
+            ThrowIfFailed(contiguousBuffer->GetCurrentLength(&currentLength), "IMFMediaBuffer::GetCurrentLength(decoder output)");
+            frame.bytes = currentLength;
+            frame.data.resize(currentLength);
+
+            BYTE* source = nullptr;
+            DWORD maxLength = 0;
+            DWORD lockedCurrentLength = 0;
+            ThrowIfFailed(contiguousBuffer->Lock(&source, &maxLength, &lockedCurrentLength), "IMFMediaBuffer::Lock(decoder output)");
+            std::memcpy(frame.data.data(), source, std::min(currentLength, lockedCurrentLength));
+            ThrowIfFailed(contiguousBuffer->Unlock(), "IMFMediaBuffer::Unlock(decoder output)");
 
             frames.push_back(frame);
             break;

@@ -12,8 +12,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -34,7 +36,13 @@ struct Options {
     uint16_t udpReceivePort = 0;
     std::string h264DumpPath;
     bool decodeH264 = false;
+    std::string decodedBmpPath;
 };
+
+uint8_t ClampToByte(int value)
+{
+    return static_cast<uint8_t>(std::clamp(value, 0, 255));
+}
 
 void PrintHelp()
 {
@@ -43,6 +51,7 @@ void PrintHelp()
         << "Usage:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
+        << "              [--dump-decoded-bmp PATH]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--udp-send HOST:PORT]\n"
         << "              [--bitrate-mbps Mbps]\n\n"
@@ -50,8 +59,109 @@ void PrintHelp()
         << "  ScreenShare --list\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
-        << "  ScreenShare --udp-recv 5000 --seconds 15 --decode-h264 --dump-h264 receiver.h264\n"
+        << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
+}
+
+void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::DecodedFrameInfo& frame)
+{
+    if (frame.width <= 0 || frame.height <= 0) {
+        throw std::runtime_error("Decoded frame dimensions are not available for BMP dump");
+    }
+    if ((frame.width % 2) != 0 || (frame.height % 2) != 0) {
+        throw std::runtime_error("Decoded NV12 frame dimensions must be even for BMP dump");
+    }
+
+    const size_t yPlaneBytes = static_cast<size_t>(frame.width) * static_cast<size_t>(frame.height);
+    const size_t requiredBytes = yPlaneBytes + yPlaneBytes / 2;
+    if (frame.data.size() < requiredBytes) {
+        throw std::runtime_error("Decoded frame data is too small for NV12 BMP dump");
+    }
+
+    if (path.has_parent_path()) {
+        std::filesystem::create_directories(path.parent_path());
+    }
+
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        throw std::runtime_error("Failed to open decoded BMP file: " + path.string());
+    }
+
+    auto writeU16 = [&](uint16_t value) {
+        const char bytes[2] = {
+            static_cast<char>(value & 0xFF),
+            static_cast<char>((value >> 8) & 0xFF),
+        };
+        output.write(bytes, sizeof(bytes));
+    };
+    auto writeU32 = [&](uint32_t value) {
+        const char bytes[4] = {
+            static_cast<char>(value & 0xFF),
+            static_cast<char>((value >> 8) & 0xFF),
+            static_cast<char>((value >> 16) & 0xFF),
+            static_cast<char>((value >> 24) & 0xFF),
+        };
+        output.write(bytes, sizeof(bytes));
+    };
+    auto writeI32 = [&](int32_t value) {
+        writeU32(static_cast<uint32_t>(value));
+    };
+
+    constexpr uint32_t fileHeaderBytes = 14;
+    constexpr uint32_t infoHeaderBytes = 40;
+    constexpr uint32_t pixelOffset = fileHeaderBytes + infoHeaderBytes;
+    const uint64_t pixelBytes64 = static_cast<uint64_t>(frame.width) * static_cast<uint64_t>(frame.height) * 4;
+    if (pixelBytes64 > std::numeric_limits<uint32_t>::max() - pixelOffset) {
+        throw std::runtime_error("Decoded BMP frame is too large to write");
+    }
+
+    const uint32_t pixelBytes = static_cast<uint32_t>(pixelBytes64);
+    const uint32_t fileBytes = pixelOffset + pixelBytes;
+
+    writeU16(0x4D42);
+    writeU32(fileBytes);
+    writeU16(0);
+    writeU16(0);
+    writeU32(pixelOffset);
+
+    writeU32(infoHeaderBytes);
+    writeI32(frame.width);
+    writeI32(-frame.height);
+    writeU16(1);
+    writeU16(32);
+    writeU32(0);
+    writeU32(pixelBytes);
+    writeI32(2835);
+    writeI32(2835);
+    writeU32(0);
+    writeU32(0);
+
+    const auto* yPlane = reinterpret_cast<const uint8_t*>(frame.data.data());
+    const auto* uvPlane = yPlane + yPlaneBytes;
+    std::vector<uint8_t> bgra(pixelBytes);
+
+    for (int y = 0; y < frame.height; ++y) {
+        const auto* yRow = yPlane + static_cast<size_t>(y) * frame.width;
+        const auto* uvRow = uvPlane + static_cast<size_t>(y / 2) * frame.width;
+        auto* bgraRow = bgra.data() + static_cast<size_t>(y) * frame.width * 4;
+
+        for (int x = 0; x < frame.width; ++x) {
+            const int luma = static_cast<int>(yRow[x]) - 16;
+            const int chromaU = static_cast<int>(uvRow[(x / 2) * 2 + 0]) - 128;
+            const int chromaV = static_cast<int>(uvRow[(x / 2) * 2 + 1]) - 128;
+            const int c = std::max(0, luma);
+
+            bgraRow[x * 4 + 0] = ClampToByte((298 * c + 516 * chromaU + 128) >> 8);
+            bgraRow[x * 4 + 1] = ClampToByte((298 * c - 100 * chromaU - 208 * chromaV + 128) >> 8);
+            bgraRow[x * 4 + 2] = ClampToByte((298 * c + 409 * chromaV + 128) >> 8);
+            bgraRow[x * 4 + 3] = 255;
+        }
+    }
+
+    output.write(reinterpret_cast<const char*>(bgra.data()), static_cast<std::streamsize>(bgra.size()));
+    if (!output) {
+        throw std::runtime_error("Failed to write decoded BMP file: " + path.string());
+    }
 }
 
 int ParseInt(const char* value, const char* name)
@@ -139,6 +249,9 @@ Options ParseOptions(int argc, char** argv)
             options.h264DumpPath = requireValue("--dump-h264");
         } else if (arg == "--decode-h264") {
             options.decodeH264 = true;
+        } else if (arg == "--dump-decoded-bmp") {
+            options.decodedBmpPath = requireValue("--dump-decoded-bmp");
+            options.decodeH264 = true;
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else {
@@ -173,6 +286,9 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.decodeH264 && options.udpReceivePort == 0) {
         throw std::invalid_argument("--decode-h264 requires --udp-recv");
+    }
+    if (!options.decodedBmpPath.empty() && options.udpReceivePort == 0) {
+        throw std::invalid_argument("--dump-decoded-bmp requires --udp-recv");
     }
 
     return options;
@@ -432,6 +548,9 @@ void RunUdpReceiverStats(const Options& options)
     if (options.decodeH264) {
         std::cout << ", decoding H.264";
     }
+    if (!options.decodedBmpPath.empty()) {
+        std::cout << ", dumping latest decoded BMP to " << options.decodedBmpPath;
+    }
     std::cout << ".\n";
 
     auto writeH264DumpFrame = [&](const screenshare::UdpCompletedFrame& frame) {
@@ -468,6 +587,7 @@ void RunUdpReceiverStats(const Options& options)
     uint64_t nextH264DecodeFrameId = 0;
     bool hasH264DecodeStartFrame = false;
     std::map<uint64_t, screenshare::UdpCompletedFrame> h264DecodeBacklog;
+    std::optional<screenshare::DecodedFrameInfo> latestDecodedFrame;
 
     if (options.decodeH264) {
         h264Decoder = std::make_unique<screenshare::H264StreamDecoder>();
@@ -480,6 +600,7 @@ void RunUdpReceiverStats(const Options& options)
             h264DecodedBytes += decodedFrame.bytes;
             h264DecodedWidth = decodedFrame.width;
             h264DecodedHeight = decodedFrame.height;
+            latestDecodedFrame = decodedFrame;
         }
     };
 
@@ -590,6 +711,12 @@ void RunUdpReceiverStats(const Options& options)
         countDecodedFrames(h264Decoder->Drain());
         h264Decoder.reset();
     }
+
+    bool decodedBmpWritten = false;
+    if (!options.decodedBmpPath.empty() && latestDecodedFrame) {
+        WriteDecodedFrameBmp(options.decodedBmpPath, *latestDecodedFrame);
+        decodedBmpWritten = true;
+    }
     receiver.Close();
 
     const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
@@ -611,6 +738,7 @@ void RunUdpReceiverStats(const Options& options)
         << ", H.264 decoded bytes: " << h264DecodedBytes
         << ", H.264 decoded output: " << h264DecodedWidth << "x" << h264DecodedHeight
         << ", pending H.264 decode packets: " << h264DecodeBacklog.size()
+        << ", decoded BMP written: " << (decodedBmpWritten ? "yes" : "no")
         << "\n";
 }
 
