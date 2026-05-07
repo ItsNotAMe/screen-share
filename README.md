@@ -8,8 +8,10 @@ The first milestone is a pure C++ capture foundation:
 - Capture a selected monitor through DXGI Desktop Duplication.
 - Run at a requested target FPS.
 - GPU-scale captured frames to the requested output resolution.
+- Send and receive H.264 packets over UDP for local transport validation.
+- Decode received H.264 and preview it in a native Direct3D window.
 
-Streaming, hardware encoding, audio, and friend pairing are the next milestones.
+Hardware encode tuning, audio, and friend pairing are later milestones.
 
 ## Build
 
@@ -87,6 +89,14 @@ Listen, decode, and save the latest decoded frame as a BMP snapshot:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15 --dump-decoded-bmp build\debug\receiver.bmp
 ```
 
+Listen, decode, and preview received frames in a native window until the window closes:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --preview
+```
+
+Add `--seconds S` to stop preview automatically after a fixed duration.
+
 Inspect a recording with FFmpeg:
 
 ```powershell
@@ -116,7 +126,9 @@ to write the reassembled H.264 elementary stream for FFmpeg inspection. It does 
 display video by default. Add `--decode-h264` to feed reassembled packets through the Microsoft
 H.264 decoder MFT and print decoded frame diagnostics. Add `--dump-decoded-bmp PATH` to save the
 latest decoded NV12 frame as a BMP snapshot. The raw `.h264` dump validates codec bytes and
-dimensions, but it does not store transport timing. A native renderer is a future milestone.
+dimensions, but it does not store transport timing. Add `--preview` on the receiver to open a
+native Win32/Direct3D preview window; when `--seconds` is omitted the preview runs until the window
+closes.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -133,7 +145,8 @@ DXGI/Windows Graphics Capture
  -> Microsoft H.264 MFT packet encode for transport validation
  -> UDP sender/receiver transport diagnostics
  -> Media Foundation H.264 decode validation
+ -> native Direct3D receiver preview
  -> future real-time hardware encode path
- -> future native Direct3D receiver renderer
+ -> future GPU-side color conversion and renderer optimizations
 ```
 An app to share your screen with others
