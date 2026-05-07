@@ -69,11 +69,18 @@ Listen for UDP H.264 packet fragments and reassemble complete encoded frames:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15
 ```
 
+Listen, reassemble, and dump the received H.264 elementary stream for inspection:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15 --dump-h264 build\debug\receiver.h264
+```
+
 Inspect a recording with FFmpeg:
 
 ```powershell
 ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,avg_frame_rate,duration -of default=noprint_wrappers=1 out.mp4
 ffmpeg -y -ss 00:00:01 -i out.mp4 -frames:v 1 out-frame.png
+ffprobe -v error -f h264 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1 build\debug\receiver.h264
 ```
 
 The current executable prints capture stats, performs GPU scaling, can write an H.264 MP4 through
@@ -92,8 +99,10 @@ conversion and real hardware encoding are added.
 
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
-complete encoded frames, and prints transport diagnostics. It does not decode or display video yet.
-A native decoder/renderer is a future milestone.
+complete encoded frames, and prints transport diagnostics. Add `--dump-h264 PATH` on the receiver
+to write the reassembled H.264 elementary stream for FFmpeg inspection. It does not decode or
+display video yet. The raw `.h264` dump validates codec bytes and dimensions, but it does not store
+transport timing. A native decoder/renderer is a future milestone.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still

@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -29,6 +31,7 @@ struct Options {
     bool streamEncode = false;
     std::string udpSendTarget;
     uint16_t udpReceivePort = 0;
+    std::string h264DumpPath;
 };
 
 void PrintHelp()
@@ -37,7 +40,7 @@ void PrintHelp()
         << "ScreenShare native C++ capture prototype\n\n"
         << "Usage:\n"
         << "  ScreenShare --list\n"
-        << "  ScreenShare --udp-recv PORT [--seconds S]\n"
+        << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--udp-send HOST:PORT]\n"
         << "              [--bitrate-mbps Mbps]\n\n"
@@ -45,7 +48,7 @@ void PrintHelp()
         << "  ScreenShare --list\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
-        << "  ScreenShare --udp-recv 5000 --seconds 15\n"
+        << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-h264 receiver.h264\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -130,6 +133,8 @@ Options ParseOptions(int argc, char** argv)
             options.streamEncode = true;
         } else if (arg == "--udp-recv") {
             options.udpReceivePort = screenshare::ParseUdpReceivePort(requireValue("--udp-recv"));
+        } else if (arg == "--dump-h264") {
+            options.h264DumpPath = requireValue("--dump-h264");
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else {
@@ -158,6 +163,9 @@ Options ParseOptions(int argc, char** argv)
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || !options.recordPath.empty() || options.streamEncode || !options.udpSendTarget.empty())) {
         throw std::invalid_argument("--udp-recv cannot be combined with --list, --record, --stream-encode, or --udp-send");
+    }
+    if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
+        throw std::invalid_argument("--dump-h264 requires --udp-recv");
     }
 
     return options;
@@ -392,7 +400,53 @@ void RunUdpReceiverStats(const Options& options)
     config.port = options.udpReceivePort;
     receiver.Open(config);
 
-    std::cout << "Listening for UDP H.264 packet fragments on port " << options.udpReceivePort << ".\n";
+    std::ofstream h264Dump;
+    uint64_t h264DumpPackets = 0;
+    uint64_t h264DumpBytes = 0;
+    uint64_t nextH264DumpFrameId = 0;
+    std::map<uint64_t, screenshare::UdpCompletedFrame> h264DumpBacklog;
+    if (!options.h264DumpPath.empty()) {
+        const std::filesystem::path dumpPath(options.h264DumpPath);
+        if (dumpPath.has_parent_path()) {
+            std::filesystem::create_directories(dumpPath.parent_path());
+        }
+
+        h264Dump.open(dumpPath, std::ios::binary | std::ios::trunc);
+        if (!h264Dump) {
+            throw std::runtime_error("Failed to open H.264 dump file: " + options.h264DumpPath);
+        }
+    }
+
+    std::cout << "Listening for UDP H.264 packet fragments on port " << options.udpReceivePort;
+    if (!options.h264DumpPath.empty()) {
+        std::cout << ", dumping H.264 to " << options.h264DumpPath;
+    }
+    std::cout << ".\n";
+
+    auto writeH264DumpFrame = [&](const screenshare::UdpCompletedFrame& frame) {
+        h264Dump.write(
+            reinterpret_cast<const char*>(frame.bytes.data()),
+            static_cast<std::streamsize>(frame.bytes.size()));
+        if (!h264Dump) {
+            throw std::runtime_error("Failed to write H.264 dump file: " + options.h264DumpPath);
+        }
+
+        ++h264DumpPackets;
+        h264DumpBytes += frame.bytes.size();
+    };
+
+    auto flushH264DumpBacklog = [&]() {
+        while (true) {
+            const auto next = h264DumpBacklog.find(nextH264DumpFrameId);
+            if (next == h264DumpBacklog.end()) {
+                break;
+            }
+
+            writeH264DumpFrame(next->second);
+            h264DumpBacklog.erase(next);
+            ++nextH264DumpFrameId;
+        }
+    };
 
     using Clock = std::chrono::steady_clock;
     const auto startedAt = Clock::now();
@@ -410,6 +464,11 @@ void RunUdpReceiverStats(const Options& options)
             latestFrameBytes = frame->bytes.size();
             latestFragmentCount = frame->fragmentCount;
             hasCompletedFrame = true;
+
+            if (h264Dump) {
+                h264DumpBacklog.emplace(frame->frameId, std::move(*frame));
+                flushH264DumpBacklog();
+            }
         }
 
         const auto now = Clock::now();
@@ -430,7 +489,10 @@ void RunUdpReceiverStats(const Options& options)
                 << " pending_frames=" << receiver.pendingFrameCount()
                 << " incomplete_dropped=" << stats.incompleteFramesDropped
                 << " payload_bytes=" << stats.payloadBytesReceived
-                << " completed_bytes=" << stats.completedFrameBytes;
+                << " completed_bytes=" << stats.completedFrameBytes
+                << " dumped_h264_packets=" << h264DumpPackets
+                << " dumped_h264_bytes=" << h264DumpBytes
+                << " pending_h264_dump_packets=" << h264DumpBacklog.size();
 
             if (hasCompletedFrame) {
                 std::cout
@@ -461,6 +523,9 @@ void RunUdpReceiverStats(const Options& options)
         << ", incomplete frames dropped: " << stats.incompleteFramesDropped
         << ", payload bytes: " << stats.payloadBytesReceived
         << ", completed bytes: " << stats.completedFrameBytes
+        << ", dumped H.264 packets: " << h264DumpPackets
+        << ", dumped H.264 bytes: " << h264DumpBytes
+        << ", pending H.264 dump packets: " << h264DumpBacklog.size()
         << "\n";
 }
 
