@@ -81,6 +81,12 @@ Listen, reassemble, and decode received H.264 packets without displaying them ye
 .\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15 --decode-h264
 ```
 
+Listen, decode, and save the latest decoded frame as a BMP snapshot:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15 --dump-decoded-bmp build\debug\receiver.bmp
+```
+
 Inspect a recording with FFmpeg:
 
 ```powershell
@@ -108,8 +114,9 @@ small header. The `--udp-recv` path binds a local UDP port, validates those data
 complete encoded frames, and prints transport diagnostics. Add `--dump-h264 PATH` on the receiver
 to write the reassembled H.264 elementary stream for FFmpeg inspection. It does not decode or
 display video by default. Add `--decode-h264` to feed reassembled packets through the Microsoft
-H.264 decoder MFT and print decoded frame diagnostics. The raw `.h264` dump validates codec bytes
-and dimensions, but it does not store transport timing. A native renderer is a future milestone.
+H.264 decoder MFT and print decoded frame diagnostics. Add `--dump-decoded-bmp PATH` to save the
+latest decoded NV12 frame as a BMP snapshot. The raw `.h264` dump validates codec bytes and
+dimensions, but it does not store transport timing. A native renderer is a future milestone.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still

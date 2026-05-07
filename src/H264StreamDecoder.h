@@ -16,6 +16,7 @@ struct DecodedFrameInfo {
     int64_t timestamp100ns = 0;
     int64_t duration100ns = 0;
     uint32_t bytes = 0;
+    std::vector<std::byte> data;
 };
 
 class H264StreamDecoder {
