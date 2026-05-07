@@ -2,8 +2,10 @@
 #include "codec/H264FileEncoder.h"
 #include "codec/H264StreamDecoder.h"
 #include "codec/H264StreamEncoder.h"
+#include "render/ReceiverPreviewWindow.h"
 #include "transport/UdpReceiver.h"
 #include "transport/UdpSender.h"
+#include "video/Nv12Convert.h"
 
 #include <algorithm>
 #include <chrono>
@@ -37,12 +39,8 @@ struct Options {
     std::string h264DumpPath;
     bool decodeH264 = false;
     std::string decodedBmpPath;
+    bool previewWindow = false;
 };
-
-uint8_t ClampToByte(int value)
-{
-    return static_cast<uint8_t>(std::clamp(value, 0, 255));
-}
 
 void PrintHelp()
 {
@@ -51,7 +49,7 @@ void PrintHelp()
         << "Usage:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
-        << "              [--dump-decoded-bmp PATH]\n"
+        << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--udp-send HOST:PORT]\n"
         << "              [--bitrate-mbps Mbps]\n\n"
@@ -60,6 +58,7 @@ void PrintHelp()
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
         << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
+        << "  ScreenShare --udp-recv 5000 --preview\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -70,12 +69,6 @@ void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::
     }
     if ((frame.width % 2) != 0 || (frame.height % 2) != 0) {
         throw std::runtime_error("Decoded NV12 frame dimensions must be even for BMP dump");
-    }
-
-    const size_t yPlaneBytes = static_cast<size_t>(frame.width) * static_cast<size_t>(frame.height);
-    const size_t requiredBytes = yPlaneBytes + yPlaneBytes / 2;
-    if (frame.data.size() < requiredBytes) {
-        throw std::runtime_error("Decoded frame data is too small for NV12 BMP dump");
     }
 
     if (path.has_parent_path()) {
@@ -136,27 +129,7 @@ void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::
     writeU32(0);
     writeU32(0);
 
-    const auto* yPlane = reinterpret_cast<const uint8_t*>(frame.data.data());
-    const auto* uvPlane = yPlane + yPlaneBytes;
-    std::vector<uint8_t> bgra(pixelBytes);
-
-    for (int y = 0; y < frame.height; ++y) {
-        const auto* yRow = yPlane + static_cast<size_t>(y) * frame.width;
-        const auto* uvRow = uvPlane + static_cast<size_t>(y / 2) * frame.width;
-        auto* bgraRow = bgra.data() + static_cast<size_t>(y) * frame.width * 4;
-
-        for (int x = 0; x < frame.width; ++x) {
-            const int luma = static_cast<int>(yRow[x]) - 16;
-            const int chromaU = static_cast<int>(uvRow[(x / 2) * 2 + 0]) - 128;
-            const int chromaV = static_cast<int>(uvRow[(x / 2) * 2 + 1]) - 128;
-            const int c = std::max(0, luma);
-
-            bgraRow[x * 4 + 0] = ClampToByte((298 * c + 516 * chromaU + 128) >> 8);
-            bgraRow[x * 4 + 1] = ClampToByte((298 * c - 100 * chromaU - 208 * chromaV + 128) >> 8);
-            bgraRow[x * 4 + 2] = ClampToByte((298 * c + 409 * chromaV + 128) >> 8);
-            bgraRow[x * 4 + 3] = 255;
-        }
-    }
+    const auto bgra = screenshare::ConvertNv12ToBgra(frame.data.data(), frame.data.size(), frame.width, frame.height);
 
     output.write(reinterpret_cast<const char*>(bgra.data()), static_cast<std::streamsize>(bgra.size()));
     if (!output) {
@@ -209,6 +182,7 @@ double Mbps(uint32_t bitrate)
 Options ParseOptions(int argc, char** argv)
 {
     Options options;
+    bool secondsProvided = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -236,6 +210,7 @@ Options ParseOptions(int argc, char** argv)
             options.fps = ParseInt(requireValue("--fps"), "--fps");
         } else if (arg == "--seconds") {
             options.seconds = ParseInt(requireValue("--seconds"), "--seconds");
+            secondsProvided = true;
         } else if (arg == "--record") {
             options.recordPath = requireValue("--record");
         } else if (arg == "--stream-encode") {
@@ -252,6 +227,9 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--dump-decoded-bmp") {
             options.decodedBmpPath = requireValue("--dump-decoded-bmp");
             options.decodeH264 = true;
+        } else if (arg == "--preview") {
+            options.previewWindow = true;
+            options.decodeH264 = true;
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else {
@@ -262,8 +240,14 @@ Options ParseOptions(int argc, char** argv)
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
     }
-    if (options.seconds <= 0) {
-        throw std::invalid_argument("--seconds must be positive");
+    if (options.previewWindow && !secondsProvided) {
+        options.seconds = 0;
+    }
+    if (options.seconds < 0) {
+        throw std::invalid_argument("--seconds must be non-negative");
+    }
+    if (options.seconds == 0 && !options.previewWindow) {
+        throw std::invalid_argument("--seconds 0 is only supported with --preview");
     }
     if ((options.width == 0) != (options.height == 0)) {
         throw std::invalid_argument("--width and --height must be provided together");
@@ -289,6 +273,9 @@ Options ParseOptions(int argc, char** argv)
     }
     if (!options.decodedBmpPath.empty() && options.udpReceivePort == 0) {
         throw std::invalid_argument("--dump-decoded-bmp requires --udp-recv");
+    }
+    if (options.previewWindow && options.udpReceivePort == 0) {
+        throw std::invalid_argument("--preview requires --udp-recv");
     }
 
     return options;
@@ -524,12 +511,13 @@ void RunUdpReceiverStats(const Options& options)
     receiver.Open(config);
 
     std::ofstream h264Dump;
+    const bool shouldDumpH264 = !options.h264DumpPath.empty();
     uint64_t h264DumpPackets = 0;
     uint64_t h264DumpBytes = 0;
     uint64_t nextH264DumpFrameId = 0;
     bool hasH264DumpStartFrame = false;
     std::map<uint64_t, screenshare::UdpCompletedFrame> h264DumpBacklog;
-    if (!options.h264DumpPath.empty()) {
+    if (shouldDumpH264) {
         const std::filesystem::path dumpPath(options.h264DumpPath);
         if (dumpPath.has_parent_path()) {
             std::filesystem::create_directories(dumpPath.parent_path());
@@ -550,6 +538,9 @@ void RunUdpReceiverStats(const Options& options)
     }
     if (!options.decodedBmpPath.empty()) {
         std::cout << ", dumping latest decoded BMP to " << options.decodedBmpPath;
+    }
+    if (options.previewWindow) {
+        std::cout << ", previewing decoded frames";
     }
     std::cout << ".\n";
 
@@ -579,6 +570,7 @@ void RunUdpReceiverStats(const Options& options)
     };
 
     std::unique_ptr<screenshare::H264StreamDecoder> h264Decoder;
+    std::unique_ptr<screenshare::ReceiverPreviewWindow> previewWindow;
     uint64_t h264DecodePackets = 0;
     uint64_t h264DecodedFrames = 0;
     uint64_t h264DecodedBytes = 0;
@@ -593,6 +585,10 @@ void RunUdpReceiverStats(const Options& options)
         h264Decoder = std::make_unique<screenshare::H264StreamDecoder>();
         h264Decoder->Start();
     }
+    if (options.previewWindow) {
+        previewWindow = std::make_unique<screenshare::ReceiverPreviewWindow>();
+        previewWindow->Show();
+    }
 
     auto countDecodedFrames = [&](const std::vector<screenshare::DecodedFrameInfo>& decodedFrames) {
         h264DecodedFrames += decodedFrames.size();
@@ -601,6 +597,9 @@ void RunUdpReceiverStats(const Options& options)
             h264DecodedWidth = decodedFrame.width;
             h264DecodedHeight = decodedFrame.height;
             latestDecodedFrame = decodedFrame;
+            if (previewWindow) {
+                previewWindow->PresentFrame(decodedFrame);
+            }
         }
     };
 
@@ -635,7 +634,17 @@ void RunUdpReceiverStats(const Options& options)
     uint16_t latestFragmentCount = 0;
     bool hasCompletedFrame = false;
 
-    while (Clock::now() - startedAt < std::chrono::seconds(options.seconds)) {
+    auto shouldContinue = [&]() {
+        if (previewWindow && !previewWindow->PumpMessages()) {
+            return false;
+        }
+        if (options.previewWindow && options.seconds == 0) {
+            return true;
+        }
+        return Clock::now() - startedAt < std::chrono::seconds(options.seconds);
+    };
+
+    while (shouldContinue()) {
         if (auto frame = receiver.ReceiveFrame(std::chrono::milliseconds(100))) {
             latestFrameId = frame->frameId;
             latestFrameBytes = frame->bytes.size();
@@ -652,7 +661,7 @@ void RunUdpReceiverStats(const Options& options)
                 flushH264DecodeBacklog();
             }
 
-            if (h264Dump) {
+            if (shouldDumpH264) {
                 if (!hasH264DumpStartFrame) {
                     nextH264DumpFrameId = frame->frameId;
                     hasH264DumpStartFrame = true;
@@ -689,7 +698,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " h264_decoded_frames=" << h264DecodedFrames
                 << " h264_decoded_bytes=" << h264DecodedBytes
                 << " h264_decoded_output=" << h264DecodedWidth << "x" << h264DecodedHeight
-                << " pending_h264_decode_packets=" << h264DecodeBacklog.size();
+                << " pending_h264_decode_packets=" << h264DecodeBacklog.size()
+                << " preview_frames_presented=" << (previewWindow ? previewWindow->framesPresented() : 0);
 
             if (hasCompletedFrame) {
                 std::cout
@@ -738,6 +748,7 @@ void RunUdpReceiverStats(const Options& options)
         << ", H.264 decoded bytes: " << h264DecodedBytes
         << ", H.264 decoded output: " << h264DecodedWidth << "x" << h264DecodedHeight
         << ", pending H.264 decode packets: " << h264DecodeBacklog.size()
+        << ", preview frames presented: " << (previewWindow ? previewWindow->framesPresented() : 0)
         << ", decoded BMP written: " << (decodedBmpWritten ? "yes" : "no")
         << "\n";
 }

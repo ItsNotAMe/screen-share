@@ -8,8 +8,10 @@ add_executable(ScreenShare
     src/codec/H264FileEncoder.cpp
     src/codec/H264StreamDecoder.cpp
     src/codec/H264StreamEncoder.cpp
+    src/render/ReceiverPreviewWindow.cpp
     src/transport/UdpReceiver.cpp
     src/transport/UdpSender.cpp
+    src/video/Nv12Convert.cpp
 )
 
 target_compile_features(ScreenShare PRIVATE cxx_std_20)
@@ -36,5 +38,6 @@ target_link_libraries(ScreenShare PRIVATE
     mfplat
     mfreadwrite
     mfuuid
+    user32
     ws2_32
 )
