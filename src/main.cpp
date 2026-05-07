@@ -404,6 +404,7 @@ void RunUdpReceiverStats(const Options& options)
     uint64_t h264DumpPackets = 0;
     uint64_t h264DumpBytes = 0;
     uint64_t nextH264DumpFrameId = 0;
+    bool hasH264DumpStartFrame = false;
     std::map<uint64_t, screenshare::UdpCompletedFrame> h264DumpBacklog;
     if (!options.h264DumpPath.empty()) {
         const std::filesystem::path dumpPath(options.h264DumpPath);
@@ -466,6 +467,11 @@ void RunUdpReceiverStats(const Options& options)
             hasCompletedFrame = true;
 
             if (h264Dump) {
+                if (!hasH264DumpStartFrame) {
+                    nextH264DumpFrameId = frame->frameId;
+                    hasH264DumpStartFrame = true;
+                }
+
                 h264DumpBacklog.emplace(frame->frameId, std::move(*frame));
                 flushH264DumpBacklog();
             }
