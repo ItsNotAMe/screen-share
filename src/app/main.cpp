@@ -31,10 +31,16 @@ struct Options {
     int height = 0;
     int fps = 60;
     int seconds = 10;
+    screenshare::CaptureBackend captureBackend = screenshare::CaptureBackend::WindowsGraphicsCapture;
     uint32_t bitrate = 0;
     std::string recordPath;
+    std::string capturedBmpPath;
     bool streamEncode = false;
     std::string udpSendTarget;
+    bool wgcBorderRequired = false;
+    bool hdrToSdr = true;
+    float hdrSdrWhiteNits = 203.0f;
+    float hdrSdrBgraExposure = 0.88f;
     uint16_t udpReceivePort = 0;
     std::string h264DumpPath;
     bool decodeH264 = false;
@@ -52,7 +58,10 @@ void PrintHelp()
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--udp-send HOST:PORT]\n"
-        << "              [--bitrate-mbps Mbps]\n\n"
+        << "              [--dump-capture-bmp PATH]\n"
+        << "              [--capture-backend dxgi|wgc]\n"
+        << "              [--bitrate-mbps Mbps] [--wgc-border] [--no-hdr-to-sdr]\n"
+        << "              [--hdr-sdr-white-nits N] [--hdr-sdr-exposure N]\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
@@ -62,13 +71,18 @@ void PrintHelp()
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
-void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::DecodedFrameInfo& frame)
+void WriteBgraBmp(const std::filesystem::path& path, const uint8_t* pixels, int width, int height, uint32_t stride)
 {
-    if (frame.width <= 0 || frame.height <= 0) {
-        throw std::runtime_error("Decoded frame dimensions are not available for BMP dump");
+    if (pixels == nullptr) {
+        throw std::runtime_error("BMP pixels are missing");
     }
-    if ((frame.width % 2) != 0 || (frame.height % 2) != 0) {
-        throw std::runtime_error("Decoded NV12 frame dimensions must be even for BMP dump");
+    if (width <= 0 || height <= 0) {
+        throw std::runtime_error("BMP frame dimensions are not available");
+    }
+
+    const uint32_t outputStride = static_cast<uint32_t>(width) * 4;
+    if (stride < outputStride) {
+        throw std::runtime_error("BMP frame stride is too small");
     }
 
     if (path.has_parent_path()) {
@@ -77,7 +91,7 @@ void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::
 
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output) {
-        throw std::runtime_error("Failed to open decoded BMP file: " + path.string());
+        throw std::runtime_error("Failed to open BMP file: " + path.string());
     }
 
     auto writeU16 = [&](uint16_t value) {
@@ -103,9 +117,9 @@ void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::
     constexpr uint32_t fileHeaderBytes = 14;
     constexpr uint32_t infoHeaderBytes = 40;
     constexpr uint32_t pixelOffset = fileHeaderBytes + infoHeaderBytes;
-    const uint64_t pixelBytes64 = static_cast<uint64_t>(frame.width) * static_cast<uint64_t>(frame.height) * 4;
+    const uint64_t pixelBytes64 = static_cast<uint64_t>(outputStride) * static_cast<uint64_t>(height);
     if (pixelBytes64 > std::numeric_limits<uint32_t>::max() - pixelOffset) {
-        throw std::runtime_error("Decoded BMP frame is too large to write");
+        throw std::runtime_error("BMP frame is too large to write");
     }
 
     const uint32_t pixelBytes = static_cast<uint32_t>(pixelBytes64);
@@ -118,8 +132,8 @@ void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::
     writeU32(pixelOffset);
 
     writeU32(infoHeaderBytes);
-    writeI32(frame.width);
-    writeI32(-frame.height);
+    writeI32(width);
+    writeI32(-height);
     writeU16(1);
     writeU16(32);
     writeU32(0);
@@ -129,12 +143,47 @@ void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::
     writeU32(0);
     writeU32(0);
 
-    const auto bgra = screenshare::ConvertNv12ToBgra(frame.data.data(), frame.data.size(), frame.width, frame.height);
-
-    output.write(reinterpret_cast<const char*>(bgra.data()), static_cast<std::streamsize>(bgra.size()));
-    if (!output) {
-        throw std::runtime_error("Failed to write decoded BMP file: " + path.string());
+    for (int y = 0; y < height; ++y) {
+        output.write(
+            reinterpret_cast<const char*>(pixels + static_cast<size_t>(stride) * y),
+            outputStride);
     }
+    if (!output) {
+        throw std::runtime_error("Failed to write BMP file: " + path.string());
+    }
+}
+
+void WriteDecodedFrameBmp(const std::filesystem::path& path, const screenshare::DecodedFrameInfo& frame)
+{
+    if (frame.width <= 0 || frame.height <= 0) {
+        throw std::runtime_error("Decoded frame dimensions are not available for BMP dump");
+    }
+    if ((frame.width % 2) != 0 || (frame.height % 2) != 0) {
+        throw std::runtime_error("Decoded NV12 frame dimensions must be even for BMP dump");
+    }
+
+    const auto bgra = screenshare::ConvertNv12ToBgra(frame.data.data(), frame.data.size(), frame.width, frame.height);
+    WriteBgraBmp(path, bgra.data(), frame.width, frame.height, static_cast<uint32_t>(frame.width) * 4);
+}
+
+void WriteCapturedFrameBmp(const std::filesystem::path& path, const screenshare::CapturedFrame& frame)
+{
+    if (frame.width <= 0 || frame.height <= 0 || frame.pixels.empty()) {
+        throw std::runtime_error("Captured frame is not available for BMP dump");
+    }
+
+    const bool isBgra =
+        frame.format == DXGI_FORMAT_B8G8R8A8_UNORM ||
+        frame.format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
+        frame.format == DXGI_FORMAT_B8G8R8X8_UNORM ||
+        frame.format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
+    if (!isBgra) {
+        throw std::runtime_error(
+            "Captured BMP dump expects BGRA8, got DXGI format " +
+            std::to_string(static_cast<int>(frame.format)));
+    }
+
+    WriteBgraBmp(path, reinterpret_cast<const uint8_t*>(frame.pixels.data()), frame.width, frame.height, frame.rowPitch);
 }
 
 int ParseInt(const char* value, const char* name)
@@ -155,6 +204,41 @@ uint32_t ParseBitrateMbps(const char* value)
         throw std::invalid_argument(std::string("Invalid value for --bitrate-mbps: ") + value);
     }
     return static_cast<uint32_t>(parsed * 1'000'000.0);
+}
+
+float ParseFloat(const char* value, const char* name)
+{
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value || *end != '\0') {
+        throw std::invalid_argument(std::string("Invalid value for ") + name + ": " + value);
+    }
+    return static_cast<float>(parsed);
+}
+
+screenshare::CaptureBackend ParseCaptureBackend(const char* value)
+{
+    const std::string backend = value;
+    if (backend == "dxgi" || backend == "desktop-duplication") {
+        return screenshare::CaptureBackend::DesktopDuplication;
+    }
+    if (backend == "wgc" || backend == "windows-graphics-capture") {
+        return screenshare::CaptureBackend::WindowsGraphicsCapture;
+    }
+
+    throw std::invalid_argument(std::string("Invalid value for --capture-backend: ") + value);
+}
+
+const char* CaptureBackendName(screenshare::CaptureBackend backend)
+{
+    switch (backend) {
+    case screenshare::CaptureBackend::DesktopDuplication:
+        return "dxgi";
+    case screenshare::CaptureBackend::WindowsGraphicsCapture:
+        return "wgc";
+    default:
+        return "unknown";
+    }
 }
 
 uint32_t SelectBitrate(const Options& options, int width, int height)
@@ -213,11 +297,23 @@ Options ParseOptions(int argc, char** argv)
             secondsProvided = true;
         } else if (arg == "--record") {
             options.recordPath = requireValue("--record");
+        } else if (arg == "--dump-capture-bmp") {
+            options.capturedBmpPath = requireValue("--dump-capture-bmp");
+        } else if (arg == "--capture-backend") {
+            options.captureBackend = ParseCaptureBackend(requireValue("--capture-backend"));
         } else if (arg == "--stream-encode") {
             options.streamEncode = true;
         } else if (arg == "--udp-send") {
             options.udpSendTarget = requireValue("--udp-send");
             options.streamEncode = true;
+        } else if (arg == "--wgc-border") {
+            options.wgcBorderRequired = true;
+        } else if (arg == "--no-hdr-to-sdr") {
+            options.hdrToSdr = false;
+        } else if (arg == "--hdr-sdr-white-nits") {
+            options.hdrSdrWhiteNits = ParseFloat(requireValue("--hdr-sdr-white-nits"), "--hdr-sdr-white-nits");
+        } else if (arg == "--hdr-sdr-exposure") {
+            options.hdrSdrBgraExposure = ParseFloat(requireValue("--hdr-sdr-exposure"), "--hdr-sdr-exposure");
         } else if (arg == "--udp-recv") {
             options.udpReceivePort = screenshare::ParseUdpReceivePort(requireValue("--udp-recv"));
         } else if (arg == "--dump-h264") {
@@ -255,15 +351,24 @@ Options ParseOptions(int argc, char** argv)
     if (options.width < 0 || options.height < 0) {
         throw std::invalid_argument("--width and --height must be positive");
     }
-    if (options.width > 0 && options.streamEncode && ((options.width % 2) != 0 || (options.height % 2) != 0)) {
-        throw std::invalid_argument("--stream-encode requires even --width and --height for NV12");
+    if (options.width > 0 &&
+        (!options.recordPath.empty() || options.streamEncode) &&
+        ((options.width % 2) != 0 || (options.height % 2) != 0)) {
+        throw std::invalid_argument("--record and --stream-encode require even --width and --height for NV12");
     }
     if (!options.udpSendTarget.empty()) {
         static_cast<void>(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
     }
+    if (options.hdrSdrWhiteNits < 80.0f || options.hdrSdrWhiteNits > 1000.0f) {
+        throw std::invalid_argument("--hdr-sdr-white-nits must be between 80 and 1000");
+    }
+    if (options.hdrSdrBgraExposure < 0.25f || options.hdrSdrBgraExposure > 2.0f) {
+        throw std::invalid_argument("--hdr-sdr-exposure must be between 0.25 and 2.0");
+    }
     if (options.udpReceivePort != 0 &&
-        (options.listDisplays || !options.recordPath.empty() || options.streamEncode || !options.udpSendTarget.empty())) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --record, --stream-encode, or --udp-send");
+        (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
+         options.streamEncode || !options.udpSendTarget.empty())) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --record, --dump-capture-bmp, --stream-encode, or --udp-send");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
         throw std::invalid_argument("--dump-h264 requires --udp-recv");
@@ -311,6 +416,11 @@ void RunCaptureStats(const Options& options)
     config.targetWidth = options.width;
     config.targetHeight = options.height;
     config.targetFps = options.fps;
+    config.backend = options.captureBackend;
+    config.wgcBorderRequired = options.wgcBorderRequired;
+    config.hdrToSdr = options.hdrToSdr;
+    config.hdrSdrWhiteNits = options.hdrSdrWhiteNits;
+    config.hdrSdrBgraExposure = options.hdrSdrBgraExposure;
 
     screenshare::DesktopCapturer capturer;
     capturer.Start(config);
@@ -323,14 +433,28 @@ void RunCaptureStats(const Options& options)
     } else {
         std::cout << ", requested output native resolution";
     }
+    std::cout << ", capture backend " << CaptureBackendName(options.captureBackend);
     if (!options.recordPath.empty()) {
         std::cout << ", recording H.264 to " << options.recordPath;
+    }
+    if (!options.capturedBmpPath.empty()) {
+        std::cout << ", dumping latest captured BMP to " << options.capturedBmpPath;
     }
     if (options.streamEncode) {
         std::cout << ", stream-encoding H.264 packets";
     }
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
+    }
+    if (options.captureBackend == screenshare::CaptureBackend::WindowsGraphicsCapture) {
+        std::cout << ", WGC border " << (options.wgcBorderRequired ? "enabled" : "disabled when permitted");
+    }
+    if (options.hdrToSdr) {
+        std::cout
+            << ", HDR-to-SDR enabled at " << options.hdrSdrWhiteNits << " nits"
+            << ", HDR desktop exposure " << options.hdrSdrBgraExposure;
+    } else {
+        std::cout << ", HDR-to-SDR disabled";
     }
     std::cout << ".\n";
 
@@ -347,6 +471,11 @@ void RunCaptureStats(const Options& options)
     int lastSourceHeight = 0;
     int lastOutputWidth = 0;
     int lastOutputHeight = 0;
+    DXGI_FORMAT lastSourceFormat = DXGI_FORMAT_UNKNOWN;
+    DXGI_FORMAT lastOutputFormat = DXGI_FORMAT_UNKNOWN;
+    DXGI_COLOR_SPACE_TYPE lastDisplayColorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    bool lastDisplayHdrActive = false;
+    uint32_t lastColorConversionMode = 0;
     bool hasFrame = false;
     screenshare::CapturedFrame lastFrame;
     std::unique_ptr<screenshare::H264FileEncoder> fileEncoder;
@@ -355,6 +484,7 @@ void RunCaptureStats(const Options& options)
     uint64_t streamEncodedFrames = 0;
     uint64_t streamPackets = 0;
     uint64_t streamBytes = 0;
+    bool capturedBmpWritten = false;
     std::unique_ptr<screenshare::UdpSender> udpSender;
 
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
@@ -372,6 +502,11 @@ void RunCaptureStats(const Options& options)
             lastSourceHeight = frame->sourceHeight;
             lastOutputWidth = frame->width;
             lastOutputHeight = frame->height;
+            lastSourceFormat = frame->sourceFormat;
+            lastOutputFormat = frame->format;
+            lastDisplayColorSpace = frame->displayColorSpace;
+            lastDisplayHdrActive = frame->displayHdrActive;
+            lastColorConversionMode = frame->colorConversionMode;
             lastFrame = std::move(*frame);
             hasFrame = true;
         }
@@ -452,7 +587,12 @@ void RunCaptureStats(const Options& options)
             const double desktopUpdateFps = static_cast<double>(intervalDesktopUpdates) / elapsed;
             std::cout
                 << "source=" << lastSourceWidth << "x" << lastSourceHeight
+                << " source_format=" << screenshare::DxgiFormatName(lastSourceFormat)
+                << " display_color_space=" << screenshare::DxgiColorSpaceName(lastDisplayColorSpace)
+                << " display_hdr=" << (lastDisplayHdrActive ? "yes" : "no")
+                << " color_conversion=" << screenshare::CaptureColorConversionName(lastColorConversionMode)
                 << " output=" << lastOutputWidth << "x" << lastOutputHeight
+                << " output_format=" << screenshare::DxgiFormatName(lastOutputFormat)
                 << " output_fps=" << outputFps
                 << " desktop_update_fps=" << desktopUpdateFps
                 << " repeated_frames=" << intervalRepeatedFrames
@@ -484,6 +624,10 @@ void RunCaptureStats(const Options& options)
     }
 
     const screenshare::UdpSenderStats udpStats = udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
+    if (!options.capturedBmpPath.empty() && hasFrame) {
+        WriteCapturedFrameBmp(options.capturedBmpPath, lastFrame);
+        capturedBmpWritten = true;
+    }
     udpSender.reset();
     streamEncoder.reset();
     fileEncoder.reset();
@@ -500,6 +644,7 @@ void RunCaptureStats(const Options& options)
         << ", stream bytes: " << streamBytes
         << ", UDP datagrams: " << udpStats.datagramsSent
         << ", UDP wire bytes: " << udpStats.wireBytesSent
+        << ", captured BMP written: " << (capturedBmpWritten ? "yes" : "no")
         << "\n";
 }
 

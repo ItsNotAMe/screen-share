@@ -20,6 +20,18 @@ target_include_directories(ScreenShare PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+if(WIN32)
+    file(GLOB _cppwinrt_include_dirs LIST_DIRECTORIES true
+        "C:/Program Files (x86)/Windows Kits/10/Include/*/cppwinrt"
+    )
+    if(_cppwinrt_include_dirs)
+        list(SORT _cppwinrt_include_dirs)
+        list(REVERSE _cppwinrt_include_dirs)
+        list(GET _cppwinrt_include_dirs 0 _cppwinrt_include_dir)
+        target_include_directories(ScreenShare PRIVATE "${_cppwinrt_include_dir}")
+    endif()
+endif()
+
 target_compile_definitions(ScreenShare PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
@@ -39,5 +51,6 @@ target_link_libraries(ScreenShare PRIVATE
     mfreadwrite
     mfuuid
     user32
+    windowsapp
     ws2_32
 )

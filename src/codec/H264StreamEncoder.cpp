@@ -1,5 +1,7 @@
 #include "codec/H264StreamEncoder.h"
 
+#include "video/Nv12Convert.h"
+
 #include <Windows.h>
 #include <codecapi.h>
 #include <initguid.h>
@@ -8,7 +10,6 @@
 #include <wmcodecdsp.h>
 
 #include <algorithm>
-#include <array>
 #include <cstring>
 #include <stdexcept>
 
@@ -32,9 +33,12 @@ void SetVideoRatio(IMFAttributes* attributes, REFGUID key, int numerator, int de
     ThrowIfFailed(MFSetAttributeRatio(attributes, key, static_cast<UINT32>(numerator), static_cast<UINT32>(denominator)), "MFSetAttributeRatio");
 }
 
-uint8_t ClampToByte(int value)
+void SetBt709ColorInfo(IMFMediaType* mediaType)
 {
-    return static_cast<uint8_t>(std::clamp(value, 0, 255));
+    ThrowIfFailed(mediaType->SetUINT32(MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709), "IMFMediaType::SetUINT32(YUV matrix)");
+    ThrowIfFailed(mediaType->SetUINT32(MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709), "IMFMediaType::SetUINT32(video primaries)");
+    ThrowIfFailed(mediaType->SetUINT32(MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709), "IMFMediaType::SetUINT32(transfer function)");
+    ThrowIfFailed(mediaType->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235), "IMFMediaType::SetUINT32(nominal range)");
 }
 
 bool IsBgra8Format(DXGI_FORMAT format)
@@ -113,6 +117,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     ThrowIfFailed(outputType->SetUINT32(MF_MT_AVG_BITRATE, config_.bitrate), "IMFMediaType::SetUINT32(output bitrate)");
     ThrowIfFailed(outputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High), "IMFMediaType::SetUINT32(output profile)");
     ThrowIfFailed(outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(output interlace)");
+    SetBt709ColorInfo(outputType.Get());
     SetVideoSize(outputType.Get(), MF_MT_FRAME_SIZE, config_.width, config_.height);
     SetVideoRatio(outputType.Get(), MF_MT_FRAME_RATE, config_.fps, 1);
     SetVideoRatio(outputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
@@ -123,6 +128,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     ThrowIfFailed(inputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "IMFMediaType::SetGUID(input major)");
     ThrowIfFailed(inputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12), "IMFMediaType::SetGUID(input subtype)");
     ThrowIfFailed(inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(input interlace)");
+    SetBt709ColorInfo(inputType.Get());
     SetVideoSize(inputType.Get(), MF_MT_FRAME_SIZE, config_.width, config_.height);
     SetVideoRatio(inputType.Get(), MF_MT_FRAME_RATE, config_.fps, 1);
     SetVideoRatio(inputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
@@ -146,7 +152,7 @@ std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& f
             std::to_string(static_cast<int>(frame.format)));
     }
 
-    const auto nv12 = ConvertBgraToNv12(frame);
+    const auto nv12 = ConvertBgraToNv12(frame.pixels.data(), frame.rowPitch, frame.width, frame.height);
     const DWORD bufferSize = static_cast<DWORD>(nv12.size());
 
     Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
@@ -198,59 +204,6 @@ std::vector<EncodedPacket> H264StreamEncoder::Drain()
 void H264StreamEncoder::Stop()
 {
     transform_.Reset();
-}
-
-std::vector<std::byte> H264StreamEncoder::ConvertBgraToNv12(const CapturedFrame& frame) const
-{
-    const int width = config_.width;
-    const int height = config_.height;
-    std::vector<std::byte> nv12(static_cast<size_t>(width) * height * 3 / 2);
-
-    auto* yPlane = reinterpret_cast<uint8_t*>(nv12.data());
-    auto* uvPlane = yPlane + static_cast<size_t>(width) * height;
-    const auto* source = reinterpret_cast<const uint8_t*>(frame.pixels.data());
-
-    for (int y = 0; y < height; ++y) {
-        const auto* row = source + static_cast<size_t>(frame.rowPitch) * y;
-        for (int x = 0; x < width; ++x) {
-            const uint8_t b = row[x * 4 + 0];
-            const uint8_t g = row[x * 4 + 1];
-            const uint8_t r = row[x * 4 + 2];
-            const int luma = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
-            yPlane[static_cast<size_t>(y) * width + x] = ClampToByte(luma);
-        }
-    }
-
-    for (int y = 0; y < height; y += 2) {
-        const auto* row0 = source + static_cast<size_t>(frame.rowPitch) * y;
-        const auto* row1 = source + static_cast<size_t>(frame.rowPitch) * (y + 1);
-
-        for (int x = 0; x < width; x += 2) {
-            int uSum = 0;
-            int vSum = 0;
-
-            const std::array<const uint8_t*, 4> pixels = {
-                row0 + x * 4,
-                row0 + (x + 1) * 4,
-                row1 + x * 4,
-                row1 + (x + 1) * 4,
-            };
-
-            for (const uint8_t* pixel : pixels) {
-                const uint8_t b = pixel[0];
-                const uint8_t g = pixel[1];
-                const uint8_t r = pixel[2];
-                uSum += ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-                vSum += ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-            }
-
-            const size_t uvIndex = static_cast<size_t>(y / 2) * width + x;
-            uvPlane[uvIndex + 0] = ClampToByte(uSum / 4);
-            uvPlane[uvIndex + 1] = ClampToByte(vSum / 4);
-        }
-    }
-
-    return nv12;
 }
 
 std::vector<EncodedPacket> H264StreamEncoder::ReadAvailablePackets()

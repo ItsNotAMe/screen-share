@@ -3,6 +3,7 @@
 #include "video/Nv12Convert.h"
 
 #include <d3dcompiler.h>
+#include <dxgi1_4.h>
 
 #include <algorithm>
 #include <cmath>
@@ -113,6 +114,28 @@ void RegisterPreviewWindowClass()
 uint32_t ClampDimension(int value)
 {
     return static_cast<uint32_t>(std::max(1, value));
+}
+
+void SetSwapChainSdrColorSpace(IDXGISwapChain* swapChain)
+{
+    if (swapChain == nullptr) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain3;
+    if (FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&swapChain3)))) {
+        return;
+    }
+
+    UINT colorSpaceSupport = 0;
+    if (FAILED(swapChain3->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, &colorSpaceSupport))) {
+        return;
+    }
+    if ((colorSpaceSupport & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == 0) {
+        return;
+    }
+
+    static_cast<void>(swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
 }
 
 SIZE FitFrameToWorkArea(HWND hwnd, int width, int height)
@@ -291,15 +314,15 @@ void ReceiverPreviewWindow::CreateDeviceAndSwapChain()
     swapChainDesc.BufferDesc.Width = clientWidth_;
     swapChainDesc.BufferDesc.Height = clientHeight_;
     swapChainDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    swapChainDesc.BufferDesc.RefreshRate.Numerator = 60;
+    swapChainDesc.BufferDesc.RefreshRate.Numerator = 0;
     swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
     swapChainDesc.SampleDesc.Count = 1;
     swapChainDesc.SampleDesc.Quality = 0;
     swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.BufferCount = 1;
+    swapChainDesc.BufferCount = 2;
     swapChainDesc.OutputWindow = hwnd_;
     swapChainDesc.Windowed = TRUE;
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
     constexpr D3D_FEATURE_LEVEL featureLevels[] = {
         D3D_FEATURE_LEVEL_11_0,
@@ -340,6 +363,7 @@ void ReceiverPreviewWindow::CreateDeviceAndSwapChain()
     }
 
     ThrowIfFailed(result, "D3D11CreateDeviceAndSwapChain(receiver preview)");
+    SetSwapChainSdrColorSpace(swapChain_.Get());
     EnsureRenderTarget();
 }
 
@@ -368,6 +392,7 @@ void ReceiverPreviewWindow::ResizeSwapChainIfNeeded()
     ThrowIfFailed(
         swapChain_->ResizeBuffers(0, clientWidth_, clientHeight_, DXGI_FORMAT_UNKNOWN, 0),
         "IDXGISwapChain::ResizeBuffers(receiver preview)");
+    SetSwapChainSdrColorSpace(swapChain_.Get());
     swapChainResizePending_ = false;
     EnsureRenderTarget();
 }
