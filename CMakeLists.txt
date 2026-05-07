@@ -5,6 +5,7 @@ project(ScreenShareNative LANGUAGES CXX)
 add_executable(ScreenShare
     src/DesktopCapturer.cpp
     src/H264FileEncoder.cpp
+    src/H264StreamDecoder.cpp
     src/H264StreamEncoder.cpp
     src/UdpReceiver.cpp
     src/UdpSender.cpp
