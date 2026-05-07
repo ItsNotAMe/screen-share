@@ -1,5 +1,7 @@
 #include "codec/H264FileEncoder.h"
 
+#include "video/Nv12Convert.h"
+
 #include <Windows.h>
 #include <codecapi.h>
 #include <mfapi.h>
@@ -27,6 +29,14 @@ void SetVideoSize(IMFAttributes* attributes, REFGUID key, int width, int height)
 void SetVideoRatio(IMFAttributes* attributes, REFGUID key, int numerator, int denominator)
 {
     ThrowIfFailed(MFSetAttributeRatio(attributes, key, static_cast<UINT32>(numerator), static_cast<UINT32>(denominator)), "MFSetAttributeRatio");
+}
+
+void SetBt709ColorInfo(IMFMediaType* mediaType, MFNominalRange nominalRange)
+{
+    ThrowIfFailed(mediaType->SetUINT32(MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709), "IMFMediaType::SetUINT32(YUV matrix)");
+    ThrowIfFailed(mediaType->SetUINT32(MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709), "IMFMediaType::SetUINT32(video primaries)");
+    ThrowIfFailed(mediaType->SetUINT32(MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709), "IMFMediaType::SetUINT32(transfer function)");
+    ThrowIfFailed(mediaType->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, nominalRange), "IMFMediaType::SetUINT32(nominal range)");
 }
 
 } // namespace
@@ -93,6 +103,7 @@ void H264FileEncoder::Start(const H264EncoderConfig& config)
     ThrowIfFailed(outputType->SetUINT32(MF_MT_AVG_BITRATE, config_.bitrate), "IMFMediaType::SetUINT32(MF_MT_AVG_BITRATE)");
     ThrowIfFailed(outputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High), "IMFMediaType::SetUINT32(MF_MT_MPEG2_PROFILE)");
     ThrowIfFailed(outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(MF_MT_INTERLACE_MODE)");
+    SetBt709ColorInfo(outputType.Get(), MFNominalRange_16_235);
     SetVideoSize(outputType.Get(), MF_MT_FRAME_SIZE, config_.width, config_.height);
     SetVideoRatio(outputType.Get(), MF_MT_FRAME_RATE, config_.fps, 1);
     SetVideoRatio(outputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
@@ -102,8 +113,9 @@ void H264FileEncoder::Start(const H264EncoderConfig& config)
     Microsoft::WRL::ComPtr<IMFMediaType> inputType;
     ThrowIfFailed(MFCreateMediaType(&inputType), "MFCreateMediaType(input)");
     ThrowIfFailed(inputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "IMFMediaType::SetGUID(input major)");
-    ThrowIfFailed(inputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_ARGB32), "IMFMediaType::SetGUID(input subtype)");
+    ThrowIfFailed(inputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12), "IMFMediaType::SetGUID(input subtype)");
     ThrowIfFailed(inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(input interlace)");
+    SetBt709ColorInfo(inputType.Get(), MFNominalRange_16_235);
     SetVideoSize(inputType.Get(), MF_MT_FRAME_SIZE, config_.width, config_.height);
     SetVideoRatio(inputType.Get(), MF_MT_FRAME_RATE, config_.fps, 1);
     SetVideoRatio(inputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
@@ -132,9 +144,8 @@ void H264FileEncoder::WriteFrame(const CapturedFrame& frame)
             std::to_string(static_cast<int>(frame.format)));
     }
 
-    constexpr uint32_t bytesPerPixel = 4;
-    const DWORD stride = static_cast<DWORD>(config_.width * bytesPerPixel);
-    const DWORD bufferSize = stride * static_cast<DWORD>(config_.height);
+    const auto nv12 = ConvertBgraToNv12(frame.pixels.data(), frame.rowPitch, frame.width, frame.height);
+    const DWORD bufferSize = static_cast<DWORD>(nv12.size());
 
     Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
     ThrowIfFailed(MFCreateMemoryBuffer(bufferSize, &buffer), "MFCreateMemoryBuffer");
@@ -144,19 +155,7 @@ void H264FileEncoder::WriteFrame(const CapturedFrame& frame)
     DWORD currentLength = 0;
     ThrowIfFailed(buffer->Lock(&destination, &maxLength, &currentLength), "IMFMediaBuffer::Lock");
 
-    const auto* source = reinterpret_cast<const BYTE*>(frame.pixels.data());
-    const DWORD sourceStride = frame.rowPitch;
-    const DWORD copyStride = std::min(stride, sourceStride);
-
-    // Media Foundation's RGB sink-writer path expects bottom-up RGB rows here.
-    // Captured D3D textures map top-down, so flip the diagnostic MP4 input.
-    for (int y = 0; y < config_.height; ++y) {
-        const int sourceY = config_.height - 1 - y;
-        std::memcpy(
-            destination + static_cast<size_t>(stride) * y,
-            source + static_cast<size_t>(sourceStride) * sourceY,
-            copyStride);
-    }
+    std::memcpy(destination, nv12.data(), nv12.size());
 
     ThrowIfFailed(buffer->Unlock(), "IMFMediaBuffer::Unlock");
     ThrowIfFailed(buffer->SetCurrentLength(bufferSize), "IMFMediaBuffer::SetCurrentLength");

@@ -39,7 +39,6 @@ public:
     [[nodiscard]] bool isRunning() const noexcept { return transform_ != nullptr; }
 
 private:
-    std::vector<std::byte> ConvertBgraToNv12(const CapturedFrame& frame) const;
     std::vector<EncodedPacket> ReadAvailablePackets();
 
     H264StreamEncoderConfig config_{};

@@ -5,7 +5,7 @@ Native C++ screen-sharing prototype for Windows.
 The first milestone is a pure C++ capture foundation:
 
 - Enumerate displays.
-- Capture a selected monitor through DXGI Desktop Duplication.
+- Capture a selected monitor through Windows Graphics Capture, with DXGI Desktop Duplication fallback.
 - Run at a requested target FPS.
 - GPU-scale captured frames to the requested output resolution.
 - Send and receive H.264 packets over UDP for local transport validation.
@@ -20,6 +20,7 @@ Requirements:
 - Windows 10/11
 - MSYS2/MinGW-w64 or Visual Studio with the Desktop development with C++ workload
 - CMake 3.24+
+- Windows SDK with C++/WinRT headers for the Windows Graphics Capture backend
 - Optional: FFmpeg for inspecting generated MP4 files
 
 ```powershell
@@ -41,10 +42,26 @@ Capture monitor 0 at a 60 FPS target and request 1080p output:
 .\build\debug\ScreenShare.exe --display 0 --width 1920 --height 1080 --fps 60 --seconds 15
 ```
 
+The default capture backend is Windows Graphics Capture (`wgc`), which can provide real scRGB
+frames on HDR desktops. The app asks Windows to hide WGC's yellow capture border by default; Windows
+can still keep the border if borderless capture permission is denied or unavailable. Add
+`--wgc-border` if you want to keep the system capture indicator visible. Use the older DXGI Desktop
+Duplication path only as a fallback or comparison:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --capture-backend dxgi --width 1920 --height 1080 --fps 60 --seconds 15
+```
+
 Capture and encode a short full-resolution H.264 MP4:
 
 ```powershell
 .\build\debug\ScreenShare.exe --display 0 --fps 60 --seconds 15 --record native.mp4
+```
+
+Capture and save the latest post-capture BGRA frame as a BMP diagnostic:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 3 --dump-capture-bmp build\debug\capture-latest.bmp
 ```
 
 Capture and encode a downscaled H.264 MP4:
@@ -64,6 +81,20 @@ Capture, stream-encode, and send H.264 packets over UDP:
 ```powershell
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8
 ```
+
+The sender automatically checks whether the captured display is running in Windows HDR mode. With
+the default WGC backend, HDR desktops are captured as scRGB float frames and converted back to SDR
+before encoding. If the preview or recording still looks too bright or too dim, tune the SDR white
+point:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8 --hdr-sdr-white-nits 203
+```
+
+Use a higher white-point value to darken true HDR/scRGB captures, or a lower value to brighten them.
+`--no-hdr-to-sdr` keeps the raw conversion behavior for comparison. The older DXGI backend can still
+receive HDR-active desktops as BGRA8 instead of true HDR; in that fallback case
+`--hdr-sdr-exposure N` controls the conservative BGRA exposure compensation.
 
 Listen for UDP H.264 packet fragments and reassemble complete encoded frames:
 
@@ -97,6 +128,10 @@ Listen, decode, and preview received frames in a native window until the window 
 
 Add `--seconds S` to stop preview automatically after a fixed duration.
 
+For color debugging, combine `--dump-capture-bmp` on the sender with `--dump-decoded-bmp` on the
+receiver. The sender dump is written after capture scaling and HDR/SDR conversion, before H.264; the
+receiver dump is written after UDP reassembly, H.264 decode, and NV12-to-BGRA conversion.
+
 Inspect a recording with FFmpeg:
 
 ```powershell
@@ -108,12 +143,20 @@ ffprobe -v error -f h264 -show_entries stream=codec_name,width,height -of defaul
 The current executable prints capture stats, performs GPU scaling, can write an H.264 MP4 through
 Media Foundation, and can produce streamable H.264 packets through the Microsoft H.264 encoder MFT.
 Omit `--width` and `--height` to record or stream-encode at the selected display's native
-resolution. Provide them only when you want to downscale. If `--bitrate-mbps` is omitted, the app
+resolution. Provide them only when you want to downscale; recording and stream-encoding require even
+output dimensions because they feed NV12 into H.264. If `--bitrate-mbps` is omitted, the app
 chooses a resolution-aware default; increase it manually if text or motion looks soft. The H.264
 validation encoders request High Profile for better quality than the default baseline profile. The
-encoder paths are validation paths: they still use CPU readback after scaling. The MP4 path accounts
-for Media Foundation RGB row orientation so recordings play upright. The future streaming encoder
-should consume GPU textures directly.
+MP4 and stream validation paths both convert BGRA to BT.709 limited-range NV12 before H.264 encoding
+so Media Foundation does not guess the RGB-to-video color conversion differently for recordings and
+streams. The encoder paths are validation paths: they still use CPU readback after scaling. The
+future streaming encoder should consume GPU textures directly. When the source display is in Windows
+HDR mode, the default Windows Graphics Capture backend requests scRGB float frames and the capture
+shader converts them into SDR BGRA before CPU readback and encoding. If the older DXGI backend
+provides an HDR-active desktop as BGRA8, the shader keeps the normal SDR color path but applies a
+conservative exposure multiplier. SDR displays keep the normal capture path. The default SDR white
+point is 203 nits and can be adjusted with `--hdr-sdr-white-nits N`; the DXGI HDR-active BGRA
+fallback exposure is 0.88 and can be adjusted with `--hdr-sdr-exposure N`.
 
 The `--stream-encode` path is CPU-heavy at native high resolutions because it currently converts
 BGRA to NV12 on the CPU. Use `--width`/`--height` for that validation path until GPU color
@@ -130,7 +173,7 @@ dimensions, but it does not store transport timing. Add `--preview` on the recei
 native Win32/Direct3D preview window; when `--seconds` is omitted the preview runs until the window
 closes.
 
-Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
+Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
 desktop can show near-zero `desktop_update_fps` while `output_fps` stays near the requested FPS.
 
@@ -139,7 +182,8 @@ desktop can show near-zero `desktop_update_fps` while `output_fps` stays near th
 Planned pipeline:
 
 ```text
-DXGI/Windows Graphics Capture
+Windows Graphics Capture
+ -> DXGI Desktop Duplication fallback
  -> GPU scaling
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
