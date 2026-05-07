@@ -1,9 +1,9 @@
-#include "DesktopCapturer.h"
-#include "H264FileEncoder.h"
-#include "H264StreamDecoder.h"
-#include "H264StreamEncoder.h"
-#include "UdpReceiver.h"
-#include "UdpSender.h"
+#include "capture/DesktopCapturer.h"
+#include "codec/H264FileEncoder.h"
+#include "codec/H264StreamDecoder.h"
+#include "codec/H264StreamEncoder.h"
+#include "transport/UdpReceiver.h"
+#include "transport/UdpSender.h"
 
 #include <algorithm>
 #include <chrono>

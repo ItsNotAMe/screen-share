@@ -1,6 +1,6 @@
 #pragma once
 
-#include "DesktopCapturer.h"
+#include "capture/DesktopCapturer.h"
 
 #include <cstdint>
 #include <vector>
