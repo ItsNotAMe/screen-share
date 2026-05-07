@@ -146,14 +146,27 @@ std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& f
     if (frame.width != config_.width || frame.height != config_.height) {
         throw std::runtime_error("Encoded frame size does not match stream encoder configuration");
     }
-    if (!IsBgra8Format(frame.format)) {
-        throw std::runtime_error(
-            "H264StreamEncoder currently expects a BGRA8 frame, got DXGI format " +
-            std::to_string(static_cast<int>(frame.format)));
+    std::vector<std::byte> convertedNv12;
+    const std::byte* nv12Data = nullptr;
+    size_t nv12Bytes = 0;
+    const size_t expectedNv12Bytes = static_cast<size_t>(frame.width) * frame.height * 3 / 2;
+    if (!frame.nv12Pixels.empty()) {
+        if (frame.nv12Pixels.size() != expectedNv12Bytes) {
+            throw std::runtime_error("GPU NV12 frame size does not match stream encoder configuration");
+        }
+        nv12Data = frame.nv12Pixels.data();
+        nv12Bytes = frame.nv12Pixels.size();
+    } else {
+        if (!IsBgra8Format(frame.format)) {
+            throw std::runtime_error(
+                "H264StreamEncoder currently expects BGRA8 or NV12 frame data, got DXGI format " +
+                std::to_string(static_cast<int>(frame.format)));
+        }
+        convertedNv12 = ConvertBgraToNv12(frame.pixels.data(), frame.rowPitch, frame.width, frame.height);
+        nv12Data = convertedNv12.data();
+        nv12Bytes = convertedNv12.size();
     }
-
-    const auto nv12 = ConvertBgraToNv12(frame.pixels.data(), frame.rowPitch, frame.width, frame.height);
-    const DWORD bufferSize = static_cast<DWORD>(nv12.size());
+    const DWORD bufferSize = static_cast<DWORD>(nv12Bytes);
 
     Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
     ThrowIfFailed(MFCreateMemoryBuffer(bufferSize, &buffer), "MFCreateMemoryBuffer(input)");
@@ -162,7 +175,7 @@ std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& f
     DWORD maxLength = 0;
     DWORD currentLength = 0;
     ThrowIfFailed(buffer->Lock(&destination, &maxLength, &currentLength), "IMFMediaBuffer::Lock(input)");
-    std::memcpy(destination, nv12.data(), nv12.size());
+    std::memcpy(destination, nv12Data, nv12Bytes);
     ThrowIfFailed(buffer->Unlock(), "IMFMediaBuffer::Unlock(input)");
     ThrowIfFailed(buffer->SetCurrentLength(bufferSize), "IMFMediaBuffer::SetCurrentLength(input)");
 

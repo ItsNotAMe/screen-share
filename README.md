@@ -147,10 +147,12 @@ resolution. Provide them only when you want to downscale; recording and stream-e
 output dimensions because they feed NV12 into H.264. If `--bitrate-mbps` is omitted, the app
 chooses a resolution-aware default; increase it manually if text or motion looks soft. The H.264
 validation encoders request High Profile for better quality than the default baseline profile. The
-MP4 and stream validation paths both convert BGRA to BT.709 limited-range NV12 before H.264 encoding
-so Media Foundation does not guess the RGB-to-video color conversion differently for recordings and
-streams. The encoder paths are validation paths: they still use CPU readback after scaling. The
-future streaming encoder should consume GPU textures directly. When the source display is in Windows
+MP4 path converts BGRA to BT.709 limited-range NV12 before H.264 encoding. The stream path asks the
+capturer for GPU-generated BT.709 limited-range NV12 planes and falls back to the shared CPU
+conversion only if that GPU payload is not present. Capture stats report `nv12=gpu` when the stream
+encoder is using that path, plus average capture and stream encode timings. The encoder paths are
+still validation paths: they use CPU readback/copies before feeding Media Foundation memory buffers.
+The future streaming encoder should consume GPU textures directly. When the source display is in Windows
 HDR mode, the default Windows Graphics Capture backend requests scRGB float frames and the capture
 shader converts them into SDR BGRA before CPU readback and encoding. If the older DXGI backend
 provides an HDR-active desktop as BGRA8, the shader keeps the normal SDR color path but applies a
@@ -158,9 +160,9 @@ conservative exposure multiplier. SDR displays keep the normal capture path. The
 point is 203 nits and can be adjusted with `--hdr-sdr-white-nits N`; the DXGI HDR-active BGRA
 fallback exposure is 0.88 and can be adjusted with `--hdr-sdr-exposure N`.
 
-The `--stream-encode` path is CPU-heavy at native high resolutions because it currently converts
-BGRA to NV12 on the CPU. Use `--width`/`--height` for that validation path until GPU color
-conversion and real hardware encoding are added.
+The `--stream-encode` path can still be heavy at native high resolutions because it reads converted
+frames back to the CPU and feeds the encoder through system-memory samples. Use `--width`/`--height`
+for that validation path until direct GPU-texture hardware encoding is added.
 
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
@@ -184,7 +186,7 @@ Planned pipeline:
 ```text
 Windows Graphics Capture
  -> DXGI Desktop Duplication fallback
- -> GPU scaling
+ -> GPU scaling and stream NV12 conversion
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
  -> UDP sender/receiver transport diagnostics

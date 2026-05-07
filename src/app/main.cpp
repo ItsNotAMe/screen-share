@@ -418,6 +418,7 @@ void RunCaptureStats(const Options& options)
     config.targetFps = options.fps;
     config.backend = options.captureBackend;
     config.wgcBorderRequired = options.wgcBorderRequired;
+    config.includeNv12 = options.streamEncode;
     config.hdrToSdr = options.hdrToSdr;
     config.hdrSdrWhiteNits = options.hdrSdrWhiteNits;
     config.hdrSdrBgraExposure = options.hdrSdrBgraExposure;
@@ -476,6 +477,7 @@ void RunCaptureStats(const Options& options)
     DXGI_COLOR_SPACE_TYPE lastDisplayColorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     bool lastDisplayHdrActive = false;
     uint32_t lastColorConversionMode = 0;
+    bool lastNv12GeneratedOnGpu = false;
     bool hasFrame = false;
     screenshare::CapturedFrame lastFrame;
     std::unique_ptr<screenshare::H264FileEncoder> fileEncoder;
@@ -484,6 +486,14 @@ void RunCaptureStats(const Options& options)
     uint64_t streamEncodedFrames = 0;
     uint64_t streamPackets = 0;
     uint64_t streamBytes = 0;
+    double intervalCaptureMs = 0.0;
+    uint64_t intervalCaptureCalls = 0;
+    double intervalStreamEncodeMs = 0.0;
+    uint64_t intervalStreamEncodeCalls = 0;
+    double totalCaptureMs = 0.0;
+    uint64_t totalCaptureCalls = 0;
+    double totalStreamEncodeMs = 0.0;
+    uint64_t totalStreamEncodeCalls = 0;
     bool capturedBmpWritten = false;
     std::unique_ptr<screenshare::UdpSender> udpSender;
 
@@ -494,7 +504,13 @@ void RunCaptureStats(const Options& options)
         std::this_thread::sleep_until(nextFrameAt);
         nextFrameAt += targetFrameTime;
 
+        const auto captureStartedAt = Clock::now();
         const auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(0));
+        const double captureMs = std::chrono::duration<double, std::milli>(Clock::now() - captureStartedAt).count();
+        intervalCaptureMs += captureMs;
+        ++intervalCaptureCalls;
+        totalCaptureMs += captureMs;
+        ++totalCaptureCalls;
         if (frame) {
             ++totalDesktopUpdates;
             ++intervalDesktopUpdates;
@@ -507,6 +523,7 @@ void RunCaptureStats(const Options& options)
             lastDisplayColorSpace = frame->displayColorSpace;
             lastDisplayHdrActive = frame->displayHdrActive;
             lastColorConversionMode = frame->colorConversionMode;
+            lastNv12GeneratedOnGpu = frame->nv12GeneratedOnGpu;
             lastFrame = std::move(*frame);
             hasFrame = true;
         }
@@ -568,7 +585,14 @@ void RunCaptureStats(const Options& options)
                         << "\n";
                 }
 
+                const auto streamEncodeStartedAt = Clock::now();
                 const auto packets = streamEncoder->EncodeFrame(lastFrame);
+                const double streamEncodeMs =
+                    std::chrono::duration<double, std::milli>(Clock::now() - streamEncodeStartedAt).count();
+                intervalStreamEncodeMs += streamEncodeMs;
+                ++intervalStreamEncodeCalls;
+                totalStreamEncodeMs += streamEncodeMs;
+                ++totalStreamEncodeCalls;
                 ++streamEncodedFrames;
                 streamPackets += packets.size();
                 for (const auto& packet : packets) {
@@ -585,6 +609,10 @@ void RunCaptureStats(const Options& options)
             const double elapsed = std::chrono::duration<double>(now - lastReportAt).count();
             const double outputFps = static_cast<double>(intervalOutputFrames) / elapsed;
             const double desktopUpdateFps = static_cast<double>(intervalDesktopUpdates) / elapsed;
+            const double captureAvgMs =
+                intervalCaptureCalls == 0 ? 0.0 : intervalCaptureMs / static_cast<double>(intervalCaptureCalls);
+            const double streamEncodeAvgMs =
+                intervalStreamEncodeCalls == 0 ? 0.0 : intervalStreamEncodeMs / static_cast<double>(intervalStreamEncodeCalls);
             std::cout
                 << "source=" << lastSourceWidth << "x" << lastSourceHeight
                 << " source_format=" << screenshare::DxgiFormatName(lastSourceFormat)
@@ -593,8 +621,11 @@ void RunCaptureStats(const Options& options)
                 << " color_conversion=" << screenshare::CaptureColorConversionName(lastColorConversionMode)
                 << " output=" << lastOutputWidth << "x" << lastOutputHeight
                 << " output_format=" << screenshare::DxgiFormatName(lastOutputFormat)
+                << " nv12=" << (lastNv12GeneratedOnGpu ? "gpu" : "cpu_or_none")
                 << " output_fps=" << outputFps
                 << " desktop_update_fps=" << desktopUpdateFps
+                << " capture_avg_ms=" << captureAvgMs
+                << " stream_encode_avg_ms=" << streamEncodeAvgMs
                 << " repeated_frames=" << intervalRepeatedFrames
                 << " total_output_frames=" << totalOutputFrames
                 << " total_desktop_updates=" << totalDesktopUpdates
@@ -608,6 +639,10 @@ void RunCaptureStats(const Options& options)
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
             intervalRepeatedFrames = 0;
+            intervalCaptureMs = 0.0;
+            intervalCaptureCalls = 0;
+            intervalStreamEncodeMs = 0.0;
+            intervalStreamEncodeCalls = 0;
             lastReportAt = now;
         }
     }
@@ -637,6 +672,8 @@ void RunCaptureStats(const Options& options)
     std::cout
         << "Done. Average output FPS: " << (static_cast<double>(totalOutputFrames) / totalElapsed)
         << ", average desktop update FPS: " << (static_cast<double>(totalDesktopUpdates) / totalElapsed)
+        << ", average capture ms: " << (totalCaptureCalls == 0 ? 0.0 : totalCaptureMs / static_cast<double>(totalCaptureCalls))
+        << ", average stream encode ms: " << (totalStreamEncodeCalls == 0 ? 0.0 : totalStreamEncodeMs / static_cast<double>(totalStreamEncodeCalls))
         << ", repeated frames: " << totalRepeatedFrames
         << ", file encoded frames: " << fileEncodedFrames
         << ", stream encoded frames: " << streamEncodedFrames
