@@ -1,6 +1,6 @@
 #pragma once
 
-#include "H264StreamEncoder.h"
+#include "codec/H264StreamEncoder.h"
 
 #include <cstddef>
 #include <cstdint>

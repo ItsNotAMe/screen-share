@@ -3,13 +3,13 @@ cmake_minimum_required(VERSION 3.24)
 project(ScreenShareNative LANGUAGES CXX)
 
 add_executable(ScreenShare
-    src/DesktopCapturer.cpp
-    src/H264FileEncoder.cpp
-    src/H264StreamDecoder.cpp
-    src/H264StreamEncoder.cpp
-    src/UdpReceiver.cpp
-    src/UdpSender.cpp
-    src/main.cpp
+    src/app/main.cpp
+    src/capture/DesktopCapturer.cpp
+    src/codec/H264FileEncoder.cpp
+    src/codec/H264StreamDecoder.cpp
+    src/codec/H264StreamEncoder.cpp
+    src/transport/UdpReceiver.cpp
+    src/transport/UdpSender.cpp
 )
 
 target_compile_features(ScreenShare PRIVATE cxx_std_20)

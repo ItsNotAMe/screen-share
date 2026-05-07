@@ -1,4 +1,4 @@
-#include "DesktopCapturer.h"
+#include "capture/DesktopCapturer.h"
 
 #include <Windows.h>
 #include <d3dcompiler.h>
