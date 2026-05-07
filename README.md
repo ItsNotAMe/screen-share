@@ -75,6 +75,12 @@ Listen, reassemble, and dump the received H.264 elementary stream for inspection
 .\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15 --dump-h264 build\debug\receiver.h264
 ```
 
+Listen, reassemble, and decode received H.264 packets without displaying them yet:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15 --decode-h264
+```
+
 Inspect a recording with FFmpeg:
 
 ```powershell
@@ -101,8 +107,9 @@ The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP 
 small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
 complete encoded frames, and prints transport diagnostics. Add `--dump-h264 PATH` on the receiver
 to write the reassembled H.264 elementary stream for FFmpeg inspection. It does not decode or
-display video yet. The raw `.h264` dump validates codec bytes and dimensions, but it does not store
-transport timing. A native decoder/renderer is a future milestone.
+display video by default. Add `--decode-h264` to feed reassembled packets through the Microsoft
+H.264 decoder MFT and print decoded frame diagnostics. The raw `.h264` dump validates codec bytes
+and dimensions, but it does not store transport timing. A native renderer is a future milestone.
 
 Desktop Duplication is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -118,7 +125,8 @@ DXGI/Windows Graphics Capture
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
  -> UDP sender/receiver transport diagnostics
+ -> Media Foundation H.264 decode validation
  -> future real-time hardware encode path
- -> future native decoder and Direct3D renderer
+ -> future native Direct3D receiver renderer
 ```
 An app to share your screen with others

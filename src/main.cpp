@@ -1,5 +1,6 @@
 #include "DesktopCapturer.h"
 #include "H264FileEncoder.h"
+#include "H264StreamDecoder.h"
 #include "H264StreamEncoder.h"
 #include "UdpReceiver.h"
 #include "UdpSender.h"
@@ -32,6 +33,7 @@ struct Options {
     std::string udpSendTarget;
     uint16_t udpReceivePort = 0;
     std::string h264DumpPath;
+    bool decodeH264 = false;
 };
 
 void PrintHelp()
@@ -40,7 +42,7 @@ void PrintHelp()
         << "ScreenShare native C++ capture prototype\n\n"
         << "Usage:\n"
         << "  ScreenShare --list\n"
-        << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH]\n"
+        << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--udp-send HOST:PORT]\n"
         << "              [--bitrate-mbps Mbps]\n\n"
@@ -48,7 +50,7 @@ void PrintHelp()
         << "  ScreenShare --list\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
-        << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-h264 receiver.h264\n"
+        << "  ScreenShare --udp-recv 5000 --seconds 15 --decode-h264 --dump-h264 receiver.h264\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -135,6 +137,8 @@ Options ParseOptions(int argc, char** argv)
             options.udpReceivePort = screenshare::ParseUdpReceivePort(requireValue("--udp-recv"));
         } else if (arg == "--dump-h264") {
             options.h264DumpPath = requireValue("--dump-h264");
+        } else if (arg == "--decode-h264") {
+            options.decodeH264 = true;
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else {
@@ -166,6 +170,9 @@ Options ParseOptions(int argc, char** argv)
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
         throw std::invalid_argument("--dump-h264 requires --udp-recv");
+    }
+    if (options.decodeH264 && options.udpReceivePort == 0) {
+        throw std::invalid_argument("--decode-h264 requires --udp-recv");
     }
 
     return options;
@@ -422,6 +429,9 @@ void RunUdpReceiverStats(const Options& options)
     if (!options.h264DumpPath.empty()) {
         std::cout << ", dumping H.264 to " << options.h264DumpPath;
     }
+    if (options.decodeH264) {
+        std::cout << ", decoding H.264";
+    }
     std::cout << ".\n";
 
     auto writeH264DumpFrame = [&](const screenshare::UdpCompletedFrame& frame) {
@@ -449,6 +459,51 @@ void RunUdpReceiverStats(const Options& options)
         }
     };
 
+    std::unique_ptr<screenshare::H264StreamDecoder> h264Decoder;
+    uint64_t h264DecodePackets = 0;
+    uint64_t h264DecodedFrames = 0;
+    uint64_t h264DecodedBytes = 0;
+    int h264DecodedWidth = 0;
+    int h264DecodedHeight = 0;
+    uint64_t nextH264DecodeFrameId = 0;
+    bool hasH264DecodeStartFrame = false;
+    std::map<uint64_t, screenshare::UdpCompletedFrame> h264DecodeBacklog;
+
+    if (options.decodeH264) {
+        h264Decoder = std::make_unique<screenshare::H264StreamDecoder>();
+        h264Decoder->Start();
+    }
+
+    auto countDecodedFrames = [&](const std::vector<screenshare::DecodedFrameInfo>& decodedFrames) {
+        h264DecodedFrames += decodedFrames.size();
+        for (const auto& decodedFrame : decodedFrames) {
+            h264DecodedBytes += decodedFrame.bytes;
+            h264DecodedWidth = decodedFrame.width;
+            h264DecodedHeight = decodedFrame.height;
+        }
+    };
+
+    auto decodeH264Frame = [&](const screenshare::UdpCompletedFrame& frame) {
+        screenshare::EncodedPacket packet;
+        packet.timestamp100ns = static_cast<int64_t>(frame.timestamp100ns);
+        packet.bytes = frame.bytes;
+        countDecodedFrames(h264Decoder->DecodePacket(packet));
+        ++h264DecodePackets;
+    };
+
+    auto flushH264DecodeBacklog = [&]() {
+        while (true) {
+            const auto next = h264DecodeBacklog.find(nextH264DecodeFrameId);
+            if (next == h264DecodeBacklog.end()) {
+                break;
+            }
+
+            decodeH264Frame(next->second);
+            h264DecodeBacklog.erase(next);
+            ++nextH264DecodeFrameId;
+        }
+    };
+
     using Clock = std::chrono::steady_clock;
     const auto startedAt = Clock::now();
     auto lastReportAt = startedAt;
@@ -465,6 +520,16 @@ void RunUdpReceiverStats(const Options& options)
             latestFrameBytes = frame->bytes.size();
             latestFragmentCount = frame->fragmentCount;
             hasCompletedFrame = true;
+
+            if (h264Decoder) {
+                if (!hasH264DecodeStartFrame) {
+                    nextH264DecodeFrameId = frame->frameId;
+                    hasH264DecodeStartFrame = true;
+                }
+
+                h264DecodeBacklog.emplace(frame->frameId, *frame);
+                flushH264DecodeBacklog();
+            }
 
             if (h264Dump) {
                 if (!hasH264DumpStartFrame) {
@@ -498,7 +563,12 @@ void RunUdpReceiverStats(const Options& options)
                 << " completed_bytes=" << stats.completedFrameBytes
                 << " dumped_h264_packets=" << h264DumpPackets
                 << " dumped_h264_bytes=" << h264DumpBytes
-                << " pending_h264_dump_packets=" << h264DumpBacklog.size();
+                << " pending_h264_dump_packets=" << h264DumpBacklog.size()
+                << " h264_decode_packets=" << h264DecodePackets
+                << " h264_decoded_frames=" << h264DecodedFrames
+                << " h264_decoded_bytes=" << h264DecodedBytes
+                << " h264_decoded_output=" << h264DecodedWidth << "x" << h264DecodedHeight
+                << " pending_h264_decode_packets=" << h264DecodeBacklog.size();
 
             if (hasCompletedFrame) {
                 std::cout
@@ -516,6 +586,10 @@ void RunUdpReceiverStats(const Options& options)
     }
 
     const screenshare::UdpReceiverStats stats = receiver.stats();
+    if (h264Decoder) {
+        countDecodedFrames(h264Decoder->Drain());
+        h264Decoder.reset();
+    }
     receiver.Close();
 
     const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
@@ -532,6 +606,11 @@ void RunUdpReceiverStats(const Options& options)
         << ", dumped H.264 packets: " << h264DumpPackets
         << ", dumped H.264 bytes: " << h264DumpBytes
         << ", pending H.264 dump packets: " << h264DumpBacklog.size()
+        << ", H.264 decode packets: " << h264DecodePackets
+        << ", H.264 decoded frames: " << h264DecodedFrames
+        << ", H.264 decoded bytes: " << h264DecodedBytes
+        << ", H.264 decoded output: " << h264DecodedWidth << "x" << h264DecodedHeight
+        << ", pending H.264 decode packets: " << h264DecodeBacklog.size()
         << "\n";
 }
 
