@@ -26,6 +26,12 @@
 
 namespace {
 
+enum class StreamEncoderPreference {
+    Auto,
+    Software,
+    Hardware,
+};
+
 struct Options {
     bool listDisplays = false;
     bool listH264Encoders = false;
@@ -39,8 +45,8 @@ struct Options {
     std::string recordPath;
     std::string capturedBmpPath;
     bool streamEncode = false;
-    bool streamEncoderBackendProvided = false;
-    screenshare::H264StreamEncoderBackend streamEncoderBackend = screenshare::H264StreamEncoderBackend::Software;
+    bool streamEncoderPreferenceProvided = false;
+    StreamEncoderPreference streamEncoderPreference = StreamEncoderPreference::Auto;
     std::string udpSendTarget;
     bool wgcBorderRequired = false;
     bool hdrToSdr = true;
@@ -63,7 +69,7 @@ void PrintHelp()
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
-        << "              [--record PATH] [--stream-encode] [--stream-encoder software|hardware]\n"
+        << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
         << "              [--udp-send HOST:PORT]\n"
         << "              [--dump-capture-bmp PATH]\n"
         << "              [--capture-backend dxgi|wgc]\n"
@@ -237,17 +243,34 @@ screenshare::CaptureBackend ParseCaptureBackend(const char* value)
     throw std::invalid_argument(std::string("Invalid value for --capture-backend: ") + value);
 }
 
-screenshare::H264StreamEncoderBackend ParseStreamEncoderBackend(const char* value)
+StreamEncoderPreference ParseStreamEncoderPreference(const char* value)
 {
-    const std::string backend = value;
-    if (backend == "software") {
-        return screenshare::H264StreamEncoderBackend::Software;
+    const std::string preference = value;
+    if (preference == "auto") {
+        return StreamEncoderPreference::Auto;
     }
-    if (backend == "hardware") {
-        return screenshare::H264StreamEncoderBackend::Hardware;
+    if (preference == "software") {
+        return StreamEncoderPreference::Software;
+    }
+    if (preference == "hardware") {
+        return StreamEncoderPreference::Hardware;
     }
 
     throw std::invalid_argument(std::string("Invalid value for --stream-encoder: ") + value);
+}
+
+const char* StreamEncoderPreferenceName(StreamEncoderPreference preference)
+{
+    switch (preference) {
+    case StreamEncoderPreference::Auto:
+        return "auto";
+    case StreamEncoderPreference::Software:
+        return "software";
+    case StreamEncoderPreference::Hardware:
+        return "hardware";
+    default:
+        return "unknown";
+    }
 }
 
 const char* CaptureBackendName(screenshare::CaptureBackend backend)
@@ -260,6 +283,30 @@ const char* CaptureBackendName(screenshare::CaptureBackend backend)
     default:
         return "unknown";
     }
+}
+
+bool PrefersHardwareStream(StreamEncoderPreference preference)
+{
+    return preference == StreamEncoderPreference::Auto || preference == StreamEncoderPreference::Hardware;
+}
+
+void ConfigureCapturePayloads(
+    screenshare::CaptureConfig& config,
+    const Options& options,
+    StreamEncoderPreference streamEncoderPreference)
+{
+    const bool optimizeForHardwareStream = options.streamEncode && PrefersHardwareStream(streamEncoderPreference);
+    config.includeNv12 = options.streamEncode;
+    config.includeNv12Readback = !optimizeForHardwareStream;
+    config.includeBgraReadback =
+        !optimizeForHardwareStream ||
+        !options.recordPath.empty() ||
+        !options.capturedBmpPath.empty();
+}
+
+bool HasSoftwareStreamInput(const screenshare::CapturedFrame& frame)
+{
+    return !frame.nv12Pixels.empty() || !frame.pixels.empty();
 }
 
 uint32_t SelectBitrate(const Options& options, int width, int height)
@@ -327,8 +374,8 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--stream-encode") {
             options.streamEncode = true;
         } else if (arg == "--stream-encoder") {
-            options.streamEncoderBackend = ParseStreamEncoderBackend(requireValue("--stream-encoder"));
-            options.streamEncoderBackendProvided = true;
+            options.streamEncoderPreference = ParseStreamEncoderPreference(requireValue("--stream-encoder"));
+            options.streamEncoderPreferenceProvided = true;
         } else if (arg == "--udp-send") {
             options.udpSendTarget = requireValue("--udp-send");
             options.streamEncode = true;
@@ -385,7 +432,7 @@ Options ParseOptions(int argc, char** argv)
     if (!options.udpSendTarget.empty()) {
         static_cast<void>(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
     }
-    if (options.streamEncoderBackendProvided && !options.streamEncode) {
+    if (options.streamEncoderPreferenceProvided && !options.streamEncode) {
         throw std::invalid_argument("--stream-encoder requires --stream-encode or --udp-send");
     }
     if (options.hdrSdrWhiteNits < 80.0f || options.hdrSdrWhiteNits > 1000.0f) {
@@ -396,12 +443,12 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || options.streamEncoderBackendProvided || !options.udpSendTarget.empty())) {
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty())) {
         throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, or --udp-send");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || options.streamEncoderBackendProvided || !options.udpSendTarget.empty() || options.decodeH264 || options.previewWindow)) {
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.decodeH264 || options.previewWindow)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
@@ -489,6 +536,8 @@ void PrintH264Encoders(const Options& options)
 
 void RunCaptureStats(const Options& options)
 {
+    StreamEncoderPreference streamEncoderPreference = options.streamEncoderPreference;
+
     screenshare::CaptureConfig config;
     config.displayIndex = options.displayIndex;
     config.targetWidth = options.width;
@@ -496,12 +545,7 @@ void RunCaptureStats(const Options& options)
     config.targetFps = options.fps;
     config.backend = options.captureBackend;
     config.wgcBorderRequired = options.wgcBorderRequired;
-    config.includeNv12 = options.streamEncode;
-    config.includeNv12Readback = options.streamEncoderBackend != screenshare::H264StreamEncoderBackend::Hardware;
-    config.includeBgraReadback =
-        options.streamEncoderBackend != screenshare::H264StreamEncoderBackend::Hardware ||
-        !options.recordPath.empty() ||
-        !options.capturedBmpPath.empty();
+    ConfigureCapturePayloads(config, options, streamEncoderPreference);
     config.hdrToSdr = options.hdrToSdr;
     config.hdrSdrWhiteNits = options.hdrSdrWhiteNits;
     config.hdrSdrBgraExposure = options.hdrSdrBgraExposure;
@@ -525,7 +569,7 @@ void RunCaptureStats(const Options& options)
         std::cout << ", dumping latest captured BMP to " << options.capturedBmpPath;
     }
     if (options.streamEncode) {
-        std::cout << ", stream-encoding H.264 packets";
+        std::cout << ", stream-encoding H.264 packets with " << StreamEncoderPreferenceName(streamEncoderPreference) << " encoder preference";
     }
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
@@ -650,31 +694,70 @@ void RunCaptureStats(const Options& options)
 
             if (options.streamEncode) {
                 if (!streamEncoder) {
-                    screenshare::H264StreamEncoderConfig encoderConfig;
-                    encoderConfig.width = lastFrame.width;
-                    encoderConfig.height = lastFrame.height;
-                    encoderConfig.fps = options.fps;
-                    encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
-                    encoderConfig.backend = options.streamEncoderBackend;
-                    if (encoderConfig.backend == screenshare::H264StreamEncoderBackend::Hardware) {
-                        encoderConfig.d3dDevice = lastFrame.d3dDevice;
-                    }
+                    auto startStreamEncoder = [&](screenshare::H264StreamEncoderBackend backend) {
+                        if (backend == screenshare::H264StreamEncoderBackend::Hardware &&
+                            (!lastFrame.d3dDevice || !lastFrame.nv12Texture)) {
+                            throw std::runtime_error("hardware stream encoder requires a captured D3D11 NV12 texture");
+                        }
 
-                    streamEncoder = std::make_unique<screenshare::H264StreamEncoder>();
-                    streamEncoder->Start(encoderConfig);
+                        screenshare::H264StreamEncoderConfig encoderConfig;
+                        encoderConfig.width = lastFrame.width;
+                        encoderConfig.height = lastFrame.height;
+                        encoderConfig.fps = options.fps;
+                        encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
+                        encoderConfig.backend = backend;
+                        if (encoderConfig.backend == screenshare::H264StreamEncoderBackend::Hardware) {
+                            encoderConfig.d3dDevice = lastFrame.d3dDevice;
+                        }
+
+                        auto encoder = std::make_unique<screenshare::H264StreamEncoder>();
+                        encoder->Start(encoderConfig);
+
+                        std::cout
+                            << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
+                            << " bitrate_mbps=" << Mbps(encoderConfig.bitrate)
+                            << " preference=" << StreamEncoderPreferenceName(streamEncoderPreference)
+                            << " backend=" << screenshare::H264StreamEncoderBackendName(encoder->backend())
+                            << " input=" << screenshare::H264StreamEncoderInputModeName(encoder->lastInputMode())
+                            << " encoder=\"" << encoder->encoderName() << "\""
+                            << "\n";
+
+                        return encoder;
+                    };
+
+                    if (streamEncoderPreference == StreamEncoderPreference::Software) {
+                        streamEncoder = startStreamEncoder(screenshare::H264StreamEncoderBackend::Software);
+                    } else {
+                        try {
+                            streamEncoder = startStreamEncoder(screenshare::H264StreamEncoderBackend::Hardware);
+                        } catch (const std::exception& error) {
+                            if (streamEncoderPreference == StreamEncoderPreference::Hardware) {
+                                throw;
+                            }
+
+                            std::cerr
+                                << "Hardware stream encoder unavailable; falling back to software: "
+                                << error.what()
+                                << "\n";
+                            streamEncoderPreference = StreamEncoderPreference::Software;
+
+                            if (!HasSoftwareStreamInput(lastFrame)) {
+                                ConfigureCapturePayloads(config, options, streamEncoderPreference);
+                                capturer.Stop();
+                                capturer.Start(config);
+                                hasFrame = false;
+                                std::cerr << "Restarted capture with CPU-visible NV12 for software stream encoding.\n";
+                                continue;
+                            }
+
+                            streamEncoder = startStreamEncoder(screenshare::H264StreamEncoderBackend::Software);
+                        }
+                    }
 
                     if (!options.udpSendTarget.empty()) {
                         udpSender = std::make_unique<screenshare::UdpSender>();
                         udpSender->Open(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
                     }
-
-                    std::cout
-                        << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
-                        << " bitrate_mbps=" << Mbps(encoderConfig.bitrate)
-                        << " backend=" << screenshare::H264StreamEncoderBackendName(streamEncoder->backend())
-                        << " input=" << screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode())
-                        << " encoder=\"" << streamEncoder->encoderName() << "\""
-                        << "\n";
                 }
 
                 const auto streamEncodeStartedAt = Clock::now();

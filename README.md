@@ -11,7 +11,7 @@ The first milestone is a pure C++ capture foundation:
 - Send and receive H.264 packets over UDP for local transport validation.
 - Decode received H.264 and preview it in a native Direct3D window.
 
-Hardware encode tuning, audio, and friend pairing are later milestones.
+Audio, friend pairing, and network adaptation are later milestones.
 
 ## Build
 
@@ -70,16 +70,24 @@ Capture and encode a downscaled H.264 MP4:
 .\build\debug\ScreenShare.exe --display 0 --width 1920 --height 1080 --fps 60 --seconds 15 --record out.mp4 --bitrate-mbps 16
 ```
 
-Capture and run the streamable H.264 packet encoder:
+Capture and run the streamable H.264 packet encoder. The default stream encoder preference is
+`auto`: the app tries the vetted hardware path first and falls back to software if hardware setup is
+not available.
 
 ```powershell
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --bitrate-mbps 8
 ```
 
-Opt into the asynchronous hardware H.264 encoder path after checking available encoders:
+Force the asynchronous hardware H.264 encoder path after checking available encoders:
 
 ```powershell
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --stream-encoder hardware --bitrate-mbps 8
+```
+
+Force the software encoder path for comparison:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --stream-encoder software --bitrate-mbps 8
 ```
 
 List Media Foundation H.264 encoders and probe whether they accept the app's NV12/H.264 stream
@@ -177,15 +185,16 @@ displays keep the normal capture path. The default SDR white point is 203 nits a
 with `--hdr-sdr-white-nits N`; the DXGI HDR-active BGRA fallback exposure is 0.88 and can be adjusted
 with `--hdr-sdr-exposure N`.
 
-The default `--stream-encode` path still uses the stable software encoder MFT and feeds it through
-system-memory NV12 samples. Use `--width`/`--height` for that validation path at high resolutions. Use
-`--list-h264-encoders` to inspect available Media Foundation encoders; hardware MFTs are reported
-with async/D3D11-manager support and whether they accept the app's current NV12 input and H.264
-output media types. The stream path uses the stable software encoder MFT by default. Add
-`--stream-encoder hardware` to try a hardware MFT through its asynchronous event model and direct
-D3D11 NV12 texture input. That path also asks supported encoder MFTs for low-latency mode and no
-B-frames, while keeping a bounded queue so live capture can keep pacing even when the encoder has
-startup latency.
+The default `--stream-encode` path uses `--stream-encoder auto`. Auto mode tries the vetted
+asynchronous hardware MFT path with direct D3D11 NV12 texture input, then falls back to the stable
+software encoder MFT if hardware setup fails. If fallback requires CPU-visible NV12 and the capture
+path was optimized for hardware input, the sender restarts capture once with software-compatible
+readback enabled. Add `--stream-encoder hardware` to require hardware and fail loudly if it is not
+available, or `--stream-encoder software` for comparison/debugging. Use `--list-h264-encoders` to
+inspect available Media Foundation encoders; hardware MFTs are reported with async/D3D11-manager
+support and whether they accept the app's current NV12 input and H.264 output media types. The
+hardware path also asks supported encoder MFTs for low-latency mode and no B-frames, while keeping a
+bounded queue so live capture can keep pacing even when the encoder has startup latency.
 
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
@@ -213,7 +222,7 @@ Windows Graphics Capture
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
  -> H.264 hardware encoder capability probe
- -> optional asynchronous hardware H.264 stream encoder with queued direct D3D11 NV12 input
+ -> default auto stream encoder with queued direct D3D11 hardware input and software fallback
  -> UDP sender/receiver transport diagnostics
  -> Media Foundation H.264 decode validation
  -> native Direct3D receiver preview
