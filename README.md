@@ -127,6 +127,13 @@ Listen for UDP H.264 packet fragments and reassemble complete encoded frames:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15
 ```
 
+Stress the receiver with simulated jitter or datagram loss:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --preview --simulate-jitter-ms 40
+.\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15 --simulate-loss-percent 1
+```
+
 Listen, reassemble, and dump the received H.264 elementary stream for inspection:
 
 ```powershell
@@ -205,18 +212,22 @@ small header. A background sender thread paces queued datagrams against the enco
 default, while the capture and encoder loop continues running at the requested FPS. Sender stats
 report `udp_queued`, `udp_pending`, `udp_peak_pending`, and `udp_dropped_frames` for that pacing
 queue. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles complete
-encoded frames, and prints transport diagnostics. Add `--dump-h264 PATH` on the receiver to write
-the reassembled H.264 elementary stream for FFmpeg inspection. It does not decode or display video
-by default. Add `--decode-h264` to feed reassembled packets through the Microsoft H.264 decoder MFT
-and print decoded frame diagnostics. Add `--dump-decoded-bmp PATH` to save the latest decoded NV12
-frame as a BMP snapshot through the CPU diagnostic converter. The raw `.h264` dump validates codec
-bytes and dimensions, but it does not store transport timing. Add `--preview` on the receiver to
-open a native Win32/Direct3D preview window; preview uploads decoded NV12 luma and chroma planes to
-GPU textures and converts to SDR Rec.709 in the pixel shader. Decoded preview frames pass through a
-small timestamp-ordered playout buffer before presentation, so network and decoder bursts are
-smoothed before they hit the window. Receiver stats report `preview_queue`, `preview_late_drops`,
-and `preview_overflow_drops` for that playout stage. When `--seconds` is omitted the preview runs
-until the window closes.
+encoded frames, and prints transport diagnostics. Receiver-side simulation flags can delay incoming
+datagrams with `--simulate-jitter-ms MS` or drop a percentage with `--simulate-loss-percent P`.
+Simulation stats report `simulated_dropped`, `simulated_delayed`, and `simulated_delay_pending`.
+Jitter simulation is useful with `--preview` for testing the playout buffer. Loss simulation is most
+useful with transport diagnostics right now; decoder recovery after missing H.264 frames is still a
+future step. Add `--dump-h264 PATH` on the receiver to write the reassembled H.264 elementary stream
+for FFmpeg inspection. It does not decode or display video by default. Add `--decode-h264` to feed
+reassembled packets through the Microsoft H.264 decoder MFT and print decoded frame diagnostics. Add
+`--dump-decoded-bmp PATH` to save the latest decoded NV12 frame as a BMP snapshot through the CPU
+diagnostic converter. The raw `.h264` dump validates codec bytes and dimensions, but it does not
+store transport timing. Add `--preview` on the receiver to open a native Win32/Direct3D preview
+window; preview uploads decoded NV12 luma and chroma planes to GPU textures and converts to SDR
+Rec.709 in the pixel shader. Decoded preview frames pass through a small timestamp-ordered playout
+buffer before presentation, so network and decoder bursts are smoothed before they hit the window.
+Receiver stats report `preview_queue`, `preview_late_drops`, and `preview_overflow_drops` for that
+playout stage. When `--seconds` is omitted the preview runs until the window closes.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
