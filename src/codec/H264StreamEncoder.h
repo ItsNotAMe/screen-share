@@ -23,12 +23,18 @@ enum class H264StreamEncoderBackend {
     Hardware,
 };
 
+enum class H264StreamEncoderInputMode {
+    Memory,
+    Direct3D,
+};
+
 struct H264StreamEncoderConfig {
     int width = 0;
     int height = 0;
     int fps = 60;
     uint32_t bitrate = 12'000'000;
     H264StreamEncoderBackend backend = H264StreamEncoderBackend::Software;
+    Microsoft::WRL::ComPtr<ID3D11Device> d3dDevice;
 };
 
 class H264StreamEncoder {
@@ -47,6 +53,7 @@ public:
     [[nodiscard]] bool isRunning() const noexcept { return transform_ != nullptr; }
     [[nodiscard]] H264StreamEncoderBackend backend() const noexcept { return backend_; }
     [[nodiscard]] const std::string& encoderName() const noexcept { return encoderName_; }
+    [[nodiscard]] H264StreamEncoderInputMode lastInputMode() const noexcept { return lastInputMode_; }
 
 private:
     std::vector<EncodedPacket> ReadAvailablePackets();
@@ -58,6 +65,7 @@ private:
 
     H264StreamEncoderConfig config_{};
     H264StreamEncoderBackend backend_ = H264StreamEncoderBackend::Software;
+    H264StreamEncoderInputMode lastInputMode_ = H264StreamEncoderInputMode::Memory;
     std::string encoderName_;
     Microsoft::WRL::ComPtr<IMFTransform> transform_;
     Microsoft::WRL::ComPtr<IMFMediaEventGenerator> eventGenerator_;
@@ -74,5 +82,6 @@ private:
 };
 
 const char* H264StreamEncoderBackendName(H264StreamEncoderBackend backend);
+const char* H264StreamEncoderInputModeName(H264StreamEncoderInputMode inputMode);
 
 } // namespace screenshare

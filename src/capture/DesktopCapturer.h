@@ -40,6 +40,8 @@ struct CaptureConfig {
     CaptureBackend backend = CaptureBackend::WindowsGraphicsCapture;
     bool wgcBorderRequired = false;
     bool includeNv12 = false;
+    bool includeNv12Readback = true;
+    bool includeBgraReadback = true;
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
     float hdrSdrBgraExposure = 0.88f;
@@ -59,6 +61,9 @@ struct CapturedFrame {
     int64_t lastPresentTimeQpc = 0;
     std::vector<std::byte> pixels;
     std::vector<std::byte> nv12Pixels;
+    Microsoft::WRL::ComPtr<ID3D11Device> d3dDevice;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12Texture;
+    uint32_t nv12TextureSubresource = 0;
     bool nv12GeneratedOnGpu = false;
 };
 
@@ -100,6 +105,12 @@ private:
     std::optional<CapturedFrame> TryCaptureWindowsGraphicsFrame(std::chrono::milliseconds timeout);
 
     CaptureConfig config_{};
+    struct Nv12TextureSet {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+        Microsoft::WRL::ComPtr<ID3D11RenderTargetView> lumaTarget;
+        Microsoft::WRL::ComPtr<ID3D11RenderTargetView> chromaTarget;
+    };
+
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     Microsoft::WRL::ComPtr<IDXGIOutputDuplication> duplication_;
@@ -114,12 +125,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> scaleConstants_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12InputTexture_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> nv12InputView_;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12LumaTexture_;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12ChromaTexture_;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12LumaStagingTexture_;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12ChromaStagingTexture_;
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> nv12LumaTarget_;
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> nv12ChromaTarget_;
+    std::vector<Nv12TextureSet> nv12Textures_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12StagingTexture_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> nv12VertexShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> nv12LumaPixelShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> nv12ChromaPixelShader_;
@@ -132,8 +139,9 @@ private:
     D3D11_TEXTURE2D_DESC scaledDesc_{};
     D3D11_TEXTURE2D_DESC stagingDesc_{};
     D3D11_TEXTURE2D_DESC nv12InputDesc_{};
-    D3D11_TEXTURE2D_DESC nv12LumaDesc_{};
-    D3D11_TEXTURE2D_DESC nv12ChromaDesc_{};
+    D3D11_TEXTURE2D_DESC nv12TextureDesc_{};
+    D3D11_TEXTURE2D_DESC nv12StagingDesc_{};
+    size_t nv12TextureCursor_ = 0;
 };
 
 std::string Narrow(const std::wstring& text);

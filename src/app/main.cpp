@@ -496,6 +496,11 @@ void RunCaptureStats(const Options& options)
     config.backend = options.captureBackend;
     config.wgcBorderRequired = options.wgcBorderRequired;
     config.includeNv12 = options.streamEncode;
+    config.includeNv12Readback = options.streamEncoderBackend != screenshare::H264StreamEncoderBackend::Hardware;
+    config.includeBgraReadback =
+        options.streamEncoderBackend != screenshare::H264StreamEncoderBackend::Hardware ||
+        !options.recordPath.empty() ||
+        !options.capturedBmpPath.empty();
     config.hdrToSdr = options.hdrToSdr;
     config.hdrSdrWhiteNits = options.hdrSdrWhiteNits;
     config.hdrSdrBgraExposure = options.hdrSdrBgraExposure;
@@ -555,6 +560,7 @@ void RunCaptureStats(const Options& options)
     bool lastDisplayHdrActive = false;
     uint32_t lastColorConversionMode = 0;
     bool lastNv12GeneratedOnGpu = false;
+    bool lastNv12TextureAvailable = false;
     bool hasFrame = false;
     screenshare::CapturedFrame lastFrame;
     std::unique_ptr<screenshare::H264FileEncoder> fileEncoder;
@@ -601,6 +607,7 @@ void RunCaptureStats(const Options& options)
             lastDisplayHdrActive = frame->displayHdrActive;
             lastColorConversionMode = frame->colorConversionMode;
             lastNv12GeneratedOnGpu = frame->nv12GeneratedOnGpu;
+            lastNv12TextureAvailable = frame->nv12Texture != nullptr;
             lastFrame = std::move(*frame);
             hasFrame = true;
         }
@@ -648,6 +655,9 @@ void RunCaptureStats(const Options& options)
                     encoderConfig.fps = options.fps;
                     encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
                     encoderConfig.backend = options.streamEncoderBackend;
+                    if (encoderConfig.backend == screenshare::H264StreamEncoderBackend::Hardware) {
+                        encoderConfig.d3dDevice = lastFrame.d3dDevice;
+                    }
 
                     streamEncoder = std::make_unique<screenshare::H264StreamEncoder>();
                     streamEncoder->Start(encoderConfig);
@@ -661,6 +671,7 @@ void RunCaptureStats(const Options& options)
                         << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
                         << " bitrate_mbps=" << Mbps(encoderConfig.bitrate)
                         << " backend=" << screenshare::H264StreamEncoderBackendName(streamEncoder->backend())
+                        << " input=" << screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode())
                         << " encoder=\"" << streamEncoder->encoderName() << "\""
                         << "\n";
                 }
@@ -701,7 +712,8 @@ void RunCaptureStats(const Options& options)
                 << " color_conversion=" << screenshare::CaptureColorConversionName(lastColorConversionMode)
                 << " output=" << lastOutputWidth << "x" << lastOutputHeight
                 << " output_format=" << screenshare::DxgiFormatName(lastOutputFormat)
-                << " nv12=" << (lastNv12GeneratedOnGpu ? "gpu" : "cpu_or_none")
+                << " nv12=" << (lastNv12TextureAvailable ? "gpu_texture" : (lastNv12GeneratedOnGpu ? "gpu_readback" : "cpu_or_none"))
+                << " stream_input=" << (streamEncoder ? screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode()) : "none")
                 << " output_fps=" << outputFps
                 << " desktop_update_fps=" << desktopUpdateFps
                 << " capture_avg_ms=" << captureAvgMs
