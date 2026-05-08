@@ -165,14 +165,17 @@ capturer for GPU-generated BT.709 limited-range NV12 planes and falls back to th
 conversion only if that GPU payload is not present. Capture stats report the available NV12 path,
 the stream input mode, average capture time, and average stream encode time. The encoder paths are
 still validation paths, but `--stream-encoder hardware` can now feed the hardware MFT directly from
-a GPU NV12 texture and skips capture readbacks when no recording or BMP dump is requested. Capture
-stats report `stream_input=d3d11` when that direct path is active. When the source display is in Windows
-HDR mode, the default Windows Graphics Capture backend requests scRGB float frames and the capture
-shader converts them into SDR BGRA before CPU readback and encoding. If the older DXGI backend
-provides an HDR-active desktop as BGRA8, the shader keeps the normal SDR color path but applies a
-conservative exposure multiplier. SDR displays keep the normal capture path. The default SDR white
-point is 203 nits and can be adjusted with `--hdr-sdr-white-nits N`; the DXGI HDR-active BGRA
-fallback exposure is 0.88 and can be adjusted with `--hdr-sdr-exposure N`.
+a GPU NV12 texture and skips capture readbacks when no recording or BMP dump is requested. The
+hardware stream encoder uses Media Foundation's asynchronous event model with a bounded input queue
+instead of waiting for every frame. Capture stats report `stream_input=d3d11`, `stream_queue`, and
+`stream_dropped` when that direct path is active. When the source display is in Windows HDR mode, the
+default Windows Graphics Capture backend requests scRGB float frames and the capture shader converts
+them into SDR BGRA before CPU readback and encoding. WGC uses its first available frame so a still
+desktop can start streaming immediately. If the older DXGI backend provides an HDR-active desktop as
+BGRA8, the shader keeps the normal SDR color path but applies a conservative exposure multiplier. SDR
+displays keep the normal capture path. The default SDR white point is 203 nits and can be adjusted
+with `--hdr-sdr-white-nits N`; the DXGI HDR-active BGRA fallback exposure is 0.88 and can be adjusted
+with `--hdr-sdr-exposure N`.
 
 The default `--stream-encode` path still uses the stable software encoder MFT and feeds it through
 system-memory NV12 samples. Use `--width`/`--height` for that validation path at high resolutions. Use
@@ -180,8 +183,9 @@ system-memory NV12 samples. Use `--width`/`--height` for that validation path at
 with async/D3D11-manager support and whether they accept the app's current NV12 input and H.264
 output media types. The stream path uses the stable software encoder MFT by default. Add
 `--stream-encoder hardware` to try a hardware MFT through its asynchronous event model and direct
-D3D11 NV12 texture input. The remaining hardware optimization is deeper pipelining so the sender
-does less per-frame waiting on encoder events.
+D3D11 NV12 texture input. That path also asks supported encoder MFTs for low-latency mode and no
+B-frames, while keeping a bounded queue so live capture can keep pacing even when the encoder has
+startup latency.
 
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
@@ -209,11 +213,10 @@ Windows Graphics Capture
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
  -> H.264 hardware encoder capability probe
- -> optional asynchronous hardware H.264 stream encoder with direct D3D11 NV12 input
+ -> optional asynchronous hardware H.264 stream encoder with queued direct D3D11 NV12 input
  -> UDP sender/receiver transport diagnostics
  -> Media Foundation H.264 decode validation
  -> native Direct3D receiver preview
- -> future deeper hardware encoder pipelining
  -> future GPU-side color conversion and renderer optimizations
 ```
 An app to share your screen with others

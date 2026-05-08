@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -714,6 +715,8 @@ void RunCaptureStats(const Options& options)
                 << " output_format=" << screenshare::DxgiFormatName(lastOutputFormat)
                 << " nv12=" << (lastNv12TextureAvailable ? "gpu_texture" : (lastNv12GeneratedOnGpu ? "gpu_readback" : "cpu_or_none"))
                 << " stream_input=" << (streamEncoder ? screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode()) : "none")
+                << " stream_queue=" << (streamEncoder ? streamEncoder->queuedInputCount() : 0)
+                << " stream_dropped=" << (streamEncoder ? streamEncoder->droppedInputFrames() : 0)
                 << " output_fps=" << outputFps
                 << " desktop_update_fps=" << desktopUpdateFps
                 << " capture_avg_ms=" << captureAvgMs
@@ -750,6 +753,8 @@ void RunCaptureStats(const Options& options)
         }
     }
 
+    const size_t streamQueuedInputs = streamEncoder ? streamEncoder->queuedInputCount() : 0;
+    const uint64_t streamDroppedInputFrames = streamEncoder ? streamEncoder->droppedInputFrames() : 0;
     const screenshare::UdpSenderStats udpStats = udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
     if (!options.capturedBmpPath.empty() && hasFrame) {
         WriteCapturedFrameBmp(options.capturedBmpPath, lastFrame);
@@ -771,6 +776,8 @@ void RunCaptureStats(const Options& options)
         << ", stream encoded frames: " << streamEncodedFrames
         << ", stream packets: " << streamPackets
         << ", stream bytes: " << streamBytes
+        << ", stream queued inputs: " << streamQueuedInputs
+        << ", stream dropped inputs: " << streamDroppedInputFrames
         << ", UDP datagrams: " << udpStats.datagramsSent
         << ", UDP wire bytes: " << udpStats.wireBytesSent
         << ", captured BMP written: " << (capturedBmpWritten ? "yes" : "no")
