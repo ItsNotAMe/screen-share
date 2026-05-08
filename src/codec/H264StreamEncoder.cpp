@@ -109,7 +109,7 @@ void TrySetCodecApiUInt32(ICodecAPI* codecApi, const GUID& key, uint32_t setting
     static_cast<void>(codecApi->SetValue(&key, &value));
 }
 
-void ConfigureLowLatencyEncoderOptions(IMFTransform* transform)
+void ConfigureLowLatencyEncoderOptions(IMFTransform* transform, const H264StreamEncoderConfig& config)
 {
     static constexpr GUID codecApiInterfaceId = {
         0x901db4c7,
@@ -125,6 +125,13 @@ void ConfigureLowLatencyEncoderOptions(IMFTransform* transform)
 
     TrySetCodecApiBool(codecApi.Get(), CODECAPI_AVLowLatencyMode, true);
     TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncMPVDefaultBPictureCount, 0);
+    if (config.keyframeIntervalFrames > 0) {
+        TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncMPVGOPSize, config.keyframeIntervalFrames);
+        TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncMPVGOPSizeMin, config.keyframeIntervalFrames);
+        TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncMPVGOPSizeMax, config.keyframeIntervalFrames);
+        TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncVideoNumGOPsPerIDR, 1);
+        TrySetCodecApiBool(codecApi.Get(), CODECAPI_AVEncMPVGOPOpen, false);
+    }
 }
 
 Microsoft::WRL::ComPtr<IMFMediaType> CreateH264OutputType(const H264StreamEncoderConfig& config)
@@ -334,7 +341,7 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
             continue;
         }
 
-        ConfigureLowLatencyEncoderOptions(transform.Get());
+        ConfigureLowLatencyEncoderOptions(transform.Get(), config);
 
         result = transform->ProcessMessage(
             MFT_MESSAGE_SET_D3D_MANAGER,
@@ -376,13 +383,13 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
     throw std::runtime_error("No hardware H.264 encoder accepted the stream configuration:" + failures);
 }
 
-Microsoft::WRL::ComPtr<IMFTransform> CreateSoftwareEncoder()
+Microsoft::WRL::ComPtr<IMFTransform> CreateSoftwareEncoder(const H264StreamEncoderConfig& config)
 {
     Microsoft::WRL::ComPtr<IMFTransform> transform;
     ThrowIfFailed(
         CoCreateInstance(CLSID_CMSH264EncoderMFT, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform)),
         "CoCreateInstance(CMSH264EncoderMFT)");
-    ConfigureLowLatencyEncoderOptions(transform.Get());
+    ConfigureLowLatencyEncoderOptions(transform.Get(), config);
     return transform;
 }
 
@@ -549,6 +556,9 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     if (config.fps <= 0) {
         throw std::invalid_argument("H264StreamEncoder FPS must be positive");
     }
+    if (config.keyframeIntervalFrames > static_cast<uint32_t>(config.fps * 30)) {
+        throw std::invalid_argument("H264StreamEncoder keyframe interval is too large");
+    }
 
     config_ = config;
     backend_ = config.backend;
@@ -577,7 +587,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
         outputStreamId_ = hardware.outputStreamId;
         encoderName_ = std::move(hardware.name);
     } else {
-        transform_ = CreateSoftwareEncoder();
+        transform_ = CreateSoftwareEncoder(config_);
         ConfigureEncoderTypes(transform_.Get(), config_, inputStreamId_, outputStreamId_);
         encoderName_ = "Microsoft H.264 Encoder MFT";
     }

@@ -90,6 +90,10 @@ Force the software encoder path for comparison:
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --stream-encoder software --bitrate-mbps 8
 ```
 
+Stream encoding requests a periodic keyframe every 2 seconds by default so receivers can recover
+after lost H.264 frames. Use `--keyframe-interval S` to tune that interval, or
+`--keyframe-interval 0` to keep the encoder's default GOP behavior.
+
 List Media Foundation H.264 encoders and probe whether they accept the app's NV12/H.264 stream
 types for a chosen output shape:
 
@@ -205,7 +209,9 @@ available, or `--stream-encoder software` for comparison/debugging. Use `--list-
 inspect available Media Foundation encoders; hardware MFTs are reported with async/D3D11-manager
 support and whether they accept the app's current NV12 input and H.264 output media types. The
 hardware path also asks supported encoder MFTs for low-latency mode and no B-frames, while keeping a
-bounded queue so live capture can keep pacing even when the encoder has startup latency.
+bounded queue so live capture can keep pacing even when the encoder has startup latency. Stream
+encoding also requests closed periodic GOPs with one IDR per GOP; the default interval is 2 seconds
+and can be adjusted with `--keyframe-interval S`.
 
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. A background sender thread paces queued datagrams against the encoder bitrate by

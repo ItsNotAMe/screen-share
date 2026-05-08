@@ -45,6 +45,8 @@ struct Options {
     int seconds = 10;
     screenshare::CaptureBackend captureBackend = screenshare::CaptureBackend::WindowsGraphicsCapture;
     uint32_t bitrate = 0;
+    int keyframeIntervalSeconds = 2;
+    bool keyframeIntervalProvided = false;
     std::string recordPath;
     std::string capturedBmpPath;
     bool streamEncode = false;
@@ -83,7 +85,8 @@ void PrintHelp()
         << "              [--udp-send HOST:PORT] [--no-udp-pacing]\n"
         << "              [--dump-capture-bmp PATH]\n"
         << "              [--capture-backend dxgi|wgc]\n"
-        << "              [--bitrate-mbps Mbps] [--wgc-border] [--no-hdr-to-sdr]\n"
+        << "              [--bitrate-mbps Mbps] [--keyframe-interval S]\n"
+        << "              [--wgc-border] [--no-hdr-to-sdr]\n"
         << "              [--hdr-sdr-white-nits N] [--hdr-sdr-exposure N]\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -518,6 +521,9 @@ Options ParseOptions(int argc, char** argv)
             options.simulateJitterProvided = true;
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
+        } else if (arg == "--keyframe-interval") {
+            options.keyframeIntervalSeconds = ParseInt(requireValue("--keyframe-interval"), "--keyframe-interval");
+            options.keyframeIntervalProvided = true;
         } else {
             throw std::invalid_argument("Unknown argument: " + arg);
         }
@@ -555,6 +561,12 @@ Options ParseOptions(int argc, char** argv)
     if (options.streamEncoderPreferenceProvided && !options.streamEncode) {
         throw std::invalid_argument("--stream-encoder requires --stream-encode or --udp-send");
     }
+    if (options.keyframeIntervalProvided && !options.streamEncode) {
+        throw std::invalid_argument("--keyframe-interval requires --stream-encode or --udp-send");
+    }
+    if (options.keyframeIntervalSeconds < 0 || options.keyframeIntervalSeconds > 30) {
+        throw std::invalid_argument("--keyframe-interval must be between 0 and 30 seconds");
+    }
     if (options.hdrSdrWhiteNits < 80.0f || options.hdrSdrWhiteNits > 1000.0f) {
         throw std::invalid_argument("--hdr-sdr-white-nits must be between 80 and 1000");
     }
@@ -572,12 +584,12 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.udpPacingOptionProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, or --no-udp-pacing");
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.udpPacingOptionProvided || options.keyframeIntervalProvided)) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.udpPacingOptionProvided || options.decodeH264 || options.previewWindow)) {
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.udpPacingOptionProvided || options.keyframeIntervalProvided || options.decodeH264 || options.previewWindow)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
@@ -699,6 +711,11 @@ void RunCaptureStats(const Options& options)
     }
     if (options.streamEncode) {
         std::cout << ", stream-encoding H.264 packets with " << StreamEncoderPreferenceName(streamEncoderPreference) << " encoder preference";
+        if (options.keyframeIntervalSeconds > 0) {
+            std::cout << ", keyframe interval " << options.keyframeIntervalSeconds << "s";
+        } else {
+            std::cout << ", encoder-default keyframe interval";
+        }
     }
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
@@ -745,6 +762,10 @@ void RunCaptureStats(const Options& options)
     uint64_t streamPackets = 0;
     uint64_t streamBytes = 0;
     uint32_t streamBitrate = 0;
+    const uint32_t streamKeyframeIntervalFrames =
+        options.keyframeIntervalSeconds <= 0 ?
+        0 :
+        static_cast<uint32_t>(options.keyframeIntervalSeconds * options.fps);
     double intervalCaptureMs = 0.0;
     uint64_t intervalCaptureCalls = 0;
     double intervalStreamEncodeMs = 0.0;
@@ -836,6 +857,7 @@ void RunCaptureStats(const Options& options)
                         encoderConfig.height = lastFrame.height;
                         encoderConfig.fps = options.fps;
                         encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
+                        encoderConfig.keyframeIntervalFrames = streamKeyframeIntervalFrames;
                         streamBitrate = encoderConfig.bitrate;
                         encoderConfig.backend = backend;
                         if (encoderConfig.backend == screenshare::H264StreamEncoderBackend::Hardware) {
@@ -848,6 +870,7 @@ void RunCaptureStats(const Options& options)
                         std::cout
                             << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
                             << " bitrate_mbps=" << Mbps(encoderConfig.bitrate)
+                            << " keyframe_interval_frames=" << encoderConfig.keyframeIntervalFrames
                             << " preference=" << StreamEncoderPreferenceName(streamEncoderPreference)
                             << " backend=" << screenshare::H264StreamEncoderBackendName(encoder->backend())
                             << " input=" << screenshare::H264StreamEncoderInputModeName(encoder->lastInputMode())
