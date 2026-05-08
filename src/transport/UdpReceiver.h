@@ -3,7 +3,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <optional>
+#include <random>
 #include <unordered_map>
 #include <vector>
 
@@ -16,6 +18,9 @@ struct UdpReceiverConfig {
     uint32_t socketReceiveBufferBytes = 4 * 1024 * 1024;
     size_t maxPendingFrames = 256;
     std::chrono::milliseconds frameTimeout = std::chrono::seconds(5);
+    float simulatedLossPercent = 0.0f;
+    std::chrono::milliseconds simulatedJitter = std::chrono::milliseconds(0);
+    uint32_t simulationSeed = 1;
 };
 
 struct UdpCompletedFrame {
@@ -34,6 +39,8 @@ struct UdpReceiverStats {
     uint64_t incompleteFramesDropped = 0;
     uint64_t payloadBytesReceived = 0;
     uint64_t completedFrameBytes = 0;
+    uint64_t simulatedDatagramsDropped = 0;
+    uint64_t simulatedDatagramsDelayed = 0;
 };
 
 class UdpReceiver {
@@ -51,9 +58,15 @@ public:
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] const UdpReceiverStats& stats() const noexcept { return stats_; }
     [[nodiscard]] size_t pendingFrameCount() const noexcept { return pendingFrames_.size(); }
+    [[nodiscard]] size_t delayedDatagramCount() const noexcept { return delayedDatagrams_.size(); }
 
 private:
     using Clock = std::chrono::steady_clock;
+
+    struct DelayedDatagram {
+        Clock::time_point releaseAt;
+        std::vector<std::byte> bytes;
+    };
 
     struct PendingFrame {
         struct FragmentRange {
@@ -75,7 +88,12 @@ private:
 
     [[nodiscard]] bool WaitForReadable(std::chrono::milliseconds timeout);
     [[nodiscard]] std::optional<UdpCompletedFrame> ReceiveDatagram();
+    [[nodiscard]] std::optional<UdpCompletedFrame> ReleaseReadyDelayedDatagram(Clock::time_point now);
     [[nodiscard]] std::optional<UdpCompletedFrame> ProcessDatagram(const std::byte* datagram, int datagramBytes);
+    void QueueDelayedDatagram(const std::byte* datagram, int datagramBytes, Clock::time_point releaseAt);
+    [[nodiscard]] bool ShouldSimulateLoss();
+    [[nodiscard]] std::chrono::milliseconds NextSimulatedJitterDelay();
+    [[nodiscard]] std::chrono::milliseconds WaitUntilNextDelayedDatagram(Clock::time_point now) const;
     void DropExpiredFrames(Clock::time_point now);
     void EnforcePendingFrameLimit();
 
@@ -83,7 +101,9 @@ private:
     UdpReceiverConfig config_{};
     UdpReceiverStats stats_{};
     std::vector<std::byte> datagramBuffer_;
+    std::deque<DelayedDatagram> delayedDatagrams_;
     std::unordered_map<uint64_t, PendingFrame> pendingFrames_;
+    std::mt19937 simulationRng_{1};
     bool winsockStarted_ = false;
 };
 

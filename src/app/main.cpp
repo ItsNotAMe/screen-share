@@ -33,6 +33,8 @@ enum class StreamEncoderPreference {
     Hardware,
 };
 
+constexpr size_t OrderedReceiverStartThresholdFrames = 30;
+
 struct Options {
     bool listDisplays = false;
     bool listH264Encoders = false;
@@ -60,6 +62,10 @@ struct Options {
     bool decodeH264 = false;
     std::string decodedBmpPath;
     bool previewWindow = false;
+    float simulateLossPercent = 0.0f;
+    bool simulateLossProvided = false;
+    int simulateJitterMs = 0;
+    bool simulateJitterProvided = false;
 };
 
 void PrintHelp()
@@ -71,6 +77,7 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
+        << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
         << "              [--udp-send HOST:PORT] [--no-udp-pacing]\n"
@@ -503,6 +510,12 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--preview") {
             options.previewWindow = true;
             options.decodeH264 = true;
+        } else if (arg == "--simulate-loss-percent") {
+            options.simulateLossPercent = ParseFloat(requireValue("--simulate-loss-percent"), "--simulate-loss-percent");
+            options.simulateLossProvided = true;
+        } else if (arg == "--simulate-jitter-ms") {
+            options.simulateJitterMs = ParseInt(requireValue("--simulate-jitter-ms"), "--simulate-jitter-ms");
+            options.simulateJitterProvided = true;
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else {
@@ -547,6 +560,15 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.hdrSdrBgraExposure < 0.25f || options.hdrSdrBgraExposure > 2.0f) {
         throw std::invalid_argument("--hdr-sdr-exposure must be between 0.25 and 2.0");
+    }
+    if (options.simulateLossPercent < 0.0f || options.simulateLossPercent > 100.0f) {
+        throw std::invalid_argument("--simulate-loss-percent must be between 0 and 100");
+    }
+    if (options.simulateJitterMs < 0 || options.simulateJitterMs > 5000) {
+        throw std::invalid_argument("--simulate-jitter-ms must be between 0 and 5000");
+    }
+    if ((options.simulateLossProvided || options.simulateJitterProvided) && options.udpReceivePort == 0) {
+        throw std::invalid_argument("--simulate-loss-percent and --simulate-jitter-ms require --udp-recv");
     }
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
@@ -1007,6 +1029,8 @@ void RunUdpReceiverStats(const Options& options)
     screenshare::UdpReceiver receiver;
     screenshare::UdpReceiverConfig config;
     config.port = options.udpReceivePort;
+    config.simulatedLossPercent = options.simulateLossPercent;
+    config.simulatedJitter = std::chrono::milliseconds(options.simulateJitterMs);
     receiver.Open(config);
 
     std::ofstream h264Dump;
@@ -1041,6 +1065,11 @@ void RunUdpReceiverStats(const Options& options)
     if (options.previewWindow) {
         std::cout << ", previewing decoded frames";
     }
+    if (options.simulateLossPercent > 0.0f || options.simulateJitterMs > 0) {
+        std::cout
+            << ", simulating loss " << options.simulateLossPercent << "%"
+            << ", jitter up to " << options.simulateJitterMs << " ms";
+    }
     std::cout << ".\n";
 
     auto writeH264DumpFrame = [&](const screenshare::UdpCompletedFrame& frame) {
@@ -1055,7 +1084,32 @@ void RunUdpReceiverStats(const Options& options)
         h264DumpBytes += frame.bytes.size();
     };
 
-    auto flushH264DumpBacklog = [&]() {
+    auto maybeStartOrderedBacklog = [](std::map<uint64_t, screenshare::UdpCompletedFrame>& backlog,
+                                       bool& hasStartFrame,
+                                       uint64_t& nextFrameId,
+                                       bool forceStart) {
+        if (hasStartFrame) {
+            return true;
+        }
+        if (backlog.empty()) {
+            return false;
+        }
+
+        const uint64_t firstFrameId = backlog.begin()->first;
+        if (firstFrameId == 0 || forceStart || backlog.size() >= OrderedReceiverStartThresholdFrames) {
+            nextFrameId = firstFrameId;
+            hasStartFrame = true;
+            return true;
+        }
+
+        return false;
+    };
+
+    auto flushH264DumpBacklog = [&](bool forceStart = false) {
+        if (!maybeStartOrderedBacklog(h264DumpBacklog, hasH264DumpStartFrame, nextH264DumpFrameId, forceStart)) {
+            return;
+        }
+
         while (true) {
             const auto next = h264DumpBacklog.find(nextH264DumpFrameId);
             if (next == h264DumpBacklog.end()) {
@@ -1117,7 +1171,11 @@ void RunUdpReceiverStats(const Options& options)
         ++h264DecodePackets;
     };
 
-    auto flushH264DecodeBacklog = [&]() {
+    auto flushH264DecodeBacklog = [&](bool forceStart = false) {
+        if (!maybeStartOrderedBacklog(h264DecodeBacklog, hasH264DecodeStartFrame, nextH264DecodeFrameId, forceStart)) {
+            return;
+        }
+
         while (true) {
             const auto next = h264DecodeBacklog.find(nextH264DecodeFrameId);
             if (next == h264DecodeBacklog.end()) {
@@ -1164,23 +1222,17 @@ void RunUdpReceiverStats(const Options& options)
             hasCompletedFrame = true;
 
             if (h264Decoder) {
-                if (!hasH264DecodeStartFrame) {
-                    nextH264DecodeFrameId = frame->frameId;
-                    hasH264DecodeStartFrame = true;
+                if (!hasH264DecodeStartFrame || frame->frameId >= nextH264DecodeFrameId) {
+                    h264DecodeBacklog.emplace(frame->frameId, *frame);
+                    flushH264DecodeBacklog();
                 }
-
-                h264DecodeBacklog.emplace(frame->frameId, *frame);
-                flushH264DecodeBacklog();
             }
 
             if (shouldDumpH264) {
-                if (!hasH264DumpStartFrame) {
-                    nextH264DumpFrameId = frame->frameId;
-                    hasH264DumpStartFrame = true;
+                if (!hasH264DumpStartFrame || frame->frameId >= nextH264DumpFrameId) {
+                    h264DumpBacklog.emplace(frame->frameId, std::move(*frame));
+                    flushH264DumpBacklog();
                 }
-
-                h264DumpBacklog.emplace(frame->frameId, std::move(*frame));
-                flushH264DumpBacklog();
             }
         }
 
@@ -1199,6 +1251,9 @@ void RunUdpReceiverStats(const Options& options)
                 << "udp_datagrams=" << stats.datagramsReceived
                 << " udp_datagrams_per_second=" << datagramsPerSecond
                 << " accepted_datagrams=" << stats.datagramsAccepted
+                << " simulated_dropped=" << stats.simulatedDatagramsDropped
+                << " simulated_delayed=" << stats.simulatedDatagramsDelayed
+                << " simulated_delay_pending=" << receiver.delayedDatagramCount()
                 << " invalid_datagrams=" << stats.invalidDatagrams
                 << " duplicate_fragments=" << stats.duplicateFragments
                 << " completed_frames=" << stats.framesCompleted
@@ -1237,8 +1292,12 @@ void RunUdpReceiverStats(const Options& options)
 
     const screenshare::UdpReceiverStats stats = receiver.stats();
     if (h264Decoder) {
+        flushH264DecodeBacklog(true);
         countDecodedFrames(h264Decoder->Drain(), false);
         h264Decoder.reset();
+    }
+    if (shouldDumpH264) {
+        flushH264DumpBacklog(true);
     }
     if (previewWindow) {
         previewPlayout.PresentReady(*previewWindow, Clock::now(), true);
@@ -1249,12 +1308,16 @@ void RunUdpReceiverStats(const Options& options)
         WriteDecodedFrameBmp(options.decodedBmpPath, *latestDecodedFrame);
         decodedBmpWritten = true;
     }
+    const size_t delayedDatagrams = receiver.delayedDatagramCount();
     receiver.Close();
 
     const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
     std::cout
         << "Done. UDP datagrams: " << stats.datagramsReceived
         << ", accepted datagrams: " << stats.datagramsAccepted
+        << ", simulated dropped datagrams: " << stats.simulatedDatagramsDropped
+        << ", simulated delayed datagrams: " << stats.simulatedDatagramsDelayed
+        << ", pending simulated delayed datagrams: " << delayedDatagrams
         << ", invalid datagrams: " << stats.invalidDatagrams
         << ", duplicate fragments: " << stats.duplicateFragments
         << ", completed frames: " << stats.framesCompleted

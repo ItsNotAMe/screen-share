@@ -6,9 +6,11 @@
 #include <ws2tcpip.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <random>
 #include <stdexcept>
 #include <string>
 
@@ -66,6 +68,12 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     if (config.socketReceiveBufferBytes > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
         throw std::invalid_argument("UDP socket receive buffer is too large");
     }
+    if (config.simulatedLossPercent < 0.0f || config.simulatedLossPercent > 100.0f) {
+        throw std::invalid_argument("UDP simulated loss percent must be between 0 and 100");
+    }
+    if (config.simulatedJitter.count() < 0 || config.simulatedJitter > std::chrono::seconds(5)) {
+        throw std::invalid_argument("UDP simulated jitter must be between 0 and 5000 ms");
+    }
 
     const SOCKET udpSocket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (udpSocket == INVALID_SOCKET) {
@@ -95,8 +103,10 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     socket_ = static_cast<uintptr_t>(udpSocket);
     config_ = config;
     datagramBuffer_.assign(config_.maxDatagramBytes, std::byte{});
+    delayedDatagrams_.clear();
     pendingFrames_.clear();
     stats_ = {};
+    simulationRng_.seed(config_.simulationSeed);
 }
 
 void UdpReceiver::Close()
@@ -107,6 +117,7 @@ void UdpReceiver::Close()
     }
 
     datagramBuffer_.clear();
+    delayedDatagrams_.clear();
     pendingFrames_.clear();
 }
 
@@ -122,13 +133,24 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveFrame(std::chrono::millisec
 
     while (true) {
         const auto now = Clock::now();
+        if (auto frame = ReleaseReadyDelayedDatagram(now)) {
+            return frame;
+        }
+
         if (now >= deadline) {
             return std::nullopt;
         }
 
-        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-        if (!WaitForReadable(std::max(std::chrono::milliseconds(1), remaining))) {
-            return std::nullopt;
+        auto waitTime = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+        const auto delayedWait = WaitUntilNextDelayedDatagram(now);
+        if (delayedWait >= std::chrono::milliseconds(0)) {
+            waitTime = std::min(waitTime, delayedWait);
+        }
+        waitTime = std::max(std::chrono::milliseconds(1), waitTime);
+
+        if (!WaitForReadable(waitTime)) {
+            DropExpiredFrames(Clock::now());
+            continue;
         }
 
         if (auto frame = ReceiveDatagram()) {
@@ -179,7 +201,34 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveDatagram()
     }
 
     ++stats_.datagramsReceived;
+    if (ShouldSimulateLoss()) {
+        ++stats_.simulatedDatagramsDropped;
+        return std::nullopt;
+    }
+
+    if (config_.simulatedJitter.count() > 0) {
+        const auto delay = NextSimulatedJitterDelay();
+        if (delay.count() > 0) {
+            QueueDelayedDatagram(datagramBuffer_.data(), received, Clock::now() + delay);
+            ++stats_.simulatedDatagramsDelayed;
+            return std::nullopt;
+        }
+    }
+
     return ProcessDatagram(datagramBuffer_.data(), received);
+}
+
+std::optional<UdpCompletedFrame> UdpReceiver::ReleaseReadyDelayedDatagram(Clock::time_point now)
+{
+    while (!delayedDatagrams_.empty() && delayedDatagrams_.front().releaseAt <= now) {
+        auto datagram = std::move(delayedDatagrams_.front().bytes);
+        delayedDatagrams_.pop_front();
+        if (auto frame = ProcessDatagram(datagram.data(), static_cast<int>(datagram.size()))) {
+            return frame;
+        }
+    }
+
+    return std::nullopt;
 }
 
 std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* datagram, int datagramBytes)
@@ -285,6 +334,57 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     ++stats_.framesCompleted;
     stats_.completedFrameBytes += completed.bytes.size();
     return completed;
+}
+
+void UdpReceiver::QueueDelayedDatagram(const std::byte* datagram, int datagramBytes, Clock::time_point releaseAt)
+{
+    DelayedDatagram delayed;
+    delayed.releaseAt = releaseAt;
+    delayed.bytes.assign(datagram, datagram + datagramBytes);
+
+    const auto insertion = std::upper_bound(
+        delayedDatagrams_.begin(),
+        delayedDatagrams_.end(),
+        delayed.releaseAt,
+        [](Clock::time_point releaseAtValue, const DelayedDatagram& queued) {
+            return releaseAtValue < queued.releaseAt;
+        });
+    delayedDatagrams_.insert(insertion, std::move(delayed));
+}
+
+bool UdpReceiver::ShouldSimulateLoss()
+{
+    if (config_.simulatedLossPercent <= 0.0f) {
+        return false;
+    }
+    if (config_.simulatedLossPercent >= 100.0f) {
+        return true;
+    }
+
+    std::uniform_real_distribution<float> distribution(0.0f, 100.0f);
+    return distribution(simulationRng_) < config_.simulatedLossPercent;
+}
+
+std::chrono::milliseconds UdpReceiver::NextSimulatedJitterDelay()
+{
+    if (config_.simulatedJitter.count() <= 0) {
+        return std::chrono::milliseconds(0);
+    }
+
+    std::uniform_int_distribution<int64_t> distribution(0, config_.simulatedJitter.count());
+    return std::chrono::milliseconds(distribution(simulationRng_));
+}
+
+std::chrono::milliseconds UdpReceiver::WaitUntilNextDelayedDatagram(Clock::time_point now) const
+{
+    if (delayedDatagrams_.empty()) {
+        return std::chrono::milliseconds(-1);
+    }
+    if (delayedDatagrams_.front().releaseAt <= now) {
+        return std::chrono::milliseconds(0);
+    }
+
+    return std::chrono::duration_cast<std::chrono::milliseconds>(delayedDatagrams_.front().releaseAt - now);
 }
 
 void UdpReceiver::DropExpiredFrames(Clock::time_point now)
