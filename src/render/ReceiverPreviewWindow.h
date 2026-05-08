@@ -8,7 +8,6 @@
 #include <wrl/client.h>
 
 #include <cstdint>
-#include <vector>
 
 namespace screenshare {
 
@@ -38,7 +37,7 @@ private:
     void ResizeSwapChainIfNeeded();
     void EnsureRenderTarget();
     void EnsurePipeline();
-    void EnsureFrameTexture(int width, int height);
+    void EnsureFrameTextures(int width, int height);
     void SizeWindowForFirstFrame(int width, int height);
     void Render();
 
@@ -53,14 +52,16 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     Microsoft::WRL::ComPtr<IDXGISwapChain> swapChain_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget_;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> frameTexture_;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> frameView_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> lumaTexture_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> chromaTexture_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> lumaView_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> chromaView_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertexShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> pixelShader_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
-    D3D11_TEXTURE2D_DESC frameDesc_{};
+    D3D11_TEXTURE2D_DESC lumaDesc_{};
+    D3D11_TEXTURE2D_DESC chromaDesc_{};
 
-    std::vector<uint8_t> bgraPixels_;
     int frameWidth_ = 0;
     int frameHeight_ = 0;
     uint64_t framesPresented_ = 0;
