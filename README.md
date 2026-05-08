@@ -9,7 +9,7 @@ The first milestone is a pure C++ capture foundation:
 - Run at a requested target FPS.
 - GPU-scale captured frames to the requested output resolution.
 - Send and receive H.264 packets over UDP for local transport validation.
-- Decode received H.264 and preview it in a native Direct3D window.
+- Decode received H.264 and preview it in a native Direct3D window with GPU-side NV12 conversion.
 
 Audio, friend pairing, and network adaptation are later milestones.
 
@@ -202,10 +202,11 @@ complete encoded frames, and prints transport diagnostics. Add `--dump-h264 PATH
 to write the reassembled H.264 elementary stream for FFmpeg inspection. It does not decode or
 display video by default. Add `--decode-h264` to feed reassembled packets through the Microsoft
 H.264 decoder MFT and print decoded frame diagnostics. Add `--dump-decoded-bmp PATH` to save the
-latest decoded NV12 frame as a BMP snapshot. The raw `.h264` dump validates codec bytes and
-dimensions, but it does not store transport timing. Add `--preview` on the receiver to open a
-native Win32/Direct3D preview window; when `--seconds` is omitted the preview runs until the window
-closes.
+latest decoded NV12 frame as a BMP snapshot through the CPU diagnostic converter. The raw `.h264`
+dump validates codec bytes and dimensions, but it does not store transport timing. Add `--preview`
+on the receiver to open a native Win32/Direct3D preview window; preview uploads decoded NV12 luma
+and chroma planes to GPU textures and converts to SDR Rec.709 in the pixel shader. When `--seconds`
+is omitted the preview runs until the window closes.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -225,7 +226,7 @@ Windows Graphics Capture
  -> default auto stream encoder with queued direct D3D11 hardware input and software fallback
  -> UDP sender/receiver transport diagnostics
  -> Media Foundation H.264 decode validation
- -> native Direct3D receiver preview
- -> future GPU-side color conversion and renderer optimizations
+ -> native Direct3D receiver preview with GPU NV12 conversion
+ -> future network adaptation and renderer optimizations
 ```
 An app to share your screen with others

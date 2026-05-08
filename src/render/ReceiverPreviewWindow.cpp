@@ -1,14 +1,14 @@
 #include "render/ReceiverPreviewWindow.h"
 
-#include "video/Nv12Convert.h"
-
 #include <d3dcompiler.h>
 #include <dxgi1_4.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -116,6 +116,22 @@ uint32_t ClampDimension(int value)
     return static_cast<uint32_t>(std::max(1, value));
 }
 
+void ValidateNv12Frame(const DecodedFrameInfo& frame)
+{
+    if (frame.width <= 0 || frame.height <= 0) {
+        throw std::runtime_error("Decoded preview frame dimensions are not available");
+    }
+    if ((frame.width % 2) != 0 || (frame.height % 2) != 0) {
+        throw std::runtime_error("Decoded preview frame dimensions must be even for NV12");
+    }
+
+    const uint64_t lumaBytes = static_cast<uint64_t>(frame.width) * static_cast<uint64_t>(frame.height);
+    const uint64_t requiredBytes = lumaBytes + lumaBytes / 2;
+    if (requiredBytes > std::numeric_limits<size_t>::max() || frame.data.size() < static_cast<size_t>(requiredBytes)) {
+        throw std::runtime_error("Decoded preview NV12 frame data is too small");
+    }
+}
+
 void SetSwapChainSdrColorSpace(IDXGISwapChain* swapChain)
 {
     if (swapChain == nullptr) {
@@ -197,21 +213,29 @@ void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
     if (closeRequested_) {
         return;
     }
-    if (frame.width <= 0 || frame.height <= 0) {
-        throw std::runtime_error("Decoded preview frame dimensions are not available");
-    }
+    ValidateNv12Frame(frame);
 
     EnsureWindow(frame.width, frame.height);
     SizeWindowForFirstFrame(frame.width, frame.height);
-    ConvertNv12ToBgra(frame.data.data(), frame.data.size(), frame.width, frame.height, bgraPixels_);
-    EnsureFrameTexture(frame.width, frame.height);
+    EnsureFrameTextures(frame.width, frame.height);
+
+    const size_t lumaBytes = static_cast<size_t>(frame.width) * static_cast<size_t>(frame.height);
+    const auto* luma = reinterpret_cast<const uint8_t*>(frame.data.data());
+    const auto* chroma = luma + lumaBytes;
 
     context_->UpdateSubresource(
-        frameTexture_.Get(),
+        lumaTexture_.Get(),
         0,
         nullptr,
-        bgraPixels_.data(),
-        static_cast<UINT>(frame.width * 4),
+        luma,
+        static_cast<UINT>(frame.width),
+        0);
+    context_->UpdateSubresource(
+        chromaTexture_.Get(),
+        0,
+        nullptr,
+        chroma,
+        static_cast<UINT>(frame.width),
         0);
 
     frameWidth_ = frame.width;
@@ -443,12 +467,24 @@ VertexOut vs_main(uint vertexId : SV_VertexID)
     return output;
 }
 
-Texture2D frameTexture : register(t0);
+Texture2D lumaTexture : register(t0);
+Texture2D chromaTexture : register(t1);
 SamplerState linearSampler : register(s0);
 
 float4 ps_main(VertexOut input) : SV_Target
 {
-    return frameTexture.Sample(linearSampler, input.uv);
+    float y = lumaTexture.Sample(linearSampler, input.uv).r;
+    float2 uv = chromaTexture.Sample(linearSampler, input.uv).rg;
+
+    float c = max(0.0, y - (16.0 / 255.0));
+    float u = uv.x - (128.0 / 255.0);
+    float v = uv.y - (128.0 / 255.0);
+
+    float3 rgb;
+    rgb.r = 1.16438356 * c + 1.79274107 * v;
+    rgb.g = 1.16438356 * c - 0.21324861 * u - 0.53290933 * v;
+    rgb.b = 1.16438356 * c + 2.11240179 * u;
+    return float4(saturate(rgb), 1.0);
 }
 )";
 
@@ -473,35 +509,53 @@ float4 ps_main(VertexOut input) : SV_Target
     ThrowIfFailed(device_->CreateSamplerState(&samplerDesc, &sampler_), "ID3D11Device::CreateSamplerState(receiver preview)");
 }
 
-void ReceiverPreviewWindow::EnsureFrameTexture(int width, int height)
+void ReceiverPreviewWindow::EnsureFrameTextures(int width, int height)
 {
-    if (frameTexture_ &&
-        frameDesc_.Width == static_cast<UINT>(width) &&
-        frameDesc_.Height == static_cast<UINT>(height)) {
+    if (lumaTexture_ &&
+        chromaTexture_ &&
+        lumaDesc_.Width == static_cast<UINT>(width) &&
+        lumaDesc_.Height == static_cast<UINT>(height) &&
+        chromaDesc_.Width == static_cast<UINT>(width / 2) &&
+        chromaDesc_.Height == static_cast<UINT>(height / 2)) {
         return;
     }
 
-    frameView_.Reset();
-    frameTexture_.Reset();
+    lumaView_.Reset();
+    chromaView_.Reset();
+    lumaTexture_.Reset();
+    chromaTexture_.Reset();
 
-    frameDesc_ = {};
-    frameDesc_.Width = static_cast<UINT>(width);
-    frameDesc_.Height = static_cast<UINT>(height);
-    frameDesc_.MipLevels = 1;
-    frameDesc_.ArraySize = 1;
-    frameDesc_.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    frameDesc_.SampleDesc.Count = 1;
-    frameDesc_.SampleDesc.Quality = 0;
-    frameDesc_.Usage = D3D11_USAGE_DEFAULT;
-    frameDesc_.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    lumaDesc_ = {};
+    lumaDesc_.Width = static_cast<UINT>(width);
+    lumaDesc_.Height = static_cast<UINT>(height);
+    lumaDesc_.MipLevels = 1;
+    lumaDesc_.ArraySize = 1;
+    lumaDesc_.Format = DXGI_FORMAT_R8_UNORM;
+    lumaDesc_.SampleDesc.Count = 1;
+    lumaDesc_.SampleDesc.Quality = 0;
+    lumaDesc_.Usage = D3D11_USAGE_DEFAULT;
+    lumaDesc_.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
-    ThrowIfFailed(device_->CreateTexture2D(&frameDesc_, nullptr, &frameTexture_), "ID3D11Device::CreateTexture2D(receiver frame)");
+    chromaDesc_ = lumaDesc_;
+    chromaDesc_.Width = static_cast<UINT>(width / 2);
+    chromaDesc_.Height = static_cast<UINT>(height / 2);
+    chromaDesc_.Format = DXGI_FORMAT_R8G8_UNORM;
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc{};
-    viewDesc.Format = frameDesc_.Format;
-    viewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    viewDesc.Texture2D.MipLevels = 1;
-    ThrowIfFailed(device_->CreateShaderResourceView(frameTexture_.Get(), &viewDesc, &frameView_), "ID3D11Device::CreateShaderResourceView(receiver frame)");
+    ThrowIfFailed(device_->CreateTexture2D(&lumaDesc_, nullptr, &lumaTexture_), "ID3D11Device::CreateTexture2D(receiver luma)");
+    ThrowIfFailed(device_->CreateTexture2D(&chromaDesc_, nullptr, &chromaTexture_), "ID3D11Device::CreateTexture2D(receiver chroma)");
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC lumaViewDesc{};
+    lumaViewDesc.Format = lumaDesc_.Format;
+    lumaViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    lumaViewDesc.Texture2D.MipLevels = 1;
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC chromaViewDesc{};
+    chromaViewDesc.Format = chromaDesc_.Format;
+    chromaViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    chromaViewDesc.Texture2D.MipLevels = 1;
+
+    ThrowIfFailed(device_->CreateShaderResourceView(lumaTexture_.Get(), &lumaViewDesc, &lumaView_), "ID3D11Device::CreateShaderResourceView(receiver luma)");
+    ThrowIfFailed(device_->CreateShaderResourceView(chromaTexture_.Get(), &chromaViewDesc, &chromaView_), "ID3D11Device::CreateShaderResourceView(receiver chroma)");
 }
 
 void ReceiverPreviewWindow::SizeWindowForFirstFrame(int width, int height)
@@ -530,7 +584,7 @@ void ReceiverPreviewWindow::SizeWindowForFirstFrame(int width, int height)
 
 void ReceiverPreviewWindow::Render()
 {
-    if (!swapChain_ || !frameView_ || hwnd_ == nullptr || IsIconic(hwnd_) != FALSE) {
+    if (!swapChain_ || !lumaView_ || !chromaView_ || hwnd_ == nullptr || IsIconic(hwnd_) != FALSE) {
         return;
     }
 
@@ -560,7 +614,7 @@ void ReceiverPreviewWindow::Render()
     viewport.MaxDepth = 1.0f;
 
     ID3D11RenderTargetView* renderTargets[] = {renderTarget_.Get()};
-    ID3D11ShaderResourceView* shaderResources[] = {frameView_.Get()};
+    ID3D11ShaderResourceView* shaderResources[] = {lumaView_.Get(), chromaView_.Get()};
     ID3D11SamplerState* samplers[] = {sampler_.Get()};
 
     context_->OMSetRenderTargets(1, renderTargets, nullptr);
@@ -569,13 +623,13 @@ void ReceiverPreviewWindow::Render()
     context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
     context_->PSSetShader(pixelShader_.Get(), nullptr, 0);
-    context_->PSSetShaderResources(0, 1, shaderResources);
+    context_->PSSetShaderResources(0, 2, shaderResources);
     context_->PSSetSamplers(0, 1, samplers);
     context_->Draw(3, 0);
 
-    ID3D11ShaderResourceView* nullShaderResources[] = {nullptr};
+    ID3D11ShaderResourceView* nullShaderResources[] = {nullptr, nullptr};
     ID3D11RenderTargetView* nullRenderTargets[] = {nullptr};
-    context_->PSSetShaderResources(0, 1, nullShaderResources);
+    context_->PSSetShaderResources(0, 2, nullShaderResources);
     context_->OMSetRenderTargets(1, nullRenderTargets, nullptr);
 
     ThrowIfFailed(swapChain_->Present(1, 0), "IDXGISwapChain::Present(receiver preview)");
