@@ -205,8 +205,11 @@ H.264 decoder MFT and print decoded frame diagnostics. Add `--dump-decoded-bmp P
 latest decoded NV12 frame as a BMP snapshot through the CPU diagnostic converter. The raw `.h264`
 dump validates codec bytes and dimensions, but it does not store transport timing. Add `--preview`
 on the receiver to open a native Win32/Direct3D preview window; preview uploads decoded NV12 luma
-and chroma planes to GPU textures and converts to SDR Rec.709 in the pixel shader. When `--seconds`
-is omitted the preview runs until the window closes.
+and chroma planes to GPU textures and converts to SDR Rec.709 in the pixel shader. Decoded preview
+frames pass through a small timestamp-ordered playout buffer before presentation, so network and
+decoder bursts are smoothed before they hit the window. Receiver stats report `preview_queue`,
+`preview_late_drops`, and `preview_overflow_drops` for that playout stage. When `--seconds` is
+omitted the preview runs until the window closes.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -226,7 +229,7 @@ Windows Graphics Capture
  -> default auto stream encoder with queued direct D3D11 hardware input and software fallback
  -> UDP sender/receiver transport diagnostics
  -> Media Foundation H.264 decode validation
- -> native Direct3D receiver preview with GPU NV12 conversion
+ -> paced native Direct3D receiver preview with GPU NV12 conversion
  -> future network adaptation and renderer optimizations
 ```
 An app to share your screen with others

@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -272,6 +273,104 @@ const char* StreamEncoderPreferenceName(StreamEncoderPreference preference)
         return "unknown";
     }
 }
+
+class PreviewPlayoutBuffer {
+public:
+    using Clock = std::chrono::steady_clock;
+
+    void Enqueue(screenshare::DecodedFrameInfo frame)
+    {
+        int64_t key = frame.timestamp100ns;
+        while (frames_.contains(key)) {
+            ++key;
+        }
+
+        frames_.emplace(key, std::move(frame));
+        while (frames_.size() > maxQueuedFrames_) {
+            frames_.erase(frames_.begin());
+            ++overflowDrops_;
+        }
+    }
+
+    void PresentReady(screenshare::ReceiverPreviewWindow& previewWindow, Clock::time_point now, bool flush)
+    {
+        if (frames_.empty()) {
+            return;
+        }
+        EnsureClockStarted(now);
+
+        while (!frames_.empty()) {
+            const auto frameTime = PresentationTime(frames_.begin()->first);
+            if (!flush && now < frameTime) {
+                break;
+            }
+            if (!flush && frames_.size() > 1 && now - frameTime > maxLateFrameAge_) {
+                frames_.erase(frames_.begin());
+                ++lateDrops_;
+                continue;
+            }
+
+            auto frame = std::move(frames_.begin()->second);
+            frames_.erase(frames_.begin());
+            previewWindow.PresentFrame(frame);
+        }
+    }
+
+    [[nodiscard]] std::chrono::milliseconds ReceiveTimeout(Clock::time_point now) const
+    {
+        constexpr auto defaultTimeout = std::chrono::milliseconds(20);
+        if (frames_.empty() || !clockStarted_) {
+            return defaultTimeout;
+        }
+
+        const auto frameTime = PresentationTime(frames_.begin()->first);
+        if (frameTime <= now) {
+            return std::chrono::milliseconds(1);
+        }
+
+        const auto untilFrame = std::chrono::duration_cast<std::chrono::milliseconds>(frameTime - now);
+        return std::clamp(untilFrame, std::chrono::milliseconds(1), defaultTimeout);
+    }
+
+    [[nodiscard]] size_t queuedFrameCount() const noexcept { return frames_.size(); }
+    [[nodiscard]] uint64_t lateDrops() const noexcept { return lateDrops_; }
+    [[nodiscard]] uint64_t overflowDrops() const noexcept { return overflowDrops_; }
+
+private:
+    void EnsureClockStarted(Clock::time_point now)
+    {
+        if (clockStarted_ || frames_.empty()) {
+            return;
+        }
+
+        firstTimestamp100ns_ = frames_.begin()->first;
+        firstPresentationAt_ = now + initialDelay_;
+        clockStarted_ = true;
+    }
+
+    [[nodiscard]] Clock::time_point PresentationTime(int64_t timestamp100ns) const
+    {
+        if (timestamp100ns <= firstTimestamp100ns_) {
+            return firstPresentationAt_;
+        }
+
+        const auto deltaTicks = static_cast<uint64_t>(timestamp100ns - firstTimestamp100ns_);
+        constexpr auto maxDeltaTicks =
+            static_cast<uint64_t>(std::numeric_limits<std::chrono::nanoseconds::rep>::max() / 100);
+        const auto delta = std::chrono::nanoseconds(std::min(deltaTicks, maxDeltaTicks) * 100);
+        return firstPresentationAt_ + std::chrono::duration_cast<Clock::duration>(delta);
+    }
+
+    std::map<int64_t, screenshare::DecodedFrameInfo> frames_;
+    Clock::time_point firstPresentationAt_{};
+    int64_t firstTimestamp100ns_ = 0;
+    bool clockStarted_ = false;
+    uint64_t lateDrops_ = 0;
+    uint64_t overflowDrops_ = 0;
+    size_t maxQueuedFrames_ = 180;
+    std::chrono::milliseconds initialDelay_{100};
+    std::chrono::milliseconds maxLateFrameAge_{250};
+};
 
 const char* CaptureBackendName(screenshare::CaptureBackend backend)
 {
@@ -954,16 +1053,23 @@ void RunUdpReceiverStats(const Options& options)
         previewWindow->Show();
     }
 
-    auto countDecodedFrames = [&](const std::vector<screenshare::DecodedFrameInfo>& decodedFrames) {
+    using Clock = std::chrono::steady_clock;
+    PreviewPlayoutBuffer previewPlayout;
+
+    auto countDecodedFrames = [&](std::vector<screenshare::DecodedFrameInfo> decodedFrames, bool presentReady = true) {
         h264DecodedFrames += decodedFrames.size();
-        for (const auto& decodedFrame : decodedFrames) {
+        for (auto& decodedFrame : decodedFrames) {
             h264DecodedBytes += decodedFrame.bytes;
             h264DecodedWidth = decodedFrame.width;
             h264DecodedHeight = decodedFrame.height;
             latestDecodedFrame = decodedFrame;
             if (previewWindow) {
-                previewWindow->PresentFrame(decodedFrame);
+                previewPlayout.Enqueue(std::move(decodedFrame));
             }
+        }
+
+        if (previewWindow && presentReady) {
+            previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
         }
     };
 
@@ -988,7 +1094,6 @@ void RunUdpReceiverStats(const Options& options)
         }
     };
 
-    using Clock = std::chrono::steady_clock;
     const auto startedAt = Clock::now();
     auto lastReportAt = startedAt;
     uint64_t lastDatagramsReceived = 0;
@@ -1009,7 +1114,14 @@ void RunUdpReceiverStats(const Options& options)
     };
 
     while (shouldContinue()) {
-        if (auto frame = receiver.ReceiveFrame(std::chrono::milliseconds(100))) {
+        if (previewWindow) {
+            previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
+        }
+
+        const auto receiveTimeout = previewWindow ?
+            previewPlayout.ReceiveTimeout(Clock::now()) :
+            std::chrono::milliseconds(100);
+        if (auto frame = receiver.ReceiveFrame(receiveTimeout)) {
             latestFrameId = frame->frameId;
             latestFrameBytes = frame->bytes.size();
             latestFragmentCount = frame->fragmentCount;
@@ -1034,6 +1146,10 @@ void RunUdpReceiverStats(const Options& options)
                 h264DumpBacklog.emplace(frame->frameId, std::move(*frame));
                 flushH264DumpBacklog();
             }
+        }
+
+        if (previewWindow) {
+            previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
         }
 
         const auto now = Clock::now();
@@ -1063,7 +1179,10 @@ void RunUdpReceiverStats(const Options& options)
                 << " h264_decoded_bytes=" << h264DecodedBytes
                 << " h264_decoded_output=" << h264DecodedWidth << "x" << h264DecodedHeight
                 << " pending_h264_decode_packets=" << h264DecodeBacklog.size()
-                << " preview_frames_presented=" << (previewWindow ? previewWindow->framesPresented() : 0);
+                << " preview_frames_presented=" << (previewWindow ? previewWindow->framesPresented() : 0)
+                << " preview_queue=" << (previewWindow ? previewPlayout.queuedFrameCount() : 0)
+                << " preview_late_drops=" << (previewWindow ? previewPlayout.lateDrops() : 0)
+                << " preview_overflow_drops=" << (previewWindow ? previewPlayout.overflowDrops() : 0);
 
             if (hasCompletedFrame) {
                 std::cout
@@ -1082,8 +1201,11 @@ void RunUdpReceiverStats(const Options& options)
 
     const screenshare::UdpReceiverStats stats = receiver.stats();
     if (h264Decoder) {
-        countDecodedFrames(h264Decoder->Drain());
+        countDecodedFrames(h264Decoder->Drain(), false);
         h264Decoder.reset();
+    }
+    if (previewWindow) {
+        previewPlayout.PresentReady(*previewWindow, Clock::now(), true);
     }
 
     bool decodedBmpWritten = false;
@@ -1113,6 +1235,9 @@ void RunUdpReceiverStats(const Options& options)
         << ", H.264 decoded output: " << h264DecodedWidth << "x" << h264DecodedHeight
         << ", pending H.264 decode packets: " << h264DecodeBacklog.size()
         << ", preview frames presented: " << (previewWindow ? previewWindow->framesPresented() : 0)
+        << ", preview queued frames: " << (previewWindow ? previewPlayout.queuedFrameCount() : 0)
+        << ", preview late drops: " << (previewWindow ? previewPlayout.lateDrops() : 0)
+        << ", preview overflow drops: " << (previewWindow ? previewPlayout.overflowDrops() : 0)
         << ", decoded BMP written: " << (decodedBmpWritten ? "yes" : "no")
         << "\n";
 }
