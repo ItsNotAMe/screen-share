@@ -38,6 +38,8 @@ struct Options {
     std::string recordPath;
     std::string capturedBmpPath;
     bool streamEncode = false;
+    bool streamEncoderBackendProvided = false;
+    screenshare::H264StreamEncoderBackend streamEncoderBackend = screenshare::H264StreamEncoderBackend::Software;
     std::string udpSendTarget;
     bool wgcBorderRequired = false;
     bool hdrToSdr = true;
@@ -60,7 +62,8 @@ void PrintHelp()
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
-        << "              [--record PATH] [--stream-encode] [--udp-send HOST:PORT]\n"
+        << "              [--record PATH] [--stream-encode] [--stream-encoder software|hardware]\n"
+        << "              [--udp-send HOST:PORT]\n"
         << "              [--dump-capture-bmp PATH]\n"
         << "              [--capture-backend dxgi|wgc]\n"
         << "              [--bitrate-mbps Mbps] [--wgc-border] [--no-hdr-to-sdr]\n"
@@ -233,6 +236,19 @@ screenshare::CaptureBackend ParseCaptureBackend(const char* value)
     throw std::invalid_argument(std::string("Invalid value for --capture-backend: ") + value);
 }
 
+screenshare::H264StreamEncoderBackend ParseStreamEncoderBackend(const char* value)
+{
+    const std::string backend = value;
+    if (backend == "software") {
+        return screenshare::H264StreamEncoderBackend::Software;
+    }
+    if (backend == "hardware") {
+        return screenshare::H264StreamEncoderBackend::Hardware;
+    }
+
+    throw std::invalid_argument(std::string("Invalid value for --stream-encoder: ") + value);
+}
+
 const char* CaptureBackendName(screenshare::CaptureBackend backend)
 {
     switch (backend) {
@@ -309,6 +325,9 @@ Options ParseOptions(int argc, char** argv)
             options.captureBackend = ParseCaptureBackend(requireValue("--capture-backend"));
         } else if (arg == "--stream-encode") {
             options.streamEncode = true;
+        } else if (arg == "--stream-encoder") {
+            options.streamEncoderBackend = ParseStreamEncoderBackend(requireValue("--stream-encoder"));
+            options.streamEncoderBackendProvided = true;
         } else if (arg == "--udp-send") {
             options.udpSendTarget = requireValue("--udp-send");
             options.streamEncode = true;
@@ -365,6 +384,9 @@ Options ParseOptions(int argc, char** argv)
     if (!options.udpSendTarget.empty()) {
         static_cast<void>(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
     }
+    if (options.streamEncoderBackendProvided && !options.streamEncode) {
+        throw std::invalid_argument("--stream-encoder requires --stream-encode or --udp-send");
+    }
     if (options.hdrSdrWhiteNits < 80.0f || options.hdrSdrWhiteNits > 1000.0f) {
         throw std::invalid_argument("--hdr-sdr-white-nits must be between 80 and 1000");
     }
@@ -373,12 +395,12 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || !options.udpSendTarget.empty())) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, or --udp-send");
+         options.streamEncode || options.streamEncoderBackendProvided || !options.udpSendTarget.empty())) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, or --udp-send");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || !options.udpSendTarget.empty() || options.decodeH264 || options.previewWindow)) {
+         options.streamEncode || options.streamEncoderBackendProvided || !options.udpSendTarget.empty() || options.decodeH264 || options.previewWindow)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
@@ -625,6 +647,7 @@ void RunCaptureStats(const Options& options)
                     encoderConfig.height = lastFrame.height;
                     encoderConfig.fps = options.fps;
                     encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
+                    encoderConfig.backend = options.streamEncoderBackend;
 
                     streamEncoder = std::make_unique<screenshare::H264StreamEncoder>();
                     streamEncoder->Start(encoderConfig);
@@ -637,6 +660,8 @@ void RunCaptureStats(const Options& options)
                     std::cout
                         << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
                         << " bitrate_mbps=" << Mbps(encoderConfig.bitrate)
+                        << " backend=" << screenshare::H264StreamEncoderBackendName(streamEncoder->backend())
+                        << " encoder=\"" << streamEncoder->encoderName() << "\""
                         << "\n";
                 }
 

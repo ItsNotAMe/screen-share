@@ -4,14 +4,20 @@
 
 #include <Windows.h>
 #include <codecapi.h>
+#include <d3d11.h>
 #include <initguid.h>
 #include <mfapi.h>
 #include <mferror.h>
+#include <mfidl.h>
 #include <wmcodecdsp.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <iterator>
 #include <stdexcept>
+#include <thread>
+#include <utility>
 
 namespace screenshare {
 namespace {
@@ -48,6 +54,302 @@ bool IsBgra8Format(DXGI_FORMAT format)
         format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
         format == DXGI_FORMAT_B8G8R8X8_UNORM ||
         format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
+}
+
+std::string GetAllocatedString(IMFAttributes* attributes, REFGUID key)
+{
+    wchar_t* value = nullptr;
+    UINT32 length = 0;
+    const HRESULT result = attributes->GetAllocatedString(key, &value, &length);
+    if (FAILED(result) || value == nullptr) {
+        return {};
+    }
+
+    std::wstring text(value, length);
+    CoTaskMemFree(value);
+    return Narrow(text);
+}
+
+bool GetBoolAttribute(IMFAttributes* attributes, REFGUID key)
+{
+    UINT32 value = 0;
+    return attributes != nullptr && SUCCEEDED(attributes->GetUINT32(key, &value)) && value != 0;
+}
+
+Microsoft::WRL::ComPtr<IMFMediaType> CreateH264OutputType(const H264StreamEncoderConfig& config)
+{
+    Microsoft::WRL::ComPtr<IMFMediaType> outputType;
+    ThrowIfFailed(MFCreateMediaType(&outputType), "MFCreateMediaType(output)");
+    ThrowIfFailed(outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "IMFMediaType::SetGUID(output major)");
+    ThrowIfFailed(outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264), "IMFMediaType::SetGUID(output subtype)");
+    ThrowIfFailed(outputType->SetUINT32(MF_MT_AVG_BITRATE, config.bitrate), "IMFMediaType::SetUINT32(output bitrate)");
+    ThrowIfFailed(outputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High), "IMFMediaType::SetUINT32(output profile)");
+    ThrowIfFailed(outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(output interlace)");
+    SetBt709ColorInfo(outputType.Get());
+    SetVideoSize(outputType.Get(), MF_MT_FRAME_SIZE, config.width, config.height);
+    SetVideoRatio(outputType.Get(), MF_MT_FRAME_RATE, config.fps, 1);
+    SetVideoRatio(outputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    return outputType;
+}
+
+Microsoft::WRL::ComPtr<IMFMediaType> CreateNv12InputType(const H264StreamEncoderConfig& config)
+{
+    Microsoft::WRL::ComPtr<IMFMediaType> inputType;
+    ThrowIfFailed(MFCreateMediaType(&inputType), "MFCreateMediaType(input)");
+    ThrowIfFailed(inputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "IMFMediaType::SetGUID(input major)");
+    ThrowIfFailed(inputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12), "IMFMediaType::SetGUID(input subtype)");
+    ThrowIfFailed(inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(input interlace)");
+    SetBt709ColorInfo(inputType.Get());
+    SetVideoSize(inputType.Get(), MF_MT_FRAME_SIZE, config.width, config.height);
+    SetVideoRatio(inputType.Get(), MF_MT_FRAME_RATE, config.fps, 1);
+    SetVideoRatio(inputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    return inputType;
+}
+
+std::pair<DWORD, DWORD> GetSingleStreamIds(IMFTransform* transform)
+{
+    DWORD inputCount = 0;
+    DWORD outputCount = 0;
+    ThrowIfFailed(transform->GetStreamCount(&inputCount, &outputCount), "IMFTransform::GetStreamCount");
+    if (inputCount != 1 || outputCount != 1) {
+        throw std::runtime_error("H264 encoder MFT did not expose one input and one output stream");
+    }
+
+    DWORD inputStreamId = 0;
+    DWORD outputStreamId = 0;
+    const HRESULT streamIdsResult = transform->GetStreamIDs(1, &inputStreamId, 1, &outputStreamId);
+    if (streamIdsResult == E_NOTIMPL) {
+        return {0, 0};
+    }
+    ThrowIfFailed(streamIdsResult, "IMFTransform::GetStreamIDs");
+    return {inputStreamId, outputStreamId};
+}
+
+void ConfigureEncoderTypes(
+    IMFTransform* transform,
+    const H264StreamEncoderConfig& config,
+    DWORD& inputStreamId,
+    DWORD& outputStreamId)
+{
+    const auto streamIds = GetSingleStreamIds(transform);
+    inputStreamId = streamIds.first;
+    outputStreamId = streamIds.second;
+
+    const auto outputType = CreateH264OutputType(config);
+    const auto inputType = CreateNv12InputType(config);
+    ThrowIfFailed(transform->SetOutputType(outputStreamId, outputType.Get(), 0), "IMFTransform::SetOutputType");
+    ThrowIfFailed(transform->SetInputType(inputStreamId, inputType.Get(), 0), "IMFTransform::SetInputType");
+}
+
+Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> CreateDxgiDeviceManager()
+{
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+
+    static constexpr D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL_11_1,
+        D3D_FEATURE_LEVEL_11_0,
+    };
+
+    D3D_FEATURE_LEVEL selectedFeatureLevel{};
+    ThrowIfFailed(
+        D3D11CreateDevice(
+            nullptr,
+            D3D_DRIVER_TYPE_HARDWARE,
+            nullptr,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            featureLevels,
+            ARRAYSIZE(featureLevels),
+            D3D11_SDK_VERSION,
+            &device,
+            &selectedFeatureLevel,
+            &context),
+        "D3D11CreateDevice(stream encoder)");
+
+    UINT resetToken = 0;
+    Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> deviceManager;
+    ThrowIfFailed(MFCreateDXGIDeviceManager(&resetToken, &deviceManager), "MFCreateDXGIDeviceManager");
+    ThrowIfFailed(deviceManager->ResetDevice(device.Get(), resetToken), "IMFDXGIDeviceManager::ResetDevice");
+    return deviceManager;
+}
+
+class ActivateList {
+public:
+    ActivateList() = default;
+    ~ActivateList()
+    {
+        for (UINT32 i = 0; i < count_; ++i) {
+            if (items_[i] != nullptr) {
+                items_[i]->Release();
+            }
+        }
+        CoTaskMemFree(items_);
+    }
+
+    ActivateList(const ActivateList&) = delete;
+    ActivateList& operator=(const ActivateList&) = delete;
+
+    IMFActivate*** put() { return &items_; }
+    UINT32* countPut() { return &count_; }
+    IMFActivate* operator[](UINT32 index) const { return items_[index]; }
+    UINT32 count() const { return count_; }
+
+private:
+    IMFActivate** items_ = nullptr;
+    UINT32 count_ = 0;
+};
+
+struct HardwareEncoderSelection {
+    Microsoft::WRL::ComPtr<IMFTransform> transform;
+    Microsoft::WRL::ComPtr<IMFMediaEventGenerator> eventGenerator;
+    Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> dxgiDeviceManager;
+    DWORD inputStreamId = 0;
+    DWORD outputStreamId = 0;
+    std::string name;
+};
+
+HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& config)
+{
+    MFT_REGISTER_TYPE_INFO inputInfo{};
+    inputInfo.guidMajorType = MFMediaType_Video;
+    inputInfo.guidSubtype = MFVideoFormat_NV12;
+
+    MFT_REGISTER_TYPE_INFO outputInfo{};
+    outputInfo.guidMajorType = MFMediaType_Video;
+    outputInfo.guidSubtype = MFVideoFormat_H264;
+
+    ActivateList activates;
+    const HRESULT enumResult = MFTEnumEx(
+        MFT_CATEGORY_VIDEO_ENCODER,
+        MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER,
+        &inputInfo,
+        &outputInfo,
+        activates.put(),
+        activates.countPut());
+    if (enumResult == MF_E_NOT_FOUND || activates.count() == 0) {
+        throw std::runtime_error("No hardware H.264 encoder MFTs were found");
+    }
+    ThrowIfFailed(enumResult, "MFTEnumEx(hardware H.264 encoders)");
+
+    auto deviceManager = CreateDxgiDeviceManager();
+    std::string failures;
+
+    for (UINT32 i = 0; i < activates.count(); ++i) {
+        IMFActivate* activate = activates[i];
+        const std::string name = GetAllocatedString(activate, MFT_FRIENDLY_NAME_Attribute);
+        const std::string label = name.empty() ? "(unnamed hardware encoder)" : name;
+
+        Microsoft::WRL::ComPtr<IMFTransform> transform;
+        HRESULT result = activate->ActivateObject(IID_PPV_ARGS(&transform));
+        if (FAILED(result)) {
+            failures += "\n  " + label + ": activation failed: " + HResultMessage(result);
+            continue;
+        }
+
+        Microsoft::WRL::ComPtr<IMFAttributes> attributes;
+        bool async = false;
+        bool d3d11Aware = false;
+        if (SUCCEEDED(transform->GetAttributes(&attributes))) {
+            async = GetBoolAttribute(attributes.Get(), MF_TRANSFORM_ASYNC);
+            d3d11Aware = GetBoolAttribute(attributes.Get(), MF_SA_D3D11_AWARE);
+            if (async) {
+                result = attributes->SetUINT32(MF_TRANSFORM_ASYNC_UNLOCK, TRUE);
+                if (FAILED(result)) {
+                    failures += "\n  " + label + ": async unlock failed: " + HResultMessage(result);
+                    static_cast<void>(activate->ShutdownObject());
+                    continue;
+                }
+            }
+        }
+
+        if (!async) {
+            failures += "\n  " + label + ": hardware encoder is not asynchronous";
+            static_cast<void>(activate->ShutdownObject());
+            continue;
+        }
+        if (!d3d11Aware) {
+            failures += "\n  " + label + ": hardware encoder is not D3D11-aware";
+            static_cast<void>(activate->ShutdownObject());
+            continue;
+        }
+
+        result = transform->ProcessMessage(
+            MFT_MESSAGE_SET_D3D_MANAGER,
+            reinterpret_cast<ULONG_PTR>(deviceManager.Get()));
+        if (FAILED(result)) {
+            failures += "\n  " + label + ": D3D manager rejected: " + HResultMessage(result);
+            static_cast<void>(activate->ShutdownObject());
+            continue;
+        }
+
+        DWORD inputStreamId = 0;
+        DWORD outputStreamId = 0;
+        try {
+            ConfigureEncoderTypes(transform.Get(), config, inputStreamId, outputStreamId);
+        } catch (const std::exception& error) {
+            failures += "\n  " + label + ": stream type setup failed: " + error.what();
+            static_cast<void>(activate->ShutdownObject());
+            continue;
+        }
+
+        Microsoft::WRL::ComPtr<IMFMediaEventGenerator> eventGenerator;
+        result = transform.As(&eventGenerator);
+        if (FAILED(result) || !eventGenerator) {
+            failures += "\n  " + label + ": async event interface unavailable: " + HResultMessage(result);
+            static_cast<void>(activate->ShutdownObject());
+            continue;
+        }
+
+        HardwareEncoderSelection selected;
+        selected.transform = std::move(transform);
+        selected.eventGenerator = std::move(eventGenerator);
+        selected.dxgiDeviceManager = std::move(deviceManager);
+        selected.inputStreamId = inputStreamId;
+        selected.outputStreamId = outputStreamId;
+        selected.name = label;
+        return selected;
+    }
+
+    throw std::runtime_error("No hardware H.264 encoder accepted the stream configuration:" + failures);
+}
+
+Microsoft::WRL::ComPtr<IMFTransform> CreateSoftwareEncoder()
+{
+    Microsoft::WRL::ComPtr<IMFTransform> transform;
+    ThrowIfFailed(
+        CoCreateInstance(CLSID_CMSH264EncoderMFT, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform)),
+        "CoCreateInstance(CMSH264EncoderMFT)");
+    return transform;
+}
+
+EncodedPacket PacketFromOutputSample(IMFSample* sample)
+{
+    DWORD totalLength = 0;
+    ThrowIfFailed(sample->GetTotalLength(&totalLength), "IMFSample::GetTotalLength");
+
+    EncodedPacket packet;
+    LONGLONG sampleTime = 0;
+    LONGLONG sampleDuration = 0;
+    if (SUCCEEDED(sample->GetSampleTime(&sampleTime))) {
+        packet.timestamp100ns = sampleTime;
+    }
+    if (SUCCEEDED(sample->GetSampleDuration(&sampleDuration))) {
+        packet.duration100ns = sampleDuration;
+    }
+
+    Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
+    ThrowIfFailed(sample->ConvertToContiguousBuffer(&buffer), "IMFSample::ConvertToContiguousBuffer");
+
+    BYTE* source = nullptr;
+    DWORD maxLength = 0;
+    DWORD currentLength = 0;
+    ThrowIfFailed(buffer->Lock(&source, &maxLength, &currentLength), "IMFMediaBuffer::Lock(output)");
+
+    packet.bytes.resize(totalLength);
+    std::memcpy(packet.bytes.data(), source, std::min<DWORD>(totalLength, currentLength));
+
+    ThrowIfFailed(buffer->Unlock(), "IMFMediaBuffer::Unlock(output)");
+    return packet;
 }
 
 } // namespace
@@ -96,47 +398,36 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     }
 
     config_ = config;
+    backend_ = config.backend;
+    encoderName_.clear();
+    eventGenerator_.Reset();
+    dxgiDeviceManager_.Reset();
+    pendingAsyncInputs_ = 0;
+    pendingAsyncOutputs_ = 0;
+    asyncDrainComplete_ = false;
     frameIndex_ = 0;
     frameDuration100ns_ = 10'000'000 / config_.fps;
 
-    ThrowIfFailed(
-        CoCreateInstance(CLSID_CMSH264EncoderMFT, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform_)),
-        "CoCreateInstance(CMSH264EncoderMFT)");
-
-    DWORD inputCount = 0;
-    DWORD outputCount = 0;
-    ThrowIfFailed(transform_->GetStreamCount(&inputCount, &outputCount), "IMFTransform::GetStreamCount");
-    if (inputCount != 1 || outputCount != 1) {
-        throw std::runtime_error("H264 encoder MFT did not expose one input and one output stream");
+    if (backend_ == H264StreamEncoderBackend::Hardware) {
+        auto hardware = CreateHardwareEncoder(config_);
+        transform_ = std::move(hardware.transform);
+        eventGenerator_ = std::move(hardware.eventGenerator);
+        dxgiDeviceManager_ = std::move(hardware.dxgiDeviceManager);
+        inputStreamId_ = hardware.inputStreamId;
+        outputStreamId_ = hardware.outputStreamId;
+        encoderName_ = std::move(hardware.name);
+    } else {
+        transform_ = CreateSoftwareEncoder();
+        ConfigureEncoderTypes(transform_.Get(), config_, inputStreamId_, outputStreamId_);
+        encoderName_ = "Microsoft H.264 Encoder MFT";
     }
-
-    Microsoft::WRL::ComPtr<IMFMediaType> outputType;
-    ThrowIfFailed(MFCreateMediaType(&outputType), "MFCreateMediaType(output)");
-    ThrowIfFailed(outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "IMFMediaType::SetGUID(output major)");
-    ThrowIfFailed(outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264), "IMFMediaType::SetGUID(output subtype)");
-    ThrowIfFailed(outputType->SetUINT32(MF_MT_AVG_BITRATE, config_.bitrate), "IMFMediaType::SetUINT32(output bitrate)");
-    ThrowIfFailed(outputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High), "IMFMediaType::SetUINT32(output profile)");
-    ThrowIfFailed(outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(output interlace)");
-    SetBt709ColorInfo(outputType.Get());
-    SetVideoSize(outputType.Get(), MF_MT_FRAME_SIZE, config_.width, config_.height);
-    SetVideoRatio(outputType.Get(), MF_MT_FRAME_RATE, config_.fps, 1);
-    SetVideoRatio(outputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-    ThrowIfFailed(transform_->SetOutputType(outputStreamId_, outputType.Get(), 0), "IMFTransform::SetOutputType");
-
-    Microsoft::WRL::ComPtr<IMFMediaType> inputType;
-    ThrowIfFailed(MFCreateMediaType(&inputType), "MFCreateMediaType(input)");
-    ThrowIfFailed(inputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "IMFMediaType::SetGUID(input major)");
-    ThrowIfFailed(inputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12), "IMFMediaType::SetGUID(input subtype)");
-    ThrowIfFailed(inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(input interlace)");
-    SetBt709ColorInfo(inputType.Get());
-    SetVideoSize(inputType.Get(), MF_MT_FRAME_SIZE, config_.width, config_.height);
-    SetVideoRatio(inputType.Get(), MF_MT_FRAME_RATE, config_.fps, 1);
-    SetVideoRatio(inputType.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-    ThrowIfFailed(transform_->SetOutputType(outputStreamId_, outputType.Get(), 0), "IMFTransform::SetOutputType");
-    ThrowIfFailed(transform_->SetInputType(inputStreamId_, inputType.Get(), 0), "IMFTransform::SetInputType");
 
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0), "IMFTransform::ProcessMessage(BEGIN_STREAMING)");
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0), "IMFTransform::ProcessMessage(START_OF_STREAM)");
+
+    if (backend_ == H264StreamEncoderBackend::Hardware) {
+        static_cast<void>(WaitForAsyncInput());
+    }
 }
 
 std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& frame)
@@ -186,6 +477,22 @@ std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& f
     ThrowIfFailed(sample->SetSampleTime(frameIndex_ * frameDuration100ns_), "IMFSample::SetSampleTime(input)");
     ThrowIfFailed(sample->SetSampleDuration(frameDuration100ns_), "IMFSample::SetSampleDuration(input)");
 
+    if (backend_ == H264StreamEncoderBackend::Hardware) {
+        auto packets = WaitForAsyncInput();
+        ThrowIfFailed(transform_->ProcessInput(inputStreamId_, sample.Get(), 0), "IMFTransform::ProcessInput");
+        if (pendingAsyncInputs_ > 0) {
+            --pendingAsyncInputs_;
+        }
+        ++frameIndex_;
+
+        auto extraPackets = PumpAsyncEvents();
+        packets.insert(
+            packets.end(),
+            std::make_move_iterator(extraPackets.begin()),
+            std::make_move_iterator(extraPackets.end()));
+        return packets;
+    }
+
     const HRESULT inputResult = transform_->ProcessInput(inputStreamId_, sample.Get(), 0);
     if (inputResult == MF_E_NOTACCEPTING) {
         auto packets = ReadAvailablePackets();
@@ -212,15 +519,38 @@ std::vector<EncodedPacket> H264StreamEncoder::Drain()
 
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0), "IMFTransform::ProcessMessage(END_OF_STREAM)");
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0), "IMFTransform::ProcessMessage(DRAIN)");
+    if (backend_ == H264StreamEncoderBackend::Hardware) {
+        return WaitForAsyncDrain();
+    }
     return ReadAvailablePackets();
 }
 
 void H264StreamEncoder::Stop()
 {
+    if (transform_) {
+        static_cast<void>(transform_->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0));
+        Microsoft::WRL::ComPtr<IMFShutdown> shutdown;
+        if (SUCCEEDED(transform_.As(&shutdown)) && shutdown) {
+            static_cast<void>(shutdown->Shutdown());
+        }
+    }
+    eventGenerator_.Reset();
     transform_.Reset();
+    dxgiDeviceManager_.Reset();
+    pendingAsyncInputs_ = 0;
+    pendingAsyncOutputs_ = 0;
+    asyncDrainComplete_ = false;
+    encoderName_.clear();
 }
 
 std::vector<EncodedPacket> H264StreamEncoder::ReadAvailablePackets()
+{
+    return backend_ == H264StreamEncoderBackend::Hardware ?
+        ReadAsyncAvailablePackets() :
+        ReadSyncAvailablePackets();
+}
+
+std::vector<EncodedPacket> H264StreamEncoder::ReadSyncAvailablePackets()
 {
     std::vector<EncodedPacket> packets;
 
@@ -272,32 +602,180 @@ std::vector<EncodedPacket> H264StreamEncoder::ReadAvailablePackets()
 
         ThrowIfFailed(outputResult, "IMFTransform::ProcessOutput");
 
-        DWORD totalLength = 0;
-        ThrowIfFailed(outputSample->GetTotalLength(&totalLength), "IMFSample::GetTotalLength");
-
-        EncodedPacket packet;
-        LONGLONG sampleTime = 0;
-        LONGLONG sampleDuration = 0;
-        if (SUCCEEDED(outputSample->GetSampleTime(&sampleTime))) {
-            packet.timestamp100ns = sampleTime;
-        }
-        if (SUCCEEDED(outputSample->GetSampleDuration(&sampleDuration))) {
-            packet.duration100ns = sampleDuration;
-        }
-
-        packet.bytes.resize(totalLength);
-
-        BYTE* source = nullptr;
-        DWORD maxLength = 0;
-        DWORD currentLength = 0;
-        ThrowIfFailed(outputBuffer->Lock(&source, &maxLength, &currentLength), "IMFMediaBuffer::Lock(output)");
-        std::memcpy(packet.bytes.data(), source, std::min<DWORD>(totalLength, currentLength));
-        ThrowIfFailed(outputBuffer->Unlock(), "IMFMediaBuffer::Unlock(output)");
-
-        packets.push_back(std::move(packet));
+        packets.push_back(PacketFromOutputSample(outputSample.Get()));
     }
 
     return packets;
+}
+
+std::vector<EncodedPacket> H264StreamEncoder::ReadAsyncAvailablePackets()
+{
+    std::vector<EncodedPacket> packets;
+
+    while (pendingAsyncOutputs_ > 0) {
+        MFT_OUTPUT_STREAM_INFO streamInfo{};
+        ThrowIfFailed(transform_->GetOutputStreamInfo(outputStreamId_, &streamInfo), "IMFTransform::GetOutputStreamInfo");
+
+        const bool transformProvidesSamples = (streamInfo.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) != 0;
+        DWORD outputBufferSize = streamInfo.cbSize == 0 ? 1'048'576 : streamInfo.cbSize;
+        HRESULT outputResult = S_OK;
+        Microsoft::WRL::ComPtr<IMFSample> outputSample;
+
+        while (true) {
+            Microsoft::WRL::ComPtr<IMFMediaBuffer> outputBuffer;
+            outputSample.Reset();
+
+            MFT_OUTPUT_DATA_BUFFER outputData{};
+            outputData.dwStreamID = outputStreamId_;
+
+            if (!transformProvidesSamples) {
+                ThrowIfFailed(MFCreateMemoryBuffer(outputBufferSize, &outputBuffer), "MFCreateMemoryBuffer(output)");
+                ThrowIfFailed(MFCreateSample(&outputSample), "MFCreateSample(output)");
+                ThrowIfFailed(outputSample->AddBuffer(outputBuffer.Get()), "IMFSample::AddBuffer(output)");
+                outputData.pSample = outputSample.Get();
+            }
+
+            DWORD status = 0;
+            outputResult = transform_->ProcessOutput(0, 1, &outputData, &status);
+
+            if (outputData.pEvents != nullptr) {
+                outputData.pEvents->Release();
+            }
+            if (transformProvidesSamples && outputData.pSample != nullptr) {
+                outputSample.Attach(outputData.pSample);
+            }
+
+            if (outputResult != MF_E_BUFFERTOOSMALL) {
+                break;
+            }
+
+            if (outputBufferSize >= 64 * 1'048'576) {
+                ThrowIfFailed(outputResult, "IMFTransform::ProcessOutput");
+            }
+
+            outputBufferSize *= 2;
+        }
+
+        --pendingAsyncOutputs_;
+
+        if (outputResult == MF_E_TRANSFORM_STREAM_CHANGE) {
+            continue;
+        }
+        ThrowIfFailed(outputResult, "IMFTransform::ProcessOutput");
+        if (!outputSample) {
+            throw std::runtime_error("Async H.264 encoder reported output without an output sample");
+        }
+
+        packets.push_back(PacketFromOutputSample(outputSample.Get()));
+    }
+
+    return packets;
+}
+
+std::vector<EncodedPacket> H264StreamEncoder::PumpAsyncEvents()
+{
+    std::vector<EncodedPacket> packets;
+    if (!eventGenerator_) {
+        return packets;
+    }
+
+    while (true) {
+        Microsoft::WRL::ComPtr<IMFMediaEvent> event;
+        const HRESULT eventResult = eventGenerator_->GetEvent(MF_EVENT_FLAG_NO_WAIT, &event);
+        if (eventResult == MF_E_NO_EVENTS_AVAILABLE) {
+            break;
+        }
+        ThrowIfFailed(eventResult, "IMFMediaEventGenerator::GetEvent");
+
+        MediaEventType eventType = MEUnknown;
+        ThrowIfFailed(event->GetType(&eventType), "IMFMediaEvent::GetType");
+
+        HRESULT eventStatus = S_OK;
+        ThrowIfFailed(event->GetStatus(&eventStatus), "IMFMediaEvent::GetStatus");
+        ThrowIfFailed(eventStatus, "Async H.264 encoder event");
+
+        if (eventType == METransformNeedInput) {
+            ++pendingAsyncInputs_;
+        } else if (eventType == METransformHaveOutput) {
+            ++pendingAsyncOutputs_;
+            auto outputPackets = ReadAsyncAvailablePackets();
+            packets.insert(
+                packets.end(),
+                std::make_move_iterator(outputPackets.begin()),
+                std::make_move_iterator(outputPackets.end()));
+        } else if (eventType == METransformDrainComplete) {
+            asyncDrainComplete_ = true;
+        }
+    }
+
+    return packets;
+}
+
+std::vector<EncodedPacket> H264StreamEncoder::WaitForAsyncInput()
+{
+    std::vector<EncodedPacket> packets;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+
+    while (pendingAsyncInputs_ == 0) {
+        auto eventPackets = PumpAsyncEvents();
+        packets.insert(
+            packets.end(),
+            std::make_move_iterator(eventPackets.begin()),
+            std::make_move_iterator(eventPackets.end()));
+
+        if (pendingAsyncInputs_ > 0) {
+            break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            throw std::runtime_error("Timed out waiting for hardware H.264 encoder input request");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    return packets;
+}
+
+std::vector<EncodedPacket> H264StreamEncoder::WaitForAsyncDrain()
+{
+    std::vector<EncodedPacket> packets;
+    asyncDrainComplete_ = false;
+    pendingAsyncInputs_ = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
+    while (!asyncDrainComplete_) {
+        auto eventPackets = PumpAsyncEvents();
+        packets.insert(
+            packets.end(),
+            std::make_move_iterator(eventPackets.begin()),
+            std::make_move_iterator(eventPackets.end()));
+
+        if (asyncDrainComplete_) {
+            break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            throw std::runtime_error("Timed out waiting for hardware H.264 encoder drain");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    auto remainingPackets = PumpAsyncEvents();
+    packets.insert(
+        packets.end(),
+        std::make_move_iterator(remainingPackets.begin()),
+        std::make_move_iterator(remainingPackets.end()));
+    return packets;
+}
+
+const char* H264StreamEncoderBackendName(H264StreamEncoderBackend backend)
+{
+    switch (backend) {
+    case H264StreamEncoderBackend::Software:
+        return "software";
+    case H264StreamEncoderBackend::Hardware:
+        return "hardware";
+    default:
+        return "unknown";
+    }
 }
 
 } // namespace screenshare
