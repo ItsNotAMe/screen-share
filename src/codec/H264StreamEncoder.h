@@ -2,7 +2,9 @@
 
 #include "capture/DesktopCapturer.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -54,13 +56,18 @@ public:
     [[nodiscard]] H264StreamEncoderBackend backend() const noexcept { return backend_; }
     [[nodiscard]] const std::string& encoderName() const noexcept { return encoderName_; }
     [[nodiscard]] H264StreamEncoderInputMode lastInputMode() const noexcept { return lastInputMode_; }
+    [[nodiscard]] size_t queuedInputCount() const noexcept { return queuedAsyncInputs_.size(); }
+    [[nodiscard]] uint64_t droppedInputFrames() const noexcept { return droppedAsyncInputs_; }
 
 private:
     std::vector<EncodedPacket> ReadAvailablePackets();
     std::vector<EncodedPacket> ReadSyncAvailablePackets();
     std::vector<EncodedPacket> ReadAsyncAvailablePackets();
     std::vector<EncodedPacket> PumpAsyncEvents();
-    std::vector<EncodedPacket> WaitForAsyncInput();
+    std::vector<EncodedPacket> QueueAsyncInput(Microsoft::WRL::ComPtr<IMFSample> sample);
+    std::vector<EncodedPacket> SubmitQueuedAsyncInputs();
+    std::vector<EncodedPacket> WaitForAsyncInputRequest();
+    std::vector<EncodedPacket> WaitForAsyncQueue();
     std::vector<EncodedPacket> WaitForAsyncDrain();
 
     H264StreamEncoderConfig config_{};
@@ -76,6 +83,9 @@ private:
     int64_t frameDuration100ns_ = 0;
     uint32_t pendingAsyncInputs_ = 0;
     uint32_t pendingAsyncOutputs_ = 0;
+    std::deque<Microsoft::WRL::ComPtr<IMFSample>> queuedAsyncInputs_;
+    size_t maxQueuedAsyncInputs_ = 8;
+    uint64_t droppedAsyncInputs_ = 0;
     bool asyncDrainComplete_ = false;
     bool comInitialized_ = false;
     bool mfStarted_ = false;

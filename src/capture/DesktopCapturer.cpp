@@ -44,7 +44,6 @@ struct WindowsGraphicsCaptureState {
     capture::GraphicsCaptureSession session{nullptr};
     direct3d11::IDirect3DDevice device{nullptr};
     graphics::SizeInt32 size{};
-    bool skippedInitialFrame = false;
 };
 
 namespace {
@@ -1021,7 +1020,7 @@ void DesktopCapturer::EnsureNv12Textures(int width, int height)
     chromaTargetDesc.Format = DXGI_FORMAT_R8G8_UNORM;
     chromaTargetDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
-    constexpr size_t texturePoolSize = 4;
+    constexpr size_t texturePoolSize = 48;
     nv12Textures_.resize(texturePoolSize);
     for (auto& textureSet : nv12Textures_) {
         ThrowIfFailed(
@@ -1196,15 +1195,6 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
         }
 
         if (captureFrame) {
-            if (!wgc_->skippedInitialFrame) {
-                wgc_->skippedInitialFrame = true;
-                if (timeout.count() == 0 || std::chrono::steady_clock::now() >= deadline) {
-                    return std::nullopt;
-                }
-                Sleep(1);
-                continue;
-            }
-
             const graphics::SizeInt32 contentSize = captureFrame.ContentSize();
             if (contentSize.Width != wgc_->size.Width || contentSize.Height != wgc_->size.Height) {
                 wgc_->size = contentSize;
