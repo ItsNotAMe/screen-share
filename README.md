@@ -103,6 +103,10 @@ Capture, stream-encode, and send H.264 packets over UDP:
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8
 ```
 
+UDP sending is paced by default using the selected stream bitrate, which spreads encoded frame
+fragments over time instead of dumping each frame as one burst. Add `--no-udp-pacing` when you want
+the older raw burst behavior for transport diagnostics.
+
 The sender automatically checks whether the captured display is running in Windows HDR mode. With
 the default WGC backend, HDR desktops are captured as scRGB float frames and converted back to SDR
 before encoding. If the preview or recording still looks too bright or too dim, tune the SDR white
@@ -197,19 +201,22 @@ hardware path also asks supported encoder MFTs for low-latency mode and no B-fra
 bounded queue so live capture can keep pacing even when the encoder has startup latency.
 
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
-small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
-complete encoded frames, and prints transport diagnostics. Add `--dump-h264 PATH` on the receiver
-to write the reassembled H.264 elementary stream for FFmpeg inspection. It does not decode or
-display video by default. Add `--decode-h264` to feed reassembled packets through the Microsoft
-H.264 decoder MFT and print decoded frame diagnostics. Add `--dump-decoded-bmp PATH` to save the
-latest decoded NV12 frame as a BMP snapshot through the CPU diagnostic converter. The raw `.h264`
-dump validates codec bytes and dimensions, but it does not store transport timing. Add `--preview`
-on the receiver to open a native Win32/Direct3D preview window; preview uploads decoded NV12 luma
-and chroma planes to GPU textures and converts to SDR Rec.709 in the pixel shader. Decoded preview
-frames pass through a small timestamp-ordered playout buffer before presentation, so network and
-decoder bursts are smoothed before they hit the window. Receiver stats report `preview_queue`,
-`preview_late_drops`, and `preview_overflow_drops` for that playout stage. When `--seconds` is
-omitted the preview runs until the window closes.
+small header. A background sender thread paces queued datagrams against the encoder bitrate by
+default, while the capture and encoder loop continues running at the requested FPS. Sender stats
+report `udp_queued`, `udp_pending`, `udp_peak_pending`, and `udp_dropped_frames` for that pacing
+queue. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles complete
+encoded frames, and prints transport diagnostics. Add `--dump-h264 PATH` on the receiver to write
+the reassembled H.264 elementary stream for FFmpeg inspection. It does not decode or display video
+by default. Add `--decode-h264` to feed reassembled packets through the Microsoft H.264 decoder MFT
+and print decoded frame diagnostics. Add `--dump-decoded-bmp PATH` to save the latest decoded NV12
+frame as a BMP snapshot through the CPU diagnostic converter. The raw `.h264` dump validates codec
+bytes and dimensions, but it does not store transport timing. Add `--preview` on the receiver to
+open a native Win32/Direct3D preview window; preview uploads decoded NV12 luma and chroma planes to
+GPU textures and converts to SDR Rec.709 in the pixel shader. Decoded preview frames pass through a
+small timestamp-ordered playout buffer before presentation, so network and decoder bursts are
+smoothed before they hit the window. Receiver stats report `preview_queue`, `preview_late_drops`,
+and `preview_overflow_drops` for that playout stage. When `--seconds` is omitted the preview runs
+until the window closes.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still

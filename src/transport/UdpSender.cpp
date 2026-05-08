@@ -6,6 +6,7 @@
 #include <ws2tcpip.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -60,8 +61,9 @@ void UdpSender::Open(const UdpSenderConfig& config)
     if (config.maxPayloadBytes == 0 || config.maxPayloadBytes > 60'000) {
         throw std::invalid_argument("UDP max payload must be between 1 and 60000 bytes");
     }
-
-    config_ = config;
+    if (config.maxQueuedDatagrams == 0) {
+        throw std::invalid_argument("UDP max queued datagrams must be non-zero");
+    }
 
     addrinfo hints{};
     hints.ai_family = AF_INET;
@@ -81,24 +83,55 @@ void UdpSender::Open(const UdpSenderConfig& config)
         throw std::runtime_error(WinsockErrorMessage("socket"));
     }
 
-    address_.resize(static_cast<size_t>(resolved->ai_addrlen));
-    std::memcpy(address_.data(), resolved->ai_addr, static_cast<size_t>(resolved->ai_addrlen));
+    {
+        std::lock_guard lock(mutex_);
+        address_.resize(static_cast<size_t>(resolved->ai_addrlen));
+        std::memcpy(address_.data(), resolved->ai_addr, static_cast<size_t>(resolved->ai_addrlen));
 
-    socket_ = static_cast<uintptr_t>(udpSocket);
-    addressLength_ = static_cast<int>(resolved->ai_addrlen);
+        socket_ = static_cast<uintptr_t>(udpSocket);
+        addressLength_ = static_cast<int>(resolved->ai_addrlen);
+        config_ = config;
+        stats_ = {};
+        frameId_ = 0;
+        queue_.clear();
+        nextSendAt_ = Clock::now();
+        workerError_.clear();
+        stopWorker_ = false;
+        datagramInFlight_ = false;
+    }
 
     freeaddrinfo(resolved);
+    worker_ = std::thread(&UdpSender::WorkerLoop, this);
 }
 
 void UdpSender::Close()
 {
+    if (worker_.joinable()) {
+        {
+            std::lock_guard lock(mutex_);
+            stopWorker_ = true;
+            queue_.clear();
+            UpdatePendingStatsLocked();
+        }
+        queueChanged_.notify_all();
+        queueDrained_.notify_all();
+        worker_.join();
+    }
+
     if (socket_ != 0) {
         closesocket(AsSocket(socket_));
         socket_ = 0;
     }
 
-    address_.clear();
-    addressLength_ = 0;
+    {
+        std::lock_guard lock(mutex_);
+        address_.clear();
+        addressLength_ = 0;
+        workerError_.clear();
+        stopWorker_ = false;
+        datagramInFlight_ = false;
+        UpdatePendingStatsLocked();
+    }
 }
 
 void UdpSender::SendFrame(const EncodedPacket& packet)
@@ -126,17 +159,56 @@ void UdpSender::SendFrame(const EncodedPacket& packet)
         throw std::runtime_error("Encoded frame is too large for UDP fragmentation limit");
     }
 
+    uint64_t frameId = 0;
+    {
+        std::lock_guard lock(mutex_);
+        CheckWorkerErrorLocked();
+        frameId = frameId_++;
+    }
+
     const auto fragmentCount = static_cast<uint16_t>(fragmentCount32);
     const auto* data = packet.bytes.data();
+    std::vector<PendingDatagram> datagrams;
+    datagrams.reserve(fragmentCount);
     for (uint16_t fragmentIndex = 0; fragmentIndex < fragmentCount; ++fragmentIndex) {
         const uint32_t offset = static_cast<uint32_t>(fragmentIndex) * maxPayload;
         const uint32_t payloadBytes = std::min(maxPayload, frameBytes - offset);
-        SendDatagram(data + offset, payloadBytes, offset, fragmentIndex, fragmentCount, packet);
+        datagrams.push_back(PendingDatagram{
+            BuildDatagram(data + offset, payloadBytes, offset, fragmentIndex, fragmentCount, frameId, packet),
+            {},
+        });
     }
 
-    ++frameId_;
-    ++stats_.framesSent;
-    stats_.payloadBytesSent += frameBytes;
+    {
+        std::lock_guard lock(mutex_);
+        CheckWorkerErrorLocked();
+
+        if (queue_.size() + datagrams.size() > config_.maxQueuedDatagrams) {
+            ++stats_.framesDropped;
+            stats_.datagramsDropped += datagrams.size();
+            UpdatePendingStatsLocked();
+            return;
+        }
+
+        const auto now = Clock::now();
+        if (!config_.pacingEnabled || config_.pacingBitrate == 0 || nextSendAt_ < now) {
+            nextSendAt_ = now;
+        }
+
+        for (auto& datagram : datagrams) {
+            datagram.sendAt = config_.pacingEnabled ? nextSendAt_ : now;
+            if (config_.pacingEnabled) {
+                nextSendAt_ += PacingDelayForBytes(datagram.bytes.size());
+            }
+            queue_.push_back(std::move(datagram));
+        }
+
+        ++stats_.framesSent;
+        stats_.datagramsQueued += datagrams.size();
+        stats_.payloadBytesSent += frameBytes;
+        UpdatePendingStatsLocked();
+    }
+    queueChanged_.notify_one();
 }
 
 bool UdpSender::isOpen() const noexcept
@@ -144,19 +216,38 @@ bool UdpSender::isOpen() const noexcept
     return socket_ != 0 && !address_.empty();
 }
 
-void UdpSender::SendDatagram(
+UdpSenderStats UdpSender::stats() const
+{
+    std::lock_guard lock(mutex_);
+    UdpSenderStats snapshot = stats_;
+    snapshot.pendingDatagrams =
+        static_cast<uint64_t>(queue_.size()) + (datagramInFlight_ ? 1ULL : 0ULL);
+    return snapshot;
+}
+
+void UdpSender::Flush()
+{
+    std::unique_lock lock(mutex_);
+    queueDrained_.wait(lock, [&] {
+        return !workerError_.empty() || (queue_.empty() && !datagramInFlight_);
+    });
+    CheckWorkerErrorLocked();
+}
+
+std::vector<std::byte> UdpSender::BuildDatagram(
     const std::byte* payload,
     uint32_t payloadBytes,
     uint32_t fragmentOffset,
     uint16_t fragmentIndex,
     uint16_t fragmentCount,
+    uint64_t frameId,
     const EncodedPacket& packet)
 {
     udp_protocol::PacketHeader header;
     header.magic = udp_protocol::ToNetwork32(udp_protocol::PacketMagic);
     header.version = udp_protocol::ToNetwork16(udp_protocol::PacketVersion);
     header.headerBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(sizeof(udp_protocol::PacketHeader)));
-    header.frameId = udp_protocol::ToNetwork64(frameId_);
+    header.frameId = udp_protocol::ToNetwork64(frameId);
     header.timestamp100ns = udp_protocol::ToNetwork64(static_cast<uint64_t>(packet.timestamp100ns));
     header.frameBytes = udp_protocol::ToNetwork32(static_cast<uint32_t>(packet.bytes.size()));
     header.fragmentOffset = udp_protocol::ToNetwork32(fragmentOffset);
@@ -168,6 +259,64 @@ void UdpSender::SendDatagram(
     std::memcpy(datagram.data(), &header, sizeof(header));
     std::memcpy(datagram.data() + sizeof(header), payload, payloadBytes);
 
+    return datagram;
+}
+
+void UdpSender::WorkerLoop()
+{
+    for (;;) {
+        std::vector<std::byte> datagram;
+        {
+            std::unique_lock lock(mutex_);
+            queueChanged_.wait(lock, [&] {
+                return stopWorker_ || !workerError_.empty() || !queue_.empty();
+            });
+
+            if ((stopWorker_ || !workerError_.empty()) && queue_.empty()) {
+                break;
+            }
+
+            const auto now = Clock::now();
+            const auto sendAt = queue_.front().sendAt;
+            if (sendAt > now) {
+                queueChanged_.wait_until(lock, sendAt, [&] {
+                    return stopWorker_ || !workerError_.empty();
+                });
+                continue;
+            }
+
+            datagram = std::move(queue_.front().bytes);
+            queue_.pop_front();
+            datagramInFlight_ = true;
+            UpdatePendingStatsLocked();
+        }
+
+        try {
+            SendDatagramBytes(datagram);
+        } catch (const std::exception& error) {
+            std::lock_guard lock(mutex_);
+            workerError_ = error.what();
+            queue_.clear();
+            datagramInFlight_ = false;
+            UpdatePendingStatsLocked();
+            queueDrained_.notify_all();
+            queueChanged_.notify_all();
+            break;
+        }
+
+        {
+            std::lock_guard lock(mutex_);
+            datagramInFlight_ = false;
+            UpdatePendingStatsLocked();
+            if (queue_.empty()) {
+                queueDrained_.notify_all();
+            }
+        }
+    }
+}
+
+void UdpSender::SendDatagramBytes(const std::vector<std::byte>& datagram)
+{
     const int sent = sendto(
         AsSocket(socket_),
         reinterpret_cast<const char*>(datagram.data()),
@@ -180,8 +329,34 @@ void UdpSender::SendDatagram(
         throw std::runtime_error(WinsockErrorMessage("sendto"));
     }
 
+    std::lock_guard lock(mutex_);
     ++stats_.datagramsSent;
     stats_.wireBytesSent += static_cast<uint64_t>(sent);
+}
+
+UdpSender::Clock::duration UdpSender::PacingDelayForBytes(uint64_t wireBytes) const
+{
+    if (!config_.pacingEnabled || config_.pacingBitrate == 0) {
+        return Clock::duration::zero();
+    }
+
+    const double seconds =
+        static_cast<double>(wireBytes) * 8.0 / static_cast<double>(config_.pacingBitrate);
+    return std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
+}
+
+void UdpSender::CheckWorkerErrorLocked() const
+{
+    if (!workerError_.empty()) {
+        throw std::runtime_error("UDP sender worker failed: " + workerError_);
+    }
+}
+
+void UdpSender::UpdatePendingStatsLocked()
+{
+    stats_.pendingDatagrams =
+        static_cast<uint64_t>(queue_.size()) + (datagramInFlight_ ? 1ULL : 0ULL);
+    stats_.peakPendingDatagrams = std::max(stats_.peakPendingDatagrams, stats_.pendingDatagrams);
 }
 
 UdpSenderConfig ParseUdpSenderTarget(const std::string& target)
