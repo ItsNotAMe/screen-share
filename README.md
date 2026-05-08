@@ -138,6 +138,10 @@ Stress the receiver with simulated jitter or datagram loss:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15 --simulate-loss-percent 1
 ```
 
+When `--decode-h264` or `--preview` is enabled, the receiver watches for gaps in the ordered H.264
+packet stream. If loss leaves a missing frame behind, it skips damaged backlog at the next IDR
+keyframe and resumes decode from that recovery point.
+
 Listen, reassemble, and dump the received H.264 elementary stream for inspection:
 
 ```powershell
@@ -221,11 +225,12 @@ queue. The `--udp-recv` path binds a local UDP port, validates those datagrams, 
 encoded frames, and prints transport diagnostics. Receiver-side simulation flags can delay incoming
 datagrams with `--simulate-jitter-ms MS` or drop a percentage with `--simulate-loss-percent P`.
 Simulation stats report `simulated_dropped`, `simulated_delayed`, and `simulated_delay_pending`.
-Jitter simulation is useful with `--preview` for testing the playout buffer. Loss simulation is most
-useful with transport diagnostics right now; decoder recovery after missing H.264 frames is still a
-future step. Add `--dump-h264 PATH` on the receiver to write the reassembled H.264 elementary stream
-for FFmpeg inspection. It does not decode or display video by default. Add `--decode-h264` to feed
-reassembled packets through the Microsoft H.264 decoder MFT and print decoded frame diagnostics. Add
+Jitter simulation is useful with `--preview` for testing the playout buffer. Loss simulation is
+useful with `--decode-h264` or `--preview` for testing keyframe recovery; receiver stats report
+`h264_decode_resyncs`, `h264_decode_restarts`, and `h264_decode_skipped_packets`. Add
+`--dump-h264 PATH` on the receiver to write the reassembled H.264 elementary stream for FFmpeg
+inspection. It does not decode or display video by default. Add `--decode-h264` to feed reassembled
+packets through the Microsoft H.264 decoder MFT and print decoded frame diagnostics. Add
 `--dump-decoded-bmp PATH` to save the latest decoded NV12 frame as a BMP snapshot through the CPU
 diagnostic converter. The raw `.h264` dump validates codec bytes and dimensions, but it does not
 store transport timing. Add `--preview` on the receiver to open a native Win32/Direct3D preview
@@ -250,9 +255,9 @@ Windows Graphics Capture
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
  -> H.264 hardware encoder capability probe
- -> default auto stream encoder with queued direct D3D11 hardware input and software fallback
+ -> default auto stream encoder with periodic keyframes, queued direct D3D11 hardware input, and software fallback
  -> UDP sender/receiver transport diagnostics
- -> Media Foundation H.264 decode validation
+ -> Media Foundation H.264 decode validation with keyframe-aware recovery
  -> paced native Direct3D receiver preview with GPU NV12 conversion
  -> future network adaptation and renderer optimizations
 ```
