@@ -4,6 +4,7 @@
 
 #include <Windows.h>
 #include <codecapi.h>
+#include <d3d10.h>
 #include <d3d11.h>
 #include <initguid.h>
 #include <mfapi.h>
@@ -141,30 +142,40 @@ void ConfigureEncoderTypes(
     ThrowIfFailed(transform->SetInputType(inputStreamId, inputType.Get(), 0), "IMFTransform::SetInputType");
 }
 
-Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> CreateDxgiDeviceManager()
+Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> CreateDxgiDeviceManager(ID3D11Device* preferredDevice)
 {
     Microsoft::WRL::ComPtr<ID3D11Device> device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
 
-    static constexpr D3D_FEATURE_LEVEL featureLevels[] = {
-        D3D_FEATURE_LEVEL_11_1,
-        D3D_FEATURE_LEVEL_11_0,
-    };
+    if (preferredDevice != nullptr) {
+        device = preferredDevice;
+        preferredDevice->GetImmediateContext(&context);
+    } else {
+        static constexpr D3D_FEATURE_LEVEL featureLevels[] = {
+            D3D_FEATURE_LEVEL_11_1,
+            D3D_FEATURE_LEVEL_11_0,
+        };
 
-    D3D_FEATURE_LEVEL selectedFeatureLevel{};
-    ThrowIfFailed(
-        D3D11CreateDevice(
-            nullptr,
-            D3D_DRIVER_TYPE_HARDWARE,
-            nullptr,
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            featureLevels,
-            ARRAYSIZE(featureLevels),
-            D3D11_SDK_VERSION,
-            &device,
-            &selectedFeatureLevel,
-            &context),
-        "D3D11CreateDevice(stream encoder)");
+        D3D_FEATURE_LEVEL selectedFeatureLevel{};
+        ThrowIfFailed(
+            D3D11CreateDevice(
+                nullptr,
+                D3D_DRIVER_TYPE_HARDWARE,
+                nullptr,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                featureLevels,
+                ARRAYSIZE(featureLevels),
+                D3D11_SDK_VERSION,
+                &device,
+                &selectedFeatureLevel,
+                &context),
+            "D3D11CreateDevice(stream encoder)");
+    }
+
+    Microsoft::WRL::ComPtr<ID3D10Multithread> multithread;
+    if (SUCCEEDED(device.As(&multithread)) && multithread) {
+        multithread->SetMultithreadProtected(TRUE);
+    }
 
     UINT resetToken = 0;
     Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> deviceManager;
@@ -231,7 +242,7 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
     }
     ThrowIfFailed(enumResult, "MFTEnumEx(hardware H.264 encoders)");
 
-    auto deviceManager = CreateDxgiDeviceManager();
+    auto deviceManager = CreateDxgiDeviceManager(config.d3dDevice.Get());
     std::string failures;
 
     for (UINT32 i = 0; i < activates.count(); ++i) {
@@ -352,6 +363,95 @@ EncodedPacket PacketFromOutputSample(IMFSample* sample)
     return packet;
 }
 
+Microsoft::WRL::ComPtr<IMFSample> CreateInputSampleFromBuffer(
+    IMFMediaBuffer* buffer,
+    int64_t sampleTime,
+    int64_t sampleDuration)
+{
+    Microsoft::WRL::ComPtr<IMFSample> sample;
+    ThrowIfFailed(MFCreateSample(&sample), "MFCreateSample(input)");
+    ThrowIfFailed(sample->AddBuffer(buffer), "IMFSample::AddBuffer(input)");
+    ThrowIfFailed(sample->SetSampleTime(sampleTime), "IMFSample::SetSampleTime(input)");
+    ThrowIfFailed(sample->SetSampleDuration(sampleDuration), "IMFSample::SetSampleDuration(input)");
+    return sample;
+}
+
+Microsoft::WRL::ComPtr<IMFSample> CreateInputSampleFromDxgiTexture(
+    const CapturedFrame& frame,
+    int64_t sampleTime,
+    int64_t sampleDuration)
+{
+    if (!frame.nv12Texture) {
+        throw std::runtime_error("Direct3D H.264 input requested but captured frame has no NV12 texture");
+    }
+
+    D3D11_TEXTURE2D_DESC textureDesc{};
+    frame.nv12Texture->GetDesc(&textureDesc);
+    if (textureDesc.Format != DXGI_FORMAT_NV12 ||
+        textureDesc.Width != static_cast<UINT>(frame.width) ||
+        textureDesc.Height != static_cast<UINT>(frame.height)) {
+        throw std::runtime_error("Captured NV12 texture does not match stream encoder configuration");
+    }
+
+    Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
+    ThrowIfFailed(
+        MFCreateDXGISurfaceBuffer(
+            __uuidof(ID3D11Texture2D),
+            frame.nv12Texture.Get(),
+            frame.nv12TextureSubresource,
+            FALSE,
+            &buffer),
+        "MFCreateDXGISurfaceBuffer(input)");
+
+    DWORD maxLength = 0;
+    if (SUCCEEDED(buffer->GetMaxLength(&maxLength)) && maxLength > 0) {
+        ThrowIfFailed(buffer->SetCurrentLength(maxLength), "IMFMediaBuffer::SetCurrentLength(DXGI input)");
+    }
+
+    return CreateInputSampleFromBuffer(buffer.Get(), sampleTime, sampleDuration);
+}
+
+Microsoft::WRL::ComPtr<IMFSample> CreateInputSampleFromMemory(
+    const CapturedFrame& frame,
+    int64_t sampleTime,
+    int64_t sampleDuration)
+{
+    std::vector<std::byte> convertedNv12;
+    const std::byte* nv12Data = nullptr;
+    size_t nv12Bytes = 0;
+    const size_t expectedNv12Bytes = static_cast<size_t>(frame.width) * frame.height * 3 / 2;
+    if (!frame.nv12Pixels.empty()) {
+        if (frame.nv12Pixels.size() != expectedNv12Bytes) {
+            throw std::runtime_error("GPU NV12 frame size does not match stream encoder configuration");
+        }
+        nv12Data = frame.nv12Pixels.data();
+        nv12Bytes = frame.nv12Pixels.size();
+    } else {
+        if (!IsBgra8Format(frame.format) || frame.pixels.empty()) {
+            throw std::runtime_error(
+                "H264StreamEncoder memory input expects BGRA8 pixels or NV12 bytes, got DXGI format " +
+                std::to_string(static_cast<int>(frame.format)));
+        }
+        convertedNv12 = ConvertBgraToNv12(frame.pixels.data(), frame.rowPitch, frame.width, frame.height);
+        nv12Data = convertedNv12.data();
+        nv12Bytes = convertedNv12.size();
+    }
+    const DWORD bufferSize = static_cast<DWORD>(nv12Bytes);
+
+    Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
+    ThrowIfFailed(MFCreateMemoryBuffer(bufferSize, &buffer), "MFCreateMemoryBuffer(input)");
+
+    BYTE* destination = nullptr;
+    DWORD maxLength = 0;
+    DWORD currentLength = 0;
+    ThrowIfFailed(buffer->Lock(&destination, &maxLength, &currentLength), "IMFMediaBuffer::Lock(input)");
+    std::memcpy(destination, nv12Data, nv12Bytes);
+    ThrowIfFailed(buffer->Unlock(), "IMFMediaBuffer::Unlock(input)");
+    ThrowIfFailed(buffer->SetCurrentLength(bufferSize), "IMFMediaBuffer::SetCurrentLength(input)");
+
+    return CreateInputSampleFromBuffer(buffer.Get(), sampleTime, sampleDuration);
+}
+
 } // namespace
 
 H264StreamEncoder::H264StreamEncoder()
@@ -399,6 +499,10 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
 
     config_ = config;
     backend_ = config.backend;
+    lastInputMode_ =
+        (backend_ == H264StreamEncoderBackend::Hardware && config.d3dDevice) ?
+        H264StreamEncoderInputMode::Direct3D :
+        H264StreamEncoderInputMode::Memory;
     encoderName_.clear();
     eventGenerator_.Reset();
     dxgiDeviceManager_.Reset();
@@ -438,44 +542,15 @@ std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& f
     if (frame.width != config_.width || frame.height != config_.height) {
         throw std::runtime_error("Encoded frame size does not match stream encoder configuration");
     }
-    std::vector<std::byte> convertedNv12;
-    const std::byte* nv12Data = nullptr;
-    size_t nv12Bytes = 0;
-    const size_t expectedNv12Bytes = static_cast<size_t>(frame.width) * frame.height * 3 / 2;
-    if (!frame.nv12Pixels.empty()) {
-        if (frame.nv12Pixels.size() != expectedNv12Bytes) {
-            throw std::runtime_error("GPU NV12 frame size does not match stream encoder configuration");
-        }
-        nv12Data = frame.nv12Pixels.data();
-        nv12Bytes = frame.nv12Pixels.size();
-    } else {
-        if (!IsBgra8Format(frame.format)) {
-            throw std::runtime_error(
-                "H264StreamEncoder currently expects BGRA8 or NV12 frame data, got DXGI format " +
-                std::to_string(static_cast<int>(frame.format)));
-        }
-        convertedNv12 = ConvertBgraToNv12(frame.pixels.data(), frame.rowPitch, frame.width, frame.height);
-        nv12Data = convertedNv12.data();
-        nv12Bytes = convertedNv12.size();
-    }
-    const DWORD bufferSize = static_cast<DWORD>(nv12Bytes);
-
-    Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
-    ThrowIfFailed(MFCreateMemoryBuffer(bufferSize, &buffer), "MFCreateMemoryBuffer(input)");
-
-    BYTE* destination = nullptr;
-    DWORD maxLength = 0;
-    DWORD currentLength = 0;
-    ThrowIfFailed(buffer->Lock(&destination, &maxLength, &currentLength), "IMFMediaBuffer::Lock(input)");
-    std::memcpy(destination, nv12Data, nv12Bytes);
-    ThrowIfFailed(buffer->Unlock(), "IMFMediaBuffer::Unlock(input)");
-    ThrowIfFailed(buffer->SetCurrentLength(bufferSize), "IMFMediaBuffer::SetCurrentLength(input)");
-
-    Microsoft::WRL::ComPtr<IMFSample> sample;
-    ThrowIfFailed(MFCreateSample(&sample), "MFCreateSample(input)");
-    ThrowIfFailed(sample->AddBuffer(buffer.Get()), "IMFSample::AddBuffer(input)");
-    ThrowIfFailed(sample->SetSampleTime(frameIndex_ * frameDuration100ns_), "IMFSample::SetSampleTime(input)");
-    ThrowIfFailed(sample->SetSampleDuration(frameDuration100ns_), "IMFSample::SetSampleDuration(input)");
+    const int64_t sampleTime = frameIndex_ * frameDuration100ns_;
+    const bool useDirect3dInput =
+        backend_ == H264StreamEncoderBackend::Hardware &&
+        config_.d3dDevice != nullptr &&
+        frame.nv12Texture != nullptr;
+    Microsoft::WRL::ComPtr<IMFSample> sample = useDirect3dInput ?
+        CreateInputSampleFromDxgiTexture(frame, sampleTime, frameDuration100ns_) :
+        CreateInputSampleFromMemory(frame, sampleTime, frameDuration100ns_);
+    lastInputMode_ = useDirect3dInput ? H264StreamEncoderInputMode::Direct3D : H264StreamEncoderInputMode::Memory;
 
     if (backend_ == H264StreamEncoderBackend::Hardware) {
         auto packets = WaitForAsyncInput();
@@ -537,9 +612,11 @@ void H264StreamEncoder::Stop()
     eventGenerator_.Reset();
     transform_.Reset();
     dxgiDeviceManager_.Reset();
+    config_.d3dDevice.Reset();
     pendingAsyncInputs_ = 0;
     pendingAsyncOutputs_ = 0;
     asyncDrainComplete_ = false;
+    lastInputMode_ = H264StreamEncoderInputMode::Memory;
     encoderName_.clear();
 }
 
@@ -773,6 +850,18 @@ const char* H264StreamEncoderBackendName(H264StreamEncoderBackend backend)
         return "software";
     case H264StreamEncoderBackend::Hardware:
         return "hardware";
+    default:
+        return "unknown";
+    }
+}
+
+const char* H264StreamEncoderInputModeName(H264StreamEncoderInputMode inputMode)
+{
+    switch (inputMode) {
+    case H264StreamEncoderInputMode::Memory:
+        return "memory";
+    case H264StreamEncoderInputMode::Direct3D:
+        return "d3d11";
     default:
         return "unknown";
     }

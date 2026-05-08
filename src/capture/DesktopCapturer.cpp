@@ -327,12 +327,8 @@ void DesktopCapturer::Stop()
     scaleConstants_.Reset();
     nv12InputTexture_.Reset();
     nv12InputView_.Reset();
-    nv12LumaTexture_.Reset();
-    nv12ChromaTexture_.Reset();
-    nv12LumaStagingTexture_.Reset();
-    nv12ChromaStagingTexture_.Reset();
-    nv12LumaTarget_.Reset();
-    nv12ChromaTarget_.Reset();
+    nv12Textures_.clear();
+    nv12StagingTexture_.Reset();
     nv12VertexShader_.Reset();
     nv12LumaPixelShader_.Reset();
     nv12ChromaPixelShader_.Reset();
@@ -342,8 +338,9 @@ void DesktopCapturer::Stop()
     std::memset(&scaledDesc_, 0, sizeof(scaledDesc_));
     std::memset(&stagingDesc_, 0, sizeof(stagingDesc_));
     std::memset(&nv12InputDesc_, 0, sizeof(nv12InputDesc_));
-    std::memset(&nv12LumaDesc_, 0, sizeof(nv12LumaDesc_));
-    std::memset(&nv12ChromaDesc_, 0, sizeof(nv12ChromaDesc_));
+    std::memset(&nv12TextureDesc_, 0, sizeof(nv12TextureDesc_));
+    std::memset(&nv12StagingDesc_, 0, sizeof(nv12StagingDesc_));
+    nv12TextureCursor_ = 0;
     outputColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     outputHdrActive_ = false;
     lastColorConversionMode_ = 0;
@@ -995,63 +992,56 @@ void DesktopCapturer::EnsureNv12Textures(int width, int height)
         throw std::runtime_error("GPU NV12 conversion requires positive even output dimensions");
     }
 
-    if (nv12LumaTexture_ &&
-        nv12ChromaTexture_ &&
-        nv12LumaDesc_.Width == static_cast<UINT>(width) &&
-        nv12LumaDesc_.Height == static_cast<UINT>(height) &&
-        nv12ChromaDesc_.Width == static_cast<UINT>(width / 2) &&
-        nv12ChromaDesc_.Height == static_cast<UINT>(height / 2)) {
+    if (!nv12Textures_.empty() &&
+        nv12TextureDesc_.Width == static_cast<UINT>(width) &&
+        nv12TextureDesc_.Height == static_cast<UINT>(height) &&
+        nv12TextureDesc_.Format == DXGI_FORMAT_NV12) {
         return;
     }
 
-    nv12LumaTarget_.Reset();
-    nv12ChromaTarget_.Reset();
-    nv12LumaTexture_.Reset();
-    nv12ChromaTexture_.Reset();
-    nv12LumaStagingTexture_.Reset();
-    nv12ChromaStagingTexture_.Reset();
+    nv12Textures_.clear();
+    nv12StagingTexture_.Reset();
+    nv12TextureCursor_ = 0;
 
-    nv12LumaDesc_ = {};
-    nv12LumaDesc_.Width = static_cast<UINT>(width);
-    nv12LumaDesc_.Height = static_cast<UINT>(height);
-    nv12LumaDesc_.MipLevels = 1;
-    nv12LumaDesc_.ArraySize = 1;
-    nv12LumaDesc_.Format = DXGI_FORMAT_R8_UNORM;
-    nv12LumaDesc_.SampleDesc.Count = 1;
-    nv12LumaDesc_.Usage = D3D11_USAGE_DEFAULT;
-    nv12LumaDesc_.BindFlags = D3D11_BIND_RENDER_TARGET;
+    nv12TextureDesc_ = {};
+    nv12TextureDesc_.Width = static_cast<UINT>(width);
+    nv12TextureDesc_.Height = static_cast<UINT>(height);
+    nv12TextureDesc_.MipLevels = 1;
+    nv12TextureDesc_.ArraySize = 1;
+    nv12TextureDesc_.Format = DXGI_FORMAT_NV12;
+    nv12TextureDesc_.SampleDesc.Count = 1;
+    nv12TextureDesc_.Usage = D3D11_USAGE_DEFAULT;
+    nv12TextureDesc_.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 
-    nv12ChromaDesc_ = {};
-    nv12ChromaDesc_.Width = static_cast<UINT>(width / 2);
-    nv12ChromaDesc_.Height = static_cast<UINT>(height / 2);
-    nv12ChromaDesc_.MipLevels = 1;
-    nv12ChromaDesc_.ArraySize = 1;
-    nv12ChromaDesc_.Format = DXGI_FORMAT_R8G8_UNORM;
-    nv12ChromaDesc_.SampleDesc.Count = 1;
-    nv12ChromaDesc_.Usage = D3D11_USAGE_DEFAULT;
-    nv12ChromaDesc_.BindFlags = D3D11_BIND_RENDER_TARGET;
+    D3D11_RENDER_TARGET_VIEW_DESC lumaTargetDesc{};
+    lumaTargetDesc.Format = DXGI_FORMAT_R8_UNORM;
+    lumaTargetDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
-    ThrowIfFailed(device_->CreateTexture2D(&nv12LumaDesc_, nullptr, &nv12LumaTexture_), "ID3D11Device::CreateTexture2D(NV12 luma)");
-    ThrowIfFailed(device_->CreateTexture2D(&nv12ChromaDesc_, nullptr, &nv12ChromaTexture_), "ID3D11Device::CreateTexture2D(NV12 chroma)");
+    D3D11_RENDER_TARGET_VIEW_DESC chromaTargetDesc{};
+    chromaTargetDesc.Format = DXGI_FORMAT_R8G8_UNORM;
+    chromaTargetDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
-    ThrowIfFailed(device_->CreateRenderTargetView(nv12LumaTexture_.Get(), nullptr, &nv12LumaTarget_), "ID3D11Device::CreateRenderTargetView(NV12 luma)");
-    ThrowIfFailed(device_->CreateRenderTargetView(nv12ChromaTexture_.Get(), nullptr, &nv12ChromaTarget_), "ID3D11Device::CreateRenderTargetView(NV12 chroma)");
+    constexpr size_t texturePoolSize = 4;
+    nv12Textures_.resize(texturePoolSize);
+    for (auto& textureSet : nv12Textures_) {
+        ThrowIfFailed(
+            device_->CreateTexture2D(&nv12TextureDesc_, nullptr, &textureSet.texture),
+            "ID3D11Device::CreateTexture2D(NV12)");
+        ThrowIfFailed(
+            device_->CreateRenderTargetView(textureSet.texture.Get(), &lumaTargetDesc, &textureSet.lumaTarget),
+            "ID3D11Device::CreateRenderTargetView(NV12 luma plane)");
+        ThrowIfFailed(
+            device_->CreateRenderTargetView(textureSet.texture.Get(), &chromaTargetDesc, &textureSet.chromaTarget),
+            "ID3D11Device::CreateRenderTargetView(NV12 chroma plane)");
+    }
 
-    D3D11_TEXTURE2D_DESC lumaStagingDesc = nv12LumaDesc_;
-    lumaStagingDesc.Usage = D3D11_USAGE_STAGING;
-    lumaStagingDesc.BindFlags = 0;
-    lumaStagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    nv12StagingDesc_ = nv12TextureDesc_;
+    nv12StagingDesc_.Usage = D3D11_USAGE_STAGING;
+    nv12StagingDesc_.BindFlags = 0;
+    nv12StagingDesc_.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     ThrowIfFailed(
-        device_->CreateTexture2D(&lumaStagingDesc, nullptr, &nv12LumaStagingTexture_),
-        "ID3D11Device::CreateTexture2D(NV12 luma staging)");
-
-    D3D11_TEXTURE2D_DESC chromaStagingDesc = nv12ChromaDesc_;
-    chromaStagingDesc.Usage = D3D11_USAGE_STAGING;
-    chromaStagingDesc.BindFlags = 0;
-    chromaStagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    ThrowIfFailed(
-        device_->CreateTexture2D(&chromaStagingDesc, nullptr, &nv12ChromaStagingTexture_),
-        "ID3D11Device::CreateTexture2D(NV12 chroma staging)");
+        device_->CreateTexture2D(&nv12StagingDesc_, nullptr, &nv12StagingTexture_),
+        "ID3D11Device::CreateTexture2D(NV12 staging)");
 }
 
 void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D11_TEXTURE2D_DESC& bgraDesc, CapturedFrame& frame)
@@ -1065,6 +1055,12 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
     EnsureNv12Pipeline();
     EnsureNv12InputTexture(bgraDesc);
     EnsureNv12Textures(width, height);
+
+    if (nv12Textures_.empty()) {
+        throw std::runtime_error("GPU NV12 texture pool is not available");
+    }
+    auto& textureSet = nv12Textures_[nv12TextureCursor_];
+    nv12TextureCursor_ = (nv12TextureCursor_ + 1) % nv12Textures_.size();
 
     context_->CopyResource(nv12InputTexture_.Get(), bgraTexture);
 
@@ -1081,8 +1077,8 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
     chromaViewport.MaxDepth = 1.0f;
 
     ID3D11ShaderResourceView* shaderResources[] = {nv12InputView_.Get()};
-    ID3D11RenderTargetView* lumaTargets[] = {nv12LumaTarget_.Get()};
-    ID3D11RenderTargetView* chromaTargets[] = {nv12ChromaTarget_.Get()};
+    ID3D11RenderTargetView* lumaTargets[] = {textureSet.lumaTarget.Get()};
+    ID3D11RenderTargetView* chromaTargets[] = {textureSet.chromaTarget.Get()};
 
     context_->IASetInputLayout(nullptr);
     context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -1104,36 +1100,40 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
     context_->PSSetShaderResources(0, 1, nullShaderResources);
     context_->OMSetRenderTargets(1, nullRenderTargets, nullptr);
 
-    context_->CopyResource(nv12LumaStagingTexture_.Get(), nv12LumaTexture_.Get());
-    context_->CopyResource(nv12ChromaStagingTexture_.Get(), nv12ChromaTexture_.Get());
+    frame.d3dDevice = device_;
+    frame.nv12Texture = textureSet.texture;
+    frame.nv12TextureSubresource = 0;
+    frame.nv12GeneratedOnGpu = true;
+
+    if (!config_.includeNv12Readback) {
+        context_->Flush();
+        return;
+    }
+
+    context_->CopyResource(nv12StagingTexture_.Get(), textureSet.texture.Get());
 
     frame.nv12Pixels.resize(static_cast<size_t>(width) * height * 3 / 2);
     auto* nv12 = reinterpret_cast<uint8_t*>(frame.nv12Pixels.data());
 
-    D3D11_MAPPED_SUBRESOURCE mappedLuma{};
-    ThrowIfFailed(context_->Map(nv12LumaStagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mappedLuma), "ID3D11DeviceContext::Map(NV12 luma)");
-    const auto* lumaSource = static_cast<const uint8_t*>(mappedLuma.pData);
+    D3D11_MAPPED_SUBRESOURCE mappedNv12{};
+    ThrowIfFailed(context_->Map(nv12StagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mappedNv12), "ID3D11DeviceContext::Map(NV12)");
+    const auto* lumaSource = static_cast<const uint8_t*>(mappedNv12.pData);
     for (int y = 0; y < height; ++y) {
         std::memcpy(
             nv12 + static_cast<size_t>(width) * y,
-            lumaSource + static_cast<size_t>(mappedLuma.RowPitch) * y,
+            lumaSource + static_cast<size_t>(mappedNv12.RowPitch) * y,
             static_cast<size_t>(width));
     }
-    context_->Unmap(nv12LumaStagingTexture_.Get(), 0);
 
-    D3D11_MAPPED_SUBRESOURCE mappedChroma{};
-    ThrowIfFailed(context_->Map(nv12ChromaStagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mappedChroma), "ID3D11DeviceContext::Map(NV12 chroma)");
-    const auto* chromaSource = static_cast<const uint8_t*>(mappedChroma.pData);
+    const auto* chromaSource = lumaSource + static_cast<size_t>(mappedNv12.RowPitch) * height;
     auto* chromaDestination = nv12 + static_cast<size_t>(width) * height;
     for (int y = 0; y < height / 2; ++y) {
         std::memcpy(
             chromaDestination + static_cast<size_t>(width) * y,
-            chromaSource + static_cast<size_t>(mappedChroma.RowPitch) * y,
+            chromaSource + static_cast<size_t>(mappedNv12.RowPitch) * y,
             static_cast<size_t>(width));
     }
-    context_->Unmap(nv12ChromaStagingTexture_.Get(), 0);
-
-    frame.nv12GeneratedOnGpu = true;
+    context_->Unmap(nv12StagingTexture_.Get(), 0);
 }
 
 std::optional<CapturedFrame> DesktopCapturer::ReadTextureFrame(
@@ -1159,6 +1159,11 @@ std::optional<CapturedFrame> DesktopCapturer::ReadTextureFrame(
     frame.lastPresentTimeQpc = presentTimeQpc;
 
     GenerateNv12Frame(outputTexture, outputDesc, frame);
+
+    if (!config_.includeBgraReadback) {
+        frame.rowPitch = static_cast<uint32_t>(frame.width) * 4;
+        return frame;
+    }
 
     EnsureStagingTexture(outputDesc);
     context_->CopyResource(stagingTexture_.Get(), outputTexture);
