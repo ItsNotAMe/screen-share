@@ -76,6 +76,12 @@ Capture and run the streamable H.264 packet encoder:
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --bitrate-mbps 8
 ```
 
+Opt into the asynchronous hardware H.264 encoder path after checking available encoders:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --stream-encode --stream-encoder hardware --bitrate-mbps 8
+```
+
 List Media Foundation H.264 encoders and probe whether they accept the app's NV12/H.264 stream
 types for a chosen output shape:
 
@@ -172,8 +178,9 @@ frames back to the CPU and feeds the encoder through system-memory samples. Use 
 for that validation path until direct GPU-texture hardware encoding is added. Use
 `--list-h264-encoders` to inspect available Media Foundation encoders; hardware MFTs are reported
 with async/D3D11-manager support and whether they accept the app's current NV12 input and H.264
-output media types. The live stream path still uses the stable software encoder MFT until the
-hardware path handles asynchronous MFT events and D3D samples directly.
+output media types. The stream path uses the stable software encoder MFT by default. Add
+`--stream-encoder hardware` to try a hardware MFT through its asynchronous event model. This is still
+fed by the current CPU-visible NV12 payload; direct D3D texture samples are the next optimization.
 
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles
@@ -201,10 +208,11 @@ Windows Graphics Capture
  -> Media Foundation H.264 file encode for validation
  -> Microsoft H.264 MFT packet encode for transport validation
  -> H.264 hardware encoder capability probe
+ -> optional asynchronous hardware H.264 stream encoder
  -> UDP sender/receiver transport diagnostics
  -> Media Foundation H.264 decode validation
  -> native Direct3D receiver preview
- -> future real-time hardware encode path
+ -> future direct D3D texture hardware encode path
  -> future GPU-side color conversion and renderer optimizations
 ```
 An app to share your screen with others
