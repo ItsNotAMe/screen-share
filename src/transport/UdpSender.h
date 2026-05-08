@@ -2,9 +2,14 @@
 
 #include "codec/H264StreamEncoder.h"
 
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace screenshare {
@@ -13,13 +18,21 @@ struct UdpSenderConfig {
     std::string host;
     uint16_t port = 0;
     uint32_t maxPayloadBytes = 1'200;
+    uint32_t pacingBitrate = 0;
+    uint32_t maxQueuedDatagrams = 4'096;
+    bool pacingEnabled = true;
 };
 
 struct UdpSenderStats {
     uint64_t framesSent = 0;
+    uint64_t framesDropped = 0;
+    uint64_t datagramsQueued = 0;
     uint64_t datagramsSent = 0;
+    uint64_t datagramsDropped = 0;
     uint64_t payloadBytesSent = 0;
     uint64_t wireBytesSent = 0;
+    uint64_t pendingDatagrams = 0;
+    uint64_t peakPendingDatagrams = 0;
 };
 
 class UdpSender {
@@ -33,18 +46,32 @@ public:
     void Open(const UdpSenderConfig& config);
     void Close();
     void SendFrame(const EncodedPacket& packet);
+    void Flush();
 
     [[nodiscard]] bool isOpen() const noexcept;
-    [[nodiscard]] const UdpSenderStats& stats() const noexcept { return stats_; }
+    [[nodiscard]] UdpSenderStats stats() const;
 
 private:
-    void SendDatagram(
+    using Clock = std::chrono::steady_clock;
+
+    struct PendingDatagram {
+        std::vector<std::byte> bytes;
+        Clock::time_point sendAt{};
+    };
+
+    std::vector<std::byte> BuildDatagram(
         const std::byte* payload,
         uint32_t payloadBytes,
         uint32_t fragmentOffset,
         uint16_t fragmentIndex,
         uint16_t fragmentCount,
+        uint64_t frameId,
         const EncodedPacket& packet);
+    void WorkerLoop();
+    void SendDatagramBytes(const std::vector<std::byte>& datagram);
+    [[nodiscard]] Clock::duration PacingDelayForBytes(uint64_t wireBytes) const;
+    void CheckWorkerErrorLocked() const;
+    void UpdatePendingStatsLocked();
 
     uintptr_t socket_ = 0;
     std::vector<std::byte> address_;
@@ -52,6 +79,15 @@ private:
     UdpSenderConfig config_{};
     UdpSenderStats stats_{};
     uint64_t frameId_ = 0;
+    mutable std::mutex mutex_;
+    std::condition_variable queueChanged_;
+    std::condition_variable queueDrained_;
+    std::deque<PendingDatagram> queue_;
+    std::thread worker_;
+    Clock::time_point nextSendAt_{};
+    std::string workerError_;
+    bool stopWorker_ = false;
+    bool datagramInFlight_ = false;
     bool winsockStarted_ = false;
 };
 

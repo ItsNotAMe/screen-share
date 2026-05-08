@@ -49,6 +49,8 @@ struct Options {
     bool streamEncoderPreferenceProvided = false;
     StreamEncoderPreference streamEncoderPreference = StreamEncoderPreference::Auto;
     std::string udpSendTarget;
+    bool udpPacing = true;
+    bool udpPacingOptionProvided = false;
     bool wgcBorderRequired = false;
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
@@ -71,7 +73,7 @@ void PrintHelp()
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
-        << "              [--udp-send HOST:PORT]\n"
+        << "              [--udp-send HOST:PORT] [--no-udp-pacing]\n"
         << "              [--dump-capture-bmp PATH]\n"
         << "              [--capture-backend dxgi|wgc]\n"
         << "              [--bitrate-mbps Mbps] [--wgc-border] [--no-hdr-to-sdr]\n"
@@ -478,6 +480,9 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--udp-send") {
             options.udpSendTarget = requireValue("--udp-send");
             options.streamEncode = true;
+        } else if (arg == "--no-udp-pacing") {
+            options.udpPacing = false;
+            options.udpPacingOptionProvided = true;
         } else if (arg == "--wgc-border") {
             options.wgcBorderRequired = true;
         } else if (arg == "--no-hdr-to-sdr") {
@@ -531,6 +536,9 @@ Options ParseOptions(int argc, char** argv)
     if (!options.udpSendTarget.empty()) {
         static_cast<void>(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
     }
+    if (options.udpPacingOptionProvided && options.udpSendTarget.empty()) {
+        throw std::invalid_argument("--no-udp-pacing requires --udp-send");
+    }
     if (options.streamEncoderPreferenceProvided && !options.streamEncode) {
         throw std::invalid_argument("--stream-encoder requires --stream-encode or --udp-send");
     }
@@ -542,12 +550,12 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty())) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, or --udp-send");
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.udpPacingOptionProvided)) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, or --no-udp-pacing");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.decodeH264 || options.previewWindow)) {
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.udpPacingOptionProvided || options.decodeH264 || options.previewWindow)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
@@ -672,6 +680,7 @@ void RunCaptureStats(const Options& options)
     }
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
+        std::cout << ", UDP pacing " << (options.udpPacing ? "enabled" : "disabled");
     }
     if (options.captureBackend == screenshare::CaptureBackend::WindowsGraphicsCapture) {
         std::cout << ", WGC border " << (options.wgcBorderRequired ? "enabled" : "disabled when permitted");
@@ -713,6 +722,7 @@ void RunCaptureStats(const Options& options)
     uint64_t streamEncodedFrames = 0;
     uint64_t streamPackets = 0;
     uint64_t streamBytes = 0;
+    uint32_t streamBitrate = 0;
     double intervalCaptureMs = 0.0;
     uint64_t intervalCaptureCalls = 0;
     double intervalStreamEncodeMs = 0.0;
@@ -804,6 +814,7 @@ void RunCaptureStats(const Options& options)
                         encoderConfig.height = lastFrame.height;
                         encoderConfig.fps = options.fps;
                         encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
+                        streamBitrate = encoderConfig.bitrate;
                         encoderConfig.backend = backend;
                         if (encoderConfig.backend == screenshare::H264StreamEncoderBackend::Hardware) {
                             encoderConfig.d3dDevice = lastFrame.d3dDevice;
@@ -854,8 +865,16 @@ void RunCaptureStats(const Options& options)
                     }
 
                     if (!options.udpSendTarget.empty()) {
+                        auto udpConfig = screenshare::ParseUdpSenderTarget(options.udpSendTarget);
+                        udpConfig.pacingEnabled = options.udpPacing;
+                        udpConfig.pacingBitrate = streamBitrate;
                         udpSender = std::make_unique<screenshare::UdpSender>();
-                        udpSender->Open(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
+                        udpSender->Open(udpConfig);
+                        std::cout
+                            << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
+                            << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
+                            << " max_queued_datagrams=" << udpConfig.maxQueuedDatagrams
+                            << "\n";
                     }
                 }
 
@@ -887,6 +906,8 @@ void RunCaptureStats(const Options& options)
                 intervalCaptureCalls == 0 ? 0.0 : intervalCaptureMs / static_cast<double>(intervalCaptureCalls);
             const double streamEncodeAvgMs =
                 intervalStreamEncodeCalls == 0 ? 0.0 : intervalStreamEncodeMs / static_cast<double>(intervalStreamEncodeCalls);
+            const screenshare::UdpSenderStats udpStatsNow =
+                udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
             std::cout
                 << "source=" << lastSourceWidth << "x" << lastSourceHeight
                 << " source_format=" << screenshare::DxgiFormatName(lastSourceFormat)
@@ -910,8 +931,12 @@ void RunCaptureStats(const Options& options)
                 << " stream_encoded_frames=" << streamEncodedFrames
                 << " stream_packets=" << streamPackets
                 << " stream_bytes=" << streamBytes
-                << " udp_datagrams=" << (udpSender ? udpSender->stats().datagramsSent : 0)
-                << " udp_wire_bytes=" << (udpSender ? udpSender->stats().wireBytesSent : 0)
+                << " udp_datagrams=" << udpStatsNow.datagramsSent
+                << " udp_queued=" << udpStatsNow.datagramsQueued
+                << " udp_pending=" << udpStatsNow.pendingDatagrams
+                << " udp_peak_pending=" << udpStatsNow.peakPendingDatagrams
+                << " udp_dropped_frames=" << udpStatsNow.framesDropped
+                << " udp_wire_bytes=" << udpStatsNow.wireBytesSent
                 << "\n";
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
@@ -924,6 +949,8 @@ void RunCaptureStats(const Options& options)
         }
     }
 
+    const auto captureFinishedAt = Clock::now();
+
     if (streamEncoder) {
         const auto drainedPackets = streamEncoder->Drain();
         streamPackets += drainedPackets.size();
@@ -933,6 +960,10 @@ void RunCaptureStats(const Options& options)
                 udpSender->SendFrame(packet);
             }
         }
+    }
+
+    if (udpSender) {
+        udpSender->Flush();
     }
 
     const size_t streamQueuedInputs = streamEncoder ? streamEncoder->queuedInputCount() : 0;
@@ -947,7 +978,7 @@ void RunCaptureStats(const Options& options)
     fileEncoder.reset();
     capturer.Stop();
 
-    const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
+    const double totalElapsed = std::chrono::duration<double>(captureFinishedAt - startedAt).count();
     std::cout
         << "Done. Average output FPS: " << (static_cast<double>(totalOutputFrames) / totalElapsed)
         << ", average desktop update FPS: " << (static_cast<double>(totalDesktopUpdates) / totalElapsed)
@@ -960,7 +991,12 @@ void RunCaptureStats(const Options& options)
         << ", stream bytes: " << streamBytes
         << ", stream queued inputs: " << streamQueuedInputs
         << ", stream dropped inputs: " << streamDroppedInputFrames
+        << ", UDP queued datagrams: " << udpStats.datagramsQueued
         << ", UDP datagrams: " << udpStats.datagramsSent
+        << ", UDP pending datagrams: " << udpStats.pendingDatagrams
+        << ", UDP peak pending datagrams: " << udpStats.peakPendingDatagrams
+        << ", UDP dropped frames: " << udpStats.framesDropped
+        << ", UDP dropped datagrams: " << udpStats.datagramsDropped
         << ", UDP wire bytes: " << udpStats.wireBytesSent
         << ", captured BMP written: " << (capturedBmpWritten ? "yes" : "no")
         << "\n";
