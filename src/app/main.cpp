@@ -44,6 +44,7 @@ constexpr size_t OrderedReceiverStartThresholdFrames = 30;
 constexpr size_t OrderedReceiverRecoveryThresholdFrames = 30;
 constexpr size_t ReceiverHealthPendingFrameWarning = 8;
 constexpr uint64_t SenderQueuePressureDatagrams = 128;
+constexpr uint32_t ResolutionStableReportsBeforeUpscale = 4;
 
 struct Options {
     bool listDisplays = false;
@@ -1145,6 +1146,7 @@ void RunCaptureStats(const Options& options)
     uint64_t resolutionAdaptations = 0;
     uint64_t resolutionAdaptationFailures = 0;
     int resolutionCooldownRemaining = 0;
+    uint32_t resolutionStableFeedbackReports = 0;
     const char* resolutionAdaptationStatus = options.adaptResolution ? "waiting" : "disabled";
     const uint32_t streamKeyframeIntervalFrames =
         options.keyframeIntervalSeconds <= 0 ?
@@ -1216,7 +1218,7 @@ void RunCaptureStats(const Options& options)
         }
     };
 
-    auto restartStreamAtResolution = [&](size_t tierIndex, const char* direction) {
+    auto restartStreamAtResolution = [&](size_t tierIndex, const char* direction, const char* reason) {
         if (tierIndex >= adaptiveResolutionTiers.size()) {
             return;
         }
@@ -1236,6 +1238,7 @@ void RunCaptureStats(const Options& options)
             hasFrame = false;
             adaptiveResolutionTierIndex = tierIndex;
             resolutionCooldownRemaining = options.adaptResolutionCooldownSeconds;
+            resolutionStableFeedbackReports = 0;
             ++resolutionAdaptations;
             resolutionAdaptationStatus = std::strcmp(direction, "increase") == 0 ? "applied_increase" : "applied_reduce";
             std::cout
@@ -1243,7 +1246,7 @@ void RunCaptureStats(const Options& options)
                 << " scale=" << tier.scale
                 << " direction=" << direction
                 << " bitrate_mbps=" << Mbps(streamBitrate)
-                << " reason=" << bitrateAdvisor.reason()
+                << " reason=" << reason
                 << "\n";
         } catch (const std::exception& error) {
             ++resolutionAdaptationFailures;
@@ -1272,18 +1275,52 @@ void RunCaptureStats(const Options& options)
             atBitrateFloor &&
             (std::strcmp(bitrateAdvisor.action(), "reduce") == 0 ||
              std::strcmp(bitrateAdvisor.reason(), "min_bitrate") == 0);
-        const bool stableIncrease =
-            std::strcmp(bitrateAdvisor.action(), "increase") == 0;
+        const bool reductionPressure =
+            std::strcmp(bitrateAdvisor.action(), "reduce") == 0 ||
+            std::strcmp(bitrateAdvisor.reason(), "reduce_cooldown") == 0;
 
-        if (pressureAtFloor && adaptiveResolutionTierIndex + 1 < adaptiveResolutionTiers.size()) {
-            restartStreamAtResolution(adaptiveResolutionTierIndex + 1, "reduce");
+        if (pressureAtFloor) {
+            resolutionStableFeedbackReports = 0;
+            if (adaptiveResolutionTierIndex + 1 < adaptiveResolutionTiers.size()) {
+                restartStreamAtResolution(adaptiveResolutionTierIndex + 1, "reduce", bitrateAdvisor.reason());
+                return;
+            }
+            resolutionAdaptationStatus = "holding";
             return;
         }
-        if (stableIncrease && adaptiveResolutionTierIndex > 0) {
-            restartStreamAtResolution(adaptiveResolutionTierIndex - 1, "increase");
+
+        if (reductionPressure) {
+            resolutionStableFeedbackReports = 0;
+            resolutionAdaptationStatus = "holding";
             return;
         }
 
+        if (adaptiveResolutionTierIndex > 0) {
+            const bool pendingBitrateIncrease =
+                std::strcmp(bitrateAdvisor.action(), "increase") == 0 &&
+                streamBitrate < bitrateAdvisor.recommendedBitrate();
+            const bool stableForUpscale =
+                streamBitrate > bitrateAdvisor.minBitrate() &&
+                !pendingBitrateIncrease &&
+                std::strcmp(bitrateAdvisor.reason(), "waiting_for_feedback") != 0 &&
+                std::strcmp(bitrateAdvisor.reason(), "min_bitrate") != 0;
+
+            if (stableForUpscale) {
+                ++resolutionStableFeedbackReports;
+            } else {
+                resolutionStableFeedbackReports = 0;
+            }
+
+            if (resolutionStableFeedbackReports < ResolutionStableReportsBeforeUpscale) {
+                resolutionAdaptationStatus =
+                    resolutionStableFeedbackReports == 0 ? "holding" : "stabilizing_increase";
+                return;
+            }
+            restartStreamAtResolution(adaptiveResolutionTierIndex - 1, "increase", "stable_resolution_feedback");
+            return;
+        }
+
+        resolutionStableFeedbackReports = 0;
         resolutionAdaptationStatus = "holding";
     };
 
@@ -1514,6 +1551,8 @@ void RunCaptureStats(const Options& options)
                 << " resolution_adaptations=" << resolutionAdaptations
                 << " resolution_adaptation_failures=" << resolutionAdaptationFailures
                 << " resolution_cooldown=" << resolutionCooldownRemaining
+                << " resolution_stable_feedback=" << resolutionStableFeedbackReports
+                << " resolution_stable_required=" << ResolutionStableReportsBeforeUpscale
                 << " nv12=" << (lastNv12TextureAvailable ? "gpu_texture" : (lastNv12GeneratedOnGpu ? "gpu_readback" : "cpu_or_none"))
                 << " stream_input=" << (streamEncoder ? screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode()) : "none")
                 << " stream_bitrate_mbps=" << Mbps(streamBitrate)
@@ -1607,6 +1646,8 @@ void RunCaptureStats(const Options& options)
         << ", resolution adaptation: " << resolutionAdaptationStatus
         << ", resolution adaptations: " << resolutionAdaptations
         << ", resolution adaptation failures: " << resolutionAdaptationFailures
+        << ", resolution stable feedback: " << resolutionStableFeedbackReports
+        << ", resolution stable required: " << ResolutionStableReportsBeforeUpscale
         << ", stream packets: " << streamPackets
         << ", stream bytes: " << streamBytes
         << ", stream queued inputs: " << streamQueuedInputs
