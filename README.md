@@ -283,9 +283,10 @@ new size. Receiver stats report `preview_queue`, `preview_playout_resets`, `prev
 `preview_overflow_drops` for that playout stage, along with `preview_latency_ms` and
 `preview_max_late_ms` for the active playout settings. Receiver stats also include
 `receiver_health=waiting|ok|loss|recovering|buffering|preview-drop`; when `--preview` is active,
-the same compact health summary is shown in the preview window title. The health label reflects the
-latest reporting interval, while the numeric drop/resync counters remain cumulative for diagnostics
-and sender-side adaptation deltas.
+the preview window title shows the same compact health summary plus decoded resolution, playout
+latency, queue depths, reset count, and presented-frame count. The health label reflects the latest
+reporting interval, while the numeric drop/resync counters remain cumulative for diagnostics and
+sender-side adaptation deltas.
 When `--seconds` is omitted the preview runs until the window closes.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.

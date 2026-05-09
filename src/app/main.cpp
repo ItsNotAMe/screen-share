@@ -488,6 +488,11 @@ struct ReceiverHealthSnapshot {
     uint64_t previewFramesPresented = 0;
     uint64_t previewLateDrops = 0;
     uint64_t previewOverflowDrops = 0;
+    int decodedWidth = 0;
+    int decodedHeight = 0;
+    uint64_t previewPlayoutResets = 0;
+    int previewLatencyMs = 0;
+    int previewMaxLateMs = 0;
     uint64_t recentDroppedDatagrams = 0;
     uint64_t recentInvalidDatagrams = 0;
     uint64_t recentIncompleteFramesDropped = 0;
@@ -751,13 +756,14 @@ std::string FormatReceiverHealthTitle(const ReceiverHealthSnapshot& health)
 
     std::ostringstream stream;
     stream << ReceiverHealthState(health)
+           << " | res " << health.decodedWidth << "x" << health.decodedHeight
            << " | fps " << std::fixed << std::setprecision(1) << health.completedFps
-           << " | recvq " << health.pendingFrames
-           << " | decq " << health.pendingDecodePackets
-           << " | pvq " << health.previewQueuedFrames
+           << " | lat " << health.previewLatencyMs << "/" << health.previewMaxLateMs << "ms"
+           << " | q " << health.pendingFrames << "/" << health.pendingDecodePackets << "/" << health.previewQueuedFrames
            << " | resync " << health.h264DecodeResyncs
            << " | skip " << health.h264DecodeSkippedPackets
            << " | drops " << transportDrops << "/" << previewDrops
+           << " | reset " << health.previewPlayoutResets
            << " | shown " << health.previewFramesPresented;
     return stream.str();
 }
@@ -1885,7 +1891,7 @@ void RunUdpReceiverStats(const Options& options)
     }
     if (options.previewWindow) {
         previewWindow = std::make_unique<screenshare::ReceiverPreviewWindow>();
-        previewWindow->SetStatusText("waiting | fps 0.0 | recvq 0 | decq 0 | pvq 0 | resync 0 | skip 0 | drops 0/0 | shown 0");
+        previewWindow->SetStatusText("waiting | res 0x0 | fps 0.0 | lat 0/0ms | q 0/0/0 | resync 0 | skip 0 | drops 0/0 | reset 0 | shown 0");
         previewWindow->Show();
     }
 
@@ -2094,6 +2100,11 @@ void RunUdpReceiverStats(const Options& options)
                 previewWindow ? previewWindow->framesPresented() : 0,
                 previewLateDrops,
                 previewOverflowDrops,
+                h264DecodedWidth,
+                h264DecodedHeight,
+                previewWindow ? previewPlayoutResets : 0,
+                previewWindow ? static_cast<int>(previewPlayout.initialDelay().count()) : 0,
+                previewWindow ? static_cast<int>(previewPlayout.maxLateFrameAge().count()) : 0,
                 stats.simulatedDatagramsDropped - lastSimulatedDroppedDatagrams,
                 stats.invalidDatagrams - lastInvalidDatagrams,
                 stats.incompleteFramesDropped - lastIncompleteFramesDropped,
@@ -2203,6 +2214,11 @@ void RunUdpReceiverStats(const Options& options)
         previewWindow ? previewWindow->framesPresented() : 0,
         finalPreviewLateDrops,
         finalPreviewOverflowDrops,
+        h264DecodedWidth,
+        h264DecodedHeight,
+        previewWindow ? previewPlayoutResets : 0,
+        previewWindow ? static_cast<int>(previewPlayout.initialDelay().count()) : 0,
+        previewWindow ? static_cast<int>(previewPlayout.maxLateFrameAge().count()) : 0,
         stats.simulatedDatagramsDropped - lastSimulatedDroppedDatagrams,
         stats.invalidDatagrams - lastInvalidDatagrams,
         stats.incompleteFramesDropped - lastIncompleteFramesDropped,
