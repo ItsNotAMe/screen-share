@@ -103,6 +103,8 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     socket_ = static_cast<uintptr_t>(udpSocket);
     config_ = config;
     datagramBuffer_.assign(config_.maxDatagramBytes, std::byte{});
+    feedbackAddress_.clear();
+    feedbackAddressLength_ = 0;
     delayedDatagrams_.clear();
     pendingFrames_.clear();
     stats_ = {};
@@ -117,6 +119,8 @@ void UdpReceiver::Close()
     }
 
     datagramBuffer_.clear();
+    feedbackAddress_.clear();
+    feedbackAddressLength_ = 0;
     delayedDatagrams_.clear();
     pendingFrames_.clear();
 }
@@ -200,6 +204,10 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveDatagram()
         throw std::runtime_error(WinsockErrorMessage("recvfrom"));
     }
 
+    feedbackAddress_.resize(static_cast<size_t>(senderAddressLength));
+    std::memcpy(feedbackAddress_.data(), &senderAddress, static_cast<size_t>(senderAddressLength));
+    feedbackAddressLength_ = senderAddressLength;
+
     ++stats_.datagramsReceived;
     if (ShouldSimulateLoss()) {
         ++stats_.simulatedDatagramsDropped;
@@ -216,6 +224,30 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveDatagram()
     }
 
     return ProcessDatagram(datagramBuffer_.data(), received);
+}
+
+bool UdpReceiver::SendFeedback(const udp_protocol::FeedbackSnapshot& feedback)
+{
+    if (!isOpen() || feedbackAddress_.empty() || feedbackAddressLength_ == 0) {
+        return false;
+    }
+
+    const auto datagram = udp_protocol::BuildFeedbackDatagram(feedback);
+    const int sent = sendto(
+        AsSocket(socket_),
+        reinterpret_cast<const char*>(datagram.data()),
+        static_cast<int>(datagram.size()),
+        0,
+        reinterpret_cast<const sockaddr*>(feedbackAddress_.data()),
+        feedbackAddressLength_);
+
+    if (sent == SOCKET_ERROR || sent != static_cast<int>(datagram.size())) {
+        ++stats_.feedbackSendErrors;
+        return false;
+    }
+
+    ++stats_.feedbackPacketsSent;
+    return true;
 }
 
 std::optional<UdpCompletedFrame> UdpReceiver::ReleaseReadyDelayedDatagram(Clock::time_point now)

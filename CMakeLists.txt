@@ -11,6 +11,7 @@ add_executable(ScreenShare
     src/codec/H264StreamDecoder.cpp
     src/codec/H264StreamEncoder.cpp
     src/render/ReceiverPreviewWindow.cpp
+    src/transport/UdpProtocol.cpp
     src/transport/UdpReceiver.cpp
     src/transport/UdpSender.cpp
     src/video/Nv12Convert.cpp

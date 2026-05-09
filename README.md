@@ -221,10 +221,15 @@ The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP 
 small header. A background sender thread paces queued datagrams against the encoder bitrate by
 default, while the capture and encoder loop continues running at the requested FPS. Sender stats
 report `udp_queued`, `udp_pending`, `udp_peak_pending`, and `udp_dropped_frames` for that pacing
-queue. The `--udp-recv` path binds a local UDP port, validates those datagrams, reassembles complete
-encoded frames, and prints transport diagnostics. Receiver-side simulation flags can delay incoming
-datagrams with `--simulate-jitter-ms MS` or drop a percentage with `--simulate-loss-percent P`.
-Simulation stats report `simulated_dropped`, `simulated_delayed`, and `simulated_delay_pending`.
+queue. The sender also listens on the same UDP socket for receiver feedback packets and reports
+`udp_feedback_health`, `udp_feedback_completed_frames`, `udp_feedback_resyncs`, and
+`udp_feedback_skipped_packets` when a receiver is present. The `--udp-recv` path binds a local UDP
+port, validates media datagrams, reassembles complete encoded frames, sends compact feedback back to
+the sender's source address, and prints transport diagnostics. Receiver-side simulation flags can
+delay incoming datagrams with `--simulate-jitter-ms MS` or drop a percentage with
+`--simulate-loss-percent P`.
+Simulation stats report `simulated_dropped`, `simulated_delayed`, `simulated_delay_pending`,
+`feedback_sent`, and `feedback_errors`.
 Jitter simulation is useful with `--preview` for testing the playout buffer. Loss simulation is
 useful with `--decode-h264` or `--preview` for testing keyframe recovery; receiver stats report
 `h264_decode_resyncs`, `h264_decode_restarts`, and `h264_decode_skipped_packets`. Add
@@ -259,7 +264,7 @@ Windows Graphics Capture
  -> Microsoft H.264 MFT packet encode for transport validation
  -> H.264 hardware encoder capability probe
  -> default auto stream encoder with periodic keyframes, queued direct D3D11 hardware input, and software fallback
- -> UDP sender/receiver transport diagnostics
+ -> UDP sender/receiver transport diagnostics with receiver feedback
  -> Media Foundation H.264 decode validation with keyframe-aware recovery
  -> paced native Direct3D receiver preview with GPU NV12 conversion
  -> future network adaptation and renderer optimizations

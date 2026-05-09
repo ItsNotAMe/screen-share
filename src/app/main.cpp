@@ -414,26 +414,71 @@ struct ReceiverHealthSnapshot {
     uint64_t previewOverflowDrops = 0;
 };
 
+screenshare::udp_protocol::FeedbackHealthState ReceiverFeedbackHealthState(const ReceiverHealthSnapshot& health);
+
 const char* ReceiverHealthState(const ReceiverHealthSnapshot& health)
 {
+    return screenshare::udp_protocol::FeedbackHealthStateName(ReceiverFeedbackHealthState(health));
+}
+
+screenshare::udp_protocol::FeedbackHealthState ReceiverFeedbackHealthState(const ReceiverHealthSnapshot& health)
+{
     if (health.completedFrames == 0) {
-        return "waiting";
+        return screenshare::udp_protocol::FeedbackHealthState::Waiting;
     }
     if (health.previewLateDrops > 0 || health.previewOverflowDrops > 0) {
-        return "preview-drop";
+        return screenshare::udp_protocol::FeedbackHealthState::PreviewDrop;
     }
     if (health.h264DecodeResyncs > 0 || health.h264DecodeSkippedPackets > 0) {
-        return "recovering";
+        return screenshare::udp_protocol::FeedbackHealthState::Recovering;
     }
     if (health.simulatedDroppedDatagrams > 0 || health.invalidDatagrams > 0 || health.incompleteDroppedFrames > 0) {
-        return "loss";
+        return screenshare::udp_protocol::FeedbackHealthState::Loss;
     }
     if (health.pendingFrames >= ReceiverHealthPendingFrameWarning ||
         health.pendingDecodePackets >= OrderedReceiverRecoveryThresholdFrames) {
-        return "buffering";
+        return screenshare::udp_protocol::FeedbackHealthState::Buffering;
     }
 
-    return "ok";
+    return screenshare::udp_protocol::FeedbackHealthState::Ok;
+}
+
+uint32_t SaturateUint32(uint64_t value)
+{
+    return value > std::numeric_limits<uint32_t>::max() ?
+        std::numeric_limits<uint32_t>::max() :
+        static_cast<uint32_t>(value);
+}
+
+screenshare::udp_protocol::FeedbackSnapshot BuildReceiverFeedbackSnapshot(
+    const ReceiverHealthSnapshot& health,
+    uint64_t sequence)
+{
+    screenshare::udp_protocol::FeedbackSnapshot feedback;
+    feedback.healthState = ReceiverFeedbackHealthState(health);
+    feedback.sequence = sequence;
+    feedback.completedFrames = health.completedFrames;
+    feedback.droppedDatagrams = health.simulatedDroppedDatagrams;
+    feedback.invalidDatagrams = health.invalidDatagrams;
+    feedback.incompleteFramesDropped = health.incompleteDroppedFrames;
+    feedback.decodeResyncs = health.h264DecodeResyncs;
+    feedback.decodeSkippedPackets = health.h264DecodeSkippedPackets;
+    feedback.previewLateDrops = health.previewLateDrops;
+    feedback.previewOverflowDrops = health.previewOverflowDrops;
+    feedback.pendingFrames = SaturateUint32(health.pendingFrames);
+    feedback.pendingDecodePackets = SaturateUint32(health.pendingDecodePackets);
+    feedback.previewQueuedFrames = SaturateUint32(health.previewQueuedFrames);
+    return feedback;
+}
+
+void DrainUdpFeedback(screenshare::UdpSender& udpSender, std::chrono::milliseconds firstTimeout)
+{
+    if (!udpSender.ReceiveFeedback(firstTimeout)) {
+        return;
+    }
+
+    while (udpSender.ReceiveFeedback(std::chrono::milliseconds(0))) {
+    }
 }
 
 std::string FormatReceiverHealthTitle(const ReceiverHealthSnapshot& health)
@@ -1022,6 +1067,9 @@ void RunCaptureStats(const Options& options)
                 intervalCaptureCalls == 0 ? 0.0 : intervalCaptureMs / static_cast<double>(intervalCaptureCalls);
             const double streamEncodeAvgMs =
                 intervalStreamEncodeCalls == 0 ? 0.0 : intervalStreamEncodeMs / static_cast<double>(intervalStreamEncodeCalls);
+            if (udpSender) {
+                DrainUdpFeedback(*udpSender, std::chrono::milliseconds(0));
+            }
             const screenshare::UdpSenderStats udpStatsNow =
                 udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
             std::cout
@@ -1053,6 +1101,15 @@ void RunCaptureStats(const Options& options)
                 << " udp_peak_pending=" << udpStatsNow.peakPendingDatagrams
                 << " udp_dropped_frames=" << udpStatsNow.framesDropped
                 << " udp_wire_bytes=" << udpStatsNow.wireBytesSent
+                << " udp_feedback_packets=" << udpStatsNow.feedbackPacketsReceived
+                << " udp_feedback_invalid=" << udpStatsNow.invalidFeedbackPackets
+                << " udp_feedback_health="
+                << (udpStatsNow.hasFeedback ?
+                    screenshare::udp_protocol::FeedbackHealthStateName(udpStatsNow.latestFeedback.healthState) :
+                    "none")
+                << " udp_feedback_completed_frames=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.completedFrames : 0)
+                << " udp_feedback_resyncs=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeResyncs : 0)
+                << " udp_feedback_skipped_packets=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeSkippedPackets : 0)
                 << "\n";
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
@@ -1080,6 +1137,7 @@ void RunCaptureStats(const Options& options)
 
     if (udpSender) {
         udpSender->Flush();
+        DrainUdpFeedback(*udpSender, std::chrono::milliseconds(100));
     }
 
     const size_t streamQueuedInputs = streamEncoder ? streamEncoder->queuedInputCount() : 0;
@@ -1114,6 +1172,15 @@ void RunCaptureStats(const Options& options)
         << ", UDP dropped frames: " << udpStats.framesDropped
         << ", UDP dropped datagrams: " << udpStats.datagramsDropped
         << ", UDP wire bytes: " << udpStats.wireBytesSent
+        << ", UDP feedback packets: " << udpStats.feedbackPacketsReceived
+        << ", UDP invalid feedback packets: " << udpStats.invalidFeedbackPackets
+        << ", UDP feedback health: "
+        << (udpStats.hasFeedback ?
+            screenshare::udp_protocol::FeedbackHealthStateName(udpStats.latestFeedback.healthState) :
+            "none")
+        << ", UDP feedback completed frames: " << (udpStats.hasFeedback ? udpStats.latestFeedback.completedFrames : 0)
+        << ", UDP feedback resyncs: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeResyncs : 0)
+        << ", UDP feedback skipped packets: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeSkippedPackets : 0)
         << ", captured BMP written: " << (capturedBmpWritten ? "yes" : "no")
         << "\n";
 }
@@ -1355,6 +1422,7 @@ void RunUdpReceiverStats(const Options& options)
     uint64_t latestFrameId = 0;
     uint64_t latestFrameBytes = 0;
     uint16_t latestFragmentCount = 0;
+    uint64_t feedbackSequence = 0;
     bool hasCompletedFrame = false;
 
     auto shouldContinue = [&]() {
@@ -1425,6 +1493,7 @@ void RunUdpReceiverStats(const Options& options)
             if (previewWindow) {
                 previewWindow->SetStatusText(FormatReceiverHealthTitle(health));
             }
+            receiver.SendFeedback(BuildReceiverFeedbackSnapshot(health, feedbackSequence++));
 
             std::cout
                 << "udp_datagrams=" << stats.datagramsReceived
@@ -1434,6 +1503,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " simulated_dropped=" << stats.simulatedDatagramsDropped
                 << " simulated_delayed=" << stats.simulatedDatagramsDelayed
                 << " simulated_delay_pending=" << receiver.delayedDatagramCount()
+                << " feedback_sent=" << stats.feedbackPacketsSent
+                << " feedback_errors=" << stats.feedbackSendErrors
                 << " invalid_datagrams=" << stats.invalidDatagrams
                 << " duplicate_fragments=" << stats.duplicateFragments
                 << " completed_frames=" << stats.framesCompleted
@@ -1473,7 +1544,7 @@ void RunUdpReceiverStats(const Options& options)
         }
     }
 
-    const screenshare::UdpReceiverStats stats = receiver.stats();
+    screenshare::UdpReceiverStats stats = receiver.stats();
     if (h264Decoder) {
         flushH264DecodeBacklog(true);
         countDecodedFrames(h264Decoder->Drain(), false);
@@ -1511,6 +1582,8 @@ void RunUdpReceiverStats(const Options& options)
     if (previewWindow) {
         previewWindow->SetStatusText(FormatReceiverHealthTitle(finalHealth));
     }
+    receiver.SendFeedback(BuildReceiverFeedbackSnapshot(finalHealth, feedbackSequence++));
+    stats = receiver.stats();
     receiver.Close();
 
     std::cout
@@ -1520,6 +1593,8 @@ void RunUdpReceiverStats(const Options& options)
         << ", simulated dropped datagrams: " << stats.simulatedDatagramsDropped
         << ", simulated delayed datagrams: " << stats.simulatedDatagramsDelayed
         << ", pending simulated delayed datagrams: " << delayedDatagrams
+        << ", feedback packets sent: " << stats.feedbackPacketsSent
+        << ", feedback send errors: " << stats.feedbackSendErrors
         << ", invalid datagrams: " << stats.invalidDatagrams
         << ", duplicate fragments: " << stats.duplicateFragments
         << ", completed frames: " << stats.framesCompleted

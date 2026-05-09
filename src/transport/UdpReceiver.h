@@ -1,5 +1,7 @@
 #pragma once
 
+#include "transport/UdpProtocol.h"
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +43,8 @@ struct UdpReceiverStats {
     uint64_t completedFrameBytes = 0;
     uint64_t simulatedDatagramsDropped = 0;
     uint64_t simulatedDatagramsDelayed = 0;
+    uint64_t feedbackPacketsSent = 0;
+    uint64_t feedbackSendErrors = 0;
 };
 
 class UdpReceiver {
@@ -54,6 +58,7 @@ public:
     void Open(const UdpReceiverConfig& config);
     void Close();
     [[nodiscard]] std::optional<UdpCompletedFrame> ReceiveFrame(std::chrono::milliseconds timeout);
+    bool SendFeedback(const udp_protocol::FeedbackSnapshot& feedback);
 
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] const UdpReceiverStats& stats() const noexcept { return stats_; }
@@ -101,6 +106,8 @@ private:
     UdpReceiverConfig config_{};
     UdpReceiverStats stats_{};
     std::vector<std::byte> datagramBuffer_;
+    std::vector<std::byte> feedbackAddress_;
+    int feedbackAddressLength_ = 0;
     std::deque<DelayedDatagram> delayedDatagrams_;
     std::unordered_map<uint64_t, PendingFrame> pendingFrames_;
     std::mt19937 simulationRng_{1};
