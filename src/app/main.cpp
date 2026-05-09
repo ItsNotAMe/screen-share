@@ -45,6 +45,8 @@ constexpr size_t OrderedReceiverRecoveryThresholdFrames = 30;
 constexpr size_t ReceiverHealthPendingFrameWarning = 8;
 constexpr uint64_t SenderQueuePressureDatagrams = 128;
 constexpr uint32_t ResolutionStableReportsBeforeUpscale = 4;
+constexpr int DefaultPreviewLatencyMs = 150;
+constexpr int DefaultPreviewMaxLateMs = 500;
 
 struct Options {
     bool listDisplays = false;
@@ -85,6 +87,10 @@ struct Options {
     bool decodeH264 = false;
     std::string decodedBmpPath;
     bool previewWindow = false;
+    int previewLatencyMs = DefaultPreviewLatencyMs;
+    bool previewLatencyProvided = false;
+    int previewMaxLateMs = DefaultPreviewMaxLateMs;
+    bool previewMaxLateProvided = false;
     float simulateLossPercent = 0.0f;
     bool simulateLossProvided = false;
     int simulateJitterMs = 0;
@@ -100,6 +106,7 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
+        << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
@@ -357,6 +364,12 @@ class PreviewPlayoutBuffer {
 public:
     using Clock = std::chrono::steady_clock;
 
+    PreviewPlayoutBuffer(std::chrono::milliseconds initialDelay, std::chrono::milliseconds maxLateFrameAge)
+        : initialDelay_(initialDelay),
+          maxLateFrameAge_(maxLateFrameAge)
+    {
+    }
+
     void Enqueue(screenshare::DecodedFrameInfo frame)
     {
         int64_t key = frame.timestamp100ns;
@@ -422,6 +435,8 @@ public:
     [[nodiscard]] size_t queuedFrameCount() const noexcept { return frames_.size(); }
     [[nodiscard]] uint64_t lateDrops() const noexcept { return lateDrops_; }
     [[nodiscard]] uint64_t overflowDrops() const noexcept { return overflowDrops_; }
+    [[nodiscard]] std::chrono::milliseconds initialDelay() const noexcept { return initialDelay_; }
+    [[nodiscard]] std::chrono::milliseconds maxLateFrameAge() const noexcept { return maxLateFrameAge_; }
 
 private:
     void EnsureClockStarted(Clock::time_point now)
@@ -455,8 +470,8 @@ private:
     uint64_t lateDrops_ = 0;
     uint64_t overflowDrops_ = 0;
     size_t maxQueuedFrames_ = 180;
-    std::chrono::milliseconds initialDelay_{100};
-    std::chrono::milliseconds maxLateFrameAge_{250};
+    std::chrono::milliseconds initialDelay_;
+    std::chrono::milliseconds maxLateFrameAge_;
 };
 
 struct ReceiverHealthSnapshot {
@@ -893,6 +908,12 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--preview") {
             options.previewWindow = true;
             options.decodeH264 = true;
+        } else if (arg == "--preview-latency-ms") {
+            options.previewLatencyMs = ParseInt(requireValue("--preview-latency-ms"), "--preview-latency-ms");
+            options.previewLatencyProvided = true;
+        } else if (arg == "--preview-max-late-ms") {
+            options.previewMaxLateMs = ParseInt(requireValue("--preview-max-late-ms"), "--preview-max-late-ms");
+            options.previewMaxLateProvided = true;
         } else if (arg == "--simulate-loss-percent") {
             options.simulateLossPercent = ParseFloat(requireValue("--simulate-loss-percent"), "--simulate-loss-percent");
             options.simulateLossProvided = true;
@@ -919,6 +940,15 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.previewWindow && !secondsProvided) {
         options.seconds = 0;
+    }
+    if ((options.previewLatencyProvided || options.previewMaxLateProvided) && !options.previewWindow) {
+        throw std::invalid_argument("--preview-latency-ms and --preview-max-late-ms require --preview");
+    }
+    if (options.previewLatencyMs < 0 || options.previewLatencyMs > 2000) {
+        throw std::invalid_argument("--preview-latency-ms must be between 0 and 2000");
+    }
+    if (options.previewMaxLateMs < 0 || options.previewMaxLateMs > 5000) {
+        throw std::invalid_argument("--preview-max-late-ms must be between 0 and 5000");
     }
     if (options.seconds < 0) {
         throw std::invalid_argument("--seconds must be non-negative");
@@ -1003,7 +1033,7 @@ Options ParseOptions(int argc, char** argv)
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
-         options.decodeH264 || options.previewWindow)) {
+         options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
@@ -1860,7 +1890,10 @@ void RunUdpReceiverStats(const Options& options)
     }
 
     using Clock = std::chrono::steady_clock;
-    PreviewPlayoutBuffer previewPlayout;
+    PreviewPlayoutBuffer previewPlayout{
+        std::chrono::milliseconds(options.previewLatencyMs),
+        std::chrono::milliseconds(options.previewMaxLateMs),
+    };
 
     auto restartPreviewPlayoutClock = [&]() {
         if (previewWindow) {
@@ -2106,6 +2139,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " pending_h264_decode_packets=" << h264DecodeBacklog.size()
                 << " preview_frames_presented=" << (previewWindow ? previewWindow->framesPresented() : 0)
                 << " preview_queue=" << (previewWindow ? previewPlayout.queuedFrameCount() : 0)
+                << " preview_latency_ms=" << (previewWindow ? previewPlayout.initialDelay().count() : 0)
+                << " preview_max_late_ms=" << (previewWindow ? previewPlayout.maxLateFrameAge().count() : 0)
                 << " preview_playout_resets=" << (previewWindow ? previewPlayoutResets : 0)
                 << " preview_late_drops=" << (previewWindow ? previewPlayout.lateDrops() : 0)
                 << " preview_overflow_drops=" << (previewWindow ? previewPlayout.overflowDrops() : 0);
@@ -2212,6 +2247,8 @@ void RunUdpReceiverStats(const Options& options)
         << ", pending H.264 decode packets: " << h264DecodeBacklog.size()
         << ", preview frames presented: " << (previewWindow ? previewWindow->framesPresented() : 0)
         << ", preview queued frames: " << (previewWindow ? previewPlayout.queuedFrameCount() : 0)
+        << ", preview latency ms: " << (previewWindow ? previewPlayout.initialDelay().count() : 0)
+        << ", preview max late ms: " << (previewWindow ? previewPlayout.maxLateFrameAge().count() : 0)
         << ", preview playout resets: " << (previewWindow ? previewPlayoutResets : 0)
         << ", preview late drops: " << (previewWindow ? previewPlayout.lateDrops() : 0)
         << ", preview overflow drops: " << (previewWindow ? previewPlayout.overflowDrops() : 0)
