@@ -1,13 +1,44 @@
 #pragma once
 
 #include <bit>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <span>
+#include <vector>
 
 namespace screenshare::udp_protocol {
 
 constexpr uint32_t PacketMagic = 0x53535631; // "SSV1"
+constexpr uint32_t FeedbackMagic = 0x53534631; // "SSF1"
 constexpr uint16_t PacketVersion = 1;
 constexpr uint16_t MaxFragmentsPerFrame = 4096;
+
+enum class FeedbackHealthState : uint16_t {
+    Unknown = 0,
+    Waiting = 1,
+    Ok = 2,
+    Loss = 3,
+    Recovering = 4,
+    Buffering = 5,
+    PreviewDrop = 6,
+};
+
+struct FeedbackSnapshot {
+    FeedbackHealthState healthState = FeedbackHealthState::Unknown;
+    uint64_t sequence = 0;
+    uint64_t completedFrames = 0;
+    uint64_t droppedDatagrams = 0;
+    uint64_t invalidDatagrams = 0;
+    uint64_t incompleteFramesDropped = 0;
+    uint64_t decodeResyncs = 0;
+    uint64_t decodeSkippedPackets = 0;
+    uint64_t previewLateDrops = 0;
+    uint64_t previewOverflowDrops = 0;
+    uint32_t pendingFrames = 0;
+    uint32_t pendingDecodePackets = 0;
+    uint32_t previewQueuedFrames = 0;
+};
 
 #pragma pack(push, 1)
 struct PacketHeader {
@@ -22,9 +53,30 @@ struct PacketHeader {
     uint16_t fragmentCount = 0;
     uint32_t payloadBytes = 0;
 };
+
+struct FeedbackPacket {
+    uint32_t magic = 0;
+    uint16_t version = 0;
+    uint16_t packetBytes = 0;
+    uint64_t sequence = 0;
+    uint64_t completedFrames = 0;
+    uint64_t droppedDatagrams = 0;
+    uint64_t invalidDatagrams = 0;
+    uint64_t incompleteFramesDropped = 0;
+    uint64_t decodeResyncs = 0;
+    uint64_t decodeSkippedPackets = 0;
+    uint64_t previewLateDrops = 0;
+    uint64_t previewOverflowDrops = 0;
+    uint32_t pendingFrames = 0;
+    uint32_t pendingDecodePackets = 0;
+    uint32_t previewQueuedFrames = 0;
+    uint16_t healthState = 0;
+    uint16_t reserved = 0;
+};
 #pragma pack(pop)
 
 static_assert(sizeof(PacketHeader) == 40);
+static_assert(sizeof(FeedbackPacket) == 96);
 
 constexpr uint16_t ByteSwap16(uint16_t value) noexcept
 {
@@ -89,5 +141,9 @@ constexpr uint64_t FromNetwork64(uint64_t value) noexcept
 {
     return ToNetwork64(value);
 }
+
+const char* FeedbackHealthStateName(FeedbackHealthState state);
+std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback);
+std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte> datagram);
 
 } // namespace screenshare::udp_protocol

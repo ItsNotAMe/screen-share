@@ -1,6 +1,7 @@
 #pragma once
 
 #include "codec/H264StreamEncoder.h"
+#include "transport/UdpProtocol.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -8,6 +9,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -33,6 +35,10 @@ struct UdpSenderStats {
     uint64_t wireBytesSent = 0;
     uint64_t pendingDatagrams = 0;
     uint64_t peakPendingDatagrams = 0;
+    uint64_t feedbackPacketsReceived = 0;
+    uint64_t invalidFeedbackPackets = 0;
+    bool hasFeedback = false;
+    udp_protocol::FeedbackSnapshot latestFeedback;
 };
 
 class UdpSender {
@@ -47,6 +53,7 @@ public:
     void Close();
     void SendFrame(const EncodedPacket& packet);
     void Flush();
+    [[nodiscard]] std::optional<udp_protocol::FeedbackSnapshot> ReceiveFeedback(std::chrono::milliseconds timeout);
 
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] UdpSenderStats stats() const;

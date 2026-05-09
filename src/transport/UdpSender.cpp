@@ -6,9 +6,12 @@
 #include <ws2tcpip.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -232,6 +235,61 @@ void UdpSender::Flush()
         return !workerError_.empty() || (queue_.empty() && !datagramInFlight_);
     });
     CheckWorkerErrorLocked();
+}
+
+std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::chrono::milliseconds timeout)
+{
+    if (!isOpen()) {
+        return std::nullopt;
+    }
+
+    fd_set readSet;
+    FD_ZERO(&readSet);
+    FD_SET(AsSocket(socket_), &readSet);
+
+    timeval waitTime{};
+    waitTime.tv_sec = static_cast<long>(timeout.count() / 1000);
+    waitTime.tv_usec = static_cast<long>((timeout.count() % 1000) * 1000);
+
+    const int ready = select(0, &readSet, nullptr, nullptr, &waitTime);
+    if (ready == SOCKET_ERROR) {
+        throw std::runtime_error(WinsockErrorMessage("select(feedback)"));
+    }
+    if (ready == 0) {
+        return std::nullopt;
+    }
+
+    std::array<std::byte, 512> buffer{};
+    sockaddr_storage senderAddress{};
+    int senderAddressLength = sizeof(senderAddress);
+    const int received = recvfrom(
+        AsSocket(socket_),
+        reinterpret_cast<char*>(buffer.data()),
+        static_cast<int>(buffer.size()),
+        0,
+        reinterpret_cast<sockaddr*>(&senderAddress),
+        &senderAddressLength);
+    if (received == SOCKET_ERROR) {
+        if (WSAGetLastError() == WSAECONNRESET) {
+            return std::nullopt;
+        }
+        throw std::runtime_error(WinsockErrorMessage("recvfrom(feedback)"));
+    }
+
+    const auto feedback = udp_protocol::ParseFeedbackDatagram(std::span<const std::byte>(
+        buffer.data(),
+        static_cast<size_t>(received)));
+
+    std::lock_guard lock(mutex_);
+    if (!feedback) {
+        ++stats_.invalidFeedbackPackets;
+        return std::nullopt;
+    }
+
+    ++stats_.feedbackPacketsReceived;
+    stats_.hasFeedback = true;
+    stats_.latestFeedback = *feedback;
+    return feedback;
 }
 
 std::vector<std::byte> UdpSender::BuildDatagram(
