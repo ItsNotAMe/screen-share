@@ -563,9 +563,12 @@ public:
         reduceCooldownRemaining_ = 0;
         suppressedReductions_ = 0;
         stableFeedbackCount_ = 0;
+        previewPressureReports_ = 0;
+        queuePressureReports_ = 0;
         hasFeedback_ = false;
         lastFeedbackSequence_ = 0;
-        lastDropSignals_ = 0;
+        lastTransportDropSignals_ = 0;
+        lastPreviewDropSignals_ = 0;
         lastResyncs_ = 0;
         lastSkippedPackets_ = 0;
         action_ = "hold";
@@ -588,13 +591,17 @@ public:
             return;
         }
 
-        const uint64_t dropSignals =
+        const uint64_t transportDropSignals =
             feedback.droppedDatagrams +
             feedback.invalidDatagrams +
-            feedback.incompleteFramesDropped +
+            feedback.incompleteFramesDropped;
+        const uint64_t previewDropSignals =
             feedback.previewLateDrops +
             feedback.previewOverflowDrops;
-        const bool newDropSignal = !hasFeedback_ ? dropSignals > 0 : dropSignals > lastDropSignals_;
+        const bool newTransportDropSignal =
+            !hasFeedback_ ? transportDropSignals > 0 : transportDropSignals > lastTransportDropSignals_;
+        const bool newPreviewDropSignal =
+            !hasFeedback_ ? previewDropSignals > 0 : previewDropSignals > lastPreviewDropSignals_;
         const bool newDecodeRecovery =
             (!hasFeedback_ ? feedback.decodeResyncs > 0 : feedback.decodeResyncs > lastResyncs_) ||
             (!hasFeedback_ ? feedback.decodeSkippedPackets > 0 : feedback.decodeSkippedPackets > lastSkippedPackets_);
@@ -605,8 +612,22 @@ public:
             (stats.pendingDatagrams >= SenderQueuePressureDatagrams &&
              stats.peakPendingDatagrams > 0 &&
              stats.pendingDatagrams >= stats.peakPendingDatagrams / 2);
+        if (queuePressure) {
+            ++queuePressureReports_;
+        } else {
+            queuePressureReports_ = 0;
+        }
+        if (newPreviewDropSignal) {
+            ++previewPressureReports_;
+        } else {
+            previewPressureReports_ = 0;
+        }
+        const bool sustainedQueuePressure =
+            queuePressureReports_ >= QueuePressureReportsBeforeReduce;
+        const bool sustainedPreviewPressure =
+            previewPressureReports_ >= PreviewPressureReportsBeforeReduce;
 
-        if (newDropSignal || newDecodeRecovery || queuePressure) {
+        if (newTransportDropSignal || newDecodeRecovery || sustainedQueuePressure || sustainedPreviewPressure) {
             stableFeedbackCount_ = 0;
             if (reduceCooldownRemaining_ > 0) {
                 --reduceCooldownRemaining_;
@@ -622,8 +643,24 @@ public:
                 recommendedBitrate_ = std::max(minBitrate_, reduced);
                 reduceCooldownRemaining_ = reduceCooldownReports_;
                 action_ = "reduce";
-                reason_ = newDecodeRecovery ? "receiver_recovery" : (newDropSignal ? "receiver_loss" : "queue_pressure");
+                reason_ = newDecodeRecovery ? "receiver_recovery" :
+                    (newTransportDropSignal ? "receiver_loss" :
+                        (sustainedQueuePressure ? "queue_pressure" : "preview_pressure"));
             }
+        } else if (queuePressure) {
+            stableFeedbackCount_ = 0;
+            if (reduceCooldownRemaining_ > 0) {
+                --reduceCooldownRemaining_;
+            }
+            action_ = "hold";
+            reason_ = "queue_stabilizing";
+        } else if (newPreviewDropSignal) {
+            stableFeedbackCount_ = 0;
+            if (reduceCooldownRemaining_ > 0) {
+                --reduceCooldownRemaining_;
+            }
+            action_ = "hold";
+            reason_ = "preview_stabilizing";
         } else if (recommendedBitrate_ < targetBitrate_) {
             if (reduceCooldownRemaining_ > 0) {
                 --reduceCooldownRemaining_;
@@ -653,7 +690,8 @@ public:
 
         hasFeedback_ = true;
         lastFeedbackSequence_ = feedback.sequence;
-        lastDropSignals_ = dropSignals;
+        lastTransportDropSignals_ = transportDropSignals;
+        lastPreviewDropSignals_ = previewDropSignals;
         lastResyncs_ = feedback.decodeResyncs;
         lastSkippedPackets_ = feedback.decodeSkippedPackets;
     }
@@ -668,6 +706,8 @@ public:
 
 private:
     static constexpr uint32_t StableFeedbackReportsBeforeIncrease = 3;
+    static constexpr uint32_t QueuePressureReportsBeforeReduce = 2;
+    static constexpr uint32_t PreviewPressureReportsBeforeReduce = 3;
 
     uint32_t targetBitrate_ = 0;
     uint32_t recommendedBitrate_ = 0;
@@ -675,10 +715,13 @@ private:
     uint32_t reduceCooldownReports_ = 3;
     uint32_t reduceCooldownRemaining_ = 0;
     uint32_t stableFeedbackCount_ = 0;
+    uint32_t previewPressureReports_ = 0;
+    uint32_t queuePressureReports_ = 0;
     uint64_t suppressedReductions_ = 0;
     bool hasFeedback_ = false;
     uint64_t lastFeedbackSequence_ = 0;
-    uint64_t lastDropSignals_ = 0;
+    uint64_t lastTransportDropSignals_ = 0;
+    uint64_t lastPreviewDropSignals_ = 0;
     uint64_t lastResyncs_ = 0;
     uint64_t lastSkippedPackets_ = 0;
     const char* action_ = "hold";
@@ -1312,7 +1355,9 @@ void RunCaptureStats(const Options& options)
                 streamBitrate > bitrateAdvisor.minBitrate() &&
                 !pendingBitrateIncrease &&
                 std::strcmp(bitrateAdvisor.reason(), "waiting_for_feedback") != 0 &&
-                std::strcmp(bitrateAdvisor.reason(), "min_bitrate") != 0;
+                std::strcmp(bitrateAdvisor.reason(), "min_bitrate") != 0 &&
+                std::strcmp(bitrateAdvisor.reason(), "queue_stabilizing") != 0 &&
+                std::strcmp(bitrateAdvisor.reason(), "preview_stabilizing") != 0;
 
             if (stableForUpscale) {
                 ++resolutionStableFeedbackReports;
