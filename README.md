@@ -113,6 +113,9 @@ the older raw burst behavior for transport diagnostics.
 
 Add `--adapt-bitrate` to let receiver feedback apply conservative live bitrate reductions to the
 active stream encoder and UDP pacing queue. Upward advice is still reported for diagnostics only.
+Use `--adapt-min-bitrate-mbps Mbps` to set the floor for reductions, and
+`--adapt-reduce-cooldown S` to control how many seconds of feedback must pass between repeated
+downward steps.
 
 The sender automatically checks whether the captured display is running in Windows HDR mode. With
 the default WGC backend, HDR desktops are captured as scRGB float frames and converted back to SDR
@@ -230,8 +233,12 @@ queue. The sender also listens on the same UDP socket for receiver feedback pack
 bitrate advice through `bitrate_advice_mbps`, `bitrate_advice_action`, and
 `bitrate_advice_reason`. By default this remains diagnostics-only; with `--adapt-bitrate`, downward
 advice is applied to the live encoder through Media Foundation's bitrate control and to the UDP
-pacing queue. Stats report `stream_bitrate_mbps`, `bitrate_adaptation`, `bitrate_adaptations`, and
-`bitrate_adaptation_failures` so you can see whether the active encoder accepted the update. The
+pacing queue. `--adapt-min-bitrate-mbps Mbps` sets the adaptive bitrate floor, while
+`--adapt-reduce-cooldown S` prevents repeated reductions from every feedback report during the same
+loss/recovery episode. Stats report `stream_bitrate_mbps`, `bitrate_advice_min_mbps`,
+`bitrate_advice_cooldown`, `bitrate_advice_suppressed`, `bitrate_adaptation`,
+`bitrate_adaptations`, and `bitrate_adaptation_failures` so you can see whether the active encoder
+accepted the update and whether cooldown is suppressing extra reductions. The
 `--udp-recv` path binds a local UDP port, validates media datagrams, reassembles complete encoded
 frames, sends compact feedback back to the sender's source address, and prints transport
 diagnostics. Receiver-side simulation flags can

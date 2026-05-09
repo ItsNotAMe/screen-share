@@ -64,6 +64,10 @@ struct Options {
     bool udpPacing = true;
     bool udpPacingOptionProvided = false;
     bool adaptBitrate = false;
+    uint32_t adaptMinBitrate = 0;
+    bool adaptMinBitrateProvided = false;
+    int adaptReduceCooldownSeconds = 3;
+    bool adaptReduceCooldownProvided = false;
     bool wgcBorderRequired = false;
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
@@ -92,6 +96,7 @@ void PrintHelp()
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
         << "              [--udp-send HOST:PORT] [--no-udp-pacing] [--adapt-bitrate]\n"
+        << "              [--adapt-min-bitrate-mbps Mbps] [--adapt-reduce-cooldown S]\n"
         << "              [--dump-capture-bmp PATH]\n"
         << "              [--capture-backend dxgi|wgc]\n"
         << "              [--bitrate-mbps Mbps] [--keyframe-interval S]\n"
@@ -486,11 +491,15 @@ void DrainUdpFeedback(screenshare::UdpSender& udpSender, std::chrono::millisecon
 
 class AdaptiveBitrateAdvisor {
 public:
-    void Configure(uint32_t targetBitrate)
+    void Configure(uint32_t targetBitrate, uint32_t minBitrate, uint32_t reduceCooldownReports)
     {
         targetBitrate_ = targetBitrate;
         recommendedBitrate_ = targetBitrate;
-        minBitrate_ = std::max<uint32_t>(1'000'000, targetBitrate / 4);
+        const uint32_t defaultMinBitrate = std::max<uint32_t>(1'000'000, targetBitrate / 4);
+        minBitrate_ = std::min(minBitrate == 0 ? defaultMinBitrate : minBitrate, targetBitrate);
+        reduceCooldownReports_ = reduceCooldownReports;
+        reduceCooldownRemaining_ = 0;
+        suppressedReductions_ = 0;
         stableFeedbackCount_ = 0;
         hasFeedback_ = false;
         lastFeedbackSequence_ = 0;
@@ -536,14 +545,28 @@ public:
              stats.pendingDatagrams >= stats.peakPendingDatagrams / 2);
 
         if (newDropSignal || newDecodeRecovery || queuePressure) {
-            const uint32_t reduced = static_cast<uint32_t>(
-                static_cast<uint64_t>(recommendedBitrate_) * 80 / 100);
-            recommendedBitrate_ = std::max(minBitrate_, reduced);
             stableFeedbackCount_ = 0;
-            action_ = "reduce";
-            reason_ = newDecodeRecovery ? "receiver_recovery" : (newDropSignal ? "receiver_loss" : "queue_pressure");
+            if (reduceCooldownRemaining_ > 0) {
+                --reduceCooldownRemaining_;
+                ++suppressedReductions_;
+                action_ = "hold";
+                reason_ = "reduce_cooldown";
+            } else if (recommendedBitrate_ <= minBitrate_) {
+                action_ = "hold";
+                reason_ = "min_bitrate";
+            } else {
+                const uint32_t reduced = static_cast<uint32_t>(
+                    static_cast<uint64_t>(recommendedBitrate_) * 80 / 100);
+                recommendedBitrate_ = std::max(minBitrate_, reduced);
+                reduceCooldownRemaining_ = reduceCooldownReports_;
+                action_ = "reduce";
+                reason_ = newDecodeRecovery ? "receiver_recovery" : (newDropSignal ? "receiver_loss" : "queue_pressure");
+            }
         } else if (feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Ok &&
                    recommendedBitrate_ < targetBitrate_) {
+            if (reduceCooldownRemaining_ > 0) {
+                --reduceCooldownRemaining_;
+            }
             ++stableFeedbackCount_;
             if (stableFeedbackCount_ >= StableFeedbackReportsBeforeIncrease) {
                 const uint32_t increased = static_cast<uint32_t>(
@@ -557,6 +580,9 @@ public:
                 reason_ = "stabilizing";
             }
         } else {
+            if (reduceCooldownRemaining_ > 0) {
+                --reduceCooldownRemaining_;
+            }
             stableFeedbackCount_ = 0;
             action_ = "hold";
             reason_ = feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Ok ?
@@ -572,6 +598,9 @@ public:
     }
 
     [[nodiscard]] uint32_t recommendedBitrate() const noexcept { return recommendedBitrate_; }
+    [[nodiscard]] uint32_t minBitrate() const noexcept { return minBitrate_; }
+    [[nodiscard]] uint32_t reduceCooldownRemaining() const noexcept { return reduceCooldownRemaining_; }
+    [[nodiscard]] uint64_t suppressedReductions() const noexcept { return suppressedReductions_; }
     [[nodiscard]] const char* action() const noexcept { return action_; }
     [[nodiscard]] const char* reason() const noexcept { return reason_; }
     [[nodiscard]] bool configured() const noexcept { return targetBitrate_ != 0; }
@@ -582,7 +611,10 @@ private:
     uint32_t targetBitrate_ = 0;
     uint32_t recommendedBitrate_ = 0;
     uint32_t minBitrate_ = 0;
+    uint32_t reduceCooldownReports_ = 3;
+    uint32_t reduceCooldownRemaining_ = 0;
     uint32_t stableFeedbackCount_ = 0;
+    uint64_t suppressedReductions_ = 0;
     bool hasFeedback_ = false;
     uint64_t lastFeedbackSequence_ = 0;
     uint64_t lastDropSignals_ = 0;
@@ -722,6 +754,12 @@ Options ParseOptions(int argc, char** argv)
             options.udpPacingOptionProvided = true;
         } else if (arg == "--adapt-bitrate") {
             options.adaptBitrate = true;
+        } else if (arg == "--adapt-min-bitrate-mbps") {
+            options.adaptMinBitrate = ParseBitrateMbps(requireValue("--adapt-min-bitrate-mbps"));
+            options.adaptMinBitrateProvided = true;
+        } else if (arg == "--adapt-reduce-cooldown") {
+            options.adaptReduceCooldownSeconds = ParseInt(requireValue("--adapt-reduce-cooldown"), "--adapt-reduce-cooldown");
+            options.adaptReduceCooldownProvided = true;
         } else if (arg == "--wgc-border") {
             options.wgcBorderRequired = true;
         } else if (arg == "--no-hdr-to-sdr") {
@@ -790,6 +828,12 @@ Options ParseOptions(int argc, char** argv)
     if (options.adaptBitrate && options.udpSendTarget.empty()) {
         throw std::invalid_argument("--adapt-bitrate requires --udp-send");
     }
+    if ((options.adaptMinBitrateProvided || options.adaptReduceCooldownProvided) && options.udpSendTarget.empty()) {
+        throw std::invalid_argument("--adapt-min-bitrate-mbps and --adapt-reduce-cooldown require --udp-send");
+    }
+    if (options.adaptReduceCooldownSeconds < 0 || options.adaptReduceCooldownSeconds > 30) {
+        throw std::invalid_argument("--adapt-reduce-cooldown must be between 0 and 30 seconds");
+    }
     if (options.streamEncoderPreferenceProvided && !options.streamEncode) {
         throw std::invalid_argument("--stream-encoder requires --stream-encode or --udp-send");
     }
@@ -817,13 +861,15 @@ Options ParseOptions(int argc, char** argv)
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.adaptBitrate || options.keyframeIntervalProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --adapt-bitrate, or --keyframe-interval");
+         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.adaptReduceCooldownProvided || options.keyframeIntervalProvided)) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.adaptBitrate || options.keyframeIntervalProvided ||
+         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.adaptReduceCooldownProvided || options.keyframeIntervalProvided ||
          options.decodeH264 || options.previewWindow)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
@@ -956,6 +1002,10 @@ void RunCaptureStats(const Options& options)
         std::cout << ", UDP sending to " << options.udpSendTarget;
         std::cout << ", UDP pacing " << (options.udpPacing ? "enabled" : "disabled");
         std::cout << ", adaptive bitrate " << (options.adaptBitrate ? "enabled" : "advice-only");
+        if (options.adaptMinBitrateProvided) {
+            std::cout << ", adaptive minimum " << Mbps(options.adaptMinBitrate) << " Mbps";
+        }
+        std::cout << ", adaptive reduce cooldown " << options.adaptReduceCooldownSeconds << "s";
     }
     if (options.captureBackend == screenshare::CaptureBackend::WindowsGraphicsCapture) {
         std::cout << ", WGC border " << (options.wgcBorderRequired ? "enabled" : "disabled when permitted");
@@ -1126,6 +1176,11 @@ void RunCaptureStats(const Options& options)
 
             if (options.streamEncode) {
                 if (!streamEncoder) {
+                    const uint32_t selectedStreamBitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
+                    if (options.adaptMinBitrateProvided && options.adaptMinBitrate > selectedStreamBitrate) {
+                        throw std::runtime_error("--adapt-min-bitrate-mbps cannot be greater than the selected stream bitrate");
+                    }
+
                     auto startStreamEncoder = [&](screenshare::H264StreamEncoderBackend backend) {
                         if (backend == screenshare::H264StreamEncoderBackend::Hardware &&
                             (!lastFrame.d3dDevice || !lastFrame.nv12Texture)) {
@@ -1136,11 +1191,14 @@ void RunCaptureStats(const Options& options)
                         encoderConfig.width = lastFrame.width;
                         encoderConfig.height = lastFrame.height;
                         encoderConfig.fps = options.fps;
-                        encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
+                        encoderConfig.bitrate = selectedStreamBitrate;
                         encoderConfig.keyframeIntervalFrames = streamKeyframeIntervalFrames;
                         streamBitrate = encoderConfig.bitrate;
                         if (!bitrateAdvisor.configured()) {
-                            bitrateAdvisor.Configure(streamBitrate);
+                            bitrateAdvisor.Configure(
+                                streamBitrate,
+                                options.adaptMinBitrate,
+                                static_cast<uint32_t>(options.adaptReduceCooldownSeconds));
                         }
                         encoderConfig.backend = backend;
                         if (encoderConfig.backend == screenshare::H264StreamEncoderBackend::Hardware) {
@@ -1202,6 +1260,8 @@ void RunCaptureStats(const Options& options)
                             << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
                             << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
                             << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
+                            << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
+                            << " adapt_reduce_cooldown_s=" << options.adaptReduceCooldownSeconds
                             << " max_queued_datagrams=" << udpConfig.maxQueuedDatagrams
                             << "\n";
                     }
@@ -1284,8 +1344,11 @@ void RunCaptureStats(const Options& options)
                 << " udp_feedback_resyncs=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeResyncs : 0)
                 << " udp_feedback_skipped_packets=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeSkippedPackets : 0)
                 << " bitrate_advice_mbps=" << Mbps(bitrateAdvisor.recommendedBitrate())
+                << " bitrate_advice_min_mbps=" << Mbps(bitrateAdvisor.minBitrate())
                 << " bitrate_advice_action=" << bitrateAdvisor.action()
                 << " bitrate_advice_reason=" << bitrateAdvisor.reason()
+                << " bitrate_advice_cooldown=" << bitrateAdvisor.reduceCooldownRemaining()
+                << " bitrate_advice_suppressed=" << bitrateAdvisor.suppressedReductions()
                 << " bitrate_adaptation=" << bitrateAdaptationStatus
                 << " bitrate_adaptations=" << bitrateAdaptations
                 << " bitrate_adaptation_failures=" << bitrateAdaptationFailures
@@ -1365,8 +1428,11 @@ void RunCaptureStats(const Options& options)
         << ", UDP feedback resyncs: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeResyncs : 0)
         << ", UDP feedback skipped packets: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeSkippedPackets : 0)
         << ", bitrate advice Mbps: " << Mbps(bitrateAdvisor.recommendedBitrate())
+        << ", bitrate advice min Mbps: " << Mbps(bitrateAdvisor.minBitrate())
         << ", bitrate advice action: " << bitrateAdvisor.action()
         << ", bitrate advice reason: " << bitrateAdvisor.reason()
+        << ", bitrate advice cooldown: " << bitrateAdvisor.reduceCooldownRemaining()
+        << ", bitrate advice suppressed reductions: " << bitrateAdvisor.suppressedReductions()
         << ", bitrate adaptation: " << bitrateAdaptationStatus
         << ", bitrate adaptations: " << bitrateAdaptations
         << ", bitrate adaptation failures: " << bitrateAdaptationFailures
