@@ -573,6 +573,9 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     if (config.keyframeIntervalFrames > static_cast<uint32_t>(config.fps * 30)) {
         throw std::invalid_argument("H264StreamEncoder keyframe interval is too large");
     }
+    if (config.startFrameIndex < 0) {
+        throw std::invalid_argument("H264StreamEncoder start frame index must be non-negative");
+    }
 
     config_ = config;
     backend_ = config.backend;
@@ -589,7 +592,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     droppedAsyncInputs_ = 0;
     maxQueuedAsyncInputs_ = std::clamp<size_t>(static_cast<size_t>((config_.fps + 1) / 2), 8, 32);
     asyncDrainComplete_ = false;
-    frameIndex_ = 0;
+    frameIndex_ = config_.startFrameIndex;
     frameDuration100ns_ = 10'000'000 / config_.fps;
 
     if (backend_ == H264StreamEncoderBackend::Hardware) {
