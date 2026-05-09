@@ -180,7 +180,10 @@ Listen, decode, and preview received frames in a native window until the window 
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview
 ```
 
-Add `--seconds S` to stop preview automatically after a fixed duration.
+Add `--seconds S` to stop preview automatically after a fixed duration. The preview playout buffer
+starts with 150 ms of latency and drops frames that are more than 500 ms late by default. Use
+`--preview-latency-ms MS` to trade latency for jitter tolerance, and `--preview-max-late-ms MS` to
+control how long late frames can stay eligible for presentation before they are dropped.
 
 For color debugging, combine `--dump-capture-bmp` on the sender with `--dump-decoded-bmp` on the
 receiver. The sender dump is written after capture scaling and HDR/SDR conversion, before H.264; the
@@ -277,7 +280,8 @@ buffer before presentation, so network and decoder bursts are smoothed before th
 If the decoded stream changes resolution, the preview drops queued frames from the old size and
 restarts its playout clock so adaptive-resolution tier switches do not carry stale timing into the
 new size. Receiver stats report `preview_queue`, `preview_playout_resets`, `preview_late_drops`, and
-`preview_overflow_drops` for that playout stage. Receiver stats also include
+`preview_overflow_drops` for that playout stage, along with `preview_latency_ms` and
+`preview_max_late_ms` for the active playout settings. Receiver stats also include
 `receiver_health=waiting|ok|loss|recovering|buffering|preview-drop`; when `--preview` is active,
 the same compact health summary is shown in the preview window title. The health label reflects the
 latest reporting interval, while the numeric drop/resync counters remain cumulative for diagnostics
