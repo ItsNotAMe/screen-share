@@ -52,6 +52,7 @@ public:
     void Open(const UdpSenderConfig& config);
     void Close();
     void SendFrame(const EncodedPacket& packet);
+    void SetPacingBitrate(uint32_t bitrate);
     void Flush();
     [[nodiscard]] std::optional<udp_protocol::FeedbackSnapshot> ReceiveFeedback(std::chrono::milliseconds timeout);
 

@@ -51,10 +51,12 @@ public:
     void Start(const H264StreamEncoderConfig& config);
     std::vector<EncodedPacket> EncodeFrame(const CapturedFrame& frame);
     std::vector<EncodedPacket> Drain();
+    bool TryUpdateBitrate(uint32_t bitrate);
     void Stop();
 
     [[nodiscard]] bool isRunning() const noexcept { return transform_ != nullptr; }
     [[nodiscard]] H264StreamEncoderBackend backend() const noexcept { return backend_; }
+    [[nodiscard]] uint32_t bitrate() const noexcept { return config_.bitrate; }
     [[nodiscard]] const std::string& encoderName() const noexcept { return encoderName_; }
     [[nodiscard]] H264StreamEncoderInputMode lastInputMode() const noexcept { return lastInputMode_; }
     [[nodiscard]] size_t queuedInputCount() const noexcept { return queuedAsyncInputs_.size(); }
