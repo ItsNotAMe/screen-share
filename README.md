@@ -111,8 +111,9 @@ UDP sending is paced by default using the selected stream bitrate, which spreads
 fragments over time instead of dumping each frame as one burst. Add `--no-udp-pacing` when you want
 the older raw burst behavior for transport diagnostics.
 
-Add `--adapt-bitrate` to let receiver feedback apply conservative live bitrate reductions to the
-active stream encoder and UDP pacing queue. Upward advice is still reported for diagnostics only.
+Add `--adapt-bitrate` to let receiver feedback apply conservative live bitrate changes to the
+active stream encoder and UDP pacing queue. The sender reduces quickly on loss/recovery signals and
+increases more slowly after repeated clean feedback, capped at the original target bitrate.
 Use `--adapt-min-bitrate-mbps Mbps` to set the floor for reductions, and
 `--adapt-reduce-cooldown S` to control how many seconds of feedback must pass between repeated
 downward steps.
@@ -231,9 +232,10 @@ queue. The sender also listens on the same UDP socket for receiver feedback pack
 `udp_feedback_health`, `udp_feedback_completed_frames`, `udp_feedback_resyncs`, and
 `udp_feedback_skipped_packets` when a receiver is present. Sender stats also include adaptive
 bitrate advice through `bitrate_advice_mbps`, `bitrate_advice_action`, and
-`bitrate_advice_reason`. By default this remains diagnostics-only; with `--adapt-bitrate`, downward
-advice is applied to the live encoder through Media Foundation's bitrate control and to the UDP
-pacing queue. `--adapt-min-bitrate-mbps Mbps` sets the adaptive bitrate floor, while
+`bitrate_advice_reason`. By default this remains diagnostics-only; with `--adapt-bitrate`, reduce
+and increase advice are applied to the live encoder through Media Foundation's bitrate control and
+to the UDP pacing queue. Increases only happen after repeated clean receiver feedback and are capped
+at the original target bitrate. `--adapt-min-bitrate-mbps Mbps` sets the adaptive bitrate floor, while
 `--adapt-reduce-cooldown S` prevents repeated reductions from every feedback report during the same
 loss/recovery episode. Stats report `stream_bitrate_mbps`, `bitrate_advice_min_mbps`,
 `bitrate_advice_cooldown`, `bitrate_advice_suppressed`, `bitrate_adaptation`,

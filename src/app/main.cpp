@@ -562,8 +562,7 @@ public:
                 action_ = "reduce";
                 reason_ = newDecodeRecovery ? "receiver_recovery" : (newDropSignal ? "receiver_loss" : "queue_pressure");
             }
-        } else if (feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Ok &&
-                   recommendedBitrate_ < targetBitrate_) {
+        } else if (recommendedBitrate_ < targetBitrate_) {
             if (reduceCooldownRemaining_ > 0) {
                 --reduceCooldownRemaining_;
             }
@@ -1078,9 +1077,14 @@ void RunCaptureStats(const Options& options)
             bitrateAdaptationStatus = "waiting";
             return;
         }
-        if (std::strcmp(bitrateAdvisor.action(), "reduce") != 0 || recommendedBitrate >= streamBitrate) {
-            bitrateAdaptationStatus =
-                recommendedBitrate > streamBitrate ? "holding_increase" : "holding";
+        const bool shouldReduce =
+            std::strcmp(bitrateAdvisor.action(), "reduce") == 0 &&
+            recommendedBitrate < streamBitrate;
+        const bool shouldIncrease =
+            std::strcmp(bitrateAdvisor.action(), "increase") == 0 &&
+            recommendedBitrate > streamBitrate;
+        if (!shouldReduce && !shouldIncrease) {
+            bitrateAdaptationStatus = "holding";
             return;
         }
         if (recommendedBitrate == lastBitrateAdaptationAttempt) {
@@ -1092,9 +1096,10 @@ void RunCaptureStats(const Options& options)
             streamBitrate = recommendedBitrate;
             udpSender->SetPacingBitrate(streamBitrate);
             ++bitrateAdaptations;
-            bitrateAdaptationStatus = "applied";
+            bitrateAdaptationStatus = shouldIncrease ? "applied_increase" : "applied_reduce";
             std::cout
                 << "Adaptive bitrate applied bitrate_mbps=" << Mbps(streamBitrate)
+                << " direction=" << (shouldIncrease ? "increase" : "reduce")
                 << " reason=" << bitrateAdvisor.reason()
                 << "\n";
         } else {
