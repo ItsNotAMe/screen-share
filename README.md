@@ -118,6 +118,12 @@ Use `--adapt-min-bitrate-mbps Mbps` to set the floor for reductions, and
 `--adapt-reduce-cooldown S` to control how many seconds of feedback must pass between repeated
 downward steps.
 
+Add `--adapt-resolution` to let the sender restart capture and stream encoding at a lower output
+resolution after bitrate reaches its floor and receiver pressure continues. When feedback stabilizes,
+resolution can step back up again. Use `--adapt-resolution-min-scale N` to set the smallest allowed
+scale and `--adapt-resolution-cooldown S` to space out resolution changes. Lower adaptive tiers are
+rounded to H.264-friendly dimensions so receiver decoders do not add hidden padding.
+
 The sender automatically checks whether the captured display is running in Windows HDR mode. With
 the default WGC backend, HDR desktops are captured as scRGB float frames and converted back to SDR
 before encoding. If the preview or recording still looks too bright or too dim, tune the SDR white
@@ -237,7 +243,11 @@ and increase advice are applied to the live encoder through Media Foundation's b
 to the UDP pacing queue. Increases only happen after repeated clean receiver feedback and are capped
 at the original target bitrate. `--adapt-min-bitrate-mbps Mbps` sets the adaptive bitrate floor, while
 `--adapt-reduce-cooldown S` prevents repeated reductions from every feedback report during the same
-loss/recovery episode. Stats report `stream_bitrate_mbps`, `bitrate_advice_min_mbps`,
+loss/recovery episode. Add `--adapt-resolution` to make resolution a second adaptation lever: the
+sender steps down to lower output-resolution tiers when bitrate is already at its floor, then steps
+back up after stable feedback. Resolution changes restart capture and the stream encoder while
+keeping UDP frame IDs and H.264 timestamps moving forward. Stats report `stream_bitrate_mbps`,
+`resolution_scale`, `resolution_adaptation`, `resolution_adaptations`, `bitrate_advice_min_mbps`,
 `bitrate_advice_cooldown`, `bitrate_advice_suppressed`, `bitrate_adaptation`,
 `bitrate_adaptations`, and `bitrate_adaptation_failures` so you can see whether the active encoder
 accepted the update and whether cooldown is suppressing extra reductions. The

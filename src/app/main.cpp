@@ -10,7 +10,9 @@
 #include "video/Nv12Convert.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -68,6 +70,11 @@ struct Options {
     bool adaptMinBitrateProvided = false;
     int adaptReduceCooldownSeconds = 3;
     bool adaptReduceCooldownProvided = false;
+    bool adaptResolution = false;
+    float adaptResolutionMinScale = 0.5f;
+    bool adaptResolutionMinScaleProvided = false;
+    int adaptResolutionCooldownSeconds = 5;
+    bool adaptResolutionCooldownProvided = false;
     bool wgcBorderRequired = false;
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
@@ -97,6 +104,8 @@ void PrintHelp()
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
         << "              [--udp-send HOST:PORT] [--no-udp-pacing] [--adapt-bitrate]\n"
         << "              [--adapt-min-bitrate-mbps Mbps] [--adapt-reduce-cooldown S]\n"
+        << "              [--adapt-resolution] [--adapt-resolution-min-scale N]\n"
+        << "              [--adapt-resolution-cooldown S]\n"
         << "              [--dump-capture-bmp PATH]\n"
         << "              [--capture-backend dxgi|wgc]\n"
         << "              [--bitrate-mbps Mbps] [--keyframe-interval S]\n"
@@ -255,6 +264,49 @@ float ParseFloat(const char* value, const char* name)
         throw std::invalid_argument(std::string("Invalid value for ") + name + ": " + value);
     }
     return static_cast<float>(parsed);
+}
+
+int EvenDimension(int value)
+{
+    return std::max(2, value & ~1);
+}
+
+int H264AlignedDimension(int value)
+{
+    return std::max(16, ((value + 8) / 16) * 16);
+}
+
+struct ResolutionTier {
+    int width = 0;
+    int height = 0;
+    double scale = 1.0;
+};
+
+std::vector<ResolutionTier> BuildResolutionTiers(int baseWidth, int baseHeight, float minScale)
+{
+    std::vector<ResolutionTier> tiers;
+    const std::array<double, 3> candidateScales{0.75, 0.5, 0.375};
+    const double clampedMinScale = std::clamp(static_cast<double>(minScale), 0.25, 1.0);
+    const int baseTierWidth = EvenDimension(baseWidth);
+    const int baseTierHeight = EvenDimension(baseHeight);
+
+    tiers.push_back(ResolutionTier{baseTierWidth, baseTierHeight, 1.0});
+
+    for (const double scale : candidateScales) {
+        if (scale + 0.0001 < clampedMinScale) {
+            continue;
+        }
+
+        ResolutionTier tier;
+        tier.width = std::min(baseTierWidth, H264AlignedDimension(static_cast<int>(std::round(static_cast<double>(baseWidth) * scale))));
+        tier.height = std::min(baseTierHeight, H264AlignedDimension(static_cast<int>(std::round(static_cast<double>(baseHeight) * scale))));
+        tier.scale = scale;
+        if (tiers.empty() || tiers.back().width != tier.width || tiers.back().height != tier.height) {
+            tiers.push_back(tier);
+        }
+    }
+
+    return tiers;
 }
 
 screenshare::CaptureBackend ParseCaptureBackend(const char* value)
@@ -759,6 +811,15 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--adapt-reduce-cooldown") {
             options.adaptReduceCooldownSeconds = ParseInt(requireValue("--adapt-reduce-cooldown"), "--adapt-reduce-cooldown");
             options.adaptReduceCooldownProvided = true;
+        } else if (arg == "--adapt-resolution") {
+            options.adaptResolution = true;
+            options.adaptBitrate = true;
+        } else if (arg == "--adapt-resolution-min-scale") {
+            options.adaptResolutionMinScale = ParseFloat(requireValue("--adapt-resolution-min-scale"), "--adapt-resolution-min-scale");
+            options.adaptResolutionMinScaleProvided = true;
+        } else if (arg == "--adapt-resolution-cooldown") {
+            options.adaptResolutionCooldownSeconds = ParseInt(requireValue("--adapt-resolution-cooldown"), "--adapt-resolution-cooldown");
+            options.adaptResolutionCooldownProvided = true;
         } else if (arg == "--wgc-border") {
             options.wgcBorderRequired = true;
         } else if (arg == "--no-hdr-to-sdr") {
@@ -795,6 +856,11 @@ Options ParseOptions(int argc, char** argv)
         }
     }
 
+    if (options.adaptResolutionMinScaleProvided || options.adaptResolutionCooldownProvided) {
+        options.adaptResolution = true;
+        options.adaptBitrate = true;
+    }
+
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
     }
@@ -824,14 +890,27 @@ Options ParseOptions(int argc, char** argv)
     if (options.udpPacingOptionProvided && options.udpSendTarget.empty()) {
         throw std::invalid_argument("--no-udp-pacing requires --udp-send");
     }
+    if ((options.adaptResolution || options.adaptResolutionMinScaleProvided || options.adaptResolutionCooldownProvided) &&
+        options.udpSendTarget.empty()) {
+        throw std::invalid_argument("--adapt-resolution, --adapt-resolution-min-scale, and --adapt-resolution-cooldown require --udp-send");
+    }
     if (options.adaptBitrate && options.udpSendTarget.empty()) {
         throw std::invalid_argument("--adapt-bitrate requires --udp-send");
     }
     if ((options.adaptMinBitrateProvided || options.adaptReduceCooldownProvided) && options.udpSendTarget.empty()) {
         throw std::invalid_argument("--adapt-min-bitrate-mbps and --adapt-reduce-cooldown require --udp-send");
     }
+    if (options.adaptResolution && !options.recordPath.empty()) {
+        throw std::invalid_argument("--adapt-resolution cannot be combined with --record");
+    }
     if (options.adaptReduceCooldownSeconds < 0 || options.adaptReduceCooldownSeconds > 30) {
         throw std::invalid_argument("--adapt-reduce-cooldown must be between 0 and 30 seconds");
+    }
+    if (options.adaptResolutionMinScale < 0.25f || options.adaptResolutionMinScale > 1.0f) {
+        throw std::invalid_argument("--adapt-resolution-min-scale must be between 0.25 and 1.0");
+    }
+    if (options.adaptResolutionCooldownSeconds < 0 || options.adaptResolutionCooldownSeconds > 60) {
+        throw std::invalid_argument("--adapt-resolution-cooldown must be between 0 and 60 seconds");
     }
     if (options.streamEncoderPreferenceProvided && !options.streamEncode) {
         throw std::invalid_argument("--stream-encoder requires --stream-encode or --udp-send");
@@ -861,14 +940,16 @@ Options ParseOptions(int argc, char** argv)
         (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
-         options.adaptReduceCooldownProvided || options.keyframeIntervalProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, or --keyframe-interval");
+         options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
+         options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided)) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
-         options.adaptReduceCooldownProvided || options.keyframeIntervalProvided ||
+         options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
+         options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
          options.decodeH264 || options.previewWindow)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
@@ -1005,6 +1086,12 @@ void RunCaptureStats(const Options& options)
             std::cout << ", adaptive minimum " << Mbps(options.adaptMinBitrate) << " Mbps";
         }
         std::cout << ", adaptive reduce cooldown " << options.adaptReduceCooldownSeconds << "s";
+        if (options.adaptResolution) {
+            std::cout
+                << ", adaptive resolution enabled"
+                << ", min scale " << options.adaptResolutionMinScale
+                << ", resolution cooldown " << options.adaptResolutionCooldownSeconds << "s";
+        }
     }
     if (options.captureBackend == screenshare::CaptureBackend::WindowsGraphicsCapture) {
         std::cout << ", WGC border " << (options.wgcBorderRequired ? "enabled" : "disabled when permitted");
@@ -1047,11 +1134,18 @@ void RunCaptureStats(const Options& options)
     uint64_t streamPackets = 0;
     uint64_t streamBytes = 0;
     uint32_t streamBitrate = 0;
+    uint32_t streamTargetBitrate = 0;
     uint64_t bitrateAdaptations = 0;
     uint64_t bitrateAdaptationFailures = 0;
     uint32_t lastBitrateAdaptationAttempt = 0;
     const char* bitrateAdaptationStatus = options.adaptBitrate ? "waiting" : "disabled";
     AdaptiveBitrateAdvisor bitrateAdvisor;
+    std::vector<ResolutionTier> adaptiveResolutionTiers;
+    size_t adaptiveResolutionTierIndex = 0;
+    uint64_t resolutionAdaptations = 0;
+    uint64_t resolutionAdaptationFailures = 0;
+    int resolutionCooldownRemaining = 0;
+    const char* resolutionAdaptationStatus = options.adaptResolution ? "waiting" : "disabled";
     const uint32_t streamKeyframeIntervalFrames =
         options.keyframeIntervalSeconds <= 0 ?
         0 :
@@ -1066,6 +1160,16 @@ void RunCaptureStats(const Options& options)
     uint64_t totalStreamEncodeCalls = 0;
     bool capturedBmpWritten = false;
     std::unique_ptr<screenshare::UdpSender> udpSender;
+
+    auto sendStreamPackets = [&](const std::vector<screenshare::EncodedPacket>& packets) {
+        streamPackets += packets.size();
+        for (const auto& packet : packets) {
+            streamBytes += packet.bytes.size();
+            if (udpSender) {
+                udpSender->SendFrame(packet);
+            }
+        }
+    };
 
     auto applyAdaptiveBitrate = [&]() {
         if (!options.adaptBitrate || !udpSender || !streamEncoder || !bitrateAdvisor.configured()) {
@@ -1112,6 +1216,77 @@ void RunCaptureStats(const Options& options)
         }
     };
 
+    auto restartStreamAtResolution = [&](size_t tierIndex, const char* direction) {
+        if (tierIndex >= adaptiveResolutionTiers.size()) {
+            return;
+        }
+
+        const auto& tier = adaptiveResolutionTiers[tierIndex];
+        try {
+            if (streamEncoder) {
+                sendStreamPackets(streamEncoder->Drain());
+                streamEncoder.reset();
+            }
+
+            config.targetWidth = tier.width;
+            config.targetHeight = tier.height;
+            ConfigureCapturePayloads(config, options, streamEncoderPreference);
+            capturer.Stop();
+            capturer.Start(config);
+            hasFrame = false;
+            adaptiveResolutionTierIndex = tierIndex;
+            resolutionCooldownRemaining = options.adaptResolutionCooldownSeconds;
+            ++resolutionAdaptations;
+            resolutionAdaptationStatus = std::strcmp(direction, "increase") == 0 ? "applied_increase" : "applied_reduce";
+            std::cout
+                << "Adaptive resolution applied output=" << tier.width << "x" << tier.height
+                << " scale=" << tier.scale
+                << " direction=" << direction
+                << " bitrate_mbps=" << Mbps(streamBitrate)
+                << " reason=" << bitrateAdvisor.reason()
+                << "\n";
+        } catch (const std::exception& error) {
+            ++resolutionAdaptationFailures;
+            resolutionAdaptationStatus = "failed";
+            std::cerr << "Adaptive resolution update failed: " << error.what() << "\n";
+            throw;
+        }
+    };
+
+    auto applyAdaptiveResolution = [&]() {
+        if (!options.adaptResolution || adaptiveResolutionTiers.size() < 2 || !streamEncoder || !bitrateAdvisor.configured()) {
+            return;
+        }
+
+        if (resolutionCooldownRemaining > 0) {
+            --resolutionCooldownRemaining;
+            resolutionAdaptationStatus = "cooldown";
+            return;
+        }
+
+        const bool atBitrateFloor =
+            streamBitrate > 0 &&
+            bitrateAdvisor.minBitrate() > 0 &&
+            streamBitrate <= bitrateAdvisor.minBitrate();
+        const bool pressureAtFloor =
+            atBitrateFloor &&
+            (std::strcmp(bitrateAdvisor.action(), "reduce") == 0 ||
+             std::strcmp(bitrateAdvisor.reason(), "min_bitrate") == 0);
+        const bool stableIncrease =
+            std::strcmp(bitrateAdvisor.action(), "increase") == 0;
+
+        if (pressureAtFloor && adaptiveResolutionTierIndex + 1 < adaptiveResolutionTiers.size()) {
+            restartStreamAtResolution(adaptiveResolutionTierIndex + 1, "reduce");
+            return;
+        }
+        if (stableIncrease && adaptiveResolutionTierIndex > 0) {
+            restartStreamAtResolution(adaptiveResolutionTierIndex - 1, "increase");
+            return;
+        }
+
+        resolutionAdaptationStatus = "holding";
+    };
+
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
     auto nextFrameAt = Clock::now();
 
@@ -1142,6 +1317,18 @@ void RunCaptureStats(const Options& options)
             lastNv12TextureAvailable = frame->nv12Texture != nullptr;
             lastFrame = std::move(*frame);
             hasFrame = true;
+            if (options.adaptResolution && adaptiveResolutionTiers.empty()) {
+                adaptiveResolutionTiers = BuildResolutionTiers(
+                    lastFrame.width,
+                    lastFrame.height,
+                    options.adaptResolutionMinScale);
+                adaptiveResolutionTierIndex = 0;
+                std::cout << "Adaptive resolution tiers:";
+                for (const auto& tier : adaptiveResolutionTiers) {
+                    std::cout << " " << tier.width << "x" << tier.height << "@" << tier.scale;
+                }
+                std::cout << "\n";
+            }
         }
 
         if (hasFrame) {
@@ -1181,8 +1368,11 @@ void RunCaptureStats(const Options& options)
 
             if (options.streamEncode) {
                 if (!streamEncoder) {
-                    const uint32_t selectedStreamBitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
-                    if (options.adaptMinBitrateProvided && options.adaptMinBitrate > selectedStreamBitrate) {
+                    if (streamTargetBitrate == 0) {
+                        streamTargetBitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
+                    }
+                    const uint32_t encoderStartBitrate = streamBitrate == 0 ? streamTargetBitrate : streamBitrate;
+                    if (options.adaptMinBitrateProvided && options.adaptMinBitrate > streamTargetBitrate) {
                         throw std::runtime_error("--adapt-min-bitrate-mbps cannot be greater than the selected stream bitrate");
                     }
 
@@ -1196,12 +1386,13 @@ void RunCaptureStats(const Options& options)
                         encoderConfig.width = lastFrame.width;
                         encoderConfig.height = lastFrame.height;
                         encoderConfig.fps = options.fps;
-                        encoderConfig.bitrate = selectedStreamBitrate;
+                        encoderConfig.bitrate = encoderStartBitrate;
                         encoderConfig.keyframeIntervalFrames = streamKeyframeIntervalFrames;
+                        encoderConfig.startFrameIndex = static_cast<int64_t>(streamEncodedFrames);
                         streamBitrate = encoderConfig.bitrate;
                         if (!bitrateAdvisor.configured()) {
                             bitrateAdvisor.Configure(
-                                streamBitrate,
+                                streamTargetBitrate,
                                 options.adaptMinBitrate,
                                 static_cast<uint32_t>(options.adaptReduceCooldownSeconds));
                         }
@@ -1256,19 +1447,23 @@ void RunCaptureStats(const Options& options)
                     }
 
                     if (!options.udpSendTarget.empty()) {
-                        auto udpConfig = screenshare::ParseUdpSenderTarget(options.udpSendTarget);
-                        udpConfig.pacingEnabled = options.udpPacing;
-                        udpConfig.pacingBitrate = streamBitrate;
-                        udpSender = std::make_unique<screenshare::UdpSender>();
-                        udpSender->Open(udpConfig);
-                        std::cout
-                            << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
-                            << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
-                            << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
-                            << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
-                            << " adapt_reduce_cooldown_s=" << options.adaptReduceCooldownSeconds
-                            << " max_queued_datagrams=" << udpConfig.maxQueuedDatagrams
-                            << "\n";
+                        if (!udpSender) {
+                            auto udpConfig = screenshare::ParseUdpSenderTarget(options.udpSendTarget);
+                            udpConfig.pacingEnabled = options.udpPacing;
+                            udpConfig.pacingBitrate = streamBitrate;
+                            udpSender = std::make_unique<screenshare::UdpSender>();
+                            udpSender->Open(udpConfig);
+                            std::cout
+                                << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
+                                << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
+                                << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
+                                << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
+                                << " adapt_reduce_cooldown_s=" << options.adaptReduceCooldownSeconds
+                                << " max_queued_datagrams=" << udpConfig.maxQueuedDatagrams
+                                << "\n";
+                        } else {
+                            udpSender->SetPacingBitrate(streamBitrate);
+                        }
                     }
                 }
 
@@ -1281,13 +1476,7 @@ void RunCaptureStats(const Options& options)
                 totalStreamEncodeMs += streamEncodeMs;
                 ++totalStreamEncodeCalls;
                 ++streamEncodedFrames;
-                streamPackets += packets.size();
-                for (const auto& packet : packets) {
-                    streamBytes += packet.bytes.size();
-                    if (udpSender) {
-                        udpSender->SendFrame(packet);
-                    }
-                }
+                sendStreamPackets(packets);
             }
         }
 
@@ -1308,6 +1497,7 @@ void RunCaptureStats(const Options& options)
             if (udpSender) {
                 bitrateAdvisor.Update(udpStatsNow);
                 applyAdaptiveBitrate();
+                applyAdaptiveResolution();
             }
             std::cout
                 << "source=" << lastSourceWidth << "x" << lastSourceHeight
@@ -1317,6 +1507,13 @@ void RunCaptureStats(const Options& options)
                 << " color_conversion=" << screenshare::CaptureColorConversionName(lastColorConversionMode)
                 << " output=" << lastOutputWidth << "x" << lastOutputHeight
                 << " output_format=" << screenshare::DxgiFormatName(lastOutputFormat)
+                << " resolution_scale=" << (adaptiveResolutionTiers.empty() ? 1.0 : adaptiveResolutionTiers[adaptiveResolutionTierIndex].scale)
+                << " resolution_tier=" << (adaptiveResolutionTiers.empty() ? 0 : adaptiveResolutionTierIndex)
+                << " resolution_tiers=" << adaptiveResolutionTiers.size()
+                << " resolution_adaptation=" << resolutionAdaptationStatus
+                << " resolution_adaptations=" << resolutionAdaptations
+                << " resolution_adaptation_failures=" << resolutionAdaptationFailures
+                << " resolution_cooldown=" << resolutionCooldownRemaining
                 << " nv12=" << (lastNv12TextureAvailable ? "gpu_texture" : (lastNv12GeneratedOnGpu ? "gpu_readback" : "cpu_or_none"))
                 << " stream_input=" << (streamEncoder ? screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode()) : "none")
                 << " stream_bitrate_mbps=" << Mbps(streamBitrate)
@@ -1373,13 +1570,7 @@ void RunCaptureStats(const Options& options)
 
     if (streamEncoder) {
         const auto drainedPackets = streamEncoder->Drain();
-        streamPackets += drainedPackets.size();
-        for (const auto& packet : drainedPackets) {
-            streamBytes += packet.bytes.size();
-            if (udpSender) {
-                udpSender->SendFrame(packet);
-            }
-        }
+        sendStreamPackets(drainedPackets);
     }
 
     if (udpSender) {
@@ -1412,6 +1603,10 @@ void RunCaptureStats(const Options& options)
         << ", file encoded frames: " << fileEncodedFrames
         << ", stream encoded frames: " << streamEncodedFrames
         << ", stream bitrate Mbps: " << Mbps(streamBitrate)
+        << ", resolution scale: " << (adaptiveResolutionTiers.empty() ? 1.0 : adaptiveResolutionTiers[adaptiveResolutionTierIndex].scale)
+        << ", resolution adaptation: " << resolutionAdaptationStatus
+        << ", resolution adaptations: " << resolutionAdaptations
+        << ", resolution adaptation failures: " << resolutionAdaptationFailures
         << ", stream packets: " << streamPackets
         << ", stream bytes: " << streamBytes
         << ", stream queued inputs: " << streamQueuedInputs

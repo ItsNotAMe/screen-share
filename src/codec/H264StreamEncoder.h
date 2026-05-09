@@ -36,6 +36,7 @@ struct H264StreamEncoderConfig {
     int fps = 60;
     uint32_t bitrate = 12'000'000;
     uint32_t keyframeIntervalFrames = 0;
+    int64_t startFrameIndex = 0;
     H264StreamEncoderBackend backend = H264StreamEncoderBackend::Software;
     Microsoft::WRL::ComPtr<ID3D11Device> d3dDevice;
 };
