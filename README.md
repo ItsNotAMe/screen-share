@@ -272,8 +272,10 @@ store transport timing. Add `--preview` on the receiver to open a native Win32/D
 window; preview uploads decoded NV12 luma and chroma planes to GPU textures and converts to SDR
 Rec.709 in the pixel shader. Decoded preview frames pass through a small timestamp-ordered playout
 buffer before presentation, so network and decoder bursts are smoothed before they hit the window.
-Receiver stats report `preview_queue`, `preview_late_drops`, and `preview_overflow_drops` for that
-playout stage. Receiver stats also include
+If the decoded stream changes resolution, the preview drops queued frames from the old size and
+restarts its playout clock so adaptive-resolution tier switches do not carry stale timing into the
+new size. Receiver stats report `preview_queue`, `preview_playout_resets`, `preview_late_drops`, and
+`preview_overflow_drops` for that playout stage. Receiver stats also include
 `receiver_health=waiting|ok|loss|recovering|buffering|preview-drop`; when `--preview` is active,
 the same compact health summary is shown in the preview window title. The health label reflects the
 latest reporting interval, while the numeric drop/resync counters remain cumulative for diagnostics

@@ -1802,6 +1802,7 @@ void RunUdpReceiverStats(const Options& options)
     bool hasH264DecodeStartFrame = false;
     std::map<uint64_t, screenshare::UdpCompletedFrame> h264DecodeBacklog;
     std::optional<screenshare::DecodedFrameInfo> latestDecodedFrame;
+    uint64_t previewPlayoutResets = 0;
 
     if (options.decodeH264) {
         h264Decoder = std::make_unique<screenshare::H264StreamDecoder>();
@@ -1816,9 +1817,24 @@ void RunUdpReceiverStats(const Options& options)
     using Clock = std::chrono::steady_clock;
     PreviewPlayoutBuffer previewPlayout;
 
+    auto restartPreviewPlayoutClock = [&]() {
+        if (previewWindow) {
+            previewPlayout.ClearPendingAndRestartClock();
+            ++previewPlayoutResets;
+        }
+    };
+
     auto countDecodedFrames = [&](std::vector<screenshare::DecodedFrameInfo> decodedFrames, bool presentReady = true) {
         h264DecodedFrames += decodedFrames.size();
         for (auto& decodedFrame : decodedFrames) {
+            const bool decodedOutputChanged =
+                h264DecodedWidth > 0 &&
+                h264DecodedHeight > 0 &&
+                (decodedFrame.width != h264DecodedWidth || decodedFrame.height != h264DecodedHeight);
+            if (decodedOutputChanged) {
+                restartPreviewPlayoutClock();
+            }
+
             h264DecodedBytes += decodedFrame.bytes;
             h264DecodedWidth = decodedFrame.width;
             h264DecodedHeight = decodedFrame.height;
@@ -1844,9 +1860,7 @@ void RunUdpReceiverStats(const Options& options)
     auto restartH264DecoderForRecovery = [&]() {
         h264Decoder->Start();
         ++h264DecodeDecoderRestarts;
-        if (previewWindow) {
-            previewPlayout.ClearPendingAndRestartClock();
-        }
+        restartPreviewPlayoutClock();
     };
 
     auto tryRecoverH264DecodeGap = [&](bool forceRecovery = false) {
@@ -1893,8 +1907,8 @@ void RunUdpReceiverStats(const Options& options)
 
         if (recoveryInfo.hasSps && recoveryInfo.hasPps) {
             restartH264DecoderForRecovery();
-        } else if (previewWindow) {
-            previewPlayout.ClearPendingAndRestartClock();
+        } else {
+            restartPreviewPlayoutClock();
         }
 
         return true;
@@ -2047,6 +2061,7 @@ void RunUdpReceiverStats(const Options& options)
                 << " pending_h264_decode_packets=" << h264DecodeBacklog.size()
                 << " preview_frames_presented=" << (previewWindow ? previewWindow->framesPresented() : 0)
                 << " preview_queue=" << (previewWindow ? previewPlayout.queuedFrameCount() : 0)
+                << " preview_playout_resets=" << (previewWindow ? previewPlayoutResets : 0)
                 << " preview_late_drops=" << (previewWindow ? previewPlayout.lateDrops() : 0)
                 << " preview_overflow_drops=" << (previewWindow ? previewPlayout.overflowDrops() : 0);
 
@@ -2152,6 +2167,7 @@ void RunUdpReceiverStats(const Options& options)
         << ", pending H.264 decode packets: " << h264DecodeBacklog.size()
         << ", preview frames presented: " << (previewWindow ? previewWindow->framesPresented() : 0)
         << ", preview queued frames: " << (previewWindow ? previewPlayout.queuedFrameCount() : 0)
+        << ", preview playout resets: " << (previewWindow ? previewPlayoutResets : 0)
         << ", preview late drops: " << (previewWindow ? previewPlayout.lateDrops() : 0)
         << ", preview overflow drops: " << (previewWindow ? previewPlayout.overflowDrops() : 0)
         << ", decoded BMP written: " << (decodedBmpWritten ? "yes" : "no")
