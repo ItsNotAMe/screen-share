@@ -242,7 +242,9 @@ bitrate advice through `bitrate_advice_mbps`, `bitrate_advice_action`, and
 `bitrate_advice_reason`. By default this remains diagnostics-only; with `--adapt-bitrate`, reduce
 and increase advice are applied to the live encoder through Media Foundation's bitrate control and
 to the UDP pacing queue. Increases only happen after repeated clean receiver feedback and are capped
-at the original target bitrate. `--adapt-min-bitrate-mbps Mbps` sets the adaptive bitrate floor, while
+at the original target bitrate. Preview-only drops and local UDP queue spikes use short hysteresis
+before they can reduce bitrate or resolution, so resize, restart, and playout timing hiccups do not
+immediately bounce the stream downward. `--adapt-min-bitrate-mbps Mbps` sets the adaptive bitrate floor, while
 `--adapt-reduce-cooldown S` prevents repeated reductions from every feedback report during the same
 loss/recovery episode. Add `--adapt-resolution` to make resolution a second adaptation lever: the
 sender steps down to lower output-resolution tiers when bitrate is already at its floor, then steps
