@@ -473,6 +473,13 @@ struct ReceiverHealthSnapshot {
     uint64_t previewFramesPresented = 0;
     uint64_t previewLateDrops = 0;
     uint64_t previewOverflowDrops = 0;
+    uint64_t recentDroppedDatagrams = 0;
+    uint64_t recentInvalidDatagrams = 0;
+    uint64_t recentIncompleteFramesDropped = 0;
+    uint64_t recentDecodeResyncs = 0;
+    uint64_t recentDecodeSkippedPackets = 0;
+    uint64_t recentPreviewLateDrops = 0;
+    uint64_t recentPreviewOverflowDrops = 0;
 };
 
 screenshare::udp_protocol::FeedbackHealthState ReceiverFeedbackHealthState(const ReceiverHealthSnapshot& health);
@@ -487,13 +494,15 @@ screenshare::udp_protocol::FeedbackHealthState ReceiverFeedbackHealthState(const
     if (health.completedFrames == 0) {
         return screenshare::udp_protocol::FeedbackHealthState::Waiting;
     }
-    if (health.previewLateDrops > 0 || health.previewOverflowDrops > 0) {
+    if (health.recentPreviewLateDrops > 0 || health.recentPreviewOverflowDrops > 0) {
         return screenshare::udp_protocol::FeedbackHealthState::PreviewDrop;
     }
-    if (health.h264DecodeResyncs > 0 || health.h264DecodeSkippedPackets > 0) {
+    if (health.recentDecodeResyncs > 0 || health.recentDecodeSkippedPackets > 0) {
         return screenshare::udp_protocol::FeedbackHealthState::Recovering;
     }
-    if (health.simulatedDroppedDatagrams > 0 || health.invalidDatagrams > 0 || health.incompleteDroppedFrames > 0) {
+    if (health.recentDroppedDatagrams > 0 ||
+        health.recentInvalidDatagrams > 0 ||
+        health.recentIncompleteFramesDropped > 0) {
         return screenshare::udp_protocol::FeedbackHealthState::Loss;
     }
     if (health.pendingFrames >= ReceiverHealthPendingFrameWarning ||
@@ -1915,6 +1924,13 @@ void RunUdpReceiverStats(const Options& options)
     auto lastReportAt = startedAt;
     uint64_t lastDatagramsReceived = 0;
     uint64_t lastFramesCompleted = 0;
+    uint64_t lastSimulatedDroppedDatagrams = 0;
+    uint64_t lastInvalidDatagrams = 0;
+    uint64_t lastIncompleteFramesDropped = 0;
+    uint64_t lastH264DecodeResyncs = 0;
+    uint64_t lastH264DecodeSkippedPackets = 0;
+    uint64_t lastPreviewLateDrops = 0;
+    uint64_t lastPreviewOverflowDrops = 0;
     uint64_t latestFrameId = 0;
     uint64_t latestFrameBytes = 0;
     uint16_t latestFragmentCount = 0;
@@ -1970,6 +1986,8 @@ void RunUdpReceiverStats(const Options& options)
             const auto& stats = receiver.stats();
             const double datagramsPerSecond = static_cast<double>(stats.datagramsReceived - lastDatagramsReceived) / elapsed;
             const double completedFps = static_cast<double>(stats.framesCompleted - lastFramesCompleted) / elapsed;
+            const uint64_t previewLateDrops = previewWindow ? previewPlayout.lateDrops() : 0;
+            const uint64_t previewOverflowDrops = previewWindow ? previewPlayout.overflowDrops() : 0;
             const ReceiverHealthSnapshot health{
                 stats.framesCompleted,
                 completedFps,
@@ -1982,8 +2000,15 @@ void RunUdpReceiverStats(const Options& options)
                 h264DecodeResyncs,
                 h264DecodeSkippedPackets,
                 previewWindow ? previewWindow->framesPresented() : 0,
-                previewWindow ? previewPlayout.lateDrops() : 0,
-                previewWindow ? previewPlayout.overflowDrops() : 0,
+                previewLateDrops,
+                previewOverflowDrops,
+                stats.simulatedDatagramsDropped - lastSimulatedDroppedDatagrams,
+                stats.invalidDatagrams - lastInvalidDatagrams,
+                stats.incompleteFramesDropped - lastIncompleteFramesDropped,
+                h264DecodeResyncs - lastH264DecodeResyncs,
+                h264DecodeSkippedPackets - lastH264DecodeSkippedPackets,
+                previewLateDrops - lastPreviewLateDrops,
+                previewOverflowDrops - lastPreviewOverflowDrops,
             };
 
             if (previewWindow) {
@@ -2036,6 +2061,13 @@ void RunUdpReceiverStats(const Options& options)
 
             lastDatagramsReceived = stats.datagramsReceived;
             lastFramesCompleted = stats.framesCompleted;
+            lastSimulatedDroppedDatagrams = stats.simulatedDatagramsDropped;
+            lastInvalidDatagrams = stats.invalidDatagrams;
+            lastIncompleteFramesDropped = stats.incompleteFramesDropped;
+            lastH264DecodeResyncs = h264DecodeResyncs;
+            lastH264DecodeSkippedPackets = h264DecodeSkippedPackets;
+            lastPreviewLateDrops = previewLateDrops;
+            lastPreviewOverflowDrops = previewOverflowDrops;
             lastReportAt = now;
         }
     }
@@ -2060,6 +2092,8 @@ void RunUdpReceiverStats(const Options& options)
     }
     const size_t delayedDatagrams = receiver.delayedDatagramCount();
     const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
+    const uint64_t finalPreviewLateDrops = previewWindow ? previewPlayout.lateDrops() : 0;
+    const uint64_t finalPreviewOverflowDrops = previewWindow ? previewPlayout.overflowDrops() : 0;
     const ReceiverHealthSnapshot finalHealth{
         stats.framesCompleted,
         static_cast<double>(stats.framesCompleted) / totalElapsed,
@@ -2072,8 +2106,15 @@ void RunUdpReceiverStats(const Options& options)
         h264DecodeResyncs,
         h264DecodeSkippedPackets,
         previewWindow ? previewWindow->framesPresented() : 0,
-        previewWindow ? previewPlayout.lateDrops() : 0,
-        previewWindow ? previewPlayout.overflowDrops() : 0,
+        finalPreviewLateDrops,
+        finalPreviewOverflowDrops,
+        stats.simulatedDatagramsDropped - lastSimulatedDroppedDatagrams,
+        stats.invalidDatagrams - lastInvalidDatagrams,
+        stats.incompleteFramesDropped - lastIncompleteFramesDropped,
+        h264DecodeResyncs - lastH264DecodeResyncs,
+        h264DecodeSkippedPackets - lastH264DecodeSkippedPackets,
+        finalPreviewLateDrops - lastPreviewLateDrops,
+        finalPreviewOverflowDrops - lastPreviewOverflowDrops,
     };
     if (previewWindow) {
         previewWindow->SetStatusText(FormatReceiverHealthTitle(finalHealth));

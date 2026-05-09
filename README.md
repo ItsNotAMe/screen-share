@@ -275,7 +275,9 @@ buffer before presentation, so network and decoder bursts are smoothed before th
 Receiver stats report `preview_queue`, `preview_late_drops`, and `preview_overflow_drops` for that
 playout stage. Receiver stats also include
 `receiver_health=waiting|ok|loss|recovering|buffering|preview-drop`; when `--preview` is active,
-the same compact health summary is shown in the preview window title.
+the same compact health summary is shown in the preview window title. The health label reflects the
+latest reporting interval, while the numeric drop/resync counters remain cumulative for diagnostics
+and sender-side adaptation deltas.
 When `--seconds` is omitted the preview runs until the window closes.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.

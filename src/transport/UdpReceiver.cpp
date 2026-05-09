@@ -201,6 +201,9 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveDatagram()
         &senderAddressLength);
 
     if (received == SOCKET_ERROR) {
+        if (WSAGetLastError() == WSAECONNRESET) {
+            return std::nullopt;
+        }
         throw std::runtime_error(WinsockErrorMessage("recvfrom"));
     }
 
