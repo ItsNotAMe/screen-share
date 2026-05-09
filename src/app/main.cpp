@@ -16,12 +16,14 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -37,6 +39,7 @@ enum class StreamEncoderPreference {
 
 constexpr size_t OrderedReceiverStartThresholdFrames = 30;
 constexpr size_t OrderedReceiverRecoveryThresholdFrames = 30;
+constexpr size_t ReceiverHealthPendingFrameWarning = 8;
 
 struct Options {
     bool listDisplays = false;
@@ -394,6 +397,63 @@ private:
     std::chrono::milliseconds initialDelay_{100};
     std::chrono::milliseconds maxLateFrameAge_{250};
 };
+
+struct ReceiverHealthSnapshot {
+    uint64_t completedFrames = 0;
+    double completedFps = 0.0;
+    size_t pendingFrames = 0;
+    size_t pendingDecodePackets = 0;
+    size_t previewQueuedFrames = 0;
+    uint64_t simulatedDroppedDatagrams = 0;
+    uint64_t invalidDatagrams = 0;
+    uint64_t incompleteDroppedFrames = 0;
+    uint64_t h264DecodeResyncs = 0;
+    uint64_t h264DecodeSkippedPackets = 0;
+    uint64_t previewFramesPresented = 0;
+    uint64_t previewLateDrops = 0;
+    uint64_t previewOverflowDrops = 0;
+};
+
+const char* ReceiverHealthState(const ReceiverHealthSnapshot& health)
+{
+    if (health.completedFrames == 0) {
+        return "waiting";
+    }
+    if (health.previewLateDrops > 0 || health.previewOverflowDrops > 0) {
+        return "preview-drop";
+    }
+    if (health.h264DecodeResyncs > 0 || health.h264DecodeSkippedPackets > 0) {
+        return "recovering";
+    }
+    if (health.simulatedDroppedDatagrams > 0 || health.invalidDatagrams > 0 || health.incompleteDroppedFrames > 0) {
+        return "loss";
+    }
+    if (health.pendingFrames >= ReceiverHealthPendingFrameWarning ||
+        health.pendingDecodePackets >= OrderedReceiverRecoveryThresholdFrames) {
+        return "buffering";
+    }
+
+    return "ok";
+}
+
+std::string FormatReceiverHealthTitle(const ReceiverHealthSnapshot& health)
+{
+    const uint64_t transportDrops =
+        health.simulatedDroppedDatagrams + health.invalidDatagrams + health.incompleteDroppedFrames;
+    const uint64_t previewDrops = health.previewLateDrops + health.previewOverflowDrops;
+
+    std::ostringstream stream;
+    stream << ReceiverHealthState(health)
+           << " | fps " << std::fixed << std::setprecision(1) << health.completedFps
+           << " | recvq " << health.pendingFrames
+           << " | decq " << health.pendingDecodePackets
+           << " | pvq " << health.previewQueuedFrames
+           << " | resync " << health.h264DecodeResyncs
+           << " | skip " << health.h264DecodeSkippedPackets
+           << " | drops " << transportDrops << "/" << previewDrops
+           << " | shown " << health.previewFramesPresented;
+    return stream.str();
+}
 
 const char* CaptureBackendName(screenshare::CaptureBackend backend)
 {
@@ -1177,6 +1237,7 @@ void RunUdpReceiverStats(const Options& options)
     }
     if (options.previewWindow) {
         previewWindow = std::make_unique<screenshare::ReceiverPreviewWindow>();
+        previewWindow->SetStatusText("waiting | fps 0.0 | recvq 0 | decq 0 | pvq 0 | resync 0 | skip 0 | drops 0/0 | shown 0");
         previewWindow->Show();
     }
 
@@ -1345,9 +1406,29 @@ void RunUdpReceiverStats(const Options& options)
             const auto& stats = receiver.stats();
             const double datagramsPerSecond = static_cast<double>(stats.datagramsReceived - lastDatagramsReceived) / elapsed;
             const double completedFps = static_cast<double>(stats.framesCompleted - lastFramesCompleted) / elapsed;
+            const ReceiverHealthSnapshot health{
+                stats.framesCompleted,
+                completedFps,
+                receiver.pendingFrameCount(),
+                h264DecodeBacklog.size(),
+                previewWindow ? previewPlayout.queuedFrameCount() : 0,
+                stats.simulatedDatagramsDropped,
+                stats.invalidDatagrams,
+                stats.incompleteFramesDropped,
+                h264DecodeResyncs,
+                h264DecodeSkippedPackets,
+                previewWindow ? previewWindow->framesPresented() : 0,
+                previewWindow ? previewPlayout.lateDrops() : 0,
+                previewWindow ? previewPlayout.overflowDrops() : 0,
+            };
+
+            if (previewWindow) {
+                previewWindow->SetStatusText(FormatReceiverHealthTitle(health));
+            }
 
             std::cout
                 << "udp_datagrams=" << stats.datagramsReceived
+                << " receiver_health=" << ReceiverHealthState(health)
                 << " udp_datagrams_per_second=" << datagramsPerSecond
                 << " accepted_datagrams=" << stats.datagramsAccepted
                 << " simulated_dropped=" << stats.simulatedDatagramsDropped
@@ -1411,11 +1492,30 @@ void RunUdpReceiverStats(const Options& options)
         decodedBmpWritten = true;
     }
     const size_t delayedDatagrams = receiver.delayedDatagramCount();
+    const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
+    const ReceiverHealthSnapshot finalHealth{
+        stats.framesCompleted,
+        static_cast<double>(stats.framesCompleted) / totalElapsed,
+        receiver.pendingFrameCount(),
+        h264DecodeBacklog.size(),
+        previewWindow ? previewPlayout.queuedFrameCount() : 0,
+        stats.simulatedDatagramsDropped,
+        stats.invalidDatagrams,
+        stats.incompleteFramesDropped,
+        h264DecodeResyncs,
+        h264DecodeSkippedPackets,
+        previewWindow ? previewWindow->framesPresented() : 0,
+        previewWindow ? previewPlayout.lateDrops() : 0,
+        previewWindow ? previewPlayout.overflowDrops() : 0,
+    };
+    if (previewWindow) {
+        previewWindow->SetStatusText(FormatReceiverHealthTitle(finalHealth));
+    }
     receiver.Close();
 
-    const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
     std::cout
         << "Done. UDP datagrams: " << stats.datagramsReceived
+        << ", receiver health: " << ReceiverHealthState(finalHealth)
         << ", accepted datagrams: " << stats.datagramsAccepted
         << ", simulated dropped datagrams: " << stats.simulatedDatagramsDropped
         << ", simulated delayed datagrams: " << stats.simulatedDatagramsDelayed

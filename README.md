@@ -238,7 +238,10 @@ window; preview uploads decoded NV12 luma and chroma planes to GPU textures and 
 Rec.709 in the pixel shader. Decoded preview frames pass through a small timestamp-ordered playout
 buffer before presentation, so network and decoder bursts are smoothed before they hit the window.
 Receiver stats report `preview_queue`, `preview_late_drops`, and `preview_overflow_drops` for that
-playout stage. When `--seconds` is omitted the preview runs until the window closes.
+playout stage. Receiver stats also include
+`receiver_health=waiting|ok|loss|recovering|buffering|preview-drop`; when `--preview` is active,
+the same compact health summary is shown in the preview window title.
+When `--seconds` is omitted the preview runs until the window closes.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
