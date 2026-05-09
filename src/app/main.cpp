@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -40,6 +41,7 @@ enum class StreamEncoderPreference {
 constexpr size_t OrderedReceiverStartThresholdFrames = 30;
 constexpr size_t OrderedReceiverRecoveryThresholdFrames = 30;
 constexpr size_t ReceiverHealthPendingFrameWarning = 8;
+constexpr uint64_t SenderQueuePressureDatagrams = 128;
 
 struct Options {
     bool listDisplays = false;
@@ -61,6 +63,7 @@ struct Options {
     std::string udpSendTarget;
     bool udpPacing = true;
     bool udpPacingOptionProvided = false;
+    bool adaptBitrate = false;
     bool wgcBorderRequired = false;
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
@@ -88,7 +91,7 @@ void PrintHelp()
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
-        << "              [--udp-send HOST:PORT] [--no-udp-pacing]\n"
+        << "              [--udp-send HOST:PORT] [--no-udp-pacing] [--adapt-bitrate]\n"
         << "              [--dump-capture-bmp PATH]\n"
         << "              [--capture-backend dxgi|wgc]\n"
         << "              [--bitrate-mbps Mbps] [--keyframe-interval S]\n"
@@ -528,7 +531,7 @@ public:
             feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Buffering ||
             feedback.pendingFrames >= ReceiverHealthPendingFrameWarning ||
             feedback.pendingDecodePackets >= OrderedReceiverRecoveryThresholdFrames ||
-            (stats.pendingDatagrams > 0 &&
+            (stats.pendingDatagrams >= SenderQueuePressureDatagrams &&
              stats.peakPendingDatagrams > 0 &&
              stats.pendingDatagrams >= stats.peakPendingDatagrams / 2);
 
@@ -717,6 +720,8 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--no-udp-pacing") {
             options.udpPacing = false;
             options.udpPacingOptionProvided = true;
+        } else if (arg == "--adapt-bitrate") {
+            options.adaptBitrate = true;
         } else if (arg == "--wgc-border") {
             options.wgcBorderRequired = true;
         } else if (arg == "--no-hdr-to-sdr") {
@@ -782,6 +787,9 @@ Options ParseOptions(int argc, char** argv)
     if (options.udpPacingOptionProvided && options.udpSendTarget.empty()) {
         throw std::invalid_argument("--no-udp-pacing requires --udp-send");
     }
+    if (options.adaptBitrate && options.udpSendTarget.empty()) {
+        throw std::invalid_argument("--adapt-bitrate requires --udp-send");
+    }
     if (options.streamEncoderPreferenceProvided && !options.streamEncode) {
         throw std::invalid_argument("--stream-encoder requires --stream-encode or --udp-send");
     }
@@ -808,12 +816,15 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.udpPacingOptionProvided || options.keyframeIntervalProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, or --keyframe-interval");
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
+         options.udpPacingOptionProvided || options.adaptBitrate || options.keyframeIntervalProvided)) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --adapt-bitrate, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
-         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() || options.udpPacingOptionProvided || options.keyframeIntervalProvided || options.decodeH264 || options.previewWindow)) {
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
+         options.udpPacingOptionProvided || options.adaptBitrate || options.keyframeIntervalProvided ||
+         options.decodeH264 || options.previewWindow)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
@@ -944,6 +955,7 @@ void RunCaptureStats(const Options& options)
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
         std::cout << ", UDP pacing " << (options.udpPacing ? "enabled" : "disabled");
+        std::cout << ", adaptive bitrate " << (options.adaptBitrate ? "enabled" : "advice-only");
     }
     if (options.captureBackend == screenshare::CaptureBackend::WindowsGraphicsCapture) {
         std::cout << ", WGC border " << (options.wgcBorderRequired ? "enabled" : "disabled when permitted");
@@ -986,6 +998,10 @@ void RunCaptureStats(const Options& options)
     uint64_t streamPackets = 0;
     uint64_t streamBytes = 0;
     uint32_t streamBitrate = 0;
+    uint64_t bitrateAdaptations = 0;
+    uint64_t bitrateAdaptationFailures = 0;
+    uint32_t lastBitrateAdaptationAttempt = 0;
+    const char* bitrateAdaptationStatus = options.adaptBitrate ? "waiting" : "disabled";
     AdaptiveBitrateAdvisor bitrateAdvisor;
     const uint32_t streamKeyframeIntervalFrames =
         options.keyframeIntervalSeconds <= 0 ?
@@ -1001,6 +1017,45 @@ void RunCaptureStats(const Options& options)
     uint64_t totalStreamEncodeCalls = 0;
     bool capturedBmpWritten = false;
     std::unique_ptr<screenshare::UdpSender> udpSender;
+
+    auto applyAdaptiveBitrate = [&]() {
+        if (!options.adaptBitrate || !udpSender || !streamEncoder || !bitrateAdvisor.configured()) {
+            return;
+        }
+
+        const uint32_t recommendedBitrate = bitrateAdvisor.recommendedBitrate();
+        if (recommendedBitrate == 0 || streamBitrate == 0) {
+            bitrateAdaptationStatus = "waiting";
+            return;
+        }
+        if (std::strcmp(bitrateAdvisor.action(), "reduce") != 0 || recommendedBitrate >= streamBitrate) {
+            bitrateAdaptationStatus =
+                recommendedBitrate > streamBitrate ? "holding_increase" : "holding";
+            return;
+        }
+        if (recommendedBitrate == lastBitrateAdaptationAttempt) {
+            return;
+        }
+
+        lastBitrateAdaptationAttempt = recommendedBitrate;
+        if (streamEncoder->TryUpdateBitrate(recommendedBitrate)) {
+            streamBitrate = recommendedBitrate;
+            udpSender->SetPacingBitrate(streamBitrate);
+            ++bitrateAdaptations;
+            bitrateAdaptationStatus = "applied";
+            std::cout
+                << "Adaptive bitrate applied bitrate_mbps=" << Mbps(streamBitrate)
+                << " reason=" << bitrateAdvisor.reason()
+                << "\n";
+        } else {
+            ++bitrateAdaptationFailures;
+            bitrateAdaptationStatus = "unsupported";
+            std::cerr
+                << "Adaptive bitrate update unsupported by active encoder; keeping bitrate_mbps="
+                << Mbps(streamBitrate)
+                << "\n";
+        }
+    };
 
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
     auto nextFrameAt = Clock::now();
@@ -1146,6 +1201,7 @@ void RunCaptureStats(const Options& options)
                         std::cout
                             << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
                             << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
+                            << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
                             << " max_queued_datagrams=" << udpConfig.maxQueuedDatagrams
                             << "\n";
                     }
@@ -1186,6 +1242,7 @@ void RunCaptureStats(const Options& options)
                 udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
             if (udpSender) {
                 bitrateAdvisor.Update(udpStatsNow);
+                applyAdaptiveBitrate();
             }
             std::cout
                 << "source=" << lastSourceWidth << "x" << lastSourceHeight
@@ -1197,6 +1254,7 @@ void RunCaptureStats(const Options& options)
                 << " output_format=" << screenshare::DxgiFormatName(lastOutputFormat)
                 << " nv12=" << (lastNv12TextureAvailable ? "gpu_texture" : (lastNv12GeneratedOnGpu ? "gpu_readback" : "cpu_or_none"))
                 << " stream_input=" << (streamEncoder ? screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode()) : "none")
+                << " stream_bitrate_mbps=" << Mbps(streamBitrate)
                 << " stream_queue=" << (streamEncoder ? streamEncoder->queuedInputCount() : 0)
                 << " stream_dropped=" << (streamEncoder ? streamEncoder->droppedInputFrames() : 0)
                 << " output_fps=" << outputFps
@@ -1228,6 +1286,9 @@ void RunCaptureStats(const Options& options)
                 << " bitrate_advice_mbps=" << Mbps(bitrateAdvisor.recommendedBitrate())
                 << " bitrate_advice_action=" << bitrateAdvisor.action()
                 << " bitrate_advice_reason=" << bitrateAdvisor.reason()
+                << " bitrate_adaptation=" << bitrateAdaptationStatus
+                << " bitrate_adaptations=" << bitrateAdaptations
+                << " bitrate_adaptation_failures=" << bitrateAdaptationFailures
                 << "\n";
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
@@ -1282,6 +1343,7 @@ void RunCaptureStats(const Options& options)
         << ", repeated frames: " << totalRepeatedFrames
         << ", file encoded frames: " << fileEncodedFrames
         << ", stream encoded frames: " << streamEncodedFrames
+        << ", stream bitrate Mbps: " << Mbps(streamBitrate)
         << ", stream packets: " << streamPackets
         << ", stream bytes: " << streamBytes
         << ", stream queued inputs: " << streamQueuedInputs
@@ -1305,6 +1367,9 @@ void RunCaptureStats(const Options& options)
         << ", bitrate advice Mbps: " << Mbps(bitrateAdvisor.recommendedBitrate())
         << ", bitrate advice action: " << bitrateAdvisor.action()
         << ", bitrate advice reason: " << bitrateAdvisor.reason()
+        << ", bitrate adaptation: " << bitrateAdaptationStatus
+        << ", bitrate adaptations: " << bitrateAdaptations
+        << ", bitrate adaptation failures: " << bitrateAdaptationFailures
         << ", captured BMP written: " << (capturedBmpWritten ? "yes" : "no")
         << "\n";
 }

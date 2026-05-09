@@ -214,6 +214,16 @@ void UdpSender::SendFrame(const EncodedPacket& packet)
     queueChanged_.notify_one();
 }
 
+void UdpSender::SetPacingBitrate(uint32_t bitrate)
+{
+    std::lock_guard lock(mutex_);
+    CheckWorkerErrorLocked();
+    config_.pacingBitrate = bitrate;
+    if (config_.pacingEnabled && nextSendAt_ < Clock::now()) {
+        nextSendAt_ = Clock::now();
+    }
+}
+
 bool UdpSender::isOpen() const noexcept
 {
     return socket_ != 0 && !address_.empty();

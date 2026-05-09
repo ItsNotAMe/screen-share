@@ -111,6 +111,9 @@ UDP sending is paced by default using the selected stream bitrate, which spreads
 fragments over time instead of dumping each frame as one burst. Add `--no-udp-pacing` when you want
 the older raw burst behavior for transport diagnostics.
 
+Add `--adapt-bitrate` to let receiver feedback apply conservative live bitrate reductions to the
+active stream encoder and UDP pacing queue. Upward advice is still reported for diagnostics only.
+
 The sender automatically checks whether the captured display is running in Windows HDR mode. With
 the default WGC backend, HDR desktops are captured as scRGB float frames and converted back to SDR
 before encoding. If the preview or recording still looks too bright or too dim, tune the SDR white
@@ -223,9 +226,12 @@ default, while the capture and encoder loop continues running at the requested F
 report `udp_queued`, `udp_pending`, `udp_peak_pending`, and `udp_dropped_frames` for that pacing
 queue. The sender also listens on the same UDP socket for receiver feedback packets and reports
 `udp_feedback_health`, `udp_feedback_completed_frames`, `udp_feedback_resyncs`, and
-`udp_feedback_skipped_packets` when a receiver is present. Sender stats also include
-diagnostics-only adaptive bitrate advice through `bitrate_advice_mbps`, `bitrate_advice_action`, and
-`bitrate_advice_reason`; this recommendation does not change the live encoder bitrate yet. The
+`udp_feedback_skipped_packets` when a receiver is present. Sender stats also include adaptive
+bitrate advice through `bitrate_advice_mbps`, `bitrate_advice_action`, and
+`bitrate_advice_reason`. By default this remains diagnostics-only; with `--adapt-bitrate`, downward
+advice is applied to the live encoder through Media Foundation's bitrate control and to the UDP
+pacing queue. Stats report `stream_bitrate_mbps`, `bitrate_adaptation`, `bitrate_adaptations`, and
+`bitrate_adaptation_failures` so you can see whether the active encoder accepted the update. The
 `--udp-recv` path binds a local UDP port, validates media datagrams, reassembles complete encoded
 frames, sends compact feedback back to the sender's source address, and prints transport
 diagnostics. Receiver-side simulation flags can
@@ -267,9 +273,9 @@ Windows Graphics Capture
  -> Microsoft H.264 MFT packet encode for transport validation
  -> H.264 hardware encoder capability probe
  -> default auto stream encoder with periodic keyframes, queued direct D3D11 hardware input, and software fallback
- -> UDP sender/receiver transport diagnostics with receiver feedback
+ -> UDP sender/receiver transport diagnostics with receiver feedback and opt-in live bitrate adaptation
  -> Media Foundation H.264 decode validation with keyframe-aware recovery
  -> paced native Direct3D receiver preview with GPU NV12 conversion
- -> future network adaptation and renderer optimizations
+ -> future policy tuning, resolution scaling, and renderer optimizations
 ```
 An app to share your screen with others

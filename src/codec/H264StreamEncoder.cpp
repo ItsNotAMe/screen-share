@@ -97,20 +97,24 @@ void TrySetCodecApiBool(ICodecAPI* codecApi, const GUID& key, bool enabled)
     static_cast<void>(codecApi->SetValue(&key, &value));
 }
 
-void TrySetCodecApiUInt32(ICodecAPI* codecApi, const GUID& key, uint32_t setting)
+bool TrySetCodecApiUInt32(ICodecAPI* codecApi, const GUID& key, uint32_t setting)
 {
     if (codecApi == nullptr || codecApi->IsSupported(&key) != S_OK) {
-        return;
+        return false;
     }
 
     VARIANT value{};
     value.vt = VT_UI4;
     value.ulVal = setting;
-    static_cast<void>(codecApi->SetValue(&key, &value));
+    return SUCCEEDED(codecApi->SetValue(&key, &value));
 }
 
-void ConfigureLowLatencyEncoderOptions(IMFTransform* transform, const H264StreamEncoderConfig& config)
+Microsoft::WRL::ComPtr<ICodecAPI> QueryCodecApi(IMFTransform* transform)
 {
+    if (transform == nullptr) {
+        return {};
+    }
+
     static constexpr GUID codecApiInterfaceId = {
         0x901db4c7,
         0x31ce,
@@ -120,10 +124,20 @@ void ConfigureLowLatencyEncoderOptions(IMFTransform* transform, const H264Stream
 
     Microsoft::WRL::ComPtr<ICodecAPI> codecApi;
     if (FAILED(transform->QueryInterface(codecApiInterfaceId, reinterpret_cast<void**>(codecApi.GetAddressOf()))) || !codecApi) {
+        return {};
+    }
+    return codecApi;
+}
+
+void ConfigureLowLatencyEncoderOptions(IMFTransform* transform, const H264StreamEncoderConfig& config)
+{
+    Microsoft::WRL::ComPtr<ICodecAPI> codecApi = QueryCodecApi(transform);
+    if (!codecApi) {
         return;
     }
 
     TrySetCodecApiBool(codecApi.Get(), CODECAPI_AVLowLatencyMode, true);
+    TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncCommonMeanBitRate, config.bitrate);
     TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncMPVDefaultBPictureCount, 0);
     if (config.keyframeIntervalFrames > 0) {
         TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncMPVGOPSize, config.keyframeIntervalFrames);
@@ -665,6 +679,25 @@ std::vector<EncodedPacket> H264StreamEncoder::Drain()
         return packets;
     }
     return ReadAvailablePackets();
+}
+
+bool H264StreamEncoder::TryUpdateBitrate(uint32_t bitrate)
+{
+    if (!transform_ || bitrate == 0) {
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<ICodecAPI> codecApi = QueryCodecApi(transform_.Get());
+    if (!codecApi) {
+        return false;
+    }
+
+    if (!TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncCommonMeanBitRate, bitrate)) {
+        return false;
+    }
+
+    config_.bitrate = bitrate;
+    return true;
 }
 
 void H264StreamEncoder::Stop()
