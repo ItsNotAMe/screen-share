@@ -8,6 +8,8 @@
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <string>
+#include <string_view>
 
 namespace screenshare {
 
@@ -22,6 +24,7 @@ public:
     void Show();
     bool PumpMessages();
     void PresentFrame(const DecodedFrameInfo& frame);
+    void SetStatusText(std::string_view statusText);
 
     [[nodiscard]] bool closeRequested() const noexcept { return closeRequested_; }
     [[nodiscard]] uint64_t framesPresented() const noexcept { return framesPresented_; }
@@ -65,6 +68,7 @@ private:
     int frameWidth_ = 0;
     int frameHeight_ = 0;
     uint64_t framesPresented_ = 0;
+    std::string statusText_;
 };
 
 } // namespace screenshare

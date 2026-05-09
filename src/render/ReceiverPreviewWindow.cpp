@@ -12,6 +12,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace screenshare {
 namespace {
@@ -51,6 +52,20 @@ void ThrowIfFailed(HRESULT hr, const char* operation)
     if (FAILED(hr)) {
         throw std::runtime_error(std::string(operation) + " failed: " + HResultMessageLocal(hr));
     }
+}
+
+std::wstring PreviewTitle(std::string_view statusText)
+{
+    std::wstring title = L"ScreenShare Receiver Preview";
+    if (statusText.empty()) {
+        return title;
+    }
+
+    title += L" - ";
+    for (const char character : statusText) {
+        title.push_back(static_cast<wchar_t>(static_cast<unsigned char>(character)));
+    }
+    return title;
 }
 
 Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const char* source, const char* entryPoint, const char* target)
@@ -244,6 +259,17 @@ void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
     ++framesPresented_;
 }
 
+void ReceiverPreviewWindow::SetStatusText(std::string_view statusText)
+{
+    statusText_.assign(statusText);
+    if (hwnd_ == nullptr) {
+        return;
+    }
+
+    const std::wstring title = PreviewTitle(statusText_);
+    SetWindowTextW(hwnd_, title.c_str());
+}
+
 LRESULT CALLBACK ReceiverPreviewWindow::StaticWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     ReceiverPreviewWindow* window = nullptr;
@@ -306,7 +332,7 @@ void ReceiverPreviewWindow::EnsureWindow(int preferredWidth, int preferredHeight
     hwnd_ = CreateWindowExW(
         0,
         WindowClassName,
-        L"ScreenShare Receiver Preview",
+        PreviewTitle(statusText_).c_str(),
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
