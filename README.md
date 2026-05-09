@@ -223,9 +223,12 @@ default, while the capture and encoder loop continues running at the requested F
 report `udp_queued`, `udp_pending`, `udp_peak_pending`, and `udp_dropped_frames` for that pacing
 queue. The sender also listens on the same UDP socket for receiver feedback packets and reports
 `udp_feedback_health`, `udp_feedback_completed_frames`, `udp_feedback_resyncs`, and
-`udp_feedback_skipped_packets` when a receiver is present. The `--udp-recv` path binds a local UDP
-port, validates media datagrams, reassembles complete encoded frames, sends compact feedback back to
-the sender's source address, and prints transport diagnostics. Receiver-side simulation flags can
+`udp_feedback_skipped_packets` when a receiver is present. Sender stats also include
+diagnostics-only adaptive bitrate advice through `bitrate_advice_mbps`, `bitrate_advice_action`, and
+`bitrate_advice_reason`; this recommendation does not change the live encoder bitrate yet. The
+`--udp-recv` path binds a local UDP port, validates media datagrams, reassembles complete encoded
+frames, sends compact feedback back to the sender's source address, and prints transport
+diagnostics. Receiver-side simulation flags can
 delay incoming datagrams with `--simulate-jitter-ms MS` or drop a percentage with
 `--simulate-loss-percent P`.
 Simulation stats report `simulated_dropped`, `simulated_delayed`, `simulated_delay_pending`,

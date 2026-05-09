@@ -481,6 +481,114 @@ void DrainUdpFeedback(screenshare::UdpSender& udpSender, std::chrono::millisecon
     }
 }
 
+class AdaptiveBitrateAdvisor {
+public:
+    void Configure(uint32_t targetBitrate)
+    {
+        targetBitrate_ = targetBitrate;
+        recommendedBitrate_ = targetBitrate;
+        minBitrate_ = std::max<uint32_t>(1'000'000, targetBitrate / 4);
+        stableFeedbackCount_ = 0;
+        hasFeedback_ = false;
+        lastFeedbackSequence_ = 0;
+        lastDropSignals_ = 0;
+        lastResyncs_ = 0;
+        lastSkippedPackets_ = 0;
+        action_ = "hold";
+        reason_ = "waiting_for_feedback";
+    }
+
+    void Update(const screenshare::UdpSenderStats& stats)
+    {
+        if (targetBitrate_ == 0) {
+            return;
+        }
+        if (!stats.hasFeedback) {
+            action_ = "hold";
+            reason_ = "waiting_for_feedback";
+            return;
+        }
+
+        const auto& feedback = stats.latestFeedback;
+        if (hasFeedback_ && feedback.sequence == lastFeedbackSequence_) {
+            return;
+        }
+
+        const uint64_t dropSignals =
+            feedback.droppedDatagrams +
+            feedback.invalidDatagrams +
+            feedback.incompleteFramesDropped +
+            feedback.previewLateDrops +
+            feedback.previewOverflowDrops;
+        const bool newDropSignal = !hasFeedback_ ? dropSignals > 0 : dropSignals > lastDropSignals_;
+        const bool newDecodeRecovery =
+            (!hasFeedback_ ? feedback.decodeResyncs > 0 : feedback.decodeResyncs > lastResyncs_) ||
+            (!hasFeedback_ ? feedback.decodeSkippedPackets > 0 : feedback.decodeSkippedPackets > lastSkippedPackets_);
+        const bool queuePressure =
+            feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Buffering ||
+            feedback.pendingFrames >= ReceiverHealthPendingFrameWarning ||
+            feedback.pendingDecodePackets >= OrderedReceiverRecoveryThresholdFrames ||
+            (stats.pendingDatagrams > 0 &&
+             stats.peakPendingDatagrams > 0 &&
+             stats.pendingDatagrams >= stats.peakPendingDatagrams / 2);
+
+        if (newDropSignal || newDecodeRecovery || queuePressure) {
+            const uint32_t reduced = static_cast<uint32_t>(
+                static_cast<uint64_t>(recommendedBitrate_) * 80 / 100);
+            recommendedBitrate_ = std::max(minBitrate_, reduced);
+            stableFeedbackCount_ = 0;
+            action_ = "reduce";
+            reason_ = newDecodeRecovery ? "receiver_recovery" : (newDropSignal ? "receiver_loss" : "queue_pressure");
+        } else if (feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Ok &&
+                   recommendedBitrate_ < targetBitrate_) {
+            ++stableFeedbackCount_;
+            if (stableFeedbackCount_ >= StableFeedbackReportsBeforeIncrease) {
+                const uint32_t increased = static_cast<uint32_t>(
+                    static_cast<uint64_t>(recommendedBitrate_) * 110 / 100);
+                recommendedBitrate_ = std::min(targetBitrate_, increased);
+                stableFeedbackCount_ = 0;
+                action_ = "increase";
+                reason_ = "stable_feedback";
+            } else {
+                action_ = "hold";
+                reason_ = "stabilizing";
+            }
+        } else {
+            stableFeedbackCount_ = 0;
+            action_ = "hold";
+            reason_ = feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Ok ?
+                "healthy" :
+                "waiting_for_recovery";
+        }
+
+        hasFeedback_ = true;
+        lastFeedbackSequence_ = feedback.sequence;
+        lastDropSignals_ = dropSignals;
+        lastResyncs_ = feedback.decodeResyncs;
+        lastSkippedPackets_ = feedback.decodeSkippedPackets;
+    }
+
+    [[nodiscard]] uint32_t recommendedBitrate() const noexcept { return recommendedBitrate_; }
+    [[nodiscard]] const char* action() const noexcept { return action_; }
+    [[nodiscard]] const char* reason() const noexcept { return reason_; }
+    [[nodiscard]] bool configured() const noexcept { return targetBitrate_ != 0; }
+
+private:
+    static constexpr uint32_t StableFeedbackReportsBeforeIncrease = 3;
+
+    uint32_t targetBitrate_ = 0;
+    uint32_t recommendedBitrate_ = 0;
+    uint32_t minBitrate_ = 0;
+    uint32_t stableFeedbackCount_ = 0;
+    bool hasFeedback_ = false;
+    uint64_t lastFeedbackSequence_ = 0;
+    uint64_t lastDropSignals_ = 0;
+    uint64_t lastResyncs_ = 0;
+    uint64_t lastSkippedPackets_ = 0;
+    const char* action_ = "hold";
+    const char* reason_ = "waiting_for_feedback";
+};
+
 std::string FormatReceiverHealthTitle(const ReceiverHealthSnapshot& health)
 {
     const uint64_t transportDrops =
@@ -878,6 +986,7 @@ void RunCaptureStats(const Options& options)
     uint64_t streamPackets = 0;
     uint64_t streamBytes = 0;
     uint32_t streamBitrate = 0;
+    AdaptiveBitrateAdvisor bitrateAdvisor;
     const uint32_t streamKeyframeIntervalFrames =
         options.keyframeIntervalSeconds <= 0 ?
         0 :
@@ -975,6 +1084,9 @@ void RunCaptureStats(const Options& options)
                         encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
                         encoderConfig.keyframeIntervalFrames = streamKeyframeIntervalFrames;
                         streamBitrate = encoderConfig.bitrate;
+                        if (!bitrateAdvisor.configured()) {
+                            bitrateAdvisor.Configure(streamBitrate);
+                        }
                         encoderConfig.backend = backend;
                         if (encoderConfig.backend == screenshare::H264StreamEncoderBackend::Hardware) {
                             encoderConfig.d3dDevice = lastFrame.d3dDevice;
@@ -1072,6 +1184,9 @@ void RunCaptureStats(const Options& options)
             }
             const screenshare::UdpSenderStats udpStatsNow =
                 udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
+            if (udpSender) {
+                bitrateAdvisor.Update(udpStatsNow);
+            }
             std::cout
                 << "source=" << lastSourceWidth << "x" << lastSourceHeight
                 << " source_format=" << screenshare::DxgiFormatName(lastSourceFormat)
@@ -1110,6 +1225,9 @@ void RunCaptureStats(const Options& options)
                 << " udp_feedback_completed_frames=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.completedFrames : 0)
                 << " udp_feedback_resyncs=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeResyncs : 0)
                 << " udp_feedback_skipped_packets=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeSkippedPackets : 0)
+                << " bitrate_advice_mbps=" << Mbps(bitrateAdvisor.recommendedBitrate())
+                << " bitrate_advice_action=" << bitrateAdvisor.action()
+                << " bitrate_advice_reason=" << bitrateAdvisor.reason()
                 << "\n";
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
@@ -1143,6 +1261,9 @@ void RunCaptureStats(const Options& options)
     const size_t streamQueuedInputs = streamEncoder ? streamEncoder->queuedInputCount() : 0;
     const uint64_t streamDroppedInputFrames = streamEncoder ? streamEncoder->droppedInputFrames() : 0;
     const screenshare::UdpSenderStats udpStats = udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
+    if (udpSender) {
+        bitrateAdvisor.Update(udpStats);
+    }
     if (!options.capturedBmpPath.empty() && hasFrame) {
         WriteCapturedFrameBmp(options.capturedBmpPath, lastFrame);
         capturedBmpWritten = true;
@@ -1181,6 +1302,9 @@ void RunCaptureStats(const Options& options)
         << ", UDP feedback completed frames: " << (udpStats.hasFeedback ? udpStats.latestFeedback.completedFrames : 0)
         << ", UDP feedback resyncs: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeResyncs : 0)
         << ", UDP feedback skipped packets: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeSkippedPackets : 0)
+        << ", bitrate advice Mbps: " << Mbps(bitrateAdvisor.recommendedBitrate())
+        << ", bitrate advice action: " << bitrateAdvisor.action()
+        << ", bitrate advice reason: " << bitrateAdvisor.reason()
         << ", captured BMP written: " << (capturedBmpWritten ? "yes" : "no")
         << "\n";
 }
