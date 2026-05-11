@@ -1,3 +1,4 @@
+#include "audio/WasapiCapture.h"
 #include "capture/DesktopCapturer.h"
 #include "codec/H264Bitstream.h"
 #include "codec/H264EncoderProbe.h"
@@ -51,6 +52,7 @@ constexpr int DefaultPreviewMaxLateMs = 500;
 struct Options {
     bool listDisplays = false;
     bool listH264Encoders = false;
+    bool listAudioDevices = false;
     int displayIndex = 0;
     int width = 0;
     int height = 0;
@@ -95,6 +97,10 @@ struct Options {
     bool simulateLossProvided = false;
     int simulateJitterMs = 0;
     bool simulateJitterProvided = false;
+    bool audioCapture = false;
+    screenshare::AudioCaptureSource audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
+    std::string audioDeviceId;
+    bool audioDeviceIdProvided = false;
 };
 
 void PrintHelp()
@@ -104,6 +110,8 @@ void PrintHelp()
         << "Usage:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
+        << "  ScreenShare --list-audio-devices\n"
+        << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
@@ -122,6 +130,8 @@ void PrintHelp()
         << "Examples:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
+        << "  ScreenShare --list-audio-devices\n"
+        << "  ScreenShare --audio-capture system --seconds 5\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
         << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
@@ -826,6 +836,14 @@ double Mbps(uint32_t bitrate)
     return static_cast<double>(bitrate) / 1'000'000.0;
 }
 
+double Dbfs(double value)
+{
+    if (value <= 0.000001) {
+        return -120.0;
+    }
+    return 20.0 * std::log10(std::min(value, 1.0));
+}
+
 Options ParseOptions(int argc, char** argv)
 {
     Options options;
@@ -849,6 +867,14 @@ Options ParseOptions(int argc, char** argv)
             options.listDisplays = true;
         } else if (arg == "--list-h264-encoders") {
             options.listH264Encoders = true;
+        } else if (arg == "--list-audio-devices") {
+            options.listAudioDevices = true;
+        } else if (arg == "--audio-capture") {
+            options.audioCaptureSource = screenshare::ParseAudioCaptureSource(requireValue("--audio-capture"));
+            options.audioCapture = true;
+        } else if (arg == "--audio-device-id") {
+            options.audioDeviceId = requireValue("--audio-device-id");
+            options.audioDeviceIdProvided = true;
         } else if (arg == "--display") {
             options.displayIndex = ParseInt(requireValue("--display"), "--display");
         } else if (arg == "--width") {
@@ -941,6 +967,9 @@ Options ParseOptions(int argc, char** argv)
         options.adaptBitrate = true;
     }
 
+    if (options.audioDeviceIdProvided && !options.audioCapture) {
+        throw std::invalid_argument("--audio-device-id requires --audio-capture");
+    }
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
     }
@@ -1026,21 +1055,47 @@ Options ParseOptions(int argc, char** argv)
         throw std::invalid_argument("--simulate-loss-percent and --simulate-jitter-ms require --udp-recv");
     }
     if (options.udpReceivePort != 0 &&
-        (options.listDisplays || options.listH264Encoders || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
+        (options.listDisplays || options.listH264Encoders || options.listAudioDevices || options.audioCapture ||
+         options.audioDeviceIdProvided || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
-        (options.listDisplays || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
+        (options.listDisplays || options.listAudioDevices || options.audioCapture || options.audioDeviceIdProvided ||
+         !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
          options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
+    }
+    if (options.listAudioDevices &&
+        (options.listDisplays || options.listH264Encoders || options.audioCapture || options.audioDeviceIdProvided ||
+         options.width != 0 || options.height != 0 || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
+         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
+         options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
+         !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
+         options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
+         options.simulateLossProvided || options.simulateJitterProvided)) {
+        throw std::invalid_argument("--list-audio-devices cannot be combined with capture, stream, receiver, or video options");
+    }
+    if (options.audioCapture &&
+        (options.listDisplays || options.listH264Encoders || options.listAudioDevices ||
+         options.width != 0 || options.height != 0 || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
+         options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
+         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
+         options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
+         !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
+         options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
+         options.simulateLossProvided || options.simulateJitterProvided)) {
+        throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds and --audio-device-id");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {
         throw std::invalid_argument("--dump-h264 requires --udp-recv");
@@ -1123,6 +1178,175 @@ void PrintH264Encoders(const Options& options)
         }
         std::cout << "\n";
     }
+}
+
+void PrintAudioDevices()
+{
+    auto printDevices = [](screenshare::AudioCaptureSource source) {
+        const auto devices = screenshare::WasapiCapture::EnumerateDevices(source);
+        std::cout << screenshare::AudioCaptureSourceName(source) << " audio devices";
+        if (source == screenshare::AudioCaptureSource::SystemOutput) {
+            std::cout << " (captured with WASAPI loopback)";
+        }
+        std::cout << ":\n";
+
+        if (devices.empty()) {
+            std::cout << "  none\n";
+            return;
+        }
+
+        for (size_t index = 0; index < devices.size(); ++index) {
+            const auto& device = devices[index];
+            std::cout
+                << "  [" << index << "] "
+                << (device.isDefault ? "default " : "")
+                << "\"" << screenshare::Narrow(device.name) << "\""
+                << "\n      id=" << screenshare::Narrow(device.id)
+                << "\n";
+        }
+    };
+
+    printDevices(screenshare::AudioCaptureSource::SystemOutput);
+    printDevices(screenshare::AudioCaptureSource::Microphone);
+}
+
+void RunAudioCaptureStats(const Options& options)
+{
+    screenshare::WasapiCapture capture;
+    screenshare::AudioCaptureConfig config;
+    config.source = options.audioCaptureSource;
+    if (!options.audioDeviceId.empty()) {
+        config.deviceId = screenshare::Widen(options.audioDeviceId);
+    }
+    capture.Start(config);
+
+    const auto& format = capture.format();
+    std::cout
+        << "Capturing "
+        << screenshare::AudioCaptureSourceName(options.audioCaptureSource)
+        << " audio with WASAPI"
+        << ", device=\"" << screenshare::Narrow(capture.deviceName()) << "\""
+        << ", format=" << screenshare::AudioCaptureFormatName(format)
+        << ", buffer_frames=" << capture.bufferFrames()
+        << ", seconds=" << options.seconds;
+    if (!options.audioDeviceId.empty()) {
+        std::cout << ", selected by id";
+    }
+    std::cout << ".\n";
+
+    using Clock = std::chrono::steady_clock;
+    const auto startedAt = Clock::now();
+    auto lastReportAt = startedAt;
+    uint64_t totalPackets = 0;
+    uint64_t totalFrames = 0;
+    uint64_t totalBytes = 0;
+    uint64_t totalSilentPackets = 0;
+    uint64_t totalDiscontinuities = 0;
+    uint64_t totalTimestampErrors = 0;
+    uint64_t intervalPackets = 0;
+    uint64_t intervalFrames = 0;
+    uint64_t intervalBytes = 0;
+    uint64_t intervalSilentPackets = 0;
+    uint64_t intervalDiscontinuities = 0;
+    uint64_t intervalTimestampErrors = 0;
+    uint64_t intervalSamples = 0;
+    long double intervalSquaredSamples = 0.0;
+    double intervalPeak = 0.0;
+    uint64_t emptyPolls = 0;
+
+    auto recordPacket = [&](const screenshare::CapturedAudioPacket& packet) {
+        ++totalPackets;
+        ++intervalPackets;
+        totalFrames += packet.frames;
+        intervalFrames += packet.frames;
+        totalBytes += packet.data.size();
+        intervalBytes += packet.data.size();
+
+        if (packet.silent) {
+            ++totalSilentPackets;
+            ++intervalSilentPackets;
+        }
+        if (packet.dataDiscontinuity) {
+            ++totalDiscontinuities;
+            ++intervalDiscontinuities;
+        }
+        if (packet.timestampError) {
+            ++totalTimestampErrors;
+            ++intervalTimestampErrors;
+        }
+        if (packet.samplesAnalyzed > 0) {
+            intervalSamples += packet.samplesAnalyzed;
+            intervalSquaredSamples +=
+                static_cast<long double>(packet.rms) *
+                static_cast<long double>(packet.rms) *
+                static_cast<long double>(packet.samplesAnalyzed);
+            intervalPeak = std::max(intervalPeak, packet.peak);
+        }
+    };
+
+    while (Clock::now() - startedAt < std::chrono::seconds(options.seconds)) {
+        if (auto packet = capture.CapturePacket(std::chrono::milliseconds(100))) {
+            recordPacket(*packet);
+        } else {
+            ++emptyPolls;
+        }
+
+        const auto now = Clock::now();
+        if (now - lastReportAt >= std::chrono::seconds(1)) {
+            const double elapsed = std::chrono::duration<double>(now - lastReportAt).count();
+            const double packetsPerSecond = static_cast<double>(intervalPackets) / elapsed;
+            const double audioFramesPerSecond = static_cast<double>(intervalFrames) / elapsed;
+            const double intervalRms =
+                intervalSamples == 0 ? 0.0 : std::sqrt(static_cast<double>(intervalSquaredSamples / intervalSamples));
+
+            std::cout
+                << "audio_packets=" << totalPackets
+                << " audio_packets_per_second=" << packetsPerSecond
+                << " audio_frames=" << totalFrames
+                << " audio_frames_per_second=" << audioFramesPerSecond
+                << " audio_bytes=" << totalBytes
+                << " silent_packets=" << totalSilentPackets
+                << " discontinuities=" << totalDiscontinuities
+                << " timestamp_errors=" << totalTimestampErrors
+                << " empty_polls=" << emptyPolls
+                << " interval_packets=" << intervalPackets
+                << " interval_frames=" << intervalFrames
+                << " interval_bytes=" << intervalBytes
+                << " interval_silent_packets=" << intervalSilentPackets
+                << " interval_discontinuities=" << intervalDiscontinuities
+                << " interval_timestamp_errors=" << intervalTimestampErrors
+                << " peak=" << intervalPeak
+                << " peak_dbfs=" << Dbfs(intervalPeak)
+                << " rms=" << intervalRms
+                << " rms_dbfs=" << Dbfs(intervalRms)
+                << "\n";
+
+            intervalPackets = 0;
+            intervalFrames = 0;
+            intervalBytes = 0;
+            intervalSilentPackets = 0;
+            intervalDiscontinuities = 0;
+            intervalTimestampErrors = 0;
+            intervalSamples = 0;
+            intervalSquaredSamples = 0.0;
+            intervalPeak = 0.0;
+            lastReportAt = now;
+        }
+    }
+
+    const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
+    capture.Stop();
+
+    std::cout
+        << "Done. Audio packets: " << totalPackets
+        << ", audio frames: " << totalFrames
+        << ", average audio frames/sec: " << (totalElapsed == 0.0 ? 0.0 : static_cast<double>(totalFrames) / totalElapsed)
+        << ", bytes: " << totalBytes
+        << ", silent packets: " << totalSilentPackets
+        << ", discontinuities: " << totalDiscontinuities
+        << ", timestamp errors: " << totalTimestampErrors
+        << ", empty polls: " << emptyPolls
+        << "\n";
 }
 
 void RunCaptureStats(const Options& options)
@@ -2286,6 +2510,16 @@ int main(int argc, char** argv)
 
         if (options.listH264Encoders) {
             PrintH264Encoders(options);
+            return 0;
+        }
+
+        if (options.listAudioDevices) {
+            PrintAudioDevices();
+            return 0;
+        }
+
+        if (options.audioCapture) {
+            RunAudioCaptureStats(options);
             return 0;
         }
 
