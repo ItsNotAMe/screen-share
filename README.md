@@ -295,7 +295,11 @@ UDP stream. Use `--list-audio-devices` to list active output and microphone endp
 `--audio-capture microphone --seconds 5` to capture the default microphone endpoint. Add
 `--audio-device-id ID` with an id from the device list to select a specific endpoint. The diagnostic
 prints the mix format, buffer size, packet/frame/byte counts, silence/discontinuity counters, and
-peak/RMS levels; it does not save or transmit audio yet.
+peak/RMS levels. Add `--audio-send HOST:PORT` to transmit those raw WASAPI packets over UDP with
+application-level fragmentation. The receiver's `--udp-recv PORT` mode accepts both H.264 media
+packets and raw audio packets; for audio it reports completed packet/frame/byte counts, pending or
+dropped incomplete packets, discontinuity/timestamp counters, and the latest audio format. Audio is
+not played back yet.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -317,6 +321,7 @@ Windows Graphics Capture
  -> Media Foundation H.264 decode validation with keyframe-aware recovery
  -> paced native Direct3D receiver preview with GPU NV12 conversion
  -> standalone WASAPI audio capture diagnostics
- -> future audio transport, session setup, and renderer optimizations
+ -> raw WASAPI audio UDP transport diagnostics without playback
+ -> future audio playback, session setup, and renderer optimizations
 ```
 An app to share your screen with others

@@ -96,6 +96,7 @@ void UdpSender::Open(const UdpSenderConfig& config)
         config_ = config;
         stats_ = {};
         frameId_ = 0;
+        audioPacketId_ = 0;
         queue_.clear();
         nextSendAt_ = Clock::now();
         workerError_.clear();
@@ -214,6 +215,92 @@ void UdpSender::SendFrame(const EncodedPacket& packet)
     queueChanged_.notify_one();
 }
 
+void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
+{
+    if (!isOpen()) {
+        throw std::logic_error("UdpSender::Open must be called before SendAudioPacket");
+    }
+    if (packet.audioFrames == 0 || packet.bytes.empty()) {
+        return;
+    }
+    if (packet.sampleRate == 0 || packet.channels == 0 || packet.bitsPerSample == 0 || packet.blockAlign == 0) {
+        throw std::invalid_argument("Audio packet format is incomplete");
+    }
+    if (packet.sampleFormat == udp_protocol::AudioSampleFormat::Unknown) {
+        throw std::invalid_argument("Audio packet sample format is unsupported");
+    }
+    if (packet.bytes.size() > std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("Audio packet is too large for UDP sender");
+    }
+    if (static_cast<uint64_t>(packet.audioFrames) * static_cast<uint64_t>(packet.blockAlign) != packet.bytes.size()) {
+        throw std::invalid_argument("Audio packet byte count does not match frame count and block alignment");
+    }
+
+    const uint32_t maxPayload = config_.maxPayloadBytes;
+    const uint32_t packetBytes = static_cast<uint32_t>(packet.bytes.size());
+    const uint32_t fragmentCount32 = (packetBytes + maxPayload - 1) / maxPayload;
+    if (fragmentCount32 == 0) {
+        return;
+    }
+    if (fragmentCount32 > udp_protocol::MaxFragmentsPerFrame) {
+        throw std::runtime_error("Audio packet is too large for UDP fragmentation limit");
+    }
+
+    uint64_t packetId = 0;
+    {
+        std::lock_guard lock(mutex_);
+        CheckWorkerErrorLocked();
+        packetId = audioPacketId_++;
+    }
+
+    const auto fragmentCount = static_cast<uint16_t>(fragmentCount32);
+    const auto* data = packet.bytes.data();
+    std::vector<PendingDatagram> datagrams;
+    datagrams.reserve(fragmentCount);
+    for (uint16_t fragmentIndex = 0; fragmentIndex < fragmentCount; ++fragmentIndex) {
+        const uint32_t offset = static_cast<uint32_t>(fragmentIndex) * maxPayload;
+        const uint32_t payloadBytes = std::min(maxPayload, packetBytes - offset);
+        datagrams.push_back(PendingDatagram{
+            BuildAudioDatagram(data + offset, payloadBytes, offset, fragmentIndex, fragmentCount, packetId, packet),
+            {},
+        });
+    }
+
+    {
+        std::lock_guard lock(mutex_);
+        CheckWorkerErrorLocked();
+
+        if (queue_.size() + datagrams.size() > config_.maxQueuedDatagrams) {
+            ++stats_.audioPacketsDropped;
+            stats_.datagramsDropped += datagrams.size();
+            UpdatePendingStatsLocked();
+            return;
+        }
+
+        const auto now = Clock::now();
+        if (!config_.pacingEnabled || config_.pacingBitrate == 0 || nextSendAt_ < now) {
+            nextSendAt_ = now;
+        }
+
+        for (auto& datagram : datagrams) {
+            datagram.sendAt = config_.pacingEnabled ? nextSendAt_ : now;
+            if (config_.pacingEnabled) {
+                nextSendAt_ += PacingDelayForBytes(datagram.bytes.size());
+            }
+            queue_.push_back(std::move(datagram));
+        }
+
+        ++stats_.audioPacketsSent;
+        stats_.audioFramesSent += packet.audioFrames;
+        stats_.audioDatagramsQueued += datagrams.size();
+        stats_.audioPayloadBytesSent += packetBytes;
+        stats_.datagramsQueued += datagrams.size();
+        stats_.payloadBytesSent += packetBytes;
+        UpdatePendingStatsLocked();
+    }
+    queueChanged_.notify_one();
+}
+
 void UdpSender::SetPacingBitrate(uint32_t bitrate)
 {
     std::lock_guard lock(mutex_);
@@ -324,6 +411,42 @@ std::vector<std::byte> UdpSender::BuildDatagram(
     header.payloadBytes = udp_protocol::ToNetwork32(payloadBytes);
 
     std::vector<std::byte> datagram(sizeof(udp_protocol::PacketHeader) + payloadBytes);
+    std::memcpy(datagram.data(), &header, sizeof(header));
+    std::memcpy(datagram.data() + sizeof(header), payload, payloadBytes);
+
+    return datagram;
+}
+
+std::vector<std::byte> UdpSender::BuildAudioDatagram(
+    const std::byte* payload,
+    uint32_t payloadBytes,
+    uint32_t fragmentOffset,
+    uint16_t fragmentIndex,
+    uint16_t fragmentCount,
+    uint64_t packetId,
+    const UdpAudioPacket& packet)
+{
+    udp_protocol::AudioPacketHeader header;
+    header.magic = udp_protocol::ToNetwork32(udp_protocol::AudioMagic);
+    header.version = udp_protocol::ToNetwork16(udp_protocol::PacketVersion);
+    header.headerBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(sizeof(udp_protocol::AudioPacketHeader)));
+    header.packetId = udp_protocol::ToNetwork64(packetId);
+    header.devicePosition = udp_protocol::ToNetwork64(packet.devicePosition);
+    header.qpcPosition = udp_protocol::ToNetwork64(packet.qpcPosition);
+    header.sampleRate = udp_protocol::ToNetwork32(packet.sampleRate);
+    header.channels = udp_protocol::ToNetwork16(packet.channels);
+    header.bitsPerSample = udp_protocol::ToNetwork16(packet.bitsPerSample);
+    header.blockAlign = udp_protocol::ToNetwork16(packet.blockAlign);
+    header.sampleFormat = udp_protocol::ToNetwork16(static_cast<uint16_t>(packet.sampleFormat));
+    header.audioFrames = udp_protocol::ToNetwork32(packet.audioFrames);
+    header.packetBytes = udp_protocol::ToNetwork32(static_cast<uint32_t>(packet.bytes.size()));
+    header.fragmentOffset = udp_protocol::ToNetwork32(fragmentOffset);
+    header.fragmentIndex = udp_protocol::ToNetwork16(fragmentIndex);
+    header.fragmentCount = udp_protocol::ToNetwork16(fragmentCount);
+    header.payloadBytes = udp_protocol::ToNetwork32(payloadBytes);
+    header.flags = udp_protocol::ToNetwork32(packet.flags);
+
+    std::vector<std::byte> datagram(sizeof(udp_protocol::AudioPacketHeader) + payloadBytes);
     std::memcpy(datagram.data(), &header, sizeof(header));
     std::memcpy(datagram.data() + sizeof(header), payload, payloadBytes);
 
