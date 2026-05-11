@@ -1,4 +1,5 @@
 #include "audio/WasapiCapture.h"
+#include "audio/WasapiRenderer.h"
 #include "capture/DesktopCapturer.h"
 #include "codec/H264Bitstream.h"
 #include "codec/H264EncoderProbe.h"
@@ -48,6 +49,7 @@ constexpr uint64_t SenderQueuePressureDatagrams = 128;
 constexpr uint32_t ResolutionStableReportsBeforeUpscale = 4;
 constexpr int DefaultPreviewLatencyMs = 150;
 constexpr int DefaultPreviewMaxLateMs = 500;
+constexpr int DefaultAudioPlaybackLatencyMs = 120;
 
 struct Options {
     bool listDisplays = false;
@@ -102,6 +104,9 @@ struct Options {
     std::string audioDeviceId;
     bool audioDeviceIdProvided = false;
     std::string audioSendTarget;
+    bool audioPlayback = false;
+    int audioPlaybackLatencyMs = DefaultAudioPlaybackLatencyMs;
+    bool audioPlaybackLatencyProvided = false;
 };
 
 void PrintHelp()
@@ -117,6 +122,7 @@ void PrintHelp()
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
+        << "              [--audio-playback] [--audio-playback-latency-ms MS]\n"
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
@@ -138,6 +144,7 @@ void PrintHelp()
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
         << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
+        << "  ScreenShare --udp-recv 5000 --audio-playback\n"
         << "  ScreenShare --udp-recv 5000 --preview\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
@@ -485,6 +492,130 @@ private:
     size_t maxQueuedFrames_ = 180;
     std::chrono::milliseconds initialDelay_;
     std::chrono::milliseconds maxLateFrameAge_;
+};
+
+class AudioPlayoutBuffer {
+public:
+    explicit AudioPlayoutBuffer(std::chrono::milliseconds targetLatency)
+        : targetLatency_(targetLatency)
+    {
+    }
+
+    void Clear()
+    {
+        packets_.clear();
+        nextPacketId_.reset();
+        started_ = false;
+    }
+
+    void Enqueue(screenshare::UdpCompletedAudioPacket packet)
+    {
+        if (nextPacketId_ && packet.packetId < *nextPacketId_) {
+            ++lateDrops_;
+            return;
+        }
+        if (!packets_.emplace(packet.packetId, std::move(packet)).second) {
+            ++duplicateDrops_;
+            return;
+        }
+        while (packets_.size() > maxQueuedPackets_) {
+            packets_.erase(packets_.begin());
+            ++overflowDrops_;
+        }
+    }
+
+    void RenderReady(screenshare::WasapiRenderer& renderer)
+    {
+        if (packets_.empty()) {
+            return;
+        }
+        if (!started_) {
+            if (QueuedDuration() < targetLatency_) {
+                return;
+            }
+            nextPacketId_ = packets_.begin()->first;
+            started_ = true;
+        }
+
+        while (!packets_.empty() && nextPacketId_) {
+            auto next = packets_.find(*nextPacketId_);
+            if (next == packets_.end()) {
+                const uint64_t firstQueuedPacketId = packets_.begin()->first;
+                if (firstQueuedPacketId > *nextPacketId_ && QueuedDuration() >= targetLatency_) {
+                    missingPacketsSkipped_ += firstQueuedPacketId - *nextPacketId_;
+                    nextPacketId_ = firstQueuedPacketId;
+                    continue;
+                }
+                return;
+            }
+
+            auto& packet = next->second;
+            if (packet.audioFrames > renderer.bufferFrames()) {
+                ++oversizedDrops_;
+                ++(*nextPacketId_);
+                packets_.erase(next);
+                continue;
+            }
+
+            const bool silent = (packet.flags & screenshare::udp_protocol::AudioPacketFlagSilent) != 0;
+            if (!renderer.RenderPacket(std::span<const std::byte>(packet.bytes.data(), packet.bytes.size()), packet.audioFrames, silent)) {
+                ++renderBackpressure_;
+                return;
+            }
+
+            ++packetsRendered_;
+            framesRendered_ += packet.audioFrames;
+            ++(*nextPacketId_);
+            packets_.erase(next);
+        }
+    }
+
+    [[nodiscard]] size_t queuedPacketCount() const noexcept { return packets_.size(); }
+    [[nodiscard]] uint64_t packetsRendered() const noexcept { return packetsRendered_; }
+    [[nodiscard]] uint64_t framesRendered() const noexcept { return framesRendered_; }
+    [[nodiscard]] uint64_t lateDrops() const noexcept { return lateDrops_; }
+    [[nodiscard]] uint64_t duplicateDrops() const noexcept { return duplicateDrops_; }
+    [[nodiscard]] uint64_t overflowDrops() const noexcept { return overflowDrops_; }
+    [[nodiscard]] uint64_t oversizedDrops() const noexcept { return oversizedDrops_; }
+    [[nodiscard]] uint64_t missingPacketsSkipped() const noexcept { return missingPacketsSkipped_; }
+    [[nodiscard]] uint64_t renderBackpressure() const noexcept { return renderBackpressure_; }
+    [[nodiscard]] bool started() const noexcept { return started_; }
+    [[nodiscard]] std::chrono::milliseconds targetLatency() const noexcept { return targetLatency_; }
+
+    [[nodiscard]] std::chrono::milliseconds QueuedDuration() const
+    {
+        if (packets_.empty()) {
+            return std::chrono::milliseconds(0);
+        }
+
+        uint64_t frames = 0;
+        uint32_t sampleRate = 0;
+        for (const auto& [packetId, packet] : packets_) {
+            static_cast<void>(packetId);
+            frames += packet.audioFrames;
+            sampleRate = packet.sampleRate;
+        }
+        if (sampleRate == 0) {
+            return std::chrono::milliseconds(0);
+        }
+
+        return std::chrono::milliseconds(static_cast<int64_t>(frames * 1000 / sampleRate));
+    }
+
+private:
+    std::map<uint64_t, screenshare::UdpCompletedAudioPacket> packets_;
+    std::optional<uint64_t> nextPacketId_;
+    bool started_ = false;
+    size_t maxQueuedPackets_ = 512;
+    std::chrono::milliseconds targetLatency_;
+    uint64_t packetsRendered_ = 0;
+    uint64_t framesRendered_ = 0;
+    uint64_t lateDrops_ = 0;
+    uint64_t duplicateDrops_ = 0;
+    uint64_t overflowDrops_ = 0;
+    uint64_t oversizedDrops_ = 0;
+    uint64_t missingPacketsSkipped_ = 0;
+    uint64_t renderBackpressure_ = 0;
 };
 
 struct ReceiverHealthSnapshot {
@@ -864,6 +995,17 @@ screenshare::udp_protocol::AudioSampleFormat ToUdpAudioSampleFormat(const screen
     return screenshare::udp_protocol::AudioSampleFormat::Unknown;
 }
 
+screenshare::AudioPlaybackFormat AudioPlaybackFormatFromPacket(const screenshare::UdpCompletedAudioPacket& packet)
+{
+    screenshare::AudioPlaybackFormat format;
+    format.sampleRate = packet.sampleRate;
+    format.channels = packet.channels;
+    format.bitsPerSample = packet.bitsPerSample;
+    format.blockAlign = packet.blockAlign;
+    format.sampleFormat = packet.sampleFormat;
+    return format;
+}
+
 Options ParseOptions(int argc, char** argv)
 {
     Options options;
@@ -968,6 +1110,11 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--preview-max-late-ms") {
             options.previewMaxLateMs = ParseInt(requireValue("--preview-max-late-ms"), "--preview-max-late-ms");
             options.previewMaxLateProvided = true;
+        } else if (arg == "--audio-playback") {
+            options.audioPlayback = true;
+        } else if (arg == "--audio-playback-latency-ms") {
+            options.audioPlaybackLatencyMs = ParseInt(requireValue("--audio-playback-latency-ms"), "--audio-playback-latency-ms");
+            options.audioPlaybackLatencyProvided = true;
         } else if (arg == "--simulate-loss-percent") {
             options.simulateLossPercent = ParseFloat(requireValue("--simulate-loss-percent"), "--simulate-loss-percent");
             options.simulateLossProvided = true;
@@ -1007,11 +1154,17 @@ Options ParseOptions(int argc, char** argv)
     if ((options.previewLatencyProvided || options.previewMaxLateProvided) && !options.previewWindow) {
         throw std::invalid_argument("--preview-latency-ms and --preview-max-late-ms require --preview");
     }
+    if (options.audioPlaybackLatencyProvided && !options.audioPlayback) {
+        throw std::invalid_argument("--audio-playback-latency-ms requires --audio-playback");
+    }
     if (options.previewLatencyMs < 0 || options.previewLatencyMs > 2000) {
         throw std::invalid_argument("--preview-latency-ms must be between 0 and 2000");
     }
     if (options.previewMaxLateMs < 0 || options.previewMaxLateMs > 5000) {
         throw std::invalid_argument("--preview-max-late-ms must be between 0 and 5000");
+    }
+    if (options.audioPlaybackLatencyMs < 0 || options.audioPlaybackLatencyMs > 2000) {
+        throw std::invalid_argument("--audio-playback-latency-ms must be between 0 and 2000");
     }
     if (options.seconds < 0) {
         throw std::invalid_argument("--seconds must be non-negative");
@@ -1099,7 +1252,8 @@ Options ParseOptions(int argc, char** argv)
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
-         options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided)) {
+         options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
+         options.audioPlayback || options.audioPlaybackLatencyProvided)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (options.listAudioDevices &&
@@ -1112,6 +1266,7 @@ Options ParseOptions(int argc, char** argv)
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
+         options.audioPlayback || options.audioPlaybackLatencyProvided ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--list-audio-devices cannot be combined with capture, stream, receiver, or video options");
     }
@@ -1124,6 +1279,7 @@ Options ParseOptions(int argc, char** argv)
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
+         options.audioPlayback || options.audioPlaybackLatencyProvided ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, and --audio-send");
     }
@@ -1138,6 +1294,9 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.previewWindow && options.udpReceivePort == 0) {
         throw std::invalid_argument("--preview requires --udp-recv");
+    }
+    if (options.audioPlayback && options.udpReceivePort == 0) {
+        throw std::invalid_argument("--audio-playback requires --udp-recv");
     }
 
     return options;
@@ -2138,6 +2297,11 @@ void RunUdpReceiverStats(const Options& options)
     if (options.previewWindow) {
         std::cout << ", previewing decoded frames";
     }
+    if (options.audioPlayback) {
+        std::cout
+            << ", playing received audio"
+            << ", audio latency " << options.audioPlaybackLatencyMs << " ms";
+    }
     if (options.simulateLossPercent > 0.0f || options.simulateJitterMs > 0) {
         std::cout
             << ", simulating loss " << options.simulateLossPercent << "%"
@@ -2226,11 +2390,60 @@ void RunUdpReceiverStats(const Options& options)
         std::chrono::milliseconds(options.previewLatencyMs),
         std::chrono::milliseconds(options.previewMaxLateMs),
     };
+    AudioPlayoutBuffer audioPlayout{std::chrono::milliseconds(options.audioPlaybackLatencyMs)};
+    std::unique_ptr<screenshare::WasapiRenderer> audioRenderer;
+    std::optional<screenshare::AudioPlaybackFormat> activeAudioPlaybackFormat;
+    std::string audioPlaybackStatus = options.audioPlayback ? "waiting" : "disabled";
+    uint64_t audioPlaybackStarts = 0;
+    uint64_t audioPlaybackFormatChanges = 0;
 
     auto restartPreviewPlayoutClock = [&]() {
         if (previewWindow) {
             previewPlayout.ClearPendingAndRestartClock();
             ++previewPlayoutResets;
+        }
+    };
+
+    auto ensureAudioRenderer = [&](const screenshare::UdpCompletedAudioPacket& packet) {
+        const auto packetFormat = AudioPlaybackFormatFromPacket(packet);
+        if (activeAudioPlaybackFormat && screenshare::SameAudioPlaybackFormat(*activeAudioPlaybackFormat, packetFormat)) {
+            return;
+        }
+
+        if (activeAudioPlaybackFormat) {
+            ++audioPlaybackFormatChanges;
+        }
+        audioPlayout.Clear();
+        audioRenderer = std::make_unique<screenshare::WasapiRenderer>();
+
+        screenshare::AudioPlaybackConfig playbackConfig;
+        playbackConfig.format = packetFormat;
+        playbackConfig.bufferDuration = std::chrono::milliseconds(
+            std::clamp(options.audioPlaybackLatencyMs + 50, 50, 500));
+        audioRenderer->Start(playbackConfig);
+        activeAudioPlaybackFormat = packetFormat;
+        audioPlaybackStatus = "buffering";
+        ++audioPlaybackStarts;
+
+        std::cout
+            << "Audio playback started on \""
+            << screenshare::Narrow(audioRenderer->deviceName())
+            << "\", format=" << screenshare::AudioPlaybackFormatName(packetFormat)
+            << ", buffer_frames=" << audioRenderer->bufferFrames()
+            << "\n";
+    };
+
+    auto drainCompletedAudioPackets = [&]() {
+        while (auto audioPacket = receiver.PopAudioPacket()) {
+            if (options.audioPlayback) {
+                ensureAudioRenderer(*audioPacket);
+                audioPlayout.Enqueue(std::move(*audioPacket));
+            }
+        }
+
+        if (options.audioPlayback && audioRenderer) {
+            audioPlayout.RenderReady(*audioRenderer);
+            audioPlaybackStatus = audioPlayout.started() ? "playing" : "buffering";
         }
     };
 
@@ -2375,10 +2588,14 @@ void RunUdpReceiverStats(const Options& options)
         if (previewWindow) {
             previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
         }
+        drainCompletedAudioPackets();
 
-        const auto receiveTimeout = previewWindow ?
+        auto receiveTimeout = previewWindow ?
             previewPlayout.ReceiveTimeout(Clock::now()) :
             std::chrono::milliseconds(100);
+        if (options.audioPlayback) {
+            receiveTimeout = std::min(receiveTimeout, std::chrono::milliseconds(5));
+        }
         if (auto frame = receiver.ReceiveFrame(receiveTimeout)) {
             latestFrameId = frame->frameId;
             latestFrameBytes = frame->bytes.size();
@@ -2399,6 +2616,7 @@ void RunUdpReceiverStats(const Options& options)
                 }
             }
         }
+        drainCompletedAudioPackets();
 
         if (previewWindow) {
             previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
@@ -2412,6 +2630,8 @@ void RunUdpReceiverStats(const Options& options)
             const double completedFps = static_cast<double>(stats.framesCompleted - lastFramesCompleted) / elapsed;
             const uint64_t previewLateDrops = previewWindow ? previewPlayout.lateDrops() : 0;
             const uint64_t previewOverflowDrops = previewWindow ? previewPlayout.overflowDrops() : 0;
+            const screenshare::AudioPlaybackStats audioRendererStats =
+                audioRenderer ? audioRenderer->stats() : screenshare::AudioPlaybackStats{};
             const ReceiverHealthSnapshot health{
                 stats.framesCompleted,
                 completedFps,
@@ -2457,9 +2677,12 @@ void RunUdpReceiverStats(const Options& options)
                 << " feedback_errors=" << stats.feedbackSendErrors
                 << " audio_datagrams=" << stats.audioDatagramsAccepted
                 << " audio_packets=" << stats.audioPacketsCompleted
+                << " audio_queued_packets=" << stats.audioPacketsQueued
+                << " audio_queue_dropped=" << stats.audioQueuedPacketsDropped
                 << " audio_frames=" << stats.audioFramesCompleted
                 << " audio_bytes=" << stats.audioCompletedPacketBytes
                 << " audio_pending_packets=" << receiver.pendingAudioPacketCount()
+                << " audio_completed_queue=" << receiver.completedAudioPacketCount()
                 << " audio_incomplete_dropped=" << stats.audioIncompletePacketsDropped
                 << " audio_duplicate_fragments=" << stats.audioDuplicateFragments
                 << " audio_silent_packets=" << stats.audioSilentPackets
@@ -2469,6 +2692,21 @@ void RunUdpReceiverStats(const Options& options)
                 << " audio_format=" << stats.audioSampleRate << "x" << stats.audioChannels
                 << "x" << stats.audioBitsPerSample
                 << "/" << screenshare::udp_protocol::AudioSampleFormatName(stats.audioSampleFormat)
+                << " audio_playback=" << audioPlaybackStatus
+                << " audio_playback_latency_ms=" << (options.audioPlayback ? audioPlayout.targetLatency().count() : 0)
+                << " audio_playback_queue=" << (options.audioPlayback ? audioPlayout.queuedPacketCount() : 0)
+                << " audio_playback_queue_ms=" << (options.audioPlayback ? audioPlayout.QueuedDuration().count() : 0)
+                << " audio_playback_packets=" << (options.audioPlayback ? audioPlayout.packetsRendered() : 0)
+                << " audio_playback_frames=" << (options.audioPlayback ? audioPlayout.framesRendered() : 0)
+                << " audio_playback_starts=" << audioPlaybackStarts
+                << " audio_playback_format_changes=" << audioPlaybackFormatChanges
+                << " audio_playback_drops=" << (options.audioPlayback ?
+                    audioPlayout.lateDrops() + audioPlayout.duplicateDrops() + audioPlayout.overflowDrops() + audioPlayout.oversizedDrops() :
+                    0)
+                << " audio_playback_missing=" << (options.audioPlayback ? audioPlayout.missingPacketsSkipped() : 0)
+                << " audio_playback_backpressure=" << (options.audioPlayback ? audioPlayout.renderBackpressure() : 0)
+                << " audio_render_buffer_full=" << audioRendererStats.bufferFullEvents
+                << " audio_render_padding=" << audioRendererStats.lastPaddingFrames
                 << " invalid_datagrams=" << stats.invalidDatagrams
                 << " duplicate_fragments=" << stats.duplicateFragments
                 << " completed_frames=" << stats.framesCompleted
@@ -2518,6 +2756,7 @@ void RunUdpReceiverStats(const Options& options)
         }
     }
 
+    drainCompletedAudioPackets();
     screenshare::UdpReceiverStats stats = receiver.stats();
     if (h264Decoder) {
         flushH264DecodeBacklog(true);
@@ -2530,6 +2769,7 @@ void RunUdpReceiverStats(const Options& options)
     if (previewWindow) {
         previewPlayout.PresentReady(*previewWindow, Clock::now(), true);
     }
+    drainCompletedAudioPackets();
 
     bool decodedBmpWritten = false;
     if (!options.decodedBmpPath.empty() && latestDecodedFrame) {
@@ -2538,6 +2778,7 @@ void RunUdpReceiverStats(const Options& options)
     }
     const size_t delayedDatagrams = receiver.delayedDatagramCount();
     const size_t pendingAudioPackets = receiver.pendingAudioPacketCount();
+    const size_t completedAudioPackets = receiver.completedAudioPacketCount();
     const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
     const uint64_t finalPreviewLateDrops = previewWindow ? previewPlayout.lateDrops() : 0;
     const uint64_t finalPreviewOverflowDrops = previewWindow ? previewPlayout.overflowDrops() : 0;
@@ -2573,6 +2814,8 @@ void RunUdpReceiverStats(const Options& options)
     }
     receiver.SendFeedback(BuildReceiverFeedbackSnapshot(finalHealth, feedbackSequence++));
     stats = receiver.stats();
+    const screenshare::AudioPlaybackStats finalAudioRendererStats =
+        audioRenderer ? audioRenderer->stats() : screenshare::AudioPlaybackStats{};
     receiver.Close();
 
     std::cout
@@ -2586,9 +2829,12 @@ void RunUdpReceiverStats(const Options& options)
         << ", feedback send errors: " << stats.feedbackSendErrors
         << ", audio datagrams: " << stats.audioDatagramsAccepted
         << ", audio packets: " << stats.audioPacketsCompleted
+        << ", audio queued packets: " << stats.audioPacketsQueued
+        << ", audio queue dropped: " << stats.audioQueuedPacketsDropped
         << ", audio frames: " << stats.audioFramesCompleted
         << ", audio bytes: " << stats.audioCompletedPacketBytes
         << ", pending audio packets: " << pendingAudioPackets
+        << ", completed audio queue: " << completedAudioPackets
         << ", incomplete audio packets dropped: " << stats.audioIncompletePacketsDropped
         << ", audio duplicate fragments: " << stats.audioDuplicateFragments
         << ", audio silent packets: " << stats.audioSilentPackets
@@ -2598,6 +2844,20 @@ void RunUdpReceiverStats(const Options& options)
         << ", audio format: " << stats.audioSampleRate << "x" << stats.audioChannels
         << "x" << stats.audioBitsPerSample
         << "/" << screenshare::udp_protocol::AudioSampleFormatName(stats.audioSampleFormat)
+        << ", audio playback: " << audioPlaybackStatus
+        << ", audio playback latency ms: " << (options.audioPlayback ? audioPlayout.targetLatency().count() : 0)
+        << ", audio playback queued packets: " << (options.audioPlayback ? audioPlayout.queuedPacketCount() : 0)
+        << ", audio playback queued ms: " << (options.audioPlayback ? audioPlayout.QueuedDuration().count() : 0)
+        << ", audio playback packets: " << (options.audioPlayback ? audioPlayout.packetsRendered() : 0)
+        << ", audio playback frames: " << (options.audioPlayback ? audioPlayout.framesRendered() : 0)
+        << ", audio playback starts: " << audioPlaybackStarts
+        << ", audio playback format changes: " << audioPlaybackFormatChanges
+        << ", audio playback drops: " << (options.audioPlayback ?
+            audioPlayout.lateDrops() + audioPlayout.duplicateDrops() + audioPlayout.overflowDrops() + audioPlayout.oversizedDrops() :
+            0)
+        << ", audio playback missing packets: " << (options.audioPlayback ? audioPlayout.missingPacketsSkipped() : 0)
+        << ", audio playback backpressure: " << (options.audioPlayback ? audioPlayout.renderBackpressure() : 0)
+        << ", audio render buffer full events: " << finalAudioRendererStats.bufferFullEvents
         << ", invalid datagrams: " << stats.invalidDatagrams
         << ", duplicate fragments: " << stats.duplicateFragments
         << ", completed frames: " << stats.framesCompleted

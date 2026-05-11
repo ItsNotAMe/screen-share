@@ -10,8 +10,10 @@ The first milestone is a pure C++ capture foundation:
 - GPU-scale captured frames to the requested output resolution.
 - Send and receive H.264 packets over UDP for local transport validation.
 - Decode received H.264 and preview it in a native Direct3D window with GPU-side NV12 conversion.
+- Capture system or microphone audio with WASAPI.
+- Send raw audio packets over UDP and optionally play them on the receiver with a small jitter buffer.
 
-Audio, friend pairing, and network adaptation are later milestones.
+Friend pairing and broader network setup are later milestones.
 
 ## Build
 
@@ -185,6 +187,23 @@ starts with 150 ms of latency and drops frames that are more than 500 ms late by
 `--preview-latency-ms MS` to trade latency for jitter tolerance, and `--preview-max-late-ms MS` to
 control how long late frames can stay eligible for presentation before they are dropped.
 
+Capture system audio and send it to the receiver:
+
+```powershell
+.\build\debug\ScreenShare.exe --audio-capture system --audio-send 127.0.0.1:5000 --seconds 15
+```
+
+Play received audio on the receiver:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --audio-playback --seconds 15
+```
+
+Audio playback is opt-in. It uses the default Windows render endpoint in shared mode and starts
+after buffering 120 ms of audio by default. Use `--audio-playback-latency-ms MS` to trade latency
+for jitter tolerance. The receiver still prints audio transport diagnostics when playback is not
+enabled.
+
 For color debugging, combine `--dump-capture-bmp` on the sender with `--dump-decoded-bmp` on the
 receiver. The sender dump is written after capture scaling and HDR/SDR conversion, before H.264; the
 receiver dump is written after UDP reassembly, H.264 decode, and NV12-to-BGRA conversion.
@@ -289,8 +308,8 @@ reporting interval, while the numeric drop/resync counters remain cumulative for
 sender-side adaptation deltas.
 When `--seconds` is omitted the preview runs until the window closes.
 
-Audio groundwork is available as a standalone WASAPI diagnostic mode before audio is mixed into the
-UDP stream. Use `--list-audio-devices` to list active output and microphone endpoints. Use
+Audio support is currently split between standalone WASAPI capture/send diagnostics and receiver
+playback. Use `--list-audio-devices` to list active output and microphone endpoints. Use
 `--audio-capture system --seconds 5` to capture the default output device through WASAPI loopback, or
 `--audio-capture microphone --seconds 5` to capture the default microphone endpoint. Add
 `--audio-device-id ID` with an id from the device list to select a specific endpoint. The diagnostic
@@ -298,8 +317,10 @@ prints the mix format, buffer size, packet/frame/byte counts, silence/discontinu
 peak/RMS levels. Add `--audio-send HOST:PORT` to transmit those raw WASAPI packets over UDP with
 application-level fragmentation. The receiver's `--udp-recv PORT` mode accepts both H.264 media
 packets and raw audio packets; for audio it reports completed packet/frame/byte counts, pending or
-dropped incomplete packets, discontinuity/timestamp counters, and the latest audio format. Audio is
-not played back yet.
+dropped incomplete packets, discontinuity/timestamp counters, and the latest audio format. Add
+`--audio-playback` to render received audio through the default Windows output endpoint with a
+packet-id-ordered jitter buffer. Receiver stats report `audio_playback`, queued playback packets and
+milliseconds, rendered packet/frame counts, playback drops/skips, and render backpressure.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -321,7 +342,8 @@ Windows Graphics Capture
  -> Media Foundation H.264 decode validation with keyframe-aware recovery
  -> paced native Direct3D receiver preview with GPU NV12 conversion
  -> standalone WASAPI audio capture diagnostics
- -> raw WASAPI audio UDP transport diagnostics without playback
- -> future audio playback, session setup, and renderer optimizations
+ -> raw WASAPI audio UDP transport diagnostics
+ -> opt-in receiver WASAPI audio playback with a jitter buffer
+ -> future session setup and renderer optimizations
 ```
 An app to share your screen with others

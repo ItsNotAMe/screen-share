@@ -20,6 +20,7 @@ struct UdpReceiverConfig {
     uint32_t socketReceiveBufferBytes = 4 * 1024 * 1024;
     size_t maxPendingFrames = 256;
     size_t maxPendingAudioPackets = 512;
+    size_t maxCompletedAudioPackets = 512;
     uint32_t maxAudioPacketBytes = 2 * 1024 * 1024;
     std::chrono::milliseconds frameTimeout = std::chrono::seconds(5);
     float simulatedLossPercent = 0.0f;
@@ -30,6 +31,21 @@ struct UdpReceiverConfig {
 struct UdpCompletedFrame {
     uint64_t frameId = 0;
     uint64_t timestamp100ns = 0;
+    uint16_t fragmentCount = 0;
+    std::vector<std::byte> bytes;
+};
+
+struct UdpCompletedAudioPacket {
+    uint64_t packetId = 0;
+    uint64_t devicePosition = 0;
+    uint64_t qpcPosition = 0;
+    uint32_t sampleRate = 0;
+    uint16_t channels = 0;
+    uint16_t bitsPerSample = 0;
+    uint16_t blockAlign = 0;
+    udp_protocol::AudioSampleFormat sampleFormat = udp_protocol::AudioSampleFormat::Unknown;
+    uint32_t audioFrames = 0;
+    uint32_t flags = 0;
     uint16_t fragmentCount = 0;
     std::vector<std::byte> bytes;
 };
@@ -50,6 +66,8 @@ struct UdpReceiverStats {
     uint64_t audioDatagramsAccepted = 0;
     uint64_t audioDuplicateFragments = 0;
     uint64_t audioPacketsCompleted = 0;
+    uint64_t audioPacketsQueued = 0;
+    uint64_t audioQueuedPacketsDropped = 0;
     uint64_t audioIncompletePacketsDropped = 0;
     uint64_t audioPayloadBytesReceived = 0;
     uint64_t audioCompletedPacketBytes = 0;
@@ -79,12 +97,14 @@ public:
     void Open(const UdpReceiverConfig& config);
     void Close();
     [[nodiscard]] std::optional<UdpCompletedFrame> ReceiveFrame(std::chrono::milliseconds timeout);
+    [[nodiscard]] std::optional<UdpCompletedAudioPacket> PopAudioPacket();
     bool SendFeedback(const udp_protocol::FeedbackSnapshot& feedback);
 
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] const UdpReceiverStats& stats() const noexcept { return stats_; }
     [[nodiscard]] size_t pendingFrameCount() const noexcept { return pendingFrames_.size(); }
     [[nodiscard]] size_t pendingAudioPacketCount() const noexcept { return pendingAudioPackets_.size(); }
+    [[nodiscard]] size_t completedAudioPacketCount() const noexcept { return completedAudioPackets_.size(); }
     [[nodiscard]] size_t delayedDatagramCount() const noexcept { return delayedDatagrams_.size(); }
 
 private:
@@ -133,6 +153,7 @@ private:
         uint16_t fragmentCount = 0;
         uint16_t receivedFragments = 0;
         uint32_t receivedBytes = 0;
+        std::vector<std::byte> bytes;
         std::vector<uint8_t> fragmentReceived;
         std::vector<FragmentRange> receivedRanges;
         Clock::time_point lastUpdated;
@@ -150,6 +171,7 @@ private:
     void DropExpiredFrames(Clock::time_point now);
     void EnforcePendingFrameLimit();
     void EnforcePendingAudioPacketLimit();
+    void EnforceCompletedAudioPacketLimit();
 
     uintptr_t socket_ = 0;
     UdpReceiverConfig config_{};
@@ -158,6 +180,7 @@ private:
     std::vector<std::byte> feedbackAddress_;
     int feedbackAddressLength_ = 0;
     std::deque<DelayedDatagram> delayedDatagrams_;
+    std::deque<UdpCompletedAudioPacket> completedAudioPackets_;
     std::unordered_map<uint64_t, PendingFrame> pendingFrames_;
     std::unordered_map<uint64_t, PendingAudioPacket> pendingAudioPackets_;
     std::mt19937 simulationRng_{1};

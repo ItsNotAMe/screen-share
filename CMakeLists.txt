@@ -5,6 +5,7 @@ project(ScreenShareNative LANGUAGES CXX)
 add_executable(ScreenShare
     src/app/main.cpp
     src/audio/WasapiCapture.cpp
+    src/audio/WasapiRenderer.cpp
     src/capture/DesktopCapturer.cpp
     src/codec/H264Bitstream.cpp
     src/codec/H264FileEncoder.cpp
