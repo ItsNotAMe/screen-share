@@ -44,6 +44,23 @@ const char* FeedbackHealthStateName(FeedbackHealthState state)
     }
 }
 
+const char* AudioSampleFormatName(AudioSampleFormat format)
+{
+    switch (format) {
+    case AudioSampleFormat::Float32:
+        return "float32";
+    case AudioSampleFormat::Pcm16:
+        return "pcm16";
+    case AudioSampleFormat::Pcm24:
+        return "pcm24";
+    case AudioSampleFormat::Pcm32:
+        return "pcm32";
+    case AudioSampleFormat::Unknown:
+    default:
+        return "unknown";
+    }
+}
+
 std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback)
 {
     FeedbackPacket packet;

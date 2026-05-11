@@ -11,6 +11,7 @@ namespace screenshare::udp_protocol {
 
 constexpr uint32_t PacketMagic = 0x53535631; // "SSV1"
 constexpr uint32_t FeedbackMagic = 0x53534631; // "SSF1"
+constexpr uint32_t AudioMagic = 0x53534131; // "SSA1"
 constexpr uint16_t PacketVersion = 1;
 constexpr uint16_t MaxFragmentsPerFrame = 4096;
 
@@ -22,6 +23,20 @@ enum class FeedbackHealthState : uint16_t {
     Recovering = 4,
     Buffering = 5,
     PreviewDrop = 6,
+};
+
+enum class AudioSampleFormat : uint16_t {
+    Unknown = 0,
+    Float32 = 1,
+    Pcm16 = 2,
+    Pcm24 = 3,
+    Pcm32 = 4,
+};
+
+enum AudioPacketFlags : uint32_t {
+    AudioPacketFlagSilent = 1U << 0,
+    AudioPacketFlagDataDiscontinuity = 1U << 1,
+    AudioPacketFlagTimestampError = 1U << 2,
 };
 
 struct FeedbackSnapshot {
@@ -73,10 +88,32 @@ struct FeedbackPacket {
     uint16_t healthState = 0;
     uint16_t reserved = 0;
 };
+
+struct AudioPacketHeader {
+    uint32_t magic = 0;
+    uint16_t version = 0;
+    uint16_t headerBytes = 0;
+    uint64_t packetId = 0;
+    uint64_t devicePosition = 0;
+    uint64_t qpcPosition = 0;
+    uint32_t sampleRate = 0;
+    uint16_t channels = 0;
+    uint16_t bitsPerSample = 0;
+    uint16_t blockAlign = 0;
+    uint16_t sampleFormat = 0;
+    uint32_t audioFrames = 0;
+    uint32_t packetBytes = 0;
+    uint32_t fragmentOffset = 0;
+    uint16_t fragmentIndex = 0;
+    uint16_t fragmentCount = 0;
+    uint32_t payloadBytes = 0;
+    uint32_t flags = 0;
+};
 #pragma pack(pop)
 
 static_assert(sizeof(PacketHeader) == 40);
 static_assert(sizeof(FeedbackPacket) == 96);
+static_assert(sizeof(AudioPacketHeader) == 68);
 
 constexpr uint16_t ByteSwap16(uint16_t value) noexcept
 {
@@ -143,6 +180,7 @@ constexpr uint64_t FromNetwork64(uint64_t value) noexcept
 }
 
 const char* FeedbackHealthStateName(FeedbackHealthState state);
+const char* AudioSampleFormatName(AudioSampleFormat format);
 std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback);
 std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte> datagram);
 

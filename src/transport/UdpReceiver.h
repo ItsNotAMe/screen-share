@@ -19,6 +19,8 @@ struct UdpReceiverConfig {
     uint32_t maxFrameBytes = 64 * 1024 * 1024;
     uint32_t socketReceiveBufferBytes = 4 * 1024 * 1024;
     size_t maxPendingFrames = 256;
+    size_t maxPendingAudioPackets = 512;
+    uint32_t maxAudioPacketBytes = 2 * 1024 * 1024;
     std::chrono::milliseconds frameTimeout = std::chrono::seconds(5);
     float simulatedLossPercent = 0.0f;
     std::chrono::milliseconds simulatedJitter = std::chrono::milliseconds(0);
@@ -45,6 +47,25 @@ struct UdpReceiverStats {
     uint64_t simulatedDatagramsDelayed = 0;
     uint64_t feedbackPacketsSent = 0;
     uint64_t feedbackSendErrors = 0;
+    uint64_t audioDatagramsAccepted = 0;
+    uint64_t audioDuplicateFragments = 0;
+    uint64_t audioPacketsCompleted = 0;
+    uint64_t audioIncompletePacketsDropped = 0;
+    uint64_t audioPayloadBytesReceived = 0;
+    uint64_t audioCompletedPacketBytes = 0;
+    uint64_t audioFramesCompleted = 0;
+    uint64_t audioSilentPackets = 0;
+    uint64_t audioDiscontinuities = 0;
+    uint64_t audioTimestampErrors = 0;
+    uint64_t audioFormatChanges = 0;
+    uint64_t latestAudioPacketId = 0;
+    uint64_t latestAudioDevicePosition = 0;
+    uint64_t latestAudioQpcPosition = 0;
+    uint32_t audioSampleRate = 0;
+    uint16_t audioChannels = 0;
+    uint16_t audioBitsPerSample = 0;
+    uint16_t audioBlockAlign = 0;
+    udp_protocol::AudioSampleFormat audioSampleFormat = udp_protocol::AudioSampleFormat::Unknown;
 };
 
 class UdpReceiver {
@@ -63,6 +84,7 @@ public:
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] const UdpReceiverStats& stats() const noexcept { return stats_; }
     [[nodiscard]] size_t pendingFrameCount() const noexcept { return pendingFrames_.size(); }
+    [[nodiscard]] size_t pendingAudioPacketCount() const noexcept { return pendingAudioPackets_.size(); }
     [[nodiscard]] size_t delayedDatagramCount() const noexcept { return delayedDatagrams_.size(); }
 
 private:
@@ -91,16 +113,43 @@ private:
         Clock::time_point lastUpdated;
     };
 
+    struct PendingAudioPacket {
+        struct FragmentRange {
+            uint32_t begin = 0;
+            uint32_t end = 0;
+        };
+
+        uint64_t packetId = 0;
+        uint64_t devicePosition = 0;
+        uint64_t qpcPosition = 0;
+        uint32_t sampleRate = 0;
+        uint16_t channels = 0;
+        uint16_t bitsPerSample = 0;
+        uint16_t blockAlign = 0;
+        udp_protocol::AudioSampleFormat sampleFormat = udp_protocol::AudioSampleFormat::Unknown;
+        uint32_t audioFrames = 0;
+        uint32_t packetBytes = 0;
+        uint32_t flags = 0;
+        uint16_t fragmentCount = 0;
+        uint16_t receivedFragments = 0;
+        uint32_t receivedBytes = 0;
+        std::vector<uint8_t> fragmentReceived;
+        std::vector<FragmentRange> receivedRanges;
+        Clock::time_point lastUpdated;
+    };
+
     [[nodiscard]] bool WaitForReadable(std::chrono::milliseconds timeout);
     [[nodiscard]] std::optional<UdpCompletedFrame> ReceiveDatagram();
     [[nodiscard]] std::optional<UdpCompletedFrame> ReleaseReadyDelayedDatagram(Clock::time_point now);
     [[nodiscard]] std::optional<UdpCompletedFrame> ProcessDatagram(const std::byte* datagram, int datagramBytes);
+    void ProcessAudioDatagram(const std::byte* datagram, int datagramBytes);
     void QueueDelayedDatagram(const std::byte* datagram, int datagramBytes, Clock::time_point releaseAt);
     [[nodiscard]] bool ShouldSimulateLoss();
     [[nodiscard]] std::chrono::milliseconds NextSimulatedJitterDelay();
     [[nodiscard]] std::chrono::milliseconds WaitUntilNextDelayedDatagram(Clock::time_point now) const;
     void DropExpiredFrames(Clock::time_point now);
     void EnforcePendingFrameLimit();
+    void EnforcePendingAudioPacketLimit();
 
     uintptr_t socket_ = 0;
     UdpReceiverConfig config_{};
@@ -110,6 +159,7 @@ private:
     int feedbackAddressLength_ = 0;
     std::deque<DelayedDatagram> delayedDatagrams_;
     std::unordered_map<uint64_t, PendingFrame> pendingFrames_;
+    std::unordered_map<uint64_t, PendingAudioPacket> pendingAudioPackets_;
     std::mt19937 simulationRng_{1};
     bool winsockStarted_ = false;
 };

@@ -65,6 +65,12 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     if (config.maxPendingFrames == 0) {
         throw std::invalid_argument("UDP max pending frames must be non-zero");
     }
+    if (config.maxPendingAudioPackets == 0) {
+        throw std::invalid_argument("UDP max pending audio packets must be non-zero");
+    }
+    if (config.maxAudioPacketBytes == 0) {
+        throw std::invalid_argument("UDP max audio packet bytes must be non-zero");
+    }
     if (config.socketReceiveBufferBytes > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
         throw std::invalid_argument("UDP socket receive buffer is too large");
     }
@@ -107,6 +113,7 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     feedbackAddressLength_ = 0;
     delayedDatagrams_.clear();
     pendingFrames_.clear();
+    pendingAudioPackets_.clear();
     stats_ = {};
     simulationRng_.seed(config_.simulationSeed);
 }
@@ -123,6 +130,7 @@ void UdpReceiver::Close()
     feedbackAddressLength_ = 0;
     delayedDatagrams_.clear();
     pendingFrames_.clear();
+    pendingAudioPackets_.clear();
 }
 
 std::optional<UdpCompletedFrame> UdpReceiver::ReceiveFrame(std::chrono::milliseconds timeout)
@@ -268,6 +276,19 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReleaseReadyDelayedDatagram(Clock:
 
 std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* datagram, int datagramBytes)
 {
+    if (datagramBytes < static_cast<int>(sizeof(uint32_t))) {
+        ++stats_.invalidDatagrams;
+        return std::nullopt;
+    }
+
+    uint32_t rawMagic = 0;
+    std::memcpy(&rawMagic, datagram, sizeof(rawMagic));
+    const uint32_t datagramMagic = udp_protocol::FromNetwork32(rawMagic);
+    if (datagramMagic == udp_protocol::AudioMagic) {
+        ProcessAudioDatagram(datagram, datagramBytes);
+        return std::nullopt;
+    }
+
     if (datagramBytes < static_cast<int>(sizeof(udp_protocol::PacketHeader))) {
         ++stats_.invalidDatagrams;
         return std::nullopt;
@@ -371,6 +392,173 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     return completed;
 }
 
+void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBytes)
+{
+    if (datagramBytes < static_cast<int>(sizeof(udp_protocol::AudioPacketHeader))) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+
+    udp_protocol::AudioPacketHeader header;
+    std::memcpy(&header, datagram, sizeof(header));
+
+    const uint32_t magic = udp_protocol::FromNetwork32(header.magic);
+    const uint16_t version = udp_protocol::FromNetwork16(header.version);
+    const uint16_t headerBytes = udp_protocol::FromNetwork16(header.headerBytes);
+    const uint64_t packetId = udp_protocol::FromNetwork64(header.packetId);
+    const uint64_t devicePosition = udp_protocol::FromNetwork64(header.devicePosition);
+    const uint64_t qpcPosition = udp_protocol::FromNetwork64(header.qpcPosition);
+    const uint32_t sampleRate = udp_protocol::FromNetwork32(header.sampleRate);
+    const uint16_t channels = udp_protocol::FromNetwork16(header.channels);
+    const uint16_t bitsPerSample = udp_protocol::FromNetwork16(header.bitsPerSample);
+    const uint16_t blockAlign = udp_protocol::FromNetwork16(header.blockAlign);
+    const auto sampleFormat = static_cast<udp_protocol::AudioSampleFormat>(udp_protocol::FromNetwork16(header.sampleFormat));
+    const uint32_t audioFrames = udp_protocol::FromNetwork32(header.audioFrames);
+    const uint32_t packetBytes = udp_protocol::FromNetwork32(header.packetBytes);
+    const uint32_t fragmentOffset = udp_protocol::FromNetwork32(header.fragmentOffset);
+    const uint16_t fragmentIndex = udp_protocol::FromNetwork16(header.fragmentIndex);
+    const uint16_t fragmentCount = udp_protocol::FromNetwork16(header.fragmentCount);
+    const uint32_t payloadBytes = udp_protocol::FromNetwork32(header.payloadBytes);
+    const uint32_t flags = udp_protocol::FromNetwork32(header.flags);
+
+    const bool knownSampleFormat =
+        sampleFormat == udp_protocol::AudioSampleFormat::Float32 ||
+        sampleFormat == udp_protocol::AudioSampleFormat::Pcm16 ||
+        sampleFormat == udp_protocol::AudioSampleFormat::Pcm24 ||
+        sampleFormat == udp_protocol::AudioSampleFormat::Pcm32;
+    const uint32_t allowedFlags =
+        udp_protocol::AudioPacketFlagSilent |
+        udp_protocol::AudioPacketFlagDataDiscontinuity |
+        udp_protocol::AudioPacketFlagTimestampError;
+
+    if (magic != udp_protocol::AudioMagic ||
+        version != udp_protocol::PacketVersion ||
+        headerBytes != sizeof(udp_protocol::AudioPacketHeader) ||
+        datagramBytes < static_cast<int>(headerBytes) ||
+        !knownSampleFormat ||
+        (flags & ~allowedFlags) != 0) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+
+    const auto actualPayloadBytes = static_cast<uint32_t>(datagramBytes - headerBytes);
+    if (sampleRate == 0 ||
+        channels == 0 ||
+        bitsPerSample == 0 ||
+        blockAlign == 0 ||
+        audioFrames == 0 ||
+        packetBytes == 0 ||
+        packetBytes > config_.maxAudioPacketBytes ||
+        static_cast<uint64_t>(audioFrames) * static_cast<uint64_t>(blockAlign) != packetBytes ||
+        fragmentCount == 0 ||
+        fragmentCount > udp_protocol::MaxFragmentsPerFrame ||
+        fragmentIndex >= fragmentCount ||
+        payloadBytes == 0 ||
+        payloadBytes != actualPayloadBytes ||
+        fragmentOffset > packetBytes ||
+        payloadBytes > packetBytes - fragmentOffset) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+
+    const auto now = Clock::now();
+    auto [it, inserted] = pendingAudioPackets_.try_emplace(packetId);
+    PendingAudioPacket& pending = it->second;
+    if (inserted) {
+        pending.packetId = packetId;
+        pending.devicePosition = devicePosition;
+        pending.qpcPosition = qpcPosition;
+        pending.sampleRate = sampleRate;
+        pending.channels = channels;
+        pending.bitsPerSample = bitsPerSample;
+        pending.blockAlign = blockAlign;
+        pending.sampleFormat = sampleFormat;
+        pending.audioFrames = audioFrames;
+        pending.packetBytes = packetBytes;
+        pending.flags = flags;
+        pending.fragmentCount = fragmentCount;
+        pending.fragmentReceived.assign(fragmentCount, 0);
+    } else if (pending.devicePosition != devicePosition ||
+               pending.qpcPosition != qpcPosition ||
+               pending.sampleRate != sampleRate ||
+               pending.channels != channels ||
+               pending.bitsPerSample != bitsPerSample ||
+               pending.blockAlign != blockAlign ||
+               pending.sampleFormat != sampleFormat ||
+               pending.audioFrames != audioFrames ||
+               pending.packetBytes != packetBytes ||
+               pending.flags != flags ||
+               pending.fragmentCount != fragmentCount) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+
+    pending.lastUpdated = now;
+
+    if (pending.fragmentReceived[fragmentIndex] != 0) {
+        ++stats_.audioDuplicateFragments;
+        return;
+    }
+
+    const uint32_t fragmentEnd = fragmentOffset + payloadBytes;
+    for (const auto& range : pending.receivedRanges) {
+        if (fragmentOffset < range.end && fragmentEnd > range.begin) {
+            ++stats_.invalidDatagrams;
+            return;
+        }
+    }
+    if (payloadBytes > pending.packetBytes - pending.receivedBytes) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+
+    ++stats_.audioDatagramsAccepted;
+    stats_.audioPayloadBytesReceived += payloadBytes;
+
+    pending.fragmentReceived[fragmentIndex] = 1;
+    pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
+    ++pending.receivedFragments;
+    pending.receivedBytes += payloadBytes;
+
+    if (pending.receivedFragments != pending.fragmentCount || pending.receivedBytes != pending.packetBytes) {
+        EnforcePendingAudioPacketLimit();
+        return;
+    }
+
+    const bool hadPreviousFormat = stats_.audioPacketsCompleted > 0;
+    if (hadPreviousFormat &&
+        (stats_.audioSampleRate != pending.sampleRate ||
+         stats_.audioChannels != pending.channels ||
+         stats_.audioBitsPerSample != pending.bitsPerSample ||
+         stats_.audioBlockAlign != pending.blockAlign ||
+         stats_.audioSampleFormat != pending.sampleFormat)) {
+        ++stats_.audioFormatChanges;
+    }
+
+    ++stats_.audioPacketsCompleted;
+    stats_.audioCompletedPacketBytes += pending.packetBytes;
+    stats_.audioFramesCompleted += pending.audioFrames;
+    if ((pending.flags & udp_protocol::AudioPacketFlagSilent) != 0) {
+        ++stats_.audioSilentPackets;
+    }
+    if ((pending.flags & udp_protocol::AudioPacketFlagDataDiscontinuity) != 0) {
+        ++stats_.audioDiscontinuities;
+    }
+    if ((pending.flags & udp_protocol::AudioPacketFlagTimestampError) != 0) {
+        ++stats_.audioTimestampErrors;
+    }
+    stats_.latestAudioPacketId = pending.packetId;
+    stats_.latestAudioDevicePosition = pending.devicePosition;
+    stats_.latestAudioQpcPosition = pending.qpcPosition;
+    stats_.audioSampleRate = pending.sampleRate;
+    stats_.audioChannels = pending.channels;
+    stats_.audioBitsPerSample = pending.bitsPerSample;
+    stats_.audioBlockAlign = pending.blockAlign;
+    stats_.audioSampleFormat = pending.sampleFormat;
+
+    pendingAudioPackets_.erase(it);
+}
+
 void UdpReceiver::QueueDelayedDatagram(const std::byte* datagram, int datagramBytes, Clock::time_point releaseAt)
 {
     DelayedDatagram delayed;
@@ -432,6 +620,15 @@ void UdpReceiver::DropExpiredFrames(Clock::time_point now)
             ++it;
         }
     }
+
+    for (auto it = pendingAudioPackets_.begin(); it != pendingAudioPackets_.end();) {
+        if (now - it->second.lastUpdated > config_.frameTimeout) {
+            it = pendingAudioPackets_.erase(it);
+            ++stats_.audioIncompletePacketsDropped;
+        } else {
+            ++it;
+        }
+    }
 }
 
 void UdpReceiver::EnforcePendingFrameLimit()
@@ -446,6 +643,21 @@ void UdpReceiver::EnforcePendingFrameLimit()
 
         pendingFrames_.erase(oldest);
         ++stats_.incompleteFramesDropped;
+    }
+}
+
+void UdpReceiver::EnforcePendingAudioPacketLimit()
+{
+    while (pendingAudioPackets_.size() > config_.maxPendingAudioPackets) {
+        auto oldest = pendingAudioPackets_.begin();
+        for (auto it = pendingAudioPackets_.begin(); it != pendingAudioPackets_.end(); ++it) {
+            if (it->second.lastUpdated < oldest->second.lastUpdated) {
+                oldest = it;
+            }
+        }
+
+        pendingAudioPackets_.erase(oldest);
+        ++stats_.audioIncompletePacketsDropped;
     }
 }
 
