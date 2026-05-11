@@ -109,6 +109,12 @@ Capture, stream-encode, and send H.264 packets over UDP:
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8
 ```
 
+Add system audio to the same UDP sender:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8 --audio-capture system
+```
+
 UDP sending is paced by default using the selected stream bitrate, which spreads encoded frame
 fragments over time instead of dumping each frame as one burst. Add `--no-udp-pacing` when you want
 the older raw burst behavior for transport diagnostics.
@@ -180,6 +186,12 @@ Listen, decode, and preview received frames in a native window until the window 
 
 ```powershell
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview
+```
+
+Listen, preview video, and play received audio:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback
 ```
 
 Add `--seconds S` to stop preview automatically after a fixed duration. The preview playout buffer
@@ -309,18 +321,23 @@ sender-side adaptation deltas.
 When `--seconds` is omitted the preview runs until the window closes.
 
 Audio support is currently split between standalone WASAPI capture/send diagnostics and receiver
-playback. Use `--list-audio-devices` to list active output and microphone endpoints. Use
+playback, with combined audio+video UDP streaming available through `--udp-send --audio-capture`.
+Use `--list-audio-devices` to list active output and microphone endpoints. Use
 `--audio-capture system --seconds 5` to capture the default output device through WASAPI loopback, or
 `--audio-capture microphone --seconds 5` to capture the default microphone endpoint. Add
 `--audio-device-id ID` with an id from the device list to select a specific endpoint. The diagnostic
 prints the mix format, buffer size, packet/frame/byte counts, silence/discontinuity counters, and
 peak/RMS levels. Add `--audio-send HOST:PORT` to transmit those raw WASAPI packets over UDP with
-application-level fragmentation. The receiver's `--udp-recv PORT` mode accepts both H.264 media
-packets and raw audio packets; for audio it reports completed packet/frame/byte counts, pending or
-dropped incomplete packets, discontinuity/timestamp counters, and the latest audio format. Add
-`--audio-playback` to render received audio through the default Windows output endpoint with a
-packet-id-ordered jitter buffer. Receiver stats report `audio_playback`, queued playback packets and
-milliseconds, rendered packet/frame counts, playback drops/skips, and render backpressure.
+application-level fragmentation. When `--audio-capture` is combined with the normal video
+`--udp-send` path, the sender captures audio on a background thread and sends it through the same UDP
+socket as video. Raw audio is currently uncompressed, so prefer LAN testing for now. Sender stats
+report `audio_capture_*`, `audio_udp_*`, `audio_capture_qpc`, and the combined UDP pacing bitrate.
+The receiver's `--udp-recv PORT` mode accepts both H.264 media packets and raw audio packets; for
+audio it reports completed packet/frame/byte counts, pending or dropped incomplete packets,
+discontinuity/timestamp counters, and the latest audio format. Add `--audio-playback` to render
+received audio through the default Windows output endpoint with a packet-id-ordered jitter buffer.
+Receiver stats report `audio_playback`, queued playback packets and milliseconds, rendered
+packet/frame counts, playback drops/skips, render backpressure, and the latest audio QPC timestamp.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -344,6 +361,7 @@ Windows Graphics Capture
  -> standalone WASAPI audio capture diagnostics
  -> raw WASAPI audio UDP transport diagnostics
  -> opt-in receiver WASAPI audio playback with a jitter buffer
+ -> combined audio+video UDP streaming with A/V diagnostics
  -> future session setup and renderer optimizations
 ```
 An app to share your screen with others
