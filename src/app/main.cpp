@@ -624,6 +624,109 @@ private:
     uint64_t renderBackpressure_ = 0;
 };
 
+struct AvSyncSnapshot {
+    bool hasVideo = false;
+    bool hasAudio = false;
+    bool ready = false;
+    uint64_t videoFrames = 0;
+    uint64_t audioPackets = 0;
+    uint64_t ignoredAudioPackets = 0;
+    uint64_t firstVideoTimestamp100ns = 0;
+    uint64_t latestVideoTimestamp100ns = 0;
+    uint64_t firstAudioQpc100ns = 0;
+    uint64_t latestAudioQpc100ns = 0;
+    uint64_t latestVideoFrameId = 0;
+    uint64_t latestAudioPacketId = 0;
+    double videoElapsedMs = 0.0;
+    double audioElapsedMs = 0.0;
+    double audioAheadMs = 0.0;
+};
+
+class AvSyncDiagnostics {
+public:
+    void ObserveVideoFrame(const screenshare::UdpCompletedFrame& frame)
+    {
+        if (!hasVideo_) {
+            firstVideoTimestamp100ns_ = frame.timestamp100ns;
+            hasVideo_ = true;
+        }
+
+        latestVideoTimestamp100ns_ = frame.timestamp100ns;
+        latestVideoFrameId_ = frame.frameId;
+        ++videoFrames_;
+    }
+
+    void ObserveAudioPacket(const screenshare::UdpCompletedAudioPacket& packet)
+    {
+        const bool timestampError =
+            (packet.flags & screenshare::udp_protocol::AudioPacketFlagTimestampError) != 0;
+        if (timestampError || packet.qpcPosition == 0) {
+            ++ignoredAudioPackets_;
+            return;
+        }
+
+        if (!hasAudio_) {
+            firstAudioQpc100ns_ = packet.qpcPosition;
+            hasAudio_ = true;
+        }
+
+        latestAudioQpc100ns_ = packet.qpcPosition;
+        latestAudioPacketId_ = packet.packetId;
+        ++audioPackets_;
+    }
+
+    [[nodiscard]] AvSyncSnapshot snapshot() const
+    {
+        AvSyncSnapshot snapshot;
+        snapshot.hasVideo = hasVideo_;
+        snapshot.hasAudio = hasAudio_;
+        snapshot.ready = hasVideo_ && hasAudio_;
+        snapshot.videoFrames = videoFrames_;
+        snapshot.audioPackets = audioPackets_;
+        snapshot.ignoredAudioPackets = ignoredAudioPackets_;
+        snapshot.firstVideoTimestamp100ns = firstVideoTimestamp100ns_;
+        snapshot.latestVideoTimestamp100ns = latestVideoTimestamp100ns_;
+        snapshot.firstAudioQpc100ns = firstAudioQpc100ns_;
+        snapshot.latestAudioQpc100ns = latestAudioQpc100ns_;
+        snapshot.latestVideoFrameId = latestVideoFrameId_;
+        snapshot.latestAudioPacketId = latestAudioPacketId_;
+
+        if (snapshot.ready) {
+            const uint64_t videoElapsed100ns =
+                latestVideoTimestamp100ns_ >= firstVideoTimestamp100ns_
+                    ? latestVideoTimestamp100ns_ - firstVideoTimestamp100ns_
+                    : 0;
+            const uint64_t audioElapsed100ns =
+                latestAudioQpc100ns_ >= firstAudioQpc100ns_
+                    ? latestAudioQpc100ns_ - firstAudioQpc100ns_
+                    : 0;
+            snapshot.videoElapsedMs = Ticks100nsToMs(videoElapsed100ns);
+            snapshot.audioElapsedMs = Ticks100nsToMs(audioElapsed100ns);
+            snapshot.audioAheadMs = snapshot.audioElapsedMs - snapshot.videoElapsedMs;
+        }
+
+        return snapshot;
+    }
+
+private:
+    static double Ticks100nsToMs(uint64_t ticks) noexcept
+    {
+        return static_cast<double>(ticks) / 10'000.0;
+    }
+
+    bool hasVideo_ = false;
+    bool hasAudio_ = false;
+    uint64_t videoFrames_ = 0;
+    uint64_t audioPackets_ = 0;
+    uint64_t ignoredAudioPackets_ = 0;
+    uint64_t firstVideoTimestamp100ns_ = 0;
+    uint64_t latestVideoTimestamp100ns_ = 0;
+    uint64_t firstAudioQpc100ns_ = 0;
+    uint64_t latestAudioQpc100ns_ = 0;
+    uint64_t latestVideoFrameId_ = 0;
+    uint64_t latestAudioPacketId_ = 0;
+};
+
 struct AudioCaptureWorkerStats {
     uint64_t packets = 0;
     uint64_t frames = 0;
@@ -1062,7 +1165,22 @@ private:
     const char* reason_ = "waiting_for_feedback";
 };
 
-std::string FormatReceiverHealthTitle(const ReceiverHealthSnapshot& health)
+std::string FormatAvSyncTitle(const AvSyncSnapshot& avSync)
+{
+    if (!avSync.ready) {
+        return "av wait";
+    }
+
+    std::ostringstream stream;
+    stream << "av "
+           << (avSync.audioAheadMs >= 0.0 ? "+" : "")
+           << std::fixed << std::setprecision(0)
+           << avSync.audioAheadMs
+           << "ms";
+    return stream.str();
+}
+
+std::string FormatReceiverHealthTitle(const ReceiverHealthSnapshot& health, const AvSyncSnapshot& avSync)
 {
     const uint64_t transportDrops =
         health.simulatedDroppedDatagrams + health.invalidDatagrams + health.incompleteDroppedFrames;
@@ -1078,7 +1196,8 @@ std::string FormatReceiverHealthTitle(const ReceiverHealthSnapshot& health)
            << " | skip " << health.h264DecodeSkippedPackets
            << " | drops " << transportDrops << "/" << previewDrops
            << " | reset " << health.previewPlayoutResets
-           << " | shown " << health.previewFramesPresented;
+           << " | shown " << health.previewFramesPresented
+           << " | " << FormatAvSyncTitle(avSync);
     return stream.str();
 }
 
@@ -2668,7 +2787,7 @@ void RunUdpReceiverStats(const Options& options)
     }
     if (options.previewWindow) {
         previewWindow = std::make_unique<screenshare::ReceiverPreviewWindow>();
-        previewWindow->SetStatusText("waiting | res 0x0 | fps 0.0 | lat 0/0ms | q 0/0/0 | resync 0 | skip 0 | drops 0/0 | reset 0 | shown 0");
+        previewWindow->SetStatusText("waiting | res 0x0 | fps 0.0 | lat 0/0ms | q 0/0/0 | resync 0 | skip 0 | drops 0/0 | reset 0 | shown 0 | av wait");
         previewWindow->Show();
     }
 
@@ -2678,6 +2797,7 @@ void RunUdpReceiverStats(const Options& options)
         std::chrono::milliseconds(options.previewMaxLateMs),
     };
     AudioPlayoutBuffer audioPlayout{std::chrono::milliseconds(options.audioPlaybackLatencyMs)};
+    AvSyncDiagnostics avSync;
     std::unique_ptr<screenshare::WasapiRenderer> audioRenderer;
     std::optional<screenshare::AudioPlaybackFormat> activeAudioPlaybackFormat;
     std::string audioPlaybackStatus = options.audioPlayback ? "waiting" : "disabled";
@@ -2722,6 +2842,7 @@ void RunUdpReceiverStats(const Options& options)
 
     auto drainCompletedAudioPackets = [&]() {
         while (auto audioPacket = receiver.PopAudioPacket()) {
+            avSync.ObserveAudioPacket(*audioPacket);
             if (options.audioPlayback) {
                 ensureAudioRenderer(*audioPacket);
                 audioPlayout.Enqueue(std::move(*audioPacket));
@@ -2884,6 +3005,7 @@ void RunUdpReceiverStats(const Options& options)
             receiveTimeout = std::min(receiveTimeout, std::chrono::milliseconds(5));
         }
         if (auto frame = receiver.ReceiveFrame(receiveTimeout)) {
+            avSync.ObserveVideoFrame(*frame);
             latestFrameId = frame->frameId;
             latestFrameBytes = frame->bytes.size();
             latestFragmentCount = frame->fragmentCount;
@@ -2919,6 +3041,7 @@ void RunUdpReceiverStats(const Options& options)
             const uint64_t previewOverflowDrops = previewWindow ? previewPlayout.overflowDrops() : 0;
             const screenshare::AudioPlaybackStats audioRendererStats =
                 audioRenderer ? audioRenderer->stats() : screenshare::AudioPlaybackStats{};
+            const AvSyncSnapshot avSyncNow = avSync.snapshot();
             const ReceiverHealthSnapshot health{
                 stats.framesCompleted,
                 completedFps,
@@ -2948,7 +3071,7 @@ void RunUdpReceiverStats(const Options& options)
             };
 
             if (previewWindow) {
-                previewWindow->SetStatusText(FormatReceiverHealthTitle(health));
+                previewWindow->SetStatusText(FormatReceiverHealthTitle(health, avSyncNow));
             }
             receiver.SendFeedback(BuildReceiverFeedbackSnapshot(health, feedbackSequence++));
 
@@ -2994,6 +3117,15 @@ void RunUdpReceiverStats(const Options& options)
                 << " audio_playback_backpressure=" << (options.audioPlayback ? audioPlayout.renderBackpressure() : 0)
                 << " audio_render_buffer_full=" << audioRendererStats.bufferFullEvents
                 << " audio_render_padding=" << audioRendererStats.lastPaddingFrames
+                << " av_sync=" << (avSyncNow.ready ? "measuring" : "waiting")
+                << " av_audio_ahead_ms=" << avSyncNow.audioAheadMs
+                << " av_audio_elapsed_ms=" << avSyncNow.audioElapsedMs
+                << " av_video_elapsed_ms=" << avSyncNow.videoElapsedMs
+                << " av_video_frames=" << avSyncNow.videoFrames
+                << " av_audio_packets=" << avSyncNow.audioPackets
+                << " av_ignored_audio_packets=" << avSyncNow.ignoredAudioPackets
+                << " av_latest_video_timestamp=" << avSyncNow.latestVideoTimestamp100ns
+                << " av_latest_audio_qpc=" << avSyncNow.latestAudioQpc100ns
                 << " invalid_datagrams=" << stats.invalidDatagrams
                 << " duplicate_fragments=" << stats.duplicateFragments
                 << " completed_frames=" << stats.framesCompleted
@@ -3069,6 +3201,7 @@ void RunUdpReceiverStats(const Options& options)
     const double totalElapsed = std::chrono::duration<double>(Clock::now() - startedAt).count();
     const uint64_t finalPreviewLateDrops = previewWindow ? previewPlayout.lateDrops() : 0;
     const uint64_t finalPreviewOverflowDrops = previewWindow ? previewPlayout.overflowDrops() : 0;
+    const AvSyncSnapshot finalAvSync = avSync.snapshot();
     const ReceiverHealthSnapshot finalHealth{
         stats.framesCompleted,
         static_cast<double>(stats.framesCompleted) / totalElapsed,
@@ -3097,7 +3230,7 @@ void RunUdpReceiverStats(const Options& options)
         finalPreviewOverflowDrops - lastPreviewOverflowDrops,
     };
     if (previewWindow) {
-        previewWindow->SetStatusText(FormatReceiverHealthTitle(finalHealth));
+        previewWindow->SetStatusText(FormatReceiverHealthTitle(finalHealth, finalAvSync));
     }
     receiver.SendFeedback(BuildReceiverFeedbackSnapshot(finalHealth, feedbackSequence++));
     stats = receiver.stats();
@@ -3145,6 +3278,15 @@ void RunUdpReceiverStats(const Options& options)
         << ", audio playback missing packets: " << (options.audioPlayback ? audioPlayout.missingPacketsSkipped() : 0)
         << ", audio playback backpressure: " << (options.audioPlayback ? audioPlayout.renderBackpressure() : 0)
         << ", audio render buffer full events: " << finalAudioRendererStats.bufferFullEvents
+        << ", A/V sync: " << (finalAvSync.ready ? "measuring" : "waiting")
+        << ", A/V audio ahead ms: " << finalAvSync.audioAheadMs
+        << ", A/V audio elapsed ms: " << finalAvSync.audioElapsedMs
+        << ", A/V video elapsed ms: " << finalAvSync.videoElapsedMs
+        << ", A/V video frames: " << finalAvSync.videoFrames
+        << ", A/V audio packets: " << finalAvSync.audioPackets
+        << ", A/V ignored audio packets: " << finalAvSync.ignoredAudioPackets
+        << ", A/V latest video timestamp: " << finalAvSync.latestVideoTimestamp100ns
+        << ", A/V latest audio qpc: " << finalAvSync.latestAudioQpc100ns
         << ", invalid datagrams: " << stats.invalidDatagrams
         << ", duplicate fragments: " << stats.duplicateFragments
         << ", completed frames: " << stats.framesCompleted

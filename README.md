@@ -338,6 +338,10 @@ discontinuity/timestamp counters, and the latest audio format. Add `--audio-play
 received audio through the default Windows output endpoint with a packet-id-ordered jitter buffer.
 Receiver stats report `audio_playback`, queued playback packets and milliseconds, rendered
 packet/frame counts, playback drops/skips, render backpressure, and the latest audio QPC timestamp.
+When both video and audio are present, receiver stats also report `av_sync`, `av_audio_ahead_ms`,
+`av_audio_elapsed_ms`, and `av_video_elapsed_ms`. The preview title includes a compact `av +/-Nms`
+field. This is currently diagnostic-only: it measures relative drift between the received video
+timestamp timeline and the WASAPI audio QPC timeline before the app applies any A/V sync correction.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -362,6 +366,7 @@ Windows Graphics Capture
  -> raw WASAPI audio UDP transport diagnostics
  -> opt-in receiver WASAPI audio playback with a jitter buffer
  -> combined audio+video UDP streaming with A/V diagnostics
+ -> receiver A/V sync drift diagnostics
  -> future session setup and renderer optimizations
 ```
 An app to share your screen with others
