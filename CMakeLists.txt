@@ -4,6 +4,7 @@ project(ScreenShareNative LANGUAGES CXX)
 
 add_executable(ScreenShare
     src/app/main.cpp
+    src/audio/WasapiCapture.cpp
     src/capture/DesktopCapturer.cpp
     src/codec/H264Bitstream.cpp
     src/codec/H264FileEncoder.cpp
@@ -49,11 +50,16 @@ target_link_libraries(ScreenShare PRIVATE
     d3dcompiler
     dxgi
     dxguid
+    ksuser
     mf
     mfplat
     mfreadwrite
     mfuuid
+    mmdevapi
+    ole32
+    propsys
     user32
+    uuid
     windowsapp
     ws2_32
 )

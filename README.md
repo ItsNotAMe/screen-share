@@ -289,6 +289,14 @@ reporting interval, while the numeric drop/resync counters remain cumulative for
 sender-side adaptation deltas.
 When `--seconds` is omitted the preview runs until the window closes.
 
+Audio groundwork is available as a standalone WASAPI diagnostic mode before audio is mixed into the
+UDP stream. Use `--list-audio-devices` to list active output and microphone endpoints. Use
+`--audio-capture system --seconds 5` to capture the default output device through WASAPI loopback, or
+`--audio-capture microphone --seconds 5` to capture the default microphone endpoint. Add
+`--audio-device-id ID` with an id from the device list to select a specific endpoint. The diagnostic
+prints the mix format, buffer size, packet/frame/byte counts, silence/discontinuity counters, and
+peak/RMS levels; it does not save or transmit audio yet.
+
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
 desktop can show near-zero `desktop_update_fps` while `output_fps` stays near the requested FPS.
@@ -308,6 +316,7 @@ Windows Graphics Capture
  -> UDP sender/receiver transport diagnostics with receiver feedback and opt-in live bitrate adaptation
  -> Media Foundation H.264 decode validation with keyframe-aware recovery
  -> paced native Direct3D receiver preview with GPU NV12 conversion
- -> future policy tuning, resolution scaling, and renderer optimizations
+ -> standalone WASAPI audio capture diagnostics
+ -> future audio transport, session setup, and renderer optimizations
 ```
 An app to share your screen with others
