@@ -68,6 +68,9 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     if (config.maxPendingAudioPackets == 0) {
         throw std::invalid_argument("UDP max pending audio packets must be non-zero");
     }
+    if (config.maxCompletedAudioPackets == 0) {
+        throw std::invalid_argument("UDP max completed audio packets must be non-zero");
+    }
     if (config.maxAudioPacketBytes == 0) {
         throw std::invalid_argument("UDP max audio packet bytes must be non-zero");
     }
@@ -112,6 +115,7 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
     delayedDatagrams_.clear();
+    completedAudioPackets_.clear();
     pendingFrames_.clear();
     pendingAudioPackets_.clear();
     stats_ = {};
@@ -129,6 +133,7 @@ void UdpReceiver::Close()
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
     delayedDatagrams_.clear();
+    completedAudioPackets_.clear();
     pendingFrames_.clear();
     pendingAudioPackets_.clear();
 }
@@ -171,6 +176,17 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveFrame(std::chrono::millisec
 
         DropExpiredFrames(Clock::now());
     }
+}
+
+std::optional<UdpCompletedAudioPacket> UdpReceiver::PopAudioPacket()
+{
+    if (completedAudioPackets_.empty()) {
+        return std::nullopt;
+    }
+
+    auto packet = std::move(completedAudioPackets_.front());
+    completedAudioPackets_.pop_front();
+    return packet;
 }
 
 bool UdpReceiver::isOpen() const noexcept
@@ -477,6 +493,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         pending.packetBytes = packetBytes;
         pending.flags = flags;
         pending.fragmentCount = fragmentCount;
+        pending.bytes.assign(packetBytes, std::byte{});
         pending.fragmentReceived.assign(fragmentCount, 0);
     } else if (pending.devicePosition != devicePosition ||
                pending.qpcPosition != qpcPosition ||
@@ -515,6 +532,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     ++stats_.audioDatagramsAccepted;
     stats_.audioPayloadBytesReceived += payloadBytes;
 
+    std::memcpy(pending.bytes.data() + fragmentOffset, datagram + headerBytes, payloadBytes);
     pending.fragmentReceived[fragmentIndex] = 1;
     pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
     ++pending.receivedFragments;
@@ -556,7 +574,24 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     stats_.audioBlockAlign = pending.blockAlign;
     stats_.audioSampleFormat = pending.sampleFormat;
 
+    UdpCompletedAudioPacket completed;
+    completed.packetId = pending.packetId;
+    completed.devicePosition = pending.devicePosition;
+    completed.qpcPosition = pending.qpcPosition;
+    completed.sampleRate = pending.sampleRate;
+    completed.channels = pending.channels;
+    completed.bitsPerSample = pending.bitsPerSample;
+    completed.blockAlign = pending.blockAlign;
+    completed.sampleFormat = pending.sampleFormat;
+    completed.audioFrames = pending.audioFrames;
+    completed.flags = pending.flags;
+    completed.fragmentCount = pending.fragmentCount;
+    completed.bytes = std::move(pending.bytes);
+
     pendingAudioPackets_.erase(it);
+    completedAudioPackets_.push_back(std::move(completed));
+    ++stats_.audioPacketsQueued;
+    EnforceCompletedAudioPacketLimit();
 }
 
 void UdpReceiver::QueueDelayedDatagram(const std::byte* datagram, int datagramBytes, Clock::time_point releaseAt)
@@ -658,6 +693,14 @@ void UdpReceiver::EnforcePendingAudioPacketLimit()
 
         pendingAudioPackets_.erase(oldest);
         ++stats_.audioIncompletePacketsDropped;
+    }
+}
+
+void UdpReceiver::EnforceCompletedAudioPacketLimit()
+{
+    while (completedAudioPackets_.size() > config_.maxCompletedAudioPackets) {
+        completedAudioPackets_.pop_front();
+        ++stats_.audioQueuedPacketsDropped;
     }
 }
 
