@@ -136,6 +136,12 @@ UDP sending is paced by default using the selected stream bitrate, which spreads
 fragments over time instead of dumping each frame as one burst. Add `--no-udp-pacing` when you want
 the older raw burst behavior for transport diagnostics.
 
+The paced sender also keeps the live UDP queue from growing without bound. By default, queued
+datagrams are capped to about 500 ms of future send time; if the network or selected bitrate cannot
+keep up, the sender drops older queued media and sends newer packets instead of letting viewers fall
+seconds behind. Use `--udp-max-queue-ms MS` to tune this live buffer, or `0` to disable the queue-time
+cap for diagnostics.
+
 Add `--adapt-bitrate` to let receiver feedback apply conservative live bitrate changes to the
 active stream encoder and UDP pacing queue. The sender reduces quickly on loss/recovery signals and
 increases more slowly after repeated clean feedback, capped at the original target bitrate.
@@ -303,8 +309,9 @@ and can be adjusted with `--keyframe-interval S`.
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. A background sender thread paces queued datagrams against the encoder bitrate by
 default, while the capture and encoder loop continues running at the requested FPS. Sender stats
-report `udp_queued`, `udp_pending`, `udp_peak_pending`, and `udp_dropped_frames` for that pacing
-queue. The sender also listens on the same UDP socket for receiver feedback packets and reports
+report `udp_queued`, `udp_pending`, `udp_peak_pending`, `udp_queue_ms`, `udp_peak_queue_ms`, and
+`udp_dropped_frames` for that pacing queue. The sender also listens on the same UDP socket for
+receiver feedback packets and reports
 `udp_feedback_health`, `udp_feedback_completed_frames`, `udp_feedback_resyncs`, and
 `udp_feedback_skipped_packets` when a receiver is present. Sender stats also include adaptive
 bitrate advice through `bitrate_advice_mbps`, `bitrate_advice_action`, and

@@ -55,6 +55,7 @@ constexpr int DefaultPreviewLatencyMs = 150;
 constexpr int DefaultAvSyncPreviewLatencyMs = 100;
 constexpr int DefaultPreviewMaxLateMs = 500;
 constexpr int DefaultAudioPlaybackLatencyMs = 120;
+constexpr int DefaultUdpMaxQueueMs = 500;
 constexpr int MaxAvSyncCorrectionBiasMs = 250;
 
 struct Options {
@@ -78,6 +79,8 @@ struct Options {
     std::string udpSendTarget;
     bool udpPacing = true;
     bool udpPacingOptionProvided = false;
+    int udpMaxQueueMs = DefaultUdpMaxQueueMs;
+    bool udpMaxQueueMsProvided = false;
     bool adaptBitrate = false;
     uint32_t adaptMinBitrate = 0;
     bool adaptMinBitrateProvided = false;
@@ -138,7 +141,8 @@ void PrintHelp()
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
-        << "              [--udp-send HOST:PORT] [--no-udp-pacing] [--adapt-bitrate]\n"
+        << "              [--udp-send HOST:PORT] [--no-udp-pacing] [--udp-max-queue-ms MS]\n"
+        << "              [--adapt-bitrate]\n"
         << "              [--audio-capture system|microphone] [--audio-device-id ID]\n"
         << "              [--audio-codec raw|opus]\n"
         << "              [--adapt-min-bitrate-mbps Mbps] [--adapt-reduce-cooldown S]\n"
@@ -1723,6 +1727,9 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--no-udp-pacing") {
             options.udpPacing = false;
             options.udpPacingOptionProvided = true;
+        } else if (arg == "--udp-max-queue-ms") {
+            options.udpMaxQueueMs = ParseInt(requireValue("--udp-max-queue-ms"), "--udp-max-queue-ms");
+            options.udpMaxQueueMsProvided = true;
         } else if (arg == "--adapt-bitrate") {
             options.adaptBitrate = true;
         } else if (arg == "--adapt-min-bitrate-mbps") {
@@ -1875,6 +1882,12 @@ Options ParseOptions(int argc, char** argv)
     if (options.udpPacingOptionProvided && options.udpSendTarget.empty()) {
         throw std::invalid_argument("--no-udp-pacing requires --udp-send");
     }
+    if (options.udpMaxQueueMsProvided && options.udpSendTarget.empty()) {
+        throw std::invalid_argument("--udp-max-queue-ms requires --udp-send");
+    }
+    if (options.udpMaxQueueMs < 0 || options.udpMaxQueueMs > 5000) {
+        throw std::invalid_argument("--udp-max-queue-ms must be between 0 and 5000");
+    }
     if ((options.adaptResolution || options.adaptResolutionMinScaleProvided || options.adaptResolutionCooldownProvided) &&
         options.udpSendTarget.empty()) {
         throw std::invalid_argument("--adapt-resolution, --adapt-resolution-min-scale, and --adapt-resolution-cooldown require --udp-send");
@@ -1926,10 +1939,11 @@ Options ParseOptions(int argc, char** argv)
          options.audioDeviceIdProvided || options.audioCodecProvided || !options.audioSendTarget.empty() ||
          !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.udpPacingOptionProvided || options.udpMaxQueueMsProvided ||
+         options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --audio-send, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --audio-send, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --udp-max-queue-ms, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || options.listAudioDevices || options.audioCapture || options.audioDeviceIdProvided ||
@@ -2351,6 +2365,7 @@ void RunCaptureStats(const Options& options)
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
         std::cout << ", UDP pacing " << (options.udpPacing ? "enabled" : "disabled");
+        std::cout << ", UDP live queue cap " << options.udpMaxQueueMs << "ms";
         std::cout << ", adaptive bitrate " << (options.adaptBitrate ? "enabled" : "advice-only");
         if (options.adaptMinBitrateProvided) {
             std::cout << ", adaptive minimum " << Mbps(options.adaptMinBitrate) << " Mbps";
@@ -2787,6 +2802,7 @@ void RunCaptureStats(const Options& options)
                             auto udpConfig = screenshare::ParseUdpSenderTarget(options.udpSendTarget);
                             udpConfig.pacingEnabled = options.udpPacing;
                             udpConfig.pacingBitrate = streamBitrate;
+                            udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
                             if (options.audioCapture) {
                                 udpConfig.maxQueuedDatagrams = 16'384;
                             }
@@ -2795,6 +2811,7 @@ void RunCaptureStats(const Options& options)
                             std::cout
                                 << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
                                 << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
+                                << " max_queue_ms=" << udpConfig.maxQueueDelay.count()
                                 << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
                                 << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
                                 << " adapt_reduce_cooldown_s=" << options.adaptReduceCooldownSeconds
@@ -2913,6 +2930,8 @@ void RunCaptureStats(const Options& options)
                 << " udp_queued=" << udpStatsNow.datagramsQueued
                 << " udp_pending=" << udpStatsNow.pendingDatagrams
                 << " udp_peak_pending=" << udpStatsNow.peakPendingDatagrams
+                << " udp_queue_ms=" << udpStatsNow.pendingQueueDelayMs
+                << " udp_peak_queue_ms=" << udpStatsNow.peakQueueDelayMs
                 << " udp_dropped_frames=" << udpStatsNow.framesDropped
                 << " udp_wire_bytes=" << udpStatsNow.wireBytesSent
                 << " audio_capture=" << (options.audioCapture ? (audioCaptureStatsNow.started ? "running" : "starting") : "disabled")
@@ -3020,6 +3039,8 @@ void RunCaptureStats(const Options& options)
         << ", UDP datagrams: " << udpStats.datagramsSent
         << ", UDP pending datagrams: " << udpStats.pendingDatagrams
         << ", UDP peak pending datagrams: " << udpStats.peakPendingDatagrams
+        << ", UDP queue ms: " << udpStats.pendingQueueDelayMs
+        << ", UDP peak queue ms: " << udpStats.peakQueueDelayMs
         << ", UDP dropped frames: " << udpStats.framesDropped
         << ", UDP dropped datagrams: " << udpStats.datagramsDropped
         << ", UDP wire bytes: " << udpStats.wireBytesSent
