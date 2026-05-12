@@ -229,10 +229,15 @@ void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
     if (packet.sampleFormat == udp_protocol::AudioSampleFormat::Unknown) {
         throw std::invalid_argument("Audio packet sample format is unsupported");
     }
+    if (packet.codec != udp_protocol::AudioCodec::Raw &&
+        packet.codec != udp_protocol::AudioCodec::Opus) {
+        throw std::invalid_argument("Audio packet codec is unsupported");
+    }
     if (packet.bytes.size() > std::numeric_limits<uint32_t>::max()) {
         throw std::runtime_error("Audio packet is too large for UDP sender");
     }
-    if (static_cast<uint64_t>(packet.audioFrames) * static_cast<uint64_t>(packet.blockAlign) != packet.bytes.size()) {
+    if (packet.codec == udp_protocol::AudioCodec::Raw &&
+        static_cast<uint64_t>(packet.audioFrames) * static_cast<uint64_t>(packet.blockAlign) != packet.bytes.size()) {
         throw std::invalid_argument("Audio packet byte count does not match frame count and block alignment");
     }
 
@@ -439,6 +444,7 @@ std::vector<std::byte> UdpSender::BuildAudioDatagram(
     header.bitsPerSample = udp_protocol::ToNetwork16(packet.bitsPerSample);
     header.blockAlign = udp_protocol::ToNetwork16(packet.blockAlign);
     header.sampleFormat = udp_protocol::ToNetwork16(static_cast<uint16_t>(packet.sampleFormat));
+    header.codec = udp_protocol::ToNetwork16(static_cast<uint16_t>(packet.codec));
     header.audioFrames = udp_protocol::ToNetwork32(packet.audioFrames);
     header.packetBytes = udp_protocol::ToNetwork32(static_cast<uint32_t>(packet.bytes.size()));
     header.fragmentOffset = udp_protocol::ToNetwork32(fragmentOffset);

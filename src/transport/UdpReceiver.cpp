@@ -433,6 +433,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     const uint16_t bitsPerSample = udp_protocol::FromNetwork16(header.bitsPerSample);
     const uint16_t blockAlign = udp_protocol::FromNetwork16(header.blockAlign);
     const auto sampleFormat = static_cast<udp_protocol::AudioSampleFormat>(udp_protocol::FromNetwork16(header.sampleFormat));
+    const auto codec = static_cast<udp_protocol::AudioCodec>(udp_protocol::FromNetwork16(header.codec));
     const uint32_t audioFrames = udp_protocol::FromNetwork32(header.audioFrames);
     const uint32_t packetBytes = udp_protocol::FromNetwork32(header.packetBytes);
     const uint32_t fragmentOffset = udp_protocol::FromNetwork32(header.fragmentOffset);
@@ -446,6 +447,9 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         sampleFormat == udp_protocol::AudioSampleFormat::Pcm16 ||
         sampleFormat == udp_protocol::AudioSampleFormat::Pcm24 ||
         sampleFormat == udp_protocol::AudioSampleFormat::Pcm32;
+    const bool knownCodec =
+        codec == udp_protocol::AudioCodec::Raw ||
+        codec == udp_protocol::AudioCodec::Opus;
     const uint32_t allowedFlags =
         udp_protocol::AudioPacketFlagSilent |
         udp_protocol::AudioPacketFlagDataDiscontinuity |
@@ -456,6 +460,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         headerBytes != sizeof(udp_protocol::AudioPacketHeader) ||
         datagramBytes < static_cast<int>(headerBytes) ||
         !knownSampleFormat ||
+        !knownCodec ||
         (flags & ~allowedFlags) != 0) {
         ++stats_.invalidDatagrams;
         return;
@@ -469,7 +474,6 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         audioFrames == 0 ||
         packetBytes == 0 ||
         packetBytes > config_.maxAudioPacketBytes ||
-        static_cast<uint64_t>(audioFrames) * static_cast<uint64_t>(blockAlign) != packetBytes ||
         fragmentCount == 0 ||
         fragmentCount > udp_protocol::MaxFragmentsPerFrame ||
         fragmentIndex >= fragmentCount ||
@@ -477,6 +481,20 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         payloadBytes != actualPayloadBytes ||
         fragmentOffset > packetBytes ||
         payloadBytes > packetBytes - fragmentOffset) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+    if (codec == udp_protocol::AudioCodec::Raw &&
+        static_cast<uint64_t>(audioFrames) * static_cast<uint64_t>(blockAlign) != packetBytes) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+    if (codec == udp_protocol::AudioCodec::Opus &&
+        (sampleRate != 48'000 ||
+         channels != 2 ||
+         bitsPerSample != 32 ||
+         blockAlign != 8 ||
+         sampleFormat != udp_protocol::AudioSampleFormat::Float32)) {
         ++stats_.invalidDatagrams;
         return;
     }
@@ -493,6 +511,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         pending.bitsPerSample = bitsPerSample;
         pending.blockAlign = blockAlign;
         pending.sampleFormat = sampleFormat;
+        pending.codec = codec;
         pending.audioFrames = audioFrames;
         pending.packetBytes = packetBytes;
         pending.flags = flags;
@@ -506,6 +525,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
                pending.bitsPerSample != bitsPerSample ||
                pending.blockAlign != blockAlign ||
                pending.sampleFormat != sampleFormat ||
+               pending.codec != codec ||
                pending.audioFrames != audioFrames ||
                pending.packetBytes != packetBytes ||
                pending.flags != flags ||
@@ -553,7 +573,8 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
          stats_.audioChannels != pending.channels ||
          stats_.audioBitsPerSample != pending.bitsPerSample ||
          stats_.audioBlockAlign != pending.blockAlign ||
-         stats_.audioSampleFormat != pending.sampleFormat)) {
+         stats_.audioSampleFormat != pending.sampleFormat ||
+         stats_.audioCodec != pending.codec)) {
         ++stats_.audioFormatChanges;
     }
 
@@ -577,6 +598,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     stats_.audioBitsPerSample = pending.bitsPerSample;
     stats_.audioBlockAlign = pending.blockAlign;
     stats_.audioSampleFormat = pending.sampleFormat;
+    stats_.audioCodec = pending.codec;
 
     UdpCompletedAudioPacket completed;
     completed.packetId = pending.packetId;
@@ -587,6 +609,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     completed.bitsPerSample = pending.bitsPerSample;
     completed.blockAlign = pending.blockAlign;
     completed.sampleFormat = pending.sampleFormat;
+    completed.codec = pending.codec;
     completed.audioFrames = pending.audioFrames;
     completed.flags = pending.flags;
     completed.fragmentCount = pending.fragmentCount;
