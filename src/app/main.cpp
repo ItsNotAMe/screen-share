@@ -570,7 +570,9 @@ public:
             }
             nextPacketId_ = packets_.begin()->first;
             started_ = true;
+            TrimLatencyBacklog();
         }
+        TrimLatencyBacklog();
 
         while (!packets_.empty() && nextPacketId_) {
             auto next = packets_.find(*nextPacketId_);
@@ -612,6 +614,7 @@ public:
     [[nodiscard]] uint64_t duplicateDrops() const noexcept { return duplicateDrops_; }
     [[nodiscard]] uint64_t overflowDrops() const noexcept { return overflowDrops_; }
     [[nodiscard]] uint64_t oversizedDrops() const noexcept { return oversizedDrops_; }
+    [[nodiscard]] uint64_t latencyDrops() const noexcept { return latencyDrops_; }
     [[nodiscard]] uint64_t missingPacketsSkipped() const noexcept { return missingPacketsSkipped_; }
     [[nodiscard]] uint64_t renderBackpressure() const noexcept { return renderBackpressure_; }
     [[nodiscard]] bool started() const noexcept { return started_; }
@@ -642,17 +645,45 @@ public:
     }
 
 private:
+    void TrimLatencyBacklog()
+    {
+        if (!started_ || packets_.empty()) {
+            return;
+        }
+
+        const auto trimThreshold = targetLatency_ + maxQueueOverTarget_;
+        if (QueuedDuration() <= trimThreshold) {
+            return;
+        }
+
+        while (!packets_.empty() && QueuedDuration() > targetLatency_) {
+            auto oldest = packets_.begin();
+            if (nextPacketId_) {
+                if (oldest->first > *nextPacketId_) {
+                    missingPacketsSkipped_ += oldest->first - *nextPacketId_;
+                }
+                if (oldest->first >= *nextPacketId_) {
+                    nextPacketId_ = oldest->first + 1;
+                }
+            }
+            packets_.erase(oldest);
+            ++latencyDrops_;
+        }
+    }
+
     std::map<uint64_t, screenshare::UdpCompletedAudioPacket> packets_;
     std::optional<uint64_t> nextPacketId_;
     bool started_ = false;
     size_t maxQueuedPackets_ = 512;
     std::chrono::milliseconds targetLatency_;
+    std::chrono::milliseconds maxQueueOverTarget_{250};
     uint64_t packetsRendered_ = 0;
     uint64_t framesRendered_ = 0;
     uint64_t lateDrops_ = 0;
     uint64_t duplicateDrops_ = 0;
     uint64_t overflowDrops_ = 0;
     uint64_t oversizedDrops_ = 0;
+    uint64_t latencyDrops_ = 0;
     uint64_t missingPacketsSkipped_ = 0;
     uint64_t renderBackpressure_ = 0;
 };
@@ -3320,6 +3351,7 @@ void RunUdpReceiverStats(const Options& options)
                 << " audio_playback_drops=" << (options.audioPlayback ?
                     audioPlayout.lateDrops() + audioPlayout.duplicateDrops() + audioPlayout.overflowDrops() + audioPlayout.oversizedDrops() :
                     0)
+                << " audio_playback_latency_drops=" << (options.audioPlayback ? audioPlayout.latencyDrops() : 0)
                 << " audio_playback_missing=" << (options.audioPlayback ? audioPlayout.missingPacketsSkipped() : 0)
                 << " audio_playback_backpressure=" << (options.audioPlayback ? audioPlayout.renderBackpressure() : 0)
                 << " audio_render_buffer_full=" << audioRendererStats.bufferFullEvents
@@ -3490,6 +3522,7 @@ void RunUdpReceiverStats(const Options& options)
         << ", audio playback drops: " << (options.audioPlayback ?
             audioPlayout.lateDrops() + audioPlayout.duplicateDrops() + audioPlayout.overflowDrops() + audioPlayout.oversizedDrops() :
             0)
+        << ", audio playback latency drops: " << (options.audioPlayback ? audioPlayout.latencyDrops() : 0)
         << ", audio playback missing packets: " << (options.audioPlayback ? audioPlayout.missingPacketsSkipped() : 0)
         << ", audio playback backpressure: " << (options.audioPlayback ? audioPlayout.renderBackpressure() : 0)
         << ", audio render buffer full events: " << finalAudioRendererStats.bufferFullEvents
