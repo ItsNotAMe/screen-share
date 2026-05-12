@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.24)
 
 project(ScreenShareNative LANGUAGES CXX)
 
+option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
+option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
+
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(OPUS QUIET IMPORTED_TARGET opus)
@@ -75,6 +78,10 @@ if(MSVC)
     target_compile_options(ScreenShare PRIVATE /W4 /permissive- /EHsc)
 endif()
 
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
+    target_link_options(ScreenShare PRIVATE -static)
+endif()
+
 target_link_libraries(ScreenShare PRIVATE
     ${SCREENSHARE_OPUS_TARGET}
     d3d11
@@ -94,3 +101,104 @@ target_link_libraries(ScreenShare PRIVATE
     windowsapp
     ws2_32
 )
+
+if(WIN32 AND SCREENSHARE_COPY_RUNTIME_DLLS AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(SCREENSHARE_RUNTIME_DLL_NAMES
+        libopus-0.dll
+    )
+    set(SCREENSHARE_STATIC_RUNTIME_DLL_NAMES
+        libgcc_s_seh-1.dll
+        libstdc++-6.dll
+        libwinpthread-1.dll
+    )
+    if(NOT SCREENSHARE_STATIC_MINGW_RUNTIME)
+        list(APPEND SCREENSHARE_RUNTIME_DLL_NAMES ${SCREENSHARE_STATIC_RUNTIME_DLL_NAMES})
+    endif()
+
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(SCREENSHARE_WINDOWS_REDIST_ARCH x64)
+    else()
+        set(SCREENSHARE_WINDOWS_REDIST_ARCH x86)
+    endif()
+
+    get_filename_component(SCREENSHARE_COMPILER_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(SCREENSHARE_RUNTIME_DLL_DIRS "${SCREENSHARE_COMPILER_BIN_DIR}")
+
+    if(DEFINED OPUS_PREFIX AND OPUS_PREFIX)
+        list(APPEND SCREENSHARE_RUNTIME_DLL_DIRS "${OPUS_PREFIX}/bin")
+    endif()
+    if(DEFINED SCREENSHARE_OPUS_LIBRARY AND SCREENSHARE_OPUS_LIBRARY)
+        get_filename_component(SCREENSHARE_OPUS_LIB_DIR "${SCREENSHARE_OPUS_LIBRARY}" DIRECTORY)
+        get_filename_component(SCREENSHARE_OPUS_PREFIX "${SCREENSHARE_OPUS_LIB_DIR}" DIRECTORY)
+        list(APPEND SCREENSHARE_RUNTIME_DLL_DIRS "${SCREENSHARE_OPUS_PREFIX}/bin")
+    endif()
+    list(REMOVE_DUPLICATES SCREENSHARE_RUNTIME_DLL_DIRS)
+
+    foreach(SCREENSHARE_RUNTIME_DLL_NAME IN LISTS SCREENSHARE_RUNTIME_DLL_NAMES)
+        string(MAKE_C_IDENTIFIER "${SCREENSHARE_RUNTIME_DLL_NAME}" SCREENSHARE_RUNTIME_DLL_ID)
+        set(SCREENSHARE_RUNTIME_DLL_VAR "SCREENSHARE_RUNTIME_DLL_${SCREENSHARE_RUNTIME_DLL_ID}")
+        find_file(${SCREENSHARE_RUNTIME_DLL_VAR}
+            NAMES "${SCREENSHARE_RUNTIME_DLL_NAME}"
+            PATHS ${SCREENSHARE_RUNTIME_DLL_DIRS}
+            NO_DEFAULT_PATH
+        )
+        if(${SCREENSHARE_RUNTIME_DLL_VAR})
+            list(APPEND SCREENSHARE_RUNTIME_DLLS "${${SCREENSHARE_RUNTIME_DLL_VAR}}")
+        else()
+            message(WARNING "Could not find ${SCREENSHARE_RUNTIME_DLL_NAME}; portable builds may require it next to ScreenShare.exe")
+        endif()
+    endforeach()
+
+    set(SCREENSHARE_WINDOWS_KITS_REDIST_ROOT "C:/Program Files (x86)/Windows Kits/10/Redist")
+    file(GLOB SCREENSHARE_UCRT_REDIST_DIRS LIST_DIRECTORIES true
+        "${SCREENSHARE_WINDOWS_KITS_REDIST_ROOT}/*/ucrt/DLLs/${SCREENSHARE_WINDOWS_REDIST_ARCH}"
+        "${SCREENSHARE_WINDOWS_KITS_REDIST_ROOT}/ucrt/DLLs/${SCREENSHARE_WINDOWS_REDIST_ARCH}"
+    )
+    if(SCREENSHARE_UCRT_REDIST_DIRS)
+        list(SORT SCREENSHARE_UCRT_REDIST_DIRS)
+        list(REVERSE SCREENSHARE_UCRT_REDIST_DIRS)
+        list(GET SCREENSHARE_UCRT_REDIST_DIRS 0 SCREENSHARE_UCRT_REDIST_DIR)
+        file(GLOB SCREENSHARE_UCRT_RUNTIME_DLLS
+            "${SCREENSHARE_UCRT_REDIST_DIR}/api-ms-win-crt-*.dll"
+            "${SCREENSHARE_UCRT_REDIST_DIR}/ucrtbase.dll"
+        )
+        list(APPEND SCREENSHARE_RUNTIME_DLLS ${SCREENSHARE_UCRT_RUNTIME_DLLS})
+    else()
+        message(WARNING "Could not find Windows SDK UCRT redist DLLs; older Windows installs may need the Universal C Runtime installed")
+    endif()
+
+    file(GLOB SCREENSHARE_D3D_COMPILER_DLLS
+        "${SCREENSHARE_WINDOWS_KITS_REDIST_ROOT}/D3D/${SCREENSHARE_WINDOWS_REDIST_ARCH}/d3dcompiler_47.dll"
+        "${SCREENSHARE_WINDOWS_KITS_REDIST_ROOT}/*/D3D/${SCREENSHARE_WINDOWS_REDIST_ARCH}/d3dcompiler_47.dll"
+    )
+    if(SCREENSHARE_D3D_COMPILER_DLLS)
+        list(SORT SCREENSHARE_D3D_COMPILER_DLLS)
+        list(REVERSE SCREENSHARE_D3D_COMPILER_DLLS)
+        list(GET SCREENSHARE_D3D_COMPILER_DLLS 0 SCREENSHARE_D3D_COMPILER_DLL)
+        list(APPEND SCREENSHARE_RUNTIME_DLLS "${SCREENSHARE_D3D_COMPILER_DLL}")
+    else()
+        message(WARNING "Could not find d3dcompiler_47.dll in the Windows SDK redist")
+    endif()
+
+    list(REMOVE_DUPLICATES SCREENSHARE_RUNTIME_DLLS)
+
+    if(SCREENSHARE_RUNTIME_DLLS)
+        string(REPLACE ";" "\n" SCREENSHARE_RUNTIME_DLL_REPORT "${SCREENSHARE_RUNTIME_DLLS}")
+        add_custom_command(TARGET ScreenShare POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                $<$<BOOL:${SCREENSHARE_STATIC_MINGW_RUNTIME}>:$<TARGET_FILE_DIR:ScreenShare>/libgcc_s_seh-1.dll>
+                $<$<BOOL:${SCREENSHARE_STATIC_MINGW_RUNTIME}>:$<TARGET_FILE_DIR:ScreenShare>/libstdc++-6.dll>
+                $<$<BOOL:${SCREENSHARE_STATIC_MINGW_RUNTIME}>:$<TARGET_FILE_DIR:ScreenShare>/libwinpthread-1.dll>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${SCREENSHARE_RUNTIME_DLLS}
+                $<TARGET_FILE_DIR:ScreenShare>
+            COMMAND_EXPAND_LISTS
+            COMMENT "Copying runtime DLLs next to ScreenShare.exe"
+            VERBATIM
+        )
+        file(GENERATE
+            OUTPUT "$<TARGET_FILE_DIR:ScreenShare>/ScreenShare-runtime-dependencies.txt"
+            CONTENT "${SCREENSHARE_RUNTIME_DLL_REPORT}\n"
+        )
+    endif()
+endif()
