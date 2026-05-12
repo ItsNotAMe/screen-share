@@ -1,6 +1,7 @@
 #include "codec/H264StreamDecoder.h"
 
 #include <Windows.h>
+#include <codecapi.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <wmcodecdsp.h>
@@ -37,6 +38,42 @@ void SetInputSubtype(IMFTransform* transform, DWORD streamId, REFGUID subtype)
     ThrowIfFailed(inputType->SetGUID(MF_MT_SUBTYPE, subtype), "IMFMediaType::SetGUID(decoder input subtype)");
     ThrowIfFailed(inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(decoder input interlace)");
     ThrowIfFailed(transform->SetInputType(streamId, inputType.Get(), 0), "IMFTransform::SetInputType(decoder)");
+}
+
+bool TrySetCodecApiBool(ICodecAPI* codecApi, const GUID& key, bool setting)
+{
+    if (codecApi == nullptr) {
+        return false;
+    }
+
+    VARIANT value{};
+    value.vt = VT_BOOL;
+    value.boolVal = setting ? VARIANT_TRUE : VARIANT_FALSE;
+    return SUCCEEDED(codecApi->SetValue(&key, &value));
+}
+
+void ConfigureLowLatencyDecoderOptions(IMFTransform* transform)
+{
+    if (transform == nullptr) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IMFAttributes> attributes;
+    if (SUCCEEDED(transform->GetAttributes(&attributes)) && attributes) {
+        static_cast<void>(attributes->SetUINT32(MF_LOW_LATENCY, TRUE));
+    }
+
+    static constexpr GUID codecApiInterfaceId = {
+        0x901db4c7,
+        0x31ce,
+        0x41a2,
+        {0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda},
+    };
+    Microsoft::WRL::ComPtr<ICodecAPI> codecApi;
+    if (SUCCEEDED(transform->QueryInterface(codecApiInterfaceId, reinterpret_cast<void**>(codecApi.GetAddressOf()))) &&
+        codecApi) {
+        TrySetCodecApiBool(codecApi.Get(), CODECAPI_AVLowLatencyMode, true);
+    }
 }
 
 DWORD Nv12BufferBytes(UINT32 width, UINT32 height)
@@ -87,6 +124,7 @@ void H264StreamDecoder::Start()
     ThrowIfFailed(
         CoCreateInstance(H264DecoderClsid, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform_)),
         "CoCreateInstance(CMSH264DecoderMFT)");
+    ConfigureLowLatencyDecoderOptions(transform_.Get());
 
     DWORD inputCount = 0;
     DWORD outputCount = 0;

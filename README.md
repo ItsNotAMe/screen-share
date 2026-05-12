@@ -170,6 +170,13 @@ Listen for UDP H.264 packet fragments and reassemble complete encoded frames:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15
 ```
 
+Add `--log PATH` to any command to save the console output while still showing it in the terminal.
+For example, use this when sending receiver diagnostics:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback --log receiver.log
+```
+
 Stress the receiver with simulated jitter or datagram loss:
 
 ```powershell
@@ -211,16 +218,18 @@ Listen, preview video, and play received audio:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback
 ```
 
-This automatically enables the startup A/V sync correction pass. Disable it only for diagnostics:
+This automatically enables A/V sync correction. Disable it only for diagnostics:
 
 ```powershell
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback --no-av-sync
 ```
 
 Add `--seconds S` to stop preview automatically after a fixed duration. The preview playout buffer
-starts with 150 ms of latency and drops frames that are more than 500 ms late by default. Use
-`--preview-latency-ms MS` to trade latency for jitter tolerance, and `--preview-max-late-ms MS` to
-control how long late frames can stay eligible for presentation before they are dropped.
+starts with 150 ms of latency for video-only preview, or 100 ms when A/V sync is enabled, and drops
+frames that are more than 500 ms late by default. Use `--preview-latency-ms MS` to trade latency for
+jitter tolerance, and `--preview-max-late-ms MS` to control how long late frames can stay eligible for
+presentation before they are dropped. When A/V sync is enabled, the effective audio jitter target is
+kept at least as large as the preview latency so the audio and video playout clocks stay connected.
 
 Capture system audio and send it to the receiver:
 
@@ -369,12 +378,20 @@ audio QPC timestamp. If the render endpoint falls behind, the receiver trims old
 than letting live playback drift seconds behind the preview.
 When both video and audio are present, receiver stats also report `av_sync`, `av_audio_ahead_ms`,
 `av_audio_elapsed_ms`, and `av_video_elapsed_ms`. The preview title includes a compact `av +/-Nms`
-field. These fields remain useful diagnostics for relative drift between the received video
-timestamp timeline and the WASAPI audio QPC timeline.
+field that estimates live playout skew after preview latency, queued audio, and WASAPI render padding.
+The console fields remain useful diagnostics for relative drift between the received video timestamp
+timeline and the WASAPI audio QPC timeline.
 With `--preview --audio-playback`, the receiver waits until both audio and video sender-clock anchors
-are known, then biases either initial audio playback latency or initial preview latency by up to
-250 ms. Receiver stats report `av_sync_correction`, `av_sync_preview_bias_ms`, and
-`av_sync_audio_bias_ms`. Add `--no-av-sync` only when comparing raw receiver timing.
+are known, then aligns the live start point by trimming leading audio packets or preview frames from
+the stream that began earlier. Audio rendering waits until the preview playout clock has started, so
+decoder startup latency cannot let audio begin before video. During playback, the receiver schedules
+audio packets against the same sender-clock preview playout timeline, so audio that belongs to a
+future video timestamp waits before entering the WASAPI render buffer. Add `--av-sync` explicitly to
+also allow the older larger startup-bias correction window for diagnostic comparisons, or `--no-av-sync`
+to compare raw receiver timing. Receiver stats report `av_sync_correction`,
+`av_sync_start_qpc`, `av_sync_playback_start_qpc`, `av_sync_video_start_drops`, `av_sync_audio_start_drops`,
+`av_playout_audio_ahead_ms`, `audio_playback_sync_waits`, `av_sync_preview_bias_ms`, and
+`av_sync_audio_bias_ms`.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
