@@ -364,7 +364,9 @@ audio it reports completed packet/frame/byte counts, pending or dropped incomple
 discontinuity/timestamp counters, the latest audio format, and `audio_codec`. Add `--audio-playback`
 to render received audio through the default Windows output endpoint with a packet-id-ordered jitter buffer.
 Receiver stats report `audio_playback`, queued playback packets and milliseconds, rendered
-packet/frame counts, playback drops/skips, render backpressure, and the latest audio QPC timestamp.
+packet/frame counts, playback drops/skips, latency-trim drops, render backpressure, and the latest
+audio QPC timestamp. If the render endpoint falls behind, the receiver trims old queued audio rather
+than letting live playback drift seconds behind the preview.
 When both video and audio are present, receiver stats also report `av_sync`, `av_audio_ahead_ms`,
 `av_audio_elapsed_ms`, and `av_video_elapsed_ms`. The preview title includes a compact `av +/-Nms`
 field. This is currently diagnostic-only: it measures relative drift between the received video
