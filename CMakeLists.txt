@@ -4,6 +4,7 @@ project(ScreenShareNative LANGUAGES CXX)
 
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
+option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
 
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
@@ -201,4 +202,43 @@ if(WIN32 AND SCREENSHARE_COPY_RUNTIME_DLLS AND CMAKE_CXX_COMPILER_ID STREQUAL "G
             CONTENT "${SCREENSHARE_RUNTIME_DLL_REPORT}\n"
         )
     endif()
+endif()
+
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(SCREENSHARE_PACKAGE_ARCH x64)
+else()
+    set(SCREENSHARE_PACKAGE_ARCH x86)
+endif()
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" SCREENSHARE_PACKAGE_SYSTEM)
+if(CMAKE_BUILD_TYPE)
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" SCREENSHARE_PACKAGE_CONFIG)
+else()
+    set(SCREENSHARE_PACKAGE_CONFIG build)
+endif()
+set(SCREENSHARE_PACKAGE_BASENAME
+    "ScreenShare-${SCREENSHARE_PACKAGE_CONFIG}-${SCREENSHARE_PACKAGE_SYSTEM}-${SCREENSHARE_PACKAGE_ARCH}"
+)
+set(SCREENSHARE_PACKAGE_ARGS
+    -D "INPUT_DIR=$<TARGET_FILE_DIR:ScreenShare>"
+    -D "EXECUTABLE_NAME=$<TARGET_FILE_NAME:ScreenShare>"
+    -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+    -D "STAGING_DIR=${CMAKE_BINARY_DIR}/package/${SCREENSHARE_PACKAGE_BASENAME}"
+    -D "OUTPUT_ZIP=${CMAKE_BINARY_DIR}/${SCREENSHARE_PACKAGE_BASENAME}.zip"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PackagePortable.cmake"
+)
+
+if(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD)
+    add_custom_target(package-portable ALL
+        COMMAND ${CMAKE_COMMAND} ${SCREENSHARE_PACKAGE_ARGS}
+        DEPENDS ScreenShare
+        COMMENT "Creating portable ScreenShare zip package"
+        VERBATIM
+    )
+else()
+    add_custom_target(package-portable
+        COMMAND ${CMAKE_COMMAND} ${SCREENSHARE_PACKAGE_ARGS}
+        DEPENDS ScreenShare
+        COMMENT "Creating portable ScreenShare zip package"
+        VERBATIM
+    )
 endif()
