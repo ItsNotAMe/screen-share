@@ -616,7 +616,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     queuedAsyncInputs_.clear();
     senderQpcBySampleTime_.clear();
     droppedAsyncInputs_ = 0;
-    maxQueuedAsyncInputs_ = std::clamp<size_t>(static_cast<size_t>((config_.fps + 1) / 2), 8, 32);
+    maxQueuedAsyncInputs_ = std::clamp<size_t>(static_cast<size_t>((config_.fps + 5) / 6), 4, 12);
     asyncDrainComplete_ = false;
     frameIndex_ = config_.startFrameIndex;
     frameDuration100ns_ = 10'000'000 / config_.fps;

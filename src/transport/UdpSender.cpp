@@ -67,6 +67,9 @@ void UdpSender::Open(const UdpSenderConfig& config)
     if (config.maxQueuedDatagrams == 0) {
         throw std::invalid_argument("UDP max queued datagrams must be non-zero");
     }
+    if (config.maxQueueDelay < std::chrono::milliseconds(0)) {
+        throw std::invalid_argument("UDP max queue delay must not be negative");
+    }
 
     addrinfo hints{};
     hints.ai_family = AF_INET;
@@ -180,12 +183,18 @@ void UdpSender::SendFrame(const EncodedPacket& packet)
         datagrams.push_back(PendingDatagram{
             BuildDatagram(data + offset, payloadBytes, offset, fragmentIndex, fragmentCount, frameId, packet),
             {},
+            PendingDatagramKind::Video,
+            frameId,
         });
     }
 
     {
         std::lock_guard lock(mutex_);
         CheckWorkerErrorLocked();
+
+        const auto now = Clock::now();
+        static_cast<void>(EnforceLiveQueueDelayLocked(now));
+        DropQueuedMediaForCapacityLocked(datagrams.size(), PendingDatagramKind::Video);
 
         if (queue_.size() + datagrams.size() > config_.maxQueuedDatagrams) {
             ++stats_.framesDropped;
@@ -194,7 +203,6 @@ void UdpSender::SendFrame(const EncodedPacket& packet)
             return;
         }
 
-        const auto now = Clock::now();
         if (!config_.pacingEnabled || config_.pacingBitrate == 0 || nextSendAt_ < now) {
             nextSendAt_ = now;
         }
@@ -268,12 +276,18 @@ void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
         datagrams.push_back(PendingDatagram{
             BuildAudioDatagram(data + offset, payloadBytes, offset, fragmentIndex, fragmentCount, packetId, packet),
             {},
+            PendingDatagramKind::Audio,
+            packetId,
         });
     }
 
     {
         std::lock_guard lock(mutex_);
         CheckWorkerErrorLocked();
+
+        const auto now = Clock::now();
+        static_cast<void>(EnforceLiveQueueDelayLocked(now));
+        DropQueuedMediaForCapacityLocked(datagrams.size(), PendingDatagramKind::Video);
 
         if (queue_.size() + datagrams.size() > config_.maxQueuedDatagrams) {
             ++stats_.audioPacketsDropped;
@@ -282,7 +296,6 @@ void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
             return;
         }
 
-        const auto now = Clock::now();
         if (!config_.pacingEnabled || config_.pacingBitrate == 0 || nextSendAt_ < now) {
             nextSendAt_ = now;
         }
@@ -308,11 +321,25 @@ void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
 
 void UdpSender::SetPacingBitrate(uint32_t bitrate)
 {
-    std::lock_guard lock(mutex_);
-    CheckWorkerErrorLocked();
-    config_.pacingBitrate = bitrate;
-    if (config_.pacingEnabled && nextSendAt_ < Clock::now()) {
-        nextSendAt_ = Clock::now();
+    bool notify = false;
+    {
+        std::lock_guard lock(mutex_);
+        CheckWorkerErrorLocked();
+        const bool bitrateChanged = config_.pacingBitrate != bitrate;
+        config_.pacingBitrate = bitrate;
+        const auto now = Clock::now();
+        if (config_.pacingEnabled && !queue_.empty()) {
+            if (bitrateChanged) {
+                RescheduleQueueLocked(now);
+            }
+            notify = bitrateChanged || EnforceLiveQueueDelayLocked(now);
+        } else if (config_.pacingEnabled && nextSendAt_ < now) {
+            nextSendAt_ = now;
+            UpdatePendingStatsLocked();
+        }
+    }
+    if (notify) {
+        queueChanged_.notify_one();
     }
 }
 
@@ -327,6 +354,13 @@ UdpSenderStats UdpSender::stats() const
     UdpSenderStats snapshot = stats_;
     snapshot.pendingDatagrams =
         static_cast<uint64_t>(queue_.size()) + (datagramInFlight_ ? 1ULL : 0ULL);
+    const auto now = Clock::now();
+    if (config_.pacingEnabled && !queue_.empty() && nextSendAt_ > now) {
+        snapshot.pendingQueueDelayMs = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(nextSendAt_ - now).count());
+    } else {
+        snapshot.pendingQueueDelayMs = 0;
+    }
     return snapshot;
 }
 
@@ -543,6 +577,106 @@ UdpSender::Clock::duration UdpSender::PacingDelayForBytes(uint64_t wireBytes) co
     return std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
 }
 
+bool UdpSender::EnforceLiveQueueDelayLocked(Clock::time_point now)
+{
+    if (!config_.pacingEnabled ||
+        config_.pacingBitrate == 0 ||
+        config_.maxQueueDelay.count() == 0 ||
+        queue_.empty()) {
+        return false;
+    }
+
+    bool dropped = false;
+    while (!queue_.empty() && nextSendAt_ > now && nextSendAt_ - now > config_.maxQueueDelay) {
+        if (!DropOldestQueuedMediaLocked(PendingDatagramKind::Video) &&
+            !DropOldestQueuedMediaLocked(PendingDatagramKind::Audio)) {
+            break;
+        }
+        dropped = true;
+        RescheduleQueueLocked(now);
+    }
+
+    if (dropped) {
+        UpdatePendingStatsLocked();
+    }
+    return dropped;
+}
+
+bool UdpSender::DropOldestQueuedMediaLocked(PendingDatagramKind kind)
+{
+    const auto first = std::find_if(queue_.begin(), queue_.end(), [kind](const PendingDatagram& datagram) {
+        return datagram.kind == kind;
+    });
+    if (first == queue_.end()) {
+        return false;
+    }
+
+    const uint64_t mediaId = first->mediaId;
+    size_t removed = 0;
+    for (auto it = queue_.begin(); it != queue_.end();) {
+        if (it->kind == kind && it->mediaId == mediaId) {
+            it = queue_.erase(it);
+            ++removed;
+        } else {
+            ++it;
+        }
+    }
+
+    if (kind == PendingDatagramKind::Video) {
+        ++stats_.framesDropped;
+    } else {
+        ++stats_.audioPacketsDropped;
+    }
+    stats_.datagramsDropped += removed;
+    return true;
+}
+
+void UdpSender::DropQueuedMediaForCapacityLocked(size_t incomingDatagrams, PendingDatagramKind preferredKind)
+{
+    if (incomingDatagrams > config_.maxQueuedDatagrams) {
+        return;
+    }
+
+    bool dropped = false;
+    while (queue_.size() + incomingDatagrams > config_.maxQueuedDatagrams) {
+        const bool droppedPreferred = DropOldestQueuedMediaLocked(preferredKind);
+        const bool droppedFallback =
+            droppedPreferred ||
+            DropOldestQueuedMediaLocked(
+                preferredKind == PendingDatagramKind::Video ?
+                    PendingDatagramKind::Audio :
+                    PendingDatagramKind::Video);
+        if (!droppedFallback) {
+            break;
+        }
+        dropped = true;
+    }
+
+    if (dropped) {
+        RescheduleQueueLocked(Clock::now());
+    }
+}
+
+void UdpSender::RescheduleQueueLocked(Clock::time_point now)
+{
+    if (!config_.pacingEnabled || config_.pacingBitrate == 0) {
+        for (auto& datagram : queue_) {
+            datagram.sendAt = now;
+        }
+        nextSendAt_ = now;
+        UpdatePendingStatsLocked();
+        return;
+    }
+
+    auto sendAt = now;
+    for (auto& datagram : queue_) {
+        datagram.sendAt = sendAt;
+        sendAt += PacingDelayForBytes(datagram.bytes.size());
+    }
+    nextSendAt_ = sendAt;
+    UpdatePendingStatsLocked();
+}
+
 void UdpSender::CheckWorkerErrorLocked() const
 {
     if (!workerError_.empty()) {
@@ -555,6 +689,14 @@ void UdpSender::UpdatePendingStatsLocked()
     stats_.pendingDatagrams =
         static_cast<uint64_t>(queue_.size()) + (datagramInFlight_ ? 1ULL : 0ULL);
     stats_.peakPendingDatagrams = std::max(stats_.peakPendingDatagrams, stats_.pendingDatagrams);
+    uint64_t queueDelayMs = 0;
+    const auto now = Clock::now();
+    if (config_.pacingEnabled && !queue_.empty() && nextSendAt_ > now) {
+        queueDelayMs = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(nextSendAt_ - now).count());
+    }
+    stats_.pendingQueueDelayMs = queueDelayMs;
+    stats_.peakQueueDelayMs = std::max(stats_.peakQueueDelayMs, queueDelayMs);
 }
 
 UdpSenderConfig ParseUdpSenderTarget(const std::string& target)

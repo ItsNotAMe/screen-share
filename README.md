@@ -136,12 +136,19 @@ UDP sending is paced by default using the selected stream bitrate, which spreads
 fragments over time instead of dumping each frame as one burst. Add `--no-udp-pacing` when you want
 the older raw burst behavior for transport diagnostics.
 
+Sender stats include `udp_queue_ms` so you can see how much future send time is currently waiting in
+the paced UDP queue. The experimental `--udp-max-queue-ms MS` option can cap that queue for
+diagnostics by dropping older queued media, while the default `0` leaves queue trimming disabled.
+Dropping queued H.264 inside a GOP can force receiver recovery at the next keyframe, so prefer
+`--adapt-bitrate` and `--adapt-resolution` for normal live runs.
+
 Add `--adapt-bitrate` to let receiver feedback apply conservative live bitrate changes to the
 active stream encoder and UDP pacing queue. The sender reduces quickly on loss/recovery signals and
 increases more slowly after repeated clean feedback, capped at the original target bitrate.
 Use `--adapt-min-bitrate-mbps Mbps` to set the floor for reductions, and
 `--adapt-reduce-cooldown S` to control how many seconds of feedback must pass between repeated
-downward steps.
+downward steps. With `--adapt-resolution`, the default floor is lower than the old target/4 rule so
+the sender can reduce bitrate further before dropping to the next resolution tier.
 
 Add `--adapt-resolution` to let the sender restart capture and stream encoding at a lower output
 resolution after bitrate reaches its floor and receiver pressure continues. When feedback stabilizes,
@@ -149,6 +156,8 @@ resolution can step back up again after several stable feedback reports, which h
 between tiers. Use `--adapt-resolution-min-scale N` to set the smallest allowed scale and
 `--adapt-resolution-cooldown S` to space out resolution changes. Lower adaptive tiers are rounded to
 H.264-friendly dimensions so receiver decoders do not add hidden padding.
+For example, 75% of a 2560x1440 capture becomes `1920x1088` because H.264 encoders prefer
+16-pixel-aligned dimensions.
 
 The sender automatically checks whether the captured display is running in Windows HDR mode. With
 the default WGC backend, HDR desktops are captured as scRGB float frames and converted back to SDR
@@ -168,6 +177,13 @@ Listen for UDP H.264 packet fragments and reassemble complete encoded frames:
 
 ```powershell
 .\build\debug\ScreenShare.exe --udp-recv 5000 --seconds 15
+```
+
+Add `--log PATH` to any command to save the console output while still showing it in the terminal.
+For example, use this when sending receiver diagnostics:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback --log receiver.log
 ```
 
 Stress the receiver with simulated jitter or datagram loss:
@@ -211,16 +227,18 @@ Listen, preview video, and play received audio:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback
 ```
 
-This automatically enables the startup A/V sync correction pass. Disable it only for diagnostics:
+This automatically enables A/V sync correction. Disable it only for diagnostics:
 
 ```powershell
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback --no-av-sync
 ```
 
 Add `--seconds S` to stop preview automatically after a fixed duration. The preview playout buffer
-starts with 150 ms of latency and drops frames that are more than 500 ms late by default. Use
-`--preview-latency-ms MS` to trade latency for jitter tolerance, and `--preview-max-late-ms MS` to
-control how long late frames can stay eligible for presentation before they are dropped.
+starts with 150 ms of latency for video-only preview, or 100 ms when A/V sync is enabled, and drops
+frames that are more than 500 ms late by default. Use `--preview-latency-ms MS` to trade latency for
+jitter tolerance, and `--preview-max-late-ms MS` to control how long late frames can stay eligible for
+presentation before they are dropped. When A/V sync is enabled, the effective audio jitter target is
+kept at least as large as the preview latency so the audio and video playout clocks stay connected.
 
 Capture system audio and send it to the receiver:
 
@@ -294,8 +312,9 @@ and can be adjusted with `--keyframe-interval S`.
 The `--udp-send` path fragments each encoded H.264 packet into MTU-friendly UDP datagrams with a
 small header. A background sender thread paces queued datagrams against the encoder bitrate by
 default, while the capture and encoder loop continues running at the requested FPS. Sender stats
-report `udp_queued`, `udp_pending`, `udp_peak_pending`, and `udp_dropped_frames` for that pacing
-queue. The sender also listens on the same UDP socket for receiver feedback packets and reports
+report `udp_queued`, `udp_pending`, `udp_peak_pending`, `udp_queue_ms`, `udp_peak_queue_ms`, and
+`udp_dropped_frames` for that pacing queue. The sender also listens on the same UDP socket for
+receiver feedback packets and reports
 `udp_feedback_health`, `udp_feedback_completed_frames`, `udp_feedback_resyncs`, and
 `udp_feedback_skipped_packets` when a receiver is present. Sender stats also include adaptive
 bitrate advice through `bitrate_advice_mbps`, `bitrate_advice_action`, and
@@ -307,11 +326,13 @@ before they can reduce bitrate or resolution, so resize, restart, and playout ti
 immediately bounce the stream downward. `--adapt-min-bitrate-mbps Mbps` sets the adaptive bitrate floor, while
 `--adapt-reduce-cooldown S` prevents repeated reductions from every feedback report during the same
 loss/recovery episode. Add `--adapt-resolution` to make resolution a second adaptation lever: the
-sender steps down to lower output-resolution tiers when bitrate is already at its floor, then steps
-back up after sustained stable feedback. Resolution changes restart capture and the stream encoder
-while keeping UDP frame IDs and H.264 timestamps moving forward. Stats report `stream_bitrate_mbps`,
+sender steps down to lower output-resolution tiers when bitrate is already at its floor and pressure
+persists for several reports, then steps back up after sustained stable feedback. Resolution changes
+restart capture and the stream encoder while keeping UDP frame IDs and H.264 timestamps moving
+forward. Stats report `stream_bitrate_mbps`,
 `resolution_scale`, `resolution_adaptation`, `resolution_adaptations`,
-`resolution_stable_feedback`, `resolution_stable_required`, `bitrate_advice_min_mbps`,
+`resolution_stable_feedback`, `resolution_stable_required`, `resolution_reduce_pressure`,
+`resolution_reduce_required`, `bitrate_advice_min_mbps`,
 `bitrate_advice_cooldown`, `bitrate_advice_suppressed`, `bitrate_adaptation`,
 `bitrate_adaptations`, and `bitrate_adaptation_failures` so you can see whether the active encoder
 accepted the update and whether cooldown is suppressing extra reductions. The
@@ -369,12 +390,20 @@ audio QPC timestamp. If the render endpoint falls behind, the receiver trims old
 than letting live playback drift seconds behind the preview.
 When both video and audio are present, receiver stats also report `av_sync`, `av_audio_ahead_ms`,
 `av_audio_elapsed_ms`, and `av_video_elapsed_ms`. The preview title includes a compact `av +/-Nms`
-field. These fields remain useful diagnostics for relative drift between the received video
-timestamp timeline and the WASAPI audio QPC timeline.
+field that estimates live playout skew after preview latency, queued audio, and WASAPI render padding.
+The console fields remain useful diagnostics for relative drift between the received video timestamp
+timeline and the WASAPI audio QPC timeline.
 With `--preview --audio-playback`, the receiver waits until both audio and video sender-clock anchors
-are known, then biases either initial audio playback latency or initial preview latency by up to
-250 ms. Receiver stats report `av_sync_correction`, `av_sync_preview_bias_ms`, and
-`av_sync_audio_bias_ms`. Add `--no-av-sync` only when comparing raw receiver timing.
+are known, then aligns the live start point by trimming leading audio packets or preview frames from
+the stream that began earlier. Audio rendering waits until the preview playout clock has started, so
+decoder startup latency cannot let audio begin before video. During playback, the receiver schedules
+audio packets against the same sender-clock preview playout timeline, so audio that belongs to a
+future video timestamp waits before entering the WASAPI render buffer. Add `--av-sync` explicitly to
+also allow the older larger startup-bias correction window for diagnostic comparisons, or `--no-av-sync`
+to compare raw receiver timing. Receiver stats report `av_sync_correction`,
+`av_sync_start_qpc`, `av_sync_playback_start_qpc`, `av_sync_video_start_drops`, `av_sync_audio_start_drops`,
+`av_playout_audio_ahead_ms`, `audio_playback_sync_waits`, `av_sync_preview_bias_ms`, and
+`av_sync_audio_bias_ms`.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still

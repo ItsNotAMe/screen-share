@@ -22,6 +22,7 @@ struct UdpSenderConfig {
     uint32_t maxPayloadBytes = 1'200;
     uint32_t pacingBitrate = 0;
     uint32_t maxQueuedDatagrams = 4'096;
+    std::chrono::milliseconds maxQueueDelay{0};
     bool pacingEnabled = true;
 };
 
@@ -40,6 +41,8 @@ struct UdpSenderStats {
     uint64_t wireBytesSent = 0;
     uint64_t pendingDatagrams = 0;
     uint64_t peakPendingDatagrams = 0;
+    uint64_t pendingQueueDelayMs = 0;
+    uint64_t peakQueueDelayMs = 0;
     uint64_t feedbackPacketsReceived = 0;
     uint64_t invalidFeedbackPackets = 0;
     bool hasFeedback = false;
@@ -82,9 +85,16 @@ public:
 private:
     using Clock = std::chrono::steady_clock;
 
+    enum class PendingDatagramKind {
+        Video,
+        Audio,
+    };
+
     struct PendingDatagram {
         std::vector<std::byte> bytes;
         Clock::time_point sendAt{};
+        PendingDatagramKind kind = PendingDatagramKind::Video;
+        uint64_t mediaId = 0;
     };
 
     std::vector<std::byte> BuildDatagram(
@@ -106,6 +116,10 @@ private:
     void WorkerLoop();
     void SendDatagramBytes(const std::vector<std::byte>& datagram);
     [[nodiscard]] Clock::duration PacingDelayForBytes(uint64_t wireBytes) const;
+    bool EnforceLiveQueueDelayLocked(Clock::time_point now);
+    bool DropOldestQueuedMediaLocked(PendingDatagramKind kind);
+    void DropQueuedMediaForCapacityLocked(size_t incomingDatagrams, PendingDatagramKind preferredKind);
+    void RescheduleQueueLocked(Clock::time_point now);
     void CheckWorkerErrorLocked() const;
     void UpdatePendingStatsLocked();
 
