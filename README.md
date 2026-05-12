@@ -41,6 +41,29 @@ copies after rebuilding because they are no longer needed by the default MinGW b
 writes `ScreenShare-runtime-dependencies.txt` beside the exe with the local source path for each
 staged runtime DLL.
 
+The normal build also creates a portable zip automatically:
+
+```powershell
+cmake --build --preset release
+```
+
+The zip is written beside the build output, for example
+`build\release\ScreenShare-release-windows-x64.zip`. It contains `ScreenShare.exe`, staged runtime
+DLLs, the dependency manifest, README, and license.
+
+This is attached to the default CMake `all` build, which is what the VS Code CMake Tools build
+button normally runs. If you changed the selected CMake target to `ScreenShare`, switch it back to
+`all` or select `package-portable` when you want to force a fresh zip.
+
+To regenerate only the package after configuring the preset, build the package target:
+
+```powershell
+cmake --build --preset release --target package-portable
+```
+
+Set `SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD=OFF` at configure time if you want normal builds to skip
+zip creation.
+
 ## Run
 
 List monitors:
