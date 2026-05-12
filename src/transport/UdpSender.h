@@ -22,7 +22,7 @@ struct UdpSenderConfig {
     uint32_t maxPayloadBytes = 1'200;
     uint32_t pacingBitrate = 0;
     uint32_t maxQueuedDatagrams = 4'096;
-    std::chrono::milliseconds maxQueueDelay{500};
+    std::chrono::milliseconds maxQueueDelay{0};
     bool pacingEnabled = true;
 };
 

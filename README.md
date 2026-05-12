@@ -136,11 +136,11 @@ UDP sending is paced by default using the selected stream bitrate, which spreads
 fragments over time instead of dumping each frame as one burst. Add `--no-udp-pacing` when you want
 the older raw burst behavior for transport diagnostics.
 
-The paced sender also keeps the live UDP queue from growing without bound. By default, queued
-datagrams are capped to about 500 ms of future send time; if the network or selected bitrate cannot
-keep up, the sender drops older queued media and sends newer packets instead of letting viewers fall
-seconds behind. Use `--udp-max-queue-ms MS` to tune this live buffer, or `0` to disable the queue-time
-cap for diagnostics.
+Sender stats include `udp_queue_ms` so you can see how much future send time is currently waiting in
+the paced UDP queue. The experimental `--udp-max-queue-ms MS` option can cap that queue for
+diagnostics by dropping older queued media, while the default `0` leaves queue trimming disabled.
+Dropping queued H.264 inside a GOP can force receiver recovery at the next keyframe, so prefer
+`--adapt-bitrate` and `--adapt-resolution` for normal live runs.
 
 Add `--adapt-bitrate` to let receiver feedback apply conservative live bitrate changes to the
 active stream encoder and UDP pacing queue. The sender reduces quickly on loss/recovery signals and

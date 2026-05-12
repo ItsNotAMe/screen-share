@@ -55,7 +55,7 @@ constexpr int DefaultPreviewLatencyMs = 150;
 constexpr int DefaultAvSyncPreviewLatencyMs = 100;
 constexpr int DefaultPreviewMaxLateMs = 500;
 constexpr int DefaultAudioPlaybackLatencyMs = 120;
-constexpr int DefaultUdpMaxQueueMs = 500;
+constexpr int DefaultUdpMaxQueueMs = 0;
 constexpr int MaxAvSyncCorrectionBiasMs = 250;
 
 struct Options {
@@ -2365,7 +2365,11 @@ void RunCaptureStats(const Options& options)
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
         std::cout << ", UDP pacing " << (options.udpPacing ? "enabled" : "disabled");
-        std::cout << ", UDP live queue cap " << options.udpMaxQueueMs << "ms";
+        if (options.udpMaxQueueMs == 0) {
+            std::cout << ", UDP live queue cap disabled";
+        } else {
+            std::cout << ", UDP live queue cap " << options.udpMaxQueueMs << "ms";
+        }
         std::cout << ", adaptive bitrate " << (options.adaptBitrate ? "enabled" : "advice-only");
         if (options.adaptMinBitrateProvided) {
             std::cout << ", adaptive minimum " << Mbps(options.adaptMinBitrate) << " Mbps";
