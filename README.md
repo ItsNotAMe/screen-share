@@ -31,6 +31,16 @@ cmake --preset debug
 cmake --build --preset debug
 ```
 
+When building with MSYS2/MinGW, the default build statically links the GCC C++ and pthread runtime
+libraries and copies the remaining runtime DLLs next to `ScreenShare.exe`: Opus, the Windows UCRT
+redist DLLs, and `d3dcompiler_47.dll` when they are available from the Windows SDK. To run on another
+computer, delete any old copied output folder first and then copy the whole fresh `build\debug` or
+`build\release` output folder, not just `ScreenShare.exe`. If you previously copied
+`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, or `libwinpthread-1.dll` beside the exe, delete those old
+copies after rebuilding because they are no longer needed by the default MinGW build. The build also
+writes `ScreenShare-runtime-dependencies.txt` beside the exe with the local source path for each
+staged runtime DLL.
+
 ## Run
 
 List monitors:
