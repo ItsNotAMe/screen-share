@@ -52,6 +52,7 @@ constexpr uint32_t ResolutionStableReportsBeforeUpscale = 4;
 constexpr int DefaultPreviewLatencyMs = 150;
 constexpr int DefaultPreviewMaxLateMs = 500;
 constexpr int DefaultAudioPlaybackLatencyMs = 120;
+constexpr int MaxAvSyncCorrectionBiasMs = 250;
 
 struct Options {
     bool listDisplays = false;
@@ -109,6 +110,7 @@ struct Options {
     bool audioPlayback = false;
     int audioPlaybackLatencyMs = DefaultAudioPlaybackLatencyMs;
     bool audioPlaybackLatencyProvided = false;
+    bool avSync = false;
 };
 
 void PrintHelp()
@@ -124,7 +126,7 @@ void PrintHelp()
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
-        << "              [--audio-playback] [--audio-playback-latency-ms MS]\n"
+        << "              [--audio-playback] [--audio-playback-latency-ms MS] [--av-sync]\n"
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
@@ -149,6 +151,7 @@ void PrintHelp()
         << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
         << "  ScreenShare --udp-recv 5000 --audio-playback\n"
         << "  ScreenShare --udp-recv 5000 --preview\n"
+        << "  ScreenShare --udp-recv 5000 --preview --audio-playback --av-sync\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
@@ -463,6 +466,10 @@ public:
     [[nodiscard]] uint64_t overflowDrops() const noexcept { return overflowDrops_; }
     [[nodiscard]] std::chrono::milliseconds initialDelay() const noexcept { return initialDelay_; }
     [[nodiscard]] std::chrono::milliseconds maxLateFrameAge() const noexcept { return maxLateFrameAge_; }
+    void AddInitialDelayBias(std::chrono::milliseconds bias)
+    {
+        initialDelay_ += bias;
+    }
 
 private:
     void EnsureClockStarted(Clock::time_point now)
@@ -587,6 +594,10 @@ public:
     [[nodiscard]] uint64_t renderBackpressure() const noexcept { return renderBackpressure_; }
     [[nodiscard]] bool started() const noexcept { return started_; }
     [[nodiscard]] std::chrono::milliseconds targetLatency() const noexcept { return targetLatency_; }
+    void AddTargetLatencyBias(std::chrono::milliseconds bias)
+    {
+        targetLatency_ += bias;
+    }
 
     [[nodiscard]] std::chrono::milliseconds QueuedDuration() const
     {
@@ -626,13 +637,17 @@ private:
 
 struct AvSyncSnapshot {
     bool hasVideo = false;
+    bool hasVideoSenderClock = false;
     bool hasAudio = false;
     bool ready = false;
+    bool senderClockReady = false;
     uint64_t videoFrames = 0;
     uint64_t audioPackets = 0;
     uint64_t ignoredAudioPackets = 0;
     uint64_t firstVideoTimestamp100ns = 0;
     uint64_t latestVideoTimestamp100ns = 0;
+    uint64_t firstVideoSenderQpc100ns = 0;
+    uint64_t latestVideoSenderQpc100ns = 0;
     uint64_t firstAudioQpc100ns = 0;
     uint64_t latestAudioQpc100ns = 0;
     uint64_t latestVideoFrameId = 0;
@@ -640,6 +655,8 @@ struct AvSyncSnapshot {
     double videoElapsedMs = 0.0;
     double audioElapsedMs = 0.0;
     double audioAheadMs = 0.0;
+    double initialAudioSenderOffsetMs = 0.0;
+    double senderClockAudioAheadMs = 0.0;
 };
 
 class AvSyncDiagnostics {
@@ -649,6 +666,13 @@ public:
         if (!hasVideo_) {
             firstVideoTimestamp100ns_ = frame.timestamp100ns;
             hasVideo_ = true;
+        }
+        if (frame.senderQpc100ns != 0) {
+            if (!hasVideoSenderClock_) {
+                firstVideoSenderQpc100ns_ = frame.senderQpc100ns;
+                hasVideoSenderClock_ = true;
+            }
+            latestVideoSenderQpc100ns_ = frame.senderQpc100ns;
         }
 
         latestVideoTimestamp100ns_ = frame.timestamp100ns;
@@ -679,13 +703,17 @@ public:
     {
         AvSyncSnapshot snapshot;
         snapshot.hasVideo = hasVideo_;
+        snapshot.hasVideoSenderClock = hasVideoSenderClock_;
         snapshot.hasAudio = hasAudio_;
         snapshot.ready = hasVideo_ && hasAudio_;
+        snapshot.senderClockReady = hasVideoSenderClock_ && hasAudio_;
         snapshot.videoFrames = videoFrames_;
         snapshot.audioPackets = audioPackets_;
         snapshot.ignoredAudioPackets = ignoredAudioPackets_;
         snapshot.firstVideoTimestamp100ns = firstVideoTimestamp100ns_;
         snapshot.latestVideoTimestamp100ns = latestVideoTimestamp100ns_;
+        snapshot.firstVideoSenderQpc100ns = firstVideoSenderQpc100ns_;
+        snapshot.latestVideoSenderQpc100ns = latestVideoSenderQpc100ns_;
         snapshot.firstAudioQpc100ns = firstAudioQpc100ns_;
         snapshot.latestAudioQpc100ns = latestAudioQpc100ns_;
         snapshot.latestVideoFrameId = latestVideoFrameId_;
@@ -704,6 +732,16 @@ public:
             snapshot.audioElapsedMs = Ticks100nsToMs(audioElapsed100ns);
             snapshot.audioAheadMs = snapshot.audioElapsedMs - snapshot.videoElapsedMs;
         }
+        if (snapshot.senderClockReady) {
+            snapshot.initialAudioSenderOffsetMs =
+                SignedTicks100nsToMs(
+                    static_cast<int64_t>(firstAudioQpc100ns_) -
+                    static_cast<int64_t>(firstVideoSenderQpc100ns_));
+            snapshot.senderClockAudioAheadMs =
+                SignedTicks100nsToMs(
+                    static_cast<int64_t>(latestAudioQpc100ns_) -
+                    static_cast<int64_t>(latestVideoSenderQpc100ns_));
+        }
 
         return snapshot;
     }
@@ -714,13 +752,21 @@ private:
         return static_cast<double>(ticks) / 10'000.0;
     }
 
+    static double SignedTicks100nsToMs(int64_t ticks) noexcept
+    {
+        return static_cast<double>(ticks) / 10'000.0;
+    }
+
     bool hasVideo_ = false;
+    bool hasVideoSenderClock_ = false;
     bool hasAudio_ = false;
     uint64_t videoFrames_ = 0;
     uint64_t audioPackets_ = 0;
     uint64_t ignoredAudioPackets_ = 0;
     uint64_t firstVideoTimestamp100ns_ = 0;
     uint64_t latestVideoTimestamp100ns_ = 0;
+    uint64_t firstVideoSenderQpc100ns_ = 0;
+    uint64_t latestVideoSenderQpc100ns_ = 0;
     uint64_t firstAudioQpc100ns_ = 0;
     uint64_t latestAudioQpc100ns_ = 0;
     uint64_t latestVideoFrameId_ = 0;
@@ -1404,6 +1450,8 @@ Options ParseOptions(int argc, char** argv)
         } else if (arg == "--audio-playback-latency-ms") {
             options.audioPlaybackLatencyMs = ParseInt(requireValue("--audio-playback-latency-ms"), "--audio-playback-latency-ms");
             options.audioPlaybackLatencyProvided = true;
+        } else if (arg == "--av-sync") {
+            options.avSync = true;
         } else if (arg == "--simulate-loss-percent") {
             options.simulateLossPercent = ParseFloat(requireValue("--simulate-loss-percent"), "--simulate-loss-percent");
             options.simulateLossProvided = true;
@@ -1448,6 +1496,9 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.audioPlaybackLatencyProvided && !options.audioPlayback) {
         throw std::invalid_argument("--audio-playback-latency-ms requires --audio-playback");
+    }
+    if (options.avSync && (!options.previewWindow || !options.audioPlayback)) {
+        throw std::invalid_argument("--av-sync requires --preview and --audio-playback");
     }
     if (options.previewLatencyMs < 0 || options.previewLatencyMs > 2000) {
         throw std::invalid_argument("--preview-latency-ms must be between 0 and 2000");
@@ -1545,7 +1596,7 @@ Options ParseOptions(int argc, char** argv)
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
          options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided)) {
+         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (options.listAudioDevices &&
@@ -1558,7 +1609,7 @@ Options ParseOptions(int argc, char** argv)
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided ||
+         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--list-audio-devices cannot be combined with capture, stream, receiver, or video options");
     }
@@ -1572,7 +1623,7 @@ Options ParseOptions(int argc, char** argv)
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided ||
+         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, and --audio-send");
     }
@@ -1581,7 +1632,7 @@ Options ParseOptions(int argc, char** argv)
          !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.udpReceivePort != 0 || !options.h264DumpPath.empty() || options.decodeH264 ||
          !options.decodedBmpPath.empty() || options.previewWindow || options.previewLatencyProvided ||
-         options.previewMaxLateProvided || options.audioPlayback || options.audioPlaybackLatencyProvided ||
+         options.previewMaxLateProvided || options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--audio-capture with --udp-send is only supported for live UDP sending, not receiver, recording, BMP dump, or preview options");
     }
@@ -2708,6 +2759,9 @@ void RunUdpReceiverStats(const Options& options)
             << ", playing received audio"
             << ", audio latency " << options.audioPlaybackLatencyMs << " ms";
     }
+    if (options.avSync) {
+        std::cout << ", A/V sync correction enabled";
+    }
     if (options.simulateLossPercent > 0.0f || options.simulateJitterMs > 0) {
         std::cout
             << ", simulating loss " << options.simulateLossPercent << "%"
@@ -2798,6 +2852,10 @@ void RunUdpReceiverStats(const Options& options)
     };
     AudioPlayoutBuffer audioPlayout{std::chrono::milliseconds(options.audioPlaybackLatencyMs)};
     AvSyncDiagnostics avSync;
+    bool avSyncCorrectionApplied = !options.avSync;
+    int avSyncPreviewBiasMs = 0;
+    int avSyncAudioBiasMs = 0;
+    std::string avSyncCorrectionStatus = options.avSync ? "waiting" : "disabled";
     std::unique_ptr<screenshare::WasapiRenderer> audioRenderer;
     std::optional<screenshare::AudioPlaybackFormat> activeAudioPlaybackFormat;
     std::string audioPlaybackStatus = options.audioPlayback ? "waiting" : "disabled";
@@ -2840,6 +2898,41 @@ void RunUdpReceiverStats(const Options& options)
             << "\n";
     };
 
+    auto mediaPlaybackAllowed = [&]() {
+        return !options.avSync || avSyncCorrectionApplied;
+    };
+
+    auto maybeApplyAvSyncCorrection = [&]() {
+        if (!options.avSync || avSyncCorrectionApplied) {
+            return;
+        }
+
+        const AvSyncSnapshot snapshot = avSync.snapshot();
+        if (!snapshot.senderClockReady) {
+            return;
+        }
+
+        const int biasMs = std::clamp(
+            static_cast<int>(std::llround(std::abs(snapshot.initialAudioSenderOffsetMs))),
+            0,
+            MaxAvSyncCorrectionBiasMs);
+        if (snapshot.initialAudioSenderOffsetMs > 0.0) {
+            audioPlayout.AddTargetLatencyBias(std::chrono::milliseconds(biasMs));
+            avSyncAudioBiasMs = biasMs;
+        } else if (snapshot.initialAudioSenderOffsetMs < 0.0) {
+            previewPlayout.AddInitialDelayBias(std::chrono::milliseconds(biasMs));
+            avSyncPreviewBiasMs = biasMs;
+        }
+
+        avSyncCorrectionApplied = true;
+        avSyncCorrectionStatus = "applied";
+        std::cout
+            << "A/V sync correction applied initial_audio_offset_ms=" << snapshot.initialAudioSenderOffsetMs
+            << " preview_bias_ms=" << avSyncPreviewBiasMs
+            << " audio_bias_ms=" << avSyncAudioBiasMs
+            << "\n";
+    };
+
     auto drainCompletedAudioPackets = [&]() {
         while (auto audioPacket = receiver.PopAudioPacket()) {
             avSync.ObserveAudioPacket(*audioPacket);
@@ -2848,10 +2941,13 @@ void RunUdpReceiverStats(const Options& options)
                 audioPlayout.Enqueue(std::move(*audioPacket));
             }
         }
+        maybeApplyAvSyncCorrection();
 
-        if (options.audioPlayback && audioRenderer) {
+        if (options.audioPlayback && audioRenderer && mediaPlaybackAllowed()) {
             audioPlayout.RenderReady(*audioRenderer);
             audioPlaybackStatus = audioPlayout.started() ? "playing" : "buffering";
+        } else if (options.audioPlayback && audioRenderer && options.avSync && !avSyncCorrectionApplied) {
+            audioPlaybackStatus = "sync-wait";
         }
     };
 
@@ -2875,7 +2971,7 @@ void RunUdpReceiverStats(const Options& options)
             }
         }
 
-        if (previewWindow && presentReady) {
+        if (previewWindow && presentReady && mediaPlaybackAllowed()) {
             previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
         }
     };
@@ -2993,7 +3089,7 @@ void RunUdpReceiverStats(const Options& options)
     };
 
     while (shouldContinue()) {
-        if (previewWindow) {
+        if (previewWindow && mediaPlaybackAllowed()) {
             previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
         }
         drainCompletedAudioPackets();
@@ -3006,6 +3102,7 @@ void RunUdpReceiverStats(const Options& options)
         }
         if (auto frame = receiver.ReceiveFrame(receiveTimeout)) {
             avSync.ObserveVideoFrame(*frame);
+            maybeApplyAvSyncCorrection();
             latestFrameId = frame->frameId;
             latestFrameBytes = frame->bytes.size();
             latestFragmentCount = frame->fragmentCount;
@@ -3027,7 +3124,7 @@ void RunUdpReceiverStats(const Options& options)
         }
         drainCompletedAudioPackets();
 
-        if (previewWindow) {
+        if (previewWindow && mediaPlaybackAllowed()) {
             previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
         }
 
@@ -3121,10 +3218,17 @@ void RunUdpReceiverStats(const Options& options)
                 << " av_audio_ahead_ms=" << avSyncNow.audioAheadMs
                 << " av_audio_elapsed_ms=" << avSyncNow.audioElapsedMs
                 << " av_video_elapsed_ms=" << avSyncNow.videoElapsedMs
+                << " av_sender_clock=" << (avSyncNow.senderClockReady ? "ready" : "waiting")
+                << " av_initial_audio_offset_ms=" << avSyncNow.initialAudioSenderOffsetMs
+                << " av_sender_audio_ahead_ms=" << avSyncNow.senderClockAudioAheadMs
+                << " av_sync_correction=" << avSyncCorrectionStatus
+                << " av_sync_preview_bias_ms=" << avSyncPreviewBiasMs
+                << " av_sync_audio_bias_ms=" << avSyncAudioBiasMs
                 << " av_video_frames=" << avSyncNow.videoFrames
                 << " av_audio_packets=" << avSyncNow.audioPackets
                 << " av_ignored_audio_packets=" << avSyncNow.ignoredAudioPackets
                 << " av_latest_video_timestamp=" << avSyncNow.latestVideoTimestamp100ns
+                << " av_latest_video_sender_qpc=" << avSyncNow.latestVideoSenderQpc100ns
                 << " av_latest_audio_qpc=" << avSyncNow.latestAudioQpc100ns
                 << " invalid_datagrams=" << stats.invalidDatagrams
                 << " duplicate_fragments=" << stats.duplicateFragments
@@ -3282,10 +3386,17 @@ void RunUdpReceiverStats(const Options& options)
         << ", A/V audio ahead ms: " << finalAvSync.audioAheadMs
         << ", A/V audio elapsed ms: " << finalAvSync.audioElapsedMs
         << ", A/V video elapsed ms: " << finalAvSync.videoElapsedMs
+        << ", A/V sender clock: " << (finalAvSync.senderClockReady ? "ready" : "waiting")
+        << ", A/V initial audio offset ms: " << finalAvSync.initialAudioSenderOffsetMs
+        << ", A/V sender audio ahead ms: " << finalAvSync.senderClockAudioAheadMs
+        << ", A/V sync correction: " << avSyncCorrectionStatus
+        << ", A/V sync preview bias ms: " << avSyncPreviewBiasMs
+        << ", A/V sync audio bias ms: " << avSyncAudioBiasMs
         << ", A/V video frames: " << finalAvSync.videoFrames
         << ", A/V audio packets: " << finalAvSync.audioPackets
         << ", A/V ignored audio packets: " << finalAvSync.ignoredAudioPackets
         << ", A/V latest video timestamp: " << finalAvSync.latestVideoTimestamp100ns
+        << ", A/V latest video sender qpc: " << finalAvSync.latestVideoSenderQpc100ns
         << ", A/V latest audio qpc: " << finalAvSync.latestAudioQpc100ns
         << ", invalid datagrams: " << stats.invalidDatagrams
         << ", duplicate fragments: " << stats.duplicateFragments

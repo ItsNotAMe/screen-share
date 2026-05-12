@@ -318,6 +318,7 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     const uint16_t headerBytes = udp_protocol::FromNetwork16(header.headerBytes);
     const uint64_t frameId = udp_protocol::FromNetwork64(header.frameId);
     const uint64_t timestamp100ns = udp_protocol::FromNetwork64(header.timestamp100ns);
+    const uint64_t senderQpc100ns = udp_protocol::FromNetwork64(header.senderQpc100ns);
     const uint32_t frameBytes = udp_protocol::FromNetwork32(header.frameBytes);
     const uint32_t fragmentOffset = udp_protocol::FromNetwork32(header.fragmentOffset);
     const uint16_t fragmentIndex = udp_protocol::FromNetwork16(header.fragmentIndex);
@@ -352,11 +353,13 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     if (inserted) {
         pending.frameId = frameId;
         pending.timestamp100ns = timestamp100ns;
+        pending.senderQpc100ns = senderQpc100ns;
         pending.frameBytes = frameBytes;
         pending.fragmentCount = fragmentCount;
         pending.bytes.assign(frameBytes, std::byte{});
         pending.fragmentReceived.assign(fragmentCount, 0);
     } else if (pending.timestamp100ns != timestamp100ns ||
+               pending.senderQpc100ns != senderQpc100ns ||
                pending.frameBytes != frameBytes ||
                pending.fragmentCount != fragmentCount) {
         ++stats_.invalidDatagrams;
@@ -399,6 +402,7 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     UdpCompletedFrame completed;
     completed.frameId = pending.frameId;
     completed.timestamp100ns = pending.timestamp100ns;
+    completed.senderQpc100ns = pending.senderQpc100ns;
     completed.fragmentCount = pending.fragmentCount;
     completed.bytes = std::move(pending.bytes);
 

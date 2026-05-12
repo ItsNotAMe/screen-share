@@ -194,6 +194,12 @@ Listen, preview video, and play received audio:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback
 ```
 
+Enable the first opt-in A/V sync correction pass:
+
+```powershell
+.\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback --av-sync
+```
+
 Add `--seconds S` to stop preview automatically after a fixed duration. The preview playout buffer
 starts with 150 ms of latency and drops frames that are more than 500 ms late by default. Use
 `--preview-latency-ms MS` to trade latency for jitter tolerance, and `--preview-max-late-ms MS` to
@@ -342,6 +348,10 @@ When both video and audio are present, receiver stats also report `av_sync`, `av
 `av_audio_elapsed_ms`, and `av_video_elapsed_ms`. The preview title includes a compact `av +/-Nms`
 field. This is currently diagnostic-only: it measures relative drift between the received video
 timestamp timeline and the WASAPI audio QPC timeline before the app applies any A/V sync correction.
+Add `--av-sync` with `--preview --audio-playback` to wait until both audio and video sender-clock
+anchors are known, then bias either initial audio playback latency or initial preview latency by up
+to 250 ms. Receiver stats report `av_sync_correction`, `av_sync_preview_bias_ms`, and
+`av_sync_audio_bias_ms`.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -367,6 +377,7 @@ Windows Graphics Capture
  -> opt-in receiver WASAPI audio playback with a jitter buffer
  -> combined audio+video UDP streaming with A/V diagnostics
  -> receiver A/V sync drift diagnostics
+ -> opt-in receiver A/V sync correction
  -> future session setup and renderer optimizations
 ```
 An app to share your screen with others

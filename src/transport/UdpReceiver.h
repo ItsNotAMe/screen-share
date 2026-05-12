@@ -31,6 +31,7 @@ struct UdpReceiverConfig {
 struct UdpCompletedFrame {
     uint64_t frameId = 0;
     uint64_t timestamp100ns = 0;
+    uint64_t senderQpc100ns = 0;
     uint16_t fragmentCount = 0;
     std::vector<std::byte> bytes;
 };
@@ -123,6 +124,7 @@ private:
 
         uint64_t frameId = 0;
         uint64_t timestamp100ns = 0;
+        uint64_t senderQpc100ns = 0;
         uint32_t frameBytes = 0;
         uint16_t fragmentCount = 0;
         uint16_t receivedFragments = 0;

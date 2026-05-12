@@ -62,6 +62,7 @@ struct PacketHeader {
     uint16_t headerBytes = 0;
     uint64_t frameId = 0;
     uint64_t timestamp100ns = 0;
+    uint64_t senderQpc100ns = 0;
     uint32_t frameBytes = 0;
     uint32_t fragmentOffset = 0;
     uint16_t fragmentIndex = 0;
@@ -111,7 +112,7 @@ struct AudioPacketHeader {
 };
 #pragma pack(pop)
 
-static_assert(sizeof(PacketHeader) == 40);
+static_assert(sizeof(PacketHeader) == 48);
 static_assert(sizeof(FeedbackPacket) == 96);
 static_assert(sizeof(AudioPacketHeader) == 68);
 

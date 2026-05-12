@@ -38,6 +38,31 @@ void AppendPackets(std::vector<EncodedPacket>& destination, std::vector<EncodedP
         std::make_move_iterator(source.end()));
 }
 
+int64_t PerformanceCounterTo100ns(LONGLONG counter)
+{
+    if (counter <= 0) {
+        return 0;
+    }
+
+    LARGE_INTEGER frequency{};
+    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) {
+        return 0;
+    }
+
+    return static_cast<int64_t>(
+        (static_cast<long double>(counter) * 10'000'000.0L) /
+        static_cast<long double>(frequency.QuadPart));
+}
+
+int64_t QueryPerformanceCounter100ns()
+{
+    LARGE_INTEGER counter{};
+    if (!QueryPerformanceCounter(&counter)) {
+        return 0;
+    }
+    return PerformanceCounterTo100ns(counter.QuadPart);
+}
+
 void SetVideoSize(IMFAttributes* attributes, REFGUID key, int width, int height)
 {
     ThrowIfFailed(MFSetAttributeSize(attributes, key, static_cast<UINT32>(width), static_cast<UINT32>(height)), "MFSetAttributeSize");
@@ -589,6 +614,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     pendingAsyncInputs_ = 0;
     pendingAsyncOutputs_ = 0;
     queuedAsyncInputs_.clear();
+    senderQpcBySampleTime_.clear();
     droppedAsyncInputs_ = 0;
     maxQueuedAsyncInputs_ = std::clamp<size_t>(static_cast<size_t>((config_.fps + 1) / 2), 8, 32);
     asyncDrainComplete_ = false;
@@ -626,6 +652,7 @@ std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& f
         throw std::runtime_error("Encoded frame size does not match stream encoder configuration");
     }
     const int64_t sampleTime = frameIndex_ * frameDuration100ns_;
+    senderQpcBySampleTime_[sampleTime] = QueryPerformanceCounter100ns();
     const bool useDirect3dInput =
         backend_ == H264StreamEncoderBackend::Hardware &&
         config_.d3dDevice != nullptr &&
@@ -719,6 +746,7 @@ void H264StreamEncoder::Stop()
     pendingAsyncInputs_ = 0;
     pendingAsyncOutputs_ = 0;
     queuedAsyncInputs_.clear();
+    senderQpcBySampleTime_.clear();
     maxQueuedAsyncInputs_ = 8;
     droppedAsyncInputs_ = 0;
     asyncDrainComplete_ = false;
@@ -785,7 +813,9 @@ std::vector<EncodedPacket> H264StreamEncoder::ReadSyncAvailablePackets()
 
         ThrowIfFailed(outputResult, "IMFTransform::ProcessOutput");
 
-        packets.push_back(PacketFromOutputSample(outputSample.Get()));
+        auto packet = PacketFromOutputSample(outputSample.Get());
+        AttachSenderQpc(packet);
+        packets.push_back(std::move(packet));
     }
 
     return packets;
@@ -849,10 +879,28 @@ std::vector<EncodedPacket> H264StreamEncoder::ReadAsyncAvailablePackets()
             throw std::runtime_error("Async H.264 encoder reported output without an output sample");
         }
 
-        packets.push_back(PacketFromOutputSample(outputSample.Get()));
+        auto packet = PacketFromOutputSample(outputSample.Get());
+        AttachSenderQpc(packet);
+        packets.push_back(std::move(packet));
     }
 
     return packets;
+}
+
+void H264StreamEncoder::AttachSenderQpc(EncodedPacket& packet)
+{
+    const auto match = senderQpcBySampleTime_.find(packet.timestamp100ns);
+    if (match != senderQpcBySampleTime_.end()) {
+        packet.senderQpc100ns = match->second;
+    }
+
+    for (auto old = senderQpcBySampleTime_.begin();
+         old != senderQpcBySampleTime_.end() && old->first < packet.timestamp100ns;) {
+        old = senderQpcBySampleTime_.erase(old);
+    }
+    while (senderQpcBySampleTime_.size() > 240) {
+        senderQpcBySampleTime_.erase(senderQpcBySampleTime_.begin());
+    }
 }
 
 std::vector<EncodedPacket> H264StreamEncoder::PumpAsyncEvents()
