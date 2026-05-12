@@ -1,3 +1,4 @@
+#include "audio/OpusCodec.h"
 #include "audio/WasapiCapture.h"
 #include "audio/WasapiRenderer.h"
 #include "capture/DesktopCapturer.h"
@@ -107,6 +108,8 @@ struct Options {
     std::string audioDeviceId;
     bool audioDeviceIdProvided = false;
     std::string audioSendTarget;
+    screenshare::udp_protocol::AudioCodec audioCodec = screenshare::udp_protocol::AudioCodec::Raw;
+    bool audioCodecProvided = false;
     bool audioPlayback = false;
     int audioPlaybackLatencyMs = DefaultAudioPlaybackLatencyMs;
     bool audioPlaybackLatencyProvided = false;
@@ -122,7 +125,7 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
-        << "              [--audio-send HOST:PORT]\n"
+        << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
@@ -132,6 +135,7 @@ void PrintHelp()
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
         << "              [--udp-send HOST:PORT] [--no-udp-pacing] [--adapt-bitrate]\n"
         << "              [--audio-capture system|microphone] [--audio-device-id ID]\n"
+        << "              [--audio-codec raw|opus]\n"
         << "              [--adapt-min-bitrate-mbps Mbps] [--adapt-reduce-cooldown S]\n"
         << "              [--adapt-resolution] [--adapt-resolution-min-scale N]\n"
         << "              [--adapt-resolution-cooldown S]\n"
@@ -145,14 +149,14 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
-        << "  ScreenShare --audio-capture system --seconds 5 --audio-send 127.0.0.1:5000\n"
+        << "  ScreenShare --audio-capture system --seconds 5 --audio-send 127.0.0.1:5000 --audio-codec opus\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
         << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
         << "  ScreenShare --udp-recv 5000 --audio-playback\n"
         << "  ScreenShare --udp-recv 5000 --preview\n"
         << "  ScreenShare --udp-recv 5000 --preview --audio-playback --av-sync\n"
-        << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system\n"
+        << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system --audio-codec opus\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -387,7 +391,25 @@ const char* StreamEncoderPreferenceName(StreamEncoderPreference preference)
     }
 }
 
+screenshare::udp_protocol::AudioCodec ParseAudioCodec(const std::string& value)
+{
+    if (value == "raw") {
+        return screenshare::udp_protocol::AudioCodec::Raw;
+    }
+    if (value == "opus") {
+        return screenshare::udp_protocol::AudioCodec::Opus;
+    }
+    throw std::invalid_argument("Invalid value for --audio-codec: " + value + " (expected raw or opus)");
+}
+
 screenshare::udp_protocol::AudioSampleFormat ToUdpAudioSampleFormat(const screenshare::AudioCaptureFormat& format);
+screenshare::UdpAudioPacket BuildRawUdpAudioPacket(
+    const screenshare::CapturedAudioPacket& packet,
+    const screenshare::AudioCaptureFormat& format,
+    screenshare::udp_protocol::AudioSampleFormat sampleFormat);
+screenshare::UdpAudioPacket BuildOpusUdpAudioPacket(
+    const screenshare::CapturedAudioPacket& packet,
+    screenshare::OpusAudioEncoder& encoder);
 
 class PreviewPlayoutBuffer {
 public:
@@ -790,6 +812,7 @@ struct AudioCaptureWorkerStats {
     uint16_t blockAlign = 0;
     screenshare::udp_protocol::AudioSampleFormat sampleFormat =
         screenshare::udp_protocol::AudioSampleFormat::Unknown;
+    screenshare::udp_protocol::AudioCodec codec = screenshare::udp_protocol::AudioCodec::Raw;
     bool started = false;
     std::string deviceName;
 };
@@ -809,7 +832,8 @@ public:
     void Start(
         screenshare::UdpSender& sender,
         screenshare::AudioCaptureSource source,
-        const std::string& deviceId)
+        const std::string& deviceId,
+        screenshare::udp_protocol::AudioCodec codec)
     {
         Stop();
         stopRequested_ = false;
@@ -819,8 +843,8 @@ public:
             error_.clear();
         }
 
-        thread_ = std::thread([this, &sender, source, deviceId] {
-            Run(sender, source, deviceId);
+        thread_ = std::thread([this, &sender, source, deviceId, codec] {
+            Run(sender, source, deviceId, codec);
         });
     }
 
@@ -850,7 +874,8 @@ private:
     void Run(
         screenshare::UdpSender& sender,
         screenshare::AudioCaptureSource source,
-        const std::string& deviceId)
+        const std::string& deviceId,
+        screenshare::udp_protocol::AudioCodec codec)
     {
         try {
             screenshare::WasapiCapture capture;
@@ -866,6 +891,11 @@ private:
             if (udpSampleFormat == screenshare::udp_protocol::AudioSampleFormat::Unknown) {
                 throw std::runtime_error("Unsupported WASAPI sample format for combined audio/video stream: " + format.sampleFormat);
             }
+            std::unique_ptr<screenshare::OpusAudioEncoder> opusEncoder;
+            if (codec == screenshare::udp_protocol::AudioCodec::Opus) {
+                opusEncoder = std::make_unique<screenshare::OpusAudioEncoder>();
+                opusEncoder->Start(format);
+            }
 
             {
                 std::lock_guard lock(mutex_);
@@ -876,10 +906,13 @@ private:
                 stats_.bitsPerSample = format.bitsPerSample;
                 stats_.blockAlign = format.blockAlign;
                 stats_.sampleFormat = udpSampleFormat;
+                stats_.codec = codec;
                 stats_.payloadBitrate =
-                    static_cast<uint64_t>(format.sampleRate) *
-                    static_cast<uint64_t>(format.blockAlign) *
-                    8ULL;
+                    codec == screenshare::udp_protocol::AudioCodec::Opus ?
+                        screenshare::OpusAudioEncoder::DefaultBitrate :
+                        static_cast<uint64_t>(format.sampleRate) *
+                        static_cast<uint64_t>(format.blockAlign) *
+                        8ULL;
             }
 
             while (!stopRequested_) {
@@ -890,20 +923,10 @@ private:
                     continue;
                 }
 
-                screenshare::UdpAudioPacket audioPacket;
-                audioPacket.devicePosition = packet->devicePosition;
-                audioPacket.qpcPosition = packet->qpcPosition;
-                audioPacket.sampleRate = format.sampleRate;
-                audioPacket.channels = format.channels;
-                audioPacket.bitsPerSample = format.bitsPerSample;
-                audioPacket.blockAlign = format.blockAlign;
-                audioPacket.sampleFormat = udpSampleFormat;
-                audioPacket.audioFrames = packet->frames;
-                audioPacket.flags =
-                    (packet->silent ? screenshare::udp_protocol::AudioPacketFlagSilent : 0U) |
-                    (packet->dataDiscontinuity ? screenshare::udp_protocol::AudioPacketFlagDataDiscontinuity : 0U) |
-                    (packet->timestampError ? screenshare::udp_protocol::AudioPacketFlagTimestampError : 0U);
-                audioPacket.bytes = packet->data;
+                screenshare::UdpAudioPacket audioPacket =
+                    codec == screenshare::udp_protocol::AudioCodec::Opus ?
+                        BuildOpusUdpAudioPacket(*packet, *opusEncoder) :
+                        BuildRawUdpAudioPacket(*packet, format, udpSampleFormat);
                 sender.SendAudioPacket(audioPacket);
 
                 std::lock_guard lock(mutex_);
@@ -1341,6 +1364,71 @@ screenshare::AudioPlaybackFormat AudioPlaybackFormatFromPacket(const screenshare
     return format;
 }
 
+uint32_t AudioFlagsFromPacket(const screenshare::CapturedAudioPacket& packet)
+{
+    return
+        (packet.silent ? screenshare::udp_protocol::AudioPacketFlagSilent : 0U) |
+        (packet.dataDiscontinuity ? screenshare::udp_protocol::AudioPacketFlagDataDiscontinuity : 0U) |
+        (packet.timestampError ? screenshare::udp_protocol::AudioPacketFlagTimestampError : 0U);
+}
+
+screenshare::UdpAudioPacket BuildRawUdpAudioPacket(
+    const screenshare::CapturedAudioPacket& packet,
+    const screenshare::AudioCaptureFormat& format,
+    screenshare::udp_protocol::AudioSampleFormat sampleFormat)
+{
+    screenshare::UdpAudioPacket audioPacket;
+    audioPacket.devicePosition = packet.devicePosition;
+    audioPacket.qpcPosition = packet.qpcPosition;
+    audioPacket.sampleRate = format.sampleRate;
+    audioPacket.channels = format.channels;
+    audioPacket.bitsPerSample = format.bitsPerSample;
+    audioPacket.blockAlign = format.blockAlign;
+    audioPacket.sampleFormat = sampleFormat;
+    audioPacket.codec = screenshare::udp_protocol::AudioCodec::Raw;
+    audioPacket.audioFrames = packet.frames;
+    audioPacket.flags = AudioFlagsFromPacket(packet);
+    audioPacket.bytes = packet.data;
+    return audioPacket;
+}
+
+screenshare::UdpAudioPacket BuildOpusUdpAudioPacket(
+    const screenshare::CapturedAudioPacket& packet,
+    screenshare::OpusAudioEncoder& encoder)
+{
+    const auto encoded = encoder.Encode(packet);
+
+    screenshare::UdpAudioPacket audioPacket;
+    audioPacket.devicePosition = packet.devicePosition;
+    audioPacket.qpcPosition = packet.qpcPosition;
+    audioPacket.sampleRate = encoded.sampleRate;
+    audioPacket.channels = encoded.channels;
+    audioPacket.bitsPerSample = encoded.bitsPerSample;
+    audioPacket.blockAlign = encoded.blockAlign;
+    audioPacket.sampleFormat = screenshare::udp_protocol::AudioSampleFormat::Float32;
+    audioPacket.codec = screenshare::udp_protocol::AudioCodec::Opus;
+    audioPacket.audioFrames = encoded.audioFrames;
+    audioPacket.flags = AudioFlagsFromPacket(packet);
+    audioPacket.bytes = encoded.bytes;
+    return audioPacket;
+}
+
+screenshare::UdpCompletedAudioPacket DecodeOpusAudioPacketForPlayback(
+    const screenshare::UdpCompletedAudioPacket& packet,
+    screenshare::OpusAudioDecoder& decoder)
+{
+    screenshare::UdpCompletedAudioPacket decoded = packet;
+    decoded.bytes = decoder.Decode(packet.bytes, packet.audioFrames);
+    decoded.codec = screenshare::udp_protocol::AudioCodec::Raw;
+    decoded.sampleRate = screenshare::OpusAudioDecoder::OutputSampleRate;
+    decoded.channels = screenshare::OpusAudioDecoder::OutputChannels;
+    decoded.bitsPerSample = screenshare::OpusAudioDecoder::OutputBitsPerSample;
+    decoded.blockAlign = screenshare::OpusAudioDecoder::OutputBlockAlign;
+    decoded.sampleFormat = screenshare::udp_protocol::AudioSampleFormat::Float32;
+    decoded.audioFrames = static_cast<uint32_t>(decoded.bytes.size() / decoded.blockAlign);
+    return decoded;
+}
+
 Options ParseOptions(int argc, char** argv)
 {
     Options options;
@@ -1374,6 +1462,9 @@ Options ParseOptions(int argc, char** argv)
             options.audioDeviceIdProvided = true;
         } else if (arg == "--audio-send") {
             options.audioSendTarget = requireValue("--audio-send");
+        } else if (arg == "--audio-codec") {
+            options.audioCodec = ParseAudioCodec(requireValue("--audio-codec"));
+            options.audioCodecProvided = true;
         } else if (arg == "--display") {
             options.displayIndex = ParseInt(requireValue("--display"), "--display");
         } else if (arg == "--width") {
@@ -1475,6 +1566,10 @@ Options ParseOptions(int argc, char** argv)
 
     if (options.audioDeviceIdProvided && !options.audioCapture) {
         throw std::invalid_argument("--audio-device-id requires --audio-capture");
+    }
+    if (options.audioCodecProvided &&
+        (!options.audioCapture || (options.audioSendTarget.empty() && options.udpSendTarget.empty()))) {
+        throw std::invalid_argument("--audio-codec requires --audio-capture with --audio-send or --udp-send");
     }
     if (!options.audioSendTarget.empty()) {
         static_cast<void>(screenshare::ParseUdpSenderTarget(options.audioSendTarget));
@@ -1580,7 +1675,7 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || options.listAudioDevices || options.audioCapture ||
-         options.audioDeviceIdProvided || !options.audioSendTarget.empty() ||
+         options.audioDeviceIdProvided || options.audioCodecProvided || !options.audioSendTarget.empty() ||
          !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
@@ -1590,7 +1685,7 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.listH264Encoders &&
         (options.listDisplays || options.listAudioDevices || options.audioCapture || options.audioDeviceIdProvided ||
-         !options.audioSendTarget.empty() || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
+         options.audioCodecProvided || !options.audioSendTarget.empty() || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
@@ -1601,7 +1696,7 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.listAudioDevices &&
         (options.listDisplays || options.listH264Encoders || options.audioCapture || options.audioDeviceIdProvided ||
-         !options.audioSendTarget.empty() ||
+         options.audioCodecProvided || !options.audioSendTarget.empty() ||
          options.width != 0 || options.height != 0 || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
@@ -1625,7 +1720,7 @@ Options ParseOptions(int argc, char** argv)
          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
          options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
-        throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, and --audio-send");
+        throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, --audio-send, and --audio-codec");
     }
     if (audioCaptureWithVideoSend &&
         (options.listDisplays || options.listH264Encoders || options.listAudioDevices ||
@@ -1769,12 +1864,17 @@ void RunAudioCaptureStats(const Options& options)
     }
 
     std::unique_ptr<screenshare::UdpSender> audioSender;
+    std::unique_ptr<screenshare::OpusAudioEncoder> opusEncoder;
     if (!options.audioSendTarget.empty()) {
         auto udpConfig = screenshare::ParseUdpSenderTarget(options.audioSendTarget);
         udpConfig.pacingEnabled = false;
         udpConfig.maxQueuedDatagrams = 16'384;
         audioSender = std::make_unique<screenshare::UdpSender>();
         audioSender->Open(udpConfig);
+        if (options.audioCodec == screenshare::udp_protocol::AudioCodec::Opus) {
+            opusEncoder = std::make_unique<screenshare::OpusAudioEncoder>();
+            opusEncoder->Start(format);
+        }
     }
 
     std::cout
@@ -1786,7 +1886,9 @@ void RunAudioCaptureStats(const Options& options)
         << ", buffer_frames=" << capture.bufferFrames()
         << ", seconds=" << options.seconds;
     if (audioSender) {
-        std::cout << ", audio UDP sending to " << options.audioSendTarget;
+        std::cout
+            << ", audio UDP sending to " << options.audioSendTarget
+            << ", codec " << screenshare::udp_protocol::AudioCodecName(options.audioCodec);
     }
     if (!options.audioDeviceId.empty()) {
         std::cout << ", selected by id";
@@ -1843,20 +1945,10 @@ void RunAudioCaptureStats(const Options& options)
         }
 
         if (audioSender) {
-            screenshare::UdpAudioPacket audioPacket;
-            audioPacket.devicePosition = packet.devicePosition;
-            audioPacket.qpcPosition = packet.qpcPosition;
-            audioPacket.sampleRate = format.sampleRate;
-            audioPacket.channels = format.channels;
-            audioPacket.bitsPerSample = format.bitsPerSample;
-            audioPacket.blockAlign = format.blockAlign;
-            audioPacket.sampleFormat = udpSampleFormat;
-            audioPacket.audioFrames = packet.frames;
-            audioPacket.flags =
-                (packet.silent ? screenshare::udp_protocol::AudioPacketFlagSilent : 0U) |
-                (packet.dataDiscontinuity ? screenshare::udp_protocol::AudioPacketFlagDataDiscontinuity : 0U) |
-                (packet.timestampError ? screenshare::udp_protocol::AudioPacketFlagTimestampError : 0U);
-            audioPacket.bytes = packet.data;
+            screenshare::UdpAudioPacket audioPacket =
+                options.audioCodec == screenshare::udp_protocol::AudioCodec::Opus ?
+                    BuildOpusUdpAudioPacket(packet, *opusEncoder) :
+                    BuildRawUdpAudioPacket(packet, format, udpSampleFormat);
             audioSender->SendAudioPacket(audioPacket);
         }
     };
@@ -1910,6 +2002,7 @@ void RunAudioCaptureStats(const Options& options)
                     << " audio_udp_pending=" << udpStatsNow.pendingDatagrams
                     << " audio_udp_dropped_packets=" << udpStatsNow.audioPacketsDropped
                     << " audio_udp_wire_bytes=" << udpStatsNow.wireBytesSent
+                    << " audio_codec=" << screenshare::udp_protocol::AudioCodecName(options.audioCodec)
                     << " udp_feedback_packets=" << udpStatsNow.feedbackPacketsReceived
                     << " udp_feedback_invalid=" << udpStatsNow.invalidFeedbackPackets;
             }
@@ -1956,6 +2049,7 @@ void RunAudioCaptureStats(const Options& options)
             << ", audio UDP dropped packets: " << finalUdpStats.audioPacketsDropped
             << ", audio UDP pending datagrams: " << finalUdpStats.pendingDatagrams
             << ", audio UDP wire bytes: " << finalUdpStats.wireBytesSent
+            << ", audio codec: " << screenshare::udp_protocol::AudioCodecName(options.audioCodec)
             << ", UDP feedback packets: " << finalUdpStats.feedbackPacketsReceived
             << ", UDP invalid feedback packets: " << finalUdpStats.invalidFeedbackPackets;
     }
@@ -2028,6 +2122,7 @@ void RunCaptureStats(const Options& options)
         if (!options.audioDeviceId.empty()) {
             std::cout << ", selected audio device id";
         }
+        std::cout << ", audio codec " << screenshare::udp_protocol::AudioCodecName(options.audioCodec);
     }
     if (options.captureBackend == screenshare::CaptureBackend::WindowsGraphicsCapture) {
         std::cout << ", WGC border " << (options.wgcBorderRequired ? "enabled" : "disabled when permitted");
@@ -2461,7 +2556,8 @@ void RunCaptureStats(const Options& options)
                                 audioCaptureWorker->Start(
                                     *udpSender,
                                     options.audioCaptureSource,
-                                    options.audioDeviceId);
+                                    options.audioDeviceId,
+                                    options.audioCodec);
                                 std::cout
                                     << "Audio capture worker started source="
                                     << screenshare::AudioCaptureSourceName(options.audioCaptureSource)
@@ -2501,6 +2597,7 @@ void RunCaptureStats(const Options& options)
                         << audioStats.sampleRate << "x" << audioStats.channels
                         << "x" << audioStats.bitsPerSample
                         << "/" << screenshare::udp_protocol::AudioSampleFormatName(audioStats.sampleFormat)
+                        << " codec=" << screenshare::udp_protocol::AudioCodecName(audioStats.codec)
                         << " payload_bitrate_mbps=" << Mbps(static_cast<uint32_t>(
                             std::min<uint64_t>(audioStats.payloadBitrate, std::numeric_limits<uint32_t>::max())))
                         << " udp_pacing_mbps=" << Mbps(combinedUdpPacingBitrate())
@@ -2577,6 +2674,7 @@ void RunCaptureStats(const Options& options)
                 << " audio_capture_discontinuities=" << audioCaptureStatsNow.discontinuities
                 << " audio_capture_timestamp_errors=" << audioCaptureStatsNow.timestampErrors
                 << " audio_capture_qpc=" << audioCaptureStatsNow.latestQpcPosition
+                << " audio_codec=" << screenshare::udp_protocol::AudioCodecName(audioCaptureStatsNow.codec)
                 << " audio_payload_bitrate_mbps=" << Mbps(static_cast<uint32_t>(
                     std::min<uint64_t>(audioCaptureStatsNow.payloadBitrate, std::numeric_limits<uint32_t>::max())))
                 << " audio_udp_packets=" << udpStatsNow.audioPacketsSent
@@ -2684,6 +2782,7 @@ void RunCaptureStats(const Options& options)
         << ", audio capture discontinuities: " << finalAudioCaptureStats.discontinuities
         << ", audio capture timestamp errors: " << finalAudioCaptureStats.timestampErrors
         << ", audio capture qpc: " << finalAudioCaptureStats.latestQpcPosition
+        << ", audio codec: " << screenshare::udp_protocol::AudioCodecName(finalAudioCaptureStats.codec)
         << ", audio payload bitrate Mbps: " << Mbps(static_cast<uint32_t>(
             std::min<uint64_t>(finalAudioCaptureStats.payloadBitrate, std::numeric_limits<uint32_t>::max())))
         << ", audio UDP packets: " << udpStats.audioPacketsSent
@@ -2857,6 +2956,7 @@ void RunUdpReceiverStats(const Options& options)
     int avSyncAudioBiasMs = 0;
     std::string avSyncCorrectionStatus = options.avSync ? "waiting" : "disabled";
     std::unique_ptr<screenshare::WasapiRenderer> audioRenderer;
+    std::unique_ptr<screenshare::OpusAudioDecoder> opusAudioDecoder;
     std::optional<screenshare::AudioPlaybackFormat> activeAudioPlaybackFormat;
     std::string audioPlaybackStatus = options.audioPlayback ? "waiting" : "disabled";
     uint64_t audioPlaybackStarts = 0;
@@ -2937,6 +3037,15 @@ void RunUdpReceiverStats(const Options& options)
         while (auto audioPacket = receiver.PopAudioPacket()) {
             avSync.ObserveAudioPacket(*audioPacket);
             if (options.audioPlayback) {
+                if (audioPacket->codec == screenshare::udp_protocol::AudioCodec::Opus) {
+                    if (!opusAudioDecoder) {
+                        opusAudioDecoder = std::make_unique<screenshare::OpusAudioDecoder>();
+                        opusAudioDecoder->Start();
+                    }
+                    *audioPacket = DecodeOpusAudioPacketForPlayback(*audioPacket, *opusAudioDecoder);
+                } else if (audioPacket->codec != screenshare::udp_protocol::AudioCodec::Raw) {
+                    continue;
+                }
                 ensureAudioRenderer(*audioPacket);
                 audioPlayout.Enqueue(std::move(*audioPacket));
             }
@@ -3199,6 +3308,7 @@ void RunUdpReceiverStats(const Options& options)
                 << " audio_format=" << stats.audioSampleRate << "x" << stats.audioChannels
                 << "x" << stats.audioBitsPerSample
                 << "/" << screenshare::udp_protocol::AudioSampleFormatName(stats.audioSampleFormat)
+                << " audio_codec=" << screenshare::udp_protocol::AudioCodecName(stats.audioCodec)
                 << " audio_playback=" << audioPlaybackStatus
                 << " audio_playback_latency_ms=" << (options.audioPlayback ? audioPlayout.targetLatency().count() : 0)
                 << " audio_playback_queue=" << (options.audioPlayback ? audioPlayout.queuedPacketCount() : 0)
@@ -3368,6 +3478,7 @@ void RunUdpReceiverStats(const Options& options)
         << ", audio format: " << stats.audioSampleRate << "x" << stats.audioChannels
         << "x" << stats.audioBitsPerSample
         << "/" << screenshare::udp_protocol::AudioSampleFormatName(stats.audioSampleFormat)
+        << ", audio codec: " << screenshare::udp_protocol::AudioCodecName(stats.audioCodec)
         << ", audio playback: " << audioPlaybackStatus
         << ", audio playback latency ms: " << (options.audioPlayback ? audioPlayout.targetLatency().count() : 0)
         << ", audio playback queued packets: " << (options.audioPlayback ? audioPlayout.queuedPacketCount() : 0)

@@ -33,6 +33,11 @@ enum class AudioSampleFormat : uint16_t {
     Pcm32 = 4,
 };
 
+enum class AudioCodec : uint16_t {
+    Raw = 0,
+    Opus = 1,
+};
+
 enum AudioPacketFlags : uint32_t {
     AudioPacketFlagSilent = 1U << 0,
     AudioPacketFlagDataDiscontinuity = 1U << 1,
@@ -102,6 +107,8 @@ struct AudioPacketHeader {
     uint16_t bitsPerSample = 0;
     uint16_t blockAlign = 0;
     uint16_t sampleFormat = 0;
+    uint16_t codec = 0;
+    uint16_t reserved = 0;
     uint32_t audioFrames = 0;
     uint32_t packetBytes = 0;
     uint32_t fragmentOffset = 0;
@@ -114,7 +121,7 @@ struct AudioPacketHeader {
 
 static_assert(sizeof(PacketHeader) == 48);
 static_assert(sizeof(FeedbackPacket) == 96);
-static_assert(sizeof(AudioPacketHeader) == 68);
+static_assert(sizeof(AudioPacketHeader) == 72);
 
 constexpr uint16_t ByteSwap16(uint16_t value) noexcept
 {
@@ -182,6 +189,7 @@ constexpr uint64_t FromNetwork64(uint64_t value) noexcept
 
 const char* FeedbackHealthStateName(FeedbackHealthState state);
 const char* AudioSampleFormatName(AudioSampleFormat format);
+const char* AudioCodecName(AudioCodec codec);
 std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback);
 std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte> datagram);
 

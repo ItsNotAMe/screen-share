@@ -11,7 +11,7 @@ The first milestone is a pure C++ capture foundation:
 - Send and receive H.264 packets over UDP for local transport validation.
 - Decode received H.264 and preview it in a native Direct3D window with GPU-side NV12 conversion.
 - Capture system or microphone audio with WASAPI.
-- Send raw audio packets over UDP and optionally play them on the receiver with a small jitter buffer.
+- Send raw or Opus-compressed audio packets over UDP and optionally play them on the receiver with a small jitter buffer.
 
 Friend pairing and broader network setup are later milestones.
 
@@ -23,6 +23,7 @@ Requirements:
 - MSYS2/MinGW-w64 or Visual Studio with the Desktop development with C++ workload
 - CMake 3.24+
 - Windows SDK with C++/WinRT headers for the Windows Graphics Capture backend
+- Opus development package for compressed audio (`mingw-w64-ucrt-x86_64-opus` on MSYS2 UCRT64)
 - Optional: FFmpeg for inspecting generated MP4 files
 
 ```powershell
@@ -113,6 +114,12 @@ Add system audio to the same UDP sender:
 
 ```powershell
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8 --audio-capture system
+```
+
+Compress audio with Opus instead of sending raw WASAPI packets:
+
+```powershell
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8 --audio-capture system --audio-codec opus
 ```
 
 UDP sending is paced by default using the selected stream bitrate, which spreads encoded frame
@@ -210,6 +217,9 @@ Capture system audio and send it to the receiver:
 ```powershell
 .\build\debug\ScreenShare.exe --audio-capture system --audio-send 127.0.0.1:5000 --seconds 15
 ```
+
+Use `--audio-codec opus` with `--audio-send` or combined `--udp-send --audio-capture` to compress
+audio before UDP transport. Raw audio remains the default for diagnostics.
 
 Play received audio on the receiver:
 
@@ -333,15 +343,16 @@ Use `--list-audio-devices` to list active output and microphone endpoints. Use
 `--audio-capture microphone --seconds 5` to capture the default microphone endpoint. Add
 `--audio-device-id ID` with an id from the device list to select a specific endpoint. The diagnostic
 prints the mix format, buffer size, packet/frame/byte counts, silence/discontinuity counters, and
-peak/RMS levels. Add `--audio-send HOST:PORT` to transmit those raw WASAPI packets over UDP with
-application-level fragmentation. When `--audio-capture` is combined with the normal video
+peak/RMS levels. Add `--audio-send HOST:PORT` to transmit WASAPI packets over UDP with
+application-level fragmentation. Add `--audio-codec opus` to encode audio as 48 kHz stereo Opus at
+128 kbps before transport; otherwise raw audio is sent for diagnostics. When `--audio-capture` is combined with the normal video
 `--udp-send` path, the sender captures audio on a background thread and sends it through the same UDP
-socket as video. Raw audio is currently uncompressed, so prefer LAN testing for now. Sender stats
-report `audio_capture_*`, `audio_udp_*`, `audio_capture_qpc`, and the combined UDP pacing bitrate.
-The receiver's `--udp-recv PORT` mode accepts both H.264 media packets and raw audio packets; for
+socket as video. Sender stats report `audio_capture_*`, `audio_udp_*`, `audio_capture_qpc`,
+`audio_codec`, and the combined UDP pacing bitrate.
+The receiver's `--udp-recv PORT` mode accepts both H.264 media packets and raw or Opus audio packets; for
 audio it reports completed packet/frame/byte counts, pending or dropped incomplete packets,
-discontinuity/timestamp counters, and the latest audio format. Add `--audio-playback` to render
-received audio through the default Windows output endpoint with a packet-id-ordered jitter buffer.
+discontinuity/timestamp counters, the latest audio format, and `audio_codec`. Add `--audio-playback`
+to render received audio through the default Windows output endpoint with a packet-id-ordered jitter buffer.
 Receiver stats report `audio_playback`, queued playback packets and milliseconds, rendered
 packet/frame counts, playback drops/skips, render backpressure, and the latest audio QPC timestamp.
 When both video and audio are present, receiver stats also report `av_sync`, `av_audio_ahead_ms`,
@@ -374,6 +385,7 @@ Windows Graphics Capture
  -> paced native Direct3D receiver preview with GPU NV12 conversion
  -> standalone WASAPI audio capture diagnostics
  -> raw WASAPI audio UDP transport diagnostics
+ -> opt-in Opus audio compression
  -> opt-in receiver WASAPI audio playback with a jitter buffer
  -> combined audio+video UDP streaming with A/V diagnostics
  -> receiver A/V sync drift diagnostics

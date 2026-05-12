@@ -61,6 +61,18 @@ const char* AudioSampleFormatName(AudioSampleFormat format)
     }
 }
 
+const char* AudioCodecName(AudioCodec codec)
+{
+    switch (codec) {
+    case AudioCodec::Raw:
+        return "raw";
+    case AudioCodec::Opus:
+        return "opus";
+    default:
+        return "unknown";
+    }
+}
+
 std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback)
 {
     FeedbackPacket packet;

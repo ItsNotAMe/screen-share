@@ -2,8 +2,37 @@ cmake_minimum_required(VERSION 3.24)
 
 project(ScreenShareNative LANGUAGES CXX)
 
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(OPUS QUIET IMPORTED_TARGET opus)
+endif()
+if(OPUS_FOUND)
+    set(SCREENSHARE_OPUS_TARGET PkgConfig::OPUS)
+else()
+    find_path(SCREENSHARE_OPUS_INCLUDE_DIR
+        NAMES opus/opus.h
+        PATHS ENV OPUS_ROOT
+        PATH_SUFFIXES include
+    )
+    find_library(SCREENSHARE_OPUS_LIBRARY
+        NAMES opus
+        PATHS ENV OPUS_ROOT
+        PATH_SUFFIXES lib
+    )
+    if(NOT SCREENSHARE_OPUS_INCLUDE_DIR OR NOT SCREENSHARE_OPUS_LIBRARY)
+        message(FATAL_ERROR "Opus development files are required. Install mingw-w64-ucrt-x86_64-opus with MSYS2 or set OPUS_ROOT.")
+    endif()
+    add_library(ScreenShareOpus UNKNOWN IMPORTED)
+    set_target_properties(ScreenShareOpus PROPERTIES
+        IMPORTED_LOCATION "${SCREENSHARE_OPUS_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${SCREENSHARE_OPUS_INCLUDE_DIR}"
+    )
+    set(SCREENSHARE_OPUS_TARGET ScreenShareOpus)
+endif()
+
 add_executable(ScreenShare
     src/app/main.cpp
+    src/audio/OpusCodec.cpp
     src/audio/WasapiCapture.cpp
     src/audio/WasapiRenderer.cpp
     src/capture/DesktopCapturer.cpp
@@ -47,6 +76,7 @@ if(MSVC)
 endif()
 
 target_link_libraries(ScreenShare PRIVATE
+    ${SCREENSHARE_OPUS_TARGET}
     d3d11
     d3dcompiler
     dxgi

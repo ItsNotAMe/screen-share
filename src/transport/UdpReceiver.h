@@ -45,6 +45,7 @@ struct UdpCompletedAudioPacket {
     uint16_t bitsPerSample = 0;
     uint16_t blockAlign = 0;
     udp_protocol::AudioSampleFormat sampleFormat = udp_protocol::AudioSampleFormat::Unknown;
+    udp_protocol::AudioCodec codec = udp_protocol::AudioCodec::Raw;
     uint32_t audioFrames = 0;
     uint32_t flags = 0;
     uint16_t fragmentCount = 0;
@@ -85,6 +86,7 @@ struct UdpReceiverStats {
     uint16_t audioBitsPerSample = 0;
     uint16_t audioBlockAlign = 0;
     udp_protocol::AudioSampleFormat audioSampleFormat = udp_protocol::AudioSampleFormat::Unknown;
+    udp_protocol::AudioCodec audioCodec = udp_protocol::AudioCodec::Raw;
 };
 
 class UdpReceiver {
@@ -149,6 +151,7 @@ private:
         uint16_t bitsPerSample = 0;
         uint16_t blockAlign = 0;
         udp_protocol::AudioSampleFormat sampleFormat = udp_protocol::AudioSampleFormat::Unknown;
+        udp_protocol::AudioCodec codec = udp_protocol::AudioCodec::Raw;
         uint32_t audioFrames = 0;
         uint32_t packetBytes = 0;
         uint32_t flags = 0;

@@ -54,6 +54,7 @@ struct UdpAudioPacket {
     uint16_t bitsPerSample = 0;
     uint16_t blockAlign = 0;
     udp_protocol::AudioSampleFormat sampleFormat = udp_protocol::AudioSampleFormat::Unknown;
+    udp_protocol::AudioCodec codec = udp_protocol::AudioCodec::Raw;
     uint32_t audioFrames = 0;
     uint32_t flags = 0;
     std::vector<std::byte> bytes;
