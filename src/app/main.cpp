@@ -49,8 +49,10 @@ enum class StreamEncoderPreference {
 constexpr size_t OrderedReceiverStartThresholdFrames = 30;
 constexpr size_t OrderedReceiverRecoveryThresholdFrames = 30;
 constexpr size_t ReceiverHealthPendingFrameWarning = 8;
-constexpr uint64_t SenderQueuePressureDatagrams = 128;
+constexpr uint64_t SenderQueuePressureDatagrams = 2'048;
+constexpr uint64_t SenderQueuePressureMs = 750;
 constexpr uint32_t ResolutionStableReportsBeforeUpscale = 4;
+constexpr uint32_t ResolutionPressureReportsBeforeReduce = 3;
 constexpr int DefaultPreviewLatencyMs = 150;
 constexpr int DefaultAvSyncPreviewLatencyMs = 100;
 constexpr int DefaultPreviewMaxLateMs = 500;
@@ -1327,13 +1329,14 @@ public:
         const bool newDecodeRecovery =
             (!hasFeedback_ ? feedback.decodeResyncs > 0 : feedback.decodeResyncs > lastResyncs_) ||
             (!hasFeedback_ ? feedback.decodeSkippedPackets > 0 : feedback.decodeSkippedPackets > lastSkippedPackets_);
+        const bool senderQueuePressure =
+            stats.pendingQueueDelayMs >= SenderQueuePressureMs ||
+            (stats.pendingQueueDelayMs == 0 && stats.pendingDatagrams >= SenderQueuePressureDatagrams);
         const bool queuePressure =
             feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Buffering ||
             feedback.pendingFrames >= ReceiverHealthPendingFrameWarning ||
             feedback.pendingDecodePackets >= OrderedReceiverRecoveryThresholdFrames ||
-            (stats.pendingDatagrams >= SenderQueuePressureDatagrams &&
-             stats.peakPendingDatagrams > 0 &&
-             stats.pendingDatagrams >= stats.peakPendingDatagrams / 2);
+            senderQueuePressure;
         if (queuePressure) {
             ++queuePressureReports_;
         } else {
@@ -1541,6 +1544,40 @@ uint32_t SelectBitrate(const Options& options, int width, int height)
     constexpr uint64_t minBitrate = 8'000'000;
     constexpr uint64_t maxBitrate = 80'000'000;
     return static_cast<uint32_t>(std::clamp(estimated, minBitrate, maxBitrate));
+}
+
+uint32_t SelectAdaptiveMinBitrate(
+    const Options& options,
+    uint32_t targetBitrate,
+    const std::vector<ResolutionTier>& resolutionTiers)
+{
+    if (options.adaptMinBitrateProvided) {
+        return options.adaptMinBitrate;
+    }
+    if (!options.adaptResolution || targetBitrate == 0 || resolutionTiers.size() < 2) {
+        return 0;
+    }
+
+    const auto& nativeTier = resolutionTiers.front();
+    const auto& lowestTier = resolutionTiers.back();
+    const uint64_t nativePixels =
+        static_cast<uint64_t>(nativeTier.width) *
+        static_cast<uint64_t>(nativeTier.height);
+    const uint64_t lowestPixels =
+        static_cast<uint64_t>(lowestTier.width) *
+        static_cast<uint64_t>(lowestTier.height);
+    if (nativePixels == 0 || lowestPixels == 0) {
+        return 0;
+    }
+
+    const uint64_t areaScaledFloor =
+        static_cast<uint64_t>(targetBitrate) *
+        lowestPixels /
+        nativePixels /
+        2;
+    const uint64_t legacyFloor = std::max<uint64_t>(1'000'000, targetBitrate / 4);
+    const uint64_t adaptiveFloor = std::min(areaScaledFloor, legacyFloor);
+    return static_cast<uint32_t>(std::clamp<uint64_t>(adaptiveFloor, 2'000'000, targetBitrate));
 }
 
 double Mbps(uint32_t bitrate)
@@ -2445,6 +2482,7 @@ void RunCaptureStats(const Options& options)
     uint64_t resolutionAdaptationFailures = 0;
     int resolutionCooldownRemaining = 0;
     uint32_t resolutionStableFeedbackReports = 0;
+    uint32_t resolutionReductionPressureReports = 0;
     const char* resolutionAdaptationStatus = options.adaptResolution ? "waiting" : "disabled";
     const uint32_t streamKeyframeIntervalFrames =
         options.keyframeIntervalSeconds <= 0 ?
@@ -2555,6 +2593,7 @@ void RunCaptureStats(const Options& options)
             adaptiveResolutionTierIndex = tierIndex;
             resolutionCooldownRemaining = options.adaptResolutionCooldownSeconds;
             resolutionStableFeedbackReports = 0;
+            resolutionReductionPressureReports = 0;
             ++resolutionAdaptations;
             resolutionAdaptationStatus = std::strcmp(direction, "increase") == 0 ? "applied_increase" : "applied_reduce";
             std::cout
@@ -2597,6 +2636,11 @@ void RunCaptureStats(const Options& options)
 
         if (pressureAtFloor) {
             resolutionStableFeedbackReports = 0;
+            ++resolutionReductionPressureReports;
+            if (resolutionReductionPressureReports < ResolutionPressureReportsBeforeReduce) {
+                resolutionAdaptationStatus = "stabilizing_reduce";
+                return;
+            }
             if (adaptiveResolutionTierIndex + 1 < adaptiveResolutionTiers.size()) {
                 restartStreamAtResolution(adaptiveResolutionTierIndex + 1, "reduce", bitrateAdvisor.reason());
                 return;
@@ -2607,6 +2651,7 @@ void RunCaptureStats(const Options& options)
 
         if (reductionPressure) {
             resolutionStableFeedbackReports = 0;
+            resolutionReductionPressureReports = 0;
             resolutionAdaptationStatus = "holding";
             return;
         }
@@ -2625,6 +2670,7 @@ void RunCaptureStats(const Options& options)
 
             if (stableForUpscale) {
                 ++resolutionStableFeedbackReports;
+                resolutionReductionPressureReports = 0;
             } else {
                 resolutionStableFeedbackReports = 0;
             }
@@ -2639,6 +2685,7 @@ void RunCaptureStats(const Options& options)
         }
 
         resolutionStableFeedbackReports = 0;
+        resolutionReductionPressureReports = 0;
         resolutionAdaptationStatus = "holding";
     };
 
@@ -2746,9 +2793,13 @@ void RunCaptureStats(const Options& options)
                         encoderConfig.startFrameIndex = static_cast<int64_t>(streamEncodedFrames);
                         streamBitrate = encoderConfig.bitrate;
                         if (!bitrateAdvisor.configured()) {
+                            const uint32_t adaptiveMinBitrate = SelectAdaptiveMinBitrate(
+                                options,
+                                streamTargetBitrate,
+                                adaptiveResolutionTiers);
                             bitrateAdvisor.Configure(
                                 streamTargetBitrate,
-                                options.adaptMinBitrate,
+                                adaptiveMinBitrate,
                                 static_cast<uint32_t>(options.adaptReduceCooldownSeconds));
                         }
                         encoderConfig.backend = backend;
@@ -2914,6 +2965,8 @@ void RunCaptureStats(const Options& options)
                 << " resolution_cooldown=" << resolutionCooldownRemaining
                 << " resolution_stable_feedback=" << resolutionStableFeedbackReports
                 << " resolution_stable_required=" << ResolutionStableReportsBeforeUpscale
+                << " resolution_reduce_pressure=" << resolutionReductionPressureReports
+                << " resolution_reduce_required=" << ResolutionPressureReportsBeforeReduce
                 << " nv12=" << (lastNv12TextureAvailable ? "gpu_texture" : (lastNv12GeneratedOnGpu ? "gpu_readback" : "cpu_or_none"))
                 << " stream_input=" << (streamEncoder ? screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode()) : "none")
                 << " stream_bitrate_mbps=" << Mbps(streamBitrate)
@@ -3035,6 +3088,8 @@ void RunCaptureStats(const Options& options)
         << ", resolution adaptation failures: " << resolutionAdaptationFailures
         << ", resolution stable feedback: " << resolutionStableFeedbackReports
         << ", resolution stable required: " << ResolutionStableReportsBeforeUpscale
+        << ", resolution reduce pressure: " << resolutionReductionPressureReports
+        << ", resolution reduce required: " << ResolutionPressureReportsBeforeReduce
         << ", stream packets: " << streamPackets
         << ", stream bytes: " << streamBytes
         << ", stream queued inputs: " << streamQueuedInputs

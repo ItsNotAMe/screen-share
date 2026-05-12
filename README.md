@@ -147,7 +147,8 @@ active stream encoder and UDP pacing queue. The sender reduces quickly on loss/r
 increases more slowly after repeated clean feedback, capped at the original target bitrate.
 Use `--adapt-min-bitrate-mbps Mbps` to set the floor for reductions, and
 `--adapt-reduce-cooldown S` to control how many seconds of feedback must pass between repeated
-downward steps.
+downward steps. With `--adapt-resolution`, the default floor is lower than the old target/4 rule so
+the sender can reduce bitrate further before dropping to the next resolution tier.
 
 Add `--adapt-resolution` to let the sender restart capture and stream encoding at a lower output
 resolution after bitrate reaches its floor and receiver pressure continues. When feedback stabilizes,
@@ -155,6 +156,8 @@ resolution can step back up again after several stable feedback reports, which h
 between tiers. Use `--adapt-resolution-min-scale N` to set the smallest allowed scale and
 `--adapt-resolution-cooldown S` to space out resolution changes. Lower adaptive tiers are rounded to
 H.264-friendly dimensions so receiver decoders do not add hidden padding.
+For example, 75% of a 2560x1440 capture becomes `1920x1088` because H.264 encoders prefer
+16-pixel-aligned dimensions.
 
 The sender automatically checks whether the captured display is running in Windows HDR mode. With
 the default WGC backend, HDR desktops are captured as scRGB float frames and converted back to SDR
@@ -323,11 +326,13 @@ before they can reduce bitrate or resolution, so resize, restart, and playout ti
 immediately bounce the stream downward. `--adapt-min-bitrate-mbps Mbps` sets the adaptive bitrate floor, while
 `--adapt-reduce-cooldown S` prevents repeated reductions from every feedback report during the same
 loss/recovery episode. Add `--adapt-resolution` to make resolution a second adaptation lever: the
-sender steps down to lower output-resolution tiers when bitrate is already at its floor, then steps
-back up after sustained stable feedback. Resolution changes restart capture and the stream encoder
-while keeping UDP frame IDs and H.264 timestamps moving forward. Stats report `stream_bitrate_mbps`,
+sender steps down to lower output-resolution tiers when bitrate is already at its floor and pressure
+persists for several reports, then steps back up after sustained stable feedback. Resolution changes
+restart capture and the stream encoder while keeping UDP frame IDs and H.264 timestamps moving
+forward. Stats report `stream_bitrate_mbps`,
 `resolution_scale`, `resolution_adaptation`, `resolution_adaptations`,
-`resolution_stable_feedback`, `resolution_stable_required`, `bitrate_advice_min_mbps`,
+`resolution_stable_feedback`, `resolution_stable_required`, `resolution_reduce_pressure`,
+`resolution_reduce_required`, `bitrate_advice_min_mbps`,
 `bitrate_advice_cooldown`, `bitrate_advice_suppressed`, `bitrate_adaptation`,
 `bitrate_adaptations`, and `bitrate_adaptation_failures` so you can see whether the active encoder
 accepted the update and whether cooldown is suppressing extra reductions. The
