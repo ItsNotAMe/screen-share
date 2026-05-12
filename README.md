@@ -11,7 +11,7 @@ The first milestone is a pure C++ capture foundation:
 - Send and receive H.264 packets over UDP for local transport validation.
 - Decode received H.264 and preview it in a native Direct3D window with GPU-side NV12 conversion.
 - Capture system or microphone audio with WASAPI.
-- Send raw or Opus-compressed audio packets over UDP and optionally play them on the receiver with a small jitter buffer.
+- Send Opus-compressed audio packets over UDP by default and optionally play them on the receiver with a small jitter buffer.
 
 Friend pairing and broader network setup are later milestones.
 
@@ -126,10 +126,10 @@ Add system audio to the same UDP sender:
 .\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8 --audio-capture system
 ```
 
-Compress audio with Opus instead of sending raw WASAPI packets:
+Raw audio is still available for transport diagnostics:
 
 ```powershell
-.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8 --audio-capture system --audio-codec opus
+.\build\debug\ScreenShare.exe --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --bitrate-mbps 8 --audio-capture system --audio-codec raw
 ```
 
 UDP sending is paced by default using the selected stream bitrate, which spreads encoded frame
@@ -211,10 +211,10 @@ Listen, preview video, and play received audio:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback
 ```
 
-Enable the first opt-in A/V sync correction pass:
+This automatically enables the startup A/V sync correction pass. Disable it only for diagnostics:
 
 ```powershell
-.\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback --av-sync
+.\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback --no-av-sync
 ```
 
 Add `--seconds S` to stop preview automatically after a fixed duration. The preview playout buffer
@@ -228,8 +228,8 @@ Capture system audio and send it to the receiver:
 .\build\debug\ScreenShare.exe --audio-capture system --audio-send 127.0.0.1:5000 --seconds 15
 ```
 
-Use `--audio-codec opus` with `--audio-send` or combined `--udp-send --audio-capture` to compress
-audio before UDP transport. Raw audio remains the default for diagnostics.
+Opus is the default audio codec for `--audio-send` and combined `--udp-send --audio-capture`.
+Use `--audio-codec raw` when you want uncompressed WASAPI packets for diagnostics.
 
 Play received audio on the receiver:
 
@@ -354,8 +354,8 @@ Use `--list-audio-devices` to list active output and microphone endpoints. Use
 `--audio-device-id ID` with an id from the device list to select a specific endpoint. The diagnostic
 prints the mix format, buffer size, packet/frame/byte counts, silence/discontinuity counters, and
 peak/RMS levels. Add `--audio-send HOST:PORT` to transmit WASAPI packets over UDP with
-application-level fragmentation. Add `--audio-codec opus` to encode audio as 48 kHz stereo Opus at
-128 kbps before transport; otherwise raw audio is sent for diagnostics. When `--audio-capture` is combined with the normal video
+application-level fragmentation. Audio is encoded as 48 kHz stereo Opus at 128 kbps by default;
+add `--audio-codec raw` for uncompressed transport diagnostics. When `--audio-capture` is combined with the normal video
 `--udp-send` path, the sender captures audio on a background thread and sends it through the same UDP
 socket as video. Sender stats report `audio_capture_*`, `audio_udp_*`, `audio_capture_qpc`,
 `audio_codec`, and the combined UDP pacing bitrate.
@@ -369,12 +369,12 @@ audio QPC timestamp. If the render endpoint falls behind, the receiver trims old
 than letting live playback drift seconds behind the preview.
 When both video and audio are present, receiver stats also report `av_sync`, `av_audio_ahead_ms`,
 `av_audio_elapsed_ms`, and `av_video_elapsed_ms`. The preview title includes a compact `av +/-Nms`
-field. This is currently diagnostic-only: it measures relative drift between the received video
-timestamp timeline and the WASAPI audio QPC timeline before the app applies any A/V sync correction.
-Add `--av-sync` with `--preview --audio-playback` to wait until both audio and video sender-clock
-anchors are known, then bias either initial audio playback latency or initial preview latency by up
-to 250 ms. Receiver stats report `av_sync_correction`, `av_sync_preview_bias_ms`, and
-`av_sync_audio_bias_ms`.
+field. These fields remain useful diagnostics for relative drift between the received video
+timestamp timeline and the WASAPI audio QPC timeline.
+With `--preview --audio-playback`, the receiver waits until both audio and video sender-clock anchors
+are known, then biases either initial audio playback latency or initial preview latency by up to
+250 ms. Receiver stats report `av_sync_correction`, `av_sync_preview_bias_ms`, and
+`av_sync_audio_bias_ms`. Add `--no-av-sync` only when comparing raw receiver timing.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
@@ -397,11 +397,11 @@ Windows Graphics Capture
  -> paced native Direct3D receiver preview with GPU NV12 conversion
  -> standalone WASAPI audio capture diagnostics
  -> raw WASAPI audio UDP transport diagnostics
- -> opt-in Opus audio compression
+ -> default Opus audio compression with raw-audio diagnostics
  -> opt-in receiver WASAPI audio playback with a jitter buffer
  -> combined audio+video UDP streaming with A/V diagnostics
  -> receiver A/V sync drift diagnostics
- -> opt-in receiver A/V sync correction
+ -> default receiver A/V sync correction for preview+audio playback
  -> future session setup and renderer optimizations
 ```
 An app to share your screen with others

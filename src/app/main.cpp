@@ -108,12 +108,13 @@ struct Options {
     std::string audioDeviceId;
     bool audioDeviceIdProvided = false;
     std::string audioSendTarget;
-    screenshare::udp_protocol::AudioCodec audioCodec = screenshare::udp_protocol::AudioCodec::Raw;
+    screenshare::udp_protocol::AudioCodec audioCodec = screenshare::udp_protocol::AudioCodec::Opus;
     bool audioCodecProvided = false;
     bool audioPlayback = false;
     int audioPlaybackLatencyMs = DefaultAudioPlaybackLatencyMs;
     bool audioPlaybackLatencyProvided = false;
     bool avSync = false;
+    bool avSyncDisabled = false;
 };
 
 void PrintHelp()
@@ -129,7 +130,7 @@ void PrintHelp()
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
-        << "              [--audio-playback] [--audio-playback-latency-ms MS] [--av-sync]\n"
+        << "              [--audio-playback] [--audio-playback-latency-ms MS] [--av-sync|--no-av-sync]\n"
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
@@ -149,14 +150,14 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
-        << "  ScreenShare --audio-capture system --seconds 5 --audio-send 127.0.0.1:5000 --audio-codec opus\n"
+        << "  ScreenShare --audio-capture system --seconds 5 --audio-send 127.0.0.1:5000\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
         << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
         << "  ScreenShare --udp-recv 5000 --audio-playback\n"
         << "  ScreenShare --udp-recv 5000 --preview\n"
-        << "  ScreenShare --udp-recv 5000 --preview --audio-playback --av-sync\n"
-        << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system --audio-codec opus\n"
+        << "  ScreenShare --udp-recv 5000 --preview --audio-playback\n"
+        << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -871,6 +872,7 @@ public:
         {
             std::lock_guard lock(mutex_);
             stats_ = {};
+            stats_.codec = codec;
             error_.clear();
         }
 
@@ -1574,6 +1576,8 @@ Options ParseOptions(int argc, char** argv)
             options.audioPlaybackLatencyProvided = true;
         } else if (arg == "--av-sync") {
             options.avSync = true;
+        } else if (arg == "--no-av-sync") {
+            options.avSyncDisabled = true;
         } else if (arg == "--simulate-loss-percent") {
             options.simulateLossPercent = ParseFloat(requireValue("--simulate-loss-percent"), "--simulate-loss-percent");
             options.simulateLossProvided = true;
@@ -1622,6 +1626,15 @@ Options ParseOptions(int argc, char** argv)
     }
     if (options.audioPlaybackLatencyProvided && !options.audioPlayback) {
         throw std::invalid_argument("--audio-playback-latency-ms requires --audio-playback");
+    }
+    if (options.avSync && options.avSyncDisabled) {
+        throw std::invalid_argument("--av-sync cannot be combined with --no-av-sync");
+    }
+    if (options.avSyncDisabled && (!options.previewWindow || !options.audioPlayback)) {
+        throw std::invalid_argument("--no-av-sync requires --preview and --audio-playback");
+    }
+    if (!options.avSyncDisabled && options.previewWindow && options.audioPlayback) {
+        options.avSync = true;
     }
     if (options.avSync && (!options.previewWindow || !options.audioPlayback)) {
         throw std::invalid_argument("--av-sync requires --preview and --audio-playback");
@@ -1722,7 +1735,7 @@ Options ParseOptions(int argc, char** argv)
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
          options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync)) {
+         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync || options.avSyncDisabled)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (options.listAudioDevices &&
@@ -1735,7 +1748,7 @@ Options ParseOptions(int argc, char** argv)
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync ||
+         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync || options.avSyncDisabled ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--list-audio-devices cannot be combined with capture, stream, receiver, or video options");
     }
@@ -1749,7 +1762,7 @@ Options ParseOptions(int argc, char** argv)
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync ||
+         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync || options.avSyncDisabled ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, --audio-send, and --audio-codec");
     }
@@ -1759,6 +1772,7 @@ Options ParseOptions(int argc, char** argv)
          options.udpReceivePort != 0 || !options.h264DumpPath.empty() || options.decodeH264 ||
          !options.decodedBmpPath.empty() || options.previewWindow || options.previewLatencyProvided ||
          options.previewMaxLateProvided || options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync ||
+         options.avSyncDisabled ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--audio-capture with --udp-send is only supported for live UDP sending, not receiver, recording, BMP dump, or preview options");
     }
