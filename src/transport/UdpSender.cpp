@@ -404,6 +404,7 @@ std::vector<std::byte> UdpSender::BuildDatagram(
     header.headerBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(sizeof(udp_protocol::PacketHeader)));
     header.frameId = udp_protocol::ToNetwork64(frameId);
     header.timestamp100ns = udp_protocol::ToNetwork64(static_cast<uint64_t>(packet.timestamp100ns));
+    header.senderQpc100ns = udp_protocol::ToNetwork64(static_cast<uint64_t>(packet.senderQpc100ns));
     header.frameBytes = udp_protocol::ToNetwork32(static_cast<uint32_t>(packet.bytes.size()));
     header.fragmentOffset = udp_protocol::ToNetwork32(fragmentOffset);
     header.fragmentIndex = udp_protocol::ToNetwork16(fragmentIndex);

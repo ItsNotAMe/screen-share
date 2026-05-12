@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,7 @@ namespace screenshare {
 struct EncodedPacket {
     int64_t timestamp100ns = 0;
     int64_t duration100ns = 0;
+    int64_t senderQpc100ns = 0;
     std::vector<std::byte> bytes;
 };
 
@@ -73,6 +75,7 @@ private:
     std::vector<EncodedPacket> WaitForAsyncInputRequest();
     std::vector<EncodedPacket> WaitForAsyncQueue();
     std::vector<EncodedPacket> WaitForAsyncDrain();
+    void AttachSenderQpc(EncodedPacket& packet);
 
     H264StreamEncoderConfig config_{};
     H264StreamEncoderBackend backend_ = H264StreamEncoderBackend::Software;
@@ -88,6 +91,7 @@ private:
     uint32_t pendingAsyncInputs_ = 0;
     uint32_t pendingAsyncOutputs_ = 0;
     std::deque<Microsoft::WRL::ComPtr<IMFSample>> queuedAsyncInputs_;
+    std::map<int64_t, int64_t> senderQpcBySampleTime_;
     size_t maxQueuedAsyncInputs_ = 8;
     uint64_t droppedAsyncInputs_ = 0;
     bool asyncDrainComplete_ = false;
