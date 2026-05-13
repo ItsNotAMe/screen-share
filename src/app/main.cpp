@@ -123,6 +123,7 @@ struct Options {
     bool avSync = false;
     bool avSyncExplicit = false;
     bool avSyncDisabled = false;
+    bool sharePreset = false;
     std::string logPath;
 };
 
@@ -134,6 +135,8 @@ void PrintHelp()
         << "  ScreenShare --list\n"
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
+        << "  ScreenShare --share HOST:PORT [--display N] [--seconds S]\n"
+        << "  ScreenShare --watch PORT [--seconds S]\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
         << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
@@ -155,11 +158,14 @@ void PrintHelp()
         << "              [--bitrate-mbps Mbps] [--keyframe-interval S]\n"
         << "              [--wgc-border] [--no-hdr-to-sdr]\n"
         << "              [--hdr-sdr-white-nits N] [--hdr-sdr-exposure N]\n"
-        << "  Global: add --log PATH to save console output to a file.\n\n"
+        << "  Global: add --log PATH to save console output to a file.\n"
+        << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
         << "  ScreenShare --list-audio-devices\n"
+        << "  ScreenShare --watch 5000\n"
+        << "  ScreenShare --share 127.0.0.1:5000\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
         << "  ScreenShare --audio-capture system --seconds 5 --audio-send 127.0.0.1:5000\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
@@ -1702,6 +1708,8 @@ Options ParseOptions(int argc, char** argv)
 {
     Options options;
     bool secondsProvided = false;
+    std::optional<std::string> shareTarget;
+    std::optional<uint16_t> watchPort;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -1725,6 +1733,10 @@ Options ParseOptions(int argc, char** argv)
             options.listH264Encoders = true;
         } else if (arg == "--list-audio-devices") {
             options.listAudioDevices = true;
+        } else if (arg == "--share") {
+            shareTarget = requireValue("--share");
+        } else if (arg == "--watch") {
+            watchPort = screenshare::ParseUdpReceivePort(requireValue("--watch"));
         } else if (arg == "--audio-capture") {
             options.audioCaptureSource = screenshare::ParseAudioCaptureSource(requireValue("--audio-capture"));
             options.audioCapture = true;
@@ -1836,6 +1848,45 @@ Options ParseOptions(int argc, char** argv)
         }
     }
 
+    if (shareTarget && watchPort) {
+        throw std::invalid_argument("--share cannot be combined with --watch");
+    }
+    if (shareTarget) {
+        if (!options.udpSendTarget.empty()) {
+            throw std::invalid_argument("--share cannot be combined with --udp-send");
+        }
+        if (options.udpReceivePort != 0) {
+            throw std::invalid_argument("--share cannot be combined with --udp-recv");
+        }
+        if (!options.audioSendTarget.empty()) {
+            throw std::invalid_argument("--share cannot be combined with --audio-send");
+        }
+        options.udpSendTarget = *shareTarget;
+        options.streamEncode = true;
+        options.adaptBitrate = true;
+        options.adaptResolution = true;
+        if (!options.audioCapture) {
+            options.audioCapture = true;
+            options.audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
+        }
+        options.sharePreset = true;
+        if (!secondsProvided) {
+            options.seconds = 0;
+        }
+    }
+    if (watchPort) {
+        if (options.udpReceivePort != 0) {
+            throw std::invalid_argument("--watch cannot be combined with --udp-recv");
+        }
+        if (!options.udpSendTarget.empty()) {
+            throw std::invalid_argument("--watch cannot be combined with --udp-send or --share");
+        }
+        options.udpReceivePort = *watchPort;
+        options.previewWindow = true;
+        options.decodeH264 = true;
+        options.audioPlayback = true;
+    }
+
     if (options.adaptResolutionMinScaleProvided || options.adaptResolutionCooldownProvided) {
         options.adaptResolution = true;
         options.adaptBitrate = true;
@@ -1899,8 +1950,8 @@ Options ParseOptions(int argc, char** argv)
     if (options.seconds < 0) {
         throw std::invalid_argument("--seconds must be non-negative");
     }
-    if (options.seconds == 0 && !options.previewWindow) {
-        throw std::invalid_argument("--seconds 0 is only supported with --preview");
+    if (options.seconds == 0 && !options.previewWindow && !options.sharePreset) {
+        throw std::invalid_argument("--seconds 0 is only supported with --preview or --share");
     }
     if ((options.width == 0) != (options.height == 0)) {
         throw std::invalid_argument("--width and --height must be provided together");
@@ -2691,8 +2742,11 @@ void RunCaptureStats(const Options& options)
 
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
     auto nextFrameAt = Clock::now();
+    auto keepRunning = [&]() {
+        return options.seconds == 0 || Clock::now() - startedAt < std::chrono::seconds(options.seconds);
+    };
 
-    while (Clock::now() - startedAt < std::chrono::seconds(options.seconds)) {
+    while (keepRunning()) {
         std::this_thread::sleep_until(nextFrameAt);
         nextFrameAt += targetFrameTime;
 
