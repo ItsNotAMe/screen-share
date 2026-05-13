@@ -233,8 +233,9 @@ Use `--save-report PATH` instead of `--log PATH` when you want a zipped report f
 The report contains the command's console output, a `ScreenShare-report.txt` summary, and the
 runtime dependency manifest when it is available beside the executable. It also records the local
 session ID and fingerprint. Receiver feedback includes the receiver session fingerprint, so a
-sender report can be matched to the receiver report that saw the same session. You can still use
-`--log PATH` when you want a plain text log file.
+sender report can be matched to the receiver report that saw the same session. When the sender sees
+receiver feedback, the report summary includes the latest compact receiver health snapshot too. You
+can still use `--log PATH` when you want a plain text log file.
 
 Stress the receiver with simulated jitter or datagram loss:
 
