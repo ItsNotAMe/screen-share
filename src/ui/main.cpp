@@ -11,7 +11,6 @@
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QGridLayout>
-#include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
@@ -78,11 +77,26 @@ QFrame* makePanel()
 
 void configureFormGrid(QGridLayout* grid)
 {
-    grid->setContentsMargins(14, 24, 14, 14);
+    grid->setContentsMargins(0, 0, 0, 0);
     grid->setHorizontalSpacing(12);
-    grid->setVerticalSpacing(10);
+    grid->setVerticalSpacing(12);
     grid->setColumnMinimumWidth(0, 96);
     grid->setColumnStretch(1, 1);
+}
+
+QGridLayout* addFormPanel(QVBoxLayout* parent, const QString& title)
+{
+    auto* panel = makePanel();
+    auto* panelLayout = new QVBoxLayout(panel);
+    panelLayout->setContentsMargins(16, 14, 16, 16);
+    panelLayout->setSpacing(12);
+    panelLayout->addWidget(makeLabel(title, "PanelTitle"));
+
+    auto* grid = new QGridLayout;
+    configureFormGrid(grid);
+    panelLayout->addLayout(grid);
+    parent->addWidget(panel);
+    return grid;
 }
 
 QString appStyleSheet(bool darkMode);
@@ -198,13 +212,12 @@ private:
     QWidget* buildShareTab()
     {
         auto* page = new QWidget;
+        page->setObjectName("TabPage");
         auto* layout = new QVBoxLayout(page);
-        layout->setContentsMargins(16, 16, 16, 16);
-        layout->setSpacing(14);
+        layout->setContentsMargins(0, 22, 0, 0);
+        layout->setSpacing(16);
 
-        auto* network = new QGroupBox("Friend");
-        auto* networkGrid = new QGridLayout(network);
-        configureFormGrid(networkGrid);
+        auto* networkGrid = addFormPanel(layout, "Friend");
         shareHostEdit_ = new QLineEdit("127.0.0.1");
         sharePortSpin_ = new QSpinBox;
         sharePortSpin_->setRange(1, 65535);
@@ -213,11 +226,8 @@ private:
         networkGrid->addWidget(shareHostEdit_, 0, 1);
         networkGrid->addWidget(makeLabel("Port"), 1, 0);
         networkGrid->addWidget(sharePortSpin_, 1, 1);
-        layout->addWidget(network);
 
-        auto* video = new QGroupBox("Video");
-        auto* videoGrid = new QGridLayout(video);
-        configureFormGrid(videoGrid);
+        auto* videoGrid = addFormPanel(layout, "Video");
         displaySpin_ = new QSpinBox;
         displaySpin_->setRange(0, 16);
         displaySpin_->setValue(0);
@@ -235,7 +245,6 @@ private:
         videoGrid->addWidget(fpsSpin_, 1, 1);
         videoGrid->addWidget(makeLabel("Resolution"), 2, 0);
         videoGrid->addWidget(resolutionCombo_, 2, 1);
-        layout->addWidget(video);
 
         layout->addStretch(1);
         return page;
@@ -244,23 +253,19 @@ private:
     QWidget* buildWatchTab()
     {
         auto* page = new QWidget;
+        page->setObjectName("TabPage");
         auto* layout = new QVBoxLayout(page);
-        layout->setContentsMargins(16, 16, 16, 16);
-        layout->setSpacing(14);
+        layout->setContentsMargins(0, 22, 0, 0);
+        layout->setSpacing(16);
 
-        auto* network = new QGroupBox("Listen");
-        auto* networkGrid = new QGridLayout(network);
-        configureFormGrid(networkGrid);
+        auto* networkGrid = addFormPanel(layout, "Listen");
         watchPortSpin_ = new QSpinBox;
         watchPortSpin_->setRange(1, 65535);
         watchPortSpin_->setValue(5000);
         networkGrid->addWidget(makeLabel("Port"), 0, 0);
         networkGrid->addWidget(watchPortSpin_, 0, 1);
-        layout->addWidget(network);
 
-        auto* audio = new QGroupBox("Audio");
-        auto* audioGrid = new QGridLayout(audio);
-        configureFormGrid(audioGrid);
+        auto* audioGrid = addFormPanel(layout, "Audio");
         mutedCheck_ = new QCheckBox("Muted playback");
         volumeSpin_ = new QSpinBox;
         volumeSpin_->setRange(0, 200);
@@ -269,18 +274,14 @@ private:
         audioGrid->addWidget(mutedCheck_, 0, 0, 1, 2);
         audioGrid->addWidget(makeLabel("Volume"), 1, 0);
         audioGrid->addWidget(volumeSpin_, 1, 1);
-        layout->addWidget(audio);
 
-        auto* timing = new QGroupBox("Timing");
-        auto* timingGrid = new QGridLayout(timing);
-        configureFormGrid(timingGrid);
+        auto* timingGrid = addFormPanel(layout, "Timing");
         previewLatencySpin_ = new QSpinBox;
         previewLatencySpin_->setRange(0, 2000);
         previewLatencySpin_->setSuffix(" ms");
         previewLatencySpin_->setValue(100);
         timingGrid->addWidget(makeLabel("Preview latency"), 0, 0);
         timingGrid->addWidget(previewLatencySpin_, 0, 1);
-        layout->addWidget(timing);
         layout->addStretch(1);
         return page;
     }
@@ -556,6 +557,9 @@ QWidget {
     background: #101418;
     color: #edf2f7;
 }
+QWidget#TabPage, QLabel {
+    background: transparent;
+}
 QLabel[class="HeroTitle"] {
     font-size: 25pt;
     font-weight: 700;
@@ -592,23 +596,10 @@ QLabel[class="StatusRunning"] {
     background: #143b35;
     color: #6ee2cf;
 }
-QFrame#Panel, QGroupBox {
+QFrame#Panel {
     background: #171c22;
     border: 1px solid #2a333e;
     border-radius: 8px;
-}
-QGroupBox {
-    margin-top: 12px;
-    padding: 0;
-    font-weight: 650;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    left: 12px;
-    padding: 0 6px;
-    color: #cbd5e1;
-    background: #171c22;
 }
 QLineEdit, QSpinBox, QComboBox {
     background: #0d1116;
@@ -637,9 +628,9 @@ QCheckBox#ThemeSwitch {
     font-weight: 650;
 }
 QTabWidget::pane {
-    border: 1px solid #2a333e;
-    border-radius: 8px;
-    background: #171c22;
+    border: 0;
+    background: transparent;
+    margin-top: 8px;
 }
 QTabBar::tab {
     background: #232b34;
@@ -707,6 +698,9 @@ QWidget {
     background: #f7f8fa;
     color: #17202a;
 }
+QWidget#TabPage, QLabel {
+    background: transparent;
+}
 QLabel[class="HeroTitle"] {
     font-size: 25pt;
     font-weight: 700;
@@ -742,23 +736,10 @@ QLabel[class="StatusRunning"] {
     background: #dff3ed;
     color: #116b5f;
 }
-QFrame#Panel, QGroupBox {
+QFrame#Panel {
     background: #ffffff;
     border: 1px solid #dfe4ea;
     border-radius: 8px;
-}
-QGroupBox {
-    margin-top: 12px;
-    padding: 0;
-    font-weight: 650;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    left: 12px;
-    padding: 0 6px;
-    color: #364152;
-    background: #ffffff;
 }
 QLineEdit, QSpinBox, QComboBox {
     background: #ffffff;
@@ -778,9 +759,9 @@ QCheckBox#ThemeSwitch {
     font-weight: 650;
 }
 QTabWidget::pane {
-    border: 1px solid #dfe4ea;
-    border-radius: 8px;
-    background: #ffffff;
+    border: 0;
+    background: transparent;
+    margin-top: 8px;
 }
 QTabBar::tab {
     background: #eceff4;
