@@ -481,12 +481,14 @@ The console fields remain useful diagnostics for relative drift between the rece
 timeline and the WASAPI audio QPC timeline.
 With `--preview --audio-playback`, the receiver waits until both audio and video sender-clock anchors
 are known, then aligns the live start point by trimming leading audio packets or preview frames from
-the stream that began earlier. Audio rendering waits until the preview playout clock has started, so
-decoder startup latency cannot let audio begin before video. During playback, the receiver schedules
-audio packets against the same sender-clock preview playout timeline, so audio that belongs to a
-future video timestamp waits before entering the WASAPI render buffer. Add `--av-sync` explicitly to
-also allow the older larger startup-bias correction window for diagnostic comparisons, or `--no-av-sync`
-to compare raw receiver timing. Receiver stats report `av_sync_correction`,
+the stream that began earlier. If automatic A/V sync sees video but no audio packets arrive, it
+continues video-only instead of letting the preview queue stall; the receiver reports
+`av_sync_correction=video_only_no_audio` in that case. Audio rendering waits until the preview playout
+clock has started, so decoder startup latency cannot let audio begin before video. During playback,
+the receiver schedules audio packets against the same sender-clock preview playout timeline, so audio
+that belongs to a future video timestamp waits before entering the WASAPI render buffer. Add
+`--av-sync` explicitly to require full audio+video sync startup for diagnostic comparisons, or
+`--no-av-sync` to compare raw receiver timing. Receiver stats report `av_sync_correction`,
 `av_sync_start_qpc`, `av_sync_playback_start_qpc`, `av_sync_video_start_drops`, `av_sync_audio_start_drops`,
 `av_playout_audio_ahead_ms`, `audio_playback_sync_waits`, `av_sync_preview_bias_ms`, and
 `av_sync_audio_bias_ms`.

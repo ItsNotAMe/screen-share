@@ -64,6 +64,7 @@ constexpr int DefaultPreviewMaxLateMs = 500;
 constexpr int DefaultAudioPlaybackLatencyMs = 120;
 constexpr int DefaultUdpMaxQueueMs = 0;
 constexpr int MaxAvSyncCorrectionBiasMs = 250;
+constexpr uint64_t AvSyncVideoOnlyFallbackFrames = 30;
 
 struct Options {
     bool listDisplays = false;
@@ -3906,6 +3907,7 @@ void RunUdpReceiverStats(const Options& options)
     uint64_t avSyncPlaybackStartQpc100ns = 0;
     double avSyncPlayoutAudioAheadMs = 0.0;
     std::string avSyncCorrectionStatus = options.avSync ? "waiting" : "disabled";
+    bool avSyncVideoOnlyFallback = false;
     std::unique_ptr<screenshare::WasapiRenderer> audioRenderer;
     std::unique_ptr<screenshare::OpusAudioDecoder> opusAudioDecoder;
     std::optional<screenshare::AudioPlaybackFormat> activeAudioPlaybackFormat;
@@ -4131,6 +4133,30 @@ void RunUdpReceiverStats(const Options& options)
             << "\n";
     };
 
+    auto maybeAllowVideoOnlyAvSync = [&]() {
+        if (!options.avSync ||
+            options.avSyncExplicit ||
+            avSyncCorrectionApplied ||
+            avSyncVideoOnlyFallback) {
+            return;
+        }
+
+        const AvSyncSnapshot snapshot = avSync.snapshot();
+        if (!snapshot.hasVideo ||
+            snapshot.hasAudio ||
+            snapshot.videoFrames < AvSyncVideoOnlyFallbackFrames) {
+            return;
+        }
+
+        avSyncVideoOnlyFallback = true;
+        avSyncCorrectionApplied = true;
+        avSyncCorrectionStatus = "video_only_no_audio";
+        std::cout
+            << "A/V sync continuing video without audio after "
+            << snapshot.videoFrames
+            << " video frames and no audio packets.\n";
+    };
+
     auto drainCompletedAudioPackets = [&]() {
         while (auto audioPacket = receiver.PopAudioPacket()) {
             avSync.ObserveAudioPacket(*audioPacket);
@@ -4155,6 +4181,7 @@ void RunUdpReceiverStats(const Options& options)
             }
         }
         maybeApplyAvSyncCorrection();
+        maybeAllowVideoOnlyAvSync();
 
         if (options.audioPlayback && audioRenderer && mediaPlaybackAllowed()) {
             if (options.avSync && previewWindow) {
