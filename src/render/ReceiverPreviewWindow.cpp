@@ -176,6 +176,21 @@ void SetSwapChainSdrColorSpace(IDXGISwapChain* swapChain)
     static_cast<void>(swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
 }
 
+void DisableDxgiDefaultAltEnter(IDXGISwapChain* swapChain, HWND hwnd)
+{
+    if (swapChain == nullptr || hwnd == nullptr) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIFactory> factory;
+    ThrowIfFailed(
+        swapChain->GetParent(IID_PPV_ARGS(&factory)),
+        "IDXGISwapChain::GetParent(receiver preview factory)");
+    ThrowIfFailed(
+        factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER),
+        "IDXGIFactory::MakeWindowAssociation(receiver preview)");
+}
+
 SIZE FitFrameToWorkArea(HWND hwnd, int width, int height)
 {
     MONITORINFO monitorInfo{};
@@ -483,6 +498,7 @@ void ReceiverPreviewWindow::CreateDeviceAndSwapChain()
     }
 
     ThrowIfFailed(result, "D3D11CreateDeviceAndSwapChain(receiver preview)");
+    DisableDxgiDefaultAltEnter(swapChain_.Get(), hwnd_);
     SetSwapChainSdrColorSpace(swapChain_.Get());
     EnsureRenderTarget();
 }
