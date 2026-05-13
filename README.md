@@ -66,6 +66,18 @@ zip creation.
 
 ## Run
 
+Common live session:
+
+```powershell
+.\build\release\ScreenShare.exe --watch 5000 --log receiver.log
+.\build\release\ScreenShare.exe --share 192.168.1.127:5000 --log sender.log
+```
+
+`--watch PORT` expands to the normal receiver preview path: `--udp-recv PORT --preview
+--audio-playback`, with default A/V sync enabled. `--share HOST:PORT` expands to the normal sender
+path: `--udp-send HOST:PORT --audio-capture system --adapt-bitrate --adapt-resolution`. The share
+preset runs until you stop it with Ctrl+C by default; add `--seconds S` to choose a shorter test.
+
 List monitors:
 
 ```powershell
