@@ -24,6 +24,7 @@ Requirements:
 - CMake 3.24+
 - Windows SDK with C++/WinRT headers for the Windows Graphics Capture backend
 - Opus development package for compressed audio (`mingw-w64-ucrt-x86_64-opus` on MSYS2 UCRT64)
+- Optional: Qt 6 Widgets (`mingw-w64-ucrt-x86_64-qt6-base` on MSYS2 UCRT64) for the desktop control UI
 - Optional: FFmpeg for inspecting generated MP4 files
 
 ```powershell
@@ -49,7 +50,9 @@ cmake --build --preset release
 
 The zip is written beside the build output, for example
 `build\release\ScreenShare-release-windows-x64.zip`. It contains `ScreenShare.exe`, staged runtime
-DLLs, the dependency manifest, README, and license.
+DLLs, the dependency manifest, README, and license. When Qt 6 Widgets is available at configure
+time, the build also creates `ScreenShareUi.exe` and packages the Qt DLLs and plugin folders needed
+to run the desktop app on another Windows computer.
 
 This is attached to the default CMake `all` build, which is what the VS Code CMake Tools build
 button normally runs. If you changed the selected CMake target to `ScreenShare`, switch it back to
@@ -65,6 +68,17 @@ Set `SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD=OFF` at configure time if you want no
 zip creation.
 
 ## Run
+
+Start the desktop control UI:
+
+```powershell
+.\build\release\ScreenShareUi.exe
+```
+
+The UI starts and stops the same `ScreenShare.exe` engine beside it. Use the Share tab on the
+sending computer and the Watch tab on the receiving computer. Reports are enabled by default so a
+test run can be sent as a zip without collecting separate log files. The UI opens in dark mode by
+default and includes a theme toggle in the header.
 
 Common live session:
 
@@ -467,12 +481,14 @@ The console fields remain useful diagnostics for relative drift between the rece
 timeline and the WASAPI audio QPC timeline.
 With `--preview --audio-playback`, the receiver waits until both audio and video sender-clock anchors
 are known, then aligns the live start point by trimming leading audio packets or preview frames from
-the stream that began earlier. Audio rendering waits until the preview playout clock has started, so
-decoder startup latency cannot let audio begin before video. During playback, the receiver schedules
-audio packets against the same sender-clock preview playout timeline, so audio that belongs to a
-future video timestamp waits before entering the WASAPI render buffer. Add `--av-sync` explicitly to
-also allow the older larger startup-bias correction window for diagnostic comparisons, or `--no-av-sync`
-to compare raw receiver timing. Receiver stats report `av_sync_correction`,
+the stream that began earlier. If automatic A/V sync sees video but no audio packets arrive, it
+continues video-only instead of letting the preview queue stall; the receiver reports
+`av_sync_correction=video_only_no_audio` in that case. Audio rendering waits until the preview playout
+clock has started, so decoder startup latency cannot let audio begin before video. During playback,
+the receiver schedules audio packets against the same sender-clock preview playout timeline, so audio
+that belongs to a future video timestamp waits before entering the WASAPI render buffer. Add
+`--av-sync` explicitly to require full audio+video sync startup for diagnostic comparisons, or
+`--no-av-sync` to compare raw receiver timing. Receiver stats report `av_sync_correction`,
 `av_sync_start_qpc`, `av_sync_playback_start_qpc`, `av_sync_video_start_drops`, `av_sync_audio_start_drops`,
 `av_playout_audio_ahead_ms`, `audio_playback_sync_waits`, `av_sync_preview_bias_ms`, and
 `av_sync_audio_bias_ms`.

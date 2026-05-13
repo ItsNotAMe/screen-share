@@ -38,6 +38,7 @@
 #include <streambuf>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -63,6 +64,7 @@ constexpr int DefaultPreviewMaxLateMs = 500;
 constexpr int DefaultAudioPlaybackLatencyMs = 120;
 constexpr int DefaultUdpMaxQueueMs = 0;
 constexpr int MaxAvSyncCorrectionBiasMs = 250;
+constexpr uint64_t AvSyncVideoOnlyFallbackFrames = 30;
 
 struct Options {
     bool listDisplays = false;
@@ -135,6 +137,7 @@ struct Options {
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
+    std::string stopFilePath;
     uint64_t sessionFingerprint = 0;
 };
 
@@ -2026,6 +2029,15 @@ std::optional<std::filesystem::path> FindPathArgument(int argc, char** argv, con
     return path;
 }
 
+bool StopRequested(const Options& options)
+{
+    if (options.stopFilePath.empty()) {
+        return false;
+    }
+    std::error_code error;
+    return std::filesystem::exists(options.stopFilePath, error);
+}
+
 Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
 {
     Options options;
@@ -2050,6 +2062,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         }
         if (arg == "--log") {
             options.logPath = requireValue("--log");
+        } else if (arg == "--stop-file") {
+            options.stopFilePath = requireValue("--stop-file");
         } else if (arg == "--session" || arg == "--session-id") {
             options.sessionId = ParseSessionId(requireValue(arg.c_str()));
         } else if (arg == "--list") {
@@ -2820,7 +2834,7 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
         }
     };
 
-    while (Clock::now() - startedAt < std::chrono::seconds(options.seconds)) {
+    while (!StopRequested(options) && Clock::now() - startedAt < std::chrono::seconds(options.seconds)) {
         if (auto packet = capture.CapturePacket(std::chrono::milliseconds(100))) {
             recordPacket(*packet);
         } else {
@@ -3272,6 +3286,9 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
     auto nextFrameAt = Clock::now();
     auto keepRunning = [&]() {
+        if (StopRequested(options)) {
+            return false;
+        }
         return options.seconds == 0 || Clock::now() - startedAt < std::chrono::seconds(options.seconds);
     };
 
@@ -3890,6 +3907,7 @@ void RunUdpReceiverStats(const Options& options)
     uint64_t avSyncPlaybackStartQpc100ns = 0;
     double avSyncPlayoutAudioAheadMs = 0.0;
     std::string avSyncCorrectionStatus = options.avSync ? "waiting" : "disabled";
+    bool avSyncVideoOnlyFallback = false;
     std::unique_ptr<screenshare::WasapiRenderer> audioRenderer;
     std::unique_ptr<screenshare::OpusAudioDecoder> opusAudioDecoder;
     std::optional<screenshare::AudioPlaybackFormat> activeAudioPlaybackFormat;
@@ -4115,6 +4133,30 @@ void RunUdpReceiverStats(const Options& options)
             << "\n";
     };
 
+    auto maybeAllowVideoOnlyAvSync = [&]() {
+        if (!options.avSync ||
+            options.avSyncExplicit ||
+            avSyncCorrectionApplied ||
+            avSyncVideoOnlyFallback) {
+            return;
+        }
+
+        const AvSyncSnapshot snapshot = avSync.snapshot();
+        if (!snapshot.hasVideo ||
+            snapshot.hasAudio ||
+            snapshot.videoFrames < AvSyncVideoOnlyFallbackFrames) {
+            return;
+        }
+
+        avSyncVideoOnlyFallback = true;
+        avSyncCorrectionApplied = true;
+        avSyncCorrectionStatus = "video_only_no_audio";
+        std::cout
+            << "A/V sync continuing video without audio after "
+            << snapshot.videoFrames
+            << " video frames and no audio packets.\n";
+    };
+
     auto drainCompletedAudioPackets = [&]() {
         while (auto audioPacket = receiver.PopAudioPacket()) {
             avSync.ObserveAudioPacket(*audioPacket);
@@ -4139,6 +4181,7 @@ void RunUdpReceiverStats(const Options& options)
             }
         }
         maybeApplyAvSyncCorrection();
+        maybeAllowVideoOnlyAvSync();
 
         if (options.audioPlayback && audioRenderer && mediaPlaybackAllowed()) {
             if (options.avSync && previewWindow) {
@@ -4318,6 +4361,9 @@ void RunUdpReceiverStats(const Options& options)
 
     auto shouldContinue = [&]() {
         if (previewWindow && !previewWindow->PumpMessages()) {
+            return false;
+        }
+        if (StopRequested(options)) {
             return false;
         }
         if (options.previewWindow && options.seconds == 0) {
