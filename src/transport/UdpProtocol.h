@@ -47,6 +47,7 @@ enum AudioPacketFlags : uint32_t {
 struct FeedbackSnapshot {
     FeedbackHealthState healthState = FeedbackHealthState::Unknown;
     uint64_t sequence = 0;
+    uint64_t sessionFingerprint = 0;
     uint64_t completedFrames = 0;
     uint64_t droppedDatagrams = 0;
     uint64_t invalidDatagrams = 0;
@@ -93,6 +94,7 @@ struct FeedbackPacket {
     uint32_t previewQueuedFrames = 0;
     uint16_t healthState = 0;
     uint16_t reserved = 0;
+    uint64_t sessionFingerprint = 0;
 };
 
 struct AudioPacketHeader {
@@ -120,7 +122,7 @@ struct AudioPacketHeader {
 #pragma pack(pop)
 
 static_assert(sizeof(PacketHeader) == 48);
-static_assert(sizeof(FeedbackPacket) == 96);
+static_assert(sizeof(FeedbackPacket) == 104);
 static_assert(sizeof(AudioPacketHeader) == 72);
 
 constexpr uint16_t ByteSwap16(uint16_t value) noexcept

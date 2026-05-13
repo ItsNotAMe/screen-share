@@ -31,11 +31,13 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <span>
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -128,6 +130,8 @@ struct Options {
     bool sharePreset = false;
     std::string saveReportPath;
     std::string logPath;
+    std::string sessionId;
+    uint64_t sessionFingerprint = 0;
 };
 
 void PrintHelp()
@@ -163,14 +167,16 @@ void PrintHelp()
         << "              [--hdr-sdr-white-nits N] [--hdr-sdr-exposure N]\n"
         << "  Global: add --log PATH to save console output to a file.\n"
         << "          add --save-report PATH to save a zipped run report.\n"
+        << "          add --session ID to give both sides a matching diagnostic session.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --watch 5000 --save-report receiver-report.zip\n"
+        << "  ScreenShare --watch 5000 --session game-night --save-report receiver-report.zip\n"
         << "  ScreenShare --watch 5000\n"
-        << "  ScreenShare --share 127.0.0.1:5000\n"
+        << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
         << "  ScreenShare --audio-capture system --seconds 5 --audio-send 127.0.0.1:5000\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
@@ -423,6 +429,62 @@ screenshare::udp_protocol::AudioCodec ParseAudioCodec(const std::string& value)
         return screenshare::udp_protocol::AudioCodec::Opus;
     }
     throw std::invalid_argument("Invalid value for --audio-codec: " + value + " (expected raw or opus)");
+}
+
+std::string FormatSessionFingerprint(uint64_t fingerprint)
+{
+    std::ostringstream text;
+    text << std::uppercase << std::hex << std::setw(16) << std::setfill('0') << fingerprint;
+    return text.str();
+}
+
+uint64_t SessionFingerprint(std::string_view sessionId)
+{
+    uint64_t hash = 14695981039346656037ULL;
+    for (const char ch : sessionId) {
+        hash ^= static_cast<unsigned char>(ch);
+        hash *= 1099511628211ULL;
+    }
+    return hash == 0 ? 1 : hash;
+}
+
+std::string GenerateSessionId()
+{
+    uint64_t randomPart = 0;
+    try {
+        std::random_device random;
+        randomPart = (static_cast<uint64_t>(random()) << 32) ^ static_cast<uint64_t>(random());
+    } catch (...) {
+        randomPart = 0;
+    }
+    const uint64_t timePart = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    const uint64_t fingerprint = (randomPart ^ timePart) == 0 ? 1 : (randomPart ^ timePart);
+    return FormatSessionFingerprint(fingerprint);
+}
+
+std::string ParseSessionId(const char* value)
+{
+    const std::string sessionId = value != nullptr ? value : "";
+    if (sessionId.empty() || sessionId.size() > 64) {
+        throw std::invalid_argument("--session must be between 1 and 64 characters");
+    }
+
+    for (const char ch : sessionId) {
+        const bool allowed =
+            (ch >= 'a' && ch <= 'z') ||
+            (ch >= 'A' && ch <= 'Z') ||
+            (ch >= '0' && ch <= '9') ||
+            ch == '-' ||
+            ch == '_' ||
+            ch == '.';
+        if (!allowed) {
+            throw std::invalid_argument("--session may only contain letters, digits, dot, dash, or underscore");
+        }
+    }
+
+    return sessionId;
 }
 
 screenshare::udp_protocol::AudioSampleFormat ToUdpAudioSampleFormat(const screenshare::AudioCaptureFormat& format);
@@ -1454,11 +1516,13 @@ uint32_t SaturateUint32(uint64_t value)
 
 screenshare::udp_protocol::FeedbackSnapshot BuildReceiverFeedbackSnapshot(
     const ReceiverHealthSnapshot& health,
-    uint64_t sequence)
+    uint64_t sequence,
+    uint64_t sessionFingerprint)
 {
     screenshare::udp_protocol::FeedbackSnapshot feedback;
     feedback.healthState = ReceiverFeedbackHealthState(health);
     feedback.sequence = sequence;
+    feedback.sessionFingerprint = sessionFingerprint;
     feedback.completedFrames = health.completedFrames;
     feedback.droppedDatagrams = health.simulatedDroppedDatagrams;
     feedback.invalidDatagrams = health.invalidDatagrams;
@@ -1471,6 +1535,14 @@ screenshare::udp_protocol::FeedbackSnapshot BuildReceiverFeedbackSnapshot(
     feedback.pendingDecodePackets = SaturateUint32(health.pendingDecodePackets);
     feedback.previewQueuedFrames = SaturateUint32(health.previewQueuedFrames);
     return feedback;
+}
+
+std::string FeedbackSessionText(const screenshare::UdpSenderStats& stats)
+{
+    if (!stats.hasFeedback || stats.latestFeedback.sessionFingerprint == 0) {
+        return "none";
+    }
+    return FormatSessionFingerprint(stats.latestFeedback.sessionFingerprint);
 }
 
 void DrainUdpFeedback(screenshare::UdpSender& udpSender, std::chrono::milliseconds firstTimeout)
@@ -1906,9 +1978,10 @@ std::optional<std::filesystem::path> FindPathArgument(int argc, char** argv, con
     return path;
 }
 
-Options ParseOptions(int argc, char** argv)
+Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
 {
     Options options;
+    options.sessionId = std::move(defaultSessionId);
     bool secondsProvided = false;
     std::optional<std::string> shareTarget;
     std::optional<uint16_t> watchPort;
@@ -1929,6 +2002,8 @@ Options ParseOptions(int argc, char** argv)
         }
         if (arg == "--log") {
             options.logPath = requireValue("--log");
+        } else if (arg == "--session" || arg == "--session-id") {
+            options.sessionId = ParseSessionId(requireValue(arg.c_str()));
         } else if (arg == "--list") {
             options.listDisplays = true;
         } else if (arg == "--list-h264-encoders") {
@@ -2302,6 +2377,7 @@ Options ParseOptions(int argc, char** argv)
         throw std::invalid_argument("--audio-playback requires --udp-recv");
     }
 
+    options.sessionFingerprint = SessionFingerprint(options.sessionId);
     return options;
 }
 
@@ -2387,6 +2463,8 @@ void WriteSavedReport(
     const char* argv0,
     int argc,
     char** argv,
+    const std::string& sessionId,
+    uint64_t sessionFingerprint,
     int exitCode)
 {
     const std::filesystem::path executablePath = std::filesystem::absolute(argv0);
@@ -2399,6 +2477,8 @@ void WriteSavedReport(
     report
         << "ScreenShare saved run report\n\n"
         << "Generated local time: " << CurrentLocalTimeText() << "\n"
+        << "Session ID: " << sessionId << "\n"
+        << "Session fingerprint: " << FormatSessionFingerprint(sessionFingerprint) << "\n"
         << "Exit code: " << exitCode << "\n"
         << "Working directory: " << std::filesystem::current_path().string() << "\n"
         << "Executable: " << executablePath.string() << "\n"
@@ -2575,6 +2655,8 @@ void RunAudioCaptureStats(const Options& options)
         << ", device=\"" << screenshare::Narrow(capture.deviceName()) << "\""
         << ", format=" << screenshare::AudioCaptureFormatName(format)
         << ", buffer_frames=" << capture.bufferFrames()
+        << ", session " << options.sessionId
+        << " (" << FormatSessionFingerprint(options.sessionFingerprint) << ")"
         << ", seconds=" << options.seconds;
     if (audioSender) {
         std::cout
@@ -2666,6 +2748,8 @@ void RunAudioCaptureStats(const Options& options)
 
             std::cout
                 << "audio_packets=" << totalPackets
+                << " session=" << options.sessionId
+                << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                 << " audio_packets_per_second=" << packetsPerSecond
                 << " audio_frames=" << totalFrames
                 << " audio_frames_per_second=" << audioFramesPerSecond
@@ -2695,7 +2779,8 @@ void RunAudioCaptureStats(const Options& options)
                     << " audio_udp_wire_bytes=" << udpStatsNow.wireBytesSent
                     << " audio_codec=" << screenshare::udp_protocol::AudioCodecName(options.audioCodec)
                     << " udp_feedback_packets=" << udpStatsNow.feedbackPacketsReceived
-                    << " udp_feedback_invalid=" << udpStatsNow.invalidFeedbackPackets;
+                    << " udp_feedback_invalid=" << udpStatsNow.invalidFeedbackPackets
+                    << " udp_feedback_session=" << FeedbackSessionText(udpStatsNow);
             }
             std::cout
                 << "\n";
@@ -2725,6 +2810,8 @@ void RunAudioCaptureStats(const Options& options)
 
     std::cout
         << "Done. Audio packets: " << totalPackets
+        << ", session: " << options.sessionId
+        << ", session fingerprint: " << FormatSessionFingerprint(options.sessionFingerprint)
         << ", audio frames: " << totalFrames
         << ", average audio frames/sec: " << (totalElapsed == 0.0 ? 0.0 : static_cast<double>(totalFrames) / totalElapsed)
         << ", bytes: " << totalBytes
@@ -2742,7 +2829,8 @@ void RunAudioCaptureStats(const Options& options)
             << ", audio UDP wire bytes: " << finalUdpStats.wireBytesSent
             << ", audio codec: " << screenshare::udp_protocol::AudioCodecName(options.audioCodec)
             << ", UDP feedback packets: " << finalUdpStats.feedbackPacketsReceived
-            << ", UDP invalid feedback packets: " << finalUdpStats.invalidFeedbackPackets;
+            << ", UDP invalid feedback packets: " << finalUdpStats.invalidFeedbackPackets
+            << ", UDP feedback session: " << FeedbackSessionText(finalUdpStats);
     }
     std::cout
         << "\n";
@@ -2775,7 +2863,10 @@ void RunCaptureStats(const Options& options)
     } else {
         std::cout << ", requested output native resolution";
     }
-    std::cout << ", capture backend " << CaptureBackendName(options.captureBackend);
+    std::cout
+        << ", capture backend " << CaptureBackendName(options.captureBackend)
+        << ", session " << options.sessionId
+        << " (" << FormatSessionFingerprint(options.sessionFingerprint) << ")";
     if (!options.recordPath.empty()) {
         std::cout << ", recording H.264 to " << options.recordPath;
     }
@@ -3344,6 +3435,8 @@ void RunCaptureStats(const Options& options)
             }
             std::cout
                 << "source=" << lastSourceWidth << "x" << lastSourceHeight
+                << " session=" << options.sessionId
+                << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                 << " source_format=" << screenshare::DxgiFormatName(lastSourceFormat)
                 << " display_color_space=" << screenshare::DxgiColorSpaceName(lastDisplayColorSpace)
                 << " display_hdr=" << (lastDisplayHdrActive ? "yes" : "no")
@@ -3410,6 +3503,7 @@ void RunCaptureStats(const Options& options)
                 << " udp_feedback_completed_frames=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.completedFrames : 0)
                 << " udp_feedback_resyncs=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeResyncs : 0)
                 << " udp_feedback_skipped_packets=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeSkippedPackets : 0)
+                << " udp_feedback_session=" << FeedbackSessionText(udpStatsNow)
                 << " bitrate_advice_mbps=" << Mbps(bitrateAdvisor.recommendedBitrate())
                 << " bitrate_advice_min_mbps=" << Mbps(bitrateAdvisor.minBitrate())
                 << " bitrate_advice_action=" << bitrateAdvisor.action()
@@ -3469,6 +3563,8 @@ void RunCaptureStats(const Options& options)
     const double totalElapsed = std::chrono::duration<double>(captureFinishedAt - startedAt).count();
     std::cout
         << "Done. Average output FPS: " << (static_cast<double>(totalOutputFrames) / totalElapsed)
+        << ", session: " << options.sessionId
+        << ", session fingerprint: " << FormatSessionFingerprint(options.sessionFingerprint)
         << ", average desktop update FPS: " << (static_cast<double>(totalDesktopUpdates) / totalElapsed)
         << ", average capture ms: " << (totalCaptureCalls == 0 ? 0.0 : totalCaptureMs / static_cast<double>(totalCaptureCalls))
         << ", average stream encode ms: " << (totalStreamEncodeCalls == 0 ? 0.0 : totalStreamEncodeMs / static_cast<double>(totalStreamEncodeCalls))
@@ -3522,6 +3618,7 @@ void RunCaptureStats(const Options& options)
         << ", UDP feedback completed frames: " << (udpStats.hasFeedback ? udpStats.latestFeedback.completedFrames : 0)
         << ", UDP feedback resyncs: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeResyncs : 0)
         << ", UDP feedback skipped packets: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeSkippedPackets : 0)
+        << ", UDP feedback session: " << FeedbackSessionText(udpStats)
         << ", bitrate advice Mbps: " << Mbps(bitrateAdvisor.recommendedBitrate())
         << ", bitrate advice min Mbps: " << Mbps(bitrateAdvisor.minBitrate())
         << ", bitrate advice action: " << bitrateAdvisor.action()
@@ -3563,7 +3660,10 @@ void RunUdpReceiverStats(const Options& options)
         }
     }
 
-    std::cout << "Listening for UDP H.264 and audio packet fragments on port " << options.udpReceivePort;
+    std::cout
+        << "Listening for UDP H.264 and audio packet fragments on port " << options.udpReceivePort
+        << ", session " << options.sessionId
+        << " (" << FormatSessionFingerprint(options.sessionFingerprint) << ")";
     if (!options.h264DumpPath.empty()) {
         std::cout << ", dumping H.264 to " << options.h264DumpPath;
     }
@@ -4141,10 +4241,15 @@ void RunUdpReceiverStats(const Options& options)
                     avSyncPlayoutAudioAheadMs,
                     avSyncPlayoutReadyNow));
             }
-            receiver.SendFeedback(BuildReceiverFeedbackSnapshot(health, feedbackSequence++));
+            receiver.SendFeedback(BuildReceiverFeedbackSnapshot(
+                health,
+                feedbackSequence++,
+                options.sessionFingerprint));
 
             std::cout
                 << "udp_datagrams=" << stats.datagramsReceived
+                << " session=" << options.sessionId
+                << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                 << " receiver_health=" << ReceiverHealthState(health)
                 << " udp_datagrams_per_second=" << datagramsPerSecond
                 << " accepted_datagrams=" << stats.datagramsAccepted
@@ -4327,7 +4432,10 @@ void RunUdpReceiverStats(const Options& options)
             avSyncPlayoutAudioAheadMs,
             finalAvSyncPlayoutReady));
     }
-    receiver.SendFeedback(BuildReceiverFeedbackSnapshot(finalHealth, feedbackSequence++));
+    receiver.SendFeedback(BuildReceiverFeedbackSnapshot(
+        finalHealth,
+        feedbackSequence++,
+        options.sessionFingerprint));
     stats = receiver.stats();
     const screenshare::AudioPlaybackStats finalAudioRendererStats =
         audioRenderer ? audioRenderer->stats() : screenshare::AudioPlaybackStats{};
@@ -4335,6 +4443,8 @@ void RunUdpReceiverStats(const Options& options)
 
     std::cout
         << "Done. UDP datagrams: " << stats.datagramsReceived
+        << ", session: " << options.sessionId
+        << ", session fingerprint: " << FormatSessionFingerprint(options.sessionFingerprint)
         << ", receiver health: " << ReceiverHealthState(finalHealth)
         << ", accepted datagrams: " << stats.datagramsAccepted
         << ", simulated dropped datagrams: " << stats.simulatedDatagramsDropped
@@ -4440,6 +4550,8 @@ int main(int argc, char** argv)
     const auto explicitLogPath = FindPathArgument(argc, argv, "--log");
     std::optional<std::filesystem::path> capturedLogPath;
     bool capturedLogIsTemporary = false;
+    std::string reportSessionId = GenerateSessionId();
+    uint64_t reportSessionFingerprint = SessionFingerprint(reportSessionId);
     int exitCode = 0;
 
     try {
@@ -4454,7 +4566,9 @@ int main(int argc, char** argv)
             std::cout << "Saving run report to " << saveReportPath->string() << "\n";
         }
 
-        const Options options = ParseOptions(argc, argv);
+        const Options options = ParseOptions(argc, argv, reportSessionId);
+        reportSessionId = options.sessionId;
+        reportSessionFingerprint = options.sessionFingerprint;
 
         if (options.listDisplays) {
             PrintDisplays();
@@ -4488,7 +4602,15 @@ int main(int argc, char** argv)
 
     if (saveReportPath) {
         try {
-            WriteSavedReport(*saveReportPath, capturedLogPath, argv[0], argc, argv, exitCode);
+            WriteSavedReport(
+                *saveReportPath,
+                capturedLogPath,
+                argv[0],
+                argc,
+                argv,
+                reportSessionId,
+                reportSessionFingerprint,
+                exitCode);
             std::cout << "Run report saved to " << saveReportPath->string() << "\n";
         } catch (const std::exception& error) {
             std::cerr << "Failed to save run report: " << error.what() << "\n";
