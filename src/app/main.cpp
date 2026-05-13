@@ -134,6 +134,12 @@ struct Options {
     uint64_t sessionFingerprint = 0;
 };
 
+struct SavedReportContext {
+    std::string sessionId;
+    uint64_t sessionFingerprint = 0;
+    std::optional<screenshare::udp_protocol::FeedbackSnapshot> latestReceiverFeedback;
+};
+
 void PrintHelp()
 {
     std::cout
@@ -1545,13 +1551,28 @@ std::string FeedbackSessionText(const screenshare::UdpSenderStats& stats)
     return FormatSessionFingerprint(stats.latestFeedback.sessionFingerprint);
 }
 
-void DrainUdpFeedback(screenshare::UdpSender& udpSender, std::chrono::milliseconds firstTimeout)
+std::optional<screenshare::udp_protocol::FeedbackSnapshot> DrainUdpFeedback(
+    screenshare::UdpSender& udpSender,
+    std::chrono::milliseconds firstTimeout)
 {
-    if (!udpSender.ReceiveFeedback(firstTimeout)) {
-        return;
+    auto latestFeedback = udpSender.ReceiveFeedback(firstTimeout);
+    if (!latestFeedback) {
+        return std::nullopt;
     }
 
-    while (udpSender.ReceiveFeedback(std::chrono::milliseconds(0))) {
+    while (auto feedback = udpSender.ReceiveFeedback(std::chrono::milliseconds(0))) {
+        latestFeedback = *feedback;
+    }
+
+    return latestFeedback;
+}
+
+void RecordLatestReceiverFeedback(
+    SavedReportContext& reportContext,
+    const std::optional<screenshare::udp_protocol::FeedbackSnapshot>& feedback)
+{
+    if (feedback) {
+        reportContext.latestReceiverFeedback = *feedback;
     }
 }
 
@@ -2457,14 +2478,44 @@ std::filesystem::path TemporaryReportLogPath(const std::filesystem::path& report
     return tempPath;
 }
 
+void AppendReceiverFeedbackSummary(
+    std::ostringstream& report,
+    const std::optional<screenshare::udp_protocol::FeedbackSnapshot>& feedback)
+{
+    report << "Latest receiver feedback: ";
+    if (!feedback) {
+        report << "not observed\n";
+        return;
+    }
+
+    const auto& snapshot = *feedback;
+    report
+        << "\n"
+        << "  Session fingerprint: "
+        << (snapshot.sessionFingerprint == 0 ? "unknown" : FormatSessionFingerprint(snapshot.sessionFingerprint))
+        << "\n"
+        << "  Health: " << screenshare::udp_protocol::FeedbackHealthStateName(snapshot.healthState) << "\n"
+        << "  Sequence: " << snapshot.sequence << "\n"
+        << "  Completed frames: " << snapshot.completedFrames << "\n"
+        << "  Dropped datagrams: " << snapshot.droppedDatagrams << "\n"
+        << "  Invalid datagrams: " << snapshot.invalidDatagrams << "\n"
+        << "  Incomplete frames dropped: " << snapshot.incompleteFramesDropped << "\n"
+        << "  Decode resyncs: " << snapshot.decodeResyncs << "\n"
+        << "  Decode skipped packets: " << snapshot.decodeSkippedPackets << "\n"
+        << "  Preview late drops: " << snapshot.previewLateDrops << "\n"
+        << "  Preview overflow drops: " << snapshot.previewOverflowDrops << "\n"
+        << "  Pending frames: " << snapshot.pendingFrames << "\n"
+        << "  Pending decode packets: " << snapshot.pendingDecodePackets << "\n"
+        << "  Preview queued frames: " << snapshot.previewQueuedFrames << "\n";
+}
+
 void WriteSavedReport(
     const std::filesystem::path& outputPath,
     const std::optional<std::filesystem::path>& consoleLogPath,
     const char* argv0,
     int argc,
     char** argv,
-    const std::string& sessionId,
-    uint64_t sessionFingerprint,
+    const SavedReportContext& reportContext,
     int exitCode)
 {
     const std::filesystem::path executablePath = std::filesystem::absolute(argv0);
@@ -2477,8 +2528,8 @@ void WriteSavedReport(
     report
         << "ScreenShare saved run report\n\n"
         << "Generated local time: " << CurrentLocalTimeText() << "\n"
-        << "Session ID: " << sessionId << "\n"
-        << "Session fingerprint: " << FormatSessionFingerprint(sessionFingerprint) << "\n"
+        << "Session ID: " << reportContext.sessionId << "\n"
+        << "Session fingerprint: " << FormatSessionFingerprint(reportContext.sessionFingerprint) << "\n"
         << "Exit code: " << exitCode << "\n"
         << "Working directory: " << std::filesystem::current_path().string() << "\n"
         << "Executable: " << executablePath.string() << "\n"
@@ -2497,6 +2548,7 @@ void WriteSavedReport(
     if (consoleLogPath && std::filesystem::exists(*consoleLogPath)) {
         report << "Console log bytes: " << std::filesystem::file_size(*consoleLogPath) << "\n";
     }
+    AppendReceiverFeedbackSummary(report, reportContext.latestReceiverFeedback);
     report
         << "Runtime dependency manifest: "
         << (std::filesystem::exists(dependencyManifest) ? dependencyManifest.string() : "not found")
@@ -2618,7 +2670,7 @@ void PrintAudioDevices()
     printDevices(screenshare::AudioCaptureSource::Microphone);
 }
 
-void RunAudioCaptureStats(const Options& options)
+void RunAudioCaptureStats(const Options& options, SavedReportContext& reportContext)
 {
     screenshare::WasapiCapture capture;
     screenshare::AudioCaptureConfig config;
@@ -2741,7 +2793,9 @@ void RunAudioCaptureStats(const Options& options)
             const double intervalRms =
                 intervalSamples == 0 ? 0.0 : std::sqrt(static_cast<double>(intervalSquaredSamples / intervalSamples));
             if (audioSender) {
-                DrainUdpFeedback(*audioSender, std::chrono::milliseconds(0));
+                RecordLatestReceiverFeedback(
+                    reportContext,
+                    DrainUdpFeedback(*audioSender, std::chrono::milliseconds(0)));
             }
             const screenshare::UdpSenderStats udpStatsNow =
                 audioSender ? audioSender->stats() : screenshare::UdpSenderStats{};
@@ -2802,7 +2856,9 @@ void RunAudioCaptureStats(const Options& options)
     screenshare::UdpSenderStats finalUdpStats;
     if (audioSender) {
         audioSender->Flush();
-        DrainUdpFeedback(*audioSender, std::chrono::milliseconds(100));
+        RecordLatestReceiverFeedback(
+            reportContext,
+            DrainUdpFeedback(*audioSender, std::chrono::milliseconds(100)));
         finalUdpStats = audioSender->stats();
     }
     audioSender.reset();
@@ -2836,7 +2892,7 @@ void RunAudioCaptureStats(const Options& options)
         << "\n";
 }
 
-void RunCaptureStats(const Options& options)
+void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
 {
     StreamEncoderPreference streamEncoderPreference = options.streamEncoderPreference;
 
@@ -3422,7 +3478,9 @@ void RunCaptureStats(const Options& options)
             const double streamEncodeAvgMs =
                 intervalStreamEncodeCalls == 0 ? 0.0 : intervalStreamEncodeMs / static_cast<double>(intervalStreamEncodeCalls);
             if (udpSender) {
-                DrainUdpFeedback(*udpSender, std::chrono::milliseconds(0));
+                RecordLatestReceiverFeedback(
+                    reportContext,
+                    DrainUdpFeedback(*udpSender, std::chrono::milliseconds(0)));
             }
             const screenshare::UdpSenderStats udpStatsNow =
                 udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
@@ -3539,7 +3597,9 @@ void RunCaptureStats(const Options& options)
 
     if (udpSender) {
         udpSender->Flush();
-        DrainUdpFeedback(*udpSender, std::chrono::milliseconds(100));
+        RecordLatestReceiverFeedback(
+            reportContext,
+            DrainUdpFeedback(*udpSender, std::chrono::milliseconds(100)));
     }
 
     const size_t streamQueuedInputs = streamEncoder ? streamEncoder->queuedInputCount() : 0;
@@ -4550,8 +4610,9 @@ int main(int argc, char** argv)
     const auto explicitLogPath = FindPathArgument(argc, argv, "--log");
     std::optional<std::filesystem::path> capturedLogPath;
     bool capturedLogIsTemporary = false;
-    std::string reportSessionId = GenerateSessionId();
-    uint64_t reportSessionFingerprint = SessionFingerprint(reportSessionId);
+    SavedReportContext reportContext;
+    reportContext.sessionId = GenerateSessionId();
+    reportContext.sessionFingerprint = SessionFingerprint(reportContext.sessionId);
     int exitCode = 0;
 
     try {
@@ -4566,9 +4627,9 @@ int main(int argc, char** argv)
             std::cout << "Saving run report to " << saveReportPath->string() << "\n";
         }
 
-        const Options options = ParseOptions(argc, argv, reportSessionId);
-        reportSessionId = options.sessionId;
-        reportSessionFingerprint = options.sessionFingerprint;
+        const Options options = ParseOptions(argc, argv, reportContext.sessionId);
+        reportContext.sessionId = options.sessionId;
+        reportContext.sessionFingerprint = options.sessionFingerprint;
 
         if (options.listDisplays) {
             PrintDisplays();
@@ -4580,13 +4641,13 @@ int main(int argc, char** argv)
             PrintAudioDevices();
             exitCode = 0;
         } else if (options.audioCapture && options.udpSendTarget.empty()) {
-            RunAudioCaptureStats(options);
+            RunAudioCaptureStats(options, reportContext);
             exitCode = 0;
         } else if (options.udpReceivePort != 0) {
             RunUdpReceiverStats(options);
             exitCode = 0;
         } else {
-            RunCaptureStats(options);
+            RunCaptureStats(options, reportContext);
             exitCode = 0;
         }
     } catch (const std::invalid_argument& error) {
@@ -4608,8 +4669,7 @@ int main(int argc, char** argv)
                 argv[0],
                 argc,
                 argv,
-                reportSessionId,
-                reportSessionFingerprint,
+                reportContext,
                 exitCode);
             std::cout << "Run report saved to " << saveReportPath->string() << "\n";
         } catch (const std::exception& error) {
