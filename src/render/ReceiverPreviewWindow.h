@@ -13,6 +13,11 @@
 
 namespace screenshare {
 
+enum class PreviewScaleMode {
+    Fit,
+    OriginalSize,
+};
+
 class ReceiverPreviewWindow {
 public:
     ReceiverPreviewWindow();
@@ -42,6 +47,12 @@ private:
     void EnsurePipeline();
     void EnsureFrameTextures(int width, int height);
     void SizeWindowForFirstFrame(int width, int height);
+    void SizeWindowForCurrentFrame();
+    void ToggleFullscreen();
+    void SetFullscreen(bool fullscreen);
+    void ToggleScaleMode();
+    void RefreshTitle();
+    [[nodiscard]] D3D11_VIEWPORT ComputeViewport() const;
     void Render();
 
     HWND hwnd_ = nullptr;
@@ -50,6 +61,11 @@ private:
     bool closeRequested_ = false;
     bool swapChainResizePending_ = false;
     bool sizedForFirstFrame_ = false;
+    bool fullscreen_ = false;
+    DWORD windowedStyle_ = 0;
+    DWORD windowedExStyle_ = 0;
+    WINDOWPLACEMENT windowedPlacement_{};
+    PreviewScaleMode scaleMode_ = PreviewScaleMode::Fit;
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;

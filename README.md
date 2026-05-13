@@ -272,6 +272,13 @@ Listen, decode, and preview received frames in a native window until the window 
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview
 ```
 
+Preview window controls:
+
+- F11 or Alt+Enter toggles fullscreen.
+- Esc leaves fullscreen.
+- F toggles between fit-to-window and 1:1 source-size scaling.
+- 1 switches to 1:1 scaling and resizes the window toward the current source resolution.
+
 Listen, preview video, and play received audio:
 
 ```powershell
@@ -404,8 +411,10 @@ packets through the Microsoft H.264 decoder MFT and print decoded frame diagnost
 diagnostic converter. The raw `.h264` dump validates codec bytes and dimensions, but it does not
 store transport timing. Add `--preview` on the receiver to open a native Win32/Direct3D preview
 window; preview uploads decoded NV12 luma and chroma planes to GPU textures and converts to SDR
-Rec.709 in the pixel shader. Decoded preview frames pass through a small timestamp-ordered playout
-buffer before presentation, so network and decoder bursts are smoothed before they hit the window.
+Rec.709 in the pixel shader. The preview title includes the current scale mode, and the window can
+toggle fullscreen with F11 or Alt+Enter. Decoded preview frames pass through a small
+timestamp-ordered playout buffer before presentation, so network and decoder bursts are smoothed
+before they hit the window.
 If the decoded stream changes resolution, the preview drops queued frames from the old size and
 restarts its playout clock so adaptive-resolution tier switches do not carry stale timing into the
 new size. Receiver stats report `preview_queue`, `preview_playout_resets`, `preview_late_drops`, and

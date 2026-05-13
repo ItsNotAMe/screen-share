@@ -54,9 +54,15 @@ void ThrowIfFailed(HRESULT hr, const char* operation)
     }
 }
 
-std::wstring PreviewTitle(std::string_view statusText)
+std::wstring PreviewTitle(std::string_view statusText, PreviewScaleMode scaleMode, bool fullscreen)
 {
-    std::wstring title = L"ScreenShare Receiver Preview";
+    std::wstring title = L"ScreenShare Receiver Preview [";
+    title += scaleMode == PreviewScaleMode::Fit ? L"fit" : L"1:1";
+    if (fullscreen) {
+        title += L", fullscreen";
+    }
+    title += L"]";
+
     if (statusText.empty()) {
         return title;
     }
@@ -190,9 +196,33 @@ SIZE FitFrameToWorkArea(HWND hwnd, int width, int height)
     };
 }
 
+void ResizeWindowClientTo(HWND hwnd, int clientWidth, int clientHeight)
+{
+    RECT windowRect{
+        0,
+        0,
+        std::max(320, clientWidth),
+        std::max(180, clientHeight),
+    };
+    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
+    const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
+    AdjustWindowRectEx(&windowRect, style, FALSE, exStyle);
+    SetWindowPos(
+        hwnd,
+        nullptr,
+        0,
+        0,
+        windowRect.right - windowRect.left,
+        windowRect.bottom - windowRect.top,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 } // namespace
 
-ReceiverPreviewWindow::ReceiverPreviewWindow() = default;
+ReceiverPreviewWindow::ReceiverPreviewWindow()
+{
+    windowedPlacement_.length = sizeof(windowedPlacement_);
+}
 
 ReceiverPreviewWindow::~ReceiverPreviewWindow()
 {
@@ -262,12 +292,7 @@ void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
 void ReceiverPreviewWindow::SetStatusText(std::string_view statusText)
 {
     statusText_.assign(statusText);
-    if (hwnd_ == nullptr) {
-        return;
-    }
-
-    const std::wstring title = PreviewTitle(statusText_);
-    SetWindowTextW(hwnd_, title.c_str());
+    RefreshTitle();
 }
 
 LRESULT CALLBACK ReceiverPreviewWindow::StaticWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -292,6 +317,28 @@ LRESULT CALLBACK ReceiverPreviewWindow::StaticWindowProc(HWND hwnd, UINT message
 LRESULT ReceiverPreviewWindow::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        if (wParam == VK_F11 || (message == WM_SYSKEYDOWN && wParam == VK_RETURN)) {
+            ToggleFullscreen();
+            return 0;
+        }
+        if (message == WM_KEYDOWN && wParam == VK_ESCAPE && fullscreen_) {
+            SetFullscreen(false);
+            return 0;
+        }
+        if (message == WM_KEYDOWN && wParam == 'F') {
+            ToggleScaleMode();
+            return 0;
+        }
+        if (message == WM_KEYDOWN && wParam == '1') {
+            scaleMode_ = PreviewScaleMode::OriginalSize;
+            SizeWindowForCurrentFrame();
+            RefreshTitle();
+            Render();
+            return 0;
+        }
+        return DefWindowProcW(hwnd_, message, wParam, lParam);
     case WM_CLOSE:
         closeRequested_ = true;
         DestroyWindow(hwnd_);
@@ -306,6 +353,7 @@ LRESULT ReceiverPreviewWindow::WindowProc(UINT message, WPARAM wParam, LPARAM lP
             clientWidth_ = ClampDimension(LOWORD(lParam));
             clientHeight_ = ClampDimension(HIWORD(lParam));
             swapChainResizePending_ = true;
+            Render();
         }
         return 0;
     default:
@@ -332,7 +380,7 @@ void ReceiverPreviewWindow::EnsureWindow(int preferredWidth, int preferredHeight
     hwnd_ = CreateWindowExW(
         0,
         WindowClassName,
-        PreviewTitle(statusText_).c_str(),
+        PreviewTitle(statusText_, scaleMode_, fullscreen_).c_str(),
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -591,21 +639,130 @@ void ReceiverPreviewWindow::SizeWindowForFirstFrame(int width, int height)
     }
 
     const SIZE clientSize = FitFrameToWorkArea(hwnd_, width, height);
-    RECT windowRect{0, 0, clientSize.cx, clientSize.cy};
-    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE));
-    const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_EXSTYLE));
-    AdjustWindowRectEx(&windowRect, style, FALSE, exStyle);
-    SetWindowPos(
-        hwnd_,
-        nullptr,
-        0,
-        0,
-        windowRect.right - windowRect.left,
-        windowRect.bottom - windowRect.top,
-        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    ResizeWindowClientTo(hwnd_, clientSize.cx, clientSize.cy);
     UpdateClientSize();
     swapChainResizePending_ = true;
     sizedForFirstFrame_ = true;
+}
+
+void ReceiverPreviewWindow::SizeWindowForCurrentFrame()
+{
+    if (hwnd_ == nullptr || fullscreen_ || frameWidth_ <= 0 || frameHeight_ <= 0) {
+        return;
+    }
+
+    const SIZE clientSize = FitFrameToWorkArea(hwnd_, frameWidth_, frameHeight_);
+    ResizeWindowClientTo(hwnd_, clientSize.cx, clientSize.cy);
+    UpdateClientSize();
+    swapChainResizePending_ = true;
+}
+
+void ReceiverPreviewWindow::ToggleFullscreen()
+{
+    SetFullscreen(!fullscreen_);
+}
+
+void ReceiverPreviewWindow::SetFullscreen(bool fullscreen)
+{
+    if (hwnd_ == nullptr || fullscreen_ == fullscreen) {
+        return;
+    }
+
+    if (fullscreen) {
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+        if (monitor == nullptr || GetMonitorInfoW(monitor, &monitorInfo) == 0) {
+            return;
+        }
+
+        windowedStyle_ = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE));
+        windowedExStyle_ = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_EXSTYLE));
+        windowedPlacement_.length = sizeof(windowedPlacement_);
+        if (GetWindowPlacement(hwnd_, &windowedPlacement_) == 0) {
+            return;
+        }
+
+        fullscreen_ = true;
+        const DWORD fullscreenStyle = (windowedStyle_ & ~WS_OVERLAPPEDWINDOW) | WS_POPUP;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, static_cast<LONG_PTR>(fullscreenStyle));
+        SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, static_cast<LONG_PTR>(windowedExStyle_));
+        SetWindowPos(
+            hwnd_,
+            HWND_TOP,
+            monitorInfo.rcMonitor.left,
+            monitorInfo.rcMonitor.top,
+            monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left,
+            monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top,
+            SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    } else {
+        fullscreen_ = false;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, static_cast<LONG_PTR>(windowedStyle_));
+        SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, static_cast<LONG_PTR>(windowedExStyle_));
+        windowedPlacement_.length = sizeof(windowedPlacement_);
+        SetWindowPlacement(hwnd_, &windowedPlacement_);
+        SetWindowPos(
+            hwnd_,
+            nullptr,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+
+    UpdateClientSize();
+    swapChainResizePending_ = true;
+    RefreshTitle();
+    Render();
+}
+
+void ReceiverPreviewWindow::ToggleScaleMode()
+{
+    scaleMode_ = scaleMode_ == PreviewScaleMode::Fit ? PreviewScaleMode::OriginalSize : PreviewScaleMode::Fit;
+    if (scaleMode_ == PreviewScaleMode::OriginalSize) {
+        SizeWindowForCurrentFrame();
+    }
+    RefreshTitle();
+    Render();
+}
+
+void ReceiverPreviewWindow::RefreshTitle()
+{
+    if (hwnd_ == nullptr) {
+        return;
+    }
+
+    const std::wstring title = PreviewTitle(statusText_, scaleMode_, fullscreen_);
+    SetWindowTextW(hwnd_, title.c_str());
+}
+
+D3D11_VIEWPORT ReceiverPreviewWindow::ComputeViewport() const
+{
+    D3D11_VIEWPORT viewport{};
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+
+    if (clientWidth_ == 0 || clientHeight_ == 0 || frameWidth_ <= 0 || frameHeight_ <= 0) {
+        viewport.Width = 1.0f;
+        viewport.Height = 1.0f;
+        return viewport;
+    }
+
+    const float clientWidth = static_cast<float>(clientWidth_);
+    const float clientHeight = static_cast<float>(clientHeight_);
+    const float frameWidth = static_cast<float>(frameWidth_);
+    const float frameHeight = static_cast<float>(frameHeight_);
+    float scale = std::min(clientWidth / frameWidth, clientHeight / frameHeight);
+    if (scaleMode_ == PreviewScaleMode::OriginalSize) {
+        scale = std::min(scale, 1.0f);
+    }
+
+    viewport.Width = std::max(1.0f, frameWidth * scale);
+    viewport.Height = std::max(1.0f, frameHeight * scale);
+    viewport.TopLeftX = (clientWidth - viewport.Width) * 0.5f;
+    viewport.TopLeftY = (clientHeight - viewport.Height) * 0.5f;
+    return viewport;
 }
 
 void ReceiverPreviewWindow::Render()
@@ -622,22 +779,7 @@ void ReceiverPreviewWindow::Render()
     const float clearColor[] = {0.02f, 0.02f, 0.02f, 1.0f};
     context_->ClearRenderTargetView(renderTarget_.Get(), clearColor);
 
-    const float clientAspect = static_cast<float>(clientWidth_) / static_cast<float>(clientHeight_);
-    const float frameAspect = static_cast<float>(frameWidth_) / static_cast<float>(frameHeight_);
-    D3D11_VIEWPORT viewport{};
-    if (clientAspect > frameAspect) {
-        viewport.Height = static_cast<float>(clientHeight_);
-        viewport.Width = viewport.Height * frameAspect;
-        viewport.TopLeftX = (static_cast<float>(clientWidth_) - viewport.Width) * 0.5f;
-        viewport.TopLeftY = 0.0f;
-    } else {
-        viewport.Width = static_cast<float>(clientWidth_);
-        viewport.Height = viewport.Width / frameAspect;
-        viewport.TopLeftX = 0.0f;
-        viewport.TopLeftY = (static_cast<float>(clientHeight_) - viewport.Height) * 0.5f;
-    }
-    viewport.MinDepth = 0.0f;
-    viewport.MaxDepth = 1.0f;
+    const D3D11_VIEWPORT viewport = ComputeViewport();
 
     ID3D11RenderTargetView* renderTargets[] = {renderTarget_.Get()};
     ID3D11ShaderResourceView* shaderResources[] = {lumaView_.Get(), chromaView_.Get()};
