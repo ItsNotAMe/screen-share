@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -37,6 +38,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -124,6 +126,7 @@ struct Options {
     bool avSyncExplicit = false;
     bool avSyncDisabled = false;
     bool sharePreset = false;
+    std::string saveReportPath;
     std::string logPath;
 };
 
@@ -159,11 +162,13 @@ void PrintHelp()
         << "              [--wgc-border] [--no-hdr-to-sdr]\n"
         << "              [--hdr-sdr-white-nits N] [--hdr-sdr-exposure N]\n"
         << "  Global: add --log PATH to save console output to a file.\n"
+        << "          add --save-report PATH to save a zipped run report.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
         << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
         << "  ScreenShare --list-audio-devices\n"
+        << "  ScreenShare --watch 5000 --save-report receiver-report.zip\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
@@ -475,7 +480,7 @@ private:
 
 class ScopedLogRedirect {
 public:
-    explicit ScopedLogRedirect(const std::filesystem::path& path)
+    explicit ScopedLogRedirect(const std::filesystem::path& path, bool announce = true)
     {
         if (path.has_parent_path()) {
             std::filesystem::create_directories(path.parent_path());
@@ -491,7 +496,9 @@ public:
         oldCout_ = std::cout.rdbuf(coutTee_.get());
         oldCerr_ = std::cerr.rdbuf(cerrTee_.get());
 
-        std::cout << "Logging console output to " << path.string() << "\n";
+        if (announce) {
+            std::cout << "Logging console output to " << path.string() << "\n";
+        }
     }
 
     ~ScopedLogRedirect()
@@ -517,6 +524,201 @@ private:
     std::unique_ptr<TeeStreambuf> cerrTee_;
     std::streambuf* oldCout_ = nullptr;
     std::streambuf* oldCerr_ = nullptr;
+};
+
+uint32_t Crc32(std::span<const uint8_t> bytes)
+{
+    uint32_t crc = 0xFFFFFFFFU;
+    for (const uint8_t byte : bytes) {
+        crc ^= byte;
+        for (int bit = 0; bit < 8; ++bit) {
+            const uint32_t mask = 0U - (crc & 1U);
+            crc = (crc >> 1U) ^ (0xEDB88320U & mask);
+        }
+    }
+    return ~crc;
+}
+
+std::vector<uint8_t> ReadBinaryFile(const std::filesystem::path& path)
+{
+    const auto size = std::filesystem::file_size(path);
+    if (size > std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("Report input is too large for the zip bundle: " + path.string());
+    }
+
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("Failed to open report input: " + path.string());
+    }
+    if (!bytes.empty()) {
+        input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        if (!input) {
+            throw std::runtime_error("Failed to read report input: " + path.string());
+        }
+    }
+    return bytes;
+}
+
+void RemoveFileIfExists(const std::filesystem::path& path)
+{
+    std::error_code error;
+    std::filesystem::remove(path, error);
+}
+
+std::vector<uint8_t> StringBytes(const std::string& text)
+{
+    return std::vector<uint8_t>(text.begin(), text.end());
+}
+
+std::string ToZipPath(std::string path)
+{
+    std::replace(path.begin(), path.end(), '\\', '/');
+    return path;
+}
+
+class ZipWriter {
+public:
+    explicit ZipWriter(const std::filesystem::path& path)
+    {
+        if (path.has_parent_path()) {
+            std::filesystem::create_directories(path.parent_path());
+        }
+
+        output_.open(path, std::ios::binary | std::ios::trunc);
+        if (!output_) {
+            throw std::runtime_error("Failed to create report bundle: " + path.string());
+        }
+    }
+
+    void AddFile(const std::string& archiveName, std::span<const uint8_t> bytes)
+    {
+        if (archiveName.empty()) {
+            throw std::runtime_error("Report bundle entry name is empty");
+        }
+        if (bytes.size() > std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("Report bundle entry is too large: " + archiveName);
+        }
+
+        Entry entry;
+        entry.name = ToZipPath(archiveName);
+        if (entry.name.size() > std::numeric_limits<uint16_t>::max()) {
+            throw std::runtime_error("Report bundle entry name is too long: " + entry.name);
+        }
+        entry.crc = Crc32(bytes);
+        entry.size = static_cast<uint32_t>(bytes.size());
+        entry.localHeaderOffset = Tell();
+
+        WriteU32(0x04034B50U);
+        WriteU16(20);
+        WriteU16(0);
+        WriteU16(0);
+        WriteU16(0);
+        WriteU16(0);
+        WriteU32(entry.crc);
+        WriteU32(entry.size);
+        WriteU32(entry.size);
+        WriteU16(static_cast<uint16_t>(entry.name.size()));
+        WriteU16(0);
+        output_.write(entry.name.data(), static_cast<std::streamsize>(entry.name.size()));
+        if (!bytes.empty()) {
+            output_.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        }
+        if (!output_) {
+            throw std::runtime_error("Failed to write report bundle entry: " + entry.name);
+        }
+
+        entries_.push_back(std::move(entry));
+    }
+
+    void Finish()
+    {
+        if (finished_) {
+            return;
+        }
+        if (entries_.size() > std::numeric_limits<uint16_t>::max()) {
+            throw std::runtime_error("Report bundle has too many entries");
+        }
+
+        const uint32_t centralDirectoryOffset = Tell();
+        for (const auto& entry : entries_) {
+            WriteU32(0x02014B50U);
+            WriteU16(20);
+            WriteU16(20);
+            WriteU16(0);
+            WriteU16(0);
+            WriteU16(0);
+            WriteU16(0);
+            WriteU32(entry.crc);
+            WriteU32(entry.size);
+            WriteU32(entry.size);
+            WriteU16(static_cast<uint16_t>(entry.name.size()));
+            WriteU16(0);
+            WriteU16(0);
+            WriteU16(0);
+            WriteU16(0);
+            WriteU32(0);
+            WriteU32(entry.localHeaderOffset);
+            output_.write(entry.name.data(), static_cast<std::streamsize>(entry.name.size()));
+        }
+
+        const uint32_t centralDirectorySize = Tell() - centralDirectoryOffset;
+        WriteU32(0x06054B50U);
+        WriteU16(0);
+        WriteU16(0);
+        WriteU16(static_cast<uint16_t>(entries_.size()));
+        WriteU16(static_cast<uint16_t>(entries_.size()));
+        WriteU32(centralDirectorySize);
+        WriteU32(centralDirectoryOffset);
+        WriteU16(0);
+        if (!output_) {
+            throw std::runtime_error("Failed to finish report bundle");
+        }
+        finished_ = true;
+    }
+
+    [[nodiscard]] size_t entryCount() const noexcept { return entries_.size(); }
+
+private:
+    struct Entry {
+        std::string name;
+        uint32_t crc = 0;
+        uint32_t size = 0;
+        uint32_t localHeaderOffset = 0;
+    };
+
+    uint32_t Tell()
+    {
+        const auto position = output_.tellp();
+        if (position < 0 || static_cast<uint64_t>(position) > std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("Report bundle exceeded zip32 size limits");
+        }
+        return static_cast<uint32_t>(position);
+    }
+
+    void WriteU16(uint16_t value)
+    {
+        const char bytes[2] = {
+            static_cast<char>(value & 0xFF),
+            static_cast<char>((value >> 8) & 0xFF),
+        };
+        output_.write(bytes, sizeof(bytes));
+    }
+
+    void WriteU32(uint32_t value)
+    {
+        const char bytes[4] = {
+            static_cast<char>(value & 0xFF),
+            static_cast<char>((value >> 8) & 0xFF),
+            static_cast<char>((value >> 16) & 0xFF),
+            static_cast<char>((value >> 24) & 0xFF),
+        };
+        output_.write(bytes, sizeof(bytes));
+    }
+
+    std::ofstream output_;
+    std::vector<Entry> entries_;
+    bool finished_ = false;
 };
 
 class PreviewPlayoutBuffer {
@@ -1692,16 +1894,16 @@ screenshare::UdpCompletedAudioPacket DecodeOpusAudioPacketForPlayback(
     return decoded;
 }
 
-std::optional<std::filesystem::path> FindLogPathArgument(int argc, char** argv)
+std::optional<std::filesystem::path> FindPathArgument(int argc, char** argv, const char* optionName)
 {
-    std::optional<std::filesystem::path> logPath;
+    std::optional<std::filesystem::path> path;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--log" && i + 1 < argc) {
-            logPath = argv[++i];
+        if (arg == optionName && i + 1 < argc) {
+            path = argv[++i];
         }
     }
-    return logPath;
+    return path;
 }
 
 Options ParseOptions(int argc, char** argv)
@@ -1733,6 +1935,8 @@ Options ParseOptions(int argc, char** argv)
             options.listH264Encoders = true;
         } else if (arg == "--list-audio-devices") {
             options.listAudioDevices = true;
+        } else if (arg == "--save-report") {
+            options.saveReportPath = requireValue("--save-report");
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
         } else if (arg == "--watch") {
@@ -2099,6 +2303,142 @@ Options ParseOptions(int argc, char** argv)
     }
 
     return options;
+}
+
+std::string UniqueArchiveName(const std::string& requestedName, std::vector<std::string>& usedNames)
+{
+    std::string baseName = ToZipPath(requestedName);
+    if (baseName.empty()) {
+        baseName = "file";
+    }
+
+    auto isUsed = [&](const std::string& name) {
+        return std::find(usedNames.begin(), usedNames.end(), name) != usedNames.end();
+    };
+
+    if (!isUsed(baseName)) {
+        usedNames.push_back(baseName);
+        return baseName;
+    }
+
+    const auto slash = baseName.find_last_of('/');
+    const auto dot = baseName.find_last_of('.');
+    const bool hasExtension = dot != std::string::npos && (slash == std::string::npos || dot > slash);
+    const std::string prefix = hasExtension ? baseName.substr(0, dot) : baseName;
+    const std::string extension = hasExtension ? baseName.substr(dot) : std::string{};
+    for (int suffix = 2;; ++suffix) {
+        const std::string candidate = prefix + "-" + std::to_string(suffix) + extension;
+        if (!isUsed(candidate)) {
+            usedNames.push_back(candidate);
+            return candidate;
+        }
+    }
+}
+
+std::string CurrentLocalTimeText()
+{
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t time = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+    if (const std::tm* local = std::localtime(&time)) {
+        localTime = *local;
+    }
+
+    std::ostringstream text;
+    text << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S");
+    return text.str();
+}
+
+std::string JoinCommandLine(int argc, char** argv)
+{
+    std::ostringstream command;
+    for (int index = 0; index < argc; ++index) {
+        if (index > 0) {
+            command << ' ';
+        }
+        const std::string arg = argv[index] != nullptr ? argv[index] : "";
+        const bool needsQuotes = arg.find_first_of(" \t\"") != std::string::npos;
+        if (!needsQuotes) {
+            command << arg;
+            continue;
+        }
+        command << '"';
+        for (const char ch : arg) {
+            if (ch == '"') {
+                command << '\\';
+            }
+            command << ch;
+        }
+        command << '"';
+    }
+    return command.str();
+}
+
+std::filesystem::path TemporaryReportLogPath(const std::filesystem::path& reportPath)
+{
+    std::filesystem::path tempPath = reportPath;
+    tempPath += ".console.log.tmp";
+    return tempPath;
+}
+
+void WriteSavedReport(
+    const std::filesystem::path& outputPath,
+    const std::optional<std::filesystem::path>& consoleLogPath,
+    const char* argv0,
+    int argc,
+    char** argv,
+    int exitCode)
+{
+    const std::filesystem::path executablePath = std::filesystem::absolute(argv0);
+    const std::filesystem::path dependencyManifest =
+        executablePath.has_parent_path() ?
+        executablePath.parent_path() / "ScreenShare-runtime-dependencies.txt" :
+        std::filesystem::path("ScreenShare-runtime-dependencies.txt");
+
+    std::ostringstream report;
+    report
+        << "ScreenShare saved run report\n\n"
+        << "Generated local time: " << CurrentLocalTimeText() << "\n"
+        << "Exit code: " << exitCode << "\n"
+        << "Working directory: " << std::filesystem::current_path().string() << "\n"
+        << "Executable: " << executablePath.string() << "\n"
+        << "Command line: " << JoinCommandLine(argc, argv) << "\n"
+        << "Build: "
+#ifdef NDEBUG
+        << "release"
+#else
+        << "debug"
+#endif
+        << "\n"
+        << "Pointer bits: " << (sizeof(void*) * 8) << "\n"
+        << "Console log: "
+        << (consoleLogPath ? std::filesystem::absolute(*consoleLogPath).string() : "not captured")
+        << "\n";
+    if (consoleLogPath && std::filesystem::exists(*consoleLogPath)) {
+        report << "Console log bytes: " << std::filesystem::file_size(*consoleLogPath) << "\n";
+    }
+    report
+        << "Runtime dependency manifest: "
+        << (std::filesystem::exists(dependencyManifest) ? dependencyManifest.string() : "not found")
+        << "\n";
+
+    ZipWriter zip(outputPath);
+    std::vector<std::string> archiveNames;
+    zip.AddFile(UniqueArchiveName("ScreenShare-report.txt", archiveNames), StringBytes(report.str()));
+
+    if (consoleLogPath && std::filesystem::exists(*consoleLogPath) && std::filesystem::is_regular_file(*consoleLogPath)) {
+        zip.AddFile(
+            UniqueArchiveName("logs/console.log", archiveNames),
+            ReadBinaryFile(*consoleLogPath));
+    }
+
+    if (std::filesystem::exists(dependencyManifest) && std::filesystem::is_regular_file(dependencyManifest)) {
+        zip.AddFile(
+            UniqueArchiveName("runtime/ScreenShare-runtime-dependencies.txt", archiveNames),
+            ReadBinaryFile(dependencyManifest));
+    }
+
+    zip.Finish();
 }
 
 void PrintDisplays()
@@ -4096,47 +4436,69 @@ void RunUdpReceiverStats(const Options& options)
 int main(int argc, char** argv)
 {
     std::unique_ptr<ScopedLogRedirect> logRedirect;
+    const auto saveReportPath = FindPathArgument(argc, argv, "--save-report");
+    const auto explicitLogPath = FindPathArgument(argc, argv, "--log");
+    std::optional<std::filesystem::path> capturedLogPath;
+    bool capturedLogIsTemporary = false;
+    int exitCode = 0;
 
     try {
-        if (const auto logPath = FindLogPathArgument(argc, argv)) {
-            logRedirect = std::make_unique<ScopedLogRedirect>(*logPath);
+        if (explicitLogPath) {
+            capturedLogPath = *explicitLogPath;
+            logRedirect = std::make_unique<ScopedLogRedirect>(*capturedLogPath);
+        } else if (saveReportPath) {
+            capturedLogPath = TemporaryReportLogPath(*saveReportPath);
+            capturedLogIsTemporary = true;
+            RemoveFileIfExists(*capturedLogPath);
+            logRedirect = std::make_unique<ScopedLogRedirect>(*capturedLogPath, false);
+            std::cout << "Saving run report to " << saveReportPath->string() << "\n";
         }
 
         const Options options = ParseOptions(argc, argv);
 
         if (options.listDisplays) {
             PrintDisplays();
-            return 0;
-        }
-
-        if (options.listH264Encoders) {
+            exitCode = 0;
+        } else if (options.listH264Encoders) {
             PrintH264Encoders(options);
-            return 0;
-        }
-
-        if (options.listAudioDevices) {
+            exitCode = 0;
+        } else if (options.listAudioDevices) {
             PrintAudioDevices();
-            return 0;
-        }
-
-        if (options.audioCapture && options.udpSendTarget.empty()) {
+            exitCode = 0;
+        } else if (options.audioCapture && options.udpSendTarget.empty()) {
             RunAudioCaptureStats(options);
-            return 0;
-        }
-
-        if (options.udpReceivePort != 0) {
+            exitCode = 0;
+        } else if (options.udpReceivePort != 0) {
             RunUdpReceiverStats(options);
-            return 0;
+            exitCode = 0;
+        } else {
+            RunCaptureStats(options);
+            exitCode = 0;
         }
-
-        RunCaptureStats(options);
-        return 0;
     } catch (const std::invalid_argument& error) {
         std::cerr << "Error: " << error.what() << "\n\n";
         PrintHelp();
-        return 1;
+        exitCode = 1;
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << "\n";
-        return 1;
+        exitCode = 1;
     }
+
+    logRedirect.reset();
+
+    if (saveReportPath) {
+        try {
+            WriteSavedReport(*saveReportPath, capturedLogPath, argv[0], argc, argv, exitCode);
+            std::cout << "Run report saved to " << saveReportPath->string() << "\n";
+        } catch (const std::exception& error) {
+            std::cerr << "Failed to save run report: " << error.what() << "\n";
+            exitCode = 1;
+        }
+    }
+
+    if (capturedLogIsTemporary && capturedLogPath) {
+        RemoveFileIfExists(*capturedLogPath);
+    }
+
+    return exitCode;
 }
