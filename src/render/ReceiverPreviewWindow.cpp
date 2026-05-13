@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace screenshare {
 namespace {
@@ -295,6 +296,11 @@ void ReceiverPreviewWindow::SetStatusText(std::string_view statusText)
     RefreshTitle();
 }
 
+void ReceiverPreviewWindow::SetControlCallbacks(ReceiverPreviewControlCallbacks callbacks)
+{
+    controlCallbacks_ = std::move(callbacks);
+}
+
 LRESULT CALLBACK ReceiverPreviewWindow::StaticWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     ReceiverPreviewWindow* window = nullptr;
@@ -336,6 +342,22 @@ LRESULT ReceiverPreviewWindow::WindowProc(UINT message, WPARAM wParam, LPARAM lP
             SizeWindowForCurrentFrame();
             RefreshTitle();
             Render();
+            return 0;
+        }
+        if (message == WM_KEYDOWN && wParam == 'M' && controlCallbacks_.toggleAudioMute) {
+            controlCallbacks_.toggleAudioMute();
+            return 0;
+        }
+        if (message == WM_KEYDOWN &&
+            (wParam == VK_OEM_PLUS || wParam == VK_ADD) &&
+            controlCallbacks_.adjustAudioVolumePercent) {
+            controlCallbacks_.adjustAudioVolumePercent(5);
+            return 0;
+        }
+        if (message == WM_KEYDOWN &&
+            (wParam == VK_OEM_MINUS || wParam == VK_SUBTRACT) &&
+            controlCallbacks_.adjustAudioVolumePercent) {
+            controlCallbacks_.adjustAudioVolumePercent(-5);
             return 0;
         }
         return DefWindowProcW(hwnd_, message, wParam, lParam);

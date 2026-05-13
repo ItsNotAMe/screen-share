@@ -8,6 +8,7 @@
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -16,6 +17,11 @@ namespace screenshare {
 enum class PreviewScaleMode {
     Fit,
     OriginalSize,
+};
+
+struct ReceiverPreviewControlCallbacks {
+    std::function<void()> toggleAudioMute;
+    std::function<void(int)> adjustAudioVolumePercent;
 };
 
 class ReceiverPreviewWindow {
@@ -30,6 +36,7 @@ public:
     bool PumpMessages();
     void PresentFrame(const DecodedFrameInfo& frame);
     void SetStatusText(std::string_view statusText);
+    void SetControlCallbacks(ReceiverPreviewControlCallbacks callbacks);
 
     [[nodiscard]] bool closeRequested() const noexcept { return closeRequested_; }
     [[nodiscard]] uint64_t framesPresented() const noexcept { return framesPresented_; }
@@ -66,6 +73,7 @@ private:
     DWORD windowedExStyle_ = 0;
     WINDOWPLACEMENT windowedPlacement_{};
     PreviewScaleMode scaleMode_ = PreviewScaleMode::Fit;
+    ReceiverPreviewControlCallbacks controlCallbacks_;
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
