@@ -77,6 +77,8 @@ Common live session:
 --audio-playback`, with default A/V sync enabled. `--share HOST:PORT` expands to the normal sender
 path: `--udp-send HOST:PORT --audio-capture system --adapt-bitrate --adapt-resolution`. The share
 preset runs until you stop it with Ctrl+C by default; add `--seconds S` to choose a shorter test.
+Add the same `--session ID` on both sides when you want sender and receiver logs/reports to be
+easy to match later. If omitted, each process generates its own diagnostic session ID.
 
 List monitors:
 
@@ -225,11 +227,14 @@ Use `--save-report PATH` instead of `--log PATH` when you want a zipped report f
 
 ```powershell
 .\build\debug\ScreenShare.exe --watch 5000 --save-report receiver-report.zip
+.\build\debug\ScreenShare.exe --share 192.168.1.127:5000 --session game-night --save-report sender-report.zip
 ```
 
 The report contains the command's console output, a `ScreenShare-report.txt` summary, and the
-runtime dependency manifest when it is available beside the executable. You can still use `--log
-PATH` when you want a plain text log file.
+runtime dependency manifest when it is available beside the executable. It also records the local
+session ID and fingerprint. Receiver feedback includes the receiver session fingerprint, so a
+sender report can be matched to the receiver report that saw the same session. You can still use
+`--log PATH` when you want a plain text log file.
 
 Stress the receiver with simulated jitter or datagram loss:
 

@@ -5,6 +5,8 @@
 namespace screenshare::udp_protocol {
 namespace {
 
+constexpr size_t LegacyFeedbackPacketBytes = 96;
+
 bool IsKnownFeedbackHealthState(uint16_t state)
 {
     switch (static_cast<FeedbackHealthState>(state)) {
@@ -80,6 +82,7 @@ std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback)
     packet.version = ToNetwork16(PacketVersion);
     packet.packetBytes = ToNetwork16(static_cast<uint16_t>(sizeof(FeedbackPacket)));
     packet.sequence = ToNetwork64(feedback.sequence);
+    packet.sessionFingerprint = ToNetwork64(feedback.sessionFingerprint);
     packet.completedFrames = ToNetwork64(feedback.completedFrames);
     packet.droppedDatagrams = ToNetwork64(feedback.droppedDatagrams);
     packet.invalidDatagrams = ToNetwork64(feedback.invalidDatagrams);
@@ -100,12 +103,13 @@ std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback)
 
 std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte> datagram)
 {
-    if (datagram.size() != sizeof(FeedbackPacket)) {
+    if (datagram.size() != LegacyFeedbackPacketBytes &&
+        datagram.size() != sizeof(FeedbackPacket)) {
         return std::nullopt;
     }
 
-    FeedbackPacket packet;
-    std::memcpy(&packet, datagram.data(), sizeof(packet));
+    FeedbackPacket packet{};
+    std::memcpy(&packet, datagram.data(), datagram.size());
 
     const uint32_t magic = FromNetwork32(packet.magic);
     const uint16_t version = FromNetwork16(packet.version);
@@ -113,7 +117,7 @@ std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte>
     const uint16_t healthState = FromNetwork16(packet.healthState);
     if (magic != FeedbackMagic ||
         version != PacketVersion ||
-        packetBytes != sizeof(FeedbackPacket) ||
+        packetBytes != datagram.size() ||
         !IsKnownFeedbackHealthState(healthState)) {
         return std::nullopt;
     }
@@ -121,6 +125,9 @@ std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte>
     FeedbackSnapshot feedback;
     feedback.healthState = static_cast<FeedbackHealthState>(healthState);
     feedback.sequence = FromNetwork64(packet.sequence);
+    if (datagram.size() >= sizeof(FeedbackPacket)) {
+        feedback.sessionFingerprint = FromNetwork64(packet.sessionFingerprint);
+    }
     feedback.completedFrames = FromNetwork64(packet.completedFrames);
     feedback.droppedDatagrams = FromNetwork64(packet.droppedDatagrams);
     feedback.invalidDatagrams = FromNetwork64(packet.invalidDatagrams);
