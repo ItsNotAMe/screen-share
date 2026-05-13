@@ -221,6 +221,16 @@ For example, use this when sending receiver diagnostics:
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback --log receiver.log
 ```
 
+Use `--save-report PATH` instead of `--log PATH` when you want a zipped report for one run:
+
+```powershell
+.\build\debug\ScreenShare.exe --watch 5000 --save-report receiver-report.zip
+```
+
+The report contains the command's console output, a `ScreenShare-report.txt` summary, and the
+runtime dependency manifest when it is available beside the executable. You can still use `--log
+PATH` when you want a plain text log file.
+
 Stress the receiver with simulated jitter or datagram loss:
 
 ```powershell
