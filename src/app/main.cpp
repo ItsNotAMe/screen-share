@@ -124,6 +124,10 @@ struct Options {
     bool audioPlayback = false;
     int audioPlaybackLatencyMs = DefaultAudioPlaybackLatencyMs;
     bool audioPlaybackLatencyProvided = false;
+    bool audioPlaybackMuted = false;
+    bool audioPlaybackMutedProvided = false;
+    float audioPlaybackVolumePercent = 100.0f;
+    bool audioPlaybackVolumeProvided = false;
     bool avSync = false;
     bool avSyncExplicit = false;
     bool avSyncDisabled = false;
@@ -155,7 +159,9 @@ void PrintHelp()
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
-        << "              [--audio-playback] [--audio-playback-latency-ms MS] [--av-sync|--no-av-sync]\n"
+        << "              [--audio-playback] [--audio-playback-latency-ms MS]\n"
+        << "              [--audio-playback-muted] [--audio-playback-volume PERCENT]\n"
+        << "              [--av-sync|--no-av-sync]\n"
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
@@ -189,6 +195,7 @@ void PrintHelp()
         << "  ScreenShare --display 0 --fps 60 --seconds 15 --record native.mp4\n"
         << "  ScreenShare --udp-recv 5000 --seconds 15 --dump-decoded-bmp receiver.bmp\n"
         << "  ScreenShare --udp-recv 5000 --audio-playback\n"
+        << "  ScreenShare --watch 5000 --audio-playback-muted\n"
         << "  ScreenShare --udp-recv 5000 --preview\n"
         << "  ScreenShare --udp-recv 5000 --preview --audio-playback\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system\n"
@@ -1769,6 +1776,26 @@ std::string FormatAvSyncTitle(const AvSyncSnapshot& avSync, double playoutAudioA
     return stream.str();
 }
 
+std::string FormatAudioPlaybackTitle(bool enabled, std::string_view status, bool muted, float volume)
+{
+    if (!enabled) {
+        return "aud off";
+    }
+
+    const int percent = static_cast<int>(std::lround(std::clamp(volume, 0.0f, 2.0f) * 100.0f));
+    std::ostringstream stream;
+    stream << "aud ";
+    if (muted) {
+        stream << "muted";
+    } else if (!status.empty()) {
+        stream << status;
+    } else {
+        stream << "on";
+    }
+    stream << " " << percent << "%";
+    return stream.str();
+}
+
 std::string FormatReceiverHealthTitle(
     const ReceiverHealthSnapshot& health,
     const AvSyncSnapshot& avSync,
@@ -2127,6 +2154,12 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--audio-playback-latency-ms") {
             options.audioPlaybackLatencyMs = ParseInt(requireValue("--audio-playback-latency-ms"), "--audio-playback-latency-ms");
             options.audioPlaybackLatencyProvided = true;
+        } else if (arg == "--audio-playback-muted") {
+            options.audioPlaybackMuted = true;
+            options.audioPlaybackMutedProvided = true;
+        } else if (arg == "--audio-playback-volume") {
+            options.audioPlaybackVolumePercent = ParseFloat(requireValue("--audio-playback-volume"), "--audio-playback-volume");
+            options.audioPlaybackVolumeProvided = true;
         } else if (arg == "--av-sync") {
             options.avSync = true;
             options.avSyncExplicit = true;
@@ -2220,6 +2253,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.audioPlaybackLatencyProvided && !options.audioPlayback) {
         throw std::invalid_argument("--audio-playback-latency-ms requires --audio-playback");
     }
+    if ((options.audioPlaybackMutedProvided || options.audioPlaybackVolumeProvided) && !options.audioPlayback) {
+        throw std::invalid_argument("--audio-playback-muted and --audio-playback-volume require --audio-playback");
+    }
     if (options.avSync && options.avSyncDisabled) {
         throw std::invalid_argument("--av-sync cannot be combined with --no-av-sync");
     }
@@ -2246,6 +2282,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     }
     if (options.audioPlaybackLatencyMs < 0 || options.audioPlaybackLatencyMs > 2000) {
         throw std::invalid_argument("--audio-playback-latency-ms must be between 0 and 2000");
+    }
+    if (options.audioPlaybackVolumePercent < 0.0f || options.audioPlaybackVolumePercent > 200.0f) {
+        throw std::invalid_argument("--audio-playback-volume must be between 0 and 200 percent");
     }
     if (options.seconds < 0) {
         throw std::invalid_argument("--seconds must be non-negative");
@@ -2341,7 +2380,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
          options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync || options.avSyncDisabled)) {
+         options.audioPlayback || options.audioPlaybackLatencyProvided || options.audioPlaybackMutedProvided ||
+         options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled)) {
         throw std::invalid_argument("--list-h264-encoders can only be combined with --width, --height, --fps, and --bitrate-mbps");
     }
     if (options.listAudioDevices &&
@@ -2353,8 +2393,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
-         options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync || options.avSyncDisabled ||
+          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
+          options.audioPlayback || options.audioPlaybackLatencyProvided || options.audioPlaybackMutedProvided ||
+          options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--list-audio-devices cannot be combined with capture, stream, receiver, or video options");
     }
@@ -2367,8 +2408,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
-         options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
-         options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync || options.avSyncDisabled ||
+          options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
+          options.audioPlayback || options.audioPlaybackLatencyProvided || options.audioPlaybackMutedProvided ||
+          options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, --audio-send, and --audio-codec");
     }
@@ -2377,8 +2419,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.udpReceivePort != 0 || !options.h264DumpPath.empty() || options.decodeH264 ||
          !options.decodedBmpPath.empty() || options.previewWindow || options.previewLatencyProvided ||
-         options.previewMaxLateProvided || options.audioPlayback || options.audioPlaybackLatencyProvided || options.avSync ||
-         options.avSyncDisabled ||
+         options.previewMaxLateProvided || options.audioPlayback || options.audioPlaybackLatencyProvided ||
+         options.audioPlaybackMutedProvided || options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--audio-capture with --udp-send is only supported for live UDP sending, not receiver, recording, BMP dump, or preview options");
     }
@@ -3739,7 +3781,9 @@ void RunUdpReceiverStats(const Options& options)
     if (options.audioPlayback) {
         std::cout
             << ", playing received audio"
-            << ", audio latency " << options.audioPlaybackLatencyMs << " ms";
+            << ", audio latency " << options.audioPlaybackLatencyMs << " ms"
+            << ", muted " << (options.audioPlaybackMuted ? "yes" : "no")
+            << ", volume " << static_cast<int>(std::lround(options.audioPlaybackVolumePercent)) << "%";
     }
     if (options.avSync) {
         std::cout
@@ -3850,8 +3894,73 @@ void RunUdpReceiverStats(const Options& options)
     std::unique_ptr<screenshare::OpusAudioDecoder> opusAudioDecoder;
     std::optional<screenshare::AudioPlaybackFormat> activeAudioPlaybackFormat;
     std::string audioPlaybackStatus = options.audioPlayback ? "waiting" : "disabled";
+    bool audioPlaybackMuted = options.audioPlaybackMuted;
+    float audioPlaybackVolume = std::clamp(options.audioPlaybackVolumePercent / 100.0f, 0.0f, 2.0f);
     uint64_t audioPlaybackStarts = 0;
     uint64_t audioPlaybackFormatChanges = 0;
+
+    std::string latestReceiverHealthTitle =
+        "waiting | res 0x0 | fps 0.0 | lat 0/0ms | q 0/0/0 | resync 0 | skip 0 | drops 0/0 | reset 0 | shown 0 | av wait";
+
+    auto audioPlaybackTitle = [&]() {
+        return FormatAudioPlaybackTitle(options.audioPlayback, audioPlaybackStatus, audioPlaybackMuted, audioPlaybackVolume);
+    };
+
+    auto updatePreviewTitle = [&]() {
+        if (previewWindow) {
+            previewWindow->SetStatusText(latestReceiverHealthTitle + " | " + audioPlaybackTitle());
+        }
+    };
+
+    auto applyAudioControls = [&]() {
+        if (audioRenderer) {
+            audioRenderer->SetMuted(audioPlaybackMuted);
+            audioRenderer->SetVolume(audioPlaybackVolume);
+        }
+    };
+
+    auto printAudioControls = [&]() {
+        const int percent = static_cast<int>(std::lround(audioPlaybackVolume * 100.0f));
+        std::cout
+            << "Audio playback " << (audioPlaybackMuted ? "muted" : "unmuted")
+            << ", volume=" << percent << "%\n";
+    };
+
+    auto toggleAudioMute = [&]() {
+        if (!options.audioPlayback) {
+            std::cout << "Audio playback is not enabled.\n";
+            return;
+        }
+        audioPlaybackMuted = !audioPlaybackMuted;
+        applyAudioControls();
+        updatePreviewTitle();
+        printAudioControls();
+    };
+
+    auto adjustAudioVolume = [&](int deltaPercent) {
+        if (!options.audioPlayback) {
+            std::cout << "Audio playback is not enabled.\n";
+            return;
+        }
+        audioPlaybackVolume = std::clamp(
+            audioPlaybackVolume + static_cast<float>(deltaPercent) / 100.0f,
+            0.0f,
+            2.0f);
+        if (audioPlaybackVolume > 0.0f) {
+            audioPlaybackMuted = false;
+        }
+        applyAudioControls();
+        updatePreviewTitle();
+        printAudioControls();
+    };
+
+    if (previewWindow) {
+        screenshare::ReceiverPreviewControlCallbacks callbacks;
+        callbacks.toggleAudioMute = toggleAudioMute;
+        callbacks.adjustAudioVolumePercent = adjustAudioVolume;
+        previewWindow->SetControlCallbacks(std::move(callbacks));
+        updatePreviewTitle();
+    }
 
     auto restartPreviewPlayoutClock = [&]() {
         if (previewWindow) {
@@ -3878,6 +3987,8 @@ void RunUdpReceiverStats(const Options& options)
         playbackConfig.format = packetFormat;
         playbackConfig.bufferDuration = std::chrono::milliseconds(
             std::clamp(options.audioPlaybackLatencyMs + 50, 50, 500));
+        playbackConfig.muted = audioPlaybackMuted;
+        playbackConfig.volume = audioPlaybackVolume;
         audioRenderer->Start(playbackConfig);
         activeAudioPlaybackFormat = packetFormat;
         audioPlaybackStatus = "buffering";
@@ -3888,6 +3999,8 @@ void RunUdpReceiverStats(const Options& options)
             << screenshare::Narrow(audioRenderer->deviceName())
             << "\", format=" << screenshare::AudioPlaybackFormatName(packetFormat)
             << ", buffer_frames=" << audioRenderer->bufferFrames()
+            << ", muted=" << (audioPlaybackMuted ? "yes" : "no")
+            << ", volume_percent=" << static_cast<int>(std::lround(audioPlaybackVolume * 100.0f))
             << "\n";
     };
 
@@ -4295,11 +4408,12 @@ void RunUdpReceiverStats(const Options& options)
             };
 
             if (previewWindow) {
-                previewWindow->SetStatusText(FormatReceiverHealthTitle(
+                latestReceiverHealthTitle = FormatReceiverHealthTitle(
                     health,
                     avSyncNow,
                     avSyncPlayoutAudioAheadMs,
-                    avSyncPlayoutReadyNow));
+                    avSyncPlayoutReadyNow);
+                updatePreviewTitle();
             }
             receiver.SendFeedback(BuildReceiverFeedbackSnapshot(
                 health,
@@ -4337,6 +4451,8 @@ void RunUdpReceiverStats(const Options& options)
                 << "/" << screenshare::udp_protocol::AudioSampleFormatName(stats.audioSampleFormat)
                 << " audio_codec=" << screenshare::udp_protocol::AudioCodecName(stats.audioCodec)
                 << " audio_playback=" << audioPlaybackStatus
+                << " audio_playback_muted=" << (audioPlaybackMuted ? "yes" : "no")
+                << " audio_playback_volume_percent=" << static_cast<int>(std::lround(audioPlaybackVolume * 100.0f))
                 << " audio_playback_latency_ms=" << (options.audioPlayback ? audioPlayout.targetLatency().count() : 0)
                 << " audio_playback_queue=" << (options.audioPlayback ? audioPlayout.queuedPacketCount() : 0)
                 << " audio_playback_queue_ms=" << (options.audioPlayback ? audioPlayout.QueuedDuration().count() : 0)
@@ -4486,11 +4602,12 @@ void RunUdpReceiverStats(const Options& options)
         finalPreviewOverflowDrops - lastPreviewOverflowDrops,
     };
     if (previewWindow) {
-        previewWindow->SetStatusText(FormatReceiverHealthTitle(
+        latestReceiverHealthTitle = FormatReceiverHealthTitle(
             finalHealth,
             finalAvSync,
             avSyncPlayoutAudioAheadMs,
-            finalAvSyncPlayoutReady));
+            finalAvSyncPlayoutReady);
+        updatePreviewTitle();
     }
     receiver.SendFeedback(BuildReceiverFeedbackSnapshot(
         finalHealth,
@@ -4531,6 +4648,8 @@ void RunUdpReceiverStats(const Options& options)
         << "/" << screenshare::udp_protocol::AudioSampleFormatName(stats.audioSampleFormat)
         << ", audio codec: " << screenshare::udp_protocol::AudioCodecName(stats.audioCodec)
         << ", audio playback: " << audioPlaybackStatus
+        << ", audio playback muted: " << (audioPlaybackMuted ? "yes" : "no")
+        << ", audio playback volume percent: " << static_cast<int>(std::lround(audioPlaybackVolume * 100.0f))
         << ", audio playback latency ms: " << (options.audioPlayback ? audioPlayout.targetLatency().count() : 0)
         << ", audio playback queued packets: " << (options.audioPlayback ? audioPlayout.queuedPacketCount() : 0)
         << ", audio playback queued ms: " << (options.audioPlayback ? audioPlayout.QueuedDuration().count() : 0)

@@ -1,6 +1,7 @@
 #include "audio/WasapiRenderer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -143,6 +144,91 @@ DWORD ChannelMaskForCount(uint16_t channels)
     }
 }
 
+int32_t SignExtend24(uint32_t value)
+{
+    if ((value & 0x0080'0000U) != 0) {
+        value |= 0xFF00'0000U;
+    }
+    return static_cast<int32_t>(value);
+}
+
+void WritePcm24(BYTE* destination, int32_t sample)
+{
+    const uint32_t raw = static_cast<uint32_t>(sample) & 0x00FF'FFFFU;
+    destination[0] = static_cast<BYTE>(raw & 0xFFU);
+    destination[1] = static_cast<BYTE>((raw >> 8) & 0xFFU);
+    destination[2] = static_cast<BYTE>((raw >> 16) & 0xFFU);
+}
+
+void CopyScaledAudio(
+    BYTE* destination,
+    std::span<const std::byte> source,
+    const AudioPlaybackFormat& format,
+    float volume)
+{
+    if (volume == 1.0f) {
+        std::memcpy(destination, source.data(), source.size());
+        return;
+    }
+
+    const size_t sampleBytes = static_cast<size_t>(format.bitsPerSample / 8);
+    const size_t sampleCount = source.size() / sampleBytes;
+    const double gain = static_cast<double>(std::max(0.0f, volume));
+
+    switch (format.sampleFormat) {
+    case udp_protocol::AudioSampleFormat::Float32:
+        for (size_t index = 0; index < sampleCount; ++index) {
+            float sample = 0.0f;
+            std::memcpy(&sample, source.data() + index * sizeof(float), sizeof(sample));
+            if (!std::isfinite(sample)) {
+                sample = 0.0f;
+            }
+            sample = std::clamp(sample * volume, -1.0f, 1.0f);
+            std::memcpy(destination + index * sizeof(float), &sample, sizeof(sample));
+        }
+        break;
+    case udp_protocol::AudioSampleFormat::Pcm16:
+        for (size_t index = 0; index < sampleCount; ++index) {
+            int16_t sample = 0;
+            std::memcpy(&sample, source.data() + index * sizeof(sample), sizeof(sample));
+            const auto scaled = static_cast<int16_t>(std::clamp(
+                std::llround(static_cast<double>(sample) * gain),
+                static_cast<long long>(std::numeric_limits<int16_t>::min()),
+                static_cast<long long>(std::numeric_limits<int16_t>::max())));
+            std::memcpy(destination + index * sizeof(scaled), &scaled, sizeof(scaled));
+        }
+        break;
+    case udp_protocol::AudioSampleFormat::Pcm24:
+        for (size_t index = 0; index < sampleCount; ++index) {
+            const size_t offset = index * 3;
+            const uint32_t raw =
+                static_cast<uint32_t>(std::to_integer<uint8_t>(source[offset])) |
+                (static_cast<uint32_t>(std::to_integer<uint8_t>(source[offset + 1])) << 8) |
+                (static_cast<uint32_t>(std::to_integer<uint8_t>(source[offset + 2])) << 16);
+            const auto scaled = static_cast<int32_t>(std::clamp(
+                std::llround(static_cast<double>(SignExtend24(raw)) * gain),
+                -8'388'608LL,
+                8'388'607LL));
+            WritePcm24(destination + offset, scaled);
+        }
+        break;
+    case udp_protocol::AudioSampleFormat::Pcm32:
+        for (size_t index = 0; index < sampleCount; ++index) {
+            int32_t sample = 0;
+            std::memcpy(&sample, source.data() + index * sizeof(sample), sizeof(sample));
+            const auto scaled = static_cast<int32_t>(std::clamp(
+                std::llround(static_cast<double>(sample) * gain),
+                static_cast<long long>(std::numeric_limits<int32_t>::min()),
+                static_cast<long long>(std::numeric_limits<int32_t>::max())));
+            std::memcpy(destination + index * sizeof(scaled), &scaled, sizeof(scaled));
+        }
+        break;
+    case udp_protocol::AudioSampleFormat::Unknown:
+    default:
+        throw std::invalid_argument("Unsupported audio playback sample format for volume control");
+    }
+}
+
 WAVEFORMATEXTENSIBLE BuildWaveFormat(const AudioPlaybackFormat& format)
 {
     if (format.sampleRate == 0 || format.channels == 0 || format.bitsPerSample == 0 || format.blockAlign == 0) {
@@ -228,6 +314,8 @@ void WasapiRenderer::Start(const AudioPlaybackConfig& config)
     InitializeCom();
     config_ = config;
     format_ = config.format;
+    volume_ = std::clamp(config.volume, 0.0f, 2.0f);
+    muted_ = config.muted;
 
     auto enumerator = CreateDeviceEnumerator();
     Microsoft::WRL::ComPtr<IMMDevice> device;
@@ -314,6 +402,16 @@ void WasapiRenderer::Stop()
     UninitializeCom();
 }
 
+void WasapiRenderer::SetVolume(float volume) noexcept
+{
+    volume_ = std::clamp(volume, 0.0f, 2.0f);
+}
+
+void WasapiRenderer::SetMuted(bool muted) noexcept
+{
+    muted_ = muted;
+}
+
 uint32_t WasapiRenderer::AvailableFrames()
 {
     if (!started_ || !audioClient_) {
@@ -349,16 +447,21 @@ bool WasapiRenderer::RenderPacket(std::span<const std::byte> bytes, uint32_t fra
 
     BYTE* renderData = nullptr;
     ThrowIfFailed(renderClient_->GetBuffer(frames, &renderData), "IAudioRenderClient::GetBuffer");
+    const bool renderSilent = silent || muted_ || volume_ <= 0.0001f;
     try {
-        if (!silent) {
-            std::memcpy(renderData, bytes.data(), bytes.size());
+        if (!renderSilent) {
+            if (std::abs(volume_ - 1.0f) <= 0.0001f) {
+                std::memcpy(renderData, bytes.data(), bytes.size());
+            } else {
+                CopyScaledAudio(renderData, bytes, format_, volume_);
+            }
         }
     } catch (...) {
         renderClient_->ReleaseBuffer(frames, AUDCLNT_BUFFERFLAGS_SILENT);
         throw;
     }
 
-    const DWORD flags = silent ? AUDCLNT_BUFFERFLAGS_SILENT : 0;
+    const DWORD flags = renderSilent ? AUDCLNT_BUFFERFLAGS_SILENT : 0;
     ThrowIfFailed(renderClient_->ReleaseBuffer(frames, flags), "IAudioRenderClient::ReleaseBuffer");
     ++stats_.packetsRendered;
     stats_.framesRendered += frames;

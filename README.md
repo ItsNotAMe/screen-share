@@ -278,11 +278,20 @@ Preview window controls:
 - Esc leaves fullscreen.
 - F toggles between fit-to-window and 1:1 source-size scaling.
 - 1 switches to 1:1 scaling and resizes the window toward the current source resolution.
+- M toggles receiver audio mute when audio playback is enabled.
+- + and - adjust receiver playback volume in 5% steps.
 
 Listen, preview video, and play received audio:
 
 ```powershell
 .\build\debug\ScreenShare.exe --udp-recv 5000 --preview --audio-playback
+```
+
+For same-computer loopback tests, keep receiving and timing audio but render it muted so the receiver
+does not feed back into system-audio capture:
+
+```powershell
+.\build\debug\ScreenShare.exe --watch 5000 --audio-playback-muted
 ```
 
 This automatically enables A/V sync correction. Disable it only for diagnostics:
@@ -315,8 +324,11 @@ Play received audio on the receiver:
 
 Audio playback is opt-in. It uses the default Windows render endpoint in shared mode and starts
 after buffering 120 ms of audio by default. Use `--audio-playback-latency-ms MS` to trade latency
-for jitter tolerance. The receiver still prints audio transport diagnostics when playback is not
-enabled.
+for jitter tolerance. Use `--audio-playback-muted` to consume and time audio packets without audible
+output, which is useful when testing sender and receiver on the same computer. Use
+`--audio-playback-volume PERCENT` to set the initial receiver playback volume from 0 to 200 percent.
+When the preview window is open, M toggles mute and + or - adjusts volume in 5% steps. The receiver
+still prints audio transport diagnostics when playback is not enabled.
 
 For color debugging, combine `--dump-capture-bmp` on the sender with `--dump-decoded-bmp` on the
 receiver. The sender dump is written after capture scaling and HDR/SDR conversion, before H.264; the

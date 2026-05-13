@@ -26,6 +26,8 @@ struct AudioPlaybackConfig {
     AudioPlaybackFormat format;
     std::wstring deviceId;
     std::chrono::milliseconds bufferDuration{100};
+    float volume = 1.0f;
+    bool muted = false;
 };
 
 struct AudioPlaybackStats {
@@ -46,11 +48,15 @@ public:
 
     void Start(const AudioPlaybackConfig& config);
     void Stop();
+    void SetVolume(float volume) noexcept;
+    void SetMuted(bool muted) noexcept;
 
     [[nodiscard]] bool RenderPacket(std::span<const std::byte> bytes, uint32_t frames, bool silent);
     [[nodiscard]] uint32_t AvailableFrames();
 
     [[nodiscard]] bool started() const noexcept { return started_; }
+    [[nodiscard]] float volume() const noexcept { return volume_; }
+    [[nodiscard]] bool muted() const noexcept { return muted_; }
     [[nodiscard]] const AudioPlaybackFormat& format() const noexcept { return format_; }
     [[nodiscard]] const std::wstring& deviceName() const noexcept { return deviceName_; }
     [[nodiscard]] const std::wstring& deviceId() const noexcept { return deviceId_; }
@@ -66,6 +72,8 @@ private:
     std::wstring deviceId_;
     std::wstring deviceName_;
     uint32_t bufferFrames_ = 0;
+    float volume_ = 1.0f;
+    bool muted_ = false;
     bool comInitialized_ = false;
     bool started_ = false;
 

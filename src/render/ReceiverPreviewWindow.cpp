@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace screenshare {
 namespace {
@@ -175,6 +176,21 @@ void SetSwapChainSdrColorSpace(IDXGISwapChain* swapChain)
     static_cast<void>(swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
 }
 
+void DisableDxgiDefaultAltEnter(IDXGISwapChain* swapChain, HWND hwnd)
+{
+    if (swapChain == nullptr || hwnd == nullptr) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIFactory> factory;
+    ThrowIfFailed(
+        swapChain->GetParent(IID_PPV_ARGS(&factory)),
+        "IDXGISwapChain::GetParent(receiver preview factory)");
+    ThrowIfFailed(
+        factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER),
+        "IDXGIFactory::MakeWindowAssociation(receiver preview)");
+}
+
 SIZE FitFrameToWorkArea(HWND hwnd, int width, int height)
 {
     MONITORINFO monitorInfo{};
@@ -295,6 +311,11 @@ void ReceiverPreviewWindow::SetStatusText(std::string_view statusText)
     RefreshTitle();
 }
 
+void ReceiverPreviewWindow::SetControlCallbacks(ReceiverPreviewControlCallbacks callbacks)
+{
+    controlCallbacks_ = std::move(callbacks);
+}
+
 LRESULT CALLBACK ReceiverPreviewWindow::StaticWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     ReceiverPreviewWindow* window = nullptr;
@@ -336,6 +357,22 @@ LRESULT ReceiverPreviewWindow::WindowProc(UINT message, WPARAM wParam, LPARAM lP
             SizeWindowForCurrentFrame();
             RefreshTitle();
             Render();
+            return 0;
+        }
+        if (message == WM_KEYDOWN && wParam == 'M' && controlCallbacks_.toggleAudioMute) {
+            controlCallbacks_.toggleAudioMute();
+            return 0;
+        }
+        if (message == WM_KEYDOWN &&
+            (wParam == VK_OEM_PLUS || wParam == VK_ADD) &&
+            controlCallbacks_.adjustAudioVolumePercent) {
+            controlCallbacks_.adjustAudioVolumePercent(5);
+            return 0;
+        }
+        if (message == WM_KEYDOWN &&
+            (wParam == VK_OEM_MINUS || wParam == VK_SUBTRACT) &&
+            controlCallbacks_.adjustAudioVolumePercent) {
+            controlCallbacks_.adjustAudioVolumePercent(-5);
             return 0;
         }
         return DefWindowProcW(hwnd_, message, wParam, lParam);
@@ -461,6 +498,7 @@ void ReceiverPreviewWindow::CreateDeviceAndSwapChain()
     }
 
     ThrowIfFailed(result, "D3D11CreateDeviceAndSwapChain(receiver preview)");
+    DisableDxgiDefaultAltEnter(swapChain_.Get(), hwnd_);
     SetSwapChainSdrColorSpace(swapChain_.Get());
     EnsureRenderTarget();
 }
