@@ -5,6 +5,7 @@ project(ScreenShareNative LANGUAGES CXX)
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
 option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
+option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets is available" ON)
 
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
@@ -102,6 +103,51 @@ target_link_libraries(ScreenShare PRIVATE
     windowsapp
     ws2_32
 )
+
+if(SCREENSHARE_BUILD_QT_UI)
+    if(WIN32 AND EXISTS "C:/msys64/ucrt64/lib/cmake/Qt6")
+        list(APPEND CMAKE_PREFIX_PATH "C:/msys64/ucrt64")
+    endif()
+
+    find_package(Qt6 QUIET COMPONENTS Widgets)
+    if(Qt6_FOUND)
+        add_executable(ScreenShareUi WIN32
+            src/ui/main.cpp
+        )
+        target_compile_features(ScreenShareUi PRIVATE cxx_std_20)
+        target_link_libraries(ScreenShareUi PRIVATE Qt6::Widgets)
+        target_compile_definitions(ScreenShareUi PRIVATE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+        )
+        add_dependencies(ScreenShareUi ScreenShare)
+
+        if(MSVC)
+            target_compile_options(ScreenShareUi PRIVATE /W4 /permissive- /EHsc)
+        endif()
+
+        find_program(SCREENSHARE_WINDEPLOYQT_EXECUTABLE
+            NAMES windeployqt6 windeployqt-qt6 windeployqt
+            HINTS
+                "C:/msys64/ucrt64/bin"
+        )
+        if(WIN32 AND SCREENSHARE_WINDEPLOYQT_EXECUTABLE)
+            add_custom_command(TARGET ScreenShareUi POST_BUILD
+                COMMAND "${SCREENSHARE_WINDEPLOYQT_EXECUTABLE}"
+                    --no-translations
+                    --no-system-d3d-compiler
+                    --no-system-dxc-compiler
+                    --no-opengl-sw
+                    --compiler-runtime
+                    "$<TARGET_FILE:ScreenShareUi>"
+                COMMENT "Deploying Qt runtime next to ScreenShareUi.exe"
+                VERBATIM
+            )
+        endif()
+    else()
+        message(WARNING "Qt 6 Widgets was not found; ScreenShareUi target will not be built")
+    endif()
+endif()
 
 if(WIN32 AND SCREENSHARE_COPY_RUNTIME_DLLS AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(SCREENSHARE_RUNTIME_DLL_NAMES
@@ -218,26 +264,41 @@ endif()
 set(SCREENSHARE_PACKAGE_BASENAME
     "ScreenShare-${SCREENSHARE_PACKAGE_CONFIG}-${SCREENSHARE_PACKAGE_SYSTEM}-${SCREENSHARE_PACKAGE_ARCH}"
 )
+set(SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS "$<TARGET_FILE_DIR:ScreenShare>")
+if(CMAKE_CXX_COMPILER)
+    get_filename_component(SCREENSHARE_PACKAGE_COMPILER_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    list(APPEND SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS "${SCREENSHARE_PACKAGE_COMPILER_BIN_DIR}")
+endif()
+if(WIN32 AND EXISTS "C:/msys64/ucrt64/bin")
+    list(APPEND SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS "C:/msys64/ucrt64/bin")
+endif()
+list(REMOVE_DUPLICATES SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS)
+string(REPLACE ";" "|" SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS_ARG "${SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS}")
 set(SCREENSHARE_PACKAGE_ARGS
     -D "INPUT_DIR=$<TARGET_FILE_DIR:ScreenShare>"
     -D "EXECUTABLE_NAME=$<TARGET_FILE_NAME:ScreenShare>"
     -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
     -D "STAGING_DIR=${CMAKE_BINARY_DIR}/package/${SCREENSHARE_PACKAGE_BASENAME}"
     -D "OUTPUT_ZIP=${CMAKE_BINARY_DIR}/${SCREENSHARE_PACKAGE_BASENAME}.zip"
+    -D "RUNTIME_SEARCH_DIRS=${SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS_ARG}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PackagePortable.cmake"
 )
+set(SCREENSHARE_PACKAGE_DEPENDS ScreenShare)
+if(TARGET ScreenShareUi)
+    list(APPEND SCREENSHARE_PACKAGE_DEPENDS ScreenShareUi)
+endif()
 
 if(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD)
     add_custom_target(package-portable ALL
         COMMAND ${CMAKE_COMMAND} ${SCREENSHARE_PACKAGE_ARGS}
-        DEPENDS ScreenShare
+        DEPENDS ${SCREENSHARE_PACKAGE_DEPENDS}
         COMMENT "Creating portable ScreenShare zip package"
         VERBATIM
     )
 else()
     add_custom_target(package-portable
         COMMAND ${CMAKE_COMMAND} ${SCREENSHARE_PACKAGE_ARGS}
-        DEPENDS ScreenShare
+        DEPENDS ${SCREENSHARE_PACKAGE_DEPENDS}
         COMMENT "Creating portable ScreenShare zip package"
         VERBATIM
     )

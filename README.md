@@ -24,6 +24,7 @@ Requirements:
 - CMake 3.24+
 - Windows SDK with C++/WinRT headers for the Windows Graphics Capture backend
 - Opus development package for compressed audio (`mingw-w64-ucrt-x86_64-opus` on MSYS2 UCRT64)
+- Optional: Qt 6 Widgets (`mingw-w64-ucrt-x86_64-qt6-base` on MSYS2 UCRT64) for the desktop control UI
 - Optional: FFmpeg for inspecting generated MP4 files
 
 ```powershell
@@ -49,7 +50,9 @@ cmake --build --preset release
 
 The zip is written beside the build output, for example
 `build\release\ScreenShare-release-windows-x64.zip`. It contains `ScreenShare.exe`, staged runtime
-DLLs, the dependency manifest, README, and license.
+DLLs, the dependency manifest, README, and license. When Qt 6 Widgets is available at configure
+time, the build also creates `ScreenShareUi.exe` and packages the Qt DLLs and plugin folders needed
+to run the desktop app on another Windows computer.
 
 This is attached to the default CMake `all` build, which is what the VS Code CMake Tools build
 button normally runs. If you changed the selected CMake target to `ScreenShare`, switch it back to
@@ -65,6 +68,17 @@ Set `SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD=OFF` at configure time if you want no
 zip creation.
 
 ## Run
+
+Start the desktop control UI:
+
+```powershell
+.\build\release\ScreenShareUi.exe
+```
+
+The UI starts and stops the same `ScreenShare.exe` engine beside it. Use the Share tab on the
+sending computer and the Watch tab on the receiving computer. Reports are enabled by default so a
+test run can be sent as a zip without collecting separate log files. The UI opens in dark mode by
+default and includes a theme toggle in the header.
 
 Common live session:
 
