@@ -47,6 +47,7 @@ add_executable(ScreenShare
     src/codec/H264StreamDecoder.cpp
     src/codec/H264StreamEncoder.cpp
     src/render/ReceiverPreviewWindow.cpp
+    src/transport/LanDiscovery.cpp
     src/transport/UdpProtocol.cpp
     src/transport/UdpReceiver.cpp
     src/transport/UdpSender.cpp
@@ -101,6 +102,7 @@ target_link_libraries(ScreenShare PRIVATE
     user32
     uuid
     windowsapp
+    iphlpapi
     ws2_32
 )
 

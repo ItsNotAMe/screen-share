@@ -8,6 +8,7 @@
 #include "codec/H264StreamDecoder.h"
 #include "codec/H264StreamEncoder.h"
 #include "render/ReceiverPreviewWindow.h"
+#include "transport/LanDiscovery.h"
 #include "transport/UdpReceiver.h"
 #include "transport/UdpSender.h"
 #include "video/Nv12Convert.h"
@@ -134,6 +135,11 @@ struct Options {
     bool avSyncExplicit = false;
     bool avSyncDisabled = false;
     bool sharePreset = false;
+    bool lanDiscover = false;
+    int lanDiscoverSeconds = 2;
+    bool lanAdvertise = false;
+    uint16_t lanDiscoveryPort = screenshare::LanDiscoveryDefaultPort;
+    std::string lanName;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
@@ -157,6 +163,7 @@ void PrintHelp()
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT [--display N] [--seconds S]\n"
         << "  ScreenShare --watch PORT [--seconds S]\n"
+        << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
         << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
@@ -183,6 +190,8 @@ void PrintHelp()
         << "  Global: add --log PATH to save console output to a file.\n"
         << "          add --save-report PATH to save a zipped run report.\n"
         << "          add --session ID to give both sides a matching diagnostic session.\n"
+        << "  LAN: add --lan-advertise to --watch/--udp-recv, then use --lan-discover on the sender.\n"
+        << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -190,6 +199,8 @@ void PrintHelp()
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --watch 5000 --save-report receiver-report.zip\n"
         << "  ScreenShare --watch 5000 --session game-night --save-report receiver-report.zip\n"
+        << "  ScreenShare --watch 5000 --lan-advertise\n"
+        << "  ScreenShare --lan-discover\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
@@ -501,6 +512,36 @@ std::string ParseSessionId(const char* value)
     }
 
     return sessionId;
+}
+
+std::string DefaultLanName()
+{
+    if (const char* computerName = std::getenv("COMPUTERNAME")) {
+        if (computerName[0] != '\0') {
+            return computerName;
+        }
+    }
+    if (const char* userName = std::getenv("USERNAME")) {
+        if (userName[0] != '\0') {
+            return userName;
+        }
+    }
+    return "ScreenShare";
+}
+
+std::string ParseLanName(const char* value)
+{
+    std::string name = value != nullptr ? value : "";
+    if (name.empty() || name.size() > 64) {
+        throw std::invalid_argument("--lan-name must be between 1 and 64 bytes");
+    }
+
+    for (const char ch : name) {
+        if (static_cast<unsigned char>(ch) < 32U || ch == 127) {
+            throw std::invalid_argument("--lan-name must not contain control characters");
+        }
+    }
+    return name;
 }
 
 screenshare::udp_protocol::AudioSampleFormat ToUdpAudioSampleFormat(const screenshare::AudioCaptureFormat& format);
@@ -2074,6 +2115,17 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.listAudioDevices = true;
         } else if (arg == "--save-report") {
             options.saveReportPath = requireValue("--save-report");
+        } else if (arg == "--lan-discover") {
+            options.lanDiscover = true;
+        } else if (arg == "--lan-discover-seconds") {
+            options.lanDiscoverSeconds = ParseInt(requireValue("--lan-discover-seconds"), "--lan-discover-seconds");
+            options.lanDiscover = true;
+        } else if (arg == "--lan-advertise") {
+            options.lanAdvertise = true;
+        } else if (arg == "--lan-discovery-port") {
+            options.lanDiscoveryPort = screenshare::ParseUdpReceivePort(requireValue("--lan-discovery-port"));
+        } else if (arg == "--lan-name") {
+            options.lanName = ParseLanName(requireValue("--lan-name"));
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
         } else if (arg == "--watch") {
@@ -2254,6 +2306,18 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         if (!options.udpSendTarget.empty()) {
             throw std::invalid_argument("--audio-send cannot be combined with --udp-send; use --udp-send with --audio-capture for combined audio/video streaming");
         }
+    }
+    if (options.lanName.empty()) {
+        options.lanName = DefaultLanName();
+    }
+    if (options.lanDiscoverSeconds < 1 || options.lanDiscoverSeconds > 30) {
+        throw std::invalid_argument("--lan-discover-seconds must be between 1 and 30");
+    }
+    if (options.lanAdvertise && options.lanDiscover) {
+        throw std::invalid_argument("--lan-advertise cannot be combined with --lan-discover");
+    }
+    if (options.lanAdvertise && options.udpReceivePort == 0) {
+        throw std::invalid_argument("--lan-advertise requires --watch or --udp-recv");
     }
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
@@ -3751,6 +3815,39 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << "\n";
 }
 
+void RunLanDiscovery(const Options& options)
+{
+    const auto timeout = std::chrono::seconds(options.lanDiscoverSeconds);
+    std::cout
+        << "Discovering LAN receivers for " << options.lanDiscoverSeconds
+        << " seconds on UDP port " << options.lanDiscoveryPort << "...\n";
+
+    const auto peers = screenshare::DiscoverLanPeers(timeout, options.lanDiscoveryPort);
+    if (peers.empty()) {
+        std::cout
+            << "No LAN receivers found. Start the receiver with --watch PORT --lan-advertise "
+            << "or enable LAN discoverable in the UI.\n";
+        return;
+    }
+
+    for (const auto& peer : peers) {
+        const std::string target = peer.address + ":" + std::to_string(peer.sharePort);
+        std::cout
+            << "receiver name=\"" << peer.name << "\""
+            << " address=" << peer.address
+            << " port=" << peer.sharePort
+            << " session=" << (peer.sessionId.empty() ? "unknown" : peer.sessionId)
+            << " fingerprint=" << (peer.sessionFingerprint == 0 ? "unknown" : FormatSessionFingerprint(peer.sessionFingerprint))
+            << "\n"
+            << "share_target=" << target << "\n"
+            << "command=ScreenShare --share " << target;
+        if (!peer.sessionId.empty()) {
+            std::cout << " --session " << peer.sessionId;
+        }
+        std::cout << "\n";
+    }
+}
+
 void RunUdpReceiverStats(const Options& options)
 {
     screenshare::UdpReceiver receiver;
@@ -3759,6 +3856,18 @@ void RunUdpReceiverStats(const Options& options)
     config.simulatedLossPercent = options.simulateLossPercent;
     config.simulatedJitter = std::chrono::milliseconds(options.simulateJitterMs);
     receiver.Open(config);
+
+    std::unique_ptr<screenshare::LanDiscoveryResponder> lanDiscoveryResponder;
+    if (options.lanAdvertise) {
+        screenshare::LanDiscoveryAdvertiseConfig advertiseConfig;
+        advertiseConfig.discoveryPort = options.lanDiscoveryPort;
+        advertiseConfig.sharePort = options.udpReceivePort;
+        advertiseConfig.name = options.lanName;
+        advertiseConfig.sessionId = options.sessionId;
+        advertiseConfig.sessionFingerprint = options.sessionFingerprint;
+        lanDiscoveryResponder = std::make_unique<screenshare::LanDiscoveryResponder>();
+        lanDiscoveryResponder->Start(advertiseConfig);
+    }
 
     std::ofstream h264Dump;
     const bool shouldDumpH264 = !options.h264DumpPath.empty();
@@ -3806,6 +3915,11 @@ void RunUdpReceiverStats(const Options& options)
         std::cout
             << ", A/V sync correction "
             << (options.avSyncExplicit ? "enabled" : "auto-enabled");
+    }
+    if (options.lanAdvertise) {
+        std::cout
+            << ", LAN discoverable as \"" << options.lanName << "\""
+            << " on discovery port " << options.lanDiscoveryPort;
     }
     if (options.simulateLossPercent > 0.0f || options.simulateJitterMs > 0) {
         std::cout
@@ -4796,7 +4910,10 @@ int main(int argc, char** argv)
         reportContext.sessionId = options.sessionId;
         reportContext.sessionFingerprint = options.sessionFingerprint;
 
-        if (options.listDisplays) {
+        if (options.lanDiscover) {
+            RunLanDiscovery(options);
+            exitCode = 0;
+        } else if (options.listDisplays) {
             PrintDisplays();
             exitCode = 0;
         } else if (options.listH264Encoders) {
