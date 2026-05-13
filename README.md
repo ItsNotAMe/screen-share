@@ -94,6 +94,24 @@ preset runs until you stop it with Ctrl+C by default; add `--seconds S` to choos
 Add the same `--session ID` on both sides when you want sender and receiver logs/reports to be
 easy to match later. If omitted, each process generates its own diagnostic session ID.
 
+LAN discovery can find a receiver without manually looking up its IP address. On the watching
+computer, start Watch with LAN advertising:
+
+```powershell
+.\build\release\ScreenShare.exe --watch 5000 --lan-advertise --log receiver.log
+```
+
+On the sharing computer, discover nearby receivers:
+
+```powershell
+.\build\release\ScreenShare.exe --lan-discover
+```
+
+The output includes `share_target=HOST:PORT` plus a ready-to-run `ScreenShare --share ...` command.
+The desktop UI exposes the same flow: Watch has a LAN discoverable checkbox, and Share has a
+Find on LAN button that fills the address and port. Discovery uses UDP port 47995 by default; add
+`--lan-discovery-port PORT` on both sides if you need a different port.
+
 List monitors:
 
 ```powershell

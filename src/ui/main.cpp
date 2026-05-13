@@ -4,6 +4,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QIODevice>
 #include <QtCore/QProcess>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
 #include <QtGui/QTextCursor>
@@ -172,6 +173,22 @@ public:
             setRunning(false);
         });
 
+        discoveryProcess_ = new QProcess(this);
+        discoveryProcess_->setProcessChannelMode(QProcess::MergedChannels);
+        connect(discoveryProcess_, &QProcess::readyReadStandardOutput, this, [this] {
+            const QString text = QString::fromLocal8Bit(discoveryProcess_->readAllStandardOutput());
+            discoveryOutput_ += text;
+            appendOutput(text);
+        });
+        connect(discoveryProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            Q_UNUSED(error);
+            appendOutput("LAN discovery error: " + discoveryProcess_->errorString() + "\n");
+            setDiscovering(false);
+        });
+        connect(discoveryProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
+            finishDiscovery(code, status);
+        });
+
         buildUi();
         refreshReportPath();
         refreshCommand();
@@ -296,6 +313,13 @@ private:
         prepareInput(sharePortSpin_);
         addRow(connectionContent, "Address", shareHostEdit_);
         addRow(connectionContent, "Port", sharePortSpin_);
+        findLanButton_ = new QPushButton("Find on LAN");
+        findLanButton_->setObjectName("SecondaryButton");
+        findLanButton_->setIcon(style()->standardIcon(QStyle::SP_DriveNetIcon));
+        findLanButton_->setIconSize(QSize(14, 14));
+        findLanButton_->setCursor(Qt::PointingHandCursor);
+        addFullRow(connectionContent, findLanButton_);
+        connect(findLanButton_, &QPushButton::clicked, this, [this] { startDiscovery(); });
 
         QVBoxLayout* videoContent = nullptr;
         layout->addWidget(makePanel("Video", &videoContent));
@@ -335,6 +359,9 @@ private:
         watchPortSpin_->setValue(5000);
         prepareInput(watchPortSpin_);
         addRow(listenContent, "Port", watchPortSpin_);
+        lanDiscoverableCheck_ = new QCheckBox("LAN discoverable");
+        lanDiscoverableCheck_->setChecked(true);
+        addFullRow(listenContent, lanDiscoverableCheck_);
 
         QVBoxLayout* audioContent = nullptr;
         layout->addWidget(makePanel("Audio", &audioContent));
@@ -503,6 +530,7 @@ private:
 
         bindLineEdit(shareHostEdit_);
         bindSpinBox(sharePortSpin_);
+        bindCheckBox(lanDiscoverableCheck_);
         bindSpinBox(displaySpin_);
         bindSpinBox(fpsSpin_);
         connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
@@ -546,6 +574,9 @@ private:
             }
         } else {
             args << "--watch" << QString::number(watchPortSpin_->value());
+            if (lanDiscoverableCheck_->isChecked()) {
+                args << "--lan-advertise";
+            }
             args << "--preview-latency-ms" << QString::number(previewLatencySpin_->value());
             args << "--audio-playback-volume" << QString::number(volumeSpin_->value());
             if (mutedCheck_->isChecked()) {
@@ -656,6 +687,72 @@ private:
         }
     }
 
+    void startDiscovery()
+    {
+        if (discoveryProcess_->state() != QProcess::NotRunning) {
+            return;
+        }
+        if (process_->state() != QProcess::NotRunning) {
+            QMessageBox::information(this, "Already running", "Stop the current session before discovering receivers.");
+            return;
+        }
+
+        const QString program = enginePath();
+        if (!QFileInfo::exists(program)) {
+            QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
+            return;
+        }
+
+        discoveryOutput_.clear();
+        appendOutput("\nDiscovering LAN receivers...\n");
+        discoveryProcess_->setProgram(program);
+        discoveryProcess_->setArguments({"--lan-discover", "--lan-discover-seconds", "2"});
+        discoveryProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
+        setDiscovering(true);
+        discoveryProcess_->start();
+    }
+
+    void finishDiscovery(int code, QProcess::ExitStatus status)
+    {
+        setDiscovering(false);
+        if (status != QProcess::NormalExit || code != 0) {
+            appendOutput("LAN discovery finished with exit code " + QString::number(code) + "\n");
+            return;
+        }
+
+        const QRegularExpression targetPattern(QStringLiteral(R"(share_target=([^:\s]+):(\d+))"));
+        const QRegularExpressionMatch match = targetPattern.match(discoveryOutput_);
+        if (!match.hasMatch()) {
+            QMessageBox::information(this, "No receivers found", "No LAN receivers were found. Start Watch with LAN discoverable enabled on the other computer.");
+            return;
+        }
+
+        bool ok = false;
+        const int port = match.captured(2).toInt(&ok);
+        if (!ok || port < sharePortSpin_->minimum() || port > sharePortSpin_->maximum()) {
+            appendOutput("LAN discovery returned an invalid port\n");
+            return;
+        }
+
+        shareHostEdit_->setText(match.captured(1));
+        sharePortSpin_->setValue(port);
+        appendOutput("Selected LAN receiver " + shareHostEdit_->text() + ":" + QString::number(port) + "\n");
+        refreshCommand();
+    }
+
+    void setDiscovering(bool discovering)
+    {
+        if (findLanButton_ != nullptr) {
+            findLanButton_->setEnabled(!discovering && process_->state() == QProcess::NotRunning);
+            findLanButton_->setText(discovering ? "Finding..." : "Find on LAN");
+        }
+        if (process_->state() == QProcess::NotRunning) {
+            statusBadge_->setText(discovering ? "Finding" : "Idle");
+            statusBadge_->setProperty("class", discovering ? "StatusRunning" : "StatusIdle");
+            repolish(statusBadge_);
+        }
+    }
+
     void setRunning(bool running)
     {
         if (running) {
@@ -676,6 +773,9 @@ private:
 
         shareModeButton_->setEnabled(!running);
         watchModeButton_->setEnabled(!running);
+        if (findLanButton_ != nullptr) {
+            findLanButton_->setEnabled(!running && discoveryProcess_->state() == QProcess::NotRunning);
+        }
     }
 
     void appendOutput(const QString& text)
@@ -694,13 +794,16 @@ private:
     QPlainTextEdit* outputEdit_ = nullptr;
     QPushButton* actionButton_ = nullptr;
     QProcess* process_ = nullptr;
+    QProcess* discoveryProcess_ = nullptr;
 
     QLineEdit* shareHostEdit_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
+    QPushButton* findLanButton_ = nullptr;
     QSpinBox* displaySpin_ = nullptr;
     QSpinBox* fpsSpin_ = nullptr;
     QComboBox* resolutionCombo_ = nullptr;
     QSpinBox* watchPortSpin_ = nullptr;
+    QCheckBox* lanDiscoverableCheck_ = nullptr;
     QCheckBox* mutedCheck_ = nullptr;
     QSpinBox* volumeSpin_ = nullptr;
     QSpinBox* previewLatencySpin_ = nullptr;
@@ -714,6 +817,7 @@ private:
     bool forcedStop_ = false;
     quint64 runSerial_ = 0;
     QString stopFilePath_;
+    QString discoveryOutput_;
 };
 
 QString appStyleSheet(bool darkMode)

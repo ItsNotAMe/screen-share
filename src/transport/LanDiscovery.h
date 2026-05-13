@@ -1,0 +1,56 @@
+#pragma once
+
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace screenshare {
+
+constexpr uint16_t LanDiscoveryDefaultPort = 47995;
+
+struct LanDiscoveryPeer {
+    std::string address;
+    uint16_t sharePort = 0;
+    std::string name;
+    std::string sessionId;
+    uint64_t sessionFingerprint = 0;
+};
+
+struct LanDiscoveryAdvertiseConfig {
+    uint16_t discoveryPort = LanDiscoveryDefaultPort;
+    uint16_t sharePort = 0;
+    std::string name;
+    std::string sessionId;
+    uint64_t sessionFingerprint = 0;
+};
+
+class LanDiscoveryResponder {
+public:
+    LanDiscoveryResponder();
+    ~LanDiscoveryResponder();
+
+    LanDiscoveryResponder(const LanDiscoveryResponder&) = delete;
+    LanDiscoveryResponder& operator=(const LanDiscoveryResponder&) = delete;
+
+    void Start(const LanDiscoveryAdvertiseConfig& config);
+    void Stop();
+
+    [[nodiscard]] bool isRunning() const noexcept { return socket_ != 0; }
+
+private:
+    void WorkerLoop();
+
+    uintptr_t socket_ = 0;
+    LanDiscoveryAdvertiseConfig config_{};
+    std::thread worker_;
+    bool stopRequested_ = false;
+    bool winsockStarted_ = false;
+};
+
+std::vector<LanDiscoveryPeer> DiscoverLanPeers(
+    std::chrono::milliseconds timeout,
+    uint16_t discoveryPort = LanDiscoveryDefaultPort);
+
+} // namespace screenshare
