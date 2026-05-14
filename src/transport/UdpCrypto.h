@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -21,6 +22,7 @@ struct UdpCryptoKey {
 };
 
 UdpCryptoKey DeriveUdpCryptoKey(std::string_view accessCode);
+std::string GenerateUdpAccessCode();
 uint32_t GenerateUdpCryptoNoncePrefix();
 void WriteUdpCryptoNonce(
     std::span<std::byte, UdpCryptoNonceBytes> nonce,

@@ -1,3 +1,5 @@
+#include "transport/UdpCrypto.h"
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -7,6 +9,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
+#include <QtGui/QClipboard>
 #include <QtGui/QTextCursor>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
@@ -19,6 +22,7 @@
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QStyle>
@@ -200,7 +204,7 @@ private:
     {
         auto* root = new QVBoxLayout(this);
         root->setContentsMargins(22, 20, 22, 20);
-        root->setSpacing(16);
+        root->setSpacing(14);
 
         root->addLayout(buildHeader());
         root->addWidget(buildModeSelector());
@@ -209,25 +213,30 @@ private:
         body->setSpacing(16);
         root->addLayout(body, 1);
 
-        auto* leftColumn = new QVBoxLayout;
+        auto* leftContent = new QWidget;
+        leftContent->setObjectName("LeftHost");
+        auto* leftColumn = new QVBoxLayout(leftContent);
+        leftColumn->setContentsMargins(0, 0, 6, 0);
         leftColumn->setSpacing(12);
         leftColumn->addWidget(buildOptionStack());
         leftColumn->addWidget(buildSessionPanel());
         leftColumn->addStretch(1);
 
-        auto* leftHost = new QWidget;
-        leftHost->setObjectName("LeftHost");
-        leftHost->setLayout(leftColumn);
-        leftHost->setFixedWidth(380);
-        body->addWidget(leftHost);
+        auto* leftScroll = new QScrollArea;
+        leftScroll->setObjectName("LeftScroll");
+        leftScroll->setWidget(leftContent);
+        leftScroll->setWidgetResizable(true);
+        leftScroll->setFrameShape(QFrame::NoFrame);
+        leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        leftScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        leftScroll->setFixedWidth(450);
+        body->addWidget(leftScroll);
 
         auto* rightColumn = new QVBoxLayout;
         rightColumn->setSpacing(12);
         rightColumn->addWidget(buildCommandPanel());
         rightColumn->addWidget(buildOutputPanel(), 1);
         body->addLayout(rightColumn, 1);
-
-        root->addLayout(buildFooter());
 
         bindCommandRefresh();
         applyTheme(darkModeCheck_->isChecked());
@@ -244,11 +253,26 @@ private:
         titleBlock->addWidget(makeLabel("Fast local screen sharing", "Subtle"));
         header->addLayout(titleBlock, 1);
 
+        statusBadge_ = makeLabel("Idle", "StatusIdle");
+        statusBadge_->setAlignment(Qt::AlignCenter);
+        statusBadge_->setMinimumHeight(34);
+        header->addWidget(statusBadge_, 0, Qt::AlignVCenter);
+
         darkModeCheck_ = new QCheckBox("Dark");
         darkModeCheck_->setObjectName("ThemeSwitch");
         darkModeCheck_->setChecked(true);
         connect(darkModeCheck_, &QCheckBox::toggled, this, [this](bool checked) { applyTheme(checked); });
         header->addWidget(darkModeCheck_, 0, Qt::AlignVCenter);
+
+        actionButton_ = new QPushButton("Start");
+        actionButton_->setObjectName("PrimaryButton");
+        actionButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+        actionButton_->setIconSize(QSize(16, 16));
+        actionButton_->setCursor(Qt::PointingHandCursor);
+        actionButton_->setMinimumHeight(40);
+        actionButton_->setMinimumWidth(140);
+        connect(actionButton_, &QPushButton::clicked, this, [this] { toggleProcess(); });
+        header->addWidget(actionButton_, 0, Qt::AlignVCenter);
 
         return header;
     }
@@ -396,11 +420,35 @@ private:
         prepareInput(sessionEdit_);
         addRow(content, "ID", sessionEdit_);
 
+        auto* accessRow = new QWidget;
+        accessRow->setObjectName("FormRow");
+        prepareInput(accessRow);
+        auto* accessLayout = new QHBoxLayout(accessRow);
+        accessLayout->setContentsMargins(0, 0, 0, 0);
+        accessLayout->setSpacing(8);
         accessCodeEdit_ = new QLineEdit;
-        accessCodeEdit_->setPlaceholderText("Optional");
+        accessCodeEdit_->setPlaceholderText("Generate or paste");
         accessCodeEdit_->setEchoMode(QLineEdit::Password);
         prepareInput(accessCodeEdit_);
-        addRow(content, "Access code", accessCodeEdit_);
+        generateAccessCodeButton_ = new QPushButton("Generate");
+        generateAccessCodeButton_->setObjectName("SecondaryButton");
+        generateAccessCodeButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
+        generateAccessCodeButton_->setIconSize(QSize(14, 14));
+        generateAccessCodeButton_->setCursor(Qt::PointingHandCursor);
+        generateAccessCodeButton_->setFixedHeight(kRowHeight);
+        copyAccessCodeButton_ = new QPushButton("Copy");
+        copyAccessCodeButton_->setObjectName("SecondaryButton");
+        copyAccessCodeButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+        copyAccessCodeButton_->setIconSize(QSize(14, 14));
+        copyAccessCodeButton_->setCursor(Qt::PointingHandCursor);
+        copyAccessCodeButton_->setFixedHeight(kRowHeight);
+        accessLayout->addWidget(accessCodeEdit_, 1);
+        accessLayout->addWidget(generateAccessCodeButton_);
+        accessLayout->addWidget(copyAccessCodeButton_);
+        addRow(content, "Access code", accessRow);
+
+        allowPlaintextCheck_ = new QCheckBox("Allow plaintext");
+        addFullRow(content, allowPlaintextCheck_);
 
         reportCheck_ = new QCheckBox("Save report");
         reportCheck_->setChecked(true);
@@ -427,6 +475,13 @@ private:
             reportPathEdited_ = true;
             refreshCommand();
         });
+        connect(accessCodeEdit_, &QLineEdit::textChanged, this, [this](const QString& text) {
+            if (!text.isEmpty()) {
+                allowPlaintextCheck_->setChecked(false);
+            }
+        });
+        connect(generateAccessCodeButton_, &QPushButton::clicked, this, [this] { generateAccessCode(); });
+        connect(copyAccessCodeButton_, &QPushButton::clicked, this, [this] { copyAccessCode(); });
         connect(browseReportButton_, &QPushButton::clicked, this, [this] {
             const QString selected = QFileDialog::getSaveFileName(
                 this,
@@ -489,30 +544,6 @@ private:
         return panel;
     }
 
-    QHBoxLayout* buildFooter()
-    {
-        auto* footer = new QHBoxLayout;
-        footer->setSpacing(12);
-
-        statusBadge_ = makeLabel("Idle", "StatusIdle");
-        statusBadge_->setAlignment(Qt::AlignCenter);
-        statusBadge_->setMinimumHeight(34);
-        footer->addWidget(statusBadge_);
-        footer->addStretch(1);
-
-        actionButton_ = new QPushButton("Start");
-        actionButton_->setObjectName("PrimaryButton");
-        actionButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
-        actionButton_->setIconSize(QSize(16, 16));
-        actionButton_->setCursor(Qt::PointingHandCursor);
-        actionButton_->setMinimumHeight(40);
-        actionButton_->setMinimumWidth(140);
-        footer->addWidget(actionButton_);
-
-        connect(actionButton_, &QPushButton::clicked, this, [this] { toggleProcess(); });
-        return footer;
-    }
-
     void setMode(int index)
     {
         optionStack_->setCurrentIndex(index);
@@ -546,6 +577,7 @@ private:
         bindSpinBox(previewLatencySpin_);
         bindLineEdit(sessionEdit_);
         bindLineEdit(accessCodeEdit_);
+        bindCheckBox(allowPlaintextCheck_);
         bindCheckBox(reportCheck_);
     }
 
@@ -564,6 +596,27 @@ private:
         if (!reportPathEdited_) {
             reportPathEdit_->setText(defaultReportName());
         }
+    }
+
+    void generateAccessCode()
+    {
+        try {
+            accessCodeEdit_->setText(QString::fromStdString(screenshare::GenerateUdpAccessCode()));
+            allowPlaintextCheck_->setChecked(false);
+            copyAccessCode();
+        } catch (const std::exception& error) {
+            QMessageBox::critical(this, "Access code", QString::fromLocal8Bit(error.what()));
+        }
+    }
+
+    void copyAccessCode()
+    {
+        const QString accessCode = accessCodeEdit_->text();
+        if (accessCode.isEmpty()) {
+            return;
+        }
+        QApplication::clipboard()->setText(accessCode);
+        appendOutput("Access code copied to clipboard\n");
     }
 
     QStringList currentArguments() const
@@ -599,6 +652,8 @@ private:
         const QString accessCode = accessCodeEdit_->text();
         if (!accessCode.isEmpty()) {
             args << "--access-code" << accessCode;
+        } else if (allowPlaintextCheck_->isChecked()) {
+            args << "--allow-plaintext";
         }
 
         if (reportCheck_->isChecked() && !reportPathEdit_->text().trimmed().isEmpty()) {
@@ -650,6 +705,13 @@ private:
         }
         if (shareMode() && shareHostEdit_->text().trimmed().isEmpty()) {
             QMessageBox::warning(this, "Missing address", "Enter a target address before sharing.");
+            return;
+        }
+        if (accessCodeEdit_->text().isEmpty() && !allowPlaintextCheck_->isChecked()) {
+            QMessageBox::warning(
+                this,
+                "Security choice",
+                "Generate or paste an access code, or allow plaintext for this run.");
             return;
         }
         const QString program = enginePath();
@@ -834,6 +896,9 @@ private:
 
     QLineEdit* sessionEdit_ = nullptr;
     QLineEdit* accessCodeEdit_ = nullptr;
+    QPushButton* generateAccessCodeButton_ = nullptr;
+    QPushButton* copyAccessCodeButton_ = nullptr;
+    QCheckBox* allowPlaintextCheck_ = nullptr;
     QCheckBox* reportCheck_ = nullptr;
     QLineEdit* reportPathEdit_ = nullptr;
     QPushButton* browseReportButton_ = nullptr;
@@ -860,6 +925,10 @@ QWidget {
 QWidget#LeftHost, QWidget#OptionPage, QWidget#FormRow,
 QStackedWidget#OptionStack {
     background: transparent;
+}
+QScrollArea#LeftScroll, QScrollArea#LeftScroll > QWidget > QWidget {
+    background: transparent;
+    border: 0;
 }
 QLabel {
     background: transparent;
@@ -1076,6 +1145,10 @@ QWidget {
 QWidget#LeftHost, QWidget#OptionPage, QWidget#FormRow,
 QStackedWidget#OptionStack {
     background: transparent;
+}
+QScrollArea#LeftScroll, QScrollArea#LeftScroll > QWidget > QWidget {
+    background: transparent;
+    border: 0;
 }
 QLabel {
     background: transparent;

@@ -118,6 +118,37 @@ UdpCryptoKey DeriveUdpCryptoKey(std::string_view accessCode)
     return key;
 }
 
+std::string GenerateUdpAccessCode()
+{
+    constexpr std::array<char, 32> Alphabet{
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
+        'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R',
+        'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+        '2', '3', '4', '5', '6', '7', '8', '9',
+    };
+    constexpr size_t AccessCodeCharacters = 20;
+    constexpr size_t AccessCodeGroupSize = 5;
+
+    std::array<unsigned char, AccessCodeCharacters> randomBytes{};
+    ThrowIfBcryptFailed(
+        "BCryptGenRandom",
+        BCryptGenRandom(
+            nullptr,
+            randomBytes.data(),
+            CheckedUlongSize(randomBytes.size(), "UDP access code random bytes"),
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG));
+
+    std::string code;
+    code.reserve(AccessCodeCharacters + (AccessCodeCharacters / AccessCodeGroupSize));
+    for (size_t index = 0; index < randomBytes.size(); ++index) {
+        if (index > 0 && index % AccessCodeGroupSize == 0) {
+            code.push_back('-');
+        }
+        code.push_back(Alphabet[randomBytes[index] & 0x1FU]);
+    }
+    return code;
+}
+
 uint32_t GenerateUdpCryptoNoncePrefix()
 {
     uint32_t prefix = 0;
