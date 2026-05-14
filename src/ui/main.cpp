@@ -182,7 +182,7 @@ public:
         connect(discoveryProcess_, &QProcess::readyReadStandardOutput, this, [this] {
             const QString text = QString::fromLocal8Bit(discoveryProcess_->readAllStandardOutput());
             discoveryOutput_ += text;
-            appendOutput(text);
+            appendOutput(redactDiscoveryOutput(text));
         });
         connect(discoveryProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
             Q_UNUSED(error);
@@ -447,6 +447,33 @@ private:
         accessLayout->addWidget(copyAccessCodeButton_);
         addRow(content, "Access code", accessRow);
 
+        auto* inviteRow = new QWidget;
+        inviteRow->setObjectName("FormRow");
+        prepareInput(inviteRow);
+        auto* inviteLayout = new QHBoxLayout(inviteRow);
+        inviteLayout->setContentsMargins(0, 0, 0, 0);
+        inviteLayout->setSpacing(8);
+        inviteCodeEdit_ = new QLineEdit;
+        inviteCodeEdit_->setPlaceholderText("Optional LAN invite");
+        inviteCodeEdit_->setEchoMode(QLineEdit::Password);
+        prepareInput(inviteCodeEdit_);
+        generateInviteCodeButton_ = new QPushButton("Generate");
+        generateInviteCodeButton_->setObjectName("SecondaryButton");
+        generateInviteCodeButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
+        generateInviteCodeButton_->setIconSize(QSize(14, 14));
+        generateInviteCodeButton_->setCursor(Qt::PointingHandCursor);
+        generateInviteCodeButton_->setFixedHeight(kRowHeight);
+        copyInviteCodeButton_ = new QPushButton("Copy");
+        copyInviteCodeButton_->setObjectName("SecondaryButton");
+        copyInviteCodeButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+        copyInviteCodeButton_->setIconSize(QSize(14, 14));
+        copyInviteCodeButton_->setCursor(Qt::PointingHandCursor);
+        copyInviteCodeButton_->setFixedHeight(kRowHeight);
+        inviteLayout->addWidget(inviteCodeEdit_, 1);
+        inviteLayout->addWidget(generateInviteCodeButton_);
+        inviteLayout->addWidget(copyInviteCodeButton_);
+        addRow(content, "Invite code", inviteRow);
+
         allowPlaintextCheck_ = new QCheckBox("Allow plaintext");
         addFullRow(content, allowPlaintextCheck_);
 
@@ -482,6 +509,8 @@ private:
         });
         connect(generateAccessCodeButton_, &QPushButton::clicked, this, [this] { generateAccessCode(); });
         connect(copyAccessCodeButton_, &QPushButton::clicked, this, [this] { copyAccessCode(); });
+        connect(generateInviteCodeButton_, &QPushButton::clicked, this, [this] { generateInviteCode(); });
+        connect(copyInviteCodeButton_, &QPushButton::clicked, this, [this] { copyInviteCode(); });
         connect(browseReportButton_, &QPushButton::clicked, this, [this] {
             const QString selected = QFileDialog::getSaveFileName(
                 this,
@@ -577,6 +606,7 @@ private:
         bindSpinBox(previewLatencySpin_);
         bindLineEdit(sessionEdit_);
         bindLineEdit(accessCodeEdit_);
+        bindLineEdit(inviteCodeEdit_);
         bindCheckBox(allowPlaintextCheck_);
         bindCheckBox(reportCheck_);
     }
@@ -619,6 +649,26 @@ private:
         appendOutput("Access code copied to clipboard\n");
     }
 
+    void generateInviteCode()
+    {
+        try {
+            inviteCodeEdit_->setText(QString::fromStdString(screenshare::GenerateUdpAccessCode()));
+            copyInviteCode();
+        } catch (const std::exception& error) {
+            QMessageBox::critical(this, "Invite code", QString::fromLocal8Bit(error.what()));
+        }
+    }
+
+    void copyInviteCode()
+    {
+        const QString inviteCode = inviteCodeEdit_->text();
+        if (inviteCode.isEmpty()) {
+            return;
+        }
+        QApplication::clipboard()->setText(inviteCode);
+        appendOutput("Invite code copied to clipboard\n");
+    }
+
     QStringList currentArguments() const
     {
         QStringList args;
@@ -655,6 +705,13 @@ private:
         } else if (allowPlaintextCheck_->isChecked()) {
             args << "--allow-plaintext";
         }
+        const QString inviteCode = inviteCodeEdit_->text();
+        if (!shareMode() &&
+            lanDiscoverableCheck_->isChecked() &&
+            !accessCode.isEmpty() &&
+            !inviteCode.isEmpty()) {
+            args << "--lan-pair-code" << inviteCode;
+        }
 
         if (reportCheck_->isChecked() && !reportPathEdit_->text().trimmed().isEmpty()) {
             args << "--save-report" << reportPathEdit_->text().trimmed();
@@ -667,12 +724,20 @@ private:
     {
         QStringList args = currentArguments();
         for (int index = 0; index + 1 < args.size(); ++index) {
-            if (args[index] == "--access-code") {
+            if (args[index] == "--access-code" || args[index] == "--lan-pair-code") {
                 args[index + 1] = "<redacted>";
                 ++index;
             }
         }
         return args;
+    }
+
+    QString redactDiscoveryOutput(QString text) const
+    {
+        text.replace(
+            QRegularExpression(QStringLiteral(R"((--access-code\s+)(?!CODE(?:\s|$))(\S+))")),
+            QStringLiteral("\\1<paired>"));
+        return text;
     }
 
     void refreshCommand()
@@ -791,8 +856,13 @@ private:
 
         discoveryOutput_.clear();
         appendOutput("\nDiscovering LAN receivers...\n");
+        QStringList args{"--lan-discover", "--lan-discover-seconds", "2"};
+        const QString inviteCode = inviteCodeEdit_->text();
+        if (!inviteCode.isEmpty()) {
+            args << "--lan-pair-code" << inviteCode;
+        }
         discoveryProcess_->setProgram(program);
-        discoveryProcess_->setArguments({"--lan-discover", "--lan-discover-seconds", "2"});
+        discoveryProcess_->setArguments(args);
         discoveryProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
         setDiscovering(true);
         discoveryProcess_->start();
@@ -829,6 +899,18 @@ private:
             sessionEdit_->setText(sessionMatch.captured(1));
         }
 
+        const QRegularExpression accessPattern(QStringLiteral(R"(\bcommand=[^\n]*--access-code\s+([^\s]+))"));
+        const QRegularExpressionMatch accessMatch = accessPattern.match(discoveryOutput_);
+        const bool pairedAccessCode =
+            accessMatch.hasMatch() &&
+            accessMatch.captured(1) != "CODE" &&
+            accessMatch.captured(1) != "<paired>";
+        if (pairedAccessCode) {
+            accessCodeEdit_->setText(accessMatch.captured(1));
+            allowPlaintextCheck_->setChecked(false);
+            appendOutput("Invite code matched; access code filled for this receiver\n");
+        }
+
         const QRegularExpression securityPattern(QStringLiteral(R"(\bsecurity=(encrypted|plaintext))"));
         const QRegularExpressionMatch securityMatch = securityPattern.match(discoveryOutput_);
         if (securityMatch.hasMatch() && securityMatch.captured(1) == "plaintext") {
@@ -840,6 +922,14 @@ private:
             if (accessCodeEdit_->text().isEmpty()) {
                 appendOutput("Selected receiver requires an access code; paste the matching code before Start\n");
             }
+        }
+
+        const QRegularExpression pairingPattern(QStringLiteral(R"(\bpairing=(none|available|matched|failed))"));
+        const QRegularExpressionMatch pairingMatch = pairingPattern.match(discoveryOutput_);
+        if (pairingMatch.hasMatch() && pairingMatch.captured(1) == "failed") {
+            appendOutput("Invite code did not match this receiver\n");
+        } else if (pairingMatch.hasMatch() && pairingMatch.captured(1) == "available" && inviteCodeEdit_->text().isEmpty()) {
+            appendOutput("This receiver has an invite code available; enter it and Find on LAN again to fill access automatically\n");
         }
 
         appendOutput("Selected LAN receiver " + shareHostEdit_->text() + ":" + QString::number(port) + "\n");
@@ -918,6 +1008,9 @@ private:
     QLineEdit* accessCodeEdit_ = nullptr;
     QPushButton* generateAccessCodeButton_ = nullptr;
     QPushButton* copyAccessCodeButton_ = nullptr;
+    QLineEdit* inviteCodeEdit_ = nullptr;
+    QPushButton* generateInviteCodeButton_ = nullptr;
+    QPushButton* copyInviteCodeButton_ = nullptr;
     QCheckBox* allowPlaintextCheck_ = nullptr;
     QCheckBox* reportCheck_ = nullptr;
     QLineEdit* reportPathEdit_ = nullptr;

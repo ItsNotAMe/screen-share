@@ -13,7 +13,7 @@ The first milestone is a pure C++ capture foundation:
 - Capture system or microphone audio with WASAPI.
 - Send Opus-compressed audio packets over UDP by default and optionally play them on the receiver with a small jitter buffer.
 
-Friend pairing and broader network setup are later milestones.
+Internet/NAT traversal is a later milestone.
 
 ## Build
 
@@ -78,8 +78,8 @@ Start the desktop control UI:
 The UI starts and stops the same `ScreenShare.exe` engine beside it. Use the Share tab on the
 sending computer and the Watch tab on the receiving computer. Reports are enabled by default so a
 test run can be sent as a zip without collecting separate log files. The UI opens in dark mode by
-default, includes a theme toggle in the header, and can generate/copy an encrypted-session access
-code.
+default, includes a theme toggle in the header, and can generate/copy encrypted-session access and
+LAN invite codes.
 
 Common live session:
 
@@ -120,6 +120,20 @@ code, discovery prints `security=encrypted` and an access-code fingerprint, and 
 command uses `--access-code CODE` as a placeholder. The raw access code is never broadcast; copy or
 share it separately. If Watch is explicitly plaintext, discovery prints `security=plaintext` and the
 generated Share command includes `--allow-plaintext`.
+
+For a smoother encrypted LAN setup, give the receiver a temporary invite code. The raw access code is
+encrypted inside the LAN discovery response and only a sender with the same invite code can recover
+it:
+
+```powershell
+.\build\release\ScreenShare.exe --watch 5000 --access-code CODE --lan-advertise --lan-pair-code INVITE
+.\build\release\ScreenShare.exe --lan-discover --lan-pair-code INVITE
+```
+
+When the invite matches, discovery prints a ready-to-run Share command with the real `--access-code`.
+Do not combine `--lan-discover --lan-pair-code` with `--log` or `--save-report`, because a matched
+terminal discovery command contains a usable access code. The desktop UI keeps discovery output
+redacted while still filling the access code field for the selected receiver.
 
 List monitors:
 

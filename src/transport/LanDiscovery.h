@@ -1,7 +1,9 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -17,6 +19,9 @@ struct LanDiscoveryPeer {
     std::string sessionId;
     uint64_t sessionFingerprint = 0;
     uint64_t accessCodeFingerprint = 0;
+    bool pairingAvailable = false;
+    bool pairingSucceeded = false;
+    std::string pairedAccessCode;
 };
 
 struct LanDiscoveryAdvertiseConfig {
@@ -26,6 +31,8 @@ struct LanDiscoveryAdvertiseConfig {
     std::string sessionId;
     uint64_t sessionFingerprint = 0;
     uint64_t accessCodeFingerprint = 0;
+    std::string accessCode;
+    std::string pairCode;
 };
 
 class LanDiscoveryResponder {
@@ -46,6 +53,7 @@ private:
 
     uintptr_t socket_ = 0;
     LanDiscoveryAdvertiseConfig config_{};
+    std::vector<std::byte> response_;
     std::thread worker_;
     bool stopRequested_ = false;
     bool winsockStarted_ = false;
@@ -53,6 +61,7 @@ private:
 
 std::vector<LanDiscoveryPeer> DiscoverLanPeers(
     std::chrono::milliseconds timeout,
-    uint16_t discoveryPort = LanDiscoveryDefaultPort);
+    uint16_t discoveryPort = LanDiscoveryDefaultPort,
+    std::optional<std::string> pairCode = std::nullopt);
 
 } // namespace screenshare

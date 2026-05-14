@@ -146,6 +146,8 @@ struct Options {
     std::string stopFilePath;
     bool generateAccessCode = false;
     bool allowPlaintext = false;
+    std::string accessCode;
+    std::string lanPairCode;
     bool accessCodeProvided = false;
     uint64_t sessionFingerprint = 0;
     uint64_t accessCodeFingerprint = 0;
@@ -171,7 +173,7 @@ void PrintHelp()
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT [--display N] [--seconds S]\n"
         << "  ScreenShare --watch PORT [--seconds S]\n"
-        << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
+        << "  ScreenShare --lan-discover [--lan-discover-seconds S] [--lan-pair-code CODE]\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
         << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
@@ -202,7 +204,8 @@ void PrintHelp()
         << "          run --generate-access-code to print a random access code.\n"
         << "          add --allow-plaintext to acknowledge an unencrypted local UDP session.\n"
         << "  LAN: add --lan-advertise to --watch/--udp-recv, then use --lan-discover on the sender.\n"
-        << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
+        << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S,\n"
+        << "       and --lan-pair-code CODE to securely share an advertised access code.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -212,8 +215,8 @@ void PrintHelp()
         << "  ScreenShare --watch 5000 --save-report receiver-report.zip\n"
         << "  ScreenShare --watch 5000 --session game-night --save-report receiver-report.zip\n"
         << "  ScreenShare --watch 5000 --access-code 123456\n"
-        << "  ScreenShare --watch 5000 --lan-advertise\n"
-        << "  ScreenShare --lan-discover\n"
+        << "  ScreenShare --watch 5000 --access-code 123456 --lan-advertise --lan-pair-code invite123\n"
+        << "  ScreenShare --lan-discover --lan-pair-code invite123\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
@@ -543,21 +546,32 @@ std::string ParseSessionId(const char* value)
     return sessionId;
 }
 
-std::string ParseAccessCode(const char* value)
+std::string ParseSecretCode(const char* value, std::string_view optionName)
 {
-    const std::string accessCode = value != nullptr ? value : "";
-    if (accessCode.empty() || accessCode.size() > 64) {
-        throw std::invalid_argument("--access-code must be between 1 and 64 bytes");
+    const std::string code = value != nullptr ? value : "";
+    const std::string option(optionName);
+    if (code.empty() || code.size() > 64) {
+        throw std::invalid_argument(option + " must be between 1 and 64 bytes");
     }
 
-    for (const char ch : accessCode) {
+    for (const char ch : code) {
         const unsigned char valueByte = static_cast<unsigned char>(ch);
         if (valueByte < 32U || valueByte == 127U) {
-            throw std::invalid_argument("--access-code may not contain control characters");
+            throw std::invalid_argument(option + " may not contain control characters");
         }
     }
 
-    return accessCode;
+    return code;
+}
+
+std::string ParseAccessCode(const char* value)
+{
+    return ParseSecretCode(value, "--access-code");
+}
+
+std::string ParseLanPairCode(const char* value)
+{
+    return ParseSecretCode(value, "--lan-pair-code");
 }
 
 std::string DefaultLanName()
@@ -2171,6 +2185,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
 
         constexpr std::string_view accessCodePrefix = "--access-code=";
         constexpr std::string_view sessionCodePrefix = "--session-code=";
+        constexpr std::string_view lanPairCodePrefix = "--lan-pair-code=";
 
         if (arg == "--help" || arg == "-h") {
             PrintHelp();
@@ -2188,6 +2203,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.allowPlaintext = true;
         } else if (arg == "--access-code" || arg == "--session-code") {
             const std::string accessCode = ParseAccessCode(requireValue(arg.c_str()));
+            options.accessCode = accessCode;
             options.accessCodeFingerprint = AccessCodeFingerprint(accessCode);
             options.accessCodeKey = screenshare::DeriveUdpCryptoKey(accessCode);
             options.accessCodeProvided = true;
@@ -2195,9 +2211,14 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             const size_t valueOffset =
                 arg.rfind(accessCodePrefix, 0) == 0 ? accessCodePrefix.size() : sessionCodePrefix.size();
             const std::string accessCode = ParseAccessCode(arg.c_str() + valueOffset);
+            options.accessCode = accessCode;
             options.accessCodeFingerprint = AccessCodeFingerprint(accessCode);
             options.accessCodeKey = screenshare::DeriveUdpCryptoKey(accessCode);
             options.accessCodeProvided = true;
+        } else if (arg == "--lan-pair-code") {
+            options.lanPairCode = ParseLanPairCode(requireValue("--lan-pair-code"));
+        } else if (arg.rfind(lanPairCodePrefix, 0) == 0) {
+            options.lanPairCode = ParseLanPairCode(arg.c_str() + lanPairCodePrefix.size());
         } else if (arg == "--list") {
             options.listDisplays = true;
         } else if (arg == "--list-h264-encoders") {
@@ -2380,6 +2401,19 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.adaptResolutionMinScaleProvided || options.adaptResolutionCooldownProvided) {
         options.adaptResolution = true;
         options.adaptBitrate = true;
+    }
+
+    if (!options.lanPairCode.empty() && !options.lanAdvertise && !options.lanDiscover) {
+        throw std::invalid_argument("--lan-pair-code requires --lan-advertise or --lan-discover");
+    }
+    if (options.lanAdvertise && !options.lanPairCode.empty() && !options.accessCodeProvided) {
+        throw std::invalid_argument("--lan-pair-code with --lan-advertise requires --access-code");
+    }
+    if (options.lanDiscover && !options.lanPairCode.empty() &&
+        (!options.logPath.empty() || !options.saveReportPath.empty())) {
+        throw std::invalid_argument(
+            "--lan-discover with --lan-pair-code cannot be combined with --log or --save-report "
+            "because matched discovery output includes a usable access code");
     }
 
     if (options.generateAccessCode) {
@@ -2679,19 +2713,24 @@ std::string CurrentLocalTimeText()
 
 bool IsSensitiveOption(std::string_view option)
 {
-    return option == "--access-code" || option == "--session-code";
+    return option == "--access-code" || option == "--session-code" || option == "--lan-pair-code";
 }
 
 bool RedactInlineSensitiveOption(std::string& option)
 {
     constexpr std::string_view accessCodePrefix = "--access-code=";
     constexpr std::string_view sessionCodePrefix = "--session-code=";
+    constexpr std::string_view lanPairCodePrefix = "--lan-pair-code=";
     if (option.rfind(accessCodePrefix, 0) == 0) {
         option = std::string(accessCodePrefix) + "<redacted>";
         return true;
     }
     if (option.rfind(sessionCodePrefix, 0) == 0) {
         option = std::string(sessionCodePrefix) + "<redacted>";
+        return true;
+    }
+    if (option.rfind(lanPairCodePrefix, 0) == 0) {
+        option = std::string(lanPairCodePrefix) + "<redacted>";
         return true;
     }
     return false;
@@ -3996,7 +4035,9 @@ void RunLanDiscovery(const Options& options)
         << "Discovering LAN receivers for " << options.lanDiscoverSeconds
         << " seconds on UDP port " << options.lanDiscoveryPort << "...\n";
 
-    const auto peers = screenshare::DiscoverLanPeers(timeout, options.lanDiscoveryPort);
+    const std::optional<std::string> pairCode =
+        options.lanPairCode.empty() ? std::nullopt : std::make_optional(options.lanPairCode);
+    const auto peers = screenshare::DiscoverLanPeers(timeout, options.lanDiscoveryPort, pairCode);
     if (peers.empty()) {
         std::cout
             << "No LAN receivers found. Start the receiver with --watch PORT --lan-advertise "
@@ -4006,6 +4047,14 @@ void RunLanDiscovery(const Options& options)
 
     for (const auto& peer : peers) {
         const std::string target = peer.address + ":" + std::to_string(peer.sharePort);
+        const char* pairingState = "none";
+        if (peer.pairingSucceeded) {
+            pairingState = "matched";
+        } else if (peer.pairingAvailable && pairCode) {
+            pairingState = "failed";
+        } else if (peer.pairingAvailable) {
+            pairingState = "available";
+        }
         std::cout
             << "receiver name=\"" << peer.name << "\""
             << " address=" << peer.address
@@ -4014,6 +4063,7 @@ void RunLanDiscovery(const Options& options)
             << " fingerprint=" << (peer.sessionFingerprint == 0 ? "unknown" : FormatSessionFingerprint(peer.sessionFingerprint))
             << " security=" << (peer.accessCodeFingerprint == 0 ? "plaintext" : "encrypted")
             << " access_fingerprint=" << (peer.accessCodeFingerprint == 0 ? "none" : FormatSessionFingerprint(peer.accessCodeFingerprint))
+            << " pairing=" << pairingState
             << "\n"
             << "share_target=" << target << "\n"
             << "command=ScreenShare --share " << target;
@@ -4022,6 +4072,8 @@ void RunLanDiscovery(const Options& options)
         }
         if (peer.accessCodeFingerprint == 0) {
             std::cout << " --allow-plaintext";
+        } else if (peer.pairingSucceeded) {
+            std::cout << " --access-code " << peer.pairedAccessCode;
         } else {
             std::cout << " --access-code CODE";
         }
@@ -4049,6 +4101,8 @@ void RunUdpReceiverStats(const Options& options)
         advertiseConfig.sessionId = options.sessionId;
         advertiseConfig.sessionFingerprint = options.sessionFingerprint;
         advertiseConfig.accessCodeFingerprint = options.accessCodeFingerprint;
+        advertiseConfig.accessCode = options.accessCode;
+        advertiseConfig.pairCode = options.lanPairCode;
         lanDiscoveryResponder = std::make_unique<screenshare::LanDiscoveryResponder>();
         lanDiscoveryResponder->Start(advertiseConfig);
     }
