@@ -12,9 +12,16 @@ namespace screenshare::udp_protocol {
 constexpr uint32_t PacketMagic = 0x53535631; // "SSV1"
 constexpr uint32_t FeedbackMagic = 0x53534631; // "SSF1"
 constexpr uint32_t AudioMagic = 0x53534131; // "SSA1"
-constexpr uint16_t PacketVersion = 2;
+constexpr uint16_t PacketVersion = 3;
 constexpr uint16_t LegacyPacketVersion = 1;
+constexpr uint16_t AccessCodePacketVersion = 2;
 constexpr uint16_t MaxFragmentsPerFrame = 4096;
+constexpr size_t CryptoNonceBytes = 12;
+constexpr size_t CryptoTagBytes = 16;
+
+enum PacketFlags : uint32_t {
+    PacketFlagEncrypted = 1U << 0,
+};
 
 enum class FeedbackHealthState : uint16_t {
     Unknown = 0,
@@ -77,12 +84,18 @@ struct PacketHeader {
     uint16_t fragmentIndex = 0;
     uint16_t fragmentCount = 0;
     uint32_t payloadBytes = 0;
+    uint32_t flags = 0;
+    std::byte encryptionNonce[CryptoNonceBytes]{};
+    std::byte encryptionTag[CryptoTagBytes]{};
 };
 
 struct FeedbackPacket {
     uint32_t magic = 0;
     uint16_t version = 0;
     uint16_t packetBytes = 0;
+    uint32_t flags = 0;
+    std::byte encryptionNonce[CryptoNonceBytes]{};
+    std::byte encryptionTag[CryptoTagBytes]{};
     uint64_t sequence = 0;
     uint64_t completedFrames = 0;
     uint64_t droppedDatagrams = 0;
@@ -123,12 +136,21 @@ struct AudioPacketHeader {
     uint16_t fragmentCount = 0;
     uint32_t payloadBytes = 0;
     uint32_t flags = 0;
+    uint32_t encryptionFlags = 0;
+    std::byte encryptionNonce[CryptoNonceBytes]{};
+    std::byte encryptionTag[CryptoTagBytes]{};
 };
 #pragma pack(pop)
 
-static_assert(sizeof(PacketHeader) == 56);
-static_assert(sizeof(FeedbackPacket) == 112);
-static_assert(sizeof(AudioPacketHeader) == 80);
+static_assert(sizeof(PacketHeader) == 88);
+static_assert(sizeof(FeedbackPacket) == 144);
+static_assert(sizeof(AudioPacketHeader) == 112);
+
+inline constexpr size_t PacketHeaderAuthenticatedBytes = offsetof(PacketHeader, encryptionTag);
+inline constexpr size_t AudioPacketHeaderAuthenticatedBytes = offsetof(AudioPacketHeader, encryptionTag);
+inline constexpr size_t FeedbackPacketAuthenticatedBytes = offsetof(FeedbackPacket, encryptionTag);
+inline constexpr size_t FeedbackPacketEncryptedPayloadOffset =
+    offsetof(FeedbackPacket, sequence);
 
 constexpr uint16_t ByteSwap16(uint16_t value) noexcept
 {

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "transport/UdpCrypto.h"
 #include "transport/UdpProtocol.h"
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <random>
 #include <unordered_map>
@@ -27,6 +29,7 @@ struct UdpReceiverConfig {
     std::chrono::milliseconds simulatedJitter = std::chrono::milliseconds(0);
     uint32_t simulationSeed = 1;
     uint64_t accessCodeFingerprint = 0;
+    std::optional<UdpCryptoKey> encryptionKey;
 };
 
 struct UdpCompletedFrame {
@@ -58,6 +61,7 @@ struct UdpReceiverStats {
     uint64_t datagramsAccepted = 0;
     uint64_t invalidDatagrams = 0;
     uint64_t accessRejectedDatagrams = 0;
+    uint64_t cryptoRejectedDatagrams = 0;
     uint64_t duplicateFragments = 0;
     uint64_t framesCompleted = 0;
     uint64_t incompleteFramesDropped = 0;
@@ -67,6 +71,7 @@ struct UdpReceiverStats {
     uint64_t simulatedDatagramsDelayed = 0;
     uint64_t feedbackPacketsSent = 0;
     uint64_t feedbackSendErrors = 0;
+    uint64_t encryptedFeedbackPacketsSent = 0;
     uint64_t audioDatagramsAccepted = 0;
     uint64_t audioDuplicateFragments = 0;
     uint64_t audioPacketsCompleted = 0;
@@ -179,6 +184,15 @@ private:
     void EnforcePendingFrameLimit();
     void EnforcePendingAudioPacketLimit();
     void EnforceCompletedAudioPacketLimit();
+    [[nodiscard]] std::optional<std::vector<std::byte>> DecryptDatagramPayload(
+        const std::byte* datagram,
+        int datagramBytes,
+        size_t headerBytes,
+        size_t authenticatedHeaderBytes,
+        std::span<const std::byte, UdpCryptoNonceBytes> nonce,
+        std::span<const std::byte, UdpCryptoTagBytes> tag,
+        uint32_t flags);
+    bool EncryptFeedbackDatagram(std::vector<std::byte>& datagram);
 
     uintptr_t socket_ = 0;
     UdpReceiverConfig config_{};
@@ -191,6 +205,8 @@ private:
     std::unordered_map<uint64_t, PendingFrame> pendingFrames_;
     std::unordered_map<uint64_t, PendingAudioPacket> pendingAudioPackets_;
     std::mt19937 simulationRng_{1};
+    std::unique_ptr<UdpAesGcm> crypto_;
+    uint32_t feedbackNoncePrefix_ = 0;
     bool winsockStarted_ = false;
 };
 

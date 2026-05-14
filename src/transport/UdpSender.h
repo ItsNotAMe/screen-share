@@ -1,6 +1,7 @@
 #pragma once
 
 #include "codec/H264StreamEncoder.h"
+#include "transport/UdpCrypto.h"
 #include "transport/UdpProtocol.h"
 
 #include <chrono>
@@ -8,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -24,6 +26,7 @@ struct UdpSenderConfig {
     uint32_t maxQueuedDatagrams = 4'096;
     std::chrono::milliseconds maxQueueDelay{0};
     uint64_t accessCodeFingerprint = 0;
+    std::optional<UdpCryptoKey> encryptionKey;
     bool pacingEnabled = true;
 };
 
@@ -47,7 +50,9 @@ struct UdpSenderStats {
     uint64_t feedbackPacketsReceived = 0;
     uint64_t invalidFeedbackPackets = 0;
     uint64_t feedbackAccessRejected = 0;
+    uint64_t feedbackCryptoRejected = 0;
     bool hasFeedback = false;
+    bool encryptionEnabled = false;
     udp_protocol::FeedbackSnapshot latestFeedback;
 };
 
@@ -124,6 +129,13 @@ private:
     void RescheduleQueueLocked(Clock::time_point now);
     void CheckWorkerErrorLocked() const;
     void UpdatePendingStatsLocked();
+    void EncryptDatagramPayload(
+        std::vector<std::byte>& datagram,
+        size_t headerBytes,
+        size_t authenticatedHeaderBytes,
+        std::span<const std::byte, UdpCryptoNonceBytes> nonce,
+        std::span<std::byte, UdpCryptoTagBytes> tag);
+    [[nodiscard]] std::optional<std::vector<std::byte>> DecryptFeedbackDatagram(std::span<const std::byte> datagram);
 
     uintptr_t socket_ = 0;
     std::vector<std::byte> address_;
@@ -139,6 +151,9 @@ private:
     std::thread worker_;
     Clock::time_point nextSendAt_{};
     std::string workerError_;
+    std::unique_ptr<UdpAesGcm> crypto_;
+    uint32_t videoNoncePrefix_ = 0;
+    uint32_t audioNoncePrefix_ = 0;
     bool stopWorker_ = false;
     bool datagramInFlight_ = false;
     bool winsockStarted_ = false;
