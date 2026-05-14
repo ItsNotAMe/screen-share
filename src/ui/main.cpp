@@ -22,6 +22,7 @@
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QStyle>
@@ -203,7 +204,7 @@ private:
     {
         auto* root = new QVBoxLayout(this);
         root->setContentsMargins(22, 20, 22, 20);
-        root->setSpacing(16);
+        root->setSpacing(14);
 
         root->addLayout(buildHeader());
         root->addWidget(buildModeSelector());
@@ -212,25 +213,30 @@ private:
         body->setSpacing(16);
         root->addLayout(body, 1);
 
-        auto* leftColumn = new QVBoxLayout;
+        auto* leftContent = new QWidget;
+        leftContent->setObjectName("LeftHost");
+        auto* leftColumn = new QVBoxLayout(leftContent);
+        leftColumn->setContentsMargins(0, 0, 6, 0);
         leftColumn->setSpacing(12);
         leftColumn->addWidget(buildOptionStack());
         leftColumn->addWidget(buildSessionPanel());
         leftColumn->addStretch(1);
 
-        auto* leftHost = new QWidget;
-        leftHost->setObjectName("LeftHost");
-        leftHost->setLayout(leftColumn);
-        leftHost->setFixedWidth(430);
-        body->addWidget(leftHost);
+        auto* leftScroll = new QScrollArea;
+        leftScroll->setObjectName("LeftScroll");
+        leftScroll->setWidget(leftContent);
+        leftScroll->setWidgetResizable(true);
+        leftScroll->setFrameShape(QFrame::NoFrame);
+        leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        leftScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        leftScroll->setFixedWidth(450);
+        body->addWidget(leftScroll);
 
         auto* rightColumn = new QVBoxLayout;
         rightColumn->setSpacing(12);
         rightColumn->addWidget(buildCommandPanel());
         rightColumn->addWidget(buildOutputPanel(), 1);
         body->addLayout(rightColumn, 1);
-
-        root->addLayout(buildFooter());
 
         bindCommandRefresh();
         applyTheme(darkModeCheck_->isChecked());
@@ -247,11 +253,26 @@ private:
         titleBlock->addWidget(makeLabel("Fast local screen sharing", "Subtle"));
         header->addLayout(titleBlock, 1);
 
+        statusBadge_ = makeLabel("Idle", "StatusIdle");
+        statusBadge_->setAlignment(Qt::AlignCenter);
+        statusBadge_->setMinimumHeight(34);
+        header->addWidget(statusBadge_, 0, Qt::AlignVCenter);
+
         darkModeCheck_ = new QCheckBox("Dark");
         darkModeCheck_->setObjectName("ThemeSwitch");
         darkModeCheck_->setChecked(true);
         connect(darkModeCheck_, &QCheckBox::toggled, this, [this](bool checked) { applyTheme(checked); });
         header->addWidget(darkModeCheck_, 0, Qt::AlignVCenter);
+
+        actionButton_ = new QPushButton("Start");
+        actionButton_->setObjectName("PrimaryButton");
+        actionButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+        actionButton_->setIconSize(QSize(16, 16));
+        actionButton_->setCursor(Qt::PointingHandCursor);
+        actionButton_->setMinimumHeight(40);
+        actionButton_->setMinimumWidth(140);
+        connect(actionButton_, &QPushButton::clicked, this, [this] { toggleProcess(); });
+        header->addWidget(actionButton_, 0, Qt::AlignVCenter);
 
         return header;
     }
@@ -521,30 +542,6 @@ private:
         layout->addWidget(outputEdit_, 1);
         connect(clearButton, &QPushButton::clicked, outputEdit_, &QPlainTextEdit::clear);
         return panel;
-    }
-
-    QHBoxLayout* buildFooter()
-    {
-        auto* footer = new QHBoxLayout;
-        footer->setSpacing(12);
-
-        statusBadge_ = makeLabel("Idle", "StatusIdle");
-        statusBadge_->setAlignment(Qt::AlignCenter);
-        statusBadge_->setMinimumHeight(34);
-        footer->addWidget(statusBadge_);
-        footer->addStretch(1);
-
-        actionButton_ = new QPushButton("Start");
-        actionButton_->setObjectName("PrimaryButton");
-        actionButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
-        actionButton_->setIconSize(QSize(16, 16));
-        actionButton_->setCursor(Qt::PointingHandCursor);
-        actionButton_->setMinimumHeight(40);
-        actionButton_->setMinimumWidth(140);
-        footer->addWidget(actionButton_);
-
-        connect(actionButton_, &QPushButton::clicked, this, [this] { toggleProcess(); });
-        return footer;
     }
 
     void setMode(int index)
@@ -929,6 +926,10 @@ QWidget#LeftHost, QWidget#OptionPage, QWidget#FormRow,
 QStackedWidget#OptionStack {
     background: transparent;
 }
+QScrollArea#LeftScroll, QScrollArea#LeftScroll > QWidget > QWidget {
+    background: transparent;
+    border: 0;
+}
 QLabel {
     background: transparent;
 }
@@ -1144,6 +1145,10 @@ QWidget {
 QWidget#LeftHost, QWidget#OptionPage, QWidget#FormRow,
 QStackedWidget#OptionStack {
     background: transparent;
+}
+QScrollArea#LeftScroll, QScrollArea#LeftScroll > QWidget > QWidget {
+    background: transparent;
+    border: 0;
 }
 QLabel {
     background: transparent;
