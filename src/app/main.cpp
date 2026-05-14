@@ -4012,11 +4012,18 @@ void RunLanDiscovery(const Options& options)
             << " port=" << peer.sharePort
             << " session=" << (peer.sessionId.empty() ? "unknown" : peer.sessionId)
             << " fingerprint=" << (peer.sessionFingerprint == 0 ? "unknown" : FormatSessionFingerprint(peer.sessionFingerprint))
+            << " security=" << (peer.accessCodeFingerprint == 0 ? "plaintext" : "encrypted")
+            << " access_fingerprint=" << (peer.accessCodeFingerprint == 0 ? "none" : FormatSessionFingerprint(peer.accessCodeFingerprint))
             << "\n"
             << "share_target=" << target << "\n"
             << "command=ScreenShare --share " << target;
         if (!peer.sessionId.empty()) {
             std::cout << " --session " << peer.sessionId;
+        }
+        if (peer.accessCodeFingerprint == 0) {
+            std::cout << " --allow-plaintext";
+        } else {
+            std::cout << " --access-code CODE";
         }
         std::cout << "\n";
     }
@@ -4041,6 +4048,7 @@ void RunUdpReceiverStats(const Options& options)
         advertiseConfig.name = options.lanName;
         advertiseConfig.sessionId = options.sessionId;
         advertiseConfig.sessionFingerprint = options.sessionFingerprint;
+        advertiseConfig.accessCodeFingerprint = options.accessCodeFingerprint;
         lanDiscoveryResponder = std::make_unique<screenshare::LanDiscoveryResponder>();
         lanDiscoveryResponder->Start(advertiseConfig);
     }

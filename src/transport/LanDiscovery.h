@@ -16,6 +16,7 @@ struct LanDiscoveryPeer {
     std::string name;
     std::string sessionId;
     uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
 };
 
 struct LanDiscoveryAdvertiseConfig {
@@ -24,6 +25,7 @@ struct LanDiscoveryAdvertiseConfig {
     std::string name;
     std::string sessionId;
     uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
 };
 
 class LanDiscoveryResponder {

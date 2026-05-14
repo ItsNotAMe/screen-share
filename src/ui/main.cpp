@@ -822,6 +822,26 @@ private:
 
         shareHostEdit_->setText(match.captured(1));
         sharePortSpin_->setValue(port);
+
+        const QRegularExpression sessionPattern(QStringLiteral(R"(\bsession=([^\s]+))"));
+        const QRegularExpressionMatch sessionMatch = sessionPattern.match(discoveryOutput_);
+        if (sessionMatch.hasMatch() && sessionMatch.captured(1) != "unknown") {
+            sessionEdit_->setText(sessionMatch.captured(1));
+        }
+
+        const QRegularExpression securityPattern(QStringLiteral(R"(\bsecurity=(encrypted|plaintext))"));
+        const QRegularExpressionMatch securityMatch = securityPattern.match(discoveryOutput_);
+        if (securityMatch.hasMatch() && securityMatch.captured(1) == "plaintext") {
+            if (accessCodeEdit_->text().isEmpty()) {
+                allowPlaintextCheck_->setChecked(true);
+            }
+        } else if (securityMatch.hasMatch() && securityMatch.captured(1) == "encrypted") {
+            allowPlaintextCheck_->setChecked(false);
+            if (accessCodeEdit_->text().isEmpty()) {
+                appendOutput("Selected receiver requires an access code; paste the matching code before Start\n");
+            }
+        }
+
         appendOutput("Selected LAN receiver " + shareHostEdit_->text() + ":" + QString::number(port) + "\n");
         refreshCommand();
     }
