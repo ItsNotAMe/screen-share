@@ -421,6 +421,11 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
         ++stats_.invalidFeedbackPackets;
         return std::nullopt;
     }
+    if (config_.accessCodeFingerprint != 0 &&
+        feedback->accessCodeFingerprint != config_.accessCodeFingerprint) {
+        ++stats_.feedbackAccessRejected;
+        return std::nullopt;
+    }
 
     ++stats_.feedbackPacketsReceived;
     stats_.hasFeedback = true;
@@ -444,6 +449,7 @@ std::vector<std::byte> UdpSender::BuildDatagram(
     header.frameId = udp_protocol::ToNetwork64(frameId);
     header.timestamp100ns = udp_protocol::ToNetwork64(static_cast<uint64_t>(packet.timestamp100ns));
     header.senderQpc100ns = udp_protocol::ToNetwork64(static_cast<uint64_t>(packet.senderQpc100ns));
+    header.accessCodeFingerprint = udp_protocol::ToNetwork64(config_.accessCodeFingerprint);
     header.frameBytes = udp_protocol::ToNetwork32(static_cast<uint32_t>(packet.bytes.size()));
     header.fragmentOffset = udp_protocol::ToNetwork32(fragmentOffset);
     header.fragmentIndex = udp_protocol::ToNetwork16(fragmentIndex);
@@ -473,6 +479,7 @@ std::vector<std::byte> UdpSender::BuildAudioDatagram(
     header.packetId = udp_protocol::ToNetwork64(packetId);
     header.devicePosition = udp_protocol::ToNetwork64(packet.devicePosition);
     header.qpcPosition = udp_protocol::ToNetwork64(packet.qpcPosition);
+    header.accessCodeFingerprint = udp_protocol::ToNetwork64(config_.accessCodeFingerprint);
     header.sampleRate = udp_protocol::ToNetwork32(packet.sampleRate);
     header.channels = udp_protocol::ToNetwork16(packet.channels);
     header.bitsPerSample = udp_protocol::ToNetwork16(packet.bitsPerSample);

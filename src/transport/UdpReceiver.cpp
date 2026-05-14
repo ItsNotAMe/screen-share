@@ -319,6 +319,7 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     const uint64_t frameId = udp_protocol::FromNetwork64(header.frameId);
     const uint64_t timestamp100ns = udp_protocol::FromNetwork64(header.timestamp100ns);
     const uint64_t senderQpc100ns = udp_protocol::FromNetwork64(header.senderQpc100ns);
+    const uint64_t accessCodeFingerprint = udp_protocol::FromNetwork64(header.accessCodeFingerprint);
     const uint32_t frameBytes = udp_protocol::FromNetwork32(header.frameBytes);
     const uint32_t fragmentOffset = udp_protocol::FromNetwork32(header.fragmentOffset);
     const uint16_t fragmentIndex = udp_protocol::FromNetwork16(header.fragmentIndex);
@@ -330,6 +331,11 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
         headerBytes != sizeof(udp_protocol::PacketHeader) ||
         datagramBytes < static_cast<int>(headerBytes)) {
         ++stats_.invalidDatagrams;
+        return std::nullopt;
+    }
+    if (config_.accessCodeFingerprint != 0 &&
+        accessCodeFingerprint != config_.accessCodeFingerprint) {
+        ++stats_.accessRejectedDatagrams;
         return std::nullopt;
     }
 
@@ -428,6 +434,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     const uint64_t packetId = udp_protocol::FromNetwork64(header.packetId);
     const uint64_t devicePosition = udp_protocol::FromNetwork64(header.devicePosition);
     const uint64_t qpcPosition = udp_protocol::FromNetwork64(header.qpcPosition);
+    const uint64_t accessCodeFingerprint = udp_protocol::FromNetwork64(header.accessCodeFingerprint);
     const uint32_t sampleRate = udp_protocol::FromNetwork32(header.sampleRate);
     const uint16_t channels = udp_protocol::FromNetwork16(header.channels);
     const uint16_t bitsPerSample = udp_protocol::FromNetwork16(header.bitsPerSample);
@@ -463,6 +470,11 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         !knownCodec ||
         (flags & ~allowedFlags) != 0) {
         ++stats_.invalidDatagrams;
+        return;
+    }
+    if (config_.accessCodeFingerprint != 0 &&
+        accessCodeFingerprint != config_.accessCodeFingerprint) {
+        ++stats_.accessRejectedDatagrams;
         return;
     }
 

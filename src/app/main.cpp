@@ -144,12 +144,15 @@ struct Options {
     std::string logPath;
     std::string sessionId;
     std::string stopFilePath;
+    bool accessCodeProvided = false;
     uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
 };
 
 struct SavedReportContext {
     std::string sessionId;
     uint64_t sessionFingerprint = 0;
+    bool accessCodeRequired = false;
     std::optional<screenshare::udp_protocol::FeedbackSnapshot> latestReceiverFeedback;
 };
 
@@ -190,6 +193,7 @@ void PrintHelp()
         << "  Global: add --log PATH to save console output to a file.\n"
         << "          add --save-report PATH to save a zipped run report.\n"
         << "          add --session ID to give both sides a matching diagnostic session.\n"
+        << "          add --access-code CODE on both sides to reject unmatched local UDP sessions.\n"
         << "  LAN: add --lan-advertise to --watch/--udp-recv, then use --lan-discover on the sender.\n"
         << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
@@ -199,10 +203,12 @@ void PrintHelp()
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --watch 5000 --save-report receiver-report.zip\n"
         << "  ScreenShare --watch 5000 --session game-night --save-report receiver-report.zip\n"
+        << "  ScreenShare --watch 5000 --access-code 123456\n"
         << "  ScreenShare --watch 5000 --lan-advertise\n"
         << "  ScreenShare --lan-discover\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
+        << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
         << "  ScreenShare --audio-capture system --seconds 5 --audio-send 127.0.0.1:5000\n"
         << "  ScreenShare --display 0 --width 1920 --height 1080 --fps 60 --seconds 15\n"
@@ -475,6 +481,21 @@ uint64_t SessionFingerprint(std::string_view sessionId)
     return hash == 0 ? 1 : hash;
 }
 
+uint64_t AccessCodeFingerprint(std::string_view accessCode)
+{
+    uint64_t hash = 14695981039346656037ULL;
+    constexpr std::string_view prefix = "screenshare-access-code-v1:";
+    for (const char ch : prefix) {
+        hash ^= static_cast<unsigned char>(ch);
+        hash *= 1099511628211ULL;
+    }
+    for (const char ch : accessCode) {
+        hash ^= static_cast<unsigned char>(ch);
+        hash *= 1099511628211ULL;
+    }
+    return hash == 0 ? 1 : hash;
+}
+
 std::string GenerateSessionId()
 {
     uint64_t randomPart = 0;
@@ -512,6 +533,23 @@ std::string ParseSessionId(const char* value)
     }
 
     return sessionId;
+}
+
+std::string ParseAccessCode(const char* value)
+{
+    const std::string accessCode = value != nullptr ? value : "";
+    if (accessCode.empty() || accessCode.size() > 64) {
+        throw std::invalid_argument("--access-code must be between 1 and 64 bytes");
+    }
+
+    for (const char ch : accessCode) {
+        const unsigned char valueByte = static_cast<unsigned char>(ch);
+        if (valueByte < 32U || valueByte == 127U) {
+            throw std::invalid_argument("--access-code may not contain control characters");
+        }
+    }
+
+    return accessCode;
 }
 
 std::string DefaultLanName()
@@ -1574,12 +1612,14 @@ uint32_t SaturateUint32(uint64_t value)
 screenshare::udp_protocol::FeedbackSnapshot BuildReceiverFeedbackSnapshot(
     const ReceiverHealthSnapshot& health,
     uint64_t sequence,
-    uint64_t sessionFingerprint)
+    uint64_t sessionFingerprint,
+    uint64_t accessCodeFingerprint)
 {
     screenshare::udp_protocol::FeedbackSnapshot feedback;
     feedback.healthState = ReceiverFeedbackHealthState(health);
     feedback.sequence = sequence;
     feedback.sessionFingerprint = sessionFingerprint;
+    feedback.accessCodeFingerprint = accessCodeFingerprint;
     feedback.completedFrames = health.completedFrames;
     feedback.droppedDatagrams = health.simulatedDroppedDatagrams;
     feedback.invalidDatagrams = health.invalidDatagrams;
@@ -1600,6 +1640,14 @@ std::string FeedbackSessionText(const screenshare::UdpSenderStats& stats)
         return "none";
     }
     return FormatSessionFingerprint(stats.latestFeedback.sessionFingerprint);
+}
+
+const char* FeedbackAccessText(const screenshare::UdpSenderStats& stats)
+{
+    if (!stats.hasFeedback) {
+        return "unknown";
+    }
+    return stats.latestFeedback.accessCodeFingerprint == 0 ? "none" : "required";
 }
 
 std::optional<screenshare::udp_protocol::FeedbackSnapshot> DrainUdpFeedback(
@@ -2097,6 +2145,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             return argv[++i];
         };
 
+        constexpr std::string_view accessCodePrefix = "--access-code=";
+        constexpr std::string_view sessionCodePrefix = "--session-code=";
+
         if (arg == "--help" || arg == "-h") {
             PrintHelp();
             std::exit(0);
@@ -2107,6 +2158,16 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.stopFilePath = requireValue("--stop-file");
         } else if (arg == "--session" || arg == "--session-id") {
             options.sessionId = ParseSessionId(requireValue(arg.c_str()));
+        } else if (arg == "--access-code" || arg == "--session-code") {
+            const std::string accessCode = ParseAccessCode(requireValue(arg.c_str()));
+            options.accessCodeFingerprint = AccessCodeFingerprint(accessCode);
+            options.accessCodeProvided = true;
+        } else if (arg.rfind(accessCodePrefix, 0) == 0 || arg.rfind(sessionCodePrefix, 0) == 0) {
+            const size_t valueOffset =
+                arg.rfind(accessCodePrefix, 0) == 0 ? accessCodePrefix.size() : sessionCodePrefix.size();
+            const std::string accessCode = ParseAccessCode(arg.c_str() + valueOffset);
+            options.accessCodeFingerprint = AccessCodeFingerprint(accessCode);
+            options.accessCodeProvided = true;
         } else if (arg == "--list") {
             options.listDisplays = true;
         } else if (arg == "--list-h264-encoders") {
@@ -2318,6 +2379,12 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     }
     if (options.lanAdvertise && options.udpReceivePort == 0) {
         throw std::invalid_argument("--lan-advertise requires --watch or --udp-recv");
+    }
+    if (options.accessCodeProvided &&
+        options.udpReceivePort == 0 &&
+        options.udpSendTarget.empty() &&
+        options.audioSendTarget.empty()) {
+        throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, or --audio-send");
     }
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
@@ -2566,14 +2633,43 @@ std::string CurrentLocalTimeText()
     return text.str();
 }
 
+bool IsSensitiveOption(std::string_view option)
+{
+    return option == "--access-code" || option == "--session-code";
+}
+
+bool RedactInlineSensitiveOption(std::string& option)
+{
+    constexpr std::string_view accessCodePrefix = "--access-code=";
+    constexpr std::string_view sessionCodePrefix = "--session-code=";
+    if (option.rfind(accessCodePrefix, 0) == 0) {
+        option = std::string(accessCodePrefix) + "<redacted>";
+        return true;
+    }
+    if (option.rfind(sessionCodePrefix, 0) == 0) {
+        option = std::string(sessionCodePrefix) + "<redacted>";
+        return true;
+    }
+    return false;
+}
+
 std::string JoinCommandLine(int argc, char** argv)
 {
     std::ostringstream command;
+    bool redactNext = false;
     for (int index = 0; index < argc; ++index) {
         if (index > 0) {
             command << ' ';
         }
-        const std::string arg = argv[index] != nullptr ? argv[index] : "";
+        std::string arg = argv[index] != nullptr ? argv[index] : "";
+        if (redactNext) {
+            arg = "<redacted>";
+            redactNext = false;
+        } else if (RedactInlineSensitiveOption(arg)) {
+            redactNext = false;
+        } else if (IsSensitiveOption(arg)) {
+            redactNext = true;
+        }
         const bool needsQuotes = arg.find_first_of(" \t\"") != std::string::npos;
         if (!needsQuotes) {
             command << arg;
@@ -2614,6 +2710,7 @@ void AppendReceiverFeedbackSummary(
         << "  Session fingerprint: "
         << (snapshot.sessionFingerprint == 0 ? "unknown" : FormatSessionFingerprint(snapshot.sessionFingerprint))
         << "\n"
+        << "  Access code required: " << (snapshot.accessCodeFingerprint == 0 ? "no" : "yes") << "\n"
         << "  Health: " << screenshare::udp_protocol::FeedbackHealthStateName(snapshot.healthState) << "\n"
         << "  Sequence: " << snapshot.sequence << "\n"
         << "  Completed frames: " << snapshot.completedFrames << "\n"
@@ -2650,6 +2747,7 @@ void WriteSavedReport(
         << "Generated local time: " << CurrentLocalTimeText() << "\n"
         << "Session ID: " << reportContext.sessionId << "\n"
         << "Session fingerprint: " << FormatSessionFingerprint(reportContext.sessionFingerprint) << "\n"
+        << "Access code required: " << (reportContext.accessCodeRequired ? "yes" : "no") << "\n"
         << "Exit code: " << exitCode << "\n"
         << "Working directory: " << std::filesystem::current_path().string() << "\n"
         << "Executable: " << executablePath.string() << "\n"
@@ -2812,6 +2910,7 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
         auto udpConfig = screenshare::ParseUdpSenderTarget(options.audioSendTarget);
         udpConfig.pacingEnabled = false;
         udpConfig.maxQueuedDatagrams = 16'384;
+        udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
         audioSender = std::make_unique<screenshare::UdpSender>();
         audioSender->Open(udpConfig);
         if (options.audioCodec == screenshare::udp_protocol::AudioCodec::Opus) {
@@ -2830,6 +2929,9 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
         << ", session " << options.sessionId
         << " (" << FormatSessionFingerprint(options.sessionFingerprint) << ")"
         << ", seconds=" << options.seconds;
+    if (options.accessCodeProvided) {
+        std::cout << ", access code required";
+    }
     if (audioSender) {
         std::cout
             << ", audio UDP sending to " << options.audioSendTarget
@@ -2954,7 +3056,9 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
                     << " audio_codec=" << screenshare::udp_protocol::AudioCodecName(options.audioCodec)
                     << " udp_feedback_packets=" << udpStatsNow.feedbackPacketsReceived
                     << " udp_feedback_invalid=" << udpStatsNow.invalidFeedbackPackets
-                    << " udp_feedback_session=" << FeedbackSessionText(udpStatsNow);
+                    << " udp_feedback_access_rejected=" << udpStatsNow.feedbackAccessRejected
+                    << " udp_feedback_session=" << FeedbackSessionText(udpStatsNow)
+                    << " udp_feedback_access=" << FeedbackAccessText(udpStatsNow);
             }
             std::cout
                 << "\n";
@@ -3006,7 +3110,9 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
             << ", audio codec: " << screenshare::udp_protocol::AudioCodecName(options.audioCodec)
             << ", UDP feedback packets: " << finalUdpStats.feedbackPacketsReceived
             << ", UDP invalid feedback packets: " << finalUdpStats.invalidFeedbackPackets
-            << ", UDP feedback session: " << FeedbackSessionText(finalUdpStats);
+            << ", UDP feedback access rejected: " << finalUdpStats.feedbackAccessRejected
+            << ", UDP feedback session: " << FeedbackSessionText(finalUdpStats)
+            << ", UDP feedback access: " << FeedbackAccessText(finalUdpStats);
     }
     std::cout
         << "\n";
@@ -3043,6 +3149,9 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", capture backend " << CaptureBackendName(options.captureBackend)
         << ", session " << options.sessionId
         << " (" << FormatSessionFingerprint(options.sessionFingerprint) << ")";
+    if (options.accessCodeProvided) {
+        std::cout << ", access code required";
+    }
     if (!options.recordPath.empty()) {
         std::cout << ", recording H.264 to " << options.recordPath;
     }
@@ -3522,6 +3631,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                             udpConfig.pacingEnabled = options.udpPacing;
                             udpConfig.pacingBitrate = streamBitrate;
                             udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
+                            udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
                             if (options.audioCapture) {
                                 udpConfig.maxQueuedDatagrams = 16'384;
                             }
@@ -3535,6 +3645,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                                 << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
                                 << " adapt_reduce_cooldown_s=" << options.adaptReduceCooldownSeconds
                                 << " max_queued_datagrams=" << udpConfig.maxQueuedDatagrams
+                                << " access_code=" << (options.accessCodeProvided ? "required" : "none")
                                 << "\n";
                             if (options.audioCapture) {
                                 audioCaptureWorker = std::make_unique<AudioUdpCaptureWorker>();
@@ -3677,6 +3788,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " udp_pacing_bitrate_mbps=" << Mbps(combinedUdpPacingBitrate())
                 << " udp_feedback_packets=" << udpStatsNow.feedbackPacketsReceived
                 << " udp_feedback_invalid=" << udpStatsNow.invalidFeedbackPackets
+                << " udp_feedback_access_rejected=" << udpStatsNow.feedbackAccessRejected
                 << " udp_feedback_health="
                 << (udpStatsNow.hasFeedback ?
                     screenshare::udp_protocol::FeedbackHealthStateName(udpStatsNow.latestFeedback.healthState) :
@@ -3685,6 +3797,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " udp_feedback_resyncs=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeResyncs : 0)
                 << " udp_feedback_skipped_packets=" << (udpStatsNow.hasFeedback ? udpStatsNow.latestFeedback.decodeSkippedPackets : 0)
                 << " udp_feedback_session=" << FeedbackSessionText(udpStatsNow)
+                << " udp_feedback_access=" << FeedbackAccessText(udpStatsNow)
                 << " bitrate_advice_mbps=" << Mbps(bitrateAdvisor.recommendedBitrate())
                 << " bitrate_advice_min_mbps=" << Mbps(bitrateAdvisor.minBitrate())
                 << " bitrate_advice_action=" << bitrateAdvisor.action()
@@ -3794,6 +3907,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", UDP pacing bitrate Mbps: " << Mbps(combinedUdpPacingBitrate())
         << ", UDP feedback packets: " << udpStats.feedbackPacketsReceived
         << ", UDP invalid feedback packets: " << udpStats.invalidFeedbackPackets
+        << ", UDP feedback access rejected: " << udpStats.feedbackAccessRejected
         << ", UDP feedback health: "
         << (udpStats.hasFeedback ?
             screenshare::udp_protocol::FeedbackHealthStateName(udpStats.latestFeedback.healthState) :
@@ -3802,6 +3916,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", UDP feedback resyncs: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeResyncs : 0)
         << ", UDP feedback skipped packets: " << (udpStats.hasFeedback ? udpStats.latestFeedback.decodeSkippedPackets : 0)
         << ", UDP feedback session: " << FeedbackSessionText(udpStats)
+        << ", UDP feedback access: " << FeedbackAccessText(udpStats)
         << ", bitrate advice Mbps: " << Mbps(bitrateAdvisor.recommendedBitrate())
         << ", bitrate advice min Mbps: " << Mbps(bitrateAdvisor.minBitrate())
         << ", bitrate advice action: " << bitrateAdvisor.action()
@@ -3855,6 +3970,7 @@ void RunUdpReceiverStats(const Options& options)
     config.port = options.udpReceivePort;
     config.simulatedLossPercent = options.simulateLossPercent;
     config.simulatedJitter = std::chrono::milliseconds(options.simulateJitterMs);
+    config.accessCodeFingerprint = options.accessCodeFingerprint;
     receiver.Open(config);
 
     std::unique_ptr<screenshare::LanDiscoveryResponder> lanDiscoveryResponder;
@@ -3892,6 +4008,9 @@ void RunUdpReceiverStats(const Options& options)
         << "Listening for UDP H.264 and audio packet fragments on port " << options.udpReceivePort
         << ", session " << options.sessionId
         << " (" << FormatSessionFingerprint(options.sessionFingerprint) << ")";
+    if (options.accessCodeProvided) {
+        std::cout << ", access code required";
+    }
     if (!options.h264DumpPath.empty()) {
         std::cout << ", dumping H.264 to " << options.h264DumpPath;
     }
@@ -4578,7 +4697,8 @@ void RunUdpReceiverStats(const Options& options)
             receiver.SendFeedback(BuildReceiverFeedbackSnapshot(
                 health,
                 feedbackSequence++,
-                options.sessionFingerprint));
+                options.sessionFingerprint,
+                options.accessCodeFingerprint));
 
             std::cout
                 << "udp_datagrams=" << stats.datagramsReceived
@@ -4587,6 +4707,7 @@ void RunUdpReceiverStats(const Options& options)
                 << " receiver_health=" << ReceiverHealthState(health)
                 << " udp_datagrams_per_second=" << datagramsPerSecond
                 << " accepted_datagrams=" << stats.datagramsAccepted
+                << " access_rejected_datagrams=" << stats.accessRejectedDatagrams
                 << " simulated_dropped=" << stats.simulatedDatagramsDropped
                 << " simulated_delayed=" << stats.simulatedDatagramsDelayed
                 << " simulated_delay_pending=" << receiver.delayedDatagramCount()
@@ -4772,7 +4893,8 @@ void RunUdpReceiverStats(const Options& options)
     receiver.SendFeedback(BuildReceiverFeedbackSnapshot(
         finalHealth,
         feedbackSequence++,
-        options.sessionFingerprint));
+        options.sessionFingerprint,
+        options.accessCodeFingerprint));
     stats = receiver.stats();
     const screenshare::AudioPlaybackStats finalAudioRendererStats =
         audioRenderer ? audioRenderer->stats() : screenshare::AudioPlaybackStats{};
@@ -4784,6 +4906,7 @@ void RunUdpReceiverStats(const Options& options)
         << ", session fingerprint: " << FormatSessionFingerprint(options.sessionFingerprint)
         << ", receiver health: " << ReceiverHealthState(finalHealth)
         << ", accepted datagrams: " << stats.datagramsAccepted
+        << ", access rejected datagrams: " << stats.accessRejectedDatagrams
         << ", simulated dropped datagrams: " << stats.simulatedDatagramsDropped
         << ", simulated delayed datagrams: " << stats.simulatedDatagramsDelayed
         << ", pending simulated delayed datagrams: " << delayedDatagrams
@@ -4909,6 +5032,7 @@ int main(int argc, char** argv)
         const Options options = ParseOptions(argc, argv, reportContext.sessionId);
         reportContext.sessionId = options.sessionId;
         reportContext.sessionFingerprint = options.sessionFingerprint;
+        reportContext.accessCodeRequired = options.accessCodeProvided;
 
         if (options.lanDiscover) {
             RunLanDiscovery(options);

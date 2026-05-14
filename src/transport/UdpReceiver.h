@@ -26,6 +26,7 @@ struct UdpReceiverConfig {
     float simulatedLossPercent = 0.0f;
     std::chrono::milliseconds simulatedJitter = std::chrono::milliseconds(0);
     uint32_t simulationSeed = 1;
+    uint64_t accessCodeFingerprint = 0;
 };
 
 struct UdpCompletedFrame {
@@ -56,6 +57,7 @@ struct UdpReceiverStats {
     uint64_t datagramsReceived = 0;
     uint64_t datagramsAccepted = 0;
     uint64_t invalidDatagrams = 0;
+    uint64_t accessRejectedDatagrams = 0;
     uint64_t duplicateFragments = 0;
     uint64_t framesCompleted = 0;
     uint64_t incompleteFramesDropped = 0;

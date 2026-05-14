@@ -12,7 +12,8 @@ namespace screenshare::udp_protocol {
 constexpr uint32_t PacketMagic = 0x53535631; // "SSV1"
 constexpr uint32_t FeedbackMagic = 0x53534631; // "SSF1"
 constexpr uint32_t AudioMagic = 0x53534131; // "SSA1"
-constexpr uint16_t PacketVersion = 1;
+constexpr uint16_t PacketVersion = 2;
+constexpr uint16_t LegacyPacketVersion = 1;
 constexpr uint16_t MaxFragmentsPerFrame = 4096;
 
 enum class FeedbackHealthState : uint16_t {
@@ -48,6 +49,7 @@ struct FeedbackSnapshot {
     FeedbackHealthState healthState = FeedbackHealthState::Unknown;
     uint64_t sequence = 0;
     uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
     uint64_t completedFrames = 0;
     uint64_t droppedDatagrams = 0;
     uint64_t invalidDatagrams = 0;
@@ -69,6 +71,7 @@ struct PacketHeader {
     uint64_t frameId = 0;
     uint64_t timestamp100ns = 0;
     uint64_t senderQpc100ns = 0;
+    uint64_t accessCodeFingerprint = 0;
     uint32_t frameBytes = 0;
     uint32_t fragmentOffset = 0;
     uint16_t fragmentIndex = 0;
@@ -95,6 +98,7 @@ struct FeedbackPacket {
     uint16_t healthState = 0;
     uint16_t reserved = 0;
     uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
 };
 
 struct AudioPacketHeader {
@@ -104,6 +108,7 @@ struct AudioPacketHeader {
     uint64_t packetId = 0;
     uint64_t devicePosition = 0;
     uint64_t qpcPosition = 0;
+    uint64_t accessCodeFingerprint = 0;
     uint32_t sampleRate = 0;
     uint16_t channels = 0;
     uint16_t bitsPerSample = 0;
@@ -121,9 +126,9 @@ struct AudioPacketHeader {
 };
 #pragma pack(pop)
 
-static_assert(sizeof(PacketHeader) == 48);
-static_assert(sizeof(FeedbackPacket) == 104);
-static_assert(sizeof(AudioPacketHeader) == 72);
+static_assert(sizeof(PacketHeader) == 56);
+static_assert(sizeof(FeedbackPacket) == 112);
+static_assert(sizeof(AudioPacketHeader) == 80);
 
 constexpr uint16_t ByteSwap16(uint16_t value) noexcept
 {

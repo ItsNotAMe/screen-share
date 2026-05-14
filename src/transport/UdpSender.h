@@ -23,6 +23,7 @@ struct UdpSenderConfig {
     uint32_t pacingBitrate = 0;
     uint32_t maxQueuedDatagrams = 4'096;
     std::chrono::milliseconds maxQueueDelay{0};
+    uint64_t accessCodeFingerprint = 0;
     bool pacingEnabled = true;
 };
 
@@ -45,6 +46,7 @@ struct UdpSenderStats {
     uint64_t peakQueueDelayMs = 0;
     uint64_t feedbackPacketsReceived = 0;
     uint64_t invalidFeedbackPackets = 0;
+    uint64_t feedbackAccessRejected = 0;
     bool hasFeedback = false;
     udp_protocol::FeedbackSnapshot latestFeedback;
 };
