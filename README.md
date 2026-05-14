@@ -78,13 +78,15 @@ Start the desktop control UI:
 The UI starts and stops the same `ScreenShare.exe` engine beside it. Use the Share tab on the
 sending computer and the Watch tab on the receiving computer. Reports are enabled by default so a
 test run can be sent as a zip without collecting separate log files. The UI opens in dark mode by
-default and includes a theme toggle in the header.
+default, includes a theme toggle in the header, and can generate/copy an encrypted-session access
+code.
 
 Common live session:
 
 ```powershell
-.\build\release\ScreenShare.exe --watch 5000 --log receiver.log
-.\build\release\ScreenShare.exe --share 192.168.1.127:5000 --log sender.log
+.\build\release\ScreenShare.exe --generate-access-code
+.\build\release\ScreenShare.exe --watch 5000 --access-code CODE --log receiver.log
+.\build\release\ScreenShare.exe --share 192.168.1.127:5000 --access-code CODE --log sender.log
 ```
 
 `--watch PORT` expands to the normal receiver preview path: `--udp-recv PORT --preview
@@ -93,6 +95,8 @@ path: `--udp-send HOST:PORT --audio-capture system --adapt-bitrate --adapt-resol
 preset runs until you stop it with Ctrl+C by default; add `--seconds S` to choose a shorter test.
 Add the same `--session ID` on both sides when you want sender and receiver logs/reports to be
 easy to match later. If omitted, each process generates its own diagnostic session ID.
+Use `--allow-plaintext` instead of `--access-code` only when you intentionally want an unencrypted
+local UDP session.
 
 LAN discovery can find a receiver without manually looking up its IP address. On the watching
 computer, start Watch with LAN advertising:
@@ -266,8 +270,9 @@ Add `--access-code CODE` on both sides when you want an encrypted local session.
 rejects senders that do not know the same code:
 
 ```powershell
-.\build\debug\ScreenShare.exe --watch 5000 --access-code 123456
-.\build\debug\ScreenShare.exe --share 192.168.1.127:5000 --access-code 123456
+.\build\debug\ScreenShare.exe --generate-access-code
+.\build\debug\ScreenShare.exe --watch 5000 --access-code CODE
+.\build\debug\ScreenShare.exe --share 192.168.1.127:5000 --access-code CODE
 ```
 
 The access code derives the UDP encryption key locally, and saved reports redact the raw code.

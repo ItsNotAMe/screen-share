@@ -144,6 +144,8 @@ struct Options {
     std::string logPath;
     std::string sessionId;
     std::string stopFilePath;
+    bool generateAccessCode = false;
+    bool allowPlaintext = false;
     bool accessCodeProvided = false;
     uint64_t sessionFingerprint = 0;
     uint64_t accessCodeFingerprint = 0;
@@ -164,6 +166,7 @@ void PrintHelp()
         << "ScreenShare native C++ capture prototype\n\n"
         << "Usage:\n"
         << "  ScreenShare --list\n"
+        << "  ScreenShare --generate-access-code\n"
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT [--display N] [--seconds S]\n"
@@ -196,11 +199,14 @@ void PrintHelp()
         << "          add --save-report PATH to save a zipped run report.\n"
         << "          add --session ID to give both sides a matching diagnostic session.\n"
         << "          add --access-code CODE on both sides to encrypt and gate local UDP sessions.\n"
+        << "          run --generate-access-code to print a random access code.\n"
+        << "          add --allow-plaintext to acknowledge an unencrypted local UDP session.\n"
         << "  LAN: add --lan-advertise to --watch/--udp-recv, then use --lan-discover on the sender.\n"
         << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
+        << "  ScreenShare --generate-access-code\n"
         << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --watch 5000 --save-report receiver-report.zip\n"
@@ -2129,6 +2135,22 @@ bool StopRequested(const Options& options)
     return std::filesystem::exists(options.stopFilePath, error);
 }
 
+bool HasUdpSession(const Options& options)
+{
+    return options.udpReceivePort != 0 ||
+           !options.udpSendTarget.empty() ||
+           !options.audioSendTarget.empty();
+}
+
+void WarnIfPlaintextUdpSession(const Options& options)
+{
+    if (HasUdpSession(options) && !options.accessCodeProvided && !options.allowPlaintext) {
+        std::cout
+            << "Warning: UDP session is plaintext. Add --access-code CODE for encryption, "
+            << "or --allow-plaintext to acknowledge plaintext mode.\n";
+    }
+}
+
 Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
 {
     Options options;
@@ -2160,6 +2182,10 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.stopFilePath = requireValue("--stop-file");
         } else if (arg == "--session" || arg == "--session-id") {
             options.sessionId = ParseSessionId(requireValue(arg.c_str()));
+        } else if (arg == "--generate-access-code") {
+            options.generateAccessCode = true;
+        } else if (arg == "--allow-plaintext") {
+            options.allowPlaintext = true;
         } else if (arg == "--access-code" || arg == "--session-code") {
             const std::string accessCode = ParseAccessCode(requireValue(arg.c_str()));
             options.accessCodeFingerprint = AccessCodeFingerprint(accessCode);
@@ -2356,6 +2382,14 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         options.adaptBitrate = true;
     }
 
+    if (options.generateAccessCode) {
+        if (!options.logPath.empty() || !options.saveReportPath.empty()) {
+            throw std::invalid_argument("--generate-access-code cannot be combined with --log or --save-report");
+        }
+        options.sessionFingerprint = SessionFingerprint(options.sessionId);
+        return options;
+    }
+
     if (options.audioDeviceIdProvided && !options.audioCapture) {
         throw std::invalid_argument("--audio-device-id requires --audio-capture");
     }
@@ -2389,6 +2423,12 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         options.udpSendTarget.empty() &&
         options.audioSendTarget.empty()) {
         throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, or --audio-send");
+    }
+    if (options.allowPlaintext && options.accessCodeProvided) {
+        throw std::invalid_argument("--allow-plaintext cannot be combined with --access-code");
+    }
+    if (options.allowPlaintext && !HasUdpSession(options)) {
+        throw std::invalid_argument("--allow-plaintext requires --share, --watch, --udp-send, --udp-recv, or --audio-send");
     }
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
@@ -2925,6 +2965,8 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
         }
     }
 
+    WarnIfPlaintextUdpSession(options);
+
     std::cout
         << "Capturing "
         << screenshare::AudioCaptureSourceName(options.audioCaptureSource)
@@ -3146,6 +3188,8 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
 
     screenshare::DesktopCapturer capturer;
     capturer.Start(config);
+
+    WarnIfPlaintextUdpSession(options);
 
     std::cout << "Capturing display " << options.displayIndex
               << " at target " << options.fps << " FPS";
@@ -4019,6 +4063,8 @@ void RunUdpReceiverStats(const Options& options)
             throw std::runtime_error("Failed to open H.264 dump file: " + options.h264DumpPath);
         }
     }
+
+    WarnIfPlaintextUdpSession(options);
 
     std::cout
         << "Listening for UDP H.264 and audio packet fragments on port " << options.udpReceivePort
@@ -5055,7 +5101,10 @@ int main(int argc, char** argv)
         reportContext.accessCodeRequired = options.accessCodeProvided;
         reportContext.encryptionEnabled = options.accessCodeKey.has_value();
 
-        if (options.lanDiscover) {
+        if (options.generateAccessCode) {
+            std::cout << screenshare::GenerateUdpAccessCode() << "\n";
+            exitCode = 0;
+        } else if (options.lanDiscover) {
             RunLanDiscovery(options);
             exitCode = 0;
         } else if (options.listDisplays) {

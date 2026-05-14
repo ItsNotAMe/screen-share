@@ -117,9 +117,13 @@ if(SCREENSHARE_BUILD_QT_UI)
     if(Qt6_FOUND)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
+            src/transport/UdpCrypto.cpp
         )
         target_compile_features(ScreenShareUi PRIVATE cxx_std_20)
-        target_link_libraries(ScreenShareUi PRIVATE Qt6::Widgets)
+        target_include_directories(ScreenShareUi PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+        )
+        target_link_libraries(ScreenShareUi PRIVATE Qt6::Widgets bcrypt)
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX

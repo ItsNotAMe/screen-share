@@ -1,3 +1,5 @@
+#include "transport/UdpCrypto.h"
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -7,6 +9,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
+#include <QtGui/QClipboard>
 #include <QtGui/QTextCursor>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
@@ -218,7 +221,7 @@ private:
         auto* leftHost = new QWidget;
         leftHost->setObjectName("LeftHost");
         leftHost->setLayout(leftColumn);
-        leftHost->setFixedWidth(380);
+        leftHost->setFixedWidth(430);
         body->addWidget(leftHost);
 
         auto* rightColumn = new QVBoxLayout;
@@ -396,11 +399,35 @@ private:
         prepareInput(sessionEdit_);
         addRow(content, "ID", sessionEdit_);
 
+        auto* accessRow = new QWidget;
+        accessRow->setObjectName("FormRow");
+        prepareInput(accessRow);
+        auto* accessLayout = new QHBoxLayout(accessRow);
+        accessLayout->setContentsMargins(0, 0, 0, 0);
+        accessLayout->setSpacing(8);
         accessCodeEdit_ = new QLineEdit;
-        accessCodeEdit_->setPlaceholderText("Optional");
+        accessCodeEdit_->setPlaceholderText("Generate or paste");
         accessCodeEdit_->setEchoMode(QLineEdit::Password);
         prepareInput(accessCodeEdit_);
-        addRow(content, "Access code", accessCodeEdit_);
+        generateAccessCodeButton_ = new QPushButton("Generate");
+        generateAccessCodeButton_->setObjectName("SecondaryButton");
+        generateAccessCodeButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
+        generateAccessCodeButton_->setIconSize(QSize(14, 14));
+        generateAccessCodeButton_->setCursor(Qt::PointingHandCursor);
+        generateAccessCodeButton_->setFixedHeight(kRowHeight);
+        copyAccessCodeButton_ = new QPushButton("Copy");
+        copyAccessCodeButton_->setObjectName("SecondaryButton");
+        copyAccessCodeButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+        copyAccessCodeButton_->setIconSize(QSize(14, 14));
+        copyAccessCodeButton_->setCursor(Qt::PointingHandCursor);
+        copyAccessCodeButton_->setFixedHeight(kRowHeight);
+        accessLayout->addWidget(accessCodeEdit_, 1);
+        accessLayout->addWidget(generateAccessCodeButton_);
+        accessLayout->addWidget(copyAccessCodeButton_);
+        addRow(content, "Access code", accessRow);
+
+        allowPlaintextCheck_ = new QCheckBox("Allow plaintext");
+        addFullRow(content, allowPlaintextCheck_);
 
         reportCheck_ = new QCheckBox("Save report");
         reportCheck_->setChecked(true);
@@ -427,6 +454,13 @@ private:
             reportPathEdited_ = true;
             refreshCommand();
         });
+        connect(accessCodeEdit_, &QLineEdit::textChanged, this, [this](const QString& text) {
+            if (!text.isEmpty()) {
+                allowPlaintextCheck_->setChecked(false);
+            }
+        });
+        connect(generateAccessCodeButton_, &QPushButton::clicked, this, [this] { generateAccessCode(); });
+        connect(copyAccessCodeButton_, &QPushButton::clicked, this, [this] { copyAccessCode(); });
         connect(browseReportButton_, &QPushButton::clicked, this, [this] {
             const QString selected = QFileDialog::getSaveFileName(
                 this,
@@ -546,6 +580,7 @@ private:
         bindSpinBox(previewLatencySpin_);
         bindLineEdit(sessionEdit_);
         bindLineEdit(accessCodeEdit_);
+        bindCheckBox(allowPlaintextCheck_);
         bindCheckBox(reportCheck_);
     }
 
@@ -564,6 +599,27 @@ private:
         if (!reportPathEdited_) {
             reportPathEdit_->setText(defaultReportName());
         }
+    }
+
+    void generateAccessCode()
+    {
+        try {
+            accessCodeEdit_->setText(QString::fromStdString(screenshare::GenerateUdpAccessCode()));
+            allowPlaintextCheck_->setChecked(false);
+            copyAccessCode();
+        } catch (const std::exception& error) {
+            QMessageBox::critical(this, "Access code", QString::fromLocal8Bit(error.what()));
+        }
+    }
+
+    void copyAccessCode()
+    {
+        const QString accessCode = accessCodeEdit_->text();
+        if (accessCode.isEmpty()) {
+            return;
+        }
+        QApplication::clipboard()->setText(accessCode);
+        appendOutput("Access code copied to clipboard\n");
     }
 
     QStringList currentArguments() const
@@ -599,6 +655,8 @@ private:
         const QString accessCode = accessCodeEdit_->text();
         if (!accessCode.isEmpty()) {
             args << "--access-code" << accessCode;
+        } else if (allowPlaintextCheck_->isChecked()) {
+            args << "--allow-plaintext";
         }
 
         if (reportCheck_->isChecked() && !reportPathEdit_->text().trimmed().isEmpty()) {
@@ -650,6 +708,13 @@ private:
         }
         if (shareMode() && shareHostEdit_->text().trimmed().isEmpty()) {
             QMessageBox::warning(this, "Missing address", "Enter a target address before sharing.");
+            return;
+        }
+        if (accessCodeEdit_->text().isEmpty() && !allowPlaintextCheck_->isChecked()) {
+            QMessageBox::warning(
+                this,
+                "Security choice",
+                "Generate or paste an access code, or allow plaintext for this run.");
             return;
         }
         const QString program = enginePath();
@@ -834,6 +899,9 @@ private:
 
     QLineEdit* sessionEdit_ = nullptr;
     QLineEdit* accessCodeEdit_ = nullptr;
+    QPushButton* generateAccessCodeButton_ = nullptr;
+    QPushButton* copyAccessCodeButton_ = nullptr;
+    QCheckBox* allowPlaintextCheck_ = nullptr;
     QCheckBox* reportCheck_ = nullptr;
     QLineEdit* reportPathEdit_ = nullptr;
     QPushButton* browseReportButton_ = nullptr;
