@@ -396,6 +396,12 @@ private:
         prepareInput(sessionEdit_);
         addRow(content, "ID", sessionEdit_);
 
+        accessCodeEdit_ = new QLineEdit;
+        accessCodeEdit_->setPlaceholderText("Optional");
+        accessCodeEdit_->setEchoMode(QLineEdit::Password);
+        prepareInput(accessCodeEdit_);
+        addRow(content, "Access code", accessCodeEdit_);
+
         reportCheck_ = new QCheckBox("Save report");
         reportCheck_->setChecked(true);
         addFullRow(content, reportCheck_);
@@ -539,6 +545,7 @@ private:
         bindSpinBox(volumeSpin_);
         bindSpinBox(previewLatencySpin_);
         bindLineEdit(sessionEdit_);
+        bindLineEdit(accessCodeEdit_);
         bindCheckBox(reportCheck_);
     }
 
@@ -589,10 +596,27 @@ private:
             args << "--session" << session;
         }
 
+        const QString accessCode = accessCodeEdit_->text();
+        if (!accessCode.isEmpty()) {
+            args << "--access-code" << accessCode;
+        }
+
         if (reportCheck_->isChecked() && !reportPathEdit_->text().trimmed().isEmpty()) {
             args << "--save-report" << reportPathEdit_->text().trimmed();
         }
 
+        return args;
+    }
+
+    QStringList displayArguments() const
+    {
+        QStringList args = currentArguments();
+        for (int index = 0; index + 1 < args.size(); ++index) {
+            if (args[index] == "--access-code") {
+                args[index + 1] = "<redacted>";
+                ++index;
+            }
+        }
         return args;
     }
 
@@ -601,7 +625,7 @@ private:
         if (commandPreview_ == nullptr) {
             return;
         }
-        commandPreview_->setText(formatCommand(enginePath(), currentArguments()));
+        commandPreview_->setText(formatCommand(enginePath(), displayArguments()));
     }
 
     void applyTheme(bool darkMode)
@@ -645,8 +669,8 @@ private:
             ".signal");
         QFile::remove(stopFilePath_);
 
-        const QStringList displayArgs = currentArguments();
-        QStringList args = displayArgs;
+        const QStringList displayArgs = displayArguments();
+        QStringList args = currentArguments();
         args << "--stop-file" << stopFilePath_;
         appendOutput("\n" + formatCommand(program, displayArgs) + "\n");
         process_->setProgram(program);
@@ -809,6 +833,7 @@ private:
     QSpinBox* previewLatencySpin_ = nullptr;
 
     QLineEdit* sessionEdit_ = nullptr;
+    QLineEdit* accessCodeEdit_ = nullptr;
     QCheckBox* reportCheck_ = nullptr;
     QLineEdit* reportPathEdit_ = nullptr;
     QPushButton* browseReportButton_ = nullptr;

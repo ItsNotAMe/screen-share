@@ -6,6 +6,7 @@ namespace screenshare::udp_protocol {
 namespace {
 
 constexpr size_t LegacyFeedbackPacketBytes = 96;
+constexpr size_t SessionFeedbackPacketBytes = 104;
 
 bool IsKnownFeedbackHealthState(uint16_t state)
 {
@@ -83,6 +84,7 @@ std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback)
     packet.packetBytes = ToNetwork16(static_cast<uint16_t>(sizeof(FeedbackPacket)));
     packet.sequence = ToNetwork64(feedback.sequence);
     packet.sessionFingerprint = ToNetwork64(feedback.sessionFingerprint);
+    packet.accessCodeFingerprint = ToNetwork64(feedback.accessCodeFingerprint);
     packet.completedFrames = ToNetwork64(feedback.completedFrames);
     packet.droppedDatagrams = ToNetwork64(feedback.droppedDatagrams);
     packet.invalidDatagrams = ToNetwork64(feedback.invalidDatagrams);
@@ -104,6 +106,7 @@ std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback)
 std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte> datagram)
 {
     if (datagram.size() != LegacyFeedbackPacketBytes &&
+        datagram.size() != SessionFeedbackPacketBytes &&
         datagram.size() != sizeof(FeedbackPacket)) {
         return std::nullopt;
     }
@@ -116,9 +119,15 @@ std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte>
     const uint16_t packetBytes = FromNetwork16(packet.packetBytes);
     const uint16_t healthState = FromNetwork16(packet.healthState);
     if (magic != FeedbackMagic ||
-        version != PacketVersion ||
+        (version != LegacyPacketVersion && version != PacketVersion) ||
         packetBytes != datagram.size() ||
         !IsKnownFeedbackHealthState(healthState)) {
+        return std::nullopt;
+    }
+    if (version == LegacyPacketVersion && datagram.size() == sizeof(FeedbackPacket)) {
+        return std::nullopt;
+    }
+    if (version == PacketVersion && datagram.size() != sizeof(FeedbackPacket)) {
         return std::nullopt;
     }
 
@@ -126,6 +135,9 @@ std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte>
     feedback.healthState = static_cast<FeedbackHealthState>(healthState);
     feedback.sequence = FromNetwork64(packet.sequence);
     if (datagram.size() >= sizeof(FeedbackPacket)) {
+        feedback.sessionFingerprint = FromNetwork64(packet.sessionFingerprint);
+        feedback.accessCodeFingerprint = FromNetwork64(packet.accessCodeFingerprint);
+    } else if (datagram.size() >= SessionFeedbackPacketBytes) {
         feedback.sessionFingerprint = FromNetwork64(packet.sessionFingerprint);
     }
     feedback.completedFrames = FromNetwork64(packet.completedFrames);
