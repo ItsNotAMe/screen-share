@@ -262,17 +262,18 @@ Use `--save-report PATH` instead of `--log PATH` when you want a zipped report f
 .\build\debug\ScreenShare.exe --share 192.168.1.127:5000 --session game-night --save-report sender-report.zip
 ```
 
-Add `--access-code CODE` on both sides when you want the receiver to reject local UDP media
-from senders that do not know the same code:
+Add `--access-code CODE` on both sides when you want an encrypted local session. The receiver
+rejects senders that do not know the same code:
 
 ```powershell
 .\build\debug\ScreenShare.exe --watch 5000 --access-code 123456
 .\build\debug\ScreenShare.exe --share 192.168.1.127:5000 --access-code 123456
 ```
 
-The access code is a local session gate, not encryption. It filters mismatched video, audio, and
-feedback packets, and saved reports redact the raw code. Anyone who can observe the network traffic
-can still read the stream until the encryption work is added.
+The access code derives the UDP encryption key locally, and saved reports redact the raw code.
+Video/audio payloads and receiver feedback are encrypted with Windows CNG AES-GCM; packet metadata
+such as sizes and timestamps remains visible for routing, pacing, and diagnostics. Use a reasonably
+long/random code on untrusted LANs; short codes can still be guessed.
 
 The report contains the command's console output, a `ScreenShare-report.txt` summary, and the
 runtime dependency manifest when it is available beside the executable. It also records the local

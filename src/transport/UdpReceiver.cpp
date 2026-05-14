@@ -83,6 +83,16 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     if (config.simulatedJitter.count() < 0 || config.simulatedJitter > std::chrono::seconds(5)) {
         throw std::invalid_argument("UDP simulated jitter must be between 0 and 5000 ms");
     }
+    if (config.encryptionKey && config.accessCodeFingerprint == 0) {
+        throw std::invalid_argument("UDP encryption requires an access code fingerprint");
+    }
+
+    std::unique_ptr<UdpAesGcm> crypto;
+    uint32_t feedbackNoncePrefix = 0;
+    if (config.encryptionKey) {
+        crypto = std::make_unique<UdpAesGcm>(*config.encryptionKey);
+        feedbackNoncePrefix = GenerateUdpCryptoNoncePrefix();
+    }
 
     const SOCKET udpSocket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (udpSocket == INVALID_SOCKET) {
@@ -111,6 +121,8 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
 
     socket_ = static_cast<uintptr_t>(udpSocket);
     config_ = config;
+    crypto_ = std::move(crypto);
+    feedbackNoncePrefix_ = feedbackNoncePrefix;
     datagramBuffer_.assign(config_.maxDatagramBytes, std::byte{});
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
@@ -130,6 +142,8 @@ void UdpReceiver::Close()
     }
 
     datagramBuffer_.clear();
+    crypto_.reset();
+    feedbackNoncePrefix_ = 0;
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
     delayedDatagrams_.clear();
@@ -259,7 +273,8 @@ bool UdpReceiver::SendFeedback(const udp_protocol::FeedbackSnapshot& feedback)
         return false;
     }
 
-    const auto datagram = udp_protocol::BuildFeedbackDatagram(feedback);
+    auto datagram = udp_protocol::BuildFeedbackDatagram(feedback);
+    const bool encrypted = EncryptFeedbackDatagram(datagram);
     const int sent = sendto(
         AsSocket(socket_),
         reinterpret_cast<const char*>(datagram.data()),
@@ -274,6 +289,9 @@ bool UdpReceiver::SendFeedback(const udp_protocol::FeedbackSnapshot& feedback)
     }
 
     ++stats_.feedbackPacketsSent;
+    if (encrypted) {
+        ++stats_.encryptedFeedbackPacketsSent;
+    }
     return true;
 }
 
@@ -325,11 +343,13 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     const uint16_t fragmentIndex = udp_protocol::FromNetwork16(header.fragmentIndex);
     const uint16_t fragmentCount = udp_protocol::FromNetwork16(header.fragmentCount);
     const uint32_t payloadBytes = udp_protocol::FromNetwork32(header.payloadBytes);
+    const uint32_t flags = udp_protocol::FromNetwork32(header.flags);
 
     if (magic != udp_protocol::PacketMagic ||
         version != udp_protocol::PacketVersion ||
         headerBytes != sizeof(udp_protocol::PacketHeader) ||
-        datagramBytes < static_cast<int>(headerBytes)) {
+        datagramBytes < static_cast<int>(headerBytes) ||
+        (flags & ~udp_protocol::PacketFlagEncrypted) != 0) {
         ++stats_.invalidDatagrams;
         return std::nullopt;
     }
@@ -350,6 +370,26 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
         fragmentOffset > frameBytes ||
         payloadBytes > frameBytes - fragmentOffset) {
         ++stats_.invalidDatagrams;
+        return std::nullopt;
+    }
+    std::optional<std::vector<std::byte>> decryptedPayload;
+    const std::byte* payloadData = datagram + headerBytes;
+    if ((flags & udp_protocol::PacketFlagEncrypted) != 0) {
+        decryptedPayload = DecryptDatagramPayload(
+            datagram,
+            datagramBytes,
+            headerBytes,
+            udp_protocol::PacketHeaderAuthenticatedBytes,
+            std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
+            std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes),
+            flags);
+        if (!decryptedPayload) {
+            ++stats_.cryptoRejectedDatagrams;
+            return std::nullopt;
+        }
+        payloadData = decryptedPayload->data();
+    } else if (crypto_) {
+        ++stats_.cryptoRejectedDatagrams;
         return std::nullopt;
     }
 
@@ -394,7 +434,7 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     ++stats_.datagramsAccepted;
     stats_.payloadBytesReceived += payloadBytes;
 
-    std::memcpy(pending.bytes.data() + fragmentOffset, datagram + headerBytes, payloadBytes);
+    std::memcpy(pending.bytes.data() + fragmentOffset, payloadData, payloadBytes);
     pending.fragmentReceived[fragmentIndex] = 1;
     pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
     ++pending.receivedFragments;
@@ -448,6 +488,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     const uint16_t fragmentCount = udp_protocol::FromNetwork16(header.fragmentCount);
     const uint32_t payloadBytes = udp_protocol::FromNetwork32(header.payloadBytes);
     const uint32_t flags = udp_protocol::FromNetwork32(header.flags);
+    const uint32_t encryptionFlags = udp_protocol::FromNetwork32(header.encryptionFlags);
 
     const bool knownSampleFormat =
         sampleFormat == udp_protocol::AudioSampleFormat::Float32 ||
@@ -468,7 +509,8 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         datagramBytes < static_cast<int>(headerBytes) ||
         !knownSampleFormat ||
         !knownCodec ||
-        (flags & ~allowedFlags) != 0) {
+        (flags & ~allowedFlags) != 0 ||
+        (encryptionFlags & ~udp_protocol::PacketFlagEncrypted) != 0) {
         ++stats_.invalidDatagrams;
         return;
     }
@@ -494,6 +536,26 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
         fragmentOffset > packetBytes ||
         payloadBytes > packetBytes - fragmentOffset) {
         ++stats_.invalidDatagrams;
+        return;
+    }
+    std::optional<std::vector<std::byte>> decryptedPayload;
+    const std::byte* payloadData = datagram + headerBytes;
+    if ((encryptionFlags & udp_protocol::PacketFlagEncrypted) != 0) {
+        decryptedPayload = DecryptDatagramPayload(
+            datagram,
+            datagramBytes,
+            headerBytes,
+            udp_protocol::AudioPacketHeaderAuthenticatedBytes,
+            std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
+            std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes),
+            encryptionFlags);
+        if (!decryptedPayload) {
+            ++stats_.cryptoRejectedDatagrams;
+            return;
+        }
+        payloadData = decryptedPayload->data();
+    } else if (crypto_) {
+        ++stats_.cryptoRejectedDatagrams;
         return;
     }
     if (codec == udp_protocol::AudioCodec::Raw &&
@@ -568,7 +630,7 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     ++stats_.audioDatagramsAccepted;
     stats_.audioPayloadBytesReceived += payloadBytes;
 
-    std::memcpy(pending.bytes.data() + fragmentOffset, datagram + headerBytes, payloadBytes);
+    std::memcpy(pending.bytes.data() + fragmentOffset, payloadData, payloadBytes);
     pending.fragmentReceived[fragmentIndex] = 1;
     pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
     ++pending.receivedFragments;
@@ -631,6 +693,64 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     completedAudioPackets_.push_back(std::move(completed));
     ++stats_.audioPacketsQueued;
     EnforceCompletedAudioPacketLimit();
+}
+
+std::optional<std::vector<std::byte>> UdpReceiver::DecryptDatagramPayload(
+    const std::byte* datagram,
+    int datagramBytes,
+    size_t headerBytes,
+    size_t authenticatedHeaderBytes,
+    std::span<const std::byte, UdpCryptoNonceBytes> nonce,
+    std::span<const std::byte, UdpCryptoTagBytes> tag,
+    uint32_t flags)
+{
+    if ((flags & udp_protocol::PacketFlagEncrypted) == 0) {
+        return std::vector<std::byte>(datagram + headerBytes, datagram + datagramBytes);
+    }
+    if (!crypto_ || datagramBytes < static_cast<int>(headerBytes)) {
+        return std::nullopt;
+    }
+
+    return crypto_->Decrypt(
+        nonce,
+        std::span<const std::byte>(datagram, authenticatedHeaderBytes),
+        std::span<const std::byte>(datagram + headerBytes, static_cast<size_t>(datagramBytes) - headerBytes),
+        tag);
+}
+
+bool UdpReceiver::EncryptFeedbackDatagram(std::vector<std::byte>& datagram)
+{
+    if (!crypto_) {
+        return false;
+    }
+    if (datagram.size() != sizeof(udp_protocol::FeedbackPacket)) {
+        throw std::runtime_error("Feedback datagram has unexpected size for encryption");
+    }
+
+    udp_protocol::FeedbackPacket packet{};
+    std::memcpy(&packet, datagram.data(), sizeof(packet));
+    packet.flags = udp_protocol::ToNetwork32(udp_protocol::PacketFlagEncrypted);
+    WriteUdpCryptoNonce(
+        std::span<std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
+        feedbackNoncePrefix_,
+        udp_protocol::FromNetwork64(packet.sequence),
+        0);
+    std::memcpy(datagram.data(), &packet, sizeof(packet));
+
+    auto ciphertext = crypto_->Encrypt(
+        std::span<const std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
+        std::span<const std::byte>(datagram.data(), udp_protocol::FeedbackPacketAuthenticatedBytes),
+        std::span<const std::byte>(
+            datagram.data() + udp_protocol::FeedbackPacketEncryptedPayloadOffset,
+            datagram.size() - udp_protocol::FeedbackPacketEncryptedPayloadOffset),
+        std::span<std::byte, UdpCryptoTagBytes>(
+            datagram.data() + offsetof(udp_protocol::FeedbackPacket, encryptionTag),
+            UdpCryptoTagBytes));
+    std::memcpy(
+        datagram.data() + udp_protocol::FeedbackPacketEncryptedPayloadOffset,
+        ciphertext.data(),
+        ciphertext.size());
+    return true;
 }
 
 void UdpReceiver::QueueDelayedDatagram(const std::byte* datagram, int datagramBytes, Clock::time_point releaseAt)
