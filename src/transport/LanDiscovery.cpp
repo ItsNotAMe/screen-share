@@ -22,7 +22,8 @@ namespace {
 
 constexpr uint32_t DiscoveryQueryMagic = 0x53534451; // "SSDQ"
 constexpr uint32_t DiscoveryResponseMagic = 0x53534452; // "SSDR"
-constexpr uint16_t DiscoveryVersion = 1;
+constexpr uint16_t DiscoveryVersion = 2;
+constexpr uint16_t LegacyDiscoveryVersion = 1;
 constexpr size_t MaxDiscoveryNameBytes = 64;
 constexpr size_t MaxDiscoverySessionBytes = 64;
 
@@ -40,13 +41,15 @@ struct DiscoveryResponseHeader {
     uint16_t sharePort = 0;
     uint16_t nameBytes = 0;
     uint16_t sessionBytes = 0;
-    uint16_t reserved = 0;
+    uint16_t flags = 0;
     uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
 };
 #pragma pack(pop)
 
 static_assert(sizeof(DiscoveryQueryPacket) == 8);
-static_assert(sizeof(DiscoveryResponseHeader) == 24);
+static_assert(sizeof(DiscoveryResponseHeader) == 32);
+constexpr size_t LegacyDiscoveryResponseHeaderBytes = 24;
 
 std::string WinsockErrorMessage(const char* operation)
 {
@@ -71,7 +74,7 @@ std::vector<std::byte> BuildDiscoveryQuery()
 {
     DiscoveryQueryPacket packet;
     packet.magic = udp_protocol::ToNetwork32(DiscoveryQueryMagic);
-    packet.version = udp_protocol::ToNetwork16(DiscoveryVersion);
+    packet.version = udp_protocol::ToNetwork16(LegacyDiscoveryVersion);
     packet.packetBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(sizeof(packet)));
 
     std::vector<std::byte> datagram(sizeof(packet));
@@ -87,8 +90,9 @@ bool IsDiscoveryQuery(const std::byte* datagram, int datagramBytes)
 
     DiscoveryQueryPacket packet;
     std::memcpy(&packet, datagram, sizeof(packet));
+    const uint16_t version = udp_protocol::FromNetwork16(packet.version);
     return udp_protocol::FromNetwork32(packet.magic) == DiscoveryQueryMagic &&
-           udp_protocol::FromNetwork16(packet.version) == DiscoveryVersion &&
+           (version == LegacyDiscoveryVersion || version == DiscoveryVersion) &&
            udp_protocol::FromNetwork16(packet.packetBytes) == sizeof(DiscoveryQueryPacket);
 }
 
@@ -107,6 +111,7 @@ std::vector<std::byte> BuildDiscoveryResponse(const LanDiscoveryAdvertiseConfig&
     header.nameBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(name.size()));
     header.sessionBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(session.size()));
     header.sessionFingerprint = udp_protocol::ToNetwork64(config.sessionFingerprint);
+    header.accessCodeFingerprint = udp_protocol::ToNetwork64(config.accessCodeFingerprint);
 
     std::vector<std::byte> datagram(packetBytes);
     std::memcpy(datagram.data(), &header, sizeof(header));
@@ -120,14 +125,21 @@ std::optional<LanDiscoveryPeer> ParseDiscoveryResponse(
     int datagramBytes,
     const sockaddr_in& senderAddress)
 {
-    if (datagramBytes < static_cast<int>(sizeof(DiscoveryResponseHeader))) {
+    if (datagramBytes < static_cast<int>(LegacyDiscoveryResponseHeaderBytes)) {
         return std::nullopt;
     }
 
     DiscoveryResponseHeader header;
-    std::memcpy(&header, datagram, sizeof(header));
-    if (udp_protocol::FromNetwork32(header.magic) != DiscoveryResponseMagic ||
-        udp_protocol::FromNetwork16(header.version) != DiscoveryVersion) {
+    std::memcpy(&header, datagram, std::min<size_t>(sizeof(header), static_cast<size_t>(datagramBytes)));
+    const uint16_t version = udp_protocol::FromNetwork16(header.version);
+    if (udp_protocol::FromNetwork32(header.magic) != DiscoveryResponseMagic) {
+        return std::nullopt;
+    }
+    const size_t expectedHeaderBytes =
+        version == DiscoveryVersion ? sizeof(DiscoveryResponseHeader) :
+        version == LegacyDiscoveryVersion ? LegacyDiscoveryResponseHeaderBytes :
+        0;
+    if (expectedHeaderBytes == 0 || datagramBytes < static_cast<int>(expectedHeaderBytes)) {
         return std::nullopt;
     }
 
@@ -137,10 +149,10 @@ std::optional<LanDiscoveryPeer> ParseDiscoveryResponse(
     const uint16_t sessionBytes = udp_protocol::FromNetwork16(header.sessionBytes);
     if (sharePort == 0 ||
         packetBytes != datagramBytes ||
-        packetBytes < sizeof(DiscoveryResponseHeader) ||
+        packetBytes < expectedHeaderBytes ||
         nameBytes > MaxDiscoveryNameBytes ||
         sessionBytes > MaxDiscoverySessionBytes ||
-        sizeof(DiscoveryResponseHeader) + nameBytes + sessionBytes != packetBytes) {
+        expectedHeaderBytes + nameBytes + sessionBytes != packetBytes) {
         return std::nullopt;
     }
 
@@ -149,13 +161,16 @@ std::optional<LanDiscoveryPeer> ParseDiscoveryResponse(
         return std::nullopt;
     }
 
-    const char* payload = reinterpret_cast<const char*>(datagram + sizeof(DiscoveryResponseHeader));
+    const char* payload = reinterpret_cast<const char*>(datagram + expectedHeaderBytes);
     LanDiscoveryPeer peer;
     peer.address = addressText.data();
     peer.sharePort = sharePort;
     peer.name.assign(payload, payload + nameBytes);
     peer.sessionId.assign(payload + nameBytes, payload + nameBytes + sessionBytes);
     peer.sessionFingerprint = udp_protocol::FromNetwork64(header.sessionFingerprint);
+    if (version == DiscoveryVersion) {
+        peer.accessCodeFingerprint = udp_protocol::FromNetwork64(header.accessCodeFingerprint);
+    }
     return peer;
 }
 

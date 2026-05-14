@@ -115,6 +115,11 @@ The output includes `share_target=HOST:PORT` plus a ready-to-run `ScreenShare --
 The desktop UI exposes the same flow: Watch has a LAN discoverable checkbox, and Share has a
 Find on LAN button that fills the address and port. Discovery uses UDP port 47995 by default; add
 `--lan-discovery-port PORT` on both sides if you need a different port.
+Discovery also reports whether the receiver expects encrypted traffic. If Watch is using an access
+code, discovery prints `security=encrypted` and an access-code fingerprint, and the generated Share
+command uses `--access-code CODE` as a placeholder. The raw access code is never broadcast; copy or
+share it separately. If Watch is explicitly plaintext, discovery prints `security=plaintext` and the
+generated Share command includes `--allow-plaintext`.
 
 List monitors:
 
