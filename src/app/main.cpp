@@ -4434,6 +4434,9 @@ void RunUdpReceiverStats(const Options& options)
         }
 
         const uint64_t padding100ns = audioRendererPadding100ns();
+        if (padding100ns == 0 && audioPlayout.queuedPacketCount() == 0) {
+            return std::nullopt;
+        }
         const uint64_t renderedAudioEnd100ns = audioPlayout.lastRenderedEndQpc100ns();
         if (renderedAudioEnd100ns <= padding100ns) {
             return std::nullopt;
