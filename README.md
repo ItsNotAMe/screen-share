@@ -501,7 +501,9 @@ new size. Receiver stats report `preview_queue`, `preview_playout_resets`, `prev
 the preview window title shows the same compact health summary plus decoded resolution, playout
 latency, queue depths, reset count, and presented-frame count. The health label reflects the latest
 reporting interval, while the numeric drop/resync counters remain cumulative for diagnostics and
-sender-side adaptation deltas.
+sender-side adaptation deltas. While no UDP media is arriving, the receiver logs a single
+`waiting_for_stream` line instead of repeating full zero-value stats every second; detailed stats
+resume as soon as new packets arrive.
 When `--seconds` is omitted the preview runs until the window closes.
 
 Audio support is currently split between standalone WASAPI capture/send diagnostics and receiver
