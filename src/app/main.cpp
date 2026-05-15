@@ -57,6 +57,8 @@ constexpr size_t OrderedReceiverRecoveryThresholdFrames = 30;
 constexpr size_t ReceiverHealthPendingFrameWarning = 8;
 constexpr uint64_t SenderQueuePressureDatagrams = 2'048;
 constexpr uint64_t SenderQueuePressureMs = 750;
+constexpr uint64_t ResolutionSenderQueuePressureMs = 1'200;
+constexpr uint32_t ResolutionBitrateReducedPercentBeforeQueueScale = 60;
 constexpr uint32_t ResolutionStableReportsBeforeUpscale = 4;
 constexpr uint32_t ResolutionPressureReportsBeforeReduce = 3;
 constexpr int DefaultPreviewLatencyMs = 150;
@@ -64,6 +66,8 @@ constexpr int DefaultAvSyncPreviewLatencyMs = 100;
 constexpr int DefaultPreviewMaxLateMs = 500;
 constexpr int DefaultAudioPlaybackLatencyMs = 120;
 constexpr int DefaultUdpMaxQueueMs = 0;
+constexpr int DefaultShareUdpMaxQueueMs = 1500;
+constexpr uint32_t DefaultUdpPacingHeadroomPercent = 125;
 constexpr int MaxAvSyncCorrectionBiasMs = 250;
 constexpr uint64_t AvSyncVideoOnlyFallbackFrames = 30;
 
@@ -1830,6 +1834,7 @@ public:
     }
 
     [[nodiscard]] uint32_t recommendedBitrate() const noexcept { return recommendedBitrate_; }
+    [[nodiscard]] uint32_t targetBitrate() const noexcept { return targetBitrate_; }
     [[nodiscard]] uint32_t minBitrate() const noexcept { return minBitrate_; }
     [[nodiscard]] uint32_t reduceCooldownRemaining() const noexcept { return reduceCooldownRemaining_; }
     [[nodiscard]] uint64_t suppressedReductions() const noexcept { return suppressedReductions_; }
@@ -2359,9 +2364,15 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.audioCapture = true;
             options.audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
         }
+        if (!options.streamEncoderPreferenceProvided) {
+            options.streamEncoderPreference = StreamEncoderPreference::Software;
+        }
         options.sharePreset = true;
         if (!secondsProvided) {
             options.seconds = 0;
+        }
+        if (!options.udpMaxQueueMsProvided) {
+            options.udpMaxQueueMs = DefaultShareUdpMaxQueueMs;
         }
     }
     if (watchPort) {
@@ -3323,9 +3334,16 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     uint64_t audioPacingBitrate = 0;
     bool audioPacingApplied = false;
 
+    auto streamUdpPacingBitrate = [&]() -> uint64_t {
+        if (streamBitrate == 0) {
+            return 0;
+        }
+        return (static_cast<uint64_t>(streamBitrate) * DefaultUdpPacingHeadroomPercent + 99) / 100;
+    };
+
     auto combinedUdpPacingBitrate = [&]() -> uint32_t {
         const uint64_t combined =
-            static_cast<uint64_t>(streamBitrate) +
+            streamUdpPacingBitrate() +
             (options.audioCapture ? audioPacingBitrate : 0ULL);
         return static_cast<uint32_t>(std::min<uint64_t>(
             combined,
@@ -3432,7 +3450,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         }
     };
 
-    auto applyAdaptiveResolution = [&]() {
+    auto applyAdaptiveResolution = [&](const screenshare::UdpSenderStats& udpStats) {
         if (!options.adaptResolution || adaptiveResolutionTiers.size() < 2 || !streamEncoder || !bitrateAdvisor.configured()) {
             return;
         }
@@ -3451,11 +3469,31 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
             atBitrateFloor &&
             (std::strcmp(bitrateAdvisor.action(), "reduce") == 0 ||
              std::strcmp(bitrateAdvisor.reason(), "min_bitrate") == 0);
+        const bool senderQueueVeryStale =
+            udpStats.pendingQueueDelayMs >= ResolutionSenderQueuePressureMs ||
+            (udpStats.pendingQueueDelayMs == 0 &&
+             udpStats.pendingDatagrams >= SenderQueuePressureDatagrams * 2);
+        const bool bitrateReducedEnoughForResolution =
+            bitrateAdvisor.targetBitrate() > 0 &&
+            streamBitrate > 0 &&
+            static_cast<uint64_t>(streamBitrate) * 100 <=
+                static_cast<uint64_t>(bitrateAdvisor.targetBitrate()) *
+                ResolutionBitrateReducedPercentBeforeQueueScale;
+        const bool queuePressureReason =
+            std::strcmp(bitrateAdvisor.action(), "reduce") == 0 ||
+            std::strcmp(bitrateAdvisor.reason(), "queue_pressure") == 0 ||
+            std::strcmp(bitrateAdvisor.reason(), "queue_stabilizing") == 0 ||
+            std::strcmp(bitrateAdvisor.reason(), "reduce_cooldown") == 0 ||
+            std::strcmp(bitrateAdvisor.reason(), "min_bitrate") == 0;
+        const bool pressureAtReducedBitrate =
+            senderQueueVeryStale &&
+            bitrateReducedEnoughForResolution &&
+            queuePressureReason;
         const bool reductionPressure =
             std::strcmp(bitrateAdvisor.action(), "reduce") == 0 ||
             std::strcmp(bitrateAdvisor.reason(), "reduce_cooldown") == 0;
 
-        if (pressureAtFloor) {
+        if (pressureAtFloor || pressureAtReducedBitrate) {
             resolutionStableFeedbackReports = 0;
             ++resolutionReductionPressureReports;
             if (resolutionReductionPressureReports < ResolutionPressureReportsBeforeReduce) {
@@ -3463,7 +3501,10 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 return;
             }
             if (adaptiveResolutionTierIndex + 1 < adaptiveResolutionTiers.size()) {
-                restartStreamAtResolution(adaptiveResolutionTierIndex + 1, "reduce", bitrateAdvisor.reason());
+                restartStreamAtResolution(
+                    adaptiveResolutionTierIndex + 1,
+                    "reduce",
+                    pressureAtReducedBitrate ? "sender_queue_pressure" : bitrateAdvisor.reason());
                 return;
             }
             resolutionAdaptationStatus = "holding";
@@ -3683,7 +3724,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                         if (!udpSender) {
                             auto udpConfig = screenshare::ParseUdpSenderTarget(options.udpSendTarget);
                             udpConfig.pacingEnabled = options.udpPacing;
-                            udpConfig.pacingBitrate = streamBitrate;
+                            udpConfig.pacingBitrate = combinedUdpPacingBitrate();
                             udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
                             udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
                             udpConfig.encryptionKey = options.accessCodeKey;
@@ -3778,7 +3819,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
             if (udpSender) {
                 bitrateAdvisor.Update(udpStatsNow);
                 applyAdaptiveBitrate();
-                applyAdaptiveResolution();
+                applyAdaptiveResolution(udpStatsNow);
             }
             std::cout
                 << "source=" << lastSourceWidth << "x" << lastSourceHeight

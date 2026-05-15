@@ -91,10 +91,14 @@ Common live session:
 
 `--watch PORT` expands to the normal receiver preview path: `--udp-recv PORT --preview
 --audio-playback`, with default A/V sync enabled. `--share HOST:PORT` expands to the normal sender
-path: `--udp-send HOST:PORT --audio-capture system --adapt-bitrate --adapt-resolution`. The share
-preset runs until you stop it with Ctrl+C by default; add `--seconds S` to choose a shorter test.
-Add the same `--session ID` on both sides when you want sender and receiver logs/reports to be
-easy to match later. If omitted, each process generates its own diagnostic session ID.
+path: `--udp-send HOST:PORT --audio-capture system --adapt-bitrate --adapt-resolution`, with a
+live UDP queue cap so old queued video does not build into multi-second latency. It currently
+defaults to the software H.264 encoder because the Windows/NVIDIA hardware MFT can build an input
+queue and drop frames on some systems; pass `--stream-encoder hardware` when you want to test the
+hardware path explicitly. The share preset runs until you stop it with Ctrl+C by default; add
+`--seconds S` to choose a shorter test. Add the same `--session ID` on both sides when you want
+sender and receiver logs/reports to be easy to match later. If omitted, each process generates its
+own diagnostic session ID.
 Use `--allow-plaintext` instead of `--access-code` only when you intentionally want an unencrypted
 local UDP session.
 
@@ -215,10 +219,13 @@ fragments over time instead of dumping each frame as one burst. Add `--no-udp-pa
 the older raw burst behavior for transport diagnostics.
 
 Sender stats include `udp_queue_ms` so you can see how much future send time is currently waiting in
-the paced UDP queue. The experimental `--udp-max-queue-ms MS` option can cap that queue for
-diagnostics by dropping older queued media, while the default `0` leaves queue trimming disabled.
-Dropping queued H.264 inside a GOP can force receiver recovery at the next keyframe, so prefer
-`--adapt-bitrate` and `--adapt-resolution` for normal live runs.
+the paced UDP queue. The experimental `--udp-max-queue-ms MS` option can cap that queue by dropping
+older queued media. Raw `--udp-send` keeps the default `0` queue cap disabled for diagnostics, while
+the `--share` preset defaults to a live cap. Dropping queued H.264 inside a GOP can force receiver
+recovery at the next keyframe, so prefer `--adapt-bitrate` and `--adapt-resolution` for normal live
+runs.
+The sender also gives the UDP pacer a small amount of headroom above the current encoder bitrate so
+packet overhead and short H.264 bursts can drain instead of turning into permanent backlog.
 
 Add `--adapt-bitrate` to let receiver feedback apply conservative live bitrate changes to the
 active stream encoder and UDP pacing queue. The sender reduces quickly on loss/recovery signals and
@@ -234,6 +241,9 @@ resolution can step back up again after several stable feedback reports, which h
 between tiers. Use `--adapt-resolution-min-scale N` to set the smallest allowed scale and
 `--adapt-resolution-cooldown S` to space out resolution changes. Lower adaptive tiers are rounded to
 H.264-friendly dimensions so receiver decoders do not add hidden padding.
+Sustained sender-side queue pressure can also trigger a resolution step-down once bitrate has already
+been reduced substantially, which avoids staying at native 1440p while the UDP queue is seconds
+behind.
 For example, 75% of a 2560x1440 capture becomes `1920x1088` because H.264 encoders prefer
 16-pixel-aligned dimensions.
 
