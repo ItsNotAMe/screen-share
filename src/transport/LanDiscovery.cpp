@@ -1,6 +1,5 @@
 #include "transport/LanDiscovery.h"
 
-#include "transport/UdpCrypto.h"
 #include "transport/UdpProtocol.h"
 
 #include <winsock2.h>
@@ -10,10 +9,8 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cstddef>
 #include <cstring>
 #include <optional>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -25,13 +22,10 @@ namespace {
 
 constexpr uint32_t DiscoveryQueryMagic = 0x53534451; // "SSDQ"
 constexpr uint32_t DiscoveryResponseMagic = 0x53534452; // "SSDR"
-constexpr uint16_t DiscoveryVersion = 3;
-constexpr uint16_t SecurityMetadataDiscoveryVersion = 2;
+constexpr uint16_t DiscoveryVersion = 2;
 constexpr uint16_t LegacyDiscoveryVersion = 1;
 constexpr size_t MaxDiscoveryNameBytes = 64;
 constexpr size_t MaxDiscoverySessionBytes = 64;
-constexpr size_t MaxDiscoveryAccessCodeBytes = 64;
-constexpr uint16_t DiscoveryFlagEncryptedAccessCode = 1U << 0;
 
 #pragma pack(push, 1)
 struct DiscoveryQueryPacket {
@@ -50,18 +44,12 @@ struct DiscoveryResponseHeader {
     uint16_t flags = 0;
     uint64_t sessionFingerprint = 0;
     uint64_t accessCodeFingerprint = 0;
-    uint16_t pairingBytes = 0;
-    uint16_t reserved = 0;
-    std::byte pairingNonce[UdpCryptoNonceBytes]{};
-    std::byte pairingTag[UdpCryptoTagBytes]{};
 };
 #pragma pack(pop)
 
 static_assert(sizeof(DiscoveryQueryPacket) == 8);
-static_assert(sizeof(DiscoveryResponseHeader) == 64);
+static_assert(sizeof(DiscoveryResponseHeader) == 32);
 constexpr size_t LegacyDiscoveryResponseHeaderBytes = 24;
-constexpr size_t SecurityMetadataDiscoveryResponseHeaderBytes = 32;
-constexpr size_t DiscoveryResponseAuthenticatedBytes = offsetof(DiscoveryResponseHeader, pairingTag);
 
 std::string WinsockErrorMessage(const char* operation)
 {
@@ -80,14 +68,6 @@ std::string TruncateUtf8Bytes(std::string value, size_t maxBytes)
     }
     value.resize(maxBytes);
     return value;
-}
-
-UdpCryptoKey DeriveLanPairingKey(const std::string& pairCode)
-{
-    if (pairCode.empty()) {
-        throw std::invalid_argument("LAN pair code must not be empty");
-    }
-    return DeriveUdpCryptoKey("lan-pair:" + pairCode);
 }
 
 std::vector<std::byte> BuildDiscoveryQuery()
@@ -120,71 +100,36 @@ std::vector<std::byte> BuildDiscoveryResponse(const LanDiscoveryAdvertiseConfig&
 {
     const std::string name = TruncateUtf8Bytes(config.name, MaxDiscoveryNameBytes);
     const std::string session = TruncateUtf8Bytes(config.sessionId, MaxDiscoverySessionBytes);
-    const bool includePairingSecret = !config.accessCode.empty() && !config.pairCode.empty();
-    if (includePairingSecret && config.accessCode.size() > MaxDiscoveryAccessCodeBytes) {
-        throw std::invalid_argument("LAN pairing access code is too large");
-    }
-    const size_t headerBytes = includePairingSecret ?
-        sizeof(DiscoveryResponseHeader) :
-        SecurityMetadataDiscoveryResponseHeaderBytes;
     const uint16_t packetBytes = static_cast<uint16_t>(
-        headerBytes +
-        name.size() +
-        session.size() +
-        (includePairingSecret ? config.accessCode.size() : 0));
+        sizeof(DiscoveryResponseHeader) + name.size() + session.size());
 
     DiscoveryResponseHeader header;
     header.magic = udp_protocol::ToNetwork32(DiscoveryResponseMagic);
-    header.version = udp_protocol::ToNetwork16(
-        includePairingSecret ? DiscoveryVersion : SecurityMetadataDiscoveryVersion);
+    header.version = udp_protocol::ToNetwork16(DiscoveryVersion);
     header.packetBytes = udp_protocol::ToNetwork16(packetBytes);
     header.sharePort = udp_protocol::ToNetwork16(config.sharePort);
     header.nameBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(name.size()));
     header.sessionBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(session.size()));
     header.sessionFingerprint = udp_protocol::ToNetwork64(config.sessionFingerprint);
     header.accessCodeFingerprint = udp_protocol::ToNetwork64(config.accessCodeFingerprint);
-    if (includePairingSecret) {
-        header.flags = udp_protocol::ToNetwork16(DiscoveryFlagEncryptedAccessCode);
-        header.pairingBytes = udp_protocol::ToNetwork16(static_cast<uint16_t>(config.accessCode.size()));
-        WriteUdpCryptoNonce(
-            std::span<std::byte, UdpCryptoNonceBytes>(header.pairingNonce, UdpCryptoNonceBytes),
-            GenerateUdpCryptoNoncePrefix(),
-            config.sessionFingerprint != 0 ? config.sessionFingerprint : config.accessCodeFingerprint,
-            0);
-    }
 
     std::vector<std::byte> datagram(packetBytes);
-    std::memcpy(datagram.data(), &header, headerBytes);
-    std::memcpy(datagram.data() + headerBytes, name.data(), name.size());
-    std::memcpy(datagram.data() + headerBytes + name.size(), session.data(), session.size());
-    if (includePairingSecret) {
-        UdpAesGcm crypto(DeriveLanPairingKey(config.pairCode));
-        auto ciphertext = crypto.Encrypt(
-            std::span<const std::byte, UdpCryptoNonceBytes>(header.pairingNonce, UdpCryptoNonceBytes),
-            std::span<const std::byte>(datagram.data(), DiscoveryResponseAuthenticatedBytes),
-            std::as_bytes(std::span<const char>(config.accessCode.data(), config.accessCode.size())),
-            std::span<std::byte, UdpCryptoTagBytes>(
-                datagram.data() + offsetof(DiscoveryResponseHeader, pairingTag),
-                UdpCryptoTagBytes));
-        std::memcpy(
-            datagram.data() + headerBytes + name.size() + session.size(),
-            ciphertext.data(),
-            ciphertext.size());
-    }
+    std::memcpy(datagram.data(), &header, sizeof(header));
+    std::memcpy(datagram.data() + sizeof(header), name.data(), name.size());
+    std::memcpy(datagram.data() + sizeof(header) + name.size(), session.data(), session.size());
     return datagram;
 }
 
 std::optional<LanDiscoveryPeer> ParseDiscoveryResponse(
     const std::byte* datagram,
     int datagramBytes,
-    const sockaddr_in& senderAddress,
-    const std::optional<std::string>& pairCode)
+    const sockaddr_in& senderAddress)
 {
     if (datagramBytes < static_cast<int>(LegacyDiscoveryResponseHeaderBytes)) {
         return std::nullopt;
     }
 
-    DiscoveryResponseHeader header{};
+    DiscoveryResponseHeader header;
     std::memcpy(&header, datagram, std::min<size_t>(sizeof(header), static_cast<size_t>(datagramBytes)));
     const uint16_t version = udp_protocol::FromNetwork16(header.version);
     if (udp_protocol::FromNetwork32(header.magic) != DiscoveryResponseMagic) {
@@ -192,7 +137,6 @@ std::optional<LanDiscoveryPeer> ParseDiscoveryResponse(
     }
     const size_t expectedHeaderBytes =
         version == DiscoveryVersion ? sizeof(DiscoveryResponseHeader) :
-        version == SecurityMetadataDiscoveryVersion ? SecurityMetadataDiscoveryResponseHeaderBytes :
         version == LegacyDiscoveryVersion ? LegacyDiscoveryResponseHeaderBytes :
         0;
     if (expectedHeaderBytes == 0 || datagramBytes < static_cast<int>(expectedHeaderBytes)) {
@@ -203,19 +147,12 @@ std::optional<LanDiscoveryPeer> ParseDiscoveryResponse(
     const uint16_t sharePort = udp_protocol::FromNetwork16(header.sharePort);
     const uint16_t nameBytes = udp_protocol::FromNetwork16(header.nameBytes);
     const uint16_t sessionBytes = udp_protocol::FromNetwork16(header.sessionBytes);
-    const uint16_t flags = udp_protocol::FromNetwork16(header.flags);
-    const uint16_t pairingBytes = version == DiscoveryVersion ? udp_protocol::FromNetwork16(header.pairingBytes) : 0;
-    const uint16_t allowedFlags = version == DiscoveryVersion ? DiscoveryFlagEncryptedAccessCode : 0;
     if (sharePort == 0 ||
         packetBytes != datagramBytes ||
         packetBytes < expectedHeaderBytes ||
         nameBytes > MaxDiscoveryNameBytes ||
         sessionBytes > MaxDiscoverySessionBytes ||
-        pairingBytes > MaxDiscoveryAccessCodeBytes ||
-        (flags & ~allowedFlags) != 0 ||
-        ((flags & DiscoveryFlagEncryptedAccessCode) == 0 && pairingBytes != 0) ||
-        ((flags & DiscoveryFlagEncryptedAccessCode) != 0 && pairingBytes == 0) ||
-        expectedHeaderBytes + nameBytes + sessionBytes + pairingBytes != packetBytes) {
+        expectedHeaderBytes + nameBytes + sessionBytes != packetBytes) {
         return std::nullopt;
     }
 
@@ -231,37 +168,8 @@ std::optional<LanDiscoveryPeer> ParseDiscoveryResponse(
     peer.name.assign(payload, payload + nameBytes);
     peer.sessionId.assign(payload + nameBytes, payload + nameBytes + sessionBytes);
     peer.sessionFingerprint = udp_protocol::FromNetwork64(header.sessionFingerprint);
-    if (version >= SecurityMetadataDiscoveryVersion) {
+    if (version == DiscoveryVersion) {
         peer.accessCodeFingerprint = udp_protocol::FromNetwork64(header.accessCodeFingerprint);
-    }
-    peer.pairingAvailable = (flags & DiscoveryFlagEncryptedAccessCode) != 0;
-    if (peer.pairingAvailable && pairCode && !pairCode->empty()) {
-        try {
-            UdpAesGcm crypto(DeriveLanPairingKey(*pairCode));
-            const auto plaintext = crypto.Decrypt(
-                std::span<const std::byte, UdpCryptoNonceBytes>(header.pairingNonce, UdpCryptoNonceBytes),
-                std::span<const std::byte>(datagram, DiscoveryResponseAuthenticatedBytes),
-                std::span<const std::byte>(
-                    datagram + expectedHeaderBytes + nameBytes + sessionBytes,
-                    pairingBytes),
-                std::span<const std::byte, UdpCryptoTagBytes>(header.pairingTag, UdpCryptoTagBytes));
-            if (plaintext && !plaintext->empty() && plaintext->size() <= MaxDiscoveryAccessCodeBytes) {
-                const auto* accessCodeBytes = reinterpret_cast<const char*>(plaintext->data());
-                const bool hasControlCharacter = std::any_of(
-                    accessCodeBytes,
-                    accessCodeBytes + plaintext->size(),
-                    [](char ch) {
-                        const auto value = static_cast<unsigned char>(ch);
-                        return value < 32U || value == 127U;
-                    });
-                if (!hasControlCharacter) {
-                    peer.pairingSucceeded = true;
-                    peer.pairedAccessCode.assign(accessCodeBytes, accessCodeBytes + plaintext->size());
-                }
-            }
-        } catch (...) {
-            peer.pairingSucceeded = false;
-        }
     }
     return peer;
 }
@@ -398,7 +306,6 @@ void LanDiscoveryResponder::Start(const LanDiscoveryAdvertiseConfig& config)
     if (config.sharePort == 0) {
         throw std::invalid_argument("LAN advertised share port must be non-zero");
     }
-    std::vector<std::byte> response = BuildDiscoveryResponse(config);
 
     const SOCKET udpSocket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (udpSocket == INVALID_SOCKET) {
@@ -424,7 +331,6 @@ void LanDiscoveryResponder::Start(const LanDiscoveryAdvertiseConfig& config)
     }
 
     config_ = config;
-    response_ = std::move(response);
     socket_ = static_cast<uintptr_t>(udpSocket);
     stopRequested_ = false;
     worker_ = std::thread(&LanDiscoveryResponder::WorkerLoop, this);
@@ -441,13 +347,13 @@ void LanDiscoveryResponder::Stop()
         closesocket(AsSocket(socket_));
         socket_ = 0;
     }
-    response_.clear();
     stopRequested_ = false;
 }
 
 void LanDiscoveryResponder::WorkerLoop()
 {
     const SOCKET socket = AsSocket(socket_);
+    const std::vector<std::byte> response = BuildDiscoveryResponse(config_);
     std::array<std::byte, 512> buffer{};
 
     while (!stopRequested_) {
@@ -476,18 +382,15 @@ void LanDiscoveryResponder::WorkerLoop()
 
         static_cast<void>(sendto(
             socket,
-            reinterpret_cast<const char*>(response_.data()),
-            static_cast<int>(response_.size()),
+            reinterpret_cast<const char*>(response.data()),
+            static_cast<int>(response.size()),
             0,
             reinterpret_cast<const sockaddr*>(&senderAddress),
             senderAddressLength));
     }
 }
 
-std::vector<LanDiscoveryPeer> DiscoverLanPeers(
-    std::chrono::milliseconds timeout,
-    uint16_t discoveryPort,
-    std::optional<std::string> pairCode)
+std::vector<LanDiscoveryPeer> DiscoverLanPeers(std::chrono::milliseconds timeout, uint16_t discoveryPort)
 {
     if (timeout <= std::chrono::milliseconds(0)) {
         throw std::invalid_argument("LAN discovery timeout must be positive");
@@ -566,7 +469,7 @@ std::vector<LanDiscoveryPeer> DiscoverLanPeers(
                 continue;
             }
 
-            auto peer = ParseDiscoveryResponse(buffer.data(), received, senderAddress, pairCode);
+            auto peer = ParseDiscoveryResponse(buffer.data(), received, senderAddress);
             if (!peer) {
                 continue;
             }
@@ -581,13 +484,6 @@ std::vector<LanDiscoveryPeer> DiscoverLanPeers(
             });
             if (!duplicate) {
                 peers.push_back(std::move(*peer));
-            } else if (peer->pairingSucceeded) {
-                auto existing = std::find_if(peers.begin(), peers.end(), [&](const LanDiscoveryPeer& candidate) {
-                    return std::tuple{candidate.address, candidate.sharePort, candidate.sessionFingerprint} == key;
-                });
-                if (existing != peers.end() && !existing->pairingSucceeded) {
-                    *existing = std::move(*peer);
-                }
             }
         }
 
