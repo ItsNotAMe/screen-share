@@ -4675,6 +4675,7 @@ void RunUdpReceiverStats(const Options& options)
     auto lastReportAt = startedAt;
     uint64_t lastDatagramsReceived = 0;
     uint64_t lastFramesCompleted = 0;
+    uint64_t lastAudioPacketsCompleted = 0;
     uint64_t lastSimulatedDroppedDatagrams = 0;
     uint64_t lastInvalidDatagrams = 0;
     uint64_t lastIncompleteFramesDropped = 0;
@@ -4687,6 +4688,25 @@ void RunUdpReceiverStats(const Options& options)
     uint16_t latestFragmentCount = 0;
     uint64_t feedbackSequence = 0;
     bool hasCompletedFrame = false;
+    bool hasReceivedStreamTraffic = false;
+    bool waitingForStreamLogged = false;
+
+    auto updateReportBaselines = [&](const screenshare::UdpReceiverStats& stats,
+                                     uint64_t previewLateDrops,
+                                     uint64_t previewOverflowDrops,
+                                     Clock::time_point now) {
+        lastDatagramsReceived = stats.datagramsReceived;
+        lastFramesCompleted = stats.framesCompleted;
+        lastAudioPacketsCompleted = stats.audioPacketsCompleted;
+        lastSimulatedDroppedDatagrams = stats.simulatedDatagramsDropped;
+        lastInvalidDatagrams = stats.invalidDatagrams;
+        lastIncompleteFramesDropped = stats.incompleteFramesDropped;
+        lastH264DecodeResyncs = h264DecodeResyncs;
+        lastH264DecodeSkippedPackets = h264DecodeSkippedPackets;
+        lastPreviewLateDrops = previewLateDrops;
+        lastPreviewOverflowDrops = previewOverflowDrops;
+        lastReportAt = now;
+    };
 
     auto shouldContinue = [&]() {
         if (previewWindow && !previewWindow->PumpMessages()) {
@@ -4795,6 +4815,31 @@ void RunUdpReceiverStats(const Options& options)
                 feedbackSequence++,
                 options.sessionFingerprint,
                 options.accessCodeFingerprint));
+
+            const bool hasIncomingActivity =
+                stats.datagramsReceived != lastDatagramsReceived ||
+                stats.framesCompleted != lastFramesCompleted ||
+                stats.audioPacketsCompleted != lastAudioPacketsCompleted;
+            if (!hasIncomingActivity) {
+                if (!waitingForStreamLogged) {
+                    std::cout
+                        << "waiting_for_stream"
+                        << " session=" << options.sessionId
+                        << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
+                        << " seen_stream=" << (hasReceivedStreamTraffic ? "yes" : "no")
+                        << " udp_datagrams=" << stats.datagramsReceived
+                        << " accepted_datagrams=" << stats.datagramsAccepted
+                        << " completed_frames=" << stats.framesCompleted
+                        << " audio_packets=" << stats.audioPacketsCompleted
+                        << "\n";
+                    waitingForStreamLogged = true;
+                }
+                updateReportBaselines(stats, previewLateDrops, previewOverflowDrops, now);
+                continue;
+            }
+
+            hasReceivedStreamTraffic = true;
+            waitingForStreamLogged = false;
 
             std::cout
                 << "udp_datagrams=" << stats.datagramsReceived
@@ -4910,16 +4955,7 @@ void RunUdpReceiverStats(const Options& options)
 
             std::cout << "\n";
 
-            lastDatagramsReceived = stats.datagramsReceived;
-            lastFramesCompleted = stats.framesCompleted;
-            lastSimulatedDroppedDatagrams = stats.simulatedDatagramsDropped;
-            lastInvalidDatagrams = stats.invalidDatagrams;
-            lastIncompleteFramesDropped = stats.incompleteFramesDropped;
-            lastH264DecodeResyncs = h264DecodeResyncs;
-            lastH264DecodeSkippedPackets = h264DecodeSkippedPackets;
-            lastPreviewLateDrops = previewLateDrops;
-            lastPreviewOverflowDrops = previewOverflowDrops;
-            lastReportAt = now;
+            updateReportBaselines(stats, previewLateDrops, previewOverflowDrops, now);
         }
     }
 
