@@ -86,6 +86,24 @@ bool UdpCryptoKey::valid() const noexcept
     });
 }
 
+uint64_t UdpAccessCodeFingerprint(std::string_view accessCode)
+{
+    uint64_t hash = 14695981039346656037ULL;
+    const auto mix = [&hash](unsigned char value) {
+        hash ^= value;
+        hash *= 1099511628211ULL;
+    };
+
+    constexpr std::string_view prefix = "screenshare-access-code-v1:";
+    for (const char ch : prefix) {
+        mix(static_cast<unsigned char>(ch));
+    }
+    for (const char ch : accessCode) {
+        mix(static_cast<unsigned char>(ch));
+    }
+    return hash == 0 ? 1 : hash;
+}
+
 UdpCryptoKey DeriveUdpCryptoKey(std::string_view accessCode)
 {
     if (accessCode.empty()) {

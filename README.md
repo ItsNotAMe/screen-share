@@ -13,7 +13,7 @@ The first milestone is a pure C++ capture foundation:
 - Capture system or microphone audio with WASAPI.
 - Send Opus-compressed audio packets over UDP by default and optionally play them on the receiver with a small jitter buffer.
 
-Friend pairing and broader network setup are later milestones.
+Internet/NAT traversal is a later milestone.
 
 ## Build
 
@@ -119,11 +119,13 @@ The output includes `share_target=HOST:PORT` plus a ready-to-run `ScreenShare --
 The desktop UI exposes the same flow: Watch has a LAN discoverable checkbox, and Share has a
 Find on LAN button that fills the address and port. Discovery uses UDP port 47995 by default; add
 `--lan-discovery-port PORT` on both sides if you need a different port.
-Discovery also reports whether the receiver expects encrypted traffic. If Watch is using an access
-code, discovery prints `security=encrypted` and an access-code fingerprint, and the generated Share
-command uses `--access-code CODE` as a placeholder. The raw access code is never broadcast; copy or
-share it separately. If Watch is explicitly plaintext, discovery prints `security=plaintext` and the
-generated Share command includes `--allow-plaintext`.
+Discovery also reports whether the receiver expects encrypted traffic. Use the same access code on
+both computers for encrypted sessions; there is no separate LAN invite code. If Watch is using an
+access code, discovery prints `security=encrypted` and an access-code fingerprint, and the generated
+Share command uses `--access-code CODE` as a placeholder. The raw access code is never broadcast.
+The desktop UI compares the typed access code with the selected receiver fingerprint after Find on
+LAN. If Watch is explicitly plaintext, discovery prints `security=plaintext` and the generated Share
+command includes `--allow-plaintext`.
 
 List monitors:
 

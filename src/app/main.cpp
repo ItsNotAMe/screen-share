@@ -493,21 +493,6 @@ uint64_t SessionFingerprint(std::string_view sessionId)
     return hash == 0 ? 1 : hash;
 }
 
-uint64_t AccessCodeFingerprint(std::string_view accessCode)
-{
-    uint64_t hash = 14695981039346656037ULL;
-    constexpr std::string_view prefix = "screenshare-access-code-v1:";
-    for (const char ch : prefix) {
-        hash ^= static_cast<unsigned char>(ch);
-        hash *= 1099511628211ULL;
-    }
-    for (const char ch : accessCode) {
-        hash ^= static_cast<unsigned char>(ch);
-        hash *= 1099511628211ULL;
-    }
-    return hash == 0 ? 1 : hash;
-}
-
 std::string GenerateSessionId()
 {
     uint64_t randomPart = 0;
@@ -2193,14 +2178,14 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.allowPlaintext = true;
         } else if (arg == "--access-code" || arg == "--session-code") {
             const std::string accessCode = ParseAccessCode(requireValue(arg.c_str()));
-            options.accessCodeFingerprint = AccessCodeFingerprint(accessCode);
+            options.accessCodeFingerprint = screenshare::UdpAccessCodeFingerprint(accessCode);
             options.accessCodeKey = screenshare::DeriveUdpCryptoKey(accessCode);
             options.accessCodeProvided = true;
         } else if (arg.rfind(accessCodePrefix, 0) == 0 || arg.rfind(sessionCodePrefix, 0) == 0) {
             const size_t valueOffset =
                 arg.rfind(accessCodePrefix, 0) == 0 ? accessCodePrefix.size() : sessionCodePrefix.size();
             const std::string accessCode = ParseAccessCode(arg.c_str() + valueOffset);
-            options.accessCodeFingerprint = AccessCodeFingerprint(accessCode);
+            options.accessCodeFingerprint = screenshare::UdpAccessCodeFingerprint(accessCode);
             options.accessCodeKey = screenshare::DeriveUdpCryptoKey(accessCode);
             options.accessCodeProvided = true;
         } else if (arg == "--list") {

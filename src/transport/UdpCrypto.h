@@ -22,6 +22,7 @@ struct UdpCryptoKey {
 };
 
 UdpCryptoKey DeriveUdpCryptoKey(std::string_view accessCode);
+uint64_t UdpAccessCodeFingerprint(std::string_view accessCode);
 std::string GenerateUdpAccessCode();
 uint32_t GenerateUdpCryptoNoncePrefix();
 void WriteUdpCryptoNonce(
