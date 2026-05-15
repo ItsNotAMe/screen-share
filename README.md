@@ -545,8 +545,13 @@ that belongs to a future video timestamp waits before entering the WASAPI render
 `--av-sync` explicitly to require full audio+video sync startup for diagnostic comparisons, or
 `--no-av-sync` to compare raw receiver timing. Receiver stats report `av_sync_correction`,
 `av_sync_start_qpc`, `av_sync_playback_start_qpc`, `av_sync_video_start_drops`, `av_sync_audio_start_drops`,
-`av_playout_audio_ahead_ms`, `audio_playback_sync_waits`, `av_sync_preview_bias_ms`, and
-`av_sync_audio_bias_ms`.
+`av_playout_audio_ahead_ms`, `audio_playback_sync_waits`, `av_sync_audio_catchup_drops`,
+`av_sync_audio_gate_bypasses`, `preview_sync_waits`, `av_sync_preview_bias_ms`, and
+`av_sync_audio_bias_ms`. Once audio is rendering, synced playback keeps the preview as the live
+timeline and trims queued, not-yet-rendered audio if audio falls far behind presented video. Preview
+playout still keeps a
+safety ceiling on how far video can lead currently audible audio, so late-drop catch-up cannot jump
+the picture hundreds of milliseconds ahead while the queued audio catches up.
 
 Windows display capture is event-driven: Windows returns a fresh frame when the desktop changes.
 The stats therefore report both paced output frames and actual desktop update frames. A still
