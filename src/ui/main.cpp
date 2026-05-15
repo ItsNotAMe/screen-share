@@ -1,6 +1,7 @@
 #include "transport/UdpCrypto.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QByteArray>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -28,6 +29,10 @@
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
+
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
 
 namespace {
 
@@ -62,6 +67,17 @@ QString formatCommand(const QString& program, const QStringList& arguments)
         parts << quoted(argument);
     }
     return parts.join(' ');
+}
+
+QString accessCodeFingerprintText(const QString& accessCode)
+{
+    const QByteArray bytes = accessCode.toUtf8();
+    const uint64_t fingerprint = screenshare::UdpAccessCodeFingerprint(
+        std::string_view(bytes.constData(), static_cast<size_t>(bytes.size())));
+
+    return QStringLiteral("%1")
+        .arg(static_cast<qulonglong>(fingerprint), 16, 16, QLatin1Char('0'))
+        .toUpper();
 }
 
 QLabel* makeLabel(const QString& text, const QString& className = {})
@@ -831,14 +847,29 @@ private:
 
         const QRegularExpression securityPattern(QStringLiteral(R"(\bsecurity=(encrypted|plaintext))"));
         const QRegularExpressionMatch securityMatch = securityPattern.match(discoveryOutput_);
+        const QRegularExpression fingerprintPattern(QStringLiteral(R"(\baccess_fingerprint=([0-9A-Fa-f]{16}|none))"));
+        const QRegularExpressionMatch fingerprintMatch = fingerprintPattern.match(discoveryOutput_);
+        const QString receiverFingerprint =
+            fingerprintMatch.hasMatch() ? fingerprintMatch.captured(1).toUpper() : QString();
+        const QString accessCode = accessCodeEdit_->text();
         if (securityMatch.hasMatch() && securityMatch.captured(1) == "plaintext") {
-            if (accessCodeEdit_->text().isEmpty()) {
+            if (accessCode.isEmpty()) {
                 allowPlaintextCheck_->setChecked(true);
+                appendOutput("Selected receiver allows plaintext; Share will use plaintext mode\n");
+            } else {
+                appendOutput("Selected receiver is plaintext; clear the access code or start Watch with the same access code\n");
             }
         } else if (securityMatch.hasMatch() && securityMatch.captured(1) == "encrypted") {
             allowPlaintextCheck_->setChecked(false);
-            if (accessCodeEdit_->text().isEmpty()) {
+            if (accessCode.isEmpty()) {
                 appendOutput("Selected receiver requires an access code; paste the matching code before Start\n");
+            } else if (!receiverFingerprint.isEmpty() && receiverFingerprint != "NONE") {
+                const QString typedFingerprint = accessCodeFingerprintText(accessCode);
+                if (typedFingerprint == receiverFingerprint) {
+                    appendOutput("Access code matches the selected receiver fingerprint\n");
+                } else {
+                    appendOutput("Access code does not match the selected receiver fingerprint\n");
+                }
             }
         }
 
