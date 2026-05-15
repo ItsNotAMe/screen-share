@@ -538,8 +538,10 @@ With `--preview --audio-playback`, the receiver waits until both audio and video
 are known, then aligns the live start point by trimming leading audio packets or preview frames from
 the stream that began earlier. If automatic A/V sync sees video but no audio packets arrive, it
 continues video-only instead of letting the preview queue stall; the receiver reports
-`av_sync_correction=video_only_no_audio` in that case. Audio rendering waits until the preview playout
-clock has started, so decoder startup latency cannot let audio begin before video. During playback,
+`av_sync_correction=video_only_no_audio` in that case. In that fallback mode, stale or later audio
+renderer timestamps do not hold video presentation; audio remains best-effort if it appears. In the
+normal synced path, audio rendering waits until the preview playout clock has started, so decoder
+startup latency cannot let audio begin before video. During playback,
 the receiver schedules audio packets against the same sender-clock preview playout timeline, so audio
 that belongs to a future video timestamp waits before entering the WASAPI render buffer. Add
 `--av-sync` explicitly to require full audio+video sync startup for diagnostic comparisons, or

@@ -1866,8 +1866,11 @@ private:
 
 std::string FormatAvSyncTitle(const AvSyncSnapshot& avSync, double playoutAudioAheadMs, bool playoutReady)
 {
-    if (!avSync.ready || !playoutReady) {
+    if (!playoutReady) {
         return "av wait";
+    }
+    if (!avSync.ready) {
+        return "av video";
     }
 
     std::ostringstream stream;
@@ -4394,6 +4397,10 @@ void RunUdpReceiverStats(const Options& options)
     };
 
     auto estimateAvSyncPlayoutAudioAheadMs = [&](const AvSyncSnapshot& snapshot) -> double {
+        if (avSyncVideoOnlyFallback) {
+            return 0.0;
+        }
+
         if (!snapshot.ready) {
             return 0.0;
         }
@@ -4424,9 +4431,12 @@ void RunUdpReceiverStats(const Options& options)
         return mediaAudioAheadMs + videoDelayMs - audioDelayMs;
     };
 
+    auto avSyncAudioGatingEnabled = [&]() {
+        return options.avSync && options.audioPlayback && !avSyncVideoOnlyFallback;
+    };
+
     auto maxPreviewPresentationTimestamp100ns = [&]() -> std::optional<int64_t> {
-        if (!options.avSync ||
-            !options.audioPlayback ||
+        if (!avSyncAudioGatingEnabled() ||
             !previewWindow ||
             !audioRenderer ||
             !audioPlayout.hasRenderedQpc()) {
@@ -4457,8 +4467,7 @@ void RunUdpReceiverStats(const Options& options)
     };
 
     auto dropQueuedAudioBehindPreview = [&]() {
-        if (!options.avSync ||
-            !options.audioPlayback ||
+        if (!avSyncAudioGatingEnabled() ||
             !previewWindow ||
             !audioRenderer ||
             !previewPlayout.hasPresentedTimestamp() ||
@@ -4522,9 +4531,17 @@ void RunUdpReceiverStats(const Options& options)
     };
 
     auto avSyncPlayoutReady = [&](const AvSyncSnapshot& snapshot) {
-        return snapshot.ready &&
-               (!options.audioPlayback || (audioPlayout.started() && audioPlayout.hasRenderedQpc())) &&
+        const bool audioRequired = avSyncAudioGatingEnabled();
+        return (snapshot.ready || avSyncVideoOnlyFallback) &&
+               (!audioRequired || (audioPlayout.started() && audioPlayout.hasRenderedQpc())) &&
                (!previewWindow || previewPlayout.hasPresentedTimestamp());
+    };
+
+    auto avSyncStateName = [&](const AvSyncSnapshot& snapshot) {
+        if (snapshot.ready) {
+            return "measuring";
+        }
+        return avSyncVideoOnlyFallback ? "video-only" : "waiting";
     };
 
     auto maybeApplyAvSyncCorrection = [&]() {
@@ -4622,7 +4639,7 @@ void RunUdpReceiverStats(const Options& options)
         maybeAllowVideoOnlyAvSync();
 
         if (options.audioPlayback && audioRenderer && mediaPlaybackAllowed()) {
-            if (options.avSync && previewWindow) {
+            if (avSyncAudioGatingEnabled() && previewWindow) {
                 if (!previewPlayout.clockStarted()) {
                     audioPlaybackStatus = "video-wait";
                     return;
@@ -4642,11 +4659,11 @@ void RunUdpReceiverStats(const Options& options)
             }
             dropQueuedAudioBehindPreview();
             const bool previewWaitingForAudioCatchup =
-                options.avSync &&
+                avSyncAudioGatingEnabled() &&
                 previewWindow &&
                 previewHeldForAudioCatchup;
             std::optional<uint64_t> maxAudioQpcPosition;
-            if (options.avSync &&
+            if (avSyncAudioGatingEnabled() &&
                 previewWindow &&
                 previewPlayout.hasPresentedTimestamp() &&
                 !previewWaitingForAudioCatchup) {
@@ -5016,7 +5033,7 @@ void RunUdpReceiverStats(const Options& options)
                 << " audio_playback_backpressure=" << (options.audioPlayback ? audioPlayout.renderBackpressure() : 0)
                 << " audio_render_buffer_full=" << audioRendererStats.bufferFullEvents
                 << " audio_render_padding=" << audioRendererStats.lastPaddingFrames
-                << " av_sync=" << (avSyncNow.ready ? "measuring" : "waiting")
+                << " av_sync=" << avSyncStateName(avSyncNow)
                 << " av_audio_ahead_ms=" << avSyncNow.audioAheadMs
                 << " av_audio_elapsed_ms=" << avSyncNow.audioElapsedMs
                 << " av_video_elapsed_ms=" << avSyncNow.videoElapsedMs
@@ -5210,7 +5227,7 @@ void RunUdpReceiverStats(const Options& options)
         << ", audio playback missing packets: " << (options.audioPlayback ? audioPlayout.missingPacketsSkipped() : 0)
         << ", audio playback backpressure: " << (options.audioPlayback ? audioPlayout.renderBackpressure() : 0)
         << ", audio render buffer full events: " << finalAudioRendererStats.bufferFullEvents
-        << ", A/V sync: " << (finalAvSync.ready ? "measuring" : "waiting")
+        << ", A/V sync: " << avSyncStateName(finalAvSync)
         << ", A/V audio ahead ms: " << finalAvSync.audioAheadMs
         << ", A/V audio elapsed ms: " << finalAvSync.audioElapsedMs
         << ", A/V video elapsed ms: " << finalAvSync.videoElapsedMs
