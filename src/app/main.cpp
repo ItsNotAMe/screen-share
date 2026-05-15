@@ -899,7 +899,11 @@ public:
         }
     }
 
-    void PresentReady(screenshare::ReceiverPreviewWindow& previewWindow, Clock::time_point now, bool flush)
+    void PresentReady(
+        screenshare::ReceiverPreviewWindow& previewWindow,
+        Clock::time_point now,
+        bool flush,
+        std::optional<int64_t> maxPresentationTimestamp100ns = std::nullopt)
     {
         if (frames_.empty()) {
             return;
@@ -907,7 +911,15 @@ public:
         EnsureClockStarted(now);
 
         while (!frames_.empty()) {
-            const auto frameTime = PresentationTime(frames_.begin()->first);
+            const int64_t frameTimestamp100ns = frames_.begin()->first;
+            if (!flush &&
+                maxPresentationTimestamp100ns &&
+                frameTimestamp100ns > *maxPresentationTimestamp100ns) {
+                ++syncWaits_;
+                break;
+            }
+
+            const auto frameTime = PresentationTime(frameTimestamp100ns);
             if (!flush && now < frameTime) {
                 break;
             }
@@ -917,11 +929,10 @@ public:
                 continue;
             }
 
-            const int64_t presentedTimestamp100ns = frames_.begin()->first;
             auto frame = std::move(frames_.begin()->second);
             frames_.erase(frames_.begin());
             previewWindow.PresentFrame(frame);
-            lastPresentedTimestamp100ns_ = presentedTimestamp100ns;
+            lastPresentedTimestamp100ns_ = frameTimestamp100ns;
             hasPresentedTimestamp_ = true;
         }
     }
@@ -956,6 +967,7 @@ public:
     [[nodiscard]] uint64_t lateDrops() const noexcept { return lateDrops_; }
     [[nodiscard]] uint64_t overflowDrops() const noexcept { return overflowDrops_; }
     [[nodiscard]] uint64_t syncDrops() const noexcept { return syncDrops_; }
+    [[nodiscard]] uint64_t syncWaits() const noexcept { return syncWaits_; }
     [[nodiscard]] bool clockStarted() const noexcept { return clockStarted_; }
     [[nodiscard]] int64_t firstTimestamp100ns() const noexcept { return firstTimestamp100ns_; }
     [[nodiscard]] Clock::time_point firstPresentationAt() const noexcept { return firstPresentationAt_; }
@@ -1019,6 +1031,7 @@ private:
     uint64_t lateDrops_ = 0;
     uint64_t overflowDrops_ = 0;
     uint64_t syncDrops_ = 0;
+    uint64_t syncWaits_ = 0;
     size_t maxQueuedFrames_ = 180;
     std::chrono::milliseconds initialDelay_;
     std::chrono::milliseconds maxLateFrameAge_;
@@ -4232,6 +4245,9 @@ void RunUdpReceiverStats(const Options& options)
     std::optional<uint64_t> avSyncStartQpc100ns;
     uint64_t avSyncVideoStartDrops = 0;
     uint64_t avSyncAudioStartDrops = 0;
+    uint64_t avSyncAudioCatchupDrops = 0;
+    uint64_t avSyncAudioGateBypasses = 0;
+    bool previewHeldForAudioCatchup = false;
     bool avSyncPlaybackStartAligned = false;
     uint64_t avSyncPlaybackStartQpc100ns = 0;
     double avSyncPlayoutAudioAheadMs = 0.0;
@@ -4408,6 +4424,99 @@ void RunUdpReceiverStats(const Options& options)
         return mediaAudioAheadMs + videoDelayMs - audioDelayMs;
     };
 
+    auto maxPreviewPresentationTimestamp100ns = [&]() -> std::optional<int64_t> {
+        if (!options.avSync ||
+            !options.audioPlayback ||
+            !previewWindow ||
+            !audioRenderer ||
+            !audioPlayout.hasRenderedQpc()) {
+            return std::nullopt;
+        }
+
+        const uint64_t padding100ns = audioRendererPadding100ns();
+        if (padding100ns == 0 && audioPlayout.queuedPacketCount() == 0) {
+            return std::nullopt;
+        }
+        const uint64_t renderedAudioEnd100ns = audioPlayout.lastRenderedEndQpc100ns();
+        if (renderedAudioEnd100ns <= padding100ns) {
+            return std::nullopt;
+        }
+
+        constexpr uint64_t videoLeadSafetyLimit100ns = 250ULL * 10'000ULL;
+        constexpr uint64_t maxTimestamp =
+            static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+        const uint64_t audibleAudio100ns = renderedAudioEnd100ns - padding100ns;
+        if (audibleAudio100ns >= maxTimestamp) {
+            return std::numeric_limits<int64_t>::max();
+        }
+
+        const uint64_t cappedSafetyLimit = std::min(
+            videoLeadSafetyLimit100ns,
+            maxTimestamp - audibleAudio100ns);
+        return static_cast<int64_t>(audibleAudio100ns + cappedSafetyLimit);
+    };
+
+    auto dropQueuedAudioBehindPreview = [&]() {
+        if (!options.avSync ||
+            !options.audioPlayback ||
+            !previewWindow ||
+            !audioRenderer ||
+            !previewPlayout.hasPresentedTimestamp() ||
+            !audioPlayout.hasRenderedQpc()) {
+            return;
+        }
+
+        const int64_t presentedVideoTimestamp100ns = previewPlayout.lastPresentedTimestamp100ns();
+        if (presentedVideoTimestamp100ns <= 0) {
+            return;
+        }
+
+        const uint64_t padding100ns = audioRendererPadding100ns();
+        const uint64_t renderedAudioEnd100ns = audioPlayout.lastRenderedEndQpc100ns();
+        const uint64_t audibleAudio100ns =
+            renderedAudioEnd100ns > padding100ns ? renderedAudioEnd100ns - padding100ns : 0;
+        const int64_t audioLag100ns =
+            presentedVideoTimestamp100ns - static_cast<int64_t>(audibleAudio100ns);
+        constexpr int64_t catchupThreshold100ns = 150LL * 10'000LL;
+        if (audioLag100ns <= catchupThreshold100ns) {
+            return;
+        }
+
+        constexpr uint64_t targetTolerance100ns = 20ULL * 10'000ULL;
+        uint64_t targetAudioQpc100ns = static_cast<uint64_t>(presentedVideoTimestamp100ns);
+        if (targetAudioQpc100ns <= std::numeric_limits<uint64_t>::max() - padding100ns) {
+            targetAudioQpc100ns += padding100ns;
+        }
+        if (targetAudioQpc100ns > targetTolerance100ns) {
+            targetAudioQpc100ns -= targetTolerance100ns;
+        }
+
+        avSyncAudioCatchupDrops += audioPlayout.DropBeforeQpc(targetAudioQpc100ns);
+    };
+
+    auto presentPreviewReady = [&](bool flush) {
+        if (!previewWindow) {
+            return;
+        }
+
+        std::optional<int64_t> maxPresentationTimestamp;
+        if (!flush) {
+            maxPresentationTimestamp = maxPreviewPresentationTimestamp100ns();
+        }
+        const uint64_t syncWaitsBefore = previewPlayout.syncWaits();
+        previewPlayout.PresentReady(
+            *previewWindow,
+            Clock::now(),
+            flush,
+            maxPresentationTimestamp);
+        if (!flush && previewPlayout.syncWaits() != syncWaitsBefore) {
+            previewHeldForAudioCatchup = true;
+        }
+        if (!flush) {
+            dropQueuedAudioBehindPreview();
+        }
+    };
+
     auto mediaPlaybackAllowed = [&]() {
         return !options.avSync || avSyncCorrectionApplied;
     };
@@ -4531,17 +4640,30 @@ void RunUdpReceiverStats(const Options& options)
                     return;
                 }
             }
+            dropQueuedAudioBehindPreview();
+            const bool previewWaitingForAudioCatchup =
+                options.avSync &&
+                previewWindow &&
+                previewHeldForAudioCatchup;
             std::optional<uint64_t> maxAudioQpcPosition;
-            if (options.avSync && previewWindow && previewPlayout.hasPresentedTimestamp()) {
+            if (options.avSync &&
+                previewWindow &&
+                previewPlayout.hasPresentedTimestamp() &&
+                !previewWaitingForAudioCatchup) {
                 const uint64_t padding100ns = audioRendererPadding100ns();
                 constexpr uint64_t audioLeadTolerance100ns = 20ULL * 10'000ULL;
                 maxAudioQpcPosition =
                     static_cast<uint64_t>(previewPlayout.lastPresentedTimestamp100ns()) +
                     padding100ns +
                     audioLeadTolerance100ns;
+            } else if (previewWaitingForAudioCatchup) {
+                ++avSyncAudioGateBypasses;
             }
             const uint64_t syncWaitsBefore = audioPlayout.syncWaits();
             audioPlayout.RenderReady(*audioRenderer, maxAudioQpcPosition);
+            if (previewWaitingForAudioCatchup) {
+                previewHeldForAudioCatchup = false;
+            }
             if (audioPlayout.syncWaits() != syncWaitsBefore) {
                 audioPlaybackStatus = "sync-wait";
                 return;
@@ -4578,7 +4700,7 @@ void RunUdpReceiverStats(const Options& options)
         }
 
         if (previewWindow && presentReady && mediaPlaybackAllowed()) {
-            previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
+            presentPreviewReady(false);
         }
     };
 
@@ -4723,7 +4845,7 @@ void RunUdpReceiverStats(const Options& options)
 
     while (shouldContinue()) {
         if (previewWindow && mediaPlaybackAllowed()) {
-            previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
+            presentPreviewReady(false);
         }
         drainCompletedAudioPackets();
 
@@ -4758,7 +4880,7 @@ void RunUdpReceiverStats(const Options& options)
         drainCompletedAudioPackets();
 
         if (previewWindow && mediaPlaybackAllowed()) {
-            previewPlayout.PresentReady(*previewWindow, Clock::now(), false);
+            presentPreviewReady(false);
         }
 
         const auto now = Clock::now();
@@ -4910,6 +5032,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " av_sync_playback_start_qpc=" << avSyncPlaybackStartQpc100ns
                 << " av_sync_video_start_drops=" << avSyncVideoStartDrops
                 << " av_sync_audio_start_drops=" << avSyncAudioStartDrops
+                << " av_sync_audio_catchup_drops=" << avSyncAudioCatchupDrops
+                << " av_sync_audio_gate_bypasses=" << avSyncAudioGateBypasses
                 << " av_sync_preview_bias_ms=" << avSyncPreviewBiasMs
                 << " av_sync_audio_bias_ms=" << avSyncAudioBiasMs
                 << " av_video_frames=" << avSyncNow.videoFrames
@@ -4944,7 +5068,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " preview_playout_resets=" << (previewWindow ? previewPlayoutResets : 0)
                 << " preview_late_drops=" << (previewWindow ? previewPlayout.lateDrops() : 0)
                 << " preview_overflow_drops=" << (previewWindow ? previewPlayout.overflowDrops() : 0)
-                << " preview_sync_drops=" << (previewWindow ? previewPlayout.syncDrops() : 0);
+                << " preview_sync_drops=" << (previewWindow ? previewPlayout.syncDrops() : 0)
+                << " preview_sync_waits=" << (previewWindow ? previewPlayout.syncWaits() : 0);
 
             if (hasCompletedFrame) {
                 std::cout
@@ -4971,7 +5096,7 @@ void RunUdpReceiverStats(const Options& options)
         flushH264DumpBacklog(true);
     }
     if (previewWindow) {
-        previewPlayout.PresentReady(*previewWindow, Clock::now(), true);
+        presentPreviewReady(true);
     }
     drainCompletedAudioPackets();
 
@@ -5101,6 +5226,8 @@ void RunUdpReceiverStats(const Options& options)
         << ", A/V sync playback start qpc: " << avSyncPlaybackStartQpc100ns
         << ", A/V sync video start drops: " << avSyncVideoStartDrops
         << ", A/V sync audio start drops: " << avSyncAudioStartDrops
+        << ", A/V sync audio catchup drops: " << avSyncAudioCatchupDrops
+        << ", A/V sync audio gate bypasses: " << avSyncAudioGateBypasses
         << ", A/V sync preview bias ms: " << avSyncPreviewBiasMs
         << ", A/V sync audio bias ms: " << avSyncAudioBiasMs
         << ", A/V video frames: " << finalAvSync.videoFrames
@@ -5135,6 +5262,7 @@ void RunUdpReceiverStats(const Options& options)
         << ", preview late drops: " << (previewWindow ? previewPlayout.lateDrops() : 0)
         << ", preview overflow drops: " << (previewWindow ? previewPlayout.overflowDrops() : 0)
         << ", preview sync drops: " << (previewWindow ? previewPlayout.syncDrops() : 0)
+        << ", preview sync waits: " << (previewWindow ? previewPlayout.syncWaits() : 0)
         << ", decoded BMP written: " << (decodedBmpWritten ? "yes" : "no")
         << "\n";
 }

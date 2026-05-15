@@ -723,6 +723,9 @@ private:
             QMessageBox::warning(this, "Missing address", "Enter a target address before sharing.");
             return;
         }
+        if (!validateSelectedReceiverSecurity()) {
+            return;
+        }
         if (accessCodeEdit_->text().isEmpty() && !allowPlaintextCheck_->isChecked()) {
             QMessageBox::warning(
                 this,
@@ -839,10 +842,12 @@ private:
         shareHostEdit_->setText(match.captured(1));
         sharePortSpin_->setValue(port);
 
+        QString discoveredSession;
         const QRegularExpression sessionPattern(QStringLiteral(R"(\bsession=([^\s]+))"));
         const QRegularExpressionMatch sessionMatch = sessionPattern.match(discoveryOutput_);
         if (sessionMatch.hasMatch() && sessionMatch.captured(1) != "unknown") {
-            sessionEdit_->setText(sessionMatch.captured(1));
+            discoveredSession = sessionMatch.captured(1);
+            sessionEdit_->setText(discoveredSession);
         }
 
         const QRegularExpression securityPattern(QStringLiteral(R"(\bsecurity=(encrypted|plaintext))"));
@@ -851,6 +856,13 @@ private:
         const QRegularExpressionMatch fingerprintMatch = fingerprintPattern.match(discoveryOutput_);
         const QString receiverFingerprint =
             fingerprintMatch.hasMatch() ? fingerprintMatch.captured(1).toUpper() : QString();
+        selectedReceiverKnown_ = true;
+        selectedReceiverHost_ = match.captured(1);
+        selectedReceiverPort_ = port;
+        selectedReceiverSession_ = discoveredSession;
+        selectedReceiverSecurityKnown_ = securityMatch.hasMatch();
+        selectedReceiverEncrypted_ = securityMatch.hasMatch() && securityMatch.captured(1) == "encrypted";
+        selectedReceiverAccessFingerprint_ = receiverFingerprint;
         const QString accessCode = accessCodeEdit_->text();
         if (securityMatch.hasMatch() && securityMatch.captured(1) == "plaintext") {
             if (accessCode.isEmpty()) {
@@ -875,6 +887,59 @@ private:
 
         appendOutput("Selected LAN receiver " + shareHostEdit_->text() + ":" + QString::number(port) + "\n");
         refreshCommand();
+    }
+
+    bool selectedReceiverApplies() const
+    {
+        if (!selectedReceiverKnown_ || !shareMode()) {
+            return false;
+        }
+        if (shareHostEdit_->text().trimmed() != selectedReceiverHost_ ||
+            sharePortSpin_->value() != selectedReceiverPort_) {
+            return false;
+        }
+        return selectedReceiverSession_.isEmpty() ||
+               sessionEdit_->text().trimmed() == selectedReceiverSession_;
+    }
+
+    bool validateSelectedReceiverSecurity()
+    {
+        if (!selectedReceiverApplies()) {
+            return true;
+        }
+        if (!selectedReceiverSecurityKnown_) {
+            return true;
+        }
+
+        const QString accessCode = accessCodeEdit_->text();
+        if (selectedReceiverEncrypted_) {
+            if (accessCode.isEmpty()) {
+                QMessageBox::warning(
+                    this,
+                    "Access code mismatch",
+                    "The selected LAN receiver requires its matching access code before sharing.");
+                return false;
+            }
+            if (!selectedReceiverAccessFingerprint_.isEmpty() &&
+                selectedReceiverAccessFingerprint_ != "NONE" &&
+                accessCodeFingerprintText(accessCode) != selectedReceiverAccessFingerprint_) {
+                QMessageBox::warning(
+                    this,
+                    "Access code mismatch",
+                    "The typed access code does not match the selected LAN receiver.");
+                return false;
+            }
+            return true;
+        }
+
+        if (!accessCode.isEmpty()) {
+            QMessageBox::warning(
+                this,
+                "Security mismatch",
+                "The selected LAN receiver is plaintext. Clear the access code or restart Watch with the same access code.");
+            return false;
+        }
+        return true;
     }
 
     void setDiscovering(bool discovering)
@@ -959,6 +1024,13 @@ private:
     quint64 runSerial_ = 0;
     QString stopFilePath_;
     QString discoveryOutput_;
+    bool selectedReceiverKnown_ = false;
+    bool selectedReceiverSecurityKnown_ = false;
+    bool selectedReceiverEncrypted_ = false;
+    QString selectedReceiverHost_;
+    int selectedReceiverPort_ = 0;
+    QString selectedReceiverSession_;
+    QString selectedReceiverAccessFingerprint_;
 };
 
 QString appStyleSheet(bool darkMode)
