@@ -47,6 +47,7 @@ add_executable(ScreenShare
     src/codec/H264StreamDecoder.cpp
     src/codec/H264StreamEncoder.cpp
     src/render/ReceiverPreviewWindow.cpp
+    src/transport/StunClient.cpp
     src/transport/UdpCrypto.cpp
     src/transport/LanDiscovery.cpp
     src/transport/UdpProtocol.cpp

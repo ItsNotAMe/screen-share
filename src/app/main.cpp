@@ -9,6 +9,7 @@
 #include "codec/H264StreamEncoder.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/LanDiscovery.h"
+#include "transport/StunClient.h"
 #include "transport/UdpReceiver.h"
 #include "transport/UdpSender.h"
 #include "video/Nv12Convert.h"
@@ -144,6 +145,10 @@ struct Options {
     bool lanAdvertise = false;
     uint16_t lanDiscoveryPort = screenshare::LanDiscoveryDefaultPort;
     std::string lanName;
+    bool stunQuery = false;
+    screenshare::StunServerTarget stunServer;
+    int stunTimeoutMs = 3000;
+    bool stunTimeoutProvided = false;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
@@ -176,6 +181,7 @@ void PrintHelp()
         << "  ScreenShare --share HOST:PORT [--display N] [--seconds S]\n"
         << "  ScreenShare --watch PORT [--seconds S]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
+        << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
         << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
@@ -207,6 +213,7 @@ void PrintHelp()
         << "          add --allow-plaintext to acknowledge an unencrypted local UDP session.\n"
         << "  LAN: add --lan-advertise to --watch/--udp-recv, then use --lan-discover on the sender.\n"
         << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
+        << "  NAT: use --stun HOST[:PORT] to print this machine's public UDP endpoint.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -218,6 +225,7 @@ void PrintHelp()
         << "  ScreenShare --watch 5000 --access-code 123456\n"
         << "  ScreenShare --watch 5000 --lan-advertise\n"
         << "  ScreenShare --lan-discover\n"
+        << "  ScreenShare --stun stun.l.google.com:19302\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
@@ -2223,6 +2231,12 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.lanDiscoveryPort = screenshare::ParseUdpReceivePort(requireValue("--lan-discovery-port"));
         } else if (arg == "--lan-name") {
             options.lanName = ParseLanName(requireValue("--lan-name"));
+        } else if (arg == "--stun") {
+            options.stunServer = screenshare::ParseStunServerTarget(requireValue("--stun"));
+            options.stunQuery = true;
+        } else if (arg == "--stun-timeout-ms") {
+            options.stunTimeoutMs = ParseInt(requireValue("--stun-timeout-ms"), "--stun-timeout-ms");
+            options.stunTimeoutProvided = true;
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
         } else if (arg == "--watch") {
@@ -2429,6 +2443,30 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     }
     if (options.lanAdvertise && options.udpReceivePort == 0) {
         throw std::invalid_argument("--lan-advertise requires --watch or --udp-recv");
+    }
+    if (options.stunTimeoutMs < 100 || options.stunTimeoutMs > 30000) {
+        throw std::invalid_argument("--stun-timeout-ms must be between 100 and 30000");
+    }
+    if (options.stunTimeoutProvided && !options.stunQuery) {
+        throw std::invalid_argument("--stun-timeout-ms requires --stun");
+    }
+    if (options.stunQuery &&
+        (options.generateAccessCode ||
+         options.listDisplays ||
+         options.listH264Encoders ||
+         options.listAudioDevices ||
+         options.lanDiscover ||
+         options.lanAdvertise ||
+         HasUdpSession(options) ||
+         options.audioCapture ||
+         options.streamEncode ||
+         options.width != 0 ||
+         options.height != 0 ||
+         options.bitrate != 0 ||
+         options.keyframeIntervalProvided ||
+         !options.recordPath.empty() ||
+         !options.capturedBmpPath.empty())) {
+        throw std::invalid_argument("--stun is a standalone diagnostic command");
     }
     if (options.accessCodeProvided &&
         options.udpReceivePort == 0 &&
@@ -4071,6 +4109,24 @@ void RunLanDiscovery(const Options& options)
     }
 }
 
+void RunStunQuery(const Options& options)
+{
+    screenshare::StunQueryConfig config;
+    config.server = options.stunServer;
+    config.timeout = std::chrono::milliseconds(options.stunTimeoutMs);
+
+    std::cout
+        << "Querying STUN server " << config.server.host << ":" << config.server.port
+        << " with timeout " << options.stunTimeoutMs << " ms...\n";
+
+    const auto result = screenshare::QueryPublicUdpEndpoint(config);
+    std::cout
+        << "stun_server=" << result.serverAddress << ":" << result.serverPort << "\n"
+        << "local_udp_endpoint=" << result.localAddress << ":" << result.localPort << "\n"
+        << "public_udp_endpoint=" << result.publicAddress << ":" << result.publicPort << "\n"
+        << "manual_invite_endpoint=" << result.publicAddress << ":" << result.publicPort << "\n";
+}
+
 void RunUdpReceiverStats(const Options& options)
 {
     screenshare::UdpReceiver receiver;
@@ -5318,6 +5374,9 @@ int main(int argc, char** argv)
 
         if (options.generateAccessCode) {
             std::cout << screenshare::GenerateUdpAccessCode() << "\n";
+            exitCode = 0;
+        } else if (options.stunQuery) {
+            RunStunQuery(options);
             exitCode = 0;
         } else if (options.lanDiscover) {
             RunLanDiscovery(options);
