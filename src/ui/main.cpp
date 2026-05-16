@@ -815,6 +815,9 @@ private:
             QMessageBox::warning(this, "Missing address", "Enter a target address before sharing.");
             return;
         }
+        if (!confirmShareTarget()) {
+            return;
+        }
         if (!validateSelectedReceiverSecurity()) {
             return;
         }
@@ -931,7 +934,34 @@ private:
 
     bool isLoopbackHost(const QString& host) const
     {
-        return host == "127.0.0.1" || host.startsWith("127.");
+        const QString normalized = host.trimmed().toLower();
+        return normalized == "localhost" ||
+               normalized == "::1" ||
+               normalized == "[::1]" ||
+               normalized == "127.0.0.1" ||
+               normalized.startsWith("127.");
+    }
+
+    bool confirmShareTarget()
+    {
+        if (!shareMode() || !isLoopbackHost(shareHostEdit_->text())) {
+            return true;
+        }
+
+        const auto result = QMessageBox::question(
+            this,
+            "Share to this computer?",
+            "The target address is localhost, so Share will send to this same computer. "
+            "Use the remote computer's LAN or Tailscale IP if you want a friend to watch.\n\n"
+            "Continue with localhost?",
+            QMessageBox::Yes | QMessageBox::Cancel,
+            QMessageBox::Cancel);
+        if (result == QMessageBox::Yes) {
+            return true;
+        }
+
+        shareHostEdit_->setFocus();
+        return false;
     }
 
     bool sameDiscoveredReceiver(const DiscoveredReceiver& lhs, const DiscoveredReceiver& rhs) const
