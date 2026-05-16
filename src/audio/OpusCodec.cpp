@@ -8,6 +8,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace screenshare {
 namespace {
@@ -72,6 +73,68 @@ float ReadSample(std::span<const std::byte> bytes, const AudioCaptureFormat& for
     return 0.0f;
 }
 
+std::pair<float, float> ReadStereoSample(std::span<const std::byte> bytes, const AudioCaptureFormat& format, uint32_t frame)
+{
+    if (format.channels == 1) {
+        const float mono = ReadSample(bytes, format, frame, 0);
+        return {mono, mono};
+    }
+    if (format.channels == 2) {
+        return {
+            ReadSample(bytes, format, frame, 0),
+            ReadSample(bytes, format, frame, 1),
+        };
+    }
+
+    float left = 0.0f;
+    float right = 0.0f;
+    auto addLeft = [&](uint16_t channel, float weight) {
+        left += ReadSample(bytes, format, frame, channel) * weight;
+    };
+    auto addRight = [&](uint16_t channel, float weight) {
+        right += ReadSample(bytes, format, frame, channel) * weight;
+    };
+    auto addCenter = [&](uint16_t channel, float weight) {
+        const float sample = ReadSample(bytes, format, frame, channel) * weight;
+        left += sample;
+        right += sample;
+    };
+
+    addLeft(0, 1.0f);  // Front left
+    addRight(1, 1.0f); // Front right
+    if (format.channels > 2) {
+        addCenter(2, 0.7071f); // Front center
+    }
+    if (format.channels > 3) {
+        addCenter(3, 0.5f); // LFE or extra mono content
+    }
+    if (format.channels > 4) {
+        addLeft(4, 0.7071f); // Back/side left
+    }
+    if (format.channels > 5) {
+        addRight(5, 0.7071f); // Back/side right
+    }
+    if (format.channels > 6) {
+        addLeft(6, 0.7071f); // Extra left
+    }
+    if (format.channels > 7) {
+        addRight(7, 0.7071f); // Extra right
+    }
+    for (uint16_t channel = 8; channel < format.channels; ++channel) {
+        if ((channel % 2) == 0) {
+            addLeft(channel, 0.5f);
+        } else {
+            addRight(channel, 0.5f);
+        }
+    }
+
+    const float peak = std::max(1.0f, std::max(std::abs(left), std::abs(right)));
+    return {
+        std::clamp(left / peak, -1.0f, 1.0f),
+        std::clamp(right / peak, -1.0f, 1.0f),
+    };
+}
+
 std::vector<float> ConvertToOpusPcm(const CapturedAudioPacket& packet, const AudioCaptureFormat& format)
 {
     if (format.sampleRate == 0 || format.channels == 0 || format.blockAlign == 0 || format.bitsPerSample == 0) {
@@ -107,8 +170,7 @@ std::vector<float> ConvertToOpusPcm(const CapturedAudioPacket& packet, const Aud
             static_cast<uint32_t>(std::llround(sourcePosition)),
             packet.frames - 1);
 
-        const float left = ReadSample(packet.data, format, sourceFrame, 0);
-        const float right = format.channels > 1 ? ReadSample(packet.data, format, sourceFrame, 1) : left;
+        const auto [left, right] = ReadStereoSample(packet.data, format, sourceFrame);
         pcm[static_cast<size_t>(outFrame) * 2] = left;
         pcm[static_cast<size_t>(outFrame) * 2 + 1] = right;
     }
