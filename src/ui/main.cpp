@@ -10,8 +10,11 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
+#include <QtCore/QTimer>
+#include <QtCore/QVector>
 #include <QtGui/QClipboard>
 #include <QtGui/QTextCursor>
+#include <QtGui/QWheelEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -20,6 +23,7 @@
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QListWidget>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QPushButton>
@@ -33,6 +37,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -98,11 +103,71 @@ void repolish(QWidget* widget)
 
 constexpr int kRowHeight = 34;
 constexpr int kLabelWidth = 96;
+constexpr int kReceiverRefreshMs = 15000;
+
+struct DiscoveredReceiver {
+    QString name;
+    QString host;
+    int port = 0;
+    QString session;
+    QString fingerprint;
+    bool securityKnown = false;
+    bool encrypted = false;
+    QString accessFingerprint;
+};
+
+class NoWheelSpinBox final : public QSpinBox {
+public:
+    using QSpinBox::QSpinBox;
+
+protected:
+    void wheelEvent(QWheelEvent* event) override
+    {
+        event->ignore();
+    }
+};
+
+class NoWheelComboBox final : public QComboBox {
+public:
+    using QComboBox::QComboBox;
+
+protected:
+    void wheelEvent(QWheelEvent* event) override
+    {
+        event->ignore();
+    }
+};
+
+class CompactStackedWidget final : public QStackedWidget {
+public:
+    using QStackedWidget::QStackedWidget;
+
+    QSize sizeHint() const override
+    {
+        if (const QWidget* current = currentWidget()) {
+            return current->sizeHint();
+        }
+        return QStackedWidget::sizeHint();
+    }
+
+    QSize minimumSizeHint() const override
+    {
+        if (const QWidget* current = currentWidget()) {
+            return current->minimumSizeHint();
+        }
+        return QStackedWidget::minimumSizeHint();
+    }
+};
 
 void prepareInput(QWidget* input)
 {
     input->setFixedHeight(kRowHeight);
     input->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    if (qobject_cast<QLineEdit*>(input) != nullptr ||
+        qobject_cast<QSpinBox*>(input) != nullptr ||
+        qobject_cast<QComboBox*>(input) != nullptr) {
+        input->setFocusPolicy(Qt::StrongFocus);
+    }
 }
 
 QFrame* makePanel(const QString& title, QVBoxLayout** outContent)
@@ -113,8 +178,8 @@ QFrame* makePanel(const QString& title, QVBoxLayout** outContent)
     frame->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
 
     auto* outer = new QVBoxLayout(frame);
-    outer->setContentsMargins(18, 14, 18, 16);
-    outer->setSpacing(10);
+    outer->setContentsMargins(14, 10, 14, 12);
+    outer->setSpacing(8);
 
     if (!title.isEmpty()) {
         outer->addWidget(makeLabel(title, "PanelTitle"));
@@ -122,7 +187,7 @@ QFrame* makePanel(const QString& title, QVBoxLayout** outContent)
 
     auto* content = new QVBoxLayout;
     content->setContentsMargins(0, 0, 0, 0);
-    content->setSpacing(10);
+    content->setSpacing(8);
     outer->addLayout(content);
 
     if (outContent != nullptr) {
@@ -198,21 +263,31 @@ public:
         connect(discoveryProcess_, &QProcess::readyReadStandardOutput, this, [this] {
             const QString text = QString::fromLocal8Bit(discoveryProcess_->readAllStandardOutput());
             discoveryOutput_ += text;
-            appendOutput(text);
+            if (discoveryLogOutput_) {
+                appendOutput(text);
+            }
         });
         connect(discoveryProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
             Q_UNUSED(error);
-            appendOutput("LAN discovery error: " + discoveryProcess_->errorString() + "\n");
+            if (discoveryLogOutput_) {
+                appendOutput("LAN discovery error: " + discoveryProcess_->errorString() + "\n");
+            }
             setDiscovering(false);
         });
         connect(discoveryProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
             finishDiscovery(code, status);
         });
 
+        receiverRefreshTimer_ = new QTimer(this);
+        receiverRefreshTimer_->setInterval(kReceiverRefreshMs);
+        connect(receiverRefreshTimer_, &QTimer::timeout, this, [this] { startDiscovery(true); });
+
         buildUi();
         refreshReportPath();
         refreshCommand();
         setRunning(false);
+        receiverRefreshTimer_->start();
+        QTimer::singleShot(400, this, [this] { startDiscovery(true); });
     }
 
 private:
@@ -233,9 +308,9 @@ private:
         leftContent->setObjectName("LeftHost");
         auto* leftColumn = new QVBoxLayout(leftContent);
         leftColumn->setContentsMargins(0, 0, 6, 0);
-        leftColumn->setSpacing(12);
+        leftColumn->setSpacing(8);
         leftColumn->addWidget(buildOptionStack());
-        leftColumn->addWidget(buildSessionPanel());
+        leftColumn->addWidget(buildSecurityPanel());
         leftColumn->addStretch(1);
 
         auto* leftScroll = new QScrollArea;
@@ -328,10 +403,13 @@ private:
 
     QWidget* buildOptionStack()
     {
-        optionStack_ = new QStackedWidget;
+        optionStack_ = new CompactStackedWidget;
         optionStack_->setObjectName("OptionStack");
         optionStack_->addWidget(buildSharePage());
         optionStack_->addWidget(buildWatchPage());
+        connect(optionStack_, &QStackedWidget::currentChanged, this, [this](int) {
+            optionStack_->updateGeometry();
+        });
         return optionStack_;
     }
 
@@ -341,35 +419,58 @@ private:
         page->setObjectName("OptionPage");
         auto* layout = new QVBoxLayout(page);
         layout->setContentsMargins(0, 0, 0, 0);
-        layout->setSpacing(12);
+        layout->setSpacing(8);
+
+        QVBoxLayout* receiversContent = nullptr;
+        layout->addWidget(makePanel("Receivers", &receiversContent));
+        receiverList_ = new QListWidget;
+        receiverList_->setObjectName("ReceiverList");
+        receiverList_->setMinimumHeight(120);
+        receiverList_->setUniformItemSizes(true);
+        receiverList_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        receiversContent->addWidget(receiverList_);
+
+        auto* receiversFooter = new QWidget;
+        receiversFooter->setObjectName("FormRow");
+        auto* receiversFooterLayout = new QHBoxLayout(receiversFooter);
+        receiversFooterLayout->setContentsMargins(0, 0, 0, 0);
+        receiversFooterLayout->setSpacing(8);
+        receiverStatusLabel_ = makeLabel("Scanning", "Subtle");
+        receiversFooterLayout->addWidget(receiverStatusLabel_, 1);
+        findLanButton_ = new QPushButton("Refresh");
+        findLanButton_->setObjectName("SecondaryButton");
+        findLanButton_->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+        findLanButton_->setIconSize(QSize(14, 14));
+        findLanButton_->setCursor(Qt::PointingHandCursor);
+        findLanButton_->setFixedHeight(kRowHeight);
+        receiversFooterLayout->addWidget(findLanButton_);
+        receiversContent->addWidget(receiversFooter);
+        connect(findLanButton_, &QPushButton::clicked, this, [this] { startDiscovery(false); });
+        connect(receiverList_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+            selectReceiverItem(item, true);
+        });
 
         QVBoxLayout* connectionContent = nullptr;
         layout->addWidget(makePanel("Connection", &connectionContent));
         shareHostEdit_ = new QLineEdit("127.0.0.1");
-        sharePortSpin_ = new QSpinBox;
+        shareHostEdit_->setPlaceholderText("Receiver IP or Tailscale IP");
+        sharePortSpin_ = new NoWheelSpinBox;
         sharePortSpin_->setRange(1, 65535);
         sharePortSpin_->setValue(5000);
         prepareInput(shareHostEdit_);
         prepareInput(sharePortSpin_);
         addRow(connectionContent, "Address", shareHostEdit_);
         addRow(connectionContent, "Port", sharePortSpin_);
-        findLanButton_ = new QPushButton("Find on LAN");
-        findLanButton_->setObjectName("SecondaryButton");
-        findLanButton_->setIcon(style()->standardIcon(QStyle::SP_DriveNetIcon));
-        findLanButton_->setIconSize(QSize(14, 14));
-        findLanButton_->setCursor(Qt::PointingHandCursor);
-        addFullRow(connectionContent, findLanButton_);
-        connect(findLanButton_, &QPushButton::clicked, this, [this] { startDiscovery(); });
 
         QVBoxLayout* videoContent = nullptr;
         layout->addWidget(makePanel("Video", &videoContent));
-        displaySpin_ = new QSpinBox;
+        displaySpin_ = new NoWheelSpinBox;
         displaySpin_->setRange(0, 16);
         displaySpin_->setValue(0);
-        fpsSpin_ = new QSpinBox;
+        fpsSpin_ = new NoWheelSpinBox;
         fpsSpin_->setRange(15, 240);
         fpsSpin_->setValue(60);
-        resolutionCombo_ = new QComboBox;
+        resolutionCombo_ = new NoWheelComboBox;
         resolutionCombo_->addItem("Native", QSize(0, 0));
         resolutionCombo_->addItem("1920 × 1080", QSize(1920, 1080));
         resolutionCombo_->addItem("1600 × 900", QSize(1600, 900));
@@ -381,6 +482,7 @@ private:
         addRow(videoContent, "FPS", fpsSpin_);
         addRow(videoContent, "Resolution", resolutionCombo_);
 
+        layout->addStretch(1);
         return page;
     }
 
@@ -390,11 +492,11 @@ private:
         page->setObjectName("OptionPage");
         auto* layout = new QVBoxLayout(page);
         layout->setContentsMargins(0, 0, 0, 0);
-        layout->setSpacing(12);
+        layout->setSpacing(8);
 
         QVBoxLayout* listenContent = nullptr;
         layout->addWidget(makePanel("Listen", &listenContent));
-        watchPortSpin_ = new QSpinBox;
+        watchPortSpin_ = new NoWheelSpinBox;
         watchPortSpin_->setRange(1, 65535);
         watchPortSpin_->setValue(5000);
         prepareInput(watchPortSpin_);
@@ -406,7 +508,7 @@ private:
         QVBoxLayout* audioContent = nullptr;
         layout->addWidget(makePanel("Audio", &audioContent));
         mutedCheck_ = new QCheckBox("Mute playback");
-        volumeSpin_ = new QSpinBox;
+        volumeSpin_ = new NoWheelSpinBox;
         volumeSpin_->setRange(0, 200);
         volumeSpin_->setSuffix("%");
         volumeSpin_->setValue(100);
@@ -416,25 +518,21 @@ private:
 
         QVBoxLayout* timingContent = nullptr;
         layout->addWidget(makePanel("Timing", &timingContent));
-        previewLatencySpin_ = new QSpinBox;
+        previewLatencySpin_ = new NoWheelSpinBox;
         previewLatencySpin_->setRange(0, 2000);
         previewLatencySpin_->setSuffix(" ms");
         previewLatencySpin_->setValue(100);
         prepareInput(previewLatencySpin_);
         addRow(timingContent, "Preview latency", previewLatencySpin_);
 
+        layout->addStretch(1);
         return page;
     }
 
-    QWidget* buildSessionPanel()
+    QWidget* buildSecurityPanel()
     {
         QVBoxLayout* content = nullptr;
-        auto* panel = makePanel("Session", &content);
-
-        sessionEdit_ = new QLineEdit;
-        sessionEdit_->setPlaceholderText("Auto");
-        prepareInput(sessionEdit_);
-        addRow(content, "ID", sessionEdit_);
+        auto* panel = makePanel("Security", &content);
 
         auto* accessRow = new QWidget;
         accessRow->setObjectName("FormRow");
@@ -591,7 +689,6 @@ private:
         bindCheckBox(mutedCheck_);
         bindSpinBox(volumeSpin_);
         bindSpinBox(previewLatencySpin_);
-        bindLineEdit(sessionEdit_);
         bindLineEdit(accessCodeEdit_);
         bindCheckBox(allowPlaintextCheck_);
         bindCheckBox(reportCheck_);
@@ -660,11 +757,6 @@ private:
             }
         }
 
-        const QString session = sessionEdit_->text().trimmed();
-        if (!session.isEmpty()) {
-            args << "--session" << session;
-        }
-
         const QString accessCode = accessCodeEdit_->text();
         if (!accessCode.isEmpty()) {
             args << "--access-code" << accessCode;
@@ -725,6 +817,11 @@ private:
         }
         if (!validateSelectedReceiverSecurity()) {
             return;
+        }
+        if (discoveryProcess_->state() != QProcess::NotRunning) {
+            discoveryProcess_->kill();
+            discoveryProcess_->waitForFinished(500);
+            setDiscovering(false);
         }
         if (accessCodeEdit_->text().isEmpty() && !allowPlaintextCheck_->isChecked()) {
             QMessageBox::warning(
@@ -792,24 +889,221 @@ private:
         }
     }
 
-    void startDiscovery()
+    QVector<DiscoveredReceiver> parseDiscoveredReceivers(const QString& output) const
+    {
+        QVector<DiscoveredReceiver> receivers;
+        const QRegularExpression receiverPattern(QStringLiteral(
+            R"room(receiver name="([^"]*)" address=([^\s]+) port=(\d+) session=([^\s]+) fingerprint=([^\s]+) security=(encrypted|plaintext) access_fingerprint=([0-9A-Fa-f]{16}|none))room"));
+
+        auto matches = receiverPattern.globalMatch(output);
+        while (matches.hasNext()) {
+            const auto match = matches.next();
+            bool portOk = false;
+            const int port = match.captured(3).toInt(&portOk);
+            if (!portOk || port < sharePortSpin_->minimum() || port > sharePortSpin_->maximum()) {
+                continue;
+            }
+
+            DiscoveredReceiver receiver;
+            receiver.name = match.captured(1);
+            receiver.host = match.captured(2);
+            receiver.port = port;
+            receiver.session = match.captured(4) == "unknown" ? QString() : match.captured(4);
+            receiver.fingerprint = match.captured(5).toUpper();
+            receiver.securityKnown = true;
+            receiver.encrypted = match.captured(6) == "encrypted";
+            receiver.accessFingerprint = match.captured(7).toUpper();
+            receivers.push_back(std::move(receiver));
+        }
+
+        return receivers;
+    }
+
+    QString receiverDisplayText(const DiscoveredReceiver& receiver) const
+    {
+        const QString name = receiver.name.trimmed().isEmpty() ? QStringLiteral("ScreenShare") : receiver.name.trimmed();
+        const QString security = receiver.securityKnown ? (receiver.encrypted ? QStringLiteral("Encrypted") : QStringLiteral("Plaintext")) : QStringLiteral("Unknown");
+        return QStringLiteral("%1  %2:%3  %4")
+            .arg(name, receiver.host)
+            .arg(receiver.port)
+            .arg(security);
+    }
+
+    bool isLoopbackHost(const QString& host) const
+    {
+        return host == "127.0.0.1" || host.startsWith("127.");
+    }
+
+    bool sameDiscoveredReceiver(const DiscoveredReceiver& lhs, const DiscoveredReceiver& rhs) const
+    {
+        if (lhs.port != rhs.port || lhs.accessFingerprint != rhs.accessFingerprint) {
+            return false;
+        }
+        if (!lhs.fingerprint.isEmpty() &&
+            lhs.fingerprint != "UNKNOWN" &&
+            lhs.fingerprint == rhs.fingerprint) {
+            return true;
+        }
+        return !lhs.session.isEmpty() &&
+               lhs.session == rhs.session &&
+               lhs.name == rhs.name;
+    }
+
+    QVector<DiscoveredReceiver> deduplicateReceivers(QVector<DiscoveredReceiver> receivers) const
+    {
+        QVector<DiscoveredReceiver> uniqueReceivers;
+        for (const auto& receiver : receivers) {
+            bool merged = false;
+            for (auto& existing : uniqueReceivers) {
+                if (!sameDiscoveredReceiver(existing, receiver)) {
+                    continue;
+                }
+                if (isLoopbackHost(existing.host) && !isLoopbackHost(receiver.host)) {
+                    existing = receiver;
+                }
+                merged = true;
+                break;
+            }
+            if (!merged) {
+                uniqueReceivers.push_back(receiver);
+            }
+        }
+        return uniqueReceivers;
+    }
+
+    void updateReceiverList(const QVector<DiscoveredReceiver>& receivers)
+    {
+        discoveredReceivers_ = deduplicateReceivers(receivers);
+        if (receiverList_ == nullptr) {
+            return;
+        }
+
+        const QString selectedHost = selectedReceiverHost_;
+        const int selectedPort = selectedReceiverPort_;
+
+        receiverList_->clear();
+        int selectedRow = -1;
+        for (int index = 0; index < discoveredReceivers_.size(); ++index) {
+            const auto& receiver = discoveredReceivers_[index];
+            auto* item = new QListWidgetItem(receiverDisplayText(receiver));
+            item->setData(Qt::UserRole, index);
+            item->setToolTip(QStringLiteral("%1:%2").arg(receiver.host).arg(receiver.port));
+            receiverList_->addItem(item);
+            if (receiver.host == selectedHost && receiver.port == selectedPort) {
+                selectedRow = index;
+            }
+        }
+
+        if (selectedRow >= 0) {
+            receiverList_->setCurrentRow(selectedRow);
+        }
+        updateReceiverStatus(false);
+    }
+
+    void updateReceiverStatus(bool scanning)
+    {
+        if (receiverStatusLabel_ == nullptr) {
+            return;
+        }
+        if (scanning) {
+            receiverStatusLabel_->setText("Scanning");
+            return;
+        }
+        const int count = discoveredReceivers_.size();
+        if (count == 0) {
+            receiverStatusLabel_->setText("No receivers");
+        } else if (count == 1) {
+            receiverStatusLabel_->setText("1 receiver");
+        } else {
+            receiverStatusLabel_->setText(QString::number(count) + " receivers");
+        }
+    }
+
+    void selectReceiverItem(QListWidgetItem* item, bool promptForAccessCode)
+    {
+        if (item == nullptr) {
+            return;
+        }
+        bool ok = false;
+        const int index = item->data(Qt::UserRole).toInt(&ok);
+        if (!ok || index < 0 || index >= discoveredReceivers_.size()) {
+            return;
+        }
+        selectDiscoveredReceiver(discoveredReceivers_[index], promptForAccessCode);
+    }
+
+    void selectDiscoveredReceiver(const DiscoveredReceiver& receiver, bool promptForAccessCode)
+    {
+        shareHostEdit_->setText(receiver.host);
+        sharePortSpin_->setValue(receiver.port);
+
+        selectedReceiverKnown_ = true;
+        selectedReceiverHost_ = receiver.host;
+        selectedReceiverPort_ = receiver.port;
+        selectedReceiverSecurityKnown_ = receiver.securityKnown;
+        selectedReceiverEncrypted_ = receiver.encrypted;
+        selectedReceiverAccessFingerprint_ = receiver.accessFingerprint;
+
+        const QString receiverName = receiver.name.trimmed().isEmpty() ? QStringLiteral("ScreenShare") : receiver.name.trimmed();
+        if (receiver.securityKnown && !receiver.encrypted) {
+            if (accessCodeEdit_->text().isEmpty()) {
+                allowPlaintextCheck_->setChecked(true);
+                appendOutput("Selected plaintext receiver " + receiverName + "\n");
+            } else {
+                appendOutput("Selected receiver is plaintext; clear the access code or start Watch with the same access code\n");
+            }
+        } else if (receiver.securityKnown && receiver.encrypted) {
+            allowPlaintextCheck_->setChecked(false);
+
+            const QString accessCode = accessCodeEdit_->text();
+            if (accessCode.isEmpty()) {
+                if (promptForAccessCode) {
+                    accessCodeEdit_->setFocus();
+                }
+                appendOutput("Selected encrypted receiver " + receiverName + "; enter the matching access code before Start\n");
+            } else if (!receiver.accessFingerprint.isEmpty() && receiver.accessFingerprint != "NONE") {
+                const QString typedFingerprint = accessCodeFingerprintText(accessCode);
+                if (typedFingerprint == receiver.accessFingerprint) {
+                    appendOutput("Access code matches the selected receiver fingerprint\n");
+                } else {
+                    clearAccessCodeForRetry("Access code does not match the selected receiver. Try again.");
+                }
+            }
+        }
+
+        appendOutput("Selected receiver " + receiverName + " at " + receiver.host + ":" + QString::number(receiver.port) + "\n");
+        refreshCommand();
+    }
+
+    void startDiscovery(bool automatic)
     {
         if (discoveryProcess_->state() != QProcess::NotRunning) {
             return;
         }
+        if (automatic && !shareMode()) {
+            return;
+        }
         if (process_->state() != QProcess::NotRunning) {
-            QMessageBox::information(this, "Already running", "Stop the current session before discovering receivers.");
+            if (!automatic) {
+                QMessageBox::information(this, "Already running", "Stop the current session before discovering receivers.");
+            }
             return;
         }
 
         const QString program = enginePath();
         if (!QFileInfo::exists(program)) {
-            QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
+            if (!automatic) {
+                QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
+            }
             return;
         }
 
+        discoverySelectFirst_ = !automatic;
+        discoveryLogOutput_ = !automatic;
         discoveryOutput_.clear();
-        appendOutput("\nDiscovering LAN receivers...\n");
+        if (!automatic) {
+            appendOutput("\nRefreshing receivers...\n");
+        }
         discoveryProcess_->setProgram(program);
         discoveryProcess_->setArguments({"--lan-discover", "--lan-discover-seconds", "2"});
         discoveryProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
@@ -821,72 +1115,26 @@ private:
     {
         setDiscovering(false);
         if (status != QProcess::NormalExit || code != 0) {
-            appendOutput("LAN discovery finished with exit code " + QString::number(code) + "\n");
-            return;
-        }
-
-        const QRegularExpression targetPattern(QStringLiteral(R"(share_target=([^:\s]+):(\d+))"));
-        const QRegularExpressionMatch match = targetPattern.match(discoveryOutput_);
-        if (!match.hasMatch()) {
-            QMessageBox::information(this, "No receivers found", "No LAN receivers were found. Start Watch with LAN discoverable enabled on the other computer.");
-            return;
-        }
-
-        bool ok = false;
-        const int port = match.captured(2).toInt(&ok);
-        if (!ok || port < sharePortSpin_->minimum() || port > sharePortSpin_->maximum()) {
-            appendOutput("LAN discovery returned an invalid port\n");
-            return;
-        }
-
-        shareHostEdit_->setText(match.captured(1));
-        sharePortSpin_->setValue(port);
-
-        QString discoveredSession;
-        const QRegularExpression sessionPattern(QStringLiteral(R"(\bsession=([^\s]+))"));
-        const QRegularExpressionMatch sessionMatch = sessionPattern.match(discoveryOutput_);
-        if (sessionMatch.hasMatch() && sessionMatch.captured(1) != "unknown") {
-            discoveredSession = sessionMatch.captured(1);
-            sessionEdit_->setText(discoveredSession);
-        }
-
-        const QRegularExpression securityPattern(QStringLiteral(R"(\bsecurity=(encrypted|plaintext))"));
-        const QRegularExpressionMatch securityMatch = securityPattern.match(discoveryOutput_);
-        const QRegularExpression fingerprintPattern(QStringLiteral(R"(\baccess_fingerprint=([0-9A-Fa-f]{16}|none))"));
-        const QRegularExpressionMatch fingerprintMatch = fingerprintPattern.match(discoveryOutput_);
-        const QString receiverFingerprint =
-            fingerprintMatch.hasMatch() ? fingerprintMatch.captured(1).toUpper() : QString();
-        selectedReceiverKnown_ = true;
-        selectedReceiverHost_ = match.captured(1);
-        selectedReceiverPort_ = port;
-        selectedReceiverSession_ = discoveredSession;
-        selectedReceiverSecurityKnown_ = securityMatch.hasMatch();
-        selectedReceiverEncrypted_ = securityMatch.hasMatch() && securityMatch.captured(1) == "encrypted";
-        selectedReceiverAccessFingerprint_ = receiverFingerprint;
-        const QString accessCode = accessCodeEdit_->text();
-        if (securityMatch.hasMatch() && securityMatch.captured(1) == "plaintext") {
-            if (accessCode.isEmpty()) {
-                allowPlaintextCheck_->setChecked(true);
-                appendOutput("Selected receiver allows plaintext; Share will use plaintext mode\n");
-            } else {
-                appendOutput("Selected receiver is plaintext; clear the access code or start Watch with the same access code\n");
+            if (discoveryLogOutput_) {
+                appendOutput("LAN discovery finished with exit code " + QString::number(code) + "\n");
             }
-        } else if (securityMatch.hasMatch() && securityMatch.captured(1) == "encrypted") {
-            allowPlaintextCheck_->setChecked(false);
-            if (accessCode.isEmpty()) {
-                appendOutput("Selected receiver requires an access code; paste the matching code before Start\n");
-            } else if (!receiverFingerprint.isEmpty() && receiverFingerprint != "NONE") {
-                const QString typedFingerprint = accessCodeFingerprintText(accessCode);
-                if (typedFingerprint == receiverFingerprint) {
-                    appendOutput("Access code matches the selected receiver fingerprint\n");
-                } else {
-                    appendOutput("Access code does not match the selected receiver fingerprint\n");
-                }
-            }
+            return;
         }
 
-        appendOutput("Selected LAN receiver " + shareHostEdit_->text() + ":" + QString::number(port) + "\n");
-        refreshCommand();
+        const QVector<DiscoveredReceiver> receivers = parseDiscoveredReceivers(discoveryOutput_);
+        updateReceiverList(receivers);
+        if (receivers.isEmpty()) {
+            if (discoverySelectFirst_) {
+                QMessageBox::information(this, "No receivers found", "No discoverable receivers were found.");
+            }
+            return;
+        }
+
+        if (discoverySelectFirst_ && receivers.size() == 1) {
+            selectDiscoveredReceiver(receivers.front(), true);
+        } else if (discoverySelectFirst_) {
+            appendOutput("Found " + QString::number(receivers.size()) + " receivers\n");
+        }
     }
 
     bool selectedReceiverApplies() const
@@ -898,8 +1146,22 @@ private:
             sharePortSpin_->value() != selectedReceiverPort_) {
             return false;
         }
-        return selectedReceiverSession_.isEmpty() ||
-               sessionEdit_->text().trimmed() == selectedReceiverSession_;
+        return true;
+    }
+
+    bool selectedReceiverAccessCodeMatches(const QString& accessCode) const
+    {
+        return selectedReceiverAccessFingerprint_.isEmpty() ||
+               selectedReceiverAccessFingerprint_ == "NONE" ||
+               accessCodeFingerprintText(accessCode) == selectedReceiverAccessFingerprint_;
+    }
+
+    void clearAccessCodeForRetry(const QString& message)
+    {
+        accessCodeEdit_->clear();
+        allowPlaintextCheck_->setChecked(false);
+        accessCodeEdit_->setFocus();
+        QMessageBox::warning(this, "Access code mismatch", message);
     }
 
     bool validateSelectedReceiverSecurity()
@@ -914,19 +1176,15 @@ private:
         const QString accessCode = accessCodeEdit_->text();
         if (selectedReceiverEncrypted_) {
             if (accessCode.isEmpty()) {
+                accessCodeEdit_->setFocus();
                 QMessageBox::warning(
                     this,
-                    "Access code mismatch",
-                    "The selected LAN receiver requires its matching access code before sharing.");
+                    "Access code required",
+                    "Enter the access code for the selected receiver.");
                 return false;
             }
-            if (!selectedReceiverAccessFingerprint_.isEmpty() &&
-                selectedReceiverAccessFingerprint_ != "NONE" &&
-                accessCodeFingerprintText(accessCode) != selectedReceiverAccessFingerprint_) {
-                QMessageBox::warning(
-                    this,
-                    "Access code mismatch",
-                    "The typed access code does not match the selected LAN receiver.");
+            if (!selectedReceiverAccessCodeMatches(accessCode)) {
+                clearAccessCodeForRetry("That access code does not match. Try again.");
                 return false;
             }
             return true;
@@ -936,7 +1194,7 @@ private:
             QMessageBox::warning(
                 this,
                 "Security mismatch",
-                "The selected LAN receiver is plaintext. Clear the access code or restart Watch with the same access code.");
+                "The selected receiver is plaintext. Clear the access code or restart Watch with the same access code.");
             return false;
         }
         return true;
@@ -946,7 +1204,11 @@ private:
     {
         if (findLanButton_ != nullptr) {
             findLanButton_->setEnabled(!discovering && process_->state() == QProcess::NotRunning);
-            findLanButton_->setText(discovering ? "Finding..." : "Find on LAN");
+            findLanButton_->setText(discovering ? "Scanning..." : "Refresh");
+        }
+        updateReceiverStatus(discovering);
+        if (receiverList_ != nullptr) {
+            receiverList_->setEnabled(!discovering);
         }
         if (process_->state() == QProcess::NotRunning) {
             statusBadge_->setText(discovering ? "Finding" : "Idle");
@@ -978,6 +1240,9 @@ private:
         if (findLanButton_ != nullptr) {
             findLanButton_->setEnabled(!running && discoveryProcess_->state() == QProcess::NotRunning);
         }
+        if (receiverList_ != nullptr) {
+            receiverList_->setEnabled(!running && discoveryProcess_->state() == QProcess::NotRunning);
+        }
     }
 
     void appendOutput(const QString& text)
@@ -987,7 +1252,7 @@ private:
         outputEdit_->moveCursor(QTextCursor::End);
     }
 
-    QStackedWidget* optionStack_ = nullptr;
+    CompactStackedWidget* optionStack_ = nullptr;
     QPushButton* shareModeButton_ = nullptr;
     QPushButton* watchModeButton_ = nullptr;
     QLabel* statusBadge_ = nullptr;
@@ -997,7 +1262,10 @@ private:
     QPushButton* actionButton_ = nullptr;
     QProcess* process_ = nullptr;
     QProcess* discoveryProcess_ = nullptr;
+    QTimer* receiverRefreshTimer_ = nullptr;
 
+    QListWidget* receiverList_ = nullptr;
+    QLabel* receiverStatusLabel_ = nullptr;
     QLineEdit* shareHostEdit_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
     QPushButton* findLanButton_ = nullptr;
@@ -1010,7 +1278,6 @@ private:
     QSpinBox* volumeSpin_ = nullptr;
     QSpinBox* previewLatencySpin_ = nullptr;
 
-    QLineEdit* sessionEdit_ = nullptr;
     QLineEdit* accessCodeEdit_ = nullptr;
     QPushButton* generateAccessCodeButton_ = nullptr;
     QPushButton* copyAccessCodeButton_ = nullptr;
@@ -1024,12 +1291,14 @@ private:
     quint64 runSerial_ = 0;
     QString stopFilePath_;
     QString discoveryOutput_;
+    QVector<DiscoveredReceiver> discoveredReceivers_;
+    bool discoverySelectFirst_ = false;
+    bool discoveryLogOutput_ = false;
     bool selectedReceiverKnown_ = false;
     bool selectedReceiverSecurityKnown_ = false;
     bool selectedReceiverEncrypted_ = false;
     QString selectedReceiverHost_;
     int selectedReceiverPort_ = 0;
-    QString selectedReceiverSession_;
     QString selectedReceiverAccessFingerprint_;
 };
 
@@ -1235,6 +1504,24 @@ QPlainTextEdit {
     padding: 12px;
     font-family: "Cascadia Mono", "Consolas";
     font-size: 9.5pt;
+}
+QListWidget#ReceiverList {
+    background: #0b0f14;
+    border: 1px solid #2a3340;
+    border-radius: 8px;
+    padding: 4px;
+    color: #e6ecf2;
+}
+QListWidget#ReceiverList::item {
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+QListWidget#ReceiverList::item:selected {
+    background: #1a9b89;
+    color: #ffffff;
+}
+QListWidget#ReceiverList::item:hover {
+    background: #1c232c;
 }
 QScrollBar:vertical {
     background: transparent;
@@ -1444,6 +1731,24 @@ QPlainTextEdit {
     padding: 12px;
     font-family: "Cascadia Mono", "Consolas";
     font-size: 9.5pt;
+}
+QListWidget#ReceiverList {
+    background: #ffffff;
+    border: 1px solid #cfd6df;
+    border-radius: 8px;
+    padding: 4px;
+    color: #15202b;
+}
+QListWidget#ReceiverList::item {
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+QListWidget#ReceiverList::item:selected {
+    background: #157a6e;
+    color: #ffffff;
+}
+QListWidget#ReceiverList::item:hover {
+    background: #eef1f6;
 }
 QScrollBar:vertical {
     background: transparent;
