@@ -131,6 +131,8 @@ explicitly plaintext, discovery prints `security=plaintext` and the generated Sh
 Tailscale and similar mesh VPNs can already be used by typing the receiver's mesh IP, such as a
 `100.x.y.z` Tailscale address, into the Share address field. LAN discovery may not list mesh peers
 because those networks usually do not behave like a broadcast LAN.
+The desktop UI warns before starting Share with `127.0.0.1`, `localhost`, or `::1` because those
+addresses send to the sender computer instead of the remote Watch computer.
 
 List monitors:
 
