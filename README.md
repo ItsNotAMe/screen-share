@@ -116,16 +116,21 @@ On the sharing computer, discover nearby receivers:
 ```
 
 The output includes `share_target=HOST:PORT` plus a ready-to-run `ScreenShare --share ...` command.
-The desktop UI exposes the same flow: Watch has a LAN discoverable checkbox, and Share has a
-Find on LAN button that fills the address and port. Discovery uses UDP port 47995 by default; add
-`--lan-discovery-port PORT` on both sides if you need a different port.
+The desktop UI exposes the same flow: Watch has a LAN discoverable checkbox, and Share has an
+auto-refreshing Receivers list plus a manual Refresh button. Selecting a discovered receiver fills the
+address and port; encrypted receivers focus the main Access code field when it is empty. Discovery
+uses UDP port 47995 by default; add `--lan-discovery-port PORT` on both sides if you need a different
+port.
 Discovery also reports whether the receiver expects encrypted traffic. Use the same access code on
 both computers for encrypted sessions; there is no separate LAN invite code. If Watch is using an
 access code, discovery prints `security=encrypted` and an access-code fingerprint, and the generated
 Share command uses `--access-code CODE` as a placeholder. The raw access code is never broadcast.
-The desktop UI compares the typed access code with the selected receiver fingerprint after Find on
-LAN. If Watch is explicitly plaintext, discovery prints `security=plaintext` and the generated Share
-command includes `--allow-plaintext`.
+The desktop UI compares the typed access code with the selected receiver fingerprint. If Watch is
+explicitly plaintext, discovery prints `security=plaintext` and the generated Share command includes
+`--allow-plaintext`.
+Tailscale and similar mesh VPNs can already be used by typing the receiver's mesh IP, such as a
+`100.x.y.z` Tailscale address, into the Share address field. LAN discovery may not list mesh peers
+because those networks usually do not behave like a broadcast LAN.
 
 List monitors:
 
