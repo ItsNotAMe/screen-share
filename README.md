@@ -79,7 +79,9 @@ The UI starts and stops the same `ScreenShare.exe` engine beside it. Use the Sha
 sending computer and the Watch tab on the receiving computer. Reports are enabled by default so a
 test run can be sent as a zip without collecting separate log files. The UI opens in dark mode by
 default, includes a theme toggle in the header, and can generate/copy an encrypted-session access
-code.
+code. The Share tab also has an output-device picker for system audio, which is useful when Windows
+or a virtual mixer uses a default output device that does not contain the audio you actually want to
+share.
 
 Common live session:
 

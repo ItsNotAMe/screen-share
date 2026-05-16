@@ -116,6 +116,12 @@ struct DiscoveredReceiver {
     QString accessFingerprint;
 };
 
+struct AudioOutputDevice {
+    QString name;
+    QString id;
+    bool isDefault = false;
+};
+
 class NoWheelSpinBox final : public QSpinBox {
 public:
     using QSpinBox::QSpinBox;
@@ -278,6 +284,22 @@ public:
             finishDiscovery(code, status);
         });
 
+        audioDeviceProcess_ = new QProcess(this);
+        audioDeviceProcess_->setProcessChannelMode(QProcess::MergedChannels);
+        connect(audioDeviceProcess_, &QProcess::readyReadStandardOutput, this, [this] {
+            audioDeviceOutput_ += QString::fromLocal8Bit(audioDeviceProcess_->readAllStandardOutput());
+        });
+        connect(audioDeviceProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            Q_UNUSED(error);
+            if (audioDeviceLogOutput_) {
+                appendOutput("Audio device refresh error: " + audioDeviceProcess_->errorString() + "\n");
+            }
+            setAudioDeviceRefreshing(false);
+        });
+        connect(audioDeviceProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
+            finishAudioDeviceRefresh(code, status);
+        });
+
         receiverRefreshTimer_ = new QTimer(this);
         receiverRefreshTimer_->setInterval(kReceiverRefreshMs);
         connect(receiverRefreshTimer_, &QTimer::timeout, this, [this] { startDiscovery(true); });
@@ -288,6 +310,7 @@ public:
         setRunning(false);
         receiverRefreshTimer_->start();
         QTimer::singleShot(400, this, [this] { startDiscovery(true); });
+        QTimer::singleShot(700, this, [this] { refreshAudioDevices(true); });
     }
 
 private:
@@ -481,6 +504,30 @@ private:
         addRow(videoContent, "Display", displaySpin_);
         addRow(videoContent, "FPS", fpsSpin_);
         addRow(videoContent, "Resolution", resolutionCombo_);
+
+        QVBoxLayout* audioContent = nullptr;
+        layout->addWidget(makePanel("Audio", &audioContent));
+        auto* audioDeviceRow = new QWidget;
+        audioDeviceRow->setObjectName("FormRow");
+        prepareInput(audioDeviceRow);
+        auto* audioDeviceLayout = new QHBoxLayout(audioDeviceRow);
+        audioDeviceLayout->setContentsMargins(0, 0, 0, 0);
+        audioDeviceLayout->setSpacing(8);
+        audioDeviceCombo_ = new NoWheelComboBox;
+        audioDeviceCombo_->addItem("Default output", QString());
+        prepareInput(audioDeviceCombo_);
+        refreshAudioDevicesButton_ = new QPushButton("Refresh");
+        refreshAudioDevicesButton_->setObjectName("SecondaryButton");
+        refreshAudioDevicesButton_->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+        refreshAudioDevicesButton_->setIconSize(QSize(14, 14));
+        refreshAudioDevicesButton_->setCursor(Qt::PointingHandCursor);
+        refreshAudioDevicesButton_->setFixedHeight(kRowHeight);
+        audioDeviceLayout->addWidget(audioDeviceCombo_, 1);
+        audioDeviceLayout->addWidget(refreshAudioDevicesButton_);
+        addRow(audioContent, "Output", audioDeviceRow);
+        audioDeviceStatusLabel_ = makeLabel("Default output", "Subtle");
+        audioContent->addWidget(audioDeviceStatusLabel_);
+        connect(refreshAudioDevicesButton_, &QPushButton::clicked, this, [this] { refreshAudioDevices(false); });
 
         layout->addStretch(1);
         return page;
@@ -685,6 +732,7 @@ private:
         bindSpinBox(displaySpin_);
         bindSpinBox(fpsSpin_);
         connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
+        connect(audioDeviceCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
         bindSpinBox(watchPortSpin_);
         bindCheckBox(mutedCheck_);
         bindSpinBox(volumeSpin_);
@@ -745,6 +793,11 @@ private:
                 args << "--width" << QString::number(resolution.width());
                 args << "--height" << QString::number(resolution.height());
             }
+
+            const QString audioDeviceId = audioDeviceCombo_->currentData().toString();
+            if (!audioDeviceId.isEmpty()) {
+                args << "--audio-device-id" << audioDeviceId;
+            }
         } else {
             args << "--watch" << QString::number(watchPortSpin_->value());
             if (lanDiscoverableCheck_->isChecked()) {
@@ -777,6 +830,9 @@ private:
         for (int index = 0; index + 1 < args.size(); ++index) {
             if (args[index] == "--access-code") {
                 args[index + 1] = "<redacted>";
+                ++index;
+            } else if (args[index] == "--audio-device-id") {
+                args[index + 1] = "<selected audio device>";
                 ++index;
             }
         }
@@ -920,6 +976,37 @@ private:
         }
 
         return receivers;
+    }
+
+    QVector<AudioOutputDevice> parseAudioOutputDevices(const QString& output) const
+    {
+        const QString header = "system audio devices";
+        const int start = output.indexOf(header, 0, Qt::CaseInsensitive);
+        if (start < 0) {
+            return {};
+        }
+
+        int end = output.indexOf("\nmicrophone audio devices", start, Qt::CaseInsensitive);
+        if (end < 0) {
+            end = output.size();
+        }
+        const QString section = output.mid(start, end - start);
+
+        QVector<AudioOutputDevice> devices;
+        const QRegularExpression devicePattern(QStringLiteral(
+            R"device(\[\d+\]\s+(default\s+)?"([^"]*)"\s*\r?\n\s*id=([^\r\n]+))device"));
+        auto matches = devicePattern.globalMatch(section);
+        while (matches.hasNext()) {
+            const auto match = matches.next();
+            AudioOutputDevice device;
+            device.isDefault = !match.captured(1).isEmpty();
+            device.name = match.captured(2).trimmed();
+            device.id = match.captured(3).trimmed();
+            if (!device.id.isEmpty()) {
+                devices.push_back(std::move(device));
+            }
+        }
+        return devices;
     }
 
     QString receiverDisplayText(const DiscoveredReceiver& receiver) const
@@ -1167,6 +1254,93 @@ private:
         }
     }
 
+    void refreshAudioDevices(bool automatic)
+    {
+        if (audioDeviceProcess_->state() != QProcess::NotRunning) {
+            return;
+        }
+
+        const QString program = enginePath();
+        if (!QFileInfo::exists(program)) {
+            if (!automatic) {
+                QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
+            }
+            return;
+        }
+
+        audioDeviceLogOutput_ = !automatic;
+        audioDeviceOutput_.clear();
+        if (!automatic) {
+            appendOutput("\nRefreshing audio devices...\n");
+        }
+        audioDeviceProcess_->setProgram(program);
+        audioDeviceProcess_->setArguments({"--list-audio-devices"});
+        audioDeviceProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
+        setAudioDeviceRefreshing(true);
+        audioDeviceProcess_->start();
+    }
+
+    void finishAudioDeviceRefresh(int code, QProcess::ExitStatus status)
+    {
+        setAudioDeviceRefreshing(false);
+        if (status != QProcess::NormalExit || code != 0) {
+            if (audioDeviceLogOutput_) {
+                appendOutput("Audio device refresh finished with exit code " + QString::number(code) + "\n");
+            }
+            return;
+        }
+
+        const QVector<AudioOutputDevice> devices = parseAudioOutputDevices(audioDeviceOutput_);
+        updateAudioDeviceList(devices);
+        if (audioDeviceLogOutput_) {
+            appendOutput("Found " + QString::number(devices.size()) + " output audio devices\n");
+        }
+    }
+
+    void updateAudioDeviceList(const QVector<AudioOutputDevice>& devices)
+    {
+        if (audioDeviceCombo_ == nullptr) {
+            return;
+        }
+
+        const QString selectedId = audioDeviceCombo_->currentData().toString();
+        audioDeviceCombo_->blockSignals(true);
+        audioDeviceCombo_->clear();
+        audioDeviceCombo_->addItem("Default output", QString());
+        audioDeviceCombo_->setItemData(0, "Use the current Windows default output device", Qt::ToolTipRole);
+
+        int selectedIndex = 0;
+        for (const auto& device : devices) {
+            QString label = device.name.isEmpty() ? "Unnamed output" : device.name;
+            if (device.isDefault) {
+                label += " (default)";
+            }
+            audioDeviceCombo_->addItem(label, device.id);
+            const int itemIndex = audioDeviceCombo_->count() - 1;
+            audioDeviceCombo_->setItemData(itemIndex, device.id, Qt::ToolTipRole);
+            if (!selectedId.isEmpty() && device.id == selectedId) {
+                selectedIndex = itemIndex;
+            }
+        }
+
+        audioDeviceCombo_->setCurrentIndex(selectedIndex);
+        audioDeviceCombo_->blockSignals(false);
+        updateAudioDeviceStatus(devices.size());
+        refreshCommand();
+    }
+
+    void updateAudioDeviceStatus(int deviceCount)
+    {
+        if (audioDeviceStatusLabel_ == nullptr) {
+            return;
+        }
+        if (deviceCount <= 0) {
+            audioDeviceStatusLabel_->setText("Default output");
+            return;
+        }
+        audioDeviceStatusLabel_->setText(QString::number(deviceCount) + " output devices available");
+    }
+
     bool selectedReceiverApplies() const
     {
         if (!selectedReceiverKnown_ || !shareMode()) {
@@ -1247,6 +1421,21 @@ private:
         }
     }
 
+    void setAudioDeviceRefreshing(bool refreshing)
+    {
+        if (refreshAudioDevicesButton_ != nullptr) {
+            refreshAudioDevicesButton_->setEnabled(!refreshing && process_->state() == QProcess::NotRunning);
+            refreshAudioDevicesButton_->setText(refreshing ? "Scanning..." : "Refresh");
+        }
+        if (audioDeviceStatusLabel_ != nullptr) {
+            if (refreshing) {
+                audioDeviceStatusLabel_->setText("Scanning output devices");
+            } else if (audioDeviceCombo_ != nullptr) {
+                updateAudioDeviceStatus(std::max(0, audioDeviceCombo_->count() - 1));
+            }
+        }
+    }
+
     void setRunning(bool running)
     {
         if (running) {
@@ -1273,6 +1462,12 @@ private:
         if (receiverList_ != nullptr) {
             receiverList_->setEnabled(!running && discoveryProcess_->state() == QProcess::NotRunning);
         }
+        if (audioDeviceCombo_ != nullptr) {
+            audioDeviceCombo_->setEnabled(!running);
+        }
+        if (refreshAudioDevicesButton_ != nullptr) {
+            refreshAudioDevicesButton_->setEnabled(!running && audioDeviceProcess_->state() == QProcess::NotRunning);
+        }
     }
 
     void appendOutput(const QString& text)
@@ -1292,6 +1487,7 @@ private:
     QPushButton* actionButton_ = nullptr;
     QProcess* process_ = nullptr;
     QProcess* discoveryProcess_ = nullptr;
+    QProcess* audioDeviceProcess_ = nullptr;
     QTimer* receiverRefreshTimer_ = nullptr;
 
     QListWidget* receiverList_ = nullptr;
@@ -1302,6 +1498,9 @@ private:
     QSpinBox* displaySpin_ = nullptr;
     QSpinBox* fpsSpin_ = nullptr;
     QComboBox* resolutionCombo_ = nullptr;
+    QComboBox* audioDeviceCombo_ = nullptr;
+    QPushButton* refreshAudioDevicesButton_ = nullptr;
+    QLabel* audioDeviceStatusLabel_ = nullptr;
     QSpinBox* watchPortSpin_ = nullptr;
     QCheckBox* lanDiscoverableCheck_ = nullptr;
     QCheckBox* mutedCheck_ = nullptr;
@@ -1321,9 +1520,11 @@ private:
     quint64 runSerial_ = 0;
     QString stopFilePath_;
     QString discoveryOutput_;
+    QString audioDeviceOutput_;
     QVector<DiscoveredReceiver> discoveredReceivers_;
     bool discoverySelectFirst_ = false;
     bool discoveryLogOutput_ = false;
+    bool audioDeviceLogOutput_ = false;
     bool selectedReceiverKnown_ = false;
     bool selectedReceiverSecurityKnown_ = false;
     bool selectedReceiverEncrypted_ = false;
