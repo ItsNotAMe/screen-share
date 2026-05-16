@@ -6,6 +6,10 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QIODevice>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QJsonParseError>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSize>
@@ -105,6 +109,11 @@ constexpr int kRowHeight = 34;
 constexpr int kLabelWidth = 96;
 constexpr int kReceiverRefreshMs = 15000;
 
+enum class ReceiverSource {
+    Lan,
+    Tailscale,
+};
+
 struct DiscoveredReceiver {
     QString name;
     QString host;
@@ -114,6 +123,7 @@ struct DiscoveredReceiver {
     bool securityKnown = false;
     bool encrypted = false;
     QString accessFingerprint;
+    ReceiverSource source = ReceiverSource::Lan;
 };
 
 struct AudioOutputDevice {
@@ -121,6 +131,63 @@ struct AudioOutputDevice {
     QString id;
     bool isDefault = false;
 };
+
+QVector<DiscoveredReceiver> parseTailscaleStatusReceivers(const QString& output, int port)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(output.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return {};
+    }
+
+    const QJsonObject peers = document.object().value("Peer").toObject();
+    QVector<DiscoveredReceiver> receivers;
+    for (auto iterator = peers.begin(); iterator != peers.end(); ++iterator) {
+        const QJsonObject peer = iterator.value().toObject();
+        if (peer.value("Online").isBool() && !peer.value("Online").toBool()) {
+            continue;
+        }
+
+        QString host;
+        const QJsonArray ips = peer.value("TailscaleIPs").toArray();
+        for (const QJsonValue& value : ips) {
+            const QString ip = value.toString();
+            if (ip.startsWith("100.")) {
+                host = ip;
+                break;
+            }
+            if (host.isEmpty() && !ip.contains(':')) {
+                host = ip;
+            }
+        }
+        if (host.isEmpty() && !ips.isEmpty()) {
+            host = ips.first().toString();
+        }
+        if (host.isEmpty()) {
+            continue;
+        }
+
+        QString name = peer.value("HostName").toString().trimmed();
+        if (name.isEmpty()) {
+            name = peer.value("DNSName").toString().trimmed();
+            if (name.endsWith('.')) {
+                name.chop(1);
+            }
+        }
+        if (name.isEmpty()) {
+            name = "Tailscale peer";
+        }
+
+        DiscoveredReceiver receiver;
+        receiver.name = name;
+        receiver.host = host;
+        receiver.port = port;
+        receiver.source = ReceiverSource::Tailscale;
+        receivers.push_back(std::move(receiver));
+    }
+
+    return receivers;
+}
 
 class NoWheelSpinBox final : public QSpinBox {
 public:
@@ -284,6 +351,24 @@ public:
             finishDiscovery(code, status);
         });
 
+        tailscaleProcess_ = new QProcess(this);
+        tailscaleProcess_->setProcessChannelMode(QProcess::MergedChannels);
+        connect(tailscaleProcess_, &QProcess::readyReadStandardOutput, this, [this] {
+            tailscaleOutput_ += QString::fromLocal8Bit(tailscaleProcess_->readAllStandardOutput());
+        });
+        connect(tailscaleProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            Q_UNUSED(error);
+            if (tailscaleLogOutput_) {
+                appendOutput("Tailscale peer refresh unavailable; type a Tailscale IP manually if needed\n");
+            }
+            tailscaleReceivers_.clear();
+            updateReceiverList(combinedReceivers());
+            completeReceiverScanIfDone();
+        });
+        connect(tailscaleProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
+            finishTailscaleDiscovery(code, status);
+        });
+
         audioDeviceProcess_ = new QProcess(this);
         audioDeviceProcess_->setProcessChannelMode(QProcess::MergedChannels);
         connect(audioDeviceProcess_, &QProcess::readyReadStandardOutput, this, [this] {
@@ -445,7 +530,7 @@ private:
         layout->setSpacing(8);
 
         QVBoxLayout* receiversContent = nullptr;
-        layout->addWidget(makePanel("Receivers", &receiversContent));
+        layout->addWidget(makePanel("Targets", &receiversContent));
         receiverList_ = new QListWidget;
         receiverList_->setObjectName("ReceiverList");
         receiverList_->setMinimumHeight(120);
@@ -728,6 +813,9 @@ private:
 
         bindLineEdit(shareHostEdit_);
         bindSpinBox(sharePortSpin_);
+        connect(sharePortSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int port) {
+            updateTailscaleReceiverPorts(port);
+        });
         bindCheckBox(lanDiscoverableCheck_);
         bindSpinBox(displaySpin_);
         bindSpinBox(fpsSpin_);
@@ -880,8 +968,12 @@ private:
         if (discoveryProcess_->state() != QProcess::NotRunning) {
             discoveryProcess_->kill();
             discoveryProcess_->waitForFinished(500);
-            setDiscovering(false);
         }
+        if (tailscaleProcess_->state() != QProcess::NotRunning) {
+            tailscaleProcess_->kill();
+            tailscaleProcess_->waitForFinished(500);
+        }
+        setDiscovering(false);
         if (accessCodeEdit_->text().isEmpty() && !allowPlaintextCheck_->isChecked()) {
             QMessageBox::warning(
                 this,
@@ -1009,9 +1101,21 @@ private:
         return devices;
     }
 
+    QVector<DiscoveredReceiver> combinedReceivers() const
+    {
+        QVector<DiscoveredReceiver> receivers = lanReceivers_;
+        receivers += tailscaleReceivers_;
+        return receivers;
+    }
+
     QString receiverDisplayText(const DiscoveredReceiver& receiver) const
     {
         const QString name = receiver.name.trimmed().isEmpty() ? QStringLiteral("ScreenShare") : receiver.name.trimmed();
+        if (receiver.source == ReceiverSource::Tailscale) {
+            return QStringLiteral("%1  %2:%3  Tailscale peer")
+                .arg(name, receiver.host)
+                .arg(receiver.port);
+        }
         const QString security = receiver.securityKnown ? (receiver.encrypted ? QStringLiteral("Encrypted") : QStringLiteral("Plaintext")) : QStringLiteral("Unknown");
         return QStringLiteral("%1  %2:%3  %4")
             .arg(name, receiver.host)
@@ -1053,6 +1157,9 @@ private:
 
     bool sameDiscoveredReceiver(const DiscoveredReceiver& lhs, const DiscoveredReceiver& rhs) const
     {
+        if (lhs.host == rhs.host && lhs.port == rhs.port) {
+            return true;
+        }
         if (lhs.port != rhs.port || lhs.accessFingerprint != rhs.accessFingerprint) {
             return false;
         }
@@ -1104,7 +1211,11 @@ private:
             const auto& receiver = discoveredReceivers_[index];
             auto* item = new QListWidgetItem(receiverDisplayText(receiver));
             item->setData(Qt::UserRole, index);
-            item->setToolTip(QStringLiteral("%1:%2").arg(receiver.host).arg(receiver.port));
+            item->setToolTip(receiver.source == ReceiverSource::Tailscale ?
+                QStringLiteral("Tailscale peer only. Watch may not be running on that computer.\n%1:%2")
+                    .arg(receiver.host)
+                    .arg(receiver.port) :
+                QStringLiteral("%1:%2").arg(receiver.host).arg(receiver.port));
             receiverList_->addItem(item);
             if (receiver.host == selectedHost && receiver.port == selectedPort) {
                 selectedRow = index;
@@ -1128,11 +1239,11 @@ private:
         }
         const int count = discoveredReceivers_.size();
         if (count == 0) {
-            receiverStatusLabel_->setText("No receivers");
+            receiverStatusLabel_->setText("No targets");
         } else if (count == 1) {
-            receiverStatusLabel_->setText("1 receiver");
+            receiverStatusLabel_->setText("1 target");
         } else {
-            receiverStatusLabel_->setText(QString::number(count) + " receivers");
+            receiverStatusLabel_->setText(QString::number(count) + " targets");
         }
     }
 
@@ -1186,6 +1297,8 @@ private:
                     clearAccessCodeForRetry("Access code does not match the selected receiver. Try again.");
                 }
             }
+        } else if (receiver.source == ReceiverSource::Tailscale) {
+            appendOutput("Selected Tailscale peer " + receiverName + "; make sure Watch is running on that computer\n");
         }
 
         appendOutput("Selected receiver " + receiverName + " at " + receiver.host + ":" + QString::number(receiver.port) + "\n");
@@ -1194,7 +1307,7 @@ private:
 
     void startDiscovery(bool automatic)
     {
-        if (discoveryProcess_->state() != QProcess::NotRunning) {
+        if (receiverScanRunning()) {
             return;
         }
         if (automatic && !shareMode()) {
@@ -1202,7 +1315,7 @@ private:
         }
         if (process_->state() != QProcess::NotRunning) {
             if (!automatic) {
-                QMessageBox::information(this, "Already running", "Stop the current session before discovering receivers.");
+                QMessageBox::information(this, "Already running", "Stop the current session before refreshing targets.");
             }
             return;
         }
@@ -1217,41 +1330,64 @@ private:
 
         discoverySelectFirst_ = !automatic;
         discoveryLogOutput_ = !automatic;
+        tailscaleLogOutput_ = !automatic;
+        receiverScanNotificationShown_ = false;
         discoveryOutput_.clear();
+        tailscaleOutput_.clear();
         if (!automatic) {
-            appendOutput("\nRefreshing receivers...\n");
+            appendOutput("\nRefreshing targets...\n");
         }
         discoveryProcess_->setProgram(program);
         discoveryProcess_->setArguments({"--lan-discover", "--lan-discover-seconds", "2"});
         discoveryProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
         setDiscovering(true);
         discoveryProcess_->start();
+        startTailscaleDiscovery();
     }
 
     void finishDiscovery(int code, QProcess::ExitStatus status)
     {
-        setDiscovering(false);
         if (status != QProcess::NormalExit || code != 0) {
             if (discoveryLogOutput_) {
                 appendOutput("LAN discovery finished with exit code " + QString::number(code) + "\n");
             }
+            lanReceivers_.clear();
+            updateReceiverList(combinedReceivers());
+            completeReceiverScanIfDone();
             return;
         }
 
-        const QVector<DiscoveredReceiver> receivers = parseDiscoveredReceivers(discoveryOutput_);
-        updateReceiverList(receivers);
-        if (receivers.isEmpty()) {
-            if (discoverySelectFirst_) {
-                QMessageBox::information(this, "No receivers found", "No discoverable receivers were found.");
+        lanReceivers_ = parseDiscoveredReceivers(discoveryOutput_);
+        updateReceiverList(combinedReceivers());
+        completeReceiverScanIfDone();
+    }
+
+    void startTailscaleDiscovery()
+    {
+        tailscaleProcess_->setProgram("tailscale");
+        tailscaleProcess_->setArguments({"status", "--json"});
+        tailscaleProcess_->setWorkingDirectory(QDir::currentPath());
+        tailscaleProcess_->start();
+    }
+
+    void finishTailscaleDiscovery(int code, QProcess::ExitStatus status)
+    {
+        if (status != QProcess::NormalExit || code != 0) {
+            if (tailscaleLogOutput_) {
+                appendOutput("Tailscale peer refresh finished with exit code " + QString::number(code) + "\n");
             }
+            tailscaleReceivers_.clear();
+            updateReceiverList(combinedReceivers());
+            completeReceiverScanIfDone();
             return;
         }
 
-        if (discoverySelectFirst_ && receivers.size() == 1) {
-            selectDiscoveredReceiver(receivers.front(), true);
-        } else if (discoverySelectFirst_) {
-            appendOutput("Found " + QString::number(receivers.size()) + " receivers\n");
+        tailscaleReceivers_ = parseTailscaleStatusReceivers(tailscaleOutput_, sharePortSpin_->value());
+        updateReceiverList(combinedReceivers());
+        if (tailscaleLogOutput_ && !tailscaleReceivers_.isEmpty()) {
+            appendOutput("Found " + QString::number(tailscaleReceivers_.size()) + " Tailscale peers\n");
         }
+        completeReceiverScanIfDone();
     }
 
     void refreshAudioDevices(bool automatic)
@@ -1404,6 +1540,51 @@ private:
         return true;
     }
 
+    bool receiverScanRunning() const
+    {
+        return discoveryProcess_->state() != QProcess::NotRunning ||
+               tailscaleProcess_->state() != QProcess::NotRunning;
+    }
+
+    void completeReceiverScanIfDone()
+    {
+        if (receiverScanRunning()) {
+            setDiscovering(true);
+            return;
+        }
+
+        setDiscovering(false);
+        if (!discoverySelectFirst_ || receiverScanNotificationShown_) {
+            return;
+        }
+
+        receiverScanNotificationShown_ = true;
+        if (discoveredReceivers_.isEmpty()) {
+            QMessageBox::information(
+                this,
+                "No targets found",
+                "No LAN receivers or Tailscale peers were found. You can still type the receiver IP manually.");
+        } else if (discoveredReceivers_.size() == 1) {
+            selectDiscoveredReceiver(discoveredReceivers_.front(), true);
+        } else {
+            appendOutput("Found " + QString::number(discoveredReceivers_.size()) + " targets\n");
+        }
+    }
+
+    void updateTailscaleReceiverPorts(int port)
+    {
+        bool changed = false;
+        for (auto& receiver : tailscaleReceivers_) {
+            if (receiver.port != port) {
+                receiver.port = port;
+                changed = true;
+            }
+        }
+        if (changed) {
+            updateReceiverList(combinedReceivers());
+        }
+    }
+
     void setDiscovering(bool discovering)
     {
         if (findLanButton_ != nullptr) {
@@ -1457,10 +1638,10 @@ private:
         shareModeButton_->setEnabled(!running);
         watchModeButton_->setEnabled(!running);
         if (findLanButton_ != nullptr) {
-            findLanButton_->setEnabled(!running && discoveryProcess_->state() == QProcess::NotRunning);
+            findLanButton_->setEnabled(!running && !receiverScanRunning());
         }
         if (receiverList_ != nullptr) {
-            receiverList_->setEnabled(!running && discoveryProcess_->state() == QProcess::NotRunning);
+            receiverList_->setEnabled(!running && !receiverScanRunning());
         }
         if (audioDeviceCombo_ != nullptr) {
             audioDeviceCombo_->setEnabled(!running);
@@ -1487,6 +1668,7 @@ private:
     QPushButton* actionButton_ = nullptr;
     QProcess* process_ = nullptr;
     QProcess* discoveryProcess_ = nullptr;
+    QProcess* tailscaleProcess_ = nullptr;
     QProcess* audioDeviceProcess_ = nullptr;
     QTimer* receiverRefreshTimer_ = nullptr;
 
@@ -1520,10 +1702,15 @@ private:
     quint64 runSerial_ = 0;
     QString stopFilePath_;
     QString discoveryOutput_;
+    QString tailscaleOutput_;
     QString audioDeviceOutput_;
     QVector<DiscoveredReceiver> discoveredReceivers_;
+    QVector<DiscoveredReceiver> lanReceivers_;
+    QVector<DiscoveredReceiver> tailscaleReceivers_;
     bool discoverySelectFirst_ = false;
     bool discoveryLogOutput_ = false;
+    bool tailscaleLogOutput_ = false;
+    bool receiverScanNotificationShown_ = false;
     bool audioDeviceLogOutput_ = false;
     bool selectedReceiverKnown_ = false;
     bool selectedReceiverSecurityKnown_ = false;
@@ -2008,7 +2195,24 @@ int main(int argc, char** argv)
     for (int index = 1; index < argc; ++index) {
         const QString arg = QString::fromLocal8Bit(argv[index]);
         if (arg == "--self-test") {
-            return QFileInfo::exists(enginePath()) ? 0 : 1;
+            if (!QFileInfo::exists(enginePath())) {
+                return 1;
+            }
+            const auto peers = parseTailscaleStatusReceivers(QString::fromUtf8(R"json({
+                "Peer": {
+                    "node-a": {
+                        "HostName": "friend-pc",
+                        "TailscaleIPs": ["100.64.0.2", "fd7a:115c:a1e0::2"],
+                        "Online": true
+                    },
+                    "node-b": {
+                        "HostName": "offline-pc",
+                        "TailscaleIPs": ["100.64.0.3"],
+                        "Online": false
+                    }
+                }
+            })json"), 5000);
+            return peers.size() == 1 && peers.front().host == "100.64.0.2" ? 0 : 2;
         }
     }
 

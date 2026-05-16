@@ -119,10 +119,14 @@ On the sharing computer, discover nearby receivers:
 
 The output includes `share_target=HOST:PORT` plus a ready-to-run `ScreenShare --share ...` command.
 The desktop UI exposes the same flow: Watch has a LAN discoverable checkbox, and Share has an
-auto-refreshing Receivers list plus a manual Refresh button. Selecting a discovered receiver fills the
+auto-refreshing Targets list plus a manual Refresh button. Selecting a discovered receiver fills the
 address and port; encrypted receivers focus the main Access code field when it is empty. Discovery
 uses UDP port 47995 by default; add `--lan-discovery-port PORT` on both sides if you need a different
 port.
+When the Tailscale CLI is installed on the sharing computer, the same Targets list also includes
+online peers from `tailscale status --json` at the currently selected port. These entries are quick
+targets, not confirmed receivers: the UI cannot know whether Watch is actually running or which access
+code the peer expects. Start Watch on that computer and use the same access code on both sides.
 Discovery also reports whether the receiver expects encrypted traffic. Use the same access code on
 both computers for encrypted sessions; there is no separate LAN invite code. If Watch is using an
 access code, discovery prints `security=encrypted` and an access-code fingerprint, and the generated
@@ -132,7 +136,8 @@ explicitly plaintext, discovery prints `security=plaintext` and the generated Sh
 `--allow-plaintext`.
 Tailscale and similar mesh VPNs can already be used by typing the receiver's mesh IP, such as a
 `100.x.y.z` Tailscale address, into the Share address field. LAN discovery may not list mesh peers
-because those networks usually do not behave like a broadcast LAN.
+because those networks usually do not behave like a broadcast LAN; the UI peer picker is a separate
+convenience over the local Tailscale CLI, not part of UDP broadcast discovery.
 The desktop UI warns before starting Share with `127.0.0.1`, `localhost`, or `::1` because those
 addresses send to the sender computer instead of the remote Watch computer.
 
