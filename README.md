@@ -134,6 +134,15 @@ because those networks usually do not behave like a broadcast LAN.
 The desktop UI warns before starting Share with `127.0.0.1`, `localhost`, or `::1` because those
 addresses send to the sender computer instead of the remote Watch computer.
 
+You can also run a first NAT diagnostic with a STUN server. This does not connect two peers yet; it
+prints the public UDP endpoint that a manual invite/hole-punching flow will use later:
+
+```powershell
+.\build\release\ScreenShare.exe --stun stun.l.google.com:19302
+```
+
+The output includes `public_udp_endpoint=HOST:PORT` and `local_udp_endpoint=HOST:PORT`.
+
 List monitors:
 
 ```powershell
