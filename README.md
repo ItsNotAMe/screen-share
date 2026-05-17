@@ -185,8 +185,10 @@ the sender invite so the receiver's punch probes hit the socket that sends media
 .\build\release\ScreenShare.exe --share "nat_invite=screenshare-invite-v1;..." --udp-local-port 5001 --access-code CODE
 ```
 
-`--share "nat_invite=..."` currently sends to the invite's public endpoint. `--nat-probe-interval-ms
-MS` can tune Watch's probe interval. The default is 250 ms.
+`--share "nat_invite=..."` uses the invite's public endpoint by default. Add
+`--invite-endpoint local` when both computers are reachable through the invite's local address, such
+as same-LAN/VPN experiments. `--nat-probe-interval-ms MS` can tune Watch's probe interval. The
+default is 250 ms.
 
 List monitors:
 

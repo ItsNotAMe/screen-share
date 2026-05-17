@@ -54,6 +54,12 @@ enum class StreamEncoderPreference {
     Hardware,
 };
 
+enum class InviteEndpointPreference {
+    Auto,
+    Public,
+    Local,
+};
+
 constexpr size_t OrderedReceiverStartThresholdFrames = 30;
 constexpr size_t OrderedReceiverRecoveryThresholdFrames = 30;
 constexpr size_t ReceiverHealthPendingFrameWarning = 8;
@@ -97,6 +103,9 @@ struct Options {
     bool udpPacing = true;
     bool udpPacingOptionProvided = false;
     bool udpSendTargetFromPeerInvite = false;
+    std::string udpSendPeerInviteEndpoint = "direct";
+    InviteEndpointPreference inviteEndpointPreference = InviteEndpointPreference::Auto;
+    bool inviteEndpointPreferenceProvided = false;
     int udpMaxQueueMs = DefaultUdpMaxQueueMs;
     bool udpMaxQueueMsProvided = false;
     bool adaptBitrate = false;
@@ -193,6 +202,7 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT|INVITE [--display N] [--seconds S]\n"
+        << "              [--invite-endpoint auto|public|local]\n"
         << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
@@ -237,6 +247,7 @@ void PrintHelp()
         << "       exchange invites, then run --nat-probe PORT --peer-invite \"nat_invite=...\" on both sides.\n"
         << "       Watch can also use --peer-invite to send punch probes while waiting for Share.\n"
         << "       Share can use --share \"nat_invite=...\" to send to the peer invite endpoint.\n"
+        << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -266,6 +277,7 @@ void PrintHelp()
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system\n"
         << "  ScreenShare --share 203.0.113.10:5000 --udp-local-port 5001 --access-code 123456\n"
         << "  ScreenShare --share \"nat_invite=screenshare-invite-v1;...\" --udp-local-port 5001 --access-code 123456\n"
+        << "  ScreenShare --share \"nat_invite=screenshare-invite-v1;...\" --invite-endpoint local --access-code 123456\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -495,6 +507,36 @@ const char* StreamEncoderPreferenceName(StreamEncoderPreference preference)
         return "software";
     case StreamEncoderPreference::Hardware:
         return "hardware";
+    default:
+        return "unknown";
+    }
+}
+
+InviteEndpointPreference ParseInviteEndpointPreference(const char* value)
+{
+    const std::string preference = value;
+    if (preference == "auto") {
+        return InviteEndpointPreference::Auto;
+    }
+    if (preference == "public") {
+        return InviteEndpointPreference::Public;
+    }
+    if (preference == "local") {
+        return InviteEndpointPreference::Local;
+    }
+
+    throw std::invalid_argument(std::string("Invalid value for --invite-endpoint: ") + value);
+}
+
+const char* InviteEndpointPreferenceName(InviteEndpointPreference preference)
+{
+    switch (preference) {
+    case InviteEndpointPreference::Auto:
+        return "auto";
+    case InviteEndpointPreference::Public:
+        return "public";
+    case InviteEndpointPreference::Local:
+        return "local";
     default:
         return "unknown";
     }
@@ -2197,6 +2239,33 @@ bool LooksLikeNatInvite(std::string_view text)
 std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint);
 screenshare::NatInvite ParseValidatedPeerInvite(const Options& options);
 
+struct SelectedNatInviteEndpoint {
+    screenshare::NatInviteEndpoint endpoint;
+    const char* name = "public";
+};
+
+bool HasNatEndpoint(const screenshare::NatInviteEndpoint& endpoint)
+{
+    return !endpoint.host.empty() && endpoint.port != 0;
+}
+
+SelectedNatInviteEndpoint SelectNatInviteEndpoint(
+    const screenshare::NatInvite& invite,
+    InviteEndpointPreference preference)
+{
+    if (preference == InviteEndpointPreference::Local) {
+        if (!HasNatEndpoint(invite.localEndpoint)) {
+            throw std::invalid_argument("Peer invite does not include a local endpoint");
+        }
+        return {invite.localEndpoint, "local"};
+    }
+
+    if (!HasNatEndpoint(invite.publicEndpoint)) {
+        throw std::invalid_argument("Peer invite does not include a public endpoint");
+    }
+    return {invite.publicEndpoint, preference == InviteEndpointPreference::Auto ? "auto-public" : "public"};
+}
+
 void WarnIfPlaintextUdpSession(const Options& options)
 {
     if (HasUdpSession(options) && !options.accessCodeProvided && !options.allowPlaintext) {
@@ -2293,6 +2362,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--nat-probe-interval-ms") {
             options.natProbeIntervalMs = ParseInt(requireValue("--nat-probe-interval-ms"), "--nat-probe-interval-ms");
             options.natProbeIntervalProvided = true;
+        } else if (arg == "--invite-endpoint") {
+            options.inviteEndpointPreference = ParseInviteEndpointPreference(requireValue("--invite-endpoint"));
+            options.inviteEndpointPreferenceProvided = true;
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
         } else if (arg == "--watch") {
@@ -2435,9 +2507,11 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
                 throw std::invalid_argument("--share invite cannot be combined with --peer-invite");
             }
             const auto invite = screenshare::ParseNatInvite(*shareTarget);
+            const auto selectedEndpoint = SelectNatInviteEndpoint(invite, options.inviteEndpointPreference);
             options.peerInvite = *shareTarget;
-            options.udpSendTarget = FormatNatEndpoint(invite.publicEndpoint);
+            options.udpSendTarget = FormatNatEndpoint(selectedEndpoint.endpoint);
             options.udpSendTargetFromPeerInvite = true;
+            options.udpSendPeerInviteEndpoint = selectedEndpoint.name;
         } else {
             options.udpSendTarget = *shareTarget;
         }
@@ -2527,6 +2601,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     }
     if (options.inviteTtlSeconds < 30 || options.inviteTtlSeconds > 3600) {
         throw std::invalid_argument("--invite-ttl-seconds must be between 30 and 3600");
+    }
+    if (options.inviteEndpointPreferenceProvided && !options.udpSendTargetFromPeerInvite) {
+        throw std::invalid_argument("--invite-endpoint requires --share INVITE");
     }
     if (!options.peerInvite.empty() &&
         !options.natProbe &&
@@ -3426,7 +3503,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
         if (peerInvite && options.udpSendTargetFromPeerInvite) {
-            std::cout << " from peer invite";
+            std::cout << " from peer invite endpoint=" << options.udpSendPeerInviteEndpoint;
         }
         if (options.udpLocalPort != 0) {
             std::cout << ", UDP local port " << options.udpLocalPort;
@@ -3937,6 +4014,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                             std::cout
                                 << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
                                 << " target_source=" << (options.udpSendTargetFromPeerInvite ? "peer_invite" : "direct")
+                                << " invite_endpoint=" << (options.udpSendTargetFromPeerInvite ? options.udpSendPeerInviteEndpoint : "none")
                                 << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
                                 << " local_port=" << (udpConfig.localPort == 0 ? std::string("auto") : std::to_string(udpConfig.localPort))
                                 << " max_queue_ms=" << udpConfig.maxQueueDelay.count()
