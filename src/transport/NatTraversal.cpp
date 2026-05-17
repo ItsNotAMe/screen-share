@@ -352,7 +352,21 @@ std::vector<std::byte> BuildNatProbeDatagram(
 
 bool IsNatProbeDatagram(std::span<const std::byte> datagram)
 {
-    return ParseProbePacket(datagram.data(), static_cast<int>(datagram.size())).has_value();
+    return ParseNatProbeDatagram(datagram).has_value();
+}
+
+std::optional<NatProbeDatagramInfo> ParseNatProbeDatagram(std::span<const std::byte> datagram)
+{
+    const auto packet = ParseProbePacket(datagram.data(), static_cast<int>(datagram.size()));
+    if (!packet) {
+        return std::nullopt;
+    }
+
+    NatProbeDatagramInfo info;
+    info.sequence = packet->sequence;
+    info.sessionFingerprint = packet->sessionFingerprint;
+    info.accessCodeFingerprint = packet->accessCodeFingerprint;
+    return info;
 }
 
 NatProbeStats RunNatProbeExchange(const NatProbeConfig& config)

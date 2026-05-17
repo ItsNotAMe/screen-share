@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -52,11 +53,18 @@ struct NatProbeStats {
     std::vector<NatProbeSeenEndpoint> seenEndpoints;
 };
 
+struct NatProbeDatagramInfo {
+    uint64_t sequence = 0;
+    uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
+};
+
 NatInvite ParseNatInvite(const std::string& text);
 std::vector<std::byte> BuildNatProbeDatagram(
     uint64_t sequence,
     uint64_t sessionFingerprint,
     uint64_t accessCodeFingerprint);
+std::optional<NatProbeDatagramInfo> ParseNatProbeDatagram(std::span<const std::byte> datagram);
 bool IsNatProbeDatagram(std::span<const std::byte> datagram);
 NatProbeStats RunNatProbeExchange(const NatProbeConfig& config);
 
