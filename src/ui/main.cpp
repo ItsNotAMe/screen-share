@@ -86,16 +86,36 @@ bool looksLikeNatInvite(QString value)
 
 QString extractInviteLine(const QString& output)
 {
+    const auto normalizeInvite = [](QString invite) {
+        invite = invite.trimmed();
+        if (invite.startsWith("screenshare-invite-v1")) {
+            invite.prepend("nat_invite=");
+        }
+        return invite;
+    };
+
+    const QString trimmed = normalizeInvite(output);
+    if (looksLikeNatInvite(trimmed)) {
+        return trimmed;
+    }
+
     const QStringList lines = output.split(QRegularExpression(QStringLiteral("[\r\n]+")), Qt::SkipEmptyParts);
     for (const QString& line : lines) {
         if (line.startsWith("send_this_invite_to_peer=")) {
-            return line.mid(QStringLiteral("send_this_invite_to_peer=").size()).trimmed();
+            return normalizeInvite(line.mid(QStringLiteral("send_this_invite_to_peer=").size()));
         }
     }
     for (const QString& line : lines) {
-        if (line.startsWith("nat_invite=")) {
-            return line.trimmed();
+        const QString invite = normalizeInvite(line);
+        if (looksLikeNatInvite(invite)) {
+            return invite;
         }
+    }
+
+    const QRegularExpression invitePattern(QStringLiteral(R"((nat_invite=screenshare-invite-v1;[^\s'"`]+))"));
+    const QRegularExpressionMatch match = invitePattern.match(output);
+    if (match.hasMatch()) {
+        return match.captured(1).trimmed();
     }
     return {};
 }
@@ -620,6 +640,17 @@ private:
         layout->addWidget(makePanel("Internet", &internetContent));
         sharePeerInviteEdit_ = new QLineEdit;
         sharePeerInviteEdit_->setPlaceholderText("Receiver invite");
+        auto* sharePeerInviteRow = new QWidget;
+        sharePeerInviteRow->setObjectName("FormRow");
+        auto* sharePeerInviteLayout = new QHBoxLayout(sharePeerInviteRow);
+        sharePeerInviteLayout->setContentsMargins(0, 0, 0, 0);
+        sharePeerInviteLayout->setSpacing(8);
+        pasteSharePeerInviteButton_ = new QPushButton("Paste");
+        pasteSharePeerInviteButton_->setObjectName("SecondaryButton");
+        pasteSharePeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
+        pasteSharePeerInviteButton_->setIconSize(QSize(14, 14));
+        pasteSharePeerInviteButton_->setCursor(Qt::PointingHandCursor);
+        pasteSharePeerInviteButton_->setFixedHeight(kRowHeight);
         shareInvitePortSpin_ = new NoWheelSpinBox;
         shareInvitePortSpin_->setRange(1, 65535);
         shareInvitePortSpin_->setValue(5000);
@@ -643,16 +674,23 @@ private:
         copyShareInviteButton_->setCursor(Qt::PointingHandCursor);
         copyShareInviteButton_->setFixedHeight(kRowHeight);
         prepareInput(sharePeerInviteEdit_);
+        prepareInput(sharePeerInviteRow);
         prepareInput(shareInvitePortSpin_);
         prepareInput(shareLocalInviteEdit_);
         prepareInput(shareLocalInviteRow);
+        sharePeerInviteLayout->addWidget(sharePeerInviteEdit_, 1);
+        sharePeerInviteLayout->addWidget(pasteSharePeerInviteButton_);
         shareLocalInviteLayout->addWidget(shareLocalInviteEdit_, 1);
         shareLocalInviteLayout->addWidget(createShareInviteButton_);
         shareLocalInviteLayout->addWidget(copyShareInviteButton_);
-        addRow(internetContent, "Peer invite", sharePeerInviteEdit_);
+        addRow(internetContent, "Peer invite", sharePeerInviteRow);
         addRow(internetContent, "Local port", shareInvitePortSpin_);
         addRow(internetContent, "Your invite", shareLocalInviteRow);
-        internetContent->addWidget(makeLabel("Create your invite, send it to your friend, then paste their invite above.", "Subtle"));
+        shareInternetStatusLabel_ = makeLabel("", "StatusHint");
+        internetContent->addWidget(shareInternetStatusLabel_);
+        connect(pasteSharePeerInviteButton_, &QPushButton::clicked, this, [this] {
+            pasteInviteFromClipboard(sharePeerInviteEdit_, "Receiver");
+        });
         connect(createShareInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Share); });
         connect(copyShareInviteButton_, &QPushButton::clicked, this, [this] {
             copyInvite(shareLocalInviteEdit_, "Share");
@@ -729,6 +767,17 @@ private:
         layout->addWidget(makePanel("Internet", &internetContent));
         watchPeerInviteEdit_ = new QLineEdit;
         watchPeerInviteEdit_->setPlaceholderText("Sender invite");
+        auto* watchPeerInviteRow = new QWidget;
+        watchPeerInviteRow->setObjectName("FormRow");
+        auto* watchPeerInviteLayout = new QHBoxLayout(watchPeerInviteRow);
+        watchPeerInviteLayout->setContentsMargins(0, 0, 0, 0);
+        watchPeerInviteLayout->setSpacing(8);
+        pasteWatchPeerInviteButton_ = new QPushButton("Paste");
+        pasteWatchPeerInviteButton_->setObjectName("SecondaryButton");
+        pasteWatchPeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
+        pasteWatchPeerInviteButton_->setIconSize(QSize(14, 14));
+        pasteWatchPeerInviteButton_->setCursor(Qt::PointingHandCursor);
+        pasteWatchPeerInviteButton_->setFixedHeight(kRowHeight);
         watchLocalInviteEdit_ = new QLineEdit;
         watchLocalInviteEdit_->setPlaceholderText("Your invite");
         auto* watchLocalInviteRow = new QWidget;
@@ -749,14 +798,21 @@ private:
         copyWatchInviteButton_->setCursor(Qt::PointingHandCursor);
         copyWatchInviteButton_->setFixedHeight(kRowHeight);
         prepareInput(watchPeerInviteEdit_);
+        prepareInput(watchPeerInviteRow);
         prepareInput(watchLocalInviteEdit_);
         prepareInput(watchLocalInviteRow);
+        watchPeerInviteLayout->addWidget(watchPeerInviteEdit_, 1);
+        watchPeerInviteLayout->addWidget(pasteWatchPeerInviteButton_);
         watchLocalInviteLayout->addWidget(watchLocalInviteEdit_, 1);
         watchLocalInviteLayout->addWidget(createWatchInviteButton_);
         watchLocalInviteLayout->addWidget(copyWatchInviteButton_);
-        addRow(internetContent, "Peer invite", watchPeerInviteEdit_);
+        addRow(internetContent, "Peer invite", watchPeerInviteRow);
         addRow(internetContent, "Your invite", watchLocalInviteRow);
-        internetContent->addWidget(makeLabel("Create your invite, send it to the sharer, then paste their invite above.", "Subtle"));
+        watchInternetStatusLabel_ = makeLabel("", "StatusHint");
+        internetContent->addWidget(watchInternetStatusLabel_);
+        connect(pasteWatchPeerInviteButton_, &QPushButton::clicked, this, [this] {
+            pasteInviteFromClipboard(watchPeerInviteEdit_, "Sender");
+        });
         connect(createWatchInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Watch); });
         connect(copyWatchInviteButton_, &QPushButton::clicked, this, [this] {
             copyInvite(watchLocalInviteEdit_, "Watch");
@@ -946,6 +1002,7 @@ private:
 
         bindLineEdit(shareHostEdit_);
         bindLineEdit(sharePeerInviteEdit_);
+        connect(sharePeerInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(shareLocalInviteEdit_);
         connect(shareLocalInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInviteButtons(); });
         bindSpinBox(shareInvitePortSpin_);
@@ -962,6 +1019,7 @@ private:
         bindSpinBox(watchPortSpin_);
         connect(watchPortSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { clearWatchLocalInvite(); });
         bindLineEdit(watchPeerInviteEdit_);
+        connect(watchPeerInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         connect(watchLocalInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInviteButtons(); });
         bindCheckBox(mutedCheck_);
         bindSpinBox(volumeSpin_);
@@ -1041,6 +1099,20 @@ private:
         }
         QApplication::clipboard()->setText(invite);
         appendOutput(label + " invite copied to clipboard\n");
+    }
+
+    void pasteInviteFromClipboard(QLineEdit* edit, const QString& label)
+    {
+        if (edit == nullptr) {
+            return;
+        }
+        const QString invite = extractInviteLine(QApplication::clipboard()->text());
+        if (invite.isEmpty()) {
+            QMessageBox::warning(this, "Invite", "The clipboard does not contain a ScreenShare invite.");
+            return;
+        }
+        edit->setText(invite);
+        appendOutput(label + " invite pasted from clipboard\n");
     }
 
     bool inviteGenerating() const
@@ -1272,6 +1344,14 @@ private:
                 "Missing peer invite",
                 "Paste the receiver invite before using a local invite.");
             sharePeerInviteEdit_->setFocus();
+            return;
+        }
+        if (shareMode() && shareNatInvite && shareLocalInviteEdit_->text().trimmed().isEmpty()) {
+            QMessageBox::warning(
+                this,
+                "Missing local invite",
+                "Create your invite before starting Share with a receiver invite.");
+            createShareInviteButton_->setFocus();
             return;
         }
         if (!confirmShareTarget()) {
@@ -1957,6 +2037,51 @@ private:
         if (copyWatchInviteButton_ != nullptr) {
             copyWatchInviteButton_->setEnabled(!creating && !watchLocalInviteEdit_->text().trimmed().isEmpty());
         }
+        if (pasteSharePeerInviteButton_ != nullptr) {
+            pasteSharePeerInviteButton_->setEnabled(!creating && !running);
+        }
+        if (pasteWatchPeerInviteButton_ != nullptr) {
+            pasteWatchPeerInviteButton_->setEnabled(!creating && !running);
+        }
+        updateInternetStatus();
+    }
+
+    void updateInternetStatus()
+    {
+        if (shareInternetStatusLabel_ != nullptr) {
+            shareInternetStatusLabel_->setText(internetStatusText(
+                true,
+                !shareLocalInviteEdit_->text().trimmed().isEmpty(),
+                !sharePeerInviteEdit_->text().trimmed().isEmpty()));
+        }
+        if (watchInternetStatusLabel_ != nullptr) {
+            watchInternetStatusLabel_->setText(internetStatusText(
+                false,
+                !watchLocalInviteEdit_->text().trimmed().isEmpty(),
+                !watchPeerInviteEdit_->text().trimmed().isEmpty()));
+        }
+    }
+
+    QString internetStatusText(bool share, bool hasLocalInvite, bool hasPeerInvite) const
+    {
+        if (!hasLocalInvite && !hasPeerInvite) {
+            return share ?
+                "Waiting: create your invite, then paste the receiver invite." :
+                "Waiting: create your invite, then paste the sender invite.";
+        }
+        if (!hasLocalInvite) {
+            return share ?
+                "Almost: create your invite so Share can bind the right UDP port." :
+                "Almost: create your invite and send it to the sharer.";
+        }
+        if (!hasPeerInvite) {
+            return share ?
+                "Almost: send your invite, then paste the receiver invite." :
+                "Almost: send your invite, then paste the sender invite.";
+        }
+        return share ?
+            "Ready: ask your friend to start Watch, then start Share." :
+            "Ready: start Watch, then tell the sharer to start Share.";
     }
 
     void setRunning(bool running)
@@ -2020,10 +2145,12 @@ private:
     QLabel* receiverStatusLabel_ = nullptr;
     QLineEdit* shareHostEdit_ = nullptr;
     QLineEdit* sharePeerInviteEdit_ = nullptr;
+    QPushButton* pasteSharePeerInviteButton_ = nullptr;
     QLineEdit* shareLocalInviteEdit_ = nullptr;
     QSpinBox* shareInvitePortSpin_ = nullptr;
     QPushButton* createShareInviteButton_ = nullptr;
     QPushButton* copyShareInviteButton_ = nullptr;
+    QLabel* shareInternetStatusLabel_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
     QPushButton* findLanButton_ = nullptr;
     QSpinBox* displaySpin_ = nullptr;
@@ -2034,9 +2161,11 @@ private:
     QLabel* audioDeviceStatusLabel_ = nullptr;
     QSpinBox* watchPortSpin_ = nullptr;
     QLineEdit* watchPeerInviteEdit_ = nullptr;
+    QPushButton* pasteWatchPeerInviteButton_ = nullptr;
     QLineEdit* watchLocalInviteEdit_ = nullptr;
     QPushButton* createWatchInviteButton_ = nullptr;
     QPushButton* copyWatchInviteButton_ = nullptr;
+    QLabel* watchInternetStatusLabel_ = nullptr;
     QCheckBox* lanDiscoverableCheck_ = nullptr;
     QCheckBox* mutedCheck_ = nullptr;
     QSpinBox* volumeSpin_ = nullptr;
@@ -2107,6 +2236,14 @@ QLabel[class="HeroTitle"] {
 }
 QLabel[class="Subtle"] {
     color: #8a96a5;
+    font-size: 9.5pt;
+}
+QLabel[class="StatusHint"] {
+    background: #10161d;
+    color: #aeb9c8;
+    border: 1px solid #26313d;
+    border-radius: 7px;
+    padding: 8px 10px;
     font-size: 9.5pt;
 }
 QLabel[class="PanelTitle"] {
@@ -2347,6 +2484,14 @@ QLabel[class="Subtle"] {
     color: #5e6b7a;
     font-size: 9.5pt;
 }
+QLabel[class="StatusHint"] {
+    background: #f0f4f8;
+    color: #536170;
+    border: 1px solid #d6dee8;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: 9.5pt;
+}
 QLabel[class="PanelTitle"] {
     font-size: 10.5pt;
     font-weight: 700;
@@ -2571,9 +2716,12 @@ int main(int argc, char** argv)
             const QString invite = extractInviteLine(QString::fromUtf8(
                 "noise\n"
                 "send_this_invite_to_peer=nat_invite=screenshare-invite-v1;public=1.2.3.4:5000\n"));
+            const QString commandInvite = extractInviteLine(QString::fromUtf8(
+                ".\\ScreenShare.exe --share 'nat_invite=screenshare-invite-v1;public=1.2.3.4:5000'"));
             return peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
-                invite.startsWith("nat_invite=screenshare-invite-v1") ? 0 : 2;
+                invite.startsWith("nat_invite=screenshare-invite-v1") &&
+                commandInvite.startsWith("nat_invite=screenshare-invite-v1") ? 0 : 2;
         }
     }
 

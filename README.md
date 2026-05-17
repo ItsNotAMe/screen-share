@@ -167,7 +167,8 @@ session fingerprint, access-code fingerprint, and an expiry timestamp. It also p
 The desktop UI exposes the same invite creation flow. Generate or paste the shared access code first,
 then use Create in the current tab's Internet section. The invite is copied to the clipboard and
 shown in the UI. Send that invite to your friend, paste their invite into Peer invite, and start the
-session normally.
+session normally. The Paste buttons can extract an invite from either a raw invite line or copied
+command output, and the Internet status line shows what is still missing before starting.
 
 After both sides exchange invite lines, you can optionally run a UDP probe diagnostic on both
 computers using the same local port that created each invite. Quote the copied invite because it
