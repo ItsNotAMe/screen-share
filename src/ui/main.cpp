@@ -78,6 +78,12 @@ QString formatCommand(const QString& program, const QStringList& arguments)
     return parts.join(' ');
 }
 
+bool looksLikeNatInvite(QString value)
+{
+    value = value.trimmed();
+    return value.startsWith("nat_invite=") || value.startsWith("screenshare-invite-v1");
+}
+
 QString accessCodeFingerprintText(const QString& accessCode)
 {
     const QByteArray bytes = accessCode.toUtf8();
@@ -570,6 +576,18 @@ private:
         addRow(connectionContent, "Address", shareHostEdit_);
         addRow(connectionContent, "Port", sharePortSpin_);
 
+        QVBoxLayout* internetContent = nullptr;
+        layout->addWidget(makePanel("Internet", &internetContent));
+        sharePeerInviteEdit_ = new QLineEdit;
+        sharePeerInviteEdit_->setPlaceholderText("Receiver invite");
+        shareLocalInviteEdit_ = new QLineEdit;
+        shareLocalInviteEdit_->setPlaceholderText("Your invite");
+        prepareInput(sharePeerInviteEdit_);
+        prepareInput(shareLocalInviteEdit_);
+        addRow(internetContent, "Peer invite", sharePeerInviteEdit_);
+        addRow(internetContent, "Local invite", shareLocalInviteEdit_);
+        internetContent->addWidget(makeLabel("Use invites for direct UDP hole punching across the internet.", "Subtle"));
+
         QVBoxLayout* videoContent = nullptr;
         layout->addWidget(makePanel("Video", &videoContent));
         displaySpin_ = new NoWheelSpinBox;
@@ -636,6 +654,14 @@ private:
         lanDiscoverableCheck_ = new QCheckBox("LAN discoverable");
         lanDiscoverableCheck_->setChecked(true);
         addFullRow(listenContent, lanDiscoverableCheck_);
+
+        QVBoxLayout* internetContent = nullptr;
+        layout->addWidget(makePanel("Internet", &internetContent));
+        watchPeerInviteEdit_ = new QLineEdit;
+        watchPeerInviteEdit_->setPlaceholderText("Sender invite");
+        prepareInput(watchPeerInviteEdit_);
+        addRow(internetContent, "Peer invite", watchPeerInviteEdit_);
+        internetContent->addWidget(makeLabel("Paste the sharer's invite to send punch probes while waiting.", "Subtle"));
 
         QVBoxLayout* audioContent = nullptr;
         layout->addWidget(makePanel("Audio", &audioContent));
@@ -812,6 +838,8 @@ private:
         };
 
         bindLineEdit(shareHostEdit_);
+        bindLineEdit(sharePeerInviteEdit_);
+        bindLineEdit(shareLocalInviteEdit_);
         bindSpinBox(sharePortSpin_);
         connect(sharePortSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int port) {
             updateTailscaleReceiverPorts(port);
@@ -822,6 +850,7 @@ private:
         connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
         connect(audioDeviceCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
         bindSpinBox(watchPortSpin_);
+        bindLineEdit(watchPeerInviteEdit_);
         bindCheckBox(mutedCheck_);
         bindSpinBox(volumeSpin_);
         bindSpinBox(previewLatencySpin_);
@@ -872,7 +901,16 @@ private:
     {
         QStringList args;
         if (shareMode()) {
-            args << "--share" << (shareHostEdit_->text().trimmed() + ":" + QString::number(sharePortSpin_->value()));
+            const QString peerInvite = sharePeerInviteEdit_->text().trimmed();
+            if (!peerInvite.isEmpty()) {
+                args << "--share" << peerInvite;
+                const QString localInvite = shareLocalInviteEdit_->text().trimmed();
+                if (!localInvite.isEmpty()) {
+                    args << "--local-invite" << localInvite;
+                }
+            } else {
+                args << "--share" << (shareHostEdit_->text().trimmed() + ":" + QString::number(sharePortSpin_->value()));
+            }
             args << "--display" << QString::number(displaySpin_->value());
             args << "--fps" << QString::number(fpsSpin_->value());
 
@@ -890,6 +928,10 @@ private:
             args << "--watch" << QString::number(watchPortSpin_->value());
             if (lanDiscoverableCheck_->isChecked()) {
                 args << "--lan-advertise";
+            }
+            const QString peerInvite = watchPeerInviteEdit_->text().trimmed();
+            if (!peerInvite.isEmpty()) {
+                args << "--peer-invite" << peerInvite;
             }
             args << "--preview-latency-ms" << QString::number(previewLatencySpin_->value());
             args << "--audio-playback-volume" << QString::number(volumeSpin_->value());
@@ -921,6 +963,15 @@ private:
                 ++index;
             } else if (args[index] == "--audio-device-id") {
                 args[index + 1] = "<selected audio device>";
+                ++index;
+            } else if (args[index] == "--peer-invite") {
+                args[index + 1] = "<peer invite>";
+                ++index;
+            } else if (args[index] == "--local-invite") {
+                args[index + 1] = "<local invite>";
+                ++index;
+            } else if (args[index] == "--share" && looksLikeNatInvite(args[index + 1])) {
+                args[index + 1] = "<peer invite>";
                 ++index;
             }
         }
@@ -955,8 +1006,17 @@ private:
         if (process_->state() != QProcess::NotRunning) {
             return;
         }
-        if (shareMode() && shareHostEdit_->text().trimmed().isEmpty()) {
+        const bool shareNatInvite = shareMode() && !sharePeerInviteEdit_->text().trimmed().isEmpty();
+        if (shareMode() && !shareNatInvite && shareHostEdit_->text().trimmed().isEmpty()) {
             QMessageBox::warning(this, "Missing address", "Enter a target address before sharing.");
+            return;
+        }
+        if (shareMode() && !shareNatInvite && !shareLocalInviteEdit_->text().trimmed().isEmpty()) {
+            QMessageBox::warning(
+                this,
+                "Missing peer invite",
+                "Paste the receiver invite before using a local invite.");
+            sharePeerInviteEdit_->setFocus();
             return;
         }
         if (!confirmShareTarget()) {
@@ -1135,6 +1195,9 @@ private:
 
     bool confirmShareTarget()
     {
+        if (shareMode() && sharePeerInviteEdit_ != nullptr && !sharePeerInviteEdit_->text().trimmed().isEmpty()) {
+            return true;
+        }
         if (!shareMode() || !isLoopbackHost(shareHostEdit_->text())) {
             return true;
         }
@@ -1482,6 +1545,9 @@ private:
         if (!selectedReceiverKnown_ || !shareMode()) {
             return false;
         }
+        if (sharePeerInviteEdit_ != nullptr && !sharePeerInviteEdit_->text().trimmed().isEmpty()) {
+            return false;
+        }
         if (shareHostEdit_->text().trimmed() != selectedReceiverHost_ ||
             sharePortSpin_->value() != selectedReceiverPort_) {
             return false;
@@ -1675,6 +1741,8 @@ private:
     QListWidget* receiverList_ = nullptr;
     QLabel* receiverStatusLabel_ = nullptr;
     QLineEdit* shareHostEdit_ = nullptr;
+    QLineEdit* sharePeerInviteEdit_ = nullptr;
+    QLineEdit* shareLocalInviteEdit_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
     QPushButton* findLanButton_ = nullptr;
     QSpinBox* displaySpin_ = nullptr;
@@ -1684,6 +1752,7 @@ private:
     QPushButton* refreshAudioDevicesButton_ = nullptr;
     QLabel* audioDeviceStatusLabel_ = nullptr;
     QSpinBox* watchPortSpin_ = nullptr;
+    QLineEdit* watchPeerInviteEdit_ = nullptr;
     QCheckBox* lanDiscoverableCheck_ = nullptr;
     QCheckBox* mutedCheck_ = nullptr;
     QSpinBox* volumeSpin_ = nullptr;
