@@ -131,6 +131,18 @@ QString accessCodeFingerprintText(const QString& accessCode)
         .toUpper();
 }
 
+QString lastLogFieldValue(const QString& output, const QString& field)
+{
+    const QRegularExpression pattern(
+        QStringLiteral(R"((?:^|\s)%1=([^\s,]+))").arg(QRegularExpression::escape(field)));
+    QRegularExpressionMatchIterator matches = pattern.globalMatch(output);
+    QString value;
+    while (matches.hasNext()) {
+        value = matches.next().captured(1).trimmed();
+    }
+    return value;
+}
+
 QLabel* makeLabel(const QString& text, const QString& className = {})
 {
     auto* label = new QLabel(text);
@@ -354,7 +366,7 @@ public:
         process_ = new QProcess(this);
         process_->setProcessChannelMode(QProcess::MergedChannels);
         connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
-            appendOutput(QString::fromLocal8Bit(process_->readAllStandardOutput()));
+            handleProcessOutput(QString::fromLocal8Bit(process_->readAllStandardOutput()));
         });
         connect(process_, &QProcess::started, this, [this] {
             appendOutput("Started " + QFileInfo(enginePath()).fileName() + "\n");
@@ -1360,6 +1372,11 @@ private:
         if (!validateSelectedReceiverSecurity()) {
             return;
         }
+        runtimeNatStatus_.clear();
+        runtimeNatHint_.clear();
+        processOutputParseBuffer_.clear();
+        runtimeNatShareMode_ = shareMode();
+        updateInternetStatus();
         if (discoveryProcess_->state() != QProcess::NotRunning) {
             discoveryProcess_->kill();
             discoveryProcess_->waitForFinished(500);
@@ -2049,16 +2066,22 @@ private:
     void updateInternetStatus()
     {
         if (shareInternetStatusLabel_ != nullptr) {
-            shareInternetStatusLabel_->setText(internetStatusText(
-                true,
-                !shareLocalInviteEdit_->text().trimmed().isEmpty(),
-                !sharePeerInviteEdit_->text().trimmed().isEmpty()));
+            const QString runtimeStatus = runtimeInternetStatusText(true);
+            shareInternetStatusLabel_->setText(runtimeStatus.isEmpty() ?
+                internetStatusText(
+                    true,
+                    !shareLocalInviteEdit_->text().trimmed().isEmpty(),
+                    !sharePeerInviteEdit_->text().trimmed().isEmpty()) :
+                runtimeStatus);
         }
         if (watchInternetStatusLabel_ != nullptr) {
-            watchInternetStatusLabel_->setText(internetStatusText(
-                false,
-                !watchLocalInviteEdit_->text().trimmed().isEmpty(),
-                !watchPeerInviteEdit_->text().trimmed().isEmpty()));
+            const QString runtimeStatus = runtimeInternetStatusText(false);
+            watchInternetStatusLabel_->setText(runtimeStatus.isEmpty() ?
+                internetStatusText(
+                    false,
+                    !watchLocalInviteEdit_->text().trimmed().isEmpty(),
+                    !watchPeerInviteEdit_->text().trimmed().isEmpty()) :
+                runtimeStatus);
         }
     }
 
@@ -2084,6 +2107,64 @@ private:
             "Ready: start Watch, then tell the sharer to start Share.";
     }
 
+    QString runtimeInternetStatusText(bool share) const
+    {
+        if (runtimeNatStatus_.isEmpty() ||
+            runtimeNatStatus_ == "none" ||
+            share != runtimeNatShareMode_) {
+            return {};
+        }
+
+        const QString& status = runtimeNatStatus_;
+        if (share) {
+            if (status == "connected") {
+                return "Live: receiver feedback connected.";
+            }
+            if (status == "retargeted_waiting_for_feedback") {
+                return "Live: probe seen; waiting for receiver feedback.";
+            }
+            if (status == "probe_seen") {
+                return "Live: probe seen; checking the media path.";
+            }
+            if (status == "probe_rejected") {
+                return "Live: probe rejected. Check the access code on both sides.";
+            }
+            if (status == "waiting_for_probe") {
+                return "Live: waiting for Watch to send a probe.";
+            }
+            if (status == "forced_endpoint_waiting_for_feedback") {
+                return "Live: sending to the selected endpoint; waiting for feedback.";
+            }
+            if (status == "starting") {
+                return "Live: starting sender.";
+            }
+        } else {
+            if (status == "receiving") {
+                return "Live: media is arriving.";
+            }
+            if (status == "media_rejected") {
+                return "Live: media rejected. Check access code or plaintext mode.";
+            }
+            if (status == "incoming_unaccepted") {
+                return "Live: packets arrived but were not accepted.";
+            }
+            if (status == "probe_send_errors") {
+                return "Live: probe send failed. Check the pasted sender invite.";
+            }
+            if (status == "probing") {
+                return "Live: probing the sender.";
+            }
+            if (status == "waiting_to_probe") {
+                return "Live: waiting to send the first probe.";
+            }
+        }
+
+        if (!runtimeNatHint_.isEmpty() && runtimeNatHint_ != "none") {
+            return "Live: " + status + " (" + runtimeNatHint_ + ")";
+        }
+        return "Live: " + status;
+    }
+
     void setRunning(bool running)
     {
         if (running) {
@@ -2098,6 +2179,9 @@ private:
             actionButton_->setProperty("class", "");
             statusBadge_->setText("Idle");
             statusBadge_->setProperty("class", "StatusIdle");
+            runtimeNatStatus_.clear();
+            runtimeNatHint_.clear();
+            processOutputParseBuffer_.clear();
         }
         repolish(actionButton_);
         repolish(statusBadge_);
@@ -2117,6 +2201,32 @@ private:
             refreshAudioDevicesButton_->setEnabled(!running && audioDeviceProcess_->state() == QProcess::NotRunning);
         }
         updateInviteButtons();
+    }
+
+    void handleProcessOutput(const QString& text)
+    {
+        appendOutput(text);
+        processOutputParseBuffer_ += text;
+        constexpr qsizetype MaxParseBuffer = 8192;
+        if (processOutputParseBuffer_.size() > MaxParseBuffer) {
+            processOutputParseBuffer_.remove(0, processOutputParseBuffer_.size() - MaxParseBuffer);
+        }
+        updateRuntimeNatStatus(processOutputParseBuffer_);
+    }
+
+    void updateRuntimeNatStatus(const QString& text)
+    {
+        const QString status = lastLogFieldValue(text, "nat_status");
+        if (status.isEmpty()) {
+            return;
+        }
+        runtimeNatStatus_ = status;
+        const QString hint = lastLogFieldValue(text, "nat_hint");
+        if (!hint.isEmpty()) {
+            runtimeNatHint_ = hint;
+        }
+        runtimeNatShareMode_ = shareMode();
+        updateInternetStatus();
     }
 
     void appendOutput(const QString& text)
@@ -2203,6 +2313,10 @@ private:
     QString selectedReceiverHost_;
     int selectedReceiverPort_ = 0;
     QString selectedReceiverAccessFingerprint_;
+    QString runtimeNatStatus_;
+    QString runtimeNatHint_;
+    QString processOutputParseBuffer_;
+    bool runtimeNatShareMode_ = true;
 };
 
 QString appStyleSheet(bool darkMode)
@@ -2718,10 +2832,14 @@ int main(int argc, char** argv)
                 "send_this_invite_to_peer=nat_invite=screenshare-invite-v1;public=1.2.3.4:5000\n"));
             const QString commandInvite = extractInviteLine(QString::fromUtf8(
                 ".\\ScreenShare.exe --share 'nat_invite=screenshare-invite-v1;public=1.2.3.4:5000'"));
+            const QString natStatus = lastLogFieldValue(QString::fromUtf8(
+                "nat_status=probing nat_hint=start_share\n"
+                "nat_status=receiving nat_hint=media_received\n"), "nat_status");
             return peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("nat_invite=screenshare-invite-v1") &&
-                commandInvite.startsWith("nat_invite=screenshare-invite-v1") ? 0 : 2;
+                commandInvite.startsWith("nat_invite=screenshare-invite-v1") &&
+                natStatus == "receiving" ? 0 : 2;
         }
     }
 
