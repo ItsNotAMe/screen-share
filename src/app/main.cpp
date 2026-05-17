@@ -149,6 +149,10 @@ struct Options {
     screenshare::StunServerTarget stunServer;
     int stunTimeoutMs = 3000;
     bool stunTimeoutProvided = false;
+    bool makeInvite = false;
+    uint16_t inviteLocalPort = 0;
+    int inviteTtlSeconds = 300;
+    bool inviteTtlProvided = false;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
@@ -182,6 +186,7 @@ void PrintHelp()
         << "  ScreenShare --watch PORT [--seconds S]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
+        << "  ScreenShare --make-invite PORT --stun HOST[:PORT] [--invite-ttl-seconds S]\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
         << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
@@ -214,6 +219,7 @@ void PrintHelp()
         << "  LAN: add --lan-advertise to --watch/--udp-recv, then use --lan-discover on the sender.\n"
         << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
         << "  NAT: use --stun HOST[:PORT] to print this machine's public UDP endpoint.\n"
+        << "       use --make-invite PORT --stun HOST[:PORT] to print a manual invite blob.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -226,6 +232,7 @@ void PrintHelp()
         << "  ScreenShare --watch 5000 --lan-advertise\n"
         << "  ScreenShare --lan-discover\n"
         << "  ScreenShare --stun stun.l.google.com:19302\n"
+        << "  ScreenShare --make-invite 5000 --stun stun.l.google.com:19302 --access-code 123456\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
@@ -2237,6 +2244,12 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--stun-timeout-ms") {
             options.stunTimeoutMs = ParseInt(requireValue("--stun-timeout-ms"), "--stun-timeout-ms");
             options.stunTimeoutProvided = true;
+        } else if (arg == "--make-invite") {
+            options.inviteLocalPort = screenshare::ParseUdpReceivePort(requireValue("--make-invite"));
+            options.makeInvite = true;
+        } else if (arg == "--invite-ttl-seconds") {
+            options.inviteTtlSeconds = ParseInt(requireValue("--invite-ttl-seconds"), "--invite-ttl-seconds");
+            options.inviteTtlProvided = true;
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
         } else if (arg == "--watch") {
@@ -2450,7 +2463,16 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.stunTimeoutProvided && !options.stunQuery) {
         throw std::invalid_argument("--stun-timeout-ms requires --stun");
     }
-    if (options.stunQuery &&
+    if (options.inviteTtlProvided && !options.makeInvite) {
+        throw std::invalid_argument("--invite-ttl-seconds requires --make-invite");
+    }
+    if (options.makeInvite && !options.stunQuery) {
+        throw std::invalid_argument("--make-invite requires --stun HOST[:PORT]");
+    }
+    if (options.inviteTtlSeconds < 30 || options.inviteTtlSeconds > 3600) {
+        throw std::invalid_argument("--invite-ttl-seconds must be between 30 and 3600");
+    }
+    if (options.stunQuery && !options.makeInvite &&
         (options.generateAccessCode ||
          options.listDisplays ||
          options.listH264Encoders ||
@@ -2468,17 +2490,39 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          !options.capturedBmpPath.empty())) {
         throw std::invalid_argument("--stun is a standalone diagnostic command");
     }
+    if (options.makeInvite &&
+        (options.generateAccessCode ||
+         options.listDisplays ||
+         options.listH264Encoders ||
+         options.listAudioDevices ||
+         options.lanDiscover ||
+         options.lanAdvertise ||
+         HasUdpSession(options) ||
+         options.audioCapture ||
+         options.streamEncode ||
+         options.width != 0 ||
+         options.height != 0 ||
+         options.bitrate != 0 ||
+         options.keyframeIntervalProvided ||
+         !options.recordPath.empty() ||
+         !options.capturedBmpPath.empty())) {
+        throw std::invalid_argument("--make-invite is a standalone NAT setup command");
+    }
     if (options.accessCodeProvided &&
         options.udpReceivePort == 0 &&
         options.udpSendTarget.empty() &&
-        options.audioSendTarget.empty()) {
-        throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, or --audio-send");
+        options.audioSendTarget.empty() &&
+        !options.makeInvite) {
+        throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, --audio-send, or --make-invite");
     }
     if (options.allowPlaintext && options.accessCodeProvided) {
         throw std::invalid_argument("--allow-plaintext cannot be combined with --access-code");
     }
-    if (options.allowPlaintext && !HasUdpSession(options)) {
-        throw std::invalid_argument("--allow-plaintext requires --share, --watch, --udp-send, --udp-recv, or --audio-send");
+    if (options.allowPlaintext && !HasUdpSession(options) && !options.makeInvite) {
+        throw std::invalid_argument("--allow-plaintext requires --share, --watch, --udp-send, --udp-recv, --audio-send, or --make-invite");
+    }
+    if (options.makeInvite && !options.accessCodeProvided && !options.allowPlaintext) {
+        throw std::invalid_argument("--make-invite requires --access-code CODE or --allow-plaintext");
     }
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
@@ -4127,6 +4171,47 @@ void RunStunQuery(const Options& options)
         << "manual_invite_endpoint=" << result.publicAddress << ":" << result.publicPort << "\n";
 }
 
+void RunMakeInvite(const Options& options)
+{
+    screenshare::StunQueryConfig config;
+    config.server = options.stunServer;
+    config.timeout = std::chrono::milliseconds(options.stunTimeoutMs);
+    config.localPort = options.inviteLocalPort;
+
+    std::cout
+        << "Creating NAT invite from local UDP port " << options.inviteLocalPort
+        << " via STUN server " << config.server.host << ":" << config.server.port
+        << " with timeout " << options.stunTimeoutMs << " ms...\n";
+
+    const auto result = screenshare::QueryPublicUdpEndpoint(config);
+    const std::time_t expiresAt =
+        std::time(nullptr) + static_cast<std::time_t>(options.inviteTtlSeconds);
+    const std::string sessionFingerprint = FormatSessionFingerprint(options.sessionFingerprint);
+    const std::string accessFingerprint =
+        options.accessCodeProvided ? FormatSessionFingerprint(options.accessCodeFingerprint) : "none";
+    const std::string security = options.accessCodeProvided ? "encrypted" : "plaintext";
+
+    std::ostringstream invite;
+    invite
+        << "screenshare-invite-v1"
+        << ";public=" << result.publicAddress << ":" << result.publicPort
+        << ";local=" << result.localAddress << ":" << result.localPort
+        << ";stun=" << result.serverAddress << ":" << result.serverPort
+        << ";session=" << options.sessionId
+        << ";session_fingerprint=" << sessionFingerprint
+        << ";security=" << security
+        << ";access_fingerprint=" << accessFingerprint
+        << ";expires_unix=" << static_cast<long long>(expiresAt);
+
+    std::cout
+        << "stun_server=" << result.serverAddress << ":" << result.serverPort << "\n"
+        << "local_udp_endpoint=" << result.localAddress << ":" << result.localPort << "\n"
+        << "public_udp_endpoint=" << result.publicAddress << ":" << result.publicPort << "\n"
+        << "invite_security=" << security << "\n"
+        << "invite_expires_unix=" << static_cast<long long>(expiresAt) << "\n"
+        << "nat_invite=" << invite.str() << "\n";
+}
+
 void RunUdpReceiverStats(const Options& options)
 {
     screenshare::UdpReceiver receiver;
@@ -5374,6 +5459,9 @@ int main(int argc, char** argv)
 
         if (options.generateAccessCode) {
             std::cout << screenshare::GenerateUdpAccessCode() << "\n";
+            exitCode = 0;
+        } else if (options.makeInvite) {
+            RunMakeInvite(options);
             exitCode = 0;
         } else if (options.stunQuery) {
             RunStunQuery(options);

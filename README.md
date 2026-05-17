@@ -150,6 +150,17 @@ prints the public UDP endpoint that a manual invite/hole-punching flow will use 
 
 The output includes `public_udp_endpoint=HOST:PORT` and `local_udp_endpoint=HOST:PORT`.
 
+To create a first manual invite blob for the next hole-punching flow, choose the UDP port the local
+side will use and query STUN from that same port:
+
+```powershell
+.\build\release\ScreenShare.exe --make-invite 5000 --stun stun.l.google.com:19302 --access-code CODE
+```
+
+The command prints `nat_invite=screenshare-invite-v1;...` with public/local UDP endpoints, the
+session fingerprint, access-code fingerprint, and an expiry timestamp. This is still setup metadata
+only; the next NAT milestone will exchange two invite blobs and send probe packets between them.
+
 List monitors:
 
 ```powershell
