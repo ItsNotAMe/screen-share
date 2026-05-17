@@ -84,6 +84,22 @@ bool looksLikeNatInvite(QString value)
     return value.startsWith("nat_invite=") || value.startsWith("screenshare-invite-v1");
 }
 
+QString extractInviteLine(const QString& output)
+{
+    const QStringList lines = output.split(QRegularExpression(QStringLiteral("[\r\n]+")), Qt::SkipEmptyParts);
+    for (const QString& line : lines) {
+        if (line.startsWith("send_this_invite_to_peer=")) {
+            return line.mid(QStringLiteral("send_this_invite_to_peer=").size()).trimmed();
+        }
+    }
+    for (const QString& line : lines) {
+        if (line.startsWith("nat_invite=")) {
+            return line.trimmed();
+        }
+    }
+    return {};
+}
+
 QString accessCodeFingerprintText(const QString& accessCode)
 {
     const QByteArray bytes = accessCode.toUtf8();
@@ -114,10 +130,17 @@ void repolish(QWidget* widget)
 constexpr int kRowHeight = 34;
 constexpr int kLabelWidth = 96;
 constexpr int kReceiverRefreshMs = 15000;
+constexpr const char* kDefaultStunServer = "stun.l.google.com:19302";
 
 enum class ReceiverSource {
     Lan,
     Tailscale,
+};
+
+enum class InviteTarget {
+    None,
+    Share,
+    Watch,
 };
 
 struct DiscoveredReceiver {
@@ -391,6 +414,23 @@ public:
             finishAudioDeviceRefresh(code, status);
         });
 
+        inviteProcess_ = new QProcess(this);
+        inviteProcess_->setProcessChannelMode(QProcess::MergedChannels);
+        connect(inviteProcess_, &QProcess::readyReadStandardOutput, this, [this] {
+            const QString text = QString::fromLocal8Bit(inviteProcess_->readAllStandardOutput());
+            inviteOutput_ += text;
+            appendOutput(text);
+        });
+        connect(inviteProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            Q_UNUSED(error);
+            appendOutput("Invite creation error: " + inviteProcess_->errorString() + "\n");
+            inviteTarget_ = InviteTarget::None;
+            updateInviteButtons();
+        });
+        connect(inviteProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
+            finishInviteGeneration(code, status);
+        });
+
         receiverRefreshTimer_ = new QTimer(this);
         receiverRefreshTimer_->setInterval(kReceiverRefreshMs);
         connect(receiverRefreshTimer_, &QTimer::timeout, this, [this] { startDiscovery(true); });
@@ -580,13 +620,43 @@ private:
         layout->addWidget(makePanel("Internet", &internetContent));
         sharePeerInviteEdit_ = new QLineEdit;
         sharePeerInviteEdit_->setPlaceholderText("Receiver invite");
+        shareInvitePortSpin_ = new NoWheelSpinBox;
+        shareInvitePortSpin_->setRange(1, 65535);
+        shareInvitePortSpin_->setValue(5000);
         shareLocalInviteEdit_ = new QLineEdit;
         shareLocalInviteEdit_->setPlaceholderText("Your invite");
+        auto* shareLocalInviteRow = new QWidget;
+        shareLocalInviteRow->setObjectName("FormRow");
+        auto* shareLocalInviteLayout = new QHBoxLayout(shareLocalInviteRow);
+        shareLocalInviteLayout->setContentsMargins(0, 0, 0, 0);
+        shareLocalInviteLayout->setSpacing(8);
+        createShareInviteButton_ = new QPushButton("Create");
+        createShareInviteButton_->setObjectName("SecondaryButton");
+        createShareInviteButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
+        createShareInviteButton_->setIconSize(QSize(14, 14));
+        createShareInviteButton_->setCursor(Qt::PointingHandCursor);
+        createShareInviteButton_->setFixedHeight(kRowHeight);
+        copyShareInviteButton_ = new QPushButton("Copy");
+        copyShareInviteButton_->setObjectName("SecondaryButton");
+        copyShareInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+        copyShareInviteButton_->setIconSize(QSize(14, 14));
+        copyShareInviteButton_->setCursor(Qt::PointingHandCursor);
+        copyShareInviteButton_->setFixedHeight(kRowHeight);
         prepareInput(sharePeerInviteEdit_);
+        prepareInput(shareInvitePortSpin_);
         prepareInput(shareLocalInviteEdit_);
+        prepareInput(shareLocalInviteRow);
+        shareLocalInviteLayout->addWidget(shareLocalInviteEdit_, 1);
+        shareLocalInviteLayout->addWidget(createShareInviteButton_);
+        shareLocalInviteLayout->addWidget(copyShareInviteButton_);
         addRow(internetContent, "Peer invite", sharePeerInviteEdit_);
-        addRow(internetContent, "Local invite", shareLocalInviteEdit_);
-        internetContent->addWidget(makeLabel("Use invites for direct UDP hole punching across the internet.", "Subtle"));
+        addRow(internetContent, "Local port", shareInvitePortSpin_);
+        addRow(internetContent, "Your invite", shareLocalInviteRow);
+        internetContent->addWidget(makeLabel("Create your invite, send it to your friend, then paste their invite above.", "Subtle"));
+        connect(createShareInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Share); });
+        connect(copyShareInviteButton_, &QPushButton::clicked, this, [this] {
+            copyInvite(shareLocalInviteEdit_, "Share");
+        });
 
         QVBoxLayout* videoContent = nullptr;
         layout->addWidget(makePanel("Video", &videoContent));
@@ -659,9 +729,38 @@ private:
         layout->addWidget(makePanel("Internet", &internetContent));
         watchPeerInviteEdit_ = new QLineEdit;
         watchPeerInviteEdit_->setPlaceholderText("Sender invite");
+        watchLocalInviteEdit_ = new QLineEdit;
+        watchLocalInviteEdit_->setPlaceholderText("Your invite");
+        auto* watchLocalInviteRow = new QWidget;
+        watchLocalInviteRow->setObjectName("FormRow");
+        auto* watchLocalInviteLayout = new QHBoxLayout(watchLocalInviteRow);
+        watchLocalInviteLayout->setContentsMargins(0, 0, 0, 0);
+        watchLocalInviteLayout->setSpacing(8);
+        createWatchInviteButton_ = new QPushButton("Create");
+        createWatchInviteButton_->setObjectName("SecondaryButton");
+        createWatchInviteButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
+        createWatchInviteButton_->setIconSize(QSize(14, 14));
+        createWatchInviteButton_->setCursor(Qt::PointingHandCursor);
+        createWatchInviteButton_->setFixedHeight(kRowHeight);
+        copyWatchInviteButton_ = new QPushButton("Copy");
+        copyWatchInviteButton_->setObjectName("SecondaryButton");
+        copyWatchInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+        copyWatchInviteButton_->setIconSize(QSize(14, 14));
+        copyWatchInviteButton_->setCursor(Qt::PointingHandCursor);
+        copyWatchInviteButton_->setFixedHeight(kRowHeight);
         prepareInput(watchPeerInviteEdit_);
+        prepareInput(watchLocalInviteEdit_);
+        prepareInput(watchLocalInviteRow);
+        watchLocalInviteLayout->addWidget(watchLocalInviteEdit_, 1);
+        watchLocalInviteLayout->addWidget(createWatchInviteButton_);
+        watchLocalInviteLayout->addWidget(copyWatchInviteButton_);
         addRow(internetContent, "Peer invite", watchPeerInviteEdit_);
-        internetContent->addWidget(makeLabel("Paste the sharer's invite to send punch probes while waiting.", "Subtle"));
+        addRow(internetContent, "Your invite", watchLocalInviteRow);
+        internetContent->addWidget(makeLabel("Create your invite, send it to the sharer, then paste their invite above.", "Subtle"));
+        connect(createWatchInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Watch); });
+        connect(copyWatchInviteButton_, &QPushButton::clicked, this, [this] {
+            copyInvite(watchLocalInviteEdit_, "Watch");
+        });
 
         QVBoxLayout* audioContent = nullptr;
         layout->addWidget(makePanel("Audio", &audioContent));
@@ -722,6 +821,11 @@ private:
         allowPlaintextCheck_ = new QCheckBox("Allow plaintext");
         addFullRow(content, allowPlaintextCheck_);
 
+        stunServerEdit_ = new QLineEdit(QString::fromUtf8(kDefaultStunServer));
+        stunServerEdit_->setPlaceholderText("host:port");
+        prepareInput(stunServerEdit_);
+        addRow(content, "STUN", stunServerEdit_);
+
         reportCheck_ = new QCheckBox("Save report");
         reportCheck_->setChecked(true);
         addFullRow(content, reportCheck_);
@@ -751,7 +855,10 @@ private:
             if (!text.isEmpty()) {
                 allowPlaintextCheck_->setChecked(false);
             }
+            clearLocalInvites();
         });
+        connect(allowPlaintextCheck_, &QCheckBox::toggled, this, [this] { clearLocalInvites(); });
+        connect(stunServerEdit_, &QLineEdit::textChanged, this, [this] { clearLocalInvites(); });
         connect(generateAccessCodeButton_, &QPushButton::clicked, this, [this] { generateAccessCode(); });
         connect(copyAccessCodeButton_, &QPushButton::clicked, this, [this] { copyAccessCode(); });
         connect(browseReportButton_, &QPushButton::clicked, this, [this] {
@@ -840,6 +947,9 @@ private:
         bindLineEdit(shareHostEdit_);
         bindLineEdit(sharePeerInviteEdit_);
         bindLineEdit(shareLocalInviteEdit_);
+        connect(shareLocalInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInviteButtons(); });
+        bindSpinBox(shareInvitePortSpin_);
+        connect(shareInvitePortSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { clearShareLocalInvite(); });
         bindSpinBox(sharePortSpin_);
         connect(sharePortSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int port) {
             updateTailscaleReceiverPorts(port);
@@ -850,7 +960,9 @@ private:
         connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
         connect(audioDeviceCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
         bindSpinBox(watchPortSpin_);
+        connect(watchPortSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { clearWatchLocalInvite(); });
         bindLineEdit(watchPeerInviteEdit_);
+        connect(watchLocalInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInviteButtons(); });
         bindCheckBox(mutedCheck_);
         bindSpinBox(volumeSpin_);
         bindSpinBox(previewLatencySpin_);
@@ -895,6 +1007,149 @@ private:
         }
         QApplication::clipboard()->setText(accessCode);
         appendOutput("Access code copied to clipboard\n");
+    }
+
+    void clearShareLocalInvite()
+    {
+        if (shareLocalInviteEdit_ != nullptr && !shareLocalInviteEdit_->text().isEmpty()) {
+            shareLocalInviteEdit_->clear();
+        }
+    }
+
+    void clearWatchLocalInvite()
+    {
+        if (watchLocalInviteEdit_ != nullptr && !watchLocalInviteEdit_->text().isEmpty()) {
+            watchLocalInviteEdit_->clear();
+        }
+    }
+
+    void clearLocalInvites()
+    {
+        clearShareLocalInvite();
+        clearWatchLocalInvite();
+    }
+
+    void copyInvite(QLineEdit* edit, const QString& label)
+    {
+        if (edit == nullptr) {
+            return;
+        }
+        const QString invite = edit->text().trimmed();
+        if (invite.isEmpty()) {
+            QMessageBox::information(this, "Invite", "Create an invite first.");
+            return;
+        }
+        QApplication::clipboard()->setText(invite);
+        appendOutput(label + " invite copied to clipboard\n");
+    }
+
+    bool inviteGenerating() const
+    {
+        return inviteProcess_ != nullptr && inviteProcess_->state() != QProcess::NotRunning;
+    }
+
+    int invitePort(InviteTarget target) const
+    {
+        if (target == InviteTarget::Share) {
+            return shareInvitePortSpin_->value();
+        }
+        return watchPortSpin_->value();
+    }
+
+    QString stunServer() const
+    {
+        QString server = stunServerEdit_ == nullptr ? QString() : stunServerEdit_->text().trimmed();
+        return server.isEmpty() ? QString::fromUtf8(kDefaultStunServer) : server;
+    }
+
+    bool validateInviteSecurity()
+    {
+        if (!accessCodeEdit_->text().isEmpty() || allowPlaintextCheck_->isChecked()) {
+            return true;
+        }
+        QMessageBox::warning(
+            this,
+            "Security choice",
+            "Generate or paste an access code, or allow plaintext before creating an invite.");
+        accessCodeEdit_->setFocus();
+        return false;
+    }
+
+    void startInviteGeneration(InviteTarget target)
+    {
+        if (inviteGenerating()) {
+            return;
+        }
+        if (process_->state() != QProcess::NotRunning) {
+            QMessageBox::information(this, "Already running", "Stop the current session before creating an invite.");
+            return;
+        }
+        if (!validateInviteSecurity()) {
+            return;
+        }
+
+        const QString program = enginePath();
+        if (!QFileInfo::exists(program)) {
+            QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
+            return;
+        }
+
+        const int port = invitePort(target);
+        QStringList args;
+        args << "--make-invite" << QString::number(port)
+             << "--stun" << stunServer();
+        const QString accessCode = accessCodeEdit_->text();
+        if (!accessCode.isEmpty()) {
+            args << "--access-code" << accessCode;
+        } else {
+            args << "--allow-plaintext";
+        }
+
+        inviteTarget_ = target;
+        inviteOutput_.clear();
+        appendOutput("\nCreating NAT invite on UDP port " + QString::number(port) + "...\n");
+        inviteProcess_->setProgram(program);
+        inviteProcess_->setArguments(args);
+        inviteProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
+        inviteProcess_->start();
+        updateInviteButtons();
+    }
+
+    void finishInviteGeneration(int code, QProcess::ExitStatus status)
+    {
+        const QString remaining = QString::fromLocal8Bit(inviteProcess_->readAllStandardOutput());
+        if (!remaining.isEmpty()) {
+            inviteOutput_ += remaining;
+            appendOutput(remaining);
+        }
+
+        const InviteTarget target = inviteTarget_;
+        inviteTarget_ = InviteTarget::None;
+        updateInviteButtons();
+
+        if (status != QProcess::NormalExit || code != 0) {
+            appendOutput("Invite creation finished with exit code " + QString::number(code) + "\n");
+            return;
+        }
+
+        const QString invite = extractInviteLine(inviteOutput_);
+        if (invite.isEmpty()) {
+            appendOutput("Invite creation finished, but no invite line was found\n");
+            return;
+        }
+
+        if (target == InviteTarget::Share) {
+            shareLocalInviteEdit_->setText(invite);
+            QApplication::clipboard()->setText(invite);
+            appendOutput("Share invite copied to clipboard. Send it to your friend and paste their receiver invite above.\n");
+        } else if (target == InviteTarget::Watch) {
+            watchLocalInviteEdit_->setText(invite);
+            QApplication::clipboard()->setText(invite);
+            appendOutput("Watch invite copied to clipboard. Send it to the sharer and paste their sender invite above.\n");
+        }
+        if (!accessCodeEdit_->text().isEmpty()) {
+            appendOutput("Use the same access code on both computers.\n");
+        }
     }
 
     QStringList currentArguments() const
@@ -1683,6 +1938,27 @@ private:
         }
     }
 
+    void updateInviteButtons()
+    {
+        const bool creating = inviteGenerating();
+        const bool running = process_ != nullptr && process_->state() != QProcess::NotRunning;
+        const bool canCreate = !creating && !running;
+        if (createShareInviteButton_ != nullptr) {
+            createShareInviteButton_->setEnabled(canCreate);
+            createShareInviteButton_->setText(creating && inviteTarget_ == InviteTarget::Share ? "Creating..." : "Create");
+        }
+        if (createWatchInviteButton_ != nullptr) {
+            createWatchInviteButton_->setEnabled(canCreate);
+            createWatchInviteButton_->setText(creating && inviteTarget_ == InviteTarget::Watch ? "Creating..." : "Create");
+        }
+        if (copyShareInviteButton_ != nullptr) {
+            copyShareInviteButton_->setEnabled(!creating && !shareLocalInviteEdit_->text().trimmed().isEmpty());
+        }
+        if (copyWatchInviteButton_ != nullptr) {
+            copyWatchInviteButton_->setEnabled(!creating && !watchLocalInviteEdit_->text().trimmed().isEmpty());
+        }
+    }
+
     void setRunning(bool running)
     {
         if (running) {
@@ -1715,6 +1991,7 @@ private:
         if (refreshAudioDevicesButton_ != nullptr) {
             refreshAudioDevicesButton_->setEnabled(!running && audioDeviceProcess_->state() == QProcess::NotRunning);
         }
+        updateInviteButtons();
     }
 
     void appendOutput(const QString& text)
@@ -1736,6 +2013,7 @@ private:
     QProcess* discoveryProcess_ = nullptr;
     QProcess* tailscaleProcess_ = nullptr;
     QProcess* audioDeviceProcess_ = nullptr;
+    QProcess* inviteProcess_ = nullptr;
     QTimer* receiverRefreshTimer_ = nullptr;
 
     QListWidget* receiverList_ = nullptr;
@@ -1743,6 +2021,9 @@ private:
     QLineEdit* shareHostEdit_ = nullptr;
     QLineEdit* sharePeerInviteEdit_ = nullptr;
     QLineEdit* shareLocalInviteEdit_ = nullptr;
+    QSpinBox* shareInvitePortSpin_ = nullptr;
+    QPushButton* createShareInviteButton_ = nullptr;
+    QPushButton* copyShareInviteButton_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
     QPushButton* findLanButton_ = nullptr;
     QSpinBox* displaySpin_ = nullptr;
@@ -1753,6 +2034,9 @@ private:
     QLabel* audioDeviceStatusLabel_ = nullptr;
     QSpinBox* watchPortSpin_ = nullptr;
     QLineEdit* watchPeerInviteEdit_ = nullptr;
+    QLineEdit* watchLocalInviteEdit_ = nullptr;
+    QPushButton* createWatchInviteButton_ = nullptr;
+    QPushButton* copyWatchInviteButton_ = nullptr;
     QCheckBox* lanDiscoverableCheck_ = nullptr;
     QCheckBox* mutedCheck_ = nullptr;
     QSpinBox* volumeSpin_ = nullptr;
@@ -1762,6 +2046,7 @@ private:
     QPushButton* generateAccessCodeButton_ = nullptr;
     QPushButton* copyAccessCodeButton_ = nullptr;
     QCheckBox* allowPlaintextCheck_ = nullptr;
+    QLineEdit* stunServerEdit_ = nullptr;
     QCheckBox* reportCheck_ = nullptr;
     QLineEdit* reportPathEdit_ = nullptr;
     QPushButton* browseReportButton_ = nullptr;
@@ -1773,6 +2058,8 @@ private:
     QString discoveryOutput_;
     QString tailscaleOutput_;
     QString audioDeviceOutput_;
+    QString inviteOutput_;
+    InviteTarget inviteTarget_ = InviteTarget::None;
     QVector<DiscoveredReceiver> discoveredReceivers_;
     QVector<DiscoveredReceiver> lanReceivers_;
     QVector<DiscoveredReceiver> tailscaleReceivers_;
@@ -2281,7 +2568,12 @@ int main(int argc, char** argv)
                     }
                 }
             })json"), 5000);
-            return peers.size() == 1 && peers.front().host == "100.64.0.2" ? 0 : 2;
+            const QString invite = extractInviteLine(QString::fromUtf8(
+                "noise\n"
+                "send_this_invite_to_peer=nat_invite=screenshare-invite-v1;public=1.2.3.4:5000\n"));
+            return peers.size() == 1 &&
+                peers.front().host == "100.64.0.2" &&
+                invite.startsWith("nat_invite=screenshare-invite-v1") ? 0 : 2;
         }
     }
 
