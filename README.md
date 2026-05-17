@@ -81,7 +81,8 @@ test run can be sent as a zip without collecting separate log files. The UI open
 default, includes a theme toggle in the header, and can generate/copy an encrypted-session access
 code. The Share tab also has an output-device picker for system audio, which is useful when Windows
 or a virtual mixer uses a default output device that does not contain the audio you actually want to
-share.
+share. For manual internet/NAT tests, Share can use receiver/local invite fields and Watch can use a
+sender invite field.
 
 Common live session:
 
