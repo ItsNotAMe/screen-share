@@ -81,8 +81,8 @@ test run can be sent as a zip without collecting separate log files. The UI open
 default, includes a theme toggle in the header, and can generate/copy an encrypted-session access
 code. The Share tab also has an output-device picker for system audio, which is useful when Windows
 or a virtual mixer uses a default output device that does not contain the audio you actually want to
-share. For manual internet/NAT tests, Share can use receiver/local invite fields and Watch can use a
-sender invite field.
+share. For manual internet/NAT tests, the Internet sections can create/copy local invite blobs,
+paste the friend's invite, and wire the matching NAT options into the generated command.
 
 Common live session:
 
@@ -163,6 +163,11 @@ session fingerprint, access-code fingerprint, and an expiry timestamp. It also p
 `watch_command_template`, `share_command_template`, and `probe_command_template` lines. Replace
 `<PEER_INVITE>` in those templates with the invite copied from your friend. If the template contains
 `CODE`, replace it with the same access code used to create the invite.
+
+The desktop UI exposes the same invite creation flow. Generate or paste the shared access code first,
+then use Create in the current tab's Internet section. The invite is copied to the clipboard and
+shown in the UI. Send that invite to your friend, paste their invite into Peer invite, and start the
+session normally.
 
 After both sides exchange invite lines, you can optionally run a UDP probe diagnostic on both
 computers using the same local port that created each invite. Quote the copied invite because it
