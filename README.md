@@ -180,7 +180,14 @@ port that was used for the sender invite/probe:
 ```
 
 This is useful for NAT testing because many routers keep mappings by local UDP port. The receiver
-still listens with `--watch PEER_PORT`.
+still listens with `--watch PEER_PORT`. Give Watch the sender's invite so it keeps sending punch
+probes from the actual receive socket while waiting for media:
+
+```powershell
+.\build\release\ScreenShare.exe --watch PEER_PORT --peer-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+```
+
+`--nat-probe-interval-ms MS` can tune the probe interval. The default is 250 ms.
 
 List monitors:
 

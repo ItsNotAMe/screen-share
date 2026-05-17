@@ -335,6 +335,26 @@ NatInvite ParseNatInvite(const std::string& text)
     return invite;
 }
 
+std::vector<std::byte> BuildNatProbeDatagram(
+    uint64_t sequence,
+    uint64_t sessionFingerprint,
+    uint64_t accessCodeFingerprint)
+{
+    const NatProbePacket packet = BuildProbePacket(
+        NatProbeTypeProbe,
+        sequence,
+        sessionFingerprint,
+        accessCodeFingerprint);
+    std::vector<std::byte> datagram(sizeof(packet));
+    std::memcpy(datagram.data(), &packet, sizeof(packet));
+    return datagram;
+}
+
+bool IsNatProbeDatagram(std::span<const std::byte> datagram)
+{
+    return ParseProbePacket(datagram.data(), static_cast<int>(datagram.size())).has_value();
+}
+
 NatProbeStats RunNatProbeExchange(const NatProbeConfig& config)
 {
     if (config.localPort == 0) {
