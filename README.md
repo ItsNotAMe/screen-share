@@ -158,8 +158,19 @@ side will use and query STUN from that same port:
 ```
 
 The command prints `nat_invite=screenshare-invite-v1;...` with public/local UDP endpoints, the
-session fingerprint, access-code fingerprint, and an expiry timestamp. This is still setup metadata
-only; the next NAT milestone will exchange two invite blobs and send probe packets between them.
+session fingerprint, access-code fingerprint, and an expiry timestamp.
+
+After both sides exchange invite lines, run a UDP probe on both computers using the same local port
+that created each invite. Quote the copied invite because it contains semicolons:
+
+```powershell
+.\build\release\ScreenShare.exe --nat-probe 5000 --peer-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+```
+
+Use `--allow-plaintext` instead of `--access-code CODE` only if the invite was created in plaintext
+mode. The probe sends small packets to the peer's public and local invite endpoints and reports
+`nat_probe_result=reachable` when any probe or reply comes back. This is still a diagnostic; wiring
+the punched socket into real Share/Watch streaming is the next NAT milestone.
 
 List monitors:
 

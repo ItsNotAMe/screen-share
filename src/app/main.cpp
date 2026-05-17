@@ -9,6 +9,7 @@
 #include "codec/H264StreamEncoder.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/LanDiscovery.h"
+#include "transport/NatTraversal.h"
 #include "transport/StunClient.h"
 #include "transport/UdpReceiver.h"
 #include "transport/UdpSender.h"
@@ -153,9 +154,15 @@ struct Options {
     uint16_t inviteLocalPort = 0;
     int inviteTtlSeconds = 300;
     bool inviteTtlProvided = false;
+    bool natProbe = false;
+    uint16_t natProbeLocalPort = 0;
+    std::string peerInvite;
+    int natProbeIntervalMs = 250;
+    bool natProbeIntervalProvided = false;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
+    bool sessionIdProvided = false;
     std::string stopFilePath;
     bool generateAccessCode = false;
     bool allowPlaintext = false;
@@ -187,6 +194,8 @@ void PrintHelp()
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
         << "  ScreenShare --make-invite PORT --stun HOST[:PORT] [--invite-ttl-seconds S]\n"
+        << "  ScreenShare --nat-probe PORT --peer-invite INVITE [--seconds S]\n"
+        << "              [--nat-probe-interval-ms MS]\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
         << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
@@ -220,6 +229,7 @@ void PrintHelp()
         << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
         << "  NAT: use --stun HOST[:PORT] to print this machine's public UDP endpoint.\n"
         << "       use --make-invite PORT --stun HOST[:PORT] to print a manual invite blob.\n"
+        << "       exchange invites, then run --nat-probe PORT --peer-invite \"nat_invite=...\" on both sides.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -233,6 +243,7 @@ void PrintHelp()
         << "  ScreenShare --lan-discover\n"
         << "  ScreenShare --stun stun.l.google.com:19302\n"
         << "  ScreenShare --make-invite 5000 --stun stun.l.google.com:19302 --access-code 123456\n"
+        << "  ScreenShare --nat-probe 5000 --peer-invite \"nat_invite=screenshare-invite-v1;...\" --access-code 123456\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
@@ -2203,6 +2214,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.stopFilePath = requireValue("--stop-file");
         } else if (arg == "--session" || arg == "--session-id") {
             options.sessionId = ParseSessionId(requireValue(arg.c_str()));
+            options.sessionIdProvided = true;
         } else if (arg == "--generate-access-code") {
             options.generateAccessCode = true;
         } else if (arg == "--allow-plaintext") {
@@ -2250,6 +2262,14 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--invite-ttl-seconds") {
             options.inviteTtlSeconds = ParseInt(requireValue("--invite-ttl-seconds"), "--invite-ttl-seconds");
             options.inviteTtlProvided = true;
+        } else if (arg == "--nat-probe") {
+            options.natProbeLocalPort = screenshare::ParseUdpReceivePort(requireValue("--nat-probe"));
+            options.natProbe = true;
+        } else if (arg == "--peer-invite") {
+            options.peerInvite = requireValue("--peer-invite");
+        } else if (arg == "--nat-probe-interval-ms") {
+            options.natProbeIntervalMs = ParseInt(requireValue("--nat-probe-interval-ms"), "--nat-probe-interval-ms");
+            options.natProbeIntervalProvided = true;
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
         } else if (arg == "--watch") {
@@ -2472,6 +2492,21 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.inviteTtlSeconds < 30 || options.inviteTtlSeconds > 3600) {
         throw std::invalid_argument("--invite-ttl-seconds must be between 30 and 3600");
     }
+    if (!options.peerInvite.empty() && !options.natProbe) {
+        throw std::invalid_argument("--peer-invite requires --nat-probe");
+    }
+    if (options.natProbeIntervalProvided && !options.natProbe) {
+        throw std::invalid_argument("--nat-probe-interval-ms requires --nat-probe");
+    }
+    if (options.natProbe && options.peerInvite.empty()) {
+        throw std::invalid_argument("--nat-probe requires --peer-invite INVITE");
+    }
+    if (options.natProbe && options.stunQuery) {
+        throw std::invalid_argument("--nat-probe cannot be combined with --stun; use an invite made with --make-invite");
+    }
+    if (options.natProbeIntervalMs < 50 || options.natProbeIntervalMs > 5000) {
+        throw std::invalid_argument("--nat-probe-interval-ms must be between 50 and 5000");
+    }
     if (options.stunQuery && !options.makeInvite &&
         (options.generateAccessCode ||
          options.listDisplays ||
@@ -2508,21 +2543,43 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          !options.capturedBmpPath.empty())) {
         throw std::invalid_argument("--make-invite is a standalone NAT setup command");
     }
+    if (options.natProbe &&
+        (options.generateAccessCode ||
+         options.listDisplays ||
+         options.listH264Encoders ||
+         options.listAudioDevices ||
+         options.lanDiscover ||
+         options.lanAdvertise ||
+         HasUdpSession(options) ||
+         options.audioCapture ||
+         options.streamEncode ||
+         options.width != 0 ||
+         options.height != 0 ||
+         options.bitrate != 0 ||
+         options.keyframeIntervalProvided ||
+         !options.recordPath.empty() ||
+         !options.capturedBmpPath.empty())) {
+        throw std::invalid_argument("--nat-probe is a standalone NAT setup command");
+    }
     if (options.accessCodeProvided &&
         options.udpReceivePort == 0 &&
         options.udpSendTarget.empty() &&
         options.audioSendTarget.empty() &&
-        !options.makeInvite) {
-        throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, --audio-send, or --make-invite");
+        !options.makeInvite &&
+        !options.natProbe) {
+        throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, --audio-send, --make-invite, or --nat-probe");
     }
     if (options.allowPlaintext && options.accessCodeProvided) {
         throw std::invalid_argument("--allow-plaintext cannot be combined with --access-code");
     }
-    if (options.allowPlaintext && !HasUdpSession(options) && !options.makeInvite) {
-        throw std::invalid_argument("--allow-plaintext requires --share, --watch, --udp-send, --udp-recv, --audio-send, or --make-invite");
+    if (options.allowPlaintext && !HasUdpSession(options) && !options.makeInvite && !options.natProbe) {
+        throw std::invalid_argument("--allow-plaintext requires --share, --watch, --udp-send, --udp-recv, --audio-send, --make-invite, or --nat-probe");
     }
     if (options.makeInvite && !options.accessCodeProvided && !options.allowPlaintext) {
         throw std::invalid_argument("--make-invite requires --access-code CODE or --allow-plaintext");
+    }
+    if (options.natProbe && !options.accessCodeProvided && !options.allowPlaintext) {
+        throw std::invalid_argument("--nat-probe requires --access-code CODE or --allow-plaintext");
     }
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
@@ -4212,6 +4269,78 @@ void RunMakeInvite(const Options& options)
         << "nat_invite=" << invite.str() << "\n";
 }
 
+std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint)
+{
+    if (endpoint.host.empty() || endpoint.port == 0) {
+        return "none";
+    }
+    return endpoint.host + ":" + std::to_string(endpoint.port);
+}
+
+void RunNatProbe(const Options& options)
+{
+    const auto invite = screenshare::ParseNatInvite(options.peerInvite);
+    const std::time_t now = std::time(nullptr);
+    if (invite.expiresUnix > 0 && invite.expiresUnix < static_cast<int64_t>(now)) {
+        std::cerr
+            << "Warning: peer invite expired at Unix time " << invite.expiresUnix
+            << "; probing anyway because clocks can differ.\n";
+    }
+
+    if (invite.encrypted) {
+        if (!options.accessCodeProvided) {
+            throw std::invalid_argument("Peer invite requires --access-code CODE");
+        }
+        if (options.accessCodeFingerprint != invite.accessCodeFingerprint) {
+            throw std::invalid_argument("Access code does not match the peer invite fingerprint");
+        }
+    } else if (!options.allowPlaintext) {
+        throw std::invalid_argument("Peer invite is plaintext; rerun with --allow-plaintext");
+    }
+
+    if (options.sessionIdProvided && options.sessionFingerprint != invite.sessionFingerprint) {
+        std::cerr
+            << "Warning: --session fingerprint " << FormatSessionFingerprint(options.sessionFingerprint)
+            << " does not match peer invite session fingerprint "
+            << FormatSessionFingerprint(invite.sessionFingerprint) << ".\n";
+    }
+
+    screenshare::NatProbeConfig config;
+    config.localPort = options.natProbeLocalPort;
+    config.peerInvite = invite;
+    config.duration = std::chrono::seconds(options.seconds);
+    config.interval = std::chrono::milliseconds(options.natProbeIntervalMs);
+    config.sessionFingerprint = options.sessionIdProvided ? options.sessionFingerprint : 0;
+    config.accessCodeFingerprint = options.accessCodeFingerprint;
+
+    std::cout
+        << "Running NAT UDP probe from local port " << options.natProbeLocalPort
+        << " for " << options.seconds << " seconds"
+        << " every " << options.natProbeIntervalMs << " ms...\n"
+        << "peer_public_endpoint=" << FormatNatEndpoint(invite.publicEndpoint) << "\n"
+        << "peer_local_endpoint=" << FormatNatEndpoint(invite.localEndpoint) << "\n"
+        << "peer_session=" << invite.sessionId << "\n"
+        << "peer_session_fingerprint=" << FormatSessionFingerprint(invite.sessionFingerprint) << "\n"
+        << "peer_security=" << (invite.encrypted ? "encrypted" : "plaintext") << "\n";
+
+    const auto stats = screenshare::RunNatProbeExchange(config);
+    const bool reachable = stats.receivedPackets > 0;
+    std::cout
+        << "nat_probe_result=" << (reachable ? "reachable" : "no_response") << "\n"
+        << "nat_probe_sent_public=" << stats.sentPublicProbes << "\n"
+        << "nat_probe_sent_local=" << stats.sentLocalProbes << "\n"
+        << "nat_probe_received=" << stats.receivedPackets << "\n"
+        << "nat_probe_received_probes=" << stats.receivedProbes << "\n"
+        << "nat_probe_received_replies=" << stats.receivedReplies << "\n"
+        << "nat_probe_replies_sent=" << stats.repliesSent << "\n"
+        << "nat_probe_invalid_packets=" << stats.invalidPackets << "\n"
+        << "nat_probe_session_mismatches=" << stats.sessionMismatches << "\n"
+        << "nat_probe_access_mismatches=" << stats.accessCodeMismatches << "\n";
+    for (const auto& endpoint : stats.seenEndpoints) {
+        std::cout << "nat_probe_seen_endpoint=" << endpoint.address << ":" << endpoint.port << "\n";
+    }
+}
+
 void RunUdpReceiverStats(const Options& options)
 {
     screenshare::UdpReceiver receiver;
@@ -5462,6 +5591,9 @@ int main(int argc, char** argv)
             exitCode = 0;
         } else if (options.makeInvite) {
             RunMakeInvite(options);
+            exitCode = 0;
+        } else if (options.natProbe) {
+            RunNatProbe(options);
             exitCode = 0;
         } else if (options.stunQuery) {
             RunStunQuery(options);
