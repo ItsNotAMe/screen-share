@@ -1,7 +1,9 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -51,6 +53,11 @@ struct NatProbeStats {
 };
 
 NatInvite ParseNatInvite(const std::string& text);
+std::vector<std::byte> BuildNatProbeDatagram(
+    uint64_t sequence,
+    uint64_t sessionFingerprint,
+    uint64_t accessCodeFingerprint);
+bool IsNatProbeDatagram(std::span<const std::byte> datagram);
 NatProbeStats RunNatProbeExchange(const NatProbeConfig& config);
 
 } // namespace screenshare

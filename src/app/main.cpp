@@ -192,7 +192,7 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT [--display N] [--seconds S]\n"
-        << "  ScreenShare --watch PORT [--seconds S]\n"
+        << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
         << "  ScreenShare --make-invite PORT --stun HOST[:PORT] [--invite-ttl-seconds S]\n"
@@ -207,6 +207,7 @@ void PrintHelp()
         << "              [--audio-playback-muted] [--audio-playback-volume PERCENT]\n"
         << "              [--av-sync|--no-av-sync]\n"
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
+        << "              [--peer-invite INVITE] [--nat-probe-interval-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
         << "              [--udp-send HOST:PORT] [--udp-local-port PORT]\n"
@@ -233,6 +234,7 @@ void PrintHelp()
         << "  NAT: use --stun HOST[:PORT] to print this machine's public UDP endpoint.\n"
         << "       use --make-invite PORT --stun HOST[:PORT] to print a manual invite blob.\n"
         << "       exchange invites, then run --nat-probe PORT --peer-invite \"nat_invite=...\" on both sides.\n"
+        << "       Watch can also use --peer-invite to send punch probes while waiting for Share.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -2499,11 +2501,11 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.inviteTtlSeconds < 30 || options.inviteTtlSeconds > 3600) {
         throw std::invalid_argument("--invite-ttl-seconds must be between 30 and 3600");
     }
-    if (!options.peerInvite.empty() && !options.natProbe) {
-        throw std::invalid_argument("--peer-invite requires --nat-probe");
+    if (!options.peerInvite.empty() && !options.natProbe && options.udpReceivePort == 0) {
+        throw std::invalid_argument("--peer-invite requires --nat-probe, --watch, or --udp-recv");
     }
-    if (options.natProbeIntervalProvided && !options.natProbe) {
-        throw std::invalid_argument("--nat-probe-interval-ms requires --nat-probe");
+    if (options.natProbeIntervalProvided && !options.natProbe && options.peerInvite.empty()) {
+        throw std::invalid_argument("--nat-probe-interval-ms requires --nat-probe or --peer-invite");
     }
     if (options.natProbe && options.peerInvite.empty()) {
         throw std::invalid_argument("--nat-probe requires --peer-invite INVITE");
@@ -2524,6 +2526,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          HasUdpSession(options) ||
          options.audioCapture ||
          options.streamEncode ||
+         !options.peerInvite.empty() ||
          options.width != 0 ||
          options.height != 0 ||
          options.bitrate != 0 ||
@@ -2542,6 +2545,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          HasUdpSession(options) ||
          options.audioCapture ||
          options.streamEncode ||
+         !options.peerInvite.empty() ||
          options.width != 0 ||
          options.height != 0 ||
          options.bitrate != 0 ||
@@ -4295,7 +4299,7 @@ std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint)
     return endpoint.host + ":" + std::to_string(endpoint.port);
 }
 
-void RunNatProbe(const Options& options)
+screenshare::NatInvite ParseValidatedPeerInvite(const Options& options)
 {
     const auto invite = screenshare::ParseNatInvite(options.peerInvite);
     const std::time_t now = std::time(nullptr);
@@ -4322,6 +4326,13 @@ void RunNatProbe(const Options& options)
             << " does not match peer invite session fingerprint "
             << FormatSessionFingerprint(invite.sessionFingerprint) << ".\n";
     }
+
+    return invite;
+}
+
+void RunNatProbe(const Options& options)
+{
+    const auto invite = ParseValidatedPeerInvite(options);
 
     screenshare::NatProbeConfig config;
     config.localPort = options.natProbeLocalPort;
@@ -4361,6 +4372,11 @@ void RunNatProbe(const Options& options)
 
 void RunUdpReceiverStats(const Options& options)
 {
+    std::optional<screenshare::NatInvite> peerInvite;
+    if (!options.peerInvite.empty()) {
+        peerInvite = ParseValidatedPeerInvite(options);
+    }
+
     screenshare::UdpReceiver receiver;
     screenshare::UdpReceiverConfig config;
     config.port = options.udpReceivePort;
@@ -4368,6 +4384,26 @@ void RunUdpReceiverStats(const Options& options)
     config.simulatedJitter = std::chrono::milliseconds(options.simulateJitterMs);
     config.accessCodeFingerprint = options.accessCodeFingerprint;
     config.encryptionKey = options.accessCodeKey;
+    config.natProbeInterval = std::chrono::milliseconds(options.natProbeIntervalMs);
+    config.natProbeSessionFingerprint = options.sessionIdProvided ? options.sessionFingerprint : 0;
+    bool peerInviteHasDistinctLocalEndpoint = false;
+    if (peerInvite) {
+        config.natProbeTargets.push_back(screenshare::UdpNatProbeTarget{
+            peerInvite->publicEndpoint.host,
+            peerInvite->publicEndpoint.port,
+            false});
+        peerInviteHasDistinctLocalEndpoint =
+            !peerInvite->localEndpoint.host.empty() &&
+            peerInvite->localEndpoint.port != 0 &&
+            (peerInvite->localEndpoint.host != peerInvite->publicEndpoint.host ||
+             peerInvite->localEndpoint.port != peerInvite->publicEndpoint.port);
+        if (peerInviteHasDistinctLocalEndpoint) {
+            config.natProbeTargets.push_back(screenshare::UdpNatProbeTarget{
+                peerInvite->localEndpoint.host,
+                peerInvite->localEndpoint.port,
+                true});
+        }
+    }
     receiver.Open(config);
 
     std::unique_ptr<screenshare::LanDiscoveryResponder> lanDiscoveryResponder;
@@ -4439,6 +4475,14 @@ void RunUdpReceiverStats(const Options& options)
         std::cout
             << ", LAN discoverable as \"" << options.lanName << "\""
             << " on discovery port " << options.lanDiscoveryPort;
+    }
+    if (peerInvite) {
+        std::cout
+            << ", NAT punch probes to " << FormatNatEndpoint(peerInvite->publicEndpoint);
+        if (peerInviteHasDistinctLocalEndpoint) {
+            std::cout << " and " << FormatNatEndpoint(peerInvite->localEndpoint);
+        }
+        std::cout << " every " << options.natProbeIntervalMs << " ms";
     }
     if (options.simulateLossPercent > 0.0f || options.simulateJitterMs > 0) {
         std::cout
@@ -5256,6 +5300,9 @@ void RunUdpReceiverStats(const Options& options)
                         << " seen_stream=" << (hasReceivedStreamTraffic ? "yes" : "no")
                         << " udp_datagrams=" << stats.datagramsReceived
                         << " accepted_datagrams=" << stats.datagramsAccepted
+                        << " nat_probe_public_sent=" << stats.natProbePublicPacketsSent
+                        << " nat_probe_local_sent=" << stats.natProbeLocalPacketsSent
+                        << " nat_probe_errors=" << stats.natProbeSendErrors
                         << " completed_frames=" << stats.framesCompleted
                         << " audio_packets=" << stats.audioPacketsCompleted
                         << "\n";
@@ -5283,6 +5330,9 @@ void RunUdpReceiverStats(const Options& options)
                 << " feedback_sent=" << stats.feedbackPacketsSent
                 << " feedback_errors=" << stats.feedbackSendErrors
                 << " feedback_encrypted=" << stats.encryptedFeedbackPacketsSent
+                << " nat_probe_public_sent=" << stats.natProbePublicPacketsSent
+                << " nat_probe_local_sent=" << stats.natProbeLocalPacketsSent
+                << " nat_probe_errors=" << stats.natProbeSendErrors
                 << " audio_datagrams=" << stats.audioDatagramsAccepted
                 << " audio_packets=" << stats.audioPacketsCompleted
                 << " audio_queued_packets=" << stats.audioPacketsQueued
@@ -5478,6 +5528,9 @@ void RunUdpReceiverStats(const Options& options)
         << ", feedback packets sent: " << stats.feedbackPacketsSent
         << ", feedback send errors: " << stats.feedbackSendErrors
         << ", encrypted feedback packets sent: " << stats.encryptedFeedbackPacketsSent
+        << ", NAT probe public packets sent: " << stats.natProbePublicPacketsSent
+        << ", NAT probe local packets sent: " << stats.natProbeLocalPacketsSent
+        << ", NAT probe send errors: " << stats.natProbeSendErrors
         << ", audio datagrams: " << stats.audioDatagramsAccepted
         << ", audio packets: " << stats.audioPacketsCompleted
         << ", audio queued packets: " << stats.audioPacketsQueued

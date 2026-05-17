@@ -1,5 +1,6 @@
 #include "transport/UdpSender.h"
 
+#include "transport/NatTraversal.h"
 #include "transport/UdpProtocol.h"
 
 #include <winsock2.h>
@@ -448,6 +449,10 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
     const std::span<const std::byte> receivedDatagram(
         buffer.data(),
         static_cast<size_t>(received));
+    if (IsNatProbeDatagram(receivedDatagram)) {
+        return std::nullopt;
+    }
+
     std::optional<std::vector<std::byte>> decryptedFeedbackDatagram;
     std::span<const std::byte> parseDatagram = receivedDatagram;
     bool cryptoRejected = false;
