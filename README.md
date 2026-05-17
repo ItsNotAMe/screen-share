@@ -168,7 +168,23 @@ The desktop UI exposes the same invite creation flow. Generate or paste the shar
 then use Create in the current tab's Internet section. The invite is copied to the clipboard and
 shown in the UI. Send that invite to your friend, paste their invite into Peer invite, and start the
 session normally. The Paste buttons can extract an invite from either a raw invite line or copied
-command output, and the Internet status line shows what is still missing before starting.
+command output, and the Internet status line shows what is still missing before starting. While a NAT
+invite session is running, that same status line switches to live setup states such as probing,
+probe seen, connected, receiving, or rejected.
+
+Two-computer UI checklist for invite testing:
+
+1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
+2. Generate or paste the same access code on both computers.
+3. On the Watch computer, open the Watch tab, choose the listen port, and click Create in Internet.
+   Send that invite to the sharer.
+4. On the Share computer, open the Share tab, click Create in Internet, send that invite to the
+   watcher, and paste the Watch invite into Peer invite.
+5. Paste the Share invite into the Watch tab's Peer invite field.
+6. Start Watch first, then start Share.
+7. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
+   If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both
+   computers.
 
 After both sides exchange invite lines, you can optionally run a UDP probe diagnostic on both
 computers using the same local port that created each invite. Quote the copied invite because it
