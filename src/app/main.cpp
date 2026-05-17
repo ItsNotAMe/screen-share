@@ -4006,6 +4006,11 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                             udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
                             udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
                             udpConfig.encryptionKey = options.accessCodeKey;
+                            udpConfig.retargetOnNatProbe =
+                                options.udpSendTargetFromPeerInvite &&
+                                options.inviteEndpointPreference == InviteEndpointPreference::Auto;
+                            udpConfig.natProbeSessionFingerprint =
+                                options.sessionIdProvided ? options.sessionFingerprint : 0;
                             if (options.audioCapture) {
                                 udpConfig.maxQueuedDatagrams = 16'384;
                             }
@@ -4015,6 +4020,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                                 << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
                                 << " target_source=" << (options.udpSendTargetFromPeerInvite ? "peer_invite" : "direct")
                                 << " invite_endpoint=" << (options.udpSendTargetFromPeerInvite ? options.udpSendPeerInviteEndpoint : "none")
+                                << " nat_probe_retarget=" << (udpConfig.retargetOnNatProbe ? "enabled" : "disabled")
                                 << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
                                 << " local_port=" << (udpConfig.localPort == 0 ? std::string("auto") : std::to_string(udpConfig.localPort))
                                 << " max_queue_ms=" << udpConfig.maxQueueDelay.count()
@@ -4167,6 +4173,12 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " udp_feedback_invalid=" << udpStatsNow.invalidFeedbackPackets
                 << " udp_feedback_access_rejected=" << udpStatsNow.feedbackAccessRejected
                 << " udp_feedback_crypto_rejected=" << udpStatsNow.feedbackCryptoRejected
+                << " udp_nat_probe_packets=" << udpStatsNow.natProbePacketsReceived
+                << " udp_nat_retargets=" << udpStatsNow.natProbeRetargets
+                << " udp_nat_retarget_rejected=" << udpStatsNow.natProbeRetargetRejected
+                << " udp_nat_retarget_active=" << (udpStatsNow.natProbeRetargetActive ? "yes" : "no")
+                << " udp_nat_retarget_endpoint="
+                << (udpStatsNow.natProbeRetargetEndpoint.empty() ? "none" : udpStatsNow.natProbeRetargetEndpoint)
                 << " udp_encryption=" << (udpStatsNow.encryptionEnabled ? "enabled" : "disabled")
                 << " udp_feedback_health="
                 << (udpStatsNow.hasFeedback ?
@@ -4288,6 +4300,12 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", UDP invalid feedback packets: " << udpStats.invalidFeedbackPackets
         << ", UDP feedback access rejected: " << udpStats.feedbackAccessRejected
         << ", UDP feedback crypto rejected: " << udpStats.feedbackCryptoRejected
+        << ", UDP NAT probe packets: " << udpStats.natProbePacketsReceived
+        << ", UDP NAT retargets: " << udpStats.natProbeRetargets
+        << ", UDP NAT retarget rejected: " << udpStats.natProbeRetargetRejected
+        << ", UDP NAT retarget active: " << (udpStats.natProbeRetargetActive ? "yes" : "no")
+        << ", UDP NAT retarget endpoint: "
+        << (udpStats.natProbeRetargetEndpoint.empty() ? "none" : udpStats.natProbeRetargetEndpoint)
         << ", UDP encryption: " << (udpStats.encryptionEnabled ? "enabled" : "disabled")
         << ", UDP feedback health: "
         << (udpStats.hasFeedback ?
