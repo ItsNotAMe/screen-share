@@ -119,6 +119,7 @@ public:
 
     void Open(const UdpReceiverConfig& config);
     void Close();
+    void ResetMediaQueues();
     [[nodiscard]] std::optional<UdpCompletedFrame> ReceiveFrame(std::chrono::milliseconds timeout);
     [[nodiscard]] std::optional<UdpCompletedAudioPacket> PopAudioPacket();
     bool SendFeedback(const udp_protocol::FeedbackSnapshot& feedback);

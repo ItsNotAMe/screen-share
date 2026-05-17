@@ -1350,6 +1350,24 @@ struct AvSyncSnapshot {
 
 class AvSyncDiagnostics {
 public:
+    void Clear()
+    {
+        hasVideo_ = false;
+        hasVideoSenderClock_ = false;
+        hasAudio_ = false;
+        videoFrames_ = 0;
+        audioPackets_ = 0;
+        ignoredAudioPackets_ = 0;
+        firstVideoTimestamp100ns_ = 0;
+        latestVideoTimestamp100ns_ = 0;
+        firstVideoSenderQpc100ns_ = 0;
+        latestVideoSenderQpc100ns_ = 0;
+        firstAudioQpc100ns_ = 0;
+        latestAudioQpc100ns_ = 0;
+        latestVideoFrameId_ = 0;
+        latestAudioPacketId_ = 0;
+    }
+
     void ObserveVideoFrame(const screenshare::UdpCompletedFrame& frame)
     {
         if (!hasVideo_) {
@@ -5475,12 +5493,95 @@ void RunUdpReceiverStats(const Options& options)
     uint64_t lastPreviewLateDrops = 0;
     uint64_t lastPreviewOverflowDrops = 0;
     uint64_t latestFrameId = 0;
+    uint64_t latestFrameSenderQpc100ns = 0;
     uint64_t latestFrameBytes = 0;
     uint16_t latestFragmentCount = 0;
     uint64_t feedbackSequence = 0;
+    uint64_t receiverStreamRestarts = 0;
+    uint64_t receiverStreamStaleFrames = 0;
+    uint64_t currentStreamStartSenderQpc100ns = 0;
     bool hasCompletedFrame = false;
     bool hasReceivedStreamTraffic = false;
     bool waitingForStreamLogged = false;
+
+    auto detectReceiverStreamRestart = [&](const screenshare::UdpCompletedFrame& frame) {
+        if (!hasCompletedFrame || frame.frameId >= latestFrameId) {
+            return false;
+        }
+
+        if (frame.senderQpc100ns != 0 && latestFrameSenderQpc100ns != 0) {
+            return frame.senderQpc100ns > latestFrameSenderQpc100ns;
+        }
+
+        constexpr uint64_t RestartFrameIdBackstepThreshold = 30;
+        return latestFrameId - frame.frameId >= RestartFrameIdBackstepThreshold;
+    };
+
+    auto isStaleReceiverStreamFrame = [&](const screenshare::UdpCompletedFrame& frame) {
+        if (currentStreamStartSenderQpc100ns == 0 || frame.senderQpc100ns == 0) {
+            return false;
+        }
+        return frame.senderQpc100ns < currentStreamStartSenderQpc100ns;
+    };
+
+    auto resetReceiverStreamState = [&](const screenshare::UdpCompletedFrame& firstFrame) {
+        ++receiverStreamRestarts;
+        std::cout
+            << "receiver_stream_restart"
+            << " previous_frame=" << latestFrameId
+            << " new_frame=" << firstFrame.frameId
+            << " previous_sender_qpc=" << latestFrameSenderQpc100ns
+            << " new_sender_qpc=" << firstFrame.senderQpc100ns
+            << "\n";
+
+        if (previewWindow) {
+            restartPreviewPlayoutClock();
+        }
+        if (h264Decoder) {
+            h264Decoder->Start();
+            ++h264DecodeDecoderRestarts;
+        }
+
+        receiver.ResetMediaQueues();
+        h264DecodeBacklog.clear();
+        hasH264DecodeStartFrame = false;
+        nextH264DecodeFrameId = 0;
+        h264DumpBacklog.clear();
+        hasH264DumpStartFrame = false;
+        nextH264DumpFrameId = 0;
+        latestDecodedFrame.reset();
+        h264DecodedWidth = 0;
+        h264DecodedHeight = 0;
+
+        audioPlayout.Clear();
+        audioRenderer.reset();
+        activeAudioPlaybackFormat.reset();
+        opusAudioDecoder.reset();
+        audioPlaybackStatus = options.audioPlayback ? "waiting" : "disabled";
+
+        avSync.Clear();
+        avSyncCorrectionApplied = !options.avSync;
+        avSyncStartQpc100ns.reset();
+        avSyncPreviewBiasMs = 0;
+        avSyncAudioBiasMs = 0;
+        avSyncVideoStartDrops = 0;
+        avSyncAudioStartDrops = 0;
+        avSyncAudioCatchupDrops = 0;
+        avSyncAudioGateBypasses = 0;
+        previewHeldForAudioCatchup = false;
+        avSyncPlaybackStartAligned = false;
+        avSyncPlaybackStartQpc100ns = 0;
+        avSyncPlayoutAudioAheadMs = 0.0;
+        avSyncCorrectionStatus = options.avSync ? "waiting" : "disabled";
+        avSyncVideoOnlyFallback = false;
+
+        latestFrameId = 0;
+        latestFrameSenderQpc100ns = 0;
+        currentStreamStartSenderQpc100ns = firstFrame.senderQpc100ns;
+        latestFrameBytes = 0;
+        latestFragmentCount = 0;
+        hasCompletedFrame = false;
+    };
 
     auto updateReportBaselines = [&](const screenshare::UdpReceiverStats& stats,
                                      uint64_t previewLateDrops,
@@ -5525,9 +5626,20 @@ void RunUdpReceiverStats(const Options& options)
             receiveTimeout = std::min(receiveTimeout, std::chrono::milliseconds(5));
         }
         if (auto frame = receiver.ReceiveFrame(receiveTimeout)) {
+            if (detectReceiverStreamRestart(*frame)) {
+                resetReceiverStreamState(*frame);
+            }
+            if (isStaleReceiverStreamFrame(*frame)) {
+                ++receiverStreamStaleFrames;
+                continue;
+            }
+            if (currentStreamStartSenderQpc100ns == 0 && frame->senderQpc100ns != 0) {
+                currentStreamStartSenderQpc100ns = frame->senderQpc100ns;
+            }
             avSync.ObserveVideoFrame(*frame);
             maybeApplyAvSyncCorrection();
             latestFrameId = frame->frameId;
+            latestFrameSenderQpc100ns = frame->senderQpc100ns;
             latestFrameBytes = frame->bytes.size();
             latestFragmentCount = frame->fragmentCount;
             hasCompletedFrame = true;
@@ -5625,6 +5737,8 @@ void RunUdpReceiverStats(const Options& options)
                         << " nat_probe_public_sent=" << stats.natProbePublicPacketsSent
                         << " nat_probe_local_sent=" << stats.natProbeLocalPacketsSent
                         << " nat_probe_errors=" << stats.natProbeSendErrors
+                        << " stream_restarts=" << receiverStreamRestarts
+                        << " stream_stale_frames=" << receiverStreamStaleFrames
                         << " completed_frames=" << stats.framesCompleted
                         << " audio_packets=" << stats.audioPacketsCompleted
                         << "\n";
@@ -5657,6 +5771,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " nat_probe_public_sent=" << stats.natProbePublicPacketsSent
                 << " nat_probe_local_sent=" << stats.natProbeLocalPacketsSent
                 << " nat_probe_errors=" << stats.natProbeSendErrors
+                << " stream_restarts=" << receiverStreamRestarts
+                << " stream_stale_frames=" << receiverStreamStaleFrames
                 << " audio_datagrams=" << stats.audioDatagramsAccepted
                 << " audio_packets=" << stats.audioPacketsCompleted
                 << " audio_queued_packets=" << stats.audioPacketsQueued
@@ -5857,6 +5973,8 @@ void RunUdpReceiverStats(const Options& options)
         << ", NAT probe public packets sent: " << stats.natProbePublicPacketsSent
         << ", NAT probe local packets sent: " << stats.natProbeLocalPacketsSent
         << ", NAT probe send errors: " << stats.natProbeSendErrors
+        << ", receiver stream restarts: " << receiverStreamRestarts
+        << ", receiver stale stream frames: " << receiverStreamStaleFrames
         << ", audio datagrams: " << stats.audioDatagramsAccepted
         << ", audio packets: " << stats.audioPacketsCompleted
         << ", audio queued packets: " << stats.audioPacketsQueued
