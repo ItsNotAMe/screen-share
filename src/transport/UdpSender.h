@@ -21,6 +21,7 @@ namespace screenshare {
 struct UdpSenderConfig {
     std::string host;
     uint16_t port = 0;
+    uint16_t localPort = 0;
     uint32_t maxPayloadBytes = 1'200;
     uint32_t pacingBitrate = 0;
     uint32_t maxQueuedDatagrams = 4'096;
