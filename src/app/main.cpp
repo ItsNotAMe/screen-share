@@ -1740,6 +1740,114 @@ const char* FeedbackAccessText(const screenshare::UdpSenderStats& stats)
     return stats.latestFeedback.accessCodeFingerprint == 0 ? "none" : "required";
 }
 
+const char* SenderNatStatus(const Options& options, const screenshare::UdpSenderStats& stats)
+{
+    if (!options.udpSendTargetFromPeerInvite) {
+        return "none";
+    }
+    if (stats.feedbackPacketsReceived > 0) {
+        return "connected";
+    }
+    if (options.inviteEndpointPreference != InviteEndpointPreference::Auto) {
+        return "forced_endpoint_waiting_for_feedback";
+    }
+    if (stats.natProbeRetargetActive) {
+        return "retargeted_waiting_for_feedback";
+    }
+    if (stats.natProbeRetargetRejected > 0) {
+        return "probe_rejected";
+    }
+    if (stats.natProbePacketsReceived > 0) {
+        return "probe_seen";
+    }
+    if (stats.datagramsSent > 0) {
+        return "waiting_for_probe";
+    }
+    return "starting";
+}
+
+const char* SenderNatHint(const Options& options, const screenshare::UdpSenderStats& stats)
+{
+    const std::string_view status = SenderNatStatus(options, stats);
+    if (status == "none") {
+        return "none";
+    }
+    if (status == "connected") {
+        return "receiver_feedback_received";
+    }
+    if (status == "forced_endpoint_waiting_for_feedback") {
+        return "check_receiver_or_try_auto_endpoint";
+    }
+    if (status == "retargeted_waiting_for_feedback") {
+        return "probe_seen_waiting_for_receiver_feedback";
+    }
+    if (status == "probe_rejected") {
+        return "check_access_code_or_session";
+    }
+    if (status == "probe_seen") {
+        return "probe_seen_no_endpoint_change";
+    }
+    if (status == "waiting_for_probe") {
+        return "start_watch_with_peer_invite_or_check_firewall";
+    }
+    return "starting_udp_sender";
+}
+
+const char* ReceiverNatStatus(
+    bool hasPeerInvite,
+    const screenshare::UdpReceiverStats& stats,
+    bool hasReceivedStreamTraffic)
+{
+    if (!hasPeerInvite) {
+        return "none";
+    }
+    if (stats.datagramsAccepted > 0 ||
+        stats.framesCompleted > 0 ||
+        stats.audioPacketsCompleted > 0) {
+        return "receiving";
+    }
+    if (stats.accessRejectedDatagrams > 0 || stats.cryptoRejectedDatagrams > 0) {
+        return "media_rejected";
+    }
+    if (hasReceivedStreamTraffic || stats.datagramsReceived > 0) {
+        return "incoming_unaccepted";
+    }
+    if (stats.natProbeSendErrors > 0) {
+        return "probe_send_errors";
+    }
+    if (stats.natProbePublicPacketsSent > 0 || stats.natProbeLocalPacketsSent > 0) {
+        return "probing";
+    }
+    return "waiting_to_probe";
+}
+
+const char* ReceiverNatHint(
+    bool hasPeerInvite,
+    const screenshare::UdpReceiverStats& stats,
+    bool hasReceivedStreamTraffic)
+{
+    const std::string_view status = ReceiverNatStatus(hasPeerInvite, stats, hasReceivedStreamTraffic);
+    if (status == "none") {
+        return "none";
+    }
+    if (status == "receiving") {
+        return "media_received";
+    }
+    if (status == "media_rejected") {
+        return "check_access_code_or_plaintext_mode";
+    }
+    if (status == "incoming_unaccepted") {
+        return "check_sender_target_or_packet_format";
+    }
+    if (status == "probe_send_errors") {
+        return "check_peer_invite_endpoint";
+    }
+    if (status == "probing") {
+        return "start_share_with_receiver_invite_and_local_invite";
+    }
+    return "waiting_to_send_first_probe";
+}
+
 std::optional<screenshare::udp_protocol::FeedbackSnapshot> DrainUdpFeedback(
     screenshare::UdpSender& udpSender,
     std::chrono::milliseconds firstTimeout)
@@ -4217,6 +4325,8 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " udp_nat_retarget_active=" << (udpStatsNow.natProbeRetargetActive ? "yes" : "no")
                 << " udp_nat_retarget_endpoint="
                 << (udpStatsNow.natProbeRetargetEndpoint.empty() ? "none" : udpStatsNow.natProbeRetargetEndpoint)
+                << " nat_status=" << SenderNatStatus(options, udpStatsNow)
+                << " nat_hint=" << SenderNatHint(options, udpStatsNow)
                 << " udp_encryption=" << (udpStatsNow.encryptionEnabled ? "enabled" : "disabled")
                 << " udp_feedback_health="
                 << (udpStatsNow.hasFeedback ?
@@ -4344,6 +4454,8 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", UDP NAT retarget active: " << (udpStats.natProbeRetargetActive ? "yes" : "no")
         << ", UDP NAT retarget endpoint: "
         << (udpStats.natProbeRetargetEndpoint.empty() ? "none" : udpStats.natProbeRetargetEndpoint)
+        << ", NAT status: " << SenderNatStatus(options, udpStats)
+        << ", NAT hint: " << SenderNatHint(options, udpStats)
         << ", UDP encryption: " << (udpStats.encryptionEnabled ? "enabled" : "disabled")
         << ", UDP feedback health: "
         << (udpStats.hasFeedback ?
@@ -5473,6 +5585,8 @@ void RunUdpReceiverStats(const Options& options)
                         << " session=" << options.sessionId
                         << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                         << " seen_stream=" << (hasReceivedStreamTraffic ? "yes" : "no")
+                        << " nat_status=" << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+                        << " nat_hint=" << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
                         << " udp_datagrams=" << stats.datagramsReceived
                         << " accepted_datagrams=" << stats.datagramsAccepted
                         << " nat_probe_public_sent=" << stats.natProbePublicPacketsSent
@@ -5495,6 +5609,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " session=" << options.sessionId
                 << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                 << " receiver_health=" << ReceiverHealthState(health)
+                << " nat_status=" << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+                << " nat_hint=" << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
                 << " udp_datagrams_per_second=" << datagramsPerSecond
                 << " accepted_datagrams=" << stats.datagramsAccepted
                 << " access_rejected_datagrams=" << stats.accessRejectedDatagrams
@@ -5694,6 +5810,8 @@ void RunUdpReceiverStats(const Options& options)
         << ", session: " << options.sessionId
         << ", session fingerprint: " << FormatSessionFingerprint(options.sessionFingerprint)
         << ", receiver health: " << ReceiverHealthState(finalHealth)
+        << ", NAT status: " << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+        << ", NAT hint: " << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
         << ", accepted datagrams: " << stats.datagramsAccepted
         << ", access rejected datagrams: " << stats.accessRejectedDatagrams
         << ", crypto rejected datagrams: " << stats.cryptoRejectedDatagrams

@@ -195,6 +195,10 @@ as same-LAN/VPN experiments, and you want to force that path. If you do not have
 handy, `--udp-local-port PORT` is still available as the manual equivalent of `--local-invite`.
 `--nat-probe-interval-ms MS` can tune Watch's probe interval. The default is 250 ms.
 
+NAT runs print `nat_status` and `nat_hint` fields in sender/receiver logs. They summarize the
+low-level counters into setup states such as `waiting_for_probe`, `retargeted_waiting_for_feedback`,
+`probe_rejected`, `probing`, `media_rejected`, `incoming_unaccepted`, or `receiving`.
+
 List monitors:
 
 ```powershell
