@@ -200,6 +200,13 @@ void UdpReceiver::Close()
     pendingAudioPackets_.clear();
 }
 
+void UdpReceiver::ResetMediaQueues()
+{
+    completedAudioPackets_.clear();
+    pendingFrames_.clear();
+    pendingAudioPackets_.clear();
+}
+
 std::optional<UdpCompletedFrame> UdpReceiver::ReceiveFrame(std::chrono::milliseconds timeout)
 {
     if (!isOpen()) {
