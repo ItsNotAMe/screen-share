@@ -169,25 +169,24 @@ that created each invite. Quote the copied invite because it contains semicolons
 
 Use `--allow-plaintext` instead of `--access-code CODE` only if the invite was created in plaintext
 mode. The probe sends small packets to the peer's public and local invite endpoints and reports
-`nat_probe_result=reachable` when any probe or reply comes back. This is still a diagnostic; wiring
-the punched socket into real Share/Watch streaming is the next NAT milestone.
+`nat_probe_result=reachable` when any probe or reply comes back.
 
-For manual experiments after a successful probe, Share can bind its sender socket to the same local
-port that was used for the sender invite/probe:
-
-```powershell
-.\build\release\ScreenShare.exe --share PEER_PUBLIC_IP:PEER_PORT --udp-local-port 5001 --access-code CODE
-```
-
-This is useful for NAT testing because many routers keep mappings by local UDP port. The receiver
-still listens with `--watch PEER_PORT`. Give Watch the sender's invite so it keeps sending punch
-probes from the actual receive socket while waiting for media:
+For manual experiments after a successful probe, start Watch with the sender's invite so it keeps
+sending punch probes from the actual receive socket while waiting for media:
 
 ```powershell
-.\build\release\ScreenShare.exe --watch PEER_PORT --peer-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+.\build\release\ScreenShare.exe --watch 5000 --peer-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
 ```
 
-`--nat-probe-interval-ms MS` can tune the probe interval. The default is 250 ms.
+Then start Share with the receiver's invite. Bind Share to the same local port that was used to make
+the sender invite so the receiver's punch probes hit the socket that sends media:
+
+```powershell
+.\build\release\ScreenShare.exe --share "nat_invite=screenshare-invite-v1;..." --udp-local-port 5001 --access-code CODE
+```
+
+`--share "nat_invite=..."` currently sends to the invite's public endpoint. `--nat-probe-interval-ms
+MS` can tune Watch's probe interval. The default is 250 ms.
 
 List monitors:
 
