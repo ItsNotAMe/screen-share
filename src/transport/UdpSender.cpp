@@ -103,6 +103,17 @@ void UdpSender::Open(const UdpSenderConfig& config)
         freeaddrinfo(resolved);
         throw std::runtime_error(WinsockErrorMessage("socket"));
     }
+    if (config.localPort != 0) {
+        sockaddr_in bindAddress{};
+        bindAddress.sin_family = AF_INET;
+        bindAddress.sin_addr.s_addr = htonl(INADDR_ANY);
+        bindAddress.sin_port = htons(config.localPort);
+        if (bind(udpSocket, reinterpret_cast<const sockaddr*>(&bindAddress), sizeof(bindAddress)) == SOCKET_ERROR) {
+            closesocket(udpSocket);
+            freeaddrinfo(resolved);
+            throw std::runtime_error(WinsockErrorMessage("bind(sender)"));
+        }
+    }
 
     {
         std::lock_guard lock(mutex_);

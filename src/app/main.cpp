@@ -92,6 +92,8 @@ struct Options {
     bool streamEncoderPreferenceProvided = false;
     StreamEncoderPreference streamEncoderPreference = StreamEncoderPreference::Auto;
     std::string udpSendTarget;
+    uint16_t udpLocalPort = 0;
+    bool udpLocalPortProvided = false;
     bool udpPacing = true;
     bool udpPacingOptionProvided = false;
     int udpMaxQueueMs = DefaultUdpMaxQueueMs;
@@ -197,7 +199,7 @@ void PrintHelp()
         << "  ScreenShare --nat-probe PORT --peer-invite INVITE [--seconds S]\n"
         << "              [--nat-probe-interval-ms MS]\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
-        << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
+        << "              [--audio-send HOST:PORT] [--udp-local-port PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
@@ -207,7 +209,8 @@ void PrintHelp()
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
-        << "              [--udp-send HOST:PORT] [--no-udp-pacing] [--udp-max-queue-ms MS]\n"
+        << "              [--udp-send HOST:PORT] [--udp-local-port PORT]\n"
+        << "              [--no-udp-pacing] [--udp-max-queue-ms MS]\n"
         << "              [--adapt-bitrate]\n"
         << "              [--audio-capture system|microphone] [--audio-device-id ID]\n"
         << "              [--audio-codec raw|opus]\n"
@@ -257,6 +260,7 @@ void PrintHelp()
         << "  ScreenShare --udp-recv 5000 --preview\n"
         << "  ScreenShare --udp-recv 5000 --preview --audio-playback\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system\n"
+        << "  ScreenShare --share 203.0.113.10:5000 --udp-local-port 5001 --access-code 123456\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -2310,6 +2314,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--udp-send") {
             options.udpSendTarget = requireValue("--udp-send");
             options.streamEncode = true;
+        } else if (arg == "--udp-local-port") {
+            options.udpLocalPort = screenshare::ParseUdpReceivePort(requireValue("--udp-local-port"));
+            options.udpLocalPortProvided = true;
         } else if (arg == "--no-udp-pacing") {
             options.udpPacing = false;
             options.udpPacingOptionProvided = true;
@@ -2652,6 +2659,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.udpMaxQueueMsProvided && options.udpSendTarget.empty()) {
         throw std::invalid_argument("--udp-max-queue-ms requires --udp-send");
     }
+    if (options.udpLocalPortProvided && options.udpSendTarget.empty() && options.audioSendTarget.empty()) {
+        throw std::invalid_argument("--udp-local-port requires --udp-send, --share, or --audio-send");
+    }
     if (options.udpMaxQueueMs < 0 || options.udpMaxQueueMs > 5000) {
         throw std::invalid_argument("--udp-max-queue-ms must be between 0 and 5000");
     }
@@ -2706,17 +2716,17 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.audioDeviceIdProvided || options.audioCodecProvided || !options.audioSendTarget.empty() ||
          !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.udpMaxQueueMsProvided ||
+         options.udpLocalPortProvided || options.udpPacingOptionProvided || options.udpMaxQueueMsProvided ||
          options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --audio-send, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --udp-max-queue-ms, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --audio-send, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --udp-local-port, --no-udp-pacing, --udp-max-queue-ms, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || options.listAudioDevices || options.audioCapture || options.audioDeviceIdProvided ||
          options.audioCodecProvided || !options.audioSendTarget.empty() || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.udpLocalPortProvided || options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
          options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
@@ -2729,7 +2739,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.audioCodecProvided || !options.audioSendTarget.empty() ||
          options.width != 0 || options.height != 0 || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.udpLocalPortProvided || options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
@@ -2744,6 +2754,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         (options.listDisplays || options.listH264Encoders || options.listAudioDevices ||
          options.width != 0 || options.height != 0 || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided ||
+         (options.udpLocalPortProvided && options.audioSendTarget.empty()) ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
@@ -2752,7 +2763,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
           options.audioPlayback || options.audioPlaybackLatencyProvided || options.audioPlaybackMutedProvided ||
           options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
-        throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, --audio-send, and --audio-codec");
+        throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, --audio-send, --udp-local-port, and --audio-codec");
     }
     if (audioCaptureWithVideoSend &&
         (options.listDisplays || options.listH264Encoders || options.listAudioDevices ||
@@ -3104,6 +3115,7 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
     std::unique_ptr<screenshare::OpusAudioEncoder> opusEncoder;
     if (!options.audioSendTarget.empty()) {
         auto udpConfig = screenshare::ParseUdpSenderTarget(options.audioSendTarget);
+        udpConfig.localPort = options.udpLocalPort;
         udpConfig.pacingEnabled = false;
         udpConfig.maxQueuedDatagrams = 16'384;
         udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
@@ -3134,6 +3146,7 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
     if (audioSender) {
         std::cout
             << ", audio UDP sending to " << options.audioSendTarget
+            << ", local port " << (options.udpLocalPort == 0 ? std::string("auto") : std::to_string(options.udpLocalPort))
             << ", codec " << screenshare::udp_protocol::AudioCodecName(options.audioCodec);
     }
     if (!options.audioDeviceId.empty()) {
@@ -3373,6 +3386,9 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     }
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
+        if (options.udpLocalPort != 0) {
+            std::cout << ", UDP local port " << options.udpLocalPort;
+        }
         std::cout << ", UDP pacing " << (options.udpPacing ? "enabled" : "disabled");
         if (options.udpMaxQueueMs == 0) {
             std::cout << ", UDP live queue cap disabled";
@@ -3863,6 +3879,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                     if (!options.udpSendTarget.empty()) {
                         if (!udpSender) {
                             auto udpConfig = screenshare::ParseUdpSenderTarget(options.udpSendTarget);
+                            udpConfig.localPort = options.udpLocalPort;
                             udpConfig.pacingEnabled = options.udpPacing;
                             udpConfig.pacingBitrate = combinedUdpPacingBitrate();
                             udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
@@ -3876,6 +3893,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                             std::cout
                                 << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
                                 << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
+                                << " local_port=" << (udpConfig.localPort == 0 ? std::string("auto") : std::to_string(udpConfig.localPort))
                                 << " max_queue_ms=" << udpConfig.maxQueueDelay.count()
                                 << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
                                 << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())

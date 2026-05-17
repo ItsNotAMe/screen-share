@@ -172,6 +172,16 @@ mode. The probe sends small packets to the peer's public and local invite endpoi
 `nat_probe_result=reachable` when any probe or reply comes back. This is still a diagnostic; wiring
 the punched socket into real Share/Watch streaming is the next NAT milestone.
 
+For manual experiments after a successful probe, Share can bind its sender socket to the same local
+port that was used for the sender invite/probe:
+
+```powershell
+.\build\release\ScreenShare.exe --share PEER_PUBLIC_IP:PEER_PORT --udp-local-port 5001 --access-code CODE
+```
+
+This is useful for NAT testing because many routers keep mappings by local UDP port. The receiver
+still listens with `--watch PEER_PORT`.
+
 List monitors:
 
 ```powershell
