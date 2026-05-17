@@ -1,5 +1,6 @@
 #include "transport/UdpReceiver.h"
 
+#include "transport/NatTraversal.h"
 #include "transport/UdpProtocol.h"
 
 #include <winsock2.h>
@@ -11,6 +12,7 @@
 #include <cstring>
 #include <limits>
 #include <random>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -86,12 +88,52 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     if (config.encryptionKey && config.accessCodeFingerprint == 0) {
         throw std::invalid_argument("UDP encryption requires an access code fingerprint");
     }
+    if (config.natProbeInterval < std::chrono::milliseconds(50) ||
+        config.natProbeInterval > std::chrono::seconds(5)) {
+        throw std::invalid_argument("UDP NAT probe interval must be between 50 and 5000 ms");
+    }
 
     std::unique_ptr<UdpAesGcm> crypto;
     uint32_t feedbackNoncePrefix = 0;
     if (config.encryptionKey) {
         crypto = std::make_unique<UdpAesGcm>(*config.encryptionKey);
         feedbackNoncePrefix = GenerateUdpCryptoNoncePrefix();
+    }
+
+    std::vector<NatProbeTargetAddress> natProbeTargets;
+    for (const auto& target : config.natProbeTargets) {
+        if (target.host.empty() || target.port == 0) {
+            throw std::invalid_argument("UDP NAT probe target must have host and port");
+        }
+
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_protocol = IPPROTO_UDP;
+
+        addrinfo* resolved = nullptr;
+        const std::string port = std::to_string(target.port);
+        const int addressResult = getaddrinfo(target.host.c_str(), port.c_str(), &hints, &resolved);
+        if (addressResult != 0 || resolved == nullptr) {
+            throw std::runtime_error("getaddrinfo failed for UDP NAT probe target " + target.host + ":" + port);
+        }
+
+        NatProbeTargetAddress resolvedTarget;
+        resolvedTarget.address.resize(static_cast<size_t>(resolved->ai_addrlen));
+        std::memcpy(resolvedTarget.address.data(), resolved->ai_addr, static_cast<size_t>(resolved->ai_addrlen));
+        resolvedTarget.addressLength = static_cast<int>(resolved->ai_addrlen);
+        resolvedTarget.localEndpoint = target.localEndpoint;
+        freeaddrinfo(resolved);
+
+        const auto duplicate = std::find_if(
+            natProbeTargets.begin(),
+            natProbeTargets.end(),
+            [&](const NatProbeTargetAddress& existing) {
+                return existing.address == resolvedTarget.address;
+            });
+        if (duplicate == natProbeTargets.end()) {
+            natProbeTargets.push_back(std::move(resolvedTarget));
+        }
     }
 
     const SOCKET udpSocket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -126,6 +168,9 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     datagramBuffer_.assign(config_.maxDatagramBytes, std::byte{});
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
+    natProbeTargets_ = std::move(natProbeTargets);
+    nextNatProbeAt_ = Clock::now();
+    nextNatProbeSequence_ = 1;
     delayedDatagrams_.clear();
     completedAudioPackets_.clear();
     pendingFrames_.clear();
@@ -146,7 +191,17 @@ void UdpReceiver::Close()
     feedbackNoncePrefix_ = 0;
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
+    natProbeTargets_.clear();
+    nextNatProbeAt_ = {};
+    nextNatProbeSequence_ = 1;
     delayedDatagrams_.clear();
+    completedAudioPackets_.clear();
+    pendingFrames_.clear();
+    pendingAudioPackets_.clear();
+}
+
+void UdpReceiver::ResetMediaQueues()
+{
     completedAudioPackets_.clear();
     pendingFrames_.clear();
     pendingAudioPackets_.clear();
@@ -164,6 +219,7 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveFrame(std::chrono::millisec
 
     while (true) {
         const auto now = Clock::now();
+        MaybeSendNatProbes(now);
         if (auto frame = ReleaseReadyDelayedDatagram(now)) {
             return frame;
         }
@@ -176,6 +232,11 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveFrame(std::chrono::millisec
         const auto delayedWait = WaitUntilNextDelayedDatagram(now);
         if (delayedWait >= std::chrono::milliseconds(0)) {
             waitTime = std::min(waitTime, delayedWait);
+        }
+        if (!natProbeTargets_.empty() && nextNatProbeAt_ > now) {
+            waitTime = std::min(
+                waitTime,
+                std::chrono::duration_cast<std::chrono::milliseconds>(nextNatProbeAt_ - now));
         }
         waitTime = std::max(std::chrono::milliseconds(1), waitTime);
 
@@ -245,6 +306,12 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveDatagram()
         throw std::runtime_error(WinsockErrorMessage("recvfrom"));
     }
 
+    if (IsNatProbeDatagram(std::span<const std::byte>(
+            datagramBuffer_.data(),
+            static_cast<size_t>(received)))) {
+        return std::nullopt;
+    }
+
     feedbackAddress_.resize(static_cast<size_t>(senderAddressLength));
     std::memcpy(feedbackAddress_.data(), &senderAddress, static_cast<size_t>(senderAddressLength));
     feedbackAddressLength_ = senderAddressLength;
@@ -295,6 +362,39 @@ bool UdpReceiver::SendFeedback(const udp_protocol::FeedbackSnapshot& feedback)
     return true;
 }
 
+void UdpReceiver::MaybeSendNatProbes(Clock::time_point now)
+{
+    if (!isOpen() || natProbeTargets_.empty() || now < nextNatProbeAt_) {
+        return;
+    }
+
+    const auto datagram = BuildNatProbeDatagram(
+        nextNatProbeSequence_++,
+        config_.natProbeSessionFingerprint,
+        config_.accessCodeFingerprint);
+
+    for (const auto& target : natProbeTargets_) {
+        const int sent = sendto(
+            AsSocket(socket_),
+            reinterpret_cast<const char*>(datagram.data()),
+            static_cast<int>(datagram.size()),
+            0,
+            reinterpret_cast<const sockaddr*>(target.address.data()),
+            target.addressLength);
+        if (sent == SOCKET_ERROR || sent != static_cast<int>(datagram.size())) {
+            ++stats_.natProbeSendErrors;
+            continue;
+        }
+        if (target.localEndpoint) {
+            ++stats_.natProbeLocalPacketsSent;
+        } else {
+            ++stats_.natProbePublicPacketsSent;
+        }
+    }
+
+    nextNatProbeAt_ = now + config_.natProbeInterval;
+}
+
 std::optional<UdpCompletedFrame> UdpReceiver::ReleaseReadyDelayedDatagram(Clock::time_point now)
 {
     while (!delayedDatagrams_.empty() && delayedDatagrams_.front().releaseAt <= now) {
@@ -312,6 +412,9 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
 {
     if (datagramBytes < static_cast<int>(sizeof(uint32_t))) {
         ++stats_.invalidDatagrams;
+        return std::nullopt;
+    }
+    if (IsNatProbeDatagram(std::span<const std::byte>(datagram, static_cast<size_t>(datagramBytes)))) {
         return std::nullopt;
     }
 

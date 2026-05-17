@@ -13,7 +13,7 @@ The first milestone is a pure C++ capture foundation:
 - Capture system or microphone audio with WASAPI.
 - Send Opus-compressed audio packets over UDP by default and optionally play them on the receiver with a small jitter buffer.
 
-Internet/NAT traversal is a later milestone.
+Direct Internet/NAT traversal is experimental and currently uses manual invite exchange plus UDP hole punching.
 
 ## Build
 
@@ -81,7 +81,8 @@ test run can be sent as a zip without collecting separate log files. The UI open
 default, includes a theme toggle in the header, and can generate/copy an encrypted-session access
 code. The Share tab also has an output-device picker for system audio, which is useful when Windows
 or a virtual mixer uses a default output device that does not contain the audio you actually want to
-share.
+share. For manual internet/NAT tests, the Internet sections can create/copy local invite blobs,
+paste the friend's invite, and wire the matching NAT options into the generated command.
 
 Common live session:
 
@@ -149,6 +150,80 @@ prints the public UDP endpoint that a manual invite/hole-punching flow will use 
 ```
 
 The output includes `public_udp_endpoint=HOST:PORT` and `local_udp_endpoint=HOST:PORT`.
+
+To create a first manual invite blob for the next hole-punching flow, choose the UDP port the local
+side will use and query STUN from that same port:
+
+```powershell
+.\build\release\ScreenShare.exe --make-invite 5000 --stun stun.l.google.com:19302 --access-code CODE
+```
+
+The command prints `nat_invite=screenshare-invite-v1;...` with public/local UDP endpoints, the
+session fingerprint, access-code fingerprint, and an expiry timestamp. It also prints
+`watch_command_template`, `share_command_template`, and `probe_command_template` lines. Replace
+`<PEER_INVITE>` in those templates with the invite copied from your friend. If the template contains
+`CODE`, replace it with the same access code used to create the invite.
+
+The desktop UI exposes the same invite creation flow. Generate or paste the shared access code first,
+then use Create in the current tab's Internet section. The invite is copied to the clipboard and
+shown in the UI. Send that invite to your friend, paste their invite into Peer invite, and start the
+session normally. The Paste buttons can extract an invite from either a raw invite line or copied
+command output, and the Internet status line shows what is still missing before starting. While a NAT
+invite session is running, that same status line switches to live setup states such as probing,
+probe seen, connected, receiving, or rejected.
+
+Two-computer UI checklist for invite testing:
+
+1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
+2. Generate or paste the same access code on both computers.
+3. On the Watch computer, open the Watch tab, choose the listen port, and click Create in Internet.
+   Send that invite to the sharer.
+4. On the Share computer, open the Share tab, click Create in Internet, send that invite to the
+   watcher, and paste the Watch invite into Peer invite.
+5. Paste the Share invite into the Watch tab's Peer invite field.
+6. Start Watch first, then start Share.
+7. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
+   If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both
+   computers.
+
+After both sides exchange invite lines, you can optionally run a UDP probe diagnostic on both
+computers using the same local port that created each invite. Quote the copied invite because it
+contains semicolons:
+
+```powershell
+.\build\release\ScreenShare.exe --nat-probe 5000 --peer-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+```
+
+Use `--allow-plaintext` instead of `--access-code CODE` only if the invite was created in plaintext
+mode. The probe sends small packets to the peer's public and local invite endpoints and reports
+`nat_probe_result=reachable` when any probe or reply comes back. This is only a setup diagnostic;
+the live Watch command can send the same kind of punch probes from the real receive socket.
+
+For manual experiments after a successful probe, start Watch with the sender's invite so it keeps
+sending punch probes from the actual receive socket while waiting for media:
+
+```powershell
+.\build\release\ScreenShare.exe --watch 5000 --peer-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+```
+
+Then start Share with the receiver's invite. Pass the sender's own invite as `--local-invite` so
+Share binds to the same local port that created that invite; this lets the receiver's punch probes
+hit the socket that sends media:
+
+```powershell
+.\build\release\ScreenShare.exe --share "nat_invite=screenshare-invite-v1;..." --local-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+```
+
+`--share "nat_invite=..."` starts with the invite's public endpoint by default. In `auto` mode,
+incoming Watch punch probes can retarget Share to the endpoint those probes actually came from. Add
+`--invite-endpoint local` when both computers are reachable through the invite's local address, such
+as same-LAN/VPN experiments, and you want to force that path. If you do not have the sender invite
+handy, `--udp-local-port PORT` is still available as the manual equivalent of `--local-invite`.
+`--nat-probe-interval-ms MS` can tune Watch's probe interval. The default is 250 ms.
+
+NAT runs print `nat_status` and `nat_hint` fields in sender/receiver logs. They summarize the
+low-level counters into setup states such as `waiting_for_probe`, `retargeted_waiting_for_feedback`,
+`probe_rejected`, `probing`, `media_rejected`, `incoming_unaccepted`, or `receiving`.
 
 List monitors:
 

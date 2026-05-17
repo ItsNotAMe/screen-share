@@ -1,6 +1,7 @@
 #pragma once
 
 #include "codec/H264StreamEncoder.h"
+#include "transport/NatTraversal.h"
 #include "transport/UdpCrypto.h"
 #include "transport/UdpProtocol.h"
 
@@ -21,6 +22,7 @@ namespace screenshare {
 struct UdpSenderConfig {
     std::string host;
     uint16_t port = 0;
+    uint16_t localPort = 0;
     uint32_t maxPayloadBytes = 1'200;
     uint32_t pacingBitrate = 0;
     uint32_t maxQueuedDatagrams = 4'096;
@@ -28,6 +30,8 @@ struct UdpSenderConfig {
     uint64_t accessCodeFingerprint = 0;
     std::optional<UdpCryptoKey> encryptionKey;
     bool pacingEnabled = true;
+    bool retargetOnNatProbe = false;
+    uint64_t natProbeSessionFingerprint = 0;
 };
 
 struct UdpSenderStats {
@@ -51,6 +55,11 @@ struct UdpSenderStats {
     uint64_t invalidFeedbackPackets = 0;
     uint64_t feedbackAccessRejected = 0;
     uint64_t feedbackCryptoRejected = 0;
+    uint64_t natProbePacketsReceived = 0;
+    uint64_t natProbeRetargets = 0;
+    uint64_t natProbeRetargetRejected = 0;
+    bool natProbeRetargetActive = false;
+    std::string natProbeRetargetEndpoint;
     bool hasFeedback = false;
     bool encryptionEnabled = false;
     udp_protocol::FeedbackSnapshot latestFeedback;
@@ -126,6 +135,10 @@ private:
     bool EnforceLiveQueueDelayLocked(Clock::time_point now);
     bool DropOldestQueuedMediaLocked(PendingDatagramKind kind);
     void DropQueuedMediaForCapacityLocked(size_t incomingDatagrams, PendingDatagramKind preferredKind);
+    void MaybeRetargetFromNatProbe(
+        const void* address,
+        int addressLength,
+        const NatProbeDatagramInfo& probe);
     void RescheduleQueueLocked(Clock::time_point now);
     void CheckWorkerErrorLocked() const;
     void UpdatePendingStatsLocked();

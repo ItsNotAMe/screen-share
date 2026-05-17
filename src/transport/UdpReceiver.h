@@ -10,10 +10,17 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace screenshare {
+
+struct UdpNatProbeTarget {
+    std::string host;
+    uint16_t port = 0;
+    bool localEndpoint = false;
+};
 
 struct UdpReceiverConfig {
     uint16_t port = 0;
@@ -30,6 +37,9 @@ struct UdpReceiverConfig {
     uint32_t simulationSeed = 1;
     uint64_t accessCodeFingerprint = 0;
     std::optional<UdpCryptoKey> encryptionKey;
+    std::vector<UdpNatProbeTarget> natProbeTargets;
+    std::chrono::milliseconds natProbeInterval{250};
+    uint64_t natProbeSessionFingerprint = 0;
 };
 
 struct UdpCompletedFrame {
@@ -85,6 +95,9 @@ struct UdpReceiverStats {
     uint64_t audioDiscontinuities = 0;
     uint64_t audioTimestampErrors = 0;
     uint64_t audioFormatChanges = 0;
+    uint64_t natProbePublicPacketsSent = 0;
+    uint64_t natProbeLocalPacketsSent = 0;
+    uint64_t natProbeSendErrors = 0;
     uint64_t latestAudioPacketId = 0;
     uint64_t latestAudioDevicePosition = 0;
     uint64_t latestAudioQpcPosition = 0;
@@ -106,6 +119,7 @@ public:
 
     void Open(const UdpReceiverConfig& config);
     void Close();
+    void ResetMediaQueues();
     [[nodiscard]] std::optional<UdpCompletedFrame> ReceiveFrame(std::chrono::milliseconds timeout);
     [[nodiscard]] std::optional<UdpCompletedAudioPacket> PopAudioPacket();
     bool SendFeedback(const udp_protocol::FeedbackSnapshot& feedback);
@@ -123,6 +137,12 @@ private:
     struct DelayedDatagram {
         Clock::time_point releaseAt;
         std::vector<std::byte> bytes;
+    };
+
+    struct NatProbeTargetAddress {
+        std::vector<std::byte> address;
+        int addressLength = 0;
+        bool localEndpoint = false;
     };
 
     struct PendingFrame {
@@ -193,6 +213,7 @@ private:
         std::span<const std::byte, UdpCryptoTagBytes> tag,
         uint32_t flags);
     bool EncryptFeedbackDatagram(std::vector<std::byte>& datagram);
+    void MaybeSendNatProbes(Clock::time_point now);
 
     uintptr_t socket_ = 0;
     UdpReceiverConfig config_{};
@@ -201,12 +222,15 @@ private:
     std::vector<std::byte> feedbackAddress_;
     int feedbackAddressLength_ = 0;
     std::deque<DelayedDatagram> delayedDatagrams_;
+    std::vector<NatProbeTargetAddress> natProbeTargets_;
     std::deque<UdpCompletedAudioPacket> completedAudioPackets_;
     std::unordered_map<uint64_t, PendingFrame> pendingFrames_;
     std::unordered_map<uint64_t, PendingAudioPacket> pendingAudioPackets_;
     std::mt19937 simulationRng_{1};
     std::unique_ptr<UdpAesGcm> crypto_;
     uint32_t feedbackNoncePrefix_ = 0;
+    Clock::time_point nextNatProbeAt_{};
+    uint64_t nextNatProbeSequence_ = 1;
     bool winsockStarted_ = false;
 };
 

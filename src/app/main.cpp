@@ -9,6 +9,7 @@
 #include "codec/H264StreamEncoder.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/LanDiscovery.h"
+#include "transport/NatTraversal.h"
 #include "transport/StunClient.h"
 #include "transport/UdpReceiver.h"
 #include "transport/UdpSender.h"
@@ -53,6 +54,12 @@ enum class StreamEncoderPreference {
     Hardware,
 };
 
+enum class InviteEndpointPreference {
+    Auto,
+    Public,
+    Local,
+};
+
 constexpr size_t OrderedReceiverStartThresholdFrames = 30;
 constexpr size_t OrderedReceiverRecoveryThresholdFrames = 30;
 constexpr size_t ReceiverHealthPendingFrameWarning = 8;
@@ -91,8 +98,14 @@ struct Options {
     bool streamEncoderPreferenceProvided = false;
     StreamEncoderPreference streamEncoderPreference = StreamEncoderPreference::Auto;
     std::string udpSendTarget;
+    uint16_t udpLocalPort = 0;
+    bool udpLocalPortProvided = false;
     bool udpPacing = true;
     bool udpPacingOptionProvided = false;
+    bool udpSendTargetFromPeerInvite = false;
+    std::string udpSendPeerInviteEndpoint = "direct";
+    InviteEndpointPreference inviteEndpointPreference = InviteEndpointPreference::Auto;
+    bool inviteEndpointPreferenceProvided = false;
     int udpMaxQueueMs = DefaultUdpMaxQueueMs;
     bool udpMaxQueueMsProvided = false;
     bool adaptBitrate = false;
@@ -149,9 +162,20 @@ struct Options {
     screenshare::StunServerTarget stunServer;
     int stunTimeoutMs = 3000;
     bool stunTimeoutProvided = false;
+    bool makeInvite = false;
+    uint16_t inviteLocalPort = 0;
+    int inviteTtlSeconds = 300;
+    bool inviteTtlProvided = false;
+    bool natProbe = false;
+    uint16_t natProbeLocalPort = 0;
+    std::string peerInvite;
+    std::string localInvite;
+    int natProbeIntervalMs = 250;
+    bool natProbeIntervalProvided = false;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
+    bool sessionIdProvided = false;
     std::string stopFilePath;
     bool generateAccessCode = false;
     bool allowPlaintext = false;
@@ -159,6 +183,7 @@ struct Options {
     uint64_t sessionFingerprint = 0;
     uint64_t accessCodeFingerprint = 0;
     std::optional<screenshare::UdpCryptoKey> accessCodeKey;
+    bool udpLocalPortFromLocalInvite = false;
 };
 
 struct SavedReportContext {
@@ -178,12 +203,16 @@ void PrintHelp()
         << "  ScreenShare --generate-access-code\n"
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
-        << "  ScreenShare --share HOST:PORT [--display N] [--seconds S]\n"
-        << "  ScreenShare --watch PORT [--seconds S]\n"
+        << "  ScreenShare --share HOST:PORT|INVITE [--display N] [--seconds S]\n"
+        << "              [--invite-endpoint auto|public|local] [--local-invite INVITE]\n"
+        << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
+        << "  ScreenShare --make-invite PORT --stun HOST[:PORT] [--invite-ttl-seconds S]\n"
+        << "  ScreenShare --nat-probe PORT --peer-invite INVITE [--seconds S]\n"
+        << "              [--nat-probe-interval-ms MS]\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
-        << "              [--audio-send HOST:PORT] [--audio-codec raw|opus]\n"
+        << "              [--audio-send HOST:PORT] [--udp-local-port PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
         << "              [--dump-decoded-bmp PATH] [--preview]\n"
         << "              [--preview-latency-ms MS] [--preview-max-late-ms MS]\n"
@@ -191,9 +220,11 @@ void PrintHelp()
         << "              [--audio-playback-muted] [--audio-playback-volume PERCENT]\n"
         << "              [--av-sync|--no-av-sync]\n"
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
+        << "              [--peer-invite INVITE] [--nat-probe-interval-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
-        << "              [--udp-send HOST:PORT] [--no-udp-pacing] [--udp-max-queue-ms MS]\n"
+        << "              [--udp-send HOST:PORT] [--udp-local-port PORT]\n"
+        << "              [--no-udp-pacing] [--udp-max-queue-ms MS]\n"
         << "              [--adapt-bitrate]\n"
         << "              [--audio-capture system|microphone] [--audio-device-id ID]\n"
         << "              [--audio-codec raw|opus]\n"
@@ -214,6 +245,13 @@ void PrintHelp()
         << "  LAN: add --lan-advertise to --watch/--udp-recv, then use --lan-discover on the sender.\n"
         << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
         << "  NAT: use --stun HOST[:PORT] to print this machine's public UDP endpoint.\n"
+        << "       use --make-invite PORT --stun HOST[:PORT] to print a manual invite blob.\n"
+        << "       The invite output includes Watch/Share command templates for the next step.\n"
+        << "       --nat-probe is an optional diagnostic for checking whether peer probes can pass.\n"
+        << "       Watch can also use --peer-invite to send punch probes while waiting for Share.\n"
+        << "       Share can use --share \"nat_invite=...\" to send to the peer invite endpoint.\n"
+        << "       Add --local-invite \"nat_invite=...\" on Share to bind the local port from this side's invite.\n"
+        << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -226,6 +264,8 @@ void PrintHelp()
         << "  ScreenShare --watch 5000 --lan-advertise\n"
         << "  ScreenShare --lan-discover\n"
         << "  ScreenShare --stun stun.l.google.com:19302\n"
+        << "  ScreenShare --make-invite 5000 --stun stun.l.google.com:19302 --access-code 123456\n"
+        << "  ScreenShare --nat-probe 5000 --peer-invite \"nat_invite=screenshare-invite-v1;...\" --access-code 123456\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
@@ -239,6 +279,9 @@ void PrintHelp()
         << "  ScreenShare --udp-recv 5000 --preview\n"
         << "  ScreenShare --udp-recv 5000 --preview --audio-playback\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system\n"
+        << "  ScreenShare --share 203.0.113.10:5000 --udp-local-port 5001 --access-code 123456\n"
+        << "  ScreenShare --share \"nat_invite=screenshare-invite-v1;...\" --local-invite \"nat_invite=screenshare-invite-v1;...\" --access-code 123456\n"
+        << "  ScreenShare --share \"nat_invite=screenshare-invite-v1;...\" --invite-endpoint local --access-code 123456\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -468,6 +511,36 @@ const char* StreamEncoderPreferenceName(StreamEncoderPreference preference)
         return "software";
     case StreamEncoderPreference::Hardware:
         return "hardware";
+    default:
+        return "unknown";
+    }
+}
+
+InviteEndpointPreference ParseInviteEndpointPreference(const char* value)
+{
+    const std::string preference = value;
+    if (preference == "auto") {
+        return InviteEndpointPreference::Auto;
+    }
+    if (preference == "public") {
+        return InviteEndpointPreference::Public;
+    }
+    if (preference == "local") {
+        return InviteEndpointPreference::Local;
+    }
+
+    throw std::invalid_argument(std::string("Invalid value for --invite-endpoint: ") + value);
+}
+
+const char* InviteEndpointPreferenceName(InviteEndpointPreference preference)
+{
+    switch (preference) {
+    case InviteEndpointPreference::Auto:
+        return "auto";
+    case InviteEndpointPreference::Public:
+        return "public";
+    case InviteEndpointPreference::Local:
+        return "local";
     default:
         return "unknown";
     }
@@ -1277,6 +1350,24 @@ struct AvSyncSnapshot {
 
 class AvSyncDiagnostics {
 public:
+    void Clear()
+    {
+        hasVideo_ = false;
+        hasVideoSenderClock_ = false;
+        hasAudio_ = false;
+        videoFrames_ = 0;
+        audioPackets_ = 0;
+        ignoredAudioPackets_ = 0;
+        firstVideoTimestamp100ns_ = 0;
+        latestVideoTimestamp100ns_ = 0;
+        firstVideoSenderQpc100ns_ = 0;
+        latestVideoSenderQpc100ns_ = 0;
+        firstAudioQpc100ns_ = 0;
+        latestAudioQpc100ns_ = 0;
+        latestVideoFrameId_ = 0;
+        latestAudioPacketId_ = 0;
+    }
+
     void ObserveVideoFrame(const screenshare::UdpCompletedFrame& frame)
     {
         if (!hasVideo_) {
@@ -1666,6 +1757,114 @@ const char* FeedbackAccessText(const screenshare::UdpSenderStats& stats)
         return "unknown";
     }
     return stats.latestFeedback.accessCodeFingerprint == 0 ? "none" : "required";
+}
+
+const char* SenderNatStatus(const Options& options, const screenshare::UdpSenderStats& stats)
+{
+    if (!options.udpSendTargetFromPeerInvite) {
+        return "none";
+    }
+    if (stats.feedbackPacketsReceived > 0) {
+        return "connected";
+    }
+    if (options.inviteEndpointPreference != InviteEndpointPreference::Auto) {
+        return "forced_endpoint_waiting_for_feedback";
+    }
+    if (stats.natProbeRetargetActive) {
+        return "retargeted_waiting_for_feedback";
+    }
+    if (stats.natProbeRetargetRejected > 0) {
+        return "probe_rejected";
+    }
+    if (stats.natProbePacketsReceived > 0) {
+        return "probe_seen";
+    }
+    if (stats.datagramsSent > 0) {
+        return "waiting_for_probe";
+    }
+    return "starting";
+}
+
+const char* SenderNatHint(const Options& options, const screenshare::UdpSenderStats& stats)
+{
+    const std::string_view status = SenderNatStatus(options, stats);
+    if (status == "none") {
+        return "none";
+    }
+    if (status == "connected") {
+        return "receiver_feedback_received";
+    }
+    if (status == "forced_endpoint_waiting_for_feedback") {
+        return "check_receiver_or_try_auto_endpoint";
+    }
+    if (status == "retargeted_waiting_for_feedback") {
+        return "probe_seen_waiting_for_receiver_feedback";
+    }
+    if (status == "probe_rejected") {
+        return "check_access_code_or_session";
+    }
+    if (status == "probe_seen") {
+        return "probe_seen_no_endpoint_change";
+    }
+    if (status == "waiting_for_probe") {
+        return "start_watch_with_peer_invite_or_check_firewall";
+    }
+    return "starting_udp_sender";
+}
+
+const char* ReceiverNatStatus(
+    bool hasPeerInvite,
+    const screenshare::UdpReceiverStats& stats,
+    bool hasReceivedStreamTraffic)
+{
+    if (!hasPeerInvite) {
+        return "none";
+    }
+    if (stats.datagramsAccepted > 0 ||
+        stats.framesCompleted > 0 ||
+        stats.audioPacketsCompleted > 0) {
+        return "receiving";
+    }
+    if (stats.accessRejectedDatagrams > 0 || stats.cryptoRejectedDatagrams > 0) {
+        return "media_rejected";
+    }
+    if (hasReceivedStreamTraffic || stats.datagramsReceived > 0) {
+        return "incoming_unaccepted";
+    }
+    if (stats.natProbeSendErrors > 0) {
+        return "probe_send_errors";
+    }
+    if (stats.natProbePublicPacketsSent > 0 || stats.natProbeLocalPacketsSent > 0) {
+        return "probing";
+    }
+    return "waiting_to_probe";
+}
+
+const char* ReceiverNatHint(
+    bool hasPeerInvite,
+    const screenshare::UdpReceiverStats& stats,
+    bool hasReceivedStreamTraffic)
+{
+    const std::string_view status = ReceiverNatStatus(hasPeerInvite, stats, hasReceivedStreamTraffic);
+    if (status == "none") {
+        return "none";
+    }
+    if (status == "receiving") {
+        return "media_received";
+    }
+    if (status == "media_rejected") {
+        return "check_access_code_or_plaintext_mode";
+    }
+    if (status == "incoming_unaccepted") {
+        return "check_sender_target_or_packet_format";
+    }
+    if (status == "probe_send_errors") {
+        return "check_peer_invite_endpoint";
+    }
+    if (status == "probing") {
+        return "start_share_with_receiver_invite_and_local_invite";
+    }
+    return "waiting_to_send_first_probe";
 }
 
 std::optional<screenshare::udp_protocol::FeedbackSnapshot> DrainUdpFeedback(
@@ -2156,6 +2355,47 @@ bool HasUdpSession(const Options& options)
            !options.audioSendTarget.empty();
 }
 
+bool LooksLikeNatInvite(std::string_view text)
+{
+    const size_t first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) {
+        return false;
+    }
+    text.remove_prefix(first);
+    return text.rfind("nat_invite=", 0) == 0 ||
+           text.rfind("screenshare-invite-v1", 0) == 0;
+}
+
+std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint);
+screenshare::NatInvite ParseValidatedPeerInvite(const Options& options);
+
+struct SelectedNatInviteEndpoint {
+    screenshare::NatInviteEndpoint endpoint;
+    const char* name = "public";
+};
+
+bool HasNatEndpoint(const screenshare::NatInviteEndpoint& endpoint)
+{
+    return !endpoint.host.empty() && endpoint.port != 0;
+}
+
+SelectedNatInviteEndpoint SelectNatInviteEndpoint(
+    const screenshare::NatInvite& invite,
+    InviteEndpointPreference preference)
+{
+    if (preference == InviteEndpointPreference::Local) {
+        if (!HasNatEndpoint(invite.localEndpoint)) {
+            throw std::invalid_argument("Peer invite does not include a local endpoint");
+        }
+        return {invite.localEndpoint, "local"};
+    }
+
+    if (!HasNatEndpoint(invite.publicEndpoint)) {
+        throw std::invalid_argument("Peer invite does not include a public endpoint");
+    }
+    return {invite.publicEndpoint, preference == InviteEndpointPreference::Auto ? "auto-public" : "public"};
+}
+
 void WarnIfPlaintextUdpSession(const Options& options)
 {
     if (HasUdpSession(options) && !options.accessCodeProvided && !options.allowPlaintext) {
@@ -2196,6 +2436,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.stopFilePath = requireValue("--stop-file");
         } else if (arg == "--session" || arg == "--session-id") {
             options.sessionId = ParseSessionId(requireValue(arg.c_str()));
+            options.sessionIdProvided = true;
         } else if (arg == "--generate-access-code") {
             options.generateAccessCode = true;
         } else if (arg == "--allow-plaintext") {
@@ -2237,6 +2478,25 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--stun-timeout-ms") {
             options.stunTimeoutMs = ParseInt(requireValue("--stun-timeout-ms"), "--stun-timeout-ms");
             options.stunTimeoutProvided = true;
+        } else if (arg == "--make-invite") {
+            options.inviteLocalPort = screenshare::ParseUdpReceivePort(requireValue("--make-invite"));
+            options.makeInvite = true;
+        } else if (arg == "--invite-ttl-seconds") {
+            options.inviteTtlSeconds = ParseInt(requireValue("--invite-ttl-seconds"), "--invite-ttl-seconds");
+            options.inviteTtlProvided = true;
+        } else if (arg == "--nat-probe") {
+            options.natProbeLocalPort = screenshare::ParseUdpReceivePort(requireValue("--nat-probe"));
+            options.natProbe = true;
+        } else if (arg == "--peer-invite") {
+            options.peerInvite = requireValue("--peer-invite");
+        } else if (arg == "--local-invite") {
+            options.localInvite = requireValue("--local-invite");
+        } else if (arg == "--nat-probe-interval-ms") {
+            options.natProbeIntervalMs = ParseInt(requireValue("--nat-probe-interval-ms"), "--nat-probe-interval-ms");
+            options.natProbeIntervalProvided = true;
+        } else if (arg == "--invite-endpoint") {
+            options.inviteEndpointPreference = ParseInviteEndpointPreference(requireValue("--invite-endpoint"));
+            options.inviteEndpointPreferenceProvided = true;
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
         } else if (arg == "--watch") {
@@ -2277,6 +2537,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--udp-send") {
             options.udpSendTarget = requireValue("--udp-send");
             options.streamEncode = true;
+        } else if (arg == "--udp-local-port") {
+            options.udpLocalPort = screenshare::ParseUdpReceivePort(requireValue("--udp-local-port"));
+            options.udpLocalPortProvided = true;
         } else if (arg == "--no-udp-pacing") {
             options.udpPacing = false;
             options.udpPacingOptionProvided = true;
@@ -2371,7 +2634,19 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         if (!options.audioSendTarget.empty()) {
             throw std::invalid_argument("--share cannot be combined with --audio-send");
         }
-        options.udpSendTarget = *shareTarget;
+        if (LooksLikeNatInvite(*shareTarget)) {
+            if (!options.peerInvite.empty()) {
+                throw std::invalid_argument("--share invite cannot be combined with --peer-invite");
+            }
+            const auto invite = screenshare::ParseNatInvite(*shareTarget);
+            const auto selectedEndpoint = SelectNatInviteEndpoint(invite, options.inviteEndpointPreference);
+            options.peerInvite = *shareTarget;
+            options.udpSendTarget = FormatNatEndpoint(selectedEndpoint.endpoint);
+            options.udpSendTargetFromPeerInvite = true;
+            options.udpSendPeerInviteEndpoint = selectedEndpoint.name;
+        } else {
+            options.udpSendTarget = *shareTarget;
+        }
         options.streamEncode = true;
         options.adaptBitrate = true;
         options.adaptResolution = true;
@@ -2450,7 +2725,104 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.stunTimeoutProvided && !options.stunQuery) {
         throw std::invalid_argument("--stun-timeout-ms requires --stun");
     }
-    if (options.stunQuery &&
+    if (options.inviteTtlProvided && !options.makeInvite) {
+        throw std::invalid_argument("--invite-ttl-seconds requires --make-invite");
+    }
+    if (options.makeInvite && !options.stunQuery) {
+        throw std::invalid_argument("--make-invite requires --stun HOST[:PORT]");
+    }
+    if (options.inviteTtlSeconds < 30 || options.inviteTtlSeconds > 3600) {
+        throw std::invalid_argument("--invite-ttl-seconds must be between 30 and 3600");
+    }
+    if (options.inviteEndpointPreferenceProvided && !options.udpSendTargetFromPeerInvite) {
+        throw std::invalid_argument("--invite-endpoint requires --share INVITE");
+    }
+    if (!options.localInvite.empty()) {
+        if (!options.udpSendTargetFromPeerInvite) {
+            throw std::invalid_argument("--local-invite requires --share INVITE");
+        }
+        const auto localInvite = screenshare::ParseNatInvite(options.localInvite);
+        if (!HasNatEndpoint(localInvite.localEndpoint)) {
+            throw std::invalid_argument("Local invite does not include a local endpoint");
+        }
+        if (localInvite.encrypted) {
+            if (!options.accessCodeProvided) {
+                throw std::invalid_argument("Local invite requires --access-code CODE");
+            }
+            if (options.accessCodeFingerprint != localInvite.accessCodeFingerprint) {
+                throw std::invalid_argument("Access code does not match the local invite fingerprint");
+            }
+        } else if (!options.allowPlaintext) {
+            throw std::invalid_argument("Local invite is plaintext; rerun with --allow-plaintext");
+        }
+        if (options.udpLocalPortProvided && options.udpLocalPort != localInvite.localEndpoint.port) {
+            throw std::invalid_argument("--udp-local-port does not match the local invite port");
+        }
+        options.udpLocalPort = localInvite.localEndpoint.port;
+        options.udpLocalPortFromLocalInvite = true;
+        if (!options.sessionIdProvided && !localInvite.sessionId.empty()) {
+            options.sessionId = localInvite.sessionId;
+        }
+    }
+    if (!options.peerInvite.empty() &&
+        !options.natProbe &&
+        options.udpReceivePort == 0 &&
+        options.udpSendTarget.empty()) {
+        throw std::invalid_argument("--peer-invite requires --nat-probe, --watch, --udp-recv, or --share");
+    }
+    if (options.natProbeIntervalProvided && !options.natProbe && options.peerInvite.empty()) {
+        throw std::invalid_argument("--nat-probe-interval-ms requires --nat-probe or --peer-invite");
+    }
+    if (options.natProbe && options.peerInvite.empty()) {
+        throw std::invalid_argument("--nat-probe requires --peer-invite INVITE");
+    }
+    if (options.natProbe && options.stunQuery) {
+        throw std::invalid_argument("--nat-probe cannot be combined with --stun; use an invite made with --make-invite");
+    }
+    if (options.natProbeIntervalMs < 50 || options.natProbeIntervalMs > 5000) {
+        throw std::invalid_argument("--nat-probe-interval-ms must be between 50 and 5000");
+    }
+    if (options.stunQuery && !options.makeInvite &&
+        (options.generateAccessCode ||
+         options.listDisplays ||
+         options.listH264Encoders ||
+         options.listAudioDevices ||
+         options.lanDiscover ||
+         options.lanAdvertise ||
+         HasUdpSession(options) ||
+         options.audioCapture ||
+         options.streamEncode ||
+         !options.localInvite.empty() ||
+         !options.peerInvite.empty() ||
+         options.width != 0 ||
+         options.height != 0 ||
+         options.bitrate != 0 ||
+         options.keyframeIntervalProvided ||
+         !options.recordPath.empty() ||
+         !options.capturedBmpPath.empty())) {
+        throw std::invalid_argument("--stun is a standalone diagnostic command");
+    }
+    if (options.makeInvite &&
+        (options.generateAccessCode ||
+         options.listDisplays ||
+         options.listH264Encoders ||
+         options.listAudioDevices ||
+         options.lanDiscover ||
+         options.lanAdvertise ||
+         HasUdpSession(options) ||
+         options.audioCapture ||
+         options.streamEncode ||
+         !options.localInvite.empty() ||
+         !options.peerInvite.empty() ||
+         options.width != 0 ||
+         options.height != 0 ||
+         options.bitrate != 0 ||
+         options.keyframeIntervalProvided ||
+         !options.recordPath.empty() ||
+         !options.capturedBmpPath.empty())) {
+        throw std::invalid_argument("--make-invite is a standalone NAT setup command");
+    }
+    if (options.natProbe &&
         (options.generateAccessCode ||
          options.listDisplays ||
          options.listH264Encoders ||
@@ -2466,19 +2838,27 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.keyframeIntervalProvided ||
          !options.recordPath.empty() ||
          !options.capturedBmpPath.empty())) {
-        throw std::invalid_argument("--stun is a standalone diagnostic command");
+        throw std::invalid_argument("--nat-probe is a standalone NAT setup command");
     }
     if (options.accessCodeProvided &&
         options.udpReceivePort == 0 &&
         options.udpSendTarget.empty() &&
-        options.audioSendTarget.empty()) {
-        throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, or --audio-send");
+        options.audioSendTarget.empty() &&
+        !options.makeInvite &&
+        !options.natProbe) {
+        throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, --audio-send, --make-invite, or --nat-probe");
     }
     if (options.allowPlaintext && options.accessCodeProvided) {
         throw std::invalid_argument("--allow-plaintext cannot be combined with --access-code");
     }
-    if (options.allowPlaintext && !HasUdpSession(options)) {
-        throw std::invalid_argument("--allow-plaintext requires --share, --watch, --udp-send, --udp-recv, or --audio-send");
+    if (options.allowPlaintext && !HasUdpSession(options) && !options.makeInvite && !options.natProbe) {
+        throw std::invalid_argument("--allow-plaintext requires --share, --watch, --udp-send, --udp-recv, --audio-send, --make-invite, --nat-probe, or --local-invite");
+    }
+    if (options.makeInvite && !options.accessCodeProvided && !options.allowPlaintext) {
+        throw std::invalid_argument("--make-invite requires --access-code CODE or --allow-plaintext");
+    }
+    if (options.natProbe && !options.accessCodeProvided && !options.allowPlaintext) {
+        throw std::invalid_argument("--nat-probe requires --access-code CODE or --allow-plaintext");
     }
     if (options.fps <= 0 || options.fps > 240) {
         throw std::invalid_argument("--fps must be between 1 and 240");
@@ -2551,6 +2931,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.udpMaxQueueMsProvided && options.udpSendTarget.empty()) {
         throw std::invalid_argument("--udp-max-queue-ms requires --udp-send");
     }
+    if (options.udpLocalPortProvided && options.udpSendTarget.empty() && options.audioSendTarget.empty()) {
+        throw std::invalid_argument("--udp-local-port requires --udp-send, --share, or --audio-send");
+    }
     if (options.udpMaxQueueMs < 0 || options.udpMaxQueueMs > 5000) {
         throw std::invalid_argument("--udp-max-queue-ms must be between 0 and 5000");
     }
@@ -2605,17 +2988,17 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.audioDeviceIdProvided || options.audioCodecProvided || !options.audioSendTarget.empty() ||
          !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.udpMaxQueueMsProvided ||
+         options.udpLocalPortProvided || options.udpPacingOptionProvided || options.udpMaxQueueMsProvided ||
          options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --audio-send, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --no-udp-pacing, --udp-max-queue-ms, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --audio-send, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --udp-local-port, --no-udp-pacing, --udp-max-queue-ms, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || options.listAudioDevices || options.audioCapture || options.audioDeviceIdProvided ||
          options.audioCodecProvided || !options.audioSendTarget.empty() || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.udpLocalPortProvided || options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided ||
          options.decodeH264 || options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
@@ -2628,7 +3011,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.audioCodecProvided || !options.audioSendTarget.empty() ||
          options.width != 0 || options.height != 0 || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided || !options.udpSendTarget.empty() ||
-         options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
+         options.udpLocalPortProvided || options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
          !options.h264DumpPath.empty() || options.decodeH264 || !options.decodedBmpPath.empty() ||
@@ -2643,6 +3026,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         (options.listDisplays || options.listH264Encoders || options.listAudioDevices ||
          options.width != 0 || options.height != 0 || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
          options.streamEncode || options.streamEncoderPreferenceProvided ||
+         (options.udpLocalPortProvided && options.audioSendTarget.empty()) ||
          options.udpPacingOptionProvided || options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
          options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided || options.udpReceivePort != 0 ||
@@ -2651,7 +3035,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
           options.audioPlayback || options.audioPlaybackLatencyProvided || options.audioPlaybackMutedProvided ||
           options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled ||
          options.simulateLossProvided || options.simulateJitterProvided)) {
-        throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, --audio-send, and --audio-codec");
+        throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, --audio-send, --udp-local-port, and --audio-codec");
     }
     if (audioCaptureWithVideoSend &&
         (options.listDisplays || options.listH264Encoders || options.listAudioDevices ||
@@ -2779,6 +3163,22 @@ std::string JoinCommandLine(int argc, char** argv)
         command << '"';
     }
     return command.str();
+}
+
+std::string PowerShellQuote(std::string_view value)
+{
+    std::string quoted;
+    quoted.reserve(value.size() + 2);
+    quoted.push_back('\'');
+    for (const char ch : value) {
+        if (ch == '\'') {
+            quoted.append("''");
+        } else {
+            quoted.push_back(ch);
+        }
+    }
+    quoted.push_back('\'');
+    return quoted;
 }
 
 std::filesystem::path TemporaryReportLogPath(const std::filesystem::path& reportPath)
@@ -3003,6 +3403,7 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
     std::unique_ptr<screenshare::OpusAudioEncoder> opusEncoder;
     if (!options.audioSendTarget.empty()) {
         auto udpConfig = screenshare::ParseUdpSenderTarget(options.audioSendTarget);
+        udpConfig.localPort = options.udpLocalPort;
         udpConfig.pacingEnabled = false;
         udpConfig.maxQueuedDatagrams = 16'384;
         udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
@@ -3033,6 +3434,7 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
     if (audioSender) {
         std::cout
             << ", audio UDP sending to " << options.audioSendTarget
+            << ", local port " << (options.udpLocalPort == 0 ? std::string("auto") : std::to_string(options.udpLocalPort))
             << ", codec " << screenshare::udp_protocol::AudioCodecName(options.audioCodec);
     }
     if (!options.audioDeviceId.empty()) {
@@ -3222,6 +3624,11 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
 
 void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
 {
+    std::optional<screenshare::NatInvite> peerInvite;
+    if (!options.peerInvite.empty()) {
+        peerInvite = ParseValidatedPeerInvite(options);
+    }
+
     StreamEncoderPreference streamEncoderPreference = options.streamEncoderPreference;
 
     screenshare::CaptureConfig config;
@@ -3272,6 +3679,17 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     }
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
+        if (peerInvite && options.udpSendTargetFromPeerInvite) {
+            std::cout << " from peer invite endpoint=" << options.udpSendPeerInviteEndpoint;
+        }
+        if (options.udpLocalPort != 0) {
+            std::cout << ", UDP local port " << options.udpLocalPort;
+            if (options.udpLocalPortFromLocalInvite) {
+                std::cout << " from local invite";
+            }
+        } else if (options.udpSendTargetFromPeerInvite) {
+            std::cout << ", UDP local port auto (use --udp-local-port to match this side's invite)";
+        }
         std::cout << ", UDP pacing " << (options.udpPacing ? "enabled" : "disabled");
         if (options.udpMaxQueueMs == 0) {
             std::cout << ", UDP live queue cap disabled";
@@ -3762,11 +4180,17 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                     if (!options.udpSendTarget.empty()) {
                         if (!udpSender) {
                             auto udpConfig = screenshare::ParseUdpSenderTarget(options.udpSendTarget);
+                            udpConfig.localPort = options.udpLocalPort;
                             udpConfig.pacingEnabled = options.udpPacing;
                             udpConfig.pacingBitrate = combinedUdpPacingBitrate();
                             udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
                             udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
                             udpConfig.encryptionKey = options.accessCodeKey;
+                            udpConfig.retargetOnNatProbe =
+                                options.udpSendTargetFromPeerInvite &&
+                                options.inviteEndpointPreference == InviteEndpointPreference::Auto;
+                            udpConfig.natProbeSessionFingerprint =
+                                options.sessionIdProvided ? options.sessionFingerprint : 0;
                             if (options.audioCapture) {
                                 udpConfig.maxQueuedDatagrams = 16'384;
                             }
@@ -3774,7 +4198,12 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                             udpSender->Open(udpConfig);
                             std::cout
                                 << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
+                                << " target_source=" << (options.udpSendTargetFromPeerInvite ? "peer_invite" : "direct")
+                                << " invite_endpoint=" << (options.udpSendTargetFromPeerInvite ? options.udpSendPeerInviteEndpoint : "none")
+                                << " nat_probe_retarget=" << (udpConfig.retargetOnNatProbe ? "enabled" : "disabled")
                                 << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
+                                << " local_port=" << (udpConfig.localPort == 0 ? std::string("auto") : std::to_string(udpConfig.localPort))
+                                << " local_port_source=" << (options.udpLocalPortFromLocalInvite ? "local_invite" : "option_or_auto")
                                 << " max_queue_ms=" << udpConfig.maxQueueDelay.count()
                                 << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
                                 << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
@@ -3925,6 +4354,14 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " udp_feedback_invalid=" << udpStatsNow.invalidFeedbackPackets
                 << " udp_feedback_access_rejected=" << udpStatsNow.feedbackAccessRejected
                 << " udp_feedback_crypto_rejected=" << udpStatsNow.feedbackCryptoRejected
+                << " udp_nat_probe_packets=" << udpStatsNow.natProbePacketsReceived
+                << " udp_nat_retargets=" << udpStatsNow.natProbeRetargets
+                << " udp_nat_retarget_rejected=" << udpStatsNow.natProbeRetargetRejected
+                << " udp_nat_retarget_active=" << (udpStatsNow.natProbeRetargetActive ? "yes" : "no")
+                << " udp_nat_retarget_endpoint="
+                << (udpStatsNow.natProbeRetargetEndpoint.empty() ? "none" : udpStatsNow.natProbeRetargetEndpoint)
+                << " nat_status=" << SenderNatStatus(options, udpStatsNow)
+                << " nat_hint=" << SenderNatHint(options, udpStatsNow)
                 << " udp_encryption=" << (udpStatsNow.encryptionEnabled ? "enabled" : "disabled")
                 << " udp_feedback_health="
                 << (udpStatsNow.hasFeedback ?
@@ -4046,6 +4483,14 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", UDP invalid feedback packets: " << udpStats.invalidFeedbackPackets
         << ", UDP feedback access rejected: " << udpStats.feedbackAccessRejected
         << ", UDP feedback crypto rejected: " << udpStats.feedbackCryptoRejected
+        << ", UDP NAT probe packets: " << udpStats.natProbePacketsReceived
+        << ", UDP NAT retargets: " << udpStats.natProbeRetargets
+        << ", UDP NAT retarget rejected: " << udpStats.natProbeRetargetRejected
+        << ", UDP NAT retarget active: " << (udpStats.natProbeRetargetActive ? "yes" : "no")
+        << ", UDP NAT retarget endpoint: "
+        << (udpStats.natProbeRetargetEndpoint.empty() ? "none" : udpStats.natProbeRetargetEndpoint)
+        << ", NAT status: " << SenderNatStatus(options, udpStats)
+        << ", NAT hint: " << SenderNatHint(options, udpStats)
         << ", UDP encryption: " << (udpStats.encryptionEnabled ? "enabled" : "disabled")
         << ", UDP feedback health: "
         << (udpStats.hasFeedback ?
@@ -4127,8 +4572,149 @@ void RunStunQuery(const Options& options)
         << "manual_invite_endpoint=" << result.publicAddress << ":" << result.publicPort << "\n";
 }
 
+void RunMakeInvite(const Options& options)
+{
+    screenshare::StunQueryConfig config;
+    config.server = options.stunServer;
+    config.timeout = std::chrono::milliseconds(options.stunTimeoutMs);
+    config.localPort = options.inviteLocalPort;
+
+    std::cout
+        << "Creating NAT invite from local UDP port " << options.inviteLocalPort
+        << " via STUN server " << config.server.host << ":" << config.server.port
+        << " with timeout " << options.stunTimeoutMs << " ms...\n";
+
+    const auto result = screenshare::QueryPublicUdpEndpoint(config);
+    const std::time_t expiresAt =
+        std::time(nullptr) + static_cast<std::time_t>(options.inviteTtlSeconds);
+    const std::string sessionFingerprint = FormatSessionFingerprint(options.sessionFingerprint);
+    const std::string accessFingerprint =
+        options.accessCodeProvided ? FormatSessionFingerprint(options.accessCodeFingerprint) : "none";
+    const std::string security = options.accessCodeProvided ? "encrypted" : "plaintext";
+
+    std::ostringstream invite;
+    invite
+        << "screenshare-invite-v1"
+        << ";public=" << result.publicAddress << ":" << result.publicPort
+        << ";local=" << result.localAddress << ":" << result.localPort
+        << ";stun=" << result.serverAddress << ":" << result.serverPort
+        << ";session=" << options.sessionId
+        << ";session_fingerprint=" << sessionFingerprint
+        << ";security=" << security
+        << ";access_fingerprint=" << accessFingerprint
+        << ";expires_unix=" << static_cast<long long>(expiresAt);
+    const std::string inviteLine = "nat_invite=" + invite.str();
+    const std::string securityOption = options.accessCodeProvided ? "--access-code CODE" : "--allow-plaintext";
+    const std::string peerInvitePlaceholder = PowerShellQuote("<PEER_INVITE>");
+    const std::string localInviteArgument = PowerShellQuote(inviteLine);
+
+    std::cout
+        << "stun_server=" << result.serverAddress << ":" << result.serverPort << "\n"
+        << "local_udp_endpoint=" << result.localAddress << ":" << result.localPort << "\n"
+        << "public_udp_endpoint=" << result.publicAddress << ":" << result.publicPort << "\n"
+        << "invite_security=" << security << "\n"
+        << "invite_expires_unix=" << static_cast<long long>(expiresAt) << "\n"
+        << inviteLine << "\n"
+        << "send_this_invite_to_peer=" << inviteLine << "\n"
+        << "peer_invite_placeholder=<PEER_INVITE>\n"
+        << "watch_command_template=.\\ScreenShare.exe --watch " << options.inviteLocalPort
+        << " --peer-invite " << peerInvitePlaceholder << " " << securityOption << "\n"
+        << "share_command_template=.\\ScreenShare.exe --share " << peerInvitePlaceholder
+        << " --local-invite " << localInviteArgument << " " << securityOption << "\n"
+        << "probe_command_template=.\\ScreenShare.exe --nat-probe " << options.inviteLocalPort
+        << " --peer-invite " << peerInvitePlaceholder << " " << securityOption << "\n";
+    if (options.accessCodeProvided) {
+        std::cout << "template_note=replace CODE with the same access code used to create this invite\n";
+    }
+    std::cout << "template_note=replace <PEER_INVITE> with the invite copied from your friend\n";
+}
+
+std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint)
+{
+    if (endpoint.host.empty() || endpoint.port == 0) {
+        return "none";
+    }
+    return endpoint.host + ":" + std::to_string(endpoint.port);
+}
+
+screenshare::NatInvite ParseValidatedPeerInvite(const Options& options)
+{
+    const auto invite = screenshare::ParseNatInvite(options.peerInvite);
+    const std::time_t now = std::time(nullptr);
+    if (invite.expiresUnix > 0 && invite.expiresUnix < static_cast<int64_t>(now)) {
+        std::cerr
+            << "Warning: peer invite expired at Unix time " << invite.expiresUnix
+            << "; probing anyway because clocks can differ.\n";
+    }
+
+    if (invite.encrypted) {
+        if (!options.accessCodeProvided) {
+            throw std::invalid_argument("Peer invite requires --access-code CODE");
+        }
+        if (options.accessCodeFingerprint != invite.accessCodeFingerprint) {
+            throw std::invalid_argument("Access code does not match the peer invite fingerprint");
+        }
+    } else if (!options.allowPlaintext) {
+        throw std::invalid_argument("Peer invite is plaintext; rerun with --allow-plaintext");
+    }
+
+    if (options.sessionIdProvided && options.sessionFingerprint != invite.sessionFingerprint) {
+        std::cerr
+            << "Warning: --session fingerprint " << FormatSessionFingerprint(options.sessionFingerprint)
+            << " does not match peer invite session fingerprint "
+            << FormatSessionFingerprint(invite.sessionFingerprint) << ".\n";
+    }
+
+    return invite;
+}
+
+void RunNatProbe(const Options& options)
+{
+    const auto invite = ParseValidatedPeerInvite(options);
+
+    screenshare::NatProbeConfig config;
+    config.localPort = options.natProbeLocalPort;
+    config.peerInvite = invite;
+    config.duration = std::chrono::seconds(options.seconds);
+    config.interval = std::chrono::milliseconds(options.natProbeIntervalMs);
+    config.sessionFingerprint = options.sessionIdProvided ? options.sessionFingerprint : 0;
+    config.accessCodeFingerprint = options.accessCodeFingerprint;
+
+    std::cout
+        << "Running NAT UDP probe from local port " << options.natProbeLocalPort
+        << " for " << options.seconds << " seconds"
+        << " every " << options.natProbeIntervalMs << " ms...\n"
+        << "peer_public_endpoint=" << FormatNatEndpoint(invite.publicEndpoint) << "\n"
+        << "peer_local_endpoint=" << FormatNatEndpoint(invite.localEndpoint) << "\n"
+        << "peer_session=" << invite.sessionId << "\n"
+        << "peer_session_fingerprint=" << FormatSessionFingerprint(invite.sessionFingerprint) << "\n"
+        << "peer_security=" << (invite.encrypted ? "encrypted" : "plaintext") << "\n";
+
+    const auto stats = screenshare::RunNatProbeExchange(config);
+    const bool reachable = stats.receivedPackets > 0;
+    std::cout
+        << "nat_probe_result=" << (reachable ? "reachable" : "no_response") << "\n"
+        << "nat_probe_sent_public=" << stats.sentPublicProbes << "\n"
+        << "nat_probe_sent_local=" << stats.sentLocalProbes << "\n"
+        << "nat_probe_received=" << stats.receivedPackets << "\n"
+        << "nat_probe_received_probes=" << stats.receivedProbes << "\n"
+        << "nat_probe_received_replies=" << stats.receivedReplies << "\n"
+        << "nat_probe_replies_sent=" << stats.repliesSent << "\n"
+        << "nat_probe_invalid_packets=" << stats.invalidPackets << "\n"
+        << "nat_probe_session_mismatches=" << stats.sessionMismatches << "\n"
+        << "nat_probe_access_mismatches=" << stats.accessCodeMismatches << "\n";
+    for (const auto& endpoint : stats.seenEndpoints) {
+        std::cout << "nat_probe_seen_endpoint=" << endpoint.address << ":" << endpoint.port << "\n";
+    }
+}
+
 void RunUdpReceiverStats(const Options& options)
 {
+    std::optional<screenshare::NatInvite> peerInvite;
+    if (!options.peerInvite.empty()) {
+        peerInvite = ParseValidatedPeerInvite(options);
+    }
+
     screenshare::UdpReceiver receiver;
     screenshare::UdpReceiverConfig config;
     config.port = options.udpReceivePort;
@@ -4136,6 +4722,26 @@ void RunUdpReceiverStats(const Options& options)
     config.simulatedJitter = std::chrono::milliseconds(options.simulateJitterMs);
     config.accessCodeFingerprint = options.accessCodeFingerprint;
     config.encryptionKey = options.accessCodeKey;
+    config.natProbeInterval = std::chrono::milliseconds(options.natProbeIntervalMs);
+    config.natProbeSessionFingerprint = options.sessionIdProvided ? options.sessionFingerprint : 0;
+    bool peerInviteHasDistinctLocalEndpoint = false;
+    if (peerInvite) {
+        config.natProbeTargets.push_back(screenshare::UdpNatProbeTarget{
+            peerInvite->publicEndpoint.host,
+            peerInvite->publicEndpoint.port,
+            false});
+        peerInviteHasDistinctLocalEndpoint =
+            !peerInvite->localEndpoint.host.empty() &&
+            peerInvite->localEndpoint.port != 0 &&
+            (peerInvite->localEndpoint.host != peerInvite->publicEndpoint.host ||
+             peerInvite->localEndpoint.port != peerInvite->publicEndpoint.port);
+        if (peerInviteHasDistinctLocalEndpoint) {
+            config.natProbeTargets.push_back(screenshare::UdpNatProbeTarget{
+                peerInvite->localEndpoint.host,
+                peerInvite->localEndpoint.port,
+                true});
+        }
+    }
     receiver.Open(config);
 
     std::unique_ptr<screenshare::LanDiscoveryResponder> lanDiscoveryResponder;
@@ -4207,6 +4813,14 @@ void RunUdpReceiverStats(const Options& options)
         std::cout
             << ", LAN discoverable as \"" << options.lanName << "\""
             << " on discovery port " << options.lanDiscoveryPort;
+    }
+    if (peerInvite) {
+        std::cout
+            << ", NAT punch probes to " << FormatNatEndpoint(peerInvite->publicEndpoint);
+        if (peerInviteHasDistinctLocalEndpoint) {
+            std::cout << " and " << FormatNatEndpoint(peerInvite->localEndpoint);
+        }
+        std::cout << " every " << options.natProbeIntervalMs << " ms";
     }
     if (options.simulateLossPercent > 0.0f || options.simulateJitterMs > 0) {
         std::cout
@@ -4879,12 +5493,95 @@ void RunUdpReceiverStats(const Options& options)
     uint64_t lastPreviewLateDrops = 0;
     uint64_t lastPreviewOverflowDrops = 0;
     uint64_t latestFrameId = 0;
+    uint64_t latestFrameSenderQpc100ns = 0;
     uint64_t latestFrameBytes = 0;
     uint16_t latestFragmentCount = 0;
     uint64_t feedbackSequence = 0;
+    uint64_t receiverStreamRestarts = 0;
+    uint64_t receiverStreamStaleFrames = 0;
+    uint64_t currentStreamStartSenderQpc100ns = 0;
     bool hasCompletedFrame = false;
     bool hasReceivedStreamTraffic = false;
     bool waitingForStreamLogged = false;
+
+    auto detectReceiverStreamRestart = [&](const screenshare::UdpCompletedFrame& frame) {
+        if (!hasCompletedFrame || frame.frameId >= latestFrameId) {
+            return false;
+        }
+
+        if (frame.senderQpc100ns != 0 && latestFrameSenderQpc100ns != 0) {
+            return frame.senderQpc100ns > latestFrameSenderQpc100ns;
+        }
+
+        constexpr uint64_t RestartFrameIdBackstepThreshold = 30;
+        return latestFrameId - frame.frameId >= RestartFrameIdBackstepThreshold;
+    };
+
+    auto isStaleReceiverStreamFrame = [&](const screenshare::UdpCompletedFrame& frame) {
+        if (currentStreamStartSenderQpc100ns == 0 || frame.senderQpc100ns == 0) {
+            return false;
+        }
+        return frame.senderQpc100ns < currentStreamStartSenderQpc100ns;
+    };
+
+    auto resetReceiverStreamState = [&](const screenshare::UdpCompletedFrame& firstFrame) {
+        ++receiverStreamRestarts;
+        std::cout
+            << "receiver_stream_restart"
+            << " previous_frame=" << latestFrameId
+            << " new_frame=" << firstFrame.frameId
+            << " previous_sender_qpc=" << latestFrameSenderQpc100ns
+            << " new_sender_qpc=" << firstFrame.senderQpc100ns
+            << "\n";
+
+        if (previewWindow) {
+            restartPreviewPlayoutClock();
+        }
+        if (h264Decoder) {
+            h264Decoder->Start();
+            ++h264DecodeDecoderRestarts;
+        }
+
+        receiver.ResetMediaQueues();
+        h264DecodeBacklog.clear();
+        hasH264DecodeStartFrame = false;
+        nextH264DecodeFrameId = 0;
+        h264DumpBacklog.clear();
+        hasH264DumpStartFrame = false;
+        nextH264DumpFrameId = 0;
+        latestDecodedFrame.reset();
+        h264DecodedWidth = 0;
+        h264DecodedHeight = 0;
+
+        audioPlayout.Clear();
+        audioRenderer.reset();
+        activeAudioPlaybackFormat.reset();
+        opusAudioDecoder.reset();
+        audioPlaybackStatus = options.audioPlayback ? "waiting" : "disabled";
+
+        avSync.Clear();
+        avSyncCorrectionApplied = !options.avSync;
+        avSyncStartQpc100ns.reset();
+        avSyncPreviewBiasMs = 0;
+        avSyncAudioBiasMs = 0;
+        avSyncVideoStartDrops = 0;
+        avSyncAudioStartDrops = 0;
+        avSyncAudioCatchupDrops = 0;
+        avSyncAudioGateBypasses = 0;
+        previewHeldForAudioCatchup = false;
+        avSyncPlaybackStartAligned = false;
+        avSyncPlaybackStartQpc100ns = 0;
+        avSyncPlayoutAudioAheadMs = 0.0;
+        avSyncCorrectionStatus = options.avSync ? "waiting" : "disabled";
+        avSyncVideoOnlyFallback = false;
+
+        latestFrameId = 0;
+        latestFrameSenderQpc100ns = 0;
+        currentStreamStartSenderQpc100ns = firstFrame.senderQpc100ns;
+        latestFrameBytes = 0;
+        latestFragmentCount = 0;
+        hasCompletedFrame = false;
+    };
 
     auto updateReportBaselines = [&](const screenshare::UdpReceiverStats& stats,
                                      uint64_t previewLateDrops,
@@ -4929,9 +5626,20 @@ void RunUdpReceiverStats(const Options& options)
             receiveTimeout = std::min(receiveTimeout, std::chrono::milliseconds(5));
         }
         if (auto frame = receiver.ReceiveFrame(receiveTimeout)) {
+            if (detectReceiverStreamRestart(*frame)) {
+                resetReceiverStreamState(*frame);
+            }
+            if (isStaleReceiverStreamFrame(*frame)) {
+                ++receiverStreamStaleFrames;
+                continue;
+            }
+            if (currentStreamStartSenderQpc100ns == 0 && frame->senderQpc100ns != 0) {
+                currentStreamStartSenderQpc100ns = frame->senderQpc100ns;
+            }
             avSync.ObserveVideoFrame(*frame);
             maybeApplyAvSyncCorrection();
             latestFrameId = frame->frameId;
+            latestFrameSenderQpc100ns = frame->senderQpc100ns;
             latestFrameBytes = frame->bytes.size();
             latestFragmentCount = frame->fragmentCount;
             hasCompletedFrame = true;
@@ -5022,8 +5730,15 @@ void RunUdpReceiverStats(const Options& options)
                         << " session=" << options.sessionId
                         << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                         << " seen_stream=" << (hasReceivedStreamTraffic ? "yes" : "no")
+                        << " nat_status=" << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+                        << " nat_hint=" << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
                         << " udp_datagrams=" << stats.datagramsReceived
                         << " accepted_datagrams=" << stats.datagramsAccepted
+                        << " nat_probe_public_sent=" << stats.natProbePublicPacketsSent
+                        << " nat_probe_local_sent=" << stats.natProbeLocalPacketsSent
+                        << " nat_probe_errors=" << stats.natProbeSendErrors
+                        << " stream_restarts=" << receiverStreamRestarts
+                        << " stream_stale_frames=" << receiverStreamStaleFrames
                         << " completed_frames=" << stats.framesCompleted
                         << " audio_packets=" << stats.audioPacketsCompleted
                         << "\n";
@@ -5041,6 +5756,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " session=" << options.sessionId
                 << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                 << " receiver_health=" << ReceiverHealthState(health)
+                << " nat_status=" << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+                << " nat_hint=" << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
                 << " udp_datagrams_per_second=" << datagramsPerSecond
                 << " accepted_datagrams=" << stats.datagramsAccepted
                 << " access_rejected_datagrams=" << stats.accessRejectedDatagrams
@@ -5051,6 +5768,11 @@ void RunUdpReceiverStats(const Options& options)
                 << " feedback_sent=" << stats.feedbackPacketsSent
                 << " feedback_errors=" << stats.feedbackSendErrors
                 << " feedback_encrypted=" << stats.encryptedFeedbackPacketsSent
+                << " nat_probe_public_sent=" << stats.natProbePublicPacketsSent
+                << " nat_probe_local_sent=" << stats.natProbeLocalPacketsSent
+                << " nat_probe_errors=" << stats.natProbeSendErrors
+                << " stream_restarts=" << receiverStreamRestarts
+                << " stream_stale_frames=" << receiverStreamStaleFrames
                 << " audio_datagrams=" << stats.audioDatagramsAccepted
                 << " audio_packets=" << stats.audioPacketsCompleted
                 << " audio_queued_packets=" << stats.audioPacketsQueued
@@ -5237,6 +5959,8 @@ void RunUdpReceiverStats(const Options& options)
         << ", session: " << options.sessionId
         << ", session fingerprint: " << FormatSessionFingerprint(options.sessionFingerprint)
         << ", receiver health: " << ReceiverHealthState(finalHealth)
+        << ", NAT status: " << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+        << ", NAT hint: " << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
         << ", accepted datagrams: " << stats.datagramsAccepted
         << ", access rejected datagrams: " << stats.accessRejectedDatagrams
         << ", crypto rejected datagrams: " << stats.cryptoRejectedDatagrams
@@ -5246,6 +5970,11 @@ void RunUdpReceiverStats(const Options& options)
         << ", feedback packets sent: " << stats.feedbackPacketsSent
         << ", feedback send errors: " << stats.feedbackSendErrors
         << ", encrypted feedback packets sent: " << stats.encryptedFeedbackPacketsSent
+        << ", NAT probe public packets sent: " << stats.natProbePublicPacketsSent
+        << ", NAT probe local packets sent: " << stats.natProbeLocalPacketsSent
+        << ", NAT probe send errors: " << stats.natProbeSendErrors
+        << ", receiver stream restarts: " << receiverStreamRestarts
+        << ", receiver stale stream frames: " << receiverStreamStaleFrames
         << ", audio datagrams: " << stats.audioDatagramsAccepted
         << ", audio packets: " << stats.audioPacketsCompleted
         << ", audio queued packets: " << stats.audioPacketsQueued
@@ -5374,6 +6103,12 @@ int main(int argc, char** argv)
 
         if (options.generateAccessCode) {
             std::cout << screenshare::GenerateUdpAccessCode() << "\n";
+            exitCode = 0;
+        } else if (options.makeInvite) {
+            RunMakeInvite(options);
+            exitCode = 0;
+        } else if (options.natProbe) {
+            RunNatProbe(options);
             exitCode = 0;
         } else if (options.stunQuery) {
             RunStunQuery(options);

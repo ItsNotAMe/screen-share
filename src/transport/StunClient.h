@@ -16,6 +16,7 @@ struct StunServerTarget {
 struct StunQueryConfig {
     StunServerTarget server;
     std::chrono::milliseconds timeout{3000};
+    uint16_t localPort = 0;
 };
 
 struct StunQueryResult {
