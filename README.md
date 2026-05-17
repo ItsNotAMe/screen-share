@@ -158,7 +158,10 @@ side will use and query STUN from that same port:
 ```
 
 The command prints `nat_invite=screenshare-invite-v1;...` with public/local UDP endpoints, the
-session fingerprint, access-code fingerprint, and an expiry timestamp.
+session fingerprint, access-code fingerprint, and an expiry timestamp. It also prints
+`watch_command_template`, `share_command_template`, and `probe_command_template` lines. Replace
+`<PEER_INVITE>` in those templates with the invite copied from your friend. If the template contains
+`CODE`, replace it with the same access code used to create the invite.
 
 After both sides exchange invite lines, you can optionally run a UDP probe diagnostic on both
 computers using the same local port that created each invite. Quote the copied invite because it

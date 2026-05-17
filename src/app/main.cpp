@@ -246,6 +246,7 @@ void PrintHelp()
         << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
         << "  NAT: use --stun HOST[:PORT] to print this machine's public UDP endpoint.\n"
         << "       use --make-invite PORT --stun HOST[:PORT] to print a manual invite blob.\n"
+        << "       The invite output includes Watch/Share command templates for the next step.\n"
         << "       --nat-probe is an optional diagnostic for checking whether peer probes can pass.\n"
         << "       Watch can also use --peer-invite to send punch probes while waiting for Share.\n"
         << "       Share can use --share \"nat_invite=...\" to send to the peer invite endpoint.\n"
@@ -3146,6 +3147,22 @@ std::string JoinCommandLine(int argc, char** argv)
     return command.str();
 }
 
+std::string PowerShellQuote(std::string_view value)
+{
+    std::string quoted;
+    quoted.reserve(value.size() + 2);
+    quoted.push_back('\'');
+    for (const char ch : value) {
+        if (ch == '\'') {
+            quoted.append("''");
+        } else {
+            quoted.push_back(ch);
+        }
+    }
+    quoted.push_back('\'');
+    return quoted;
+}
+
 std::filesystem::path TemporaryReportLogPath(const std::filesystem::path& reportPath)
 {
     std::filesystem::path tempPath = reportPath;
@@ -4568,6 +4585,10 @@ void RunMakeInvite(const Options& options)
         << ";security=" << security
         << ";access_fingerprint=" << accessFingerprint
         << ";expires_unix=" << static_cast<long long>(expiresAt);
+    const std::string inviteLine = "nat_invite=" + invite.str();
+    const std::string securityOption = options.accessCodeProvided ? "--access-code CODE" : "--allow-plaintext";
+    const std::string peerInvitePlaceholder = PowerShellQuote("<PEER_INVITE>");
+    const std::string localInviteArgument = PowerShellQuote(inviteLine);
 
     std::cout
         << "stun_server=" << result.serverAddress << ":" << result.serverPort << "\n"
@@ -4575,7 +4596,19 @@ void RunMakeInvite(const Options& options)
         << "public_udp_endpoint=" << result.publicAddress << ":" << result.publicPort << "\n"
         << "invite_security=" << security << "\n"
         << "invite_expires_unix=" << static_cast<long long>(expiresAt) << "\n"
-        << "nat_invite=" << invite.str() << "\n";
+        << inviteLine << "\n"
+        << "send_this_invite_to_peer=" << inviteLine << "\n"
+        << "peer_invite_placeholder=<PEER_INVITE>\n"
+        << "watch_command_template=.\\ScreenShare.exe --watch " << options.inviteLocalPort
+        << " --peer-invite " << peerInvitePlaceholder << " " << securityOption << "\n"
+        << "share_command_template=.\\ScreenShare.exe --share " << peerInvitePlaceholder
+        << " --local-invite " << localInviteArgument << " " << securityOption << "\n"
+        << "probe_command_template=.\\ScreenShare.exe --nat-probe " << options.inviteLocalPort
+        << " --peer-invite " << peerInvitePlaceholder << " " << securityOption << "\n";
+    if (options.accessCodeProvided) {
+        std::cout << "template_note=replace CODE with the same access code used to create this invite\n";
+    }
+    std::cout << "template_note=replace <PEER_INVITE> with the invite copied from your friend\n";
 }
 
 std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint)
