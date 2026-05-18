@@ -79,10 +79,14 @@ The UI starts and stops the same `ScreenShare.exe` engine beside it. Use the Sha
 sending computer and the Watch tab on the receiving computer. Reports are enabled by default so a
 test run can be sent as a zip without collecting separate log files. The UI opens in dark mode by
 default, includes a theme toggle in the header, and can generate/copy an encrypted-session access
-code. The Share tab also has an output-device picker for system audio, which is useful when Windows
-or a virtual mixer uses a default output device that does not contain the audio you actually want to
-share. For manual internet/NAT tests, the Internet sections can create/copy local invite blobs,
-paste the friend's invite, and wire the matching NAT options into the generated command.
+code. The Share tab shows friendly display choices such as resolution, position, and primary monitor
+status while still passing the selected numeric display index to the engine. It also has an
+output-device picker for system audio, which is useful when Windows or a virtual mixer uses a default
+output device that does not contain the audio you actually want to share. For manual internet/NAT
+tests, choose the Internet tab in Share screen's Connection section. That page can create/copy this
+side's invite, paste the friend's invite, and wire the matching NAT options into the generated
+command. Nearby, Internet, and Manual live as tabs in the same Connection section so setup uses one
+mental model instead of separate competing panels.
 
 Common live session:
 
@@ -119,12 +123,13 @@ On the sharing computer, discover nearby receivers:
 ```
 
 The output includes `share_target=HOST:PORT` plus a ready-to-run `ScreenShare --share ...` command.
-The desktop UI exposes the same flow: Watch has a LAN discoverable checkbox, and Share has an
-auto-refreshing Targets list plus a manual Refresh button. Selecting a discovered receiver fills the
-address and port; encrypted receivers focus the main Access code field when it is empty. Discovery
-uses UDP port 47995 by default; add `--lan-discovery-port PORT` on both sides if you need a different
-port.
-When the Tailscale CLI is installed on the sharing computer, the same Targets list also includes
+The desktop UI exposes the same flow: both Share screen and Watch room have a Connection section
+with the same tab vocabulary. Watch room's Nearby tab carries the LAN discoverable checkbox, and
+Share screen's Nearby tab shows the auto-refreshing Nearby Devices list plus a manual Refresh
+button. Selecting a discovered receiver fills the address and port; encrypted receivers focus the
+main Access code field when it is empty. Discovery uses UDP port 47995 by default; add
+`--lan-discovery-port PORT` on both sides if you need a different port.
+When the Tailscale CLI is installed on the sharing computer, the same Nearby Devices list also includes
 online peers from `tailscale status --json` at the currently selected port. These entries are quick
 targets, not confirmed receivers: the UI cannot know whether Watch is actually running or which access
 code the peer expects. Start Watch on that computer and use the same access code on both sides.
@@ -165,26 +170,31 @@ session fingerprint, access-code fingerprint, and an expiry timestamp. It also p
 `CODE`, replace it with the same access code used to create the invite.
 
 The desktop UI exposes the same invite creation flow. Generate or paste the shared access code first,
-then use Create in the current tab's Internet section. The invite is copied to the clipboard and
-shown in the UI. Send that invite to your friend, paste their invite into Peer invite, and start the
-session normally. The Paste buttons can extract an invite from either a raw invite line or copied
-command output, and the Internet status line shows what is still missing before starting. While a NAT
-invite session is running, that same status line switches to live setup states such as probing,
-probe seen, connected, receiving, or rejected.
+then choose the Internet tab in either Share screen or Watch room's Connection section. Create my
+invite copies this side's invite to the clipboard and shows it in the UI. Send that invite to your
+friend, paste their invite with Paste invite, and start the session normally. The Paste
+buttons can extract an invite from either a raw invite line or copied command output, and the
+compact status line shows what is still missing before starting. While a NAT invite session is
+running, that same status line switches to live setup states such as probing, probe seen, connected,
+receiving, or rejected.
 
 Two-computer UI checklist for invite testing:
 
 1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
 2. Generate or paste the same access code on both computers.
-3. On the Watch computer, open the Watch tab, choose the listen port, and click Create in Internet.
-   Send that invite to the sharer.
-4. On the Share computer, open the Share tab, click Create in Internet, send that invite to the
-   watcher, and paste the Watch invite into Peer invite.
-5. Paste the Share invite into the Watch tab's Peer invite field.
+3. On the Watch computer, open Watch room, choose the listen port, switch the Connection section to
+   the Internet tab, and click Create invite. Send that invite to the sharer.
+4. On the Share computer, open Share screen, switch the Connection section to the Internet tab,
+   click Create invite, send that invite to the watcher, and paste the Watch invite into Friend.
+5. Paste the Share invite into the Watch room's Internet tab Friend field.
 6. Start Watch first, then start Share.
 7. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
    If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both
    computers.
+
+For a two-window test on one computer, the two windows cannot both own UDP port `5000`. Use separate
+local invite/listen ports, for example Watch on `5000` and Share's Internet local port on `5001`,
+then create fresh invites after changing either port.
 
 After both sides exchange invite lines, you can optionally run a UDP probe diagnostic on both
 computers using the same local port that created each invite. Quote the copied invite because it

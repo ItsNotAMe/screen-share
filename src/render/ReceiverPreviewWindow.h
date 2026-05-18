@@ -35,6 +35,7 @@ public:
     void Show();
     bool PumpMessages();
     void PresentFrame(const DecodedFrameInfo& frame);
+    void ClearFrame();
     void SetStatusText(std::string_view statusText);
     void SetControlCallbacks(ReceiverPreviewControlCallbacks callbacks);
 

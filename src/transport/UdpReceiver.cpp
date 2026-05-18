@@ -4,6 +4,7 @@
 #include "transport/UdpProtocol.h"
 
 #include <winsock2.h>
+#include <mstcpip.h>
 #include <ws2tcpip.h>
 
 #include <algorithm>
@@ -16,17 +17,65 @@
 #include <stdexcept>
 #include <string>
 
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
+
 namespace screenshare {
 namespace {
 
+std::string WinsockErrorDescription(int error)
+{
+    switch (error) {
+    case WSAEADDRINUSE:
+        return "address already in use";
+    case WSAEADDRNOTAVAIL:
+        return "address not available";
+    case WSAEACCES:
+        return "permission denied";
+    case WSAENETUNREACH:
+        return "network unreachable";
+    case WSAEHOSTUNREACH:
+        return "host unreachable";
+    default:
+        return {};
+    }
+}
+
+std::string WinsockErrorMessage(const std::string& operation, int error)
+{
+    std::string message = operation + " failed with WSA error " + std::to_string(error);
+    const std::string description = WinsockErrorDescription(error);
+    if (!description.empty()) {
+        message += " (" + description + ")";
+    }
+    return message;
+}
+
 std::string WinsockErrorMessage(const char* operation)
 {
-    return std::string(operation) + " failed with WSA error " + std::to_string(WSAGetLastError());
+    return WinsockErrorMessage(operation, WSAGetLastError());
 }
 
 SOCKET AsSocket(uintptr_t socket)
 {
     return static_cast<SOCKET>(socket);
+}
+
+void DisableUdpConnReset(SOCKET socket)
+{
+    BOOL newBehavior = FALSE;
+    DWORD bytesReturned = 0;
+    static_cast<void>(WSAIoctl(
+        socket,
+        SIO_UDP_CONNRESET,
+        &newBehavior,
+        sizeof(newBehavior),
+        nullptr,
+        0,
+        &bytesReturned,
+        nullptr,
+        nullptr));
 }
 
 } // namespace
@@ -141,6 +190,8 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
         throw std::runtime_error(WinsockErrorMessage("socket"));
     }
 
+    DisableUdpConnReset(udpSocket);
+
     if (config.socketReceiveBufferBytes > 0) {
         const int receiveBufferBytes = static_cast<int>(config.socketReceiveBufferBytes);
         static_cast<void>(setsockopt(
@@ -157,8 +208,16 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     address.sin_port = htons(config.port);
 
     if (bind(udpSocket, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
+        const int error = WSAGetLastError();
         closesocket(udpSocket);
-        throw std::runtime_error(WinsockErrorMessage("bind"));
+        std::string message = WinsockErrorMessage(
+            "bind(receiver 0.0.0.0:" + std::to_string(config.port) + ")",
+            error);
+        if (error == WSAEADDRINUSE) {
+            message += ". The UDP receive port is already in use; close the other process using it or choose "
+                       "a different --watch/--udp-recv port.";
+        }
+        throw std::runtime_error(message);
     }
 
     socket_ = static_cast<uintptr_t>(udpSocket);
