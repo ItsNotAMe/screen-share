@@ -49,6 +49,7 @@
 - Tailscale/mesh VPN peers are already usable by manual IP in the Share address field. The Tailscale peer picker is separate from UDP LAN broadcast discovery because mesh VPNs usually do not forward broadcast.
 - Discovery output never includes a raw access code. For encrypted receivers, the UI compares the typed access code with the advertised access-code fingerprint and warns on mismatch.
 - Wrong discovered-receiver access codes should clear the Access code field, disable plaintext, and focus the field so the user can retry immediately.
+- Runtime access-code failures should use the same retry path: parse engine output for encrypted invite decrypt failures, invite fingerprint mismatches, and increasing `access_rejected_datagrams` / `crypto_rejected_datagrams` counters, then warn once and clear/focus the Access code field.
 - Share should warn before starting when the target is localhost/loopback; that usually means the sender is about to send to their own computer instead of the remote Watch computer.
 - Use `--self-test` on the UI for automated smoke checks; it verifies that the engine executable is beside the UI.
 - Packaging must include Qt DLLs, plugin folders, and their transitive MinGW/UCRT dependencies.

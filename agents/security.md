@@ -28,6 +28,7 @@
 - CLI adds `--allow-plaintext` to explicitly acknowledge unencrypted UDP mode and suppress the plaintext warning.
 - Qt UI requires either an access code or the explicit plaintext checkbox before Start.
 - Qt UI can generate and copy an access code; command preview continues to redact the raw code.
+- Qt UI should surface bad access-code paths without exposing secrets: invite decrypt failures, fingerprint mismatches, and rejected-packet counters clear/focus the access-code field and warn once per run.
 - LAN discovery should stay access-code-only for now. It can advertise and compare fingerprints, but it must not broadcast raw access codes.
 
 ## LAN Invite Metadata

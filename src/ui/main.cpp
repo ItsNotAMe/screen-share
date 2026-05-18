@@ -209,6 +209,45 @@ QString lastLogFieldValue(const QString& output, const QString& field)
     return value;
 }
 
+enum class AccessCodeProblem {
+    None,
+    Required,
+    Mismatch,
+};
+
+bool logFieldPositive(const QString& output, const QString& field)
+{
+    const QString value = lastLogFieldValue(output, field);
+    if (value.isEmpty()) {
+        return false;
+    }
+    bool ok = false;
+    return value.toULongLong(&ok) > 0 && ok;
+}
+
+AccessCodeProblem detectAccessCodeProblem(const QString& output)
+{
+    if (output.contains("requires --access-code CODE", Qt::CaseInsensitive) ||
+        output.contains("requires an access code", Qt::CaseInsensitive) ||
+        output.contains("--access-code CODE or --allow-plaintext", Qt::CaseInsensitive) ||
+        lastLogFieldValue(output, "access_code") == "required") {
+        return AccessCodeProblem::Required;
+    }
+
+    if (output.contains("could not be decrypted", Qt::CaseInsensitive) ||
+        output.contains("access code does not match", Qt::CaseInsensitive) ||
+        output.contains("does not match the peer invite fingerprint", Qt::CaseInsensitive) ||
+        output.contains("does not match the local invite fingerprint", Qt::CaseInsensitive) ||
+        logFieldPositive(output, "access_rejected_datagrams") ||
+        logFieldPositive(output, "crypto_rejected_datagrams") ||
+        logFieldPositive(output, "udp_feedback_access_rejected") ||
+        logFieldPositive(output, "udp_feedback_crypto_rejected")) {
+        return AccessCodeProblem::Mismatch;
+    }
+
+    return AccessCodeProblem::None;
+}
+
 QLabel* makeLabel(const QString& text, const QString& className = {})
 {
     auto* label = new QLabel(text);
@@ -490,6 +529,10 @@ public:
             setRunning(false);
         });
         connect(process_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
+            const QString remaining = QString::fromLocal8Bit(process_->readAllStandardOutput());
+            if (!remaining.isEmpty()) {
+                handleProcessOutput(remaining);
+            }
             if (stopRequested_) {
                 appendOutput(forcedStop_ ?
                     "Process was forced closed after stop timed out\n" :
@@ -1670,6 +1713,7 @@ private:
         runtimeNatStatus_.clear();
         runtimeNatHint_.clear();
         processOutputParseBuffer_.clear();
+        accessCodeWarningShown_ = false;
         runtimeNatShareMode_ = shareMode();
         updateInternetStatus();
         if (discoveryProcess_->state() != QProcess::NotRunning) {
@@ -2309,12 +2353,12 @@ private:
                accessCodeFingerprintText(accessCode) == selectedReceiverAccessFingerprint_;
     }
 
-    void clearAccessCodeForRetry(const QString& message)
+    void clearAccessCodeForRetry(const QString& message, const QString& title = "Access code mismatch")
     {
         accessCodeEdit_->clear();
         allowPlaintextCheck_->setChecked(false);
         accessCodeEdit_->setFocus();
-        QMessageBox::warning(this, "Access code mismatch", message);
+        QMessageBox::warning(this, title, message);
     }
 
     bool validateSelectedReceiverSecurity()
@@ -2739,8 +2783,34 @@ private:
         if (processOutputParseBuffer_.size() > MaxParseBuffer) {
             processOutputParseBuffer_.remove(0, processOutputParseBuffer_.size() - MaxParseBuffer);
         }
+        handleAccessCodeProblem(processOutputParseBuffer_);
         updateRuntimeNatStatus(processOutputParseBuffer_);
         updateConnectionState(processOutputParseBuffer_);
+    }
+
+    void handleAccessCodeProblem(const QString& text)
+    {
+        if (accessCodeWarningShown_) {
+            return;
+        }
+
+        const AccessCodeProblem problem = detectAccessCodeProblem(text);
+        if (problem == AccessCodeProblem::None) {
+            return;
+        }
+
+        accessCodeWarningShown_ = true;
+        if (problem == AccessCodeProblem::Required) {
+            clearAccessCodeForRetry(
+                "This room or receiver needs an access code. Enter the same access code on both computers, or enable plaintext on both sides.",
+                "Access code required");
+            return;
+        }
+
+        clearAccessCodeForRetry(
+            process_ != nullptr && process_->state() != QProcess::NotRunning ?
+                "The room invite or incoming packets were rejected with this access code. Stop the current run, enter the same access code on both computers, then start again." :
+                "The room invite or incoming packets were rejected with this access code. Enter the same access code on both computers, then start again.");
     }
 
     void resetPeerStatus()
@@ -2959,6 +3029,7 @@ private:
     QString runtimeNatHint_;
     QString processOutputParseBuffer_;
     bool runtimeNatShareMode_ = true;
+    bool accessCodeWarningShown_ = false;
 };
 
 QString appStyleSheet(bool darkMode)
@@ -3503,6 +3574,15 @@ int main(int argc, char** argv)
             const QString natStatus = lastLogFieldValue(QString::fromUtf8(
                 "nat_status=probing nat_hint=start_share\n"
                 "nat_status=receiving nat_hint=media_received\n"), "nat_status");
+            const bool missingAccessCodeDetected =
+                detectAccessCodeProblem("Encrypted compact NAT invite requires --access-code CODE") ==
+                AccessCodeProblem::Required;
+            const bool mismatchedAccessCodeDetected =
+                detectAccessCodeProblem("Encrypted compact NAT invite could not be decrypted; check the access code") ==
+                AccessCodeProblem::Mismatch;
+            const bool rejectedPacketsDetected =
+                detectAccessCodeProblem("access_rejected_datagrams=2 crypto_rejected_datagrams=0") ==
+                AccessCodeProblem::Mismatch;
             const auto displays = parseDisplayChoices(QString::fromUtf8(
                 "[0] \\\\.\\DISPLAY1 2560x1440 at (0,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"
                 "[1] \\\\.\\DISPLAY2 1920x1080 at (-1920,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"));
@@ -3512,6 +3592,9 @@ int main(int argc, char** argv)
                 commandInvite.startsWith("nat_invite=screenshare-invite-v1") &&
                 compactCommandInvite.startsWith("ss1p:") &&
                 natStatus == "receiving" &&
+                missingAccessCodeDetected &&
+                mismatchedAccessCodeDetected &&
+                rejectedPacketsDetected &&
                 displays.size() == 2 &&
                 displays[1].index == 1 &&
                 displays[1].width == 1920 &&
