@@ -868,7 +868,7 @@ private:
         connect(connectionGroup, &QButtonGroup::idClicked, this, [this](int id) {
             setShareConnectionMethod(static_cast<ShareConnectionMethod>(id));
         });
-        setShareConnectionMethod(ShareConnectionMethod::Nearby);
+        setShareConnectionMethod(ShareConnectionMethod::InternetInvite);
 
         QVBoxLayout* videoContent = nullptr;
         layout->addWidget(makePanel("Video", &videoContent));
@@ -1029,7 +1029,7 @@ private:
         connect(watchConnectionGroup, &QButtonGroup::idClicked, this, [this](int id) {
             setWatchConnectionMethod(static_cast<WatchConnectionMethod>(id));
         });
-        setWatchConnectionMethod(WatchConnectionMethod::Nearby);
+        setWatchConnectionMethod(WatchConnectionMethod::InternetInvite);
 
         QVBoxLayout* audioContent = nullptr;
         layout->addWidget(makePanel("Audio", &audioContent));
@@ -2795,7 +2795,7 @@ private:
     QPushButton* internetConnectionButton_ = nullptr;
     QPushButton* manualConnectionButton_ = nullptr;
     PageStack* shareConnectionStack_ = nullptr;
-    ShareConnectionMethod shareConnectionMethod_ = ShareConnectionMethod::Nearby;
+    ShareConnectionMethod shareConnectionMethod_ = ShareConnectionMethod::InternetInvite;
     QLineEdit* shareHostEdit_ = nullptr;
     QLineEdit* shareLocalInviteEdit_ = nullptr;
     QSpinBox* shareInvitePortSpin_ = nullptr;
@@ -2815,7 +2815,7 @@ private:
     QPushButton* watchNearbyButton_ = nullptr;
     QPushButton* watchInternetButton_ = nullptr;
     PageStack* watchConnectionStack_ = nullptr;
-    WatchConnectionMethod watchConnectionMethod_ = WatchConnectionMethod::Nearby;
+    WatchConnectionMethod watchConnectionMethod_ = WatchConnectionMethod::InternetInvite;
     QLineEdit* watchPeerInviteEdit_ = nullptr;
     QPushButton* pasteWatchPeerInviteButton_ = nullptr;
     QLabel* watchInternetStatusLabel_ = nullptr;

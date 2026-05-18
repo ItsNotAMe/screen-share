@@ -86,7 +86,8 @@ output device that does not contain the audio you actually want to share. For ma
 tests with no server, choose the Internet tab in Create room. That page creates and copies the
 sharer's room invite. Send that invite to your friend; they paste it into Join room. Nearby,
 Internet, and Manual live as tabs in the same Room section so setup uses one mental model instead of
-separate competing panels.
+separate competing panels. The UI opens the Room section on Internet by default because the room
+invite flow is the normal direct-share path.
 
 Common live session:
 

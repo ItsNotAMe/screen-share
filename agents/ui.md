@@ -11,8 +11,8 @@
 - Keep ordinary labels transparent so global dark/light backgrounds do not paint ugly strips behind text.
 - UI Stop should request a graceful engine exit with a hidden stop-file signal before force-killing the process; otherwise Qt reports sender termination as a crash and saved reports may not flush.
 - Primary tabs:
-  - Create room: one Room panel with tab-like buttons for Nearby, Internet, and Manual; then friendly display chooser, FPS, resolution, and system-output audio device.
-  - Join room: one Room panel with the listen port above tab-like buttons for Nearby (LAN discoverable) and Internet (paste room invite), then mute, volume, preview latency.
+  - Create room: one Room panel with tab-like buttons for Nearby, Internet, and Manual; it opens on Internet by default, then friendly display chooser, FPS, resolution, and system-output audio device.
+  - Join room: one Room panel with the listen port above tab-like buttons for Nearby (LAN discoverable) and Internet (paste room invite); it opens on Internet by default, then mute, volume, preview latency.
   - Watch's Nearby and Internet tabs use the same `ModeBar` + `ModeButton` styling as Share's so the connection-method vocabulary is identical on both sides.
 - Reports should stay easy: enabled by default with `sender-report.zip` / `receiver-report.zip`.
 - The window is a single-column settings shell now; the Command preview and Output console were removed because they pushed every settings row sideways and bloated the chrome. Engine stdout is still captured for NAT-status parsing and the saved-report zip; routine stdout from the UI is mirrored to qDebug so it can be tailed from a terminal build.
