@@ -15,6 +15,7 @@ When resuming this repo, read:
    - `agents/packaging.md`
    - `agents/ui.md`
    - `agents/lan-discovery.md`
+   - `agents/nat-traversal.md`
    - `agents/security.md`
 
 Workflow reminders:

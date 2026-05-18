@@ -13,7 +13,7 @@
 
 - `main` now contains the direct manual NAT building blocks:
   - `--stun HOST[:PORT]` prints the public/local UDP endpoint for a temporary socket.
-  - `--make-invite PORT --stun HOST[:PORT]` queries STUN from the chosen local UDP port and prints a `screenshare-invite-v1;...` blob with public/local endpoints, session/access fingerprint metadata, security mode, and expiry.
+  - `--make-invite PORT --stun HOST[:PORT]` queries STUN from the chosen local UDP port and prints a compact invite. `ss1e:` invites are encrypted with the shared access code and hide endpoint/session metadata; `ss1p:` invites are compact plaintext for explicit `--allow-plaintext` mode. Legacy `nat_invite=screenshare-invite-v1;...` blobs still parse for compatibility.
   - `--make-invite` also prints `watch_command_template`, `share_command_template`, and `probe_command_template` lines. These intentionally use `<PEER_INVITE>` and `CODE` placeholders so the raw access code is not echoed.
   - `--nat-probe PORT --peer-invite INVITE` binds the chosen local UDP port and sends small probe/reply packets to the peer invite's public and local endpoints.
   - `--udp-local-port PORT` lets Share/live UDP send bind a chosen local sender port for manual media experiments after a successful probe.
@@ -33,12 +33,13 @@
 - PR #83 merged: UI live NAT status display from engine `nat_status` / `nat_hint` output.
 - PR #85 merged the full branch to `main`.
 - PR #88 testing showed the one-sharer-invite UI path works locally/reachable-direct, but not through the tested NAT: Watch sent public/local probes while Share saw `udp_nat_probe_packets=0` and stayed `waiting_for_probe`. This is the expected endpoint-filtered NAT deadlock for a one-link, no-server flow, not a decoder/media bug.
+- Current UI supports the no-server two-sided fallback: Watch can create a My invite response from its listen port, and Share can paste that Friend invite while still passing its own room invite as `--local-invite`.
 
 ## Follow-Up Shape
 
 - Live Watch probe source retargeting plus Share `--local-invite` binding is the first automatic endpoint selection path; still needed: richer setup summaries and UI guidance.
 - Next diagnostic layer should keep failures readable: no probes seen, probes rejected, retargeted but no feedback, receiver probing, receiver media rejected, and receiver actively receiving.
-- For generic Internet NAT without an external rendezvous/relay, one side must still learn the other side's endpoint somehow. Practical no-server options are Tailscale/manual IP, router port mapping/UPnP, or bringing back a two-sided response invite flow.
+- For generic Internet NAT without an external rendezvous/relay, one side must still learn the other side's endpoint somehow. Practical no-server options are the UI two-sided response invite, Tailscale/manual IP, or router port mapping/UPnP. Compact encrypted invites make that exchange shorter and less leaky, but do not remove the need for endpoint exchange.
 - User already validated the UI-guided direct invite flow after create/copy invite landed. Since later changes only added receiver restart recovery and status display, treat the core invite mechanics as validated.
 - README now carries the two-computer UI checklist for future NAT/Tailscale validation.
 - Still needed: richer live probe/media status only if reports still show confusion.

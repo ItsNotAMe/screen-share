@@ -152,7 +152,8 @@ WGC capture by default
   - Validated against `stun.l.google.com:19302`; output includes local and public UDP endpoints.
   - `--make-invite`, `--nat-probe`, `--udp-local-port`, Watch `--peer-invite`, Share `--share "nat_invite=..."`, `--invite-endpoint auto|public|local`, Share `--local-invite`, and Share auto retarget from Watch probes are now available for manual hole-punch experiments.
   - `--make-invite` prints guided command templates for Watch, Share, and optional probe diagnostics.
-  - Current UI bridge presents one sharer-owned room invite in the main UI for LAN/VPN/reachable-NAT; lower-level CLI commands still support manual two-invite experiments.
+  - Current generated invites are compact by default: `ss1e:` is encrypted with the shared access code and hides endpoint/session metadata; `ss1p:` is compact plaintext for explicit plaintext mode. Legacy verbose `nat_invite=screenshare-invite-v1;...` strings still parse.
+  - Current UI bridge presents one sharer-owned room invite for LAN/VPN/reachable-NAT and an optional Watch-side My invite response for blocked NAT pairs. Share uses the friend response as `--share` and its own room invite as `--local-invite`.
   - Guided UI work adds create/copy/paste/extract buttons and compact status hints for the one-invite room flow.
   - NAT logs now summarize setup state with `nat_status` / `nat_hint` so reports can distinguish missing probes, rejected probes/media, retarget-without-feedback, and receiving states.
   - Remaining NAT work is deferred unless reports show direct hole punching is insufficient or diagnostics are still confusing.

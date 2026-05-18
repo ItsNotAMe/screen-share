@@ -167,19 +167,22 @@ side will use and query STUN from that same port:
 .\build\release\ScreenShare.exe --make-invite 5000 --stun stun.l.google.com:19302 --access-code CODE
 ```
 
-The command prints `nat_invite=screenshare-invite-v1;...` with public/local UDP endpoints, the
-session fingerprint, access-code fingerprint, and an expiry timestamp. It also prints
-`watch_command_template`, `share_command_template`, and `probe_command_template` lines. Replace
-`<PEER_INVITE>` in those templates with the invite copied from your friend. If the template contains
-`CODE`, replace it with the same access code used to create the invite.
+The command prints a compact invite. With an access code it starts with `ss1e:` and encrypts the
+endpoint/session metadata inside the invite. In explicit plaintext mode it starts with `ss1p:` and
+is shorter than the legacy `nat_invite=screenshare-invite-v1;...` text, but not hidden. It also
+prints `watch_command_template`, `share_command_template`, and `probe_command_template` lines.
+Replace `<PEER_INVITE>` in those templates with the invite copied from your friend. If the template
+contains `CODE`, replace it with the same access code used to create the invite.
 
-The desktop UI turns this into a one-invite room flow for reachable direct paths. Generate or paste
-the shared access code first, then choose the Internet tab in Create room. The Create button copies
-the sharer's room invite to the clipboard and shows it in the UI. Send that invite to your friend.
-They open Join room, switch to Internet, paste the room invite, and start watching. The Paste buttons
-can extract an invite from either a raw invite line or copied command output, and the compact status
-line shows what is still missing before starting. While an invite session is running, that same status
-line switches to live setup states such as probing, probe seen, connected, receiving, or rejected.
+The desktop UI keeps this as a room flow. Generate or paste the shared access code first, then choose
+the Internet tab in Create room. The Create button copies the sharer's room invite to the clipboard
+and shows it in the UI. Send that invite to your friend. They open Join room, switch to Internet,
+paste the room invite, and can create/copy their own My invite response from the same listen port.
+If the one-invite path stalls, send that response invite back and paste it into Share's Friend invite
+field before starting Share. The Paste buttons can extract an invite from either a raw invite line or
+copied command output, and the compact status line shows what is still missing before starting. While
+an invite session is running, that same status line switches to live setup states such as probing,
+probe seen, connected, receiving, or rejected.
 
 Two-computer UI checklist for invite testing:
 
@@ -189,25 +192,27 @@ Two-computer UI checklist for invite testing:
    send that invite to the watcher.
 4. On the Watch computer, open Join room, choose the listen port, switch the Room section to
    Internet, and paste the room invite.
-5. Start watching, then start sharing.
-6. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
+5. For Internet NAT pairs, click Create beside My invite on Watch, send that response invite back to
+   the sharer, and paste it into Share's Friend invite field. LAN/Tailscale/reachable paths can skip
+   this response invite.
+6. Start watching, then start sharing.
+7. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
    If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both
    computers.
 
 If Watch stays probing and Share stays waiting for a probe, the receiver's packets did not reach the
-sharer. That is a normal NAT failure for a one-invite, no-server flow. Use Tailscale/manual IP, a
-router port mapping, or a future two-sided response/signaling flow for that network.
+sharer. That is a normal NAT failure for a one-invite, no-server flow. Try the Watch-side My invite
+response, Tailscale/manual IP, or a router port mapping for that network.
 
 For a two-window test on one computer, the two windows cannot both own UDP port `5000`. Use separate
 ports, for example Join room on `5000` and Create room's Internet room port on `5001`, then create a
 fresh room invite after changing either port.
 
 After both sides exchange invite lines, you can optionally run a UDP probe diagnostic on both
-computers using the same local port that created each invite. Quote the copied invite because it
-contains semicolons:
+computers using the same local port that created each invite:
 
 ```powershell
-.\build\release\ScreenShare.exe --nat-probe 5000 --peer-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+.\build\release\ScreenShare.exe --nat-probe 5000 --peer-invite "ss1e:..." --access-code CODE
 ```
 
 Use `--allow-plaintext` instead of `--access-code CODE` only if the invite was created in plaintext
@@ -219,7 +224,7 @@ For manual experiments after a successful probe, start Watch with the sender's i
 sending punch probes from the actual receive socket while waiting for media:
 
 ```powershell
-.\build\release\ScreenShare.exe --watch 5000 --peer-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+.\build\release\ScreenShare.exe --watch 5000 --peer-invite "ss1e:..." --access-code CODE
 ```
 
 The UI's one-invite room flow starts Share from the sharer's own invite and also passes that invite
@@ -228,10 +233,10 @@ to retarget the media path. For lower-level manual experiments where you already
 invite, start Share with the receiver's invite and pass the sender's own invite as `--local-invite`:
 
 ```powershell
-.\build\release\ScreenShare.exe --share "nat_invite=screenshare-invite-v1;..." --local-invite "nat_invite=screenshare-invite-v1;..." --access-code CODE
+.\build\release\ScreenShare.exe --share "ss1e:..." --local-invite "ss1e:..." --access-code CODE
 ```
 
-`--share "nat_invite=..."` starts with the invite's public endpoint by default. In `auto` mode,
+`--share "ss1e:..."` starts with the invite's public endpoint by default. In `auto` mode,
 incoming Watch punch probes can retarget Share to the endpoint those probes actually came from. Add
 `--invite-endpoint local` when both computers are reachable through the invite's local address, such
 as same-LAN/VPN experiments, and you want to force that path. If you do not have the sender invite

@@ -26,6 +26,12 @@ constexpr uint32_t NatProbeMagic = 0x53534E50; // "SSNP"
 constexpr uint16_t NatProbeVersion = 1;
 constexpr uint16_t NatProbeTypeProbe = 1;
 constexpr uint16_t NatProbeTypeReply = 2;
+constexpr std::string_view LegacyInvitePrefix = "screenshare-invite-v1";
+constexpr std::string_view CompactPlainInvitePrefix = "ss1p:";
+constexpr std::string_view CompactEncryptedInvitePrefix = "ss1e:";
+constexpr std::string_view CompactEncryptedInviteAd = "screenshare-compact-invite-v1";
+constexpr uint8_t CompactInvitePayloadVersion = 1;
+constexpr uint8_t CompactInviteFlagEncrypted = 1U << 0;
 
 #pragma pack(push, 1)
 struct NatProbePacket {
@@ -48,6 +54,11 @@ struct ResolvedTarget {
     bool isLocalEndpoint = false;
 };
 
+bool StartsWith(std::string_view text, std::string_view prefix)
+{
+    return text.rfind(prefix, 0) == 0;
+}
+
 std::string WinsockErrorMessage(const char* operation)
 {
     return std::string(operation) + " failed with WSA error " + std::to_string(WSAGetLastError());
@@ -66,6 +77,295 @@ std::string TrimInviteLine(std::string text)
         text.erase(0, prefix.size());
     }
     return text;
+}
+
+std::vector<std::byte> BytesFromString(std::string_view text)
+{
+    std::vector<std::byte> bytes;
+    bytes.reserve(text.size());
+    for (const char ch : text) {
+        bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(ch)));
+    }
+    return bytes;
+}
+
+std::string Base64UrlEncode(std::span<const std::byte> bytes)
+{
+    constexpr char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+    std::string output;
+    output.reserve((bytes.size() * 4 + 2) / 3);
+
+    size_t offset = 0;
+    while (offset + 3 <= bytes.size()) {
+        const uint32_t value =
+            (static_cast<uint32_t>(std::to_integer<uint8_t>(bytes[offset])) << 16) |
+            (static_cast<uint32_t>(std::to_integer<uint8_t>(bytes[offset + 1])) << 8) |
+            static_cast<uint32_t>(std::to_integer<uint8_t>(bytes[offset + 2]));
+        output.push_back(alphabet[(value >> 18) & 0x3F]);
+        output.push_back(alphabet[(value >> 12) & 0x3F]);
+        output.push_back(alphabet[(value >> 6) & 0x3F]);
+        output.push_back(alphabet[value & 0x3F]);
+        offset += 3;
+    }
+
+    const size_t remaining = bytes.size() - offset;
+    if (remaining == 1) {
+        const uint32_t value = static_cast<uint32_t>(std::to_integer<uint8_t>(bytes[offset])) << 16;
+        output.push_back(alphabet[(value >> 18) & 0x3F]);
+        output.push_back(alphabet[(value >> 12) & 0x3F]);
+    } else if (remaining == 2) {
+        const uint32_t value =
+            (static_cast<uint32_t>(std::to_integer<uint8_t>(bytes[offset])) << 16) |
+            (static_cast<uint32_t>(std::to_integer<uint8_t>(bytes[offset + 1])) << 8);
+        output.push_back(alphabet[(value >> 18) & 0x3F]);
+        output.push_back(alphabet[(value >> 12) & 0x3F]);
+        output.push_back(alphabet[(value >> 6) & 0x3F]);
+    }
+    return output;
+}
+
+int Base64UrlValue(char ch)
+{
+    if (ch >= 'A' && ch <= 'Z') {
+        return ch - 'A';
+    }
+    if (ch >= 'a' && ch <= 'z') {
+        return ch - 'a' + 26;
+    }
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0' + 52;
+    }
+    if (ch == '-') {
+        return 62;
+    }
+    if (ch == '_') {
+        return 63;
+    }
+    return -1;
+}
+
+std::vector<std::byte> Base64UrlDecode(std::string_view text)
+{
+    std::vector<std::byte> output;
+    output.reserve(text.size() * 3 / 4);
+
+    uint32_t value = 0;
+    int valueBits = 0;
+    for (const char ch : text) {
+        if (ch == '=') {
+            break;
+        }
+        const int decoded = Base64UrlValue(ch);
+        if (decoded < 0) {
+            throw std::invalid_argument("Compact NAT invite has invalid base64url data");
+        }
+        value = (value << 6) | static_cast<uint32_t>(decoded);
+        valueBits += 6;
+        while (valueBits >= 8) {
+            valueBits -= 8;
+            output.push_back(static_cast<std::byte>((value >> valueBits) & 0xFF));
+            value &= valueBits == 0 ? 0 : ((1U << valueBits) - 1U);
+        }
+    }
+    return output;
+}
+
+void AppendUint8(std::vector<std::byte>& output, uint8_t value)
+{
+    output.push_back(static_cast<std::byte>(value));
+}
+
+void AppendUint16(std::vector<std::byte>& output, uint16_t value)
+{
+    output.push_back(static_cast<std::byte>((value >> 8) & 0xFF));
+    output.push_back(static_cast<std::byte>(value & 0xFF));
+}
+
+void AppendUint32(std::span<std::byte> output, size_t offset, uint32_t value)
+{
+    output[offset] = static_cast<std::byte>((value >> 24) & 0xFF);
+    output[offset + 1] = static_cast<std::byte>((value >> 16) & 0xFF);
+    output[offset + 2] = static_cast<std::byte>((value >> 8) & 0xFF);
+    output[offset + 3] = static_cast<std::byte>(value & 0xFF);
+}
+
+void AppendUint64(std::vector<std::byte>& output, uint64_t value)
+{
+    for (int shift = 56; shift >= 0; shift -= 8) {
+        output.push_back(static_cast<std::byte>((value >> shift) & 0xFF));
+    }
+}
+
+uint8_t ReadUint8(std::span<const std::byte> data, size_t& offset)
+{
+    if (offset + 1 > data.size()) {
+        throw std::invalid_argument("Compact NAT invite is truncated");
+    }
+    return std::to_integer<uint8_t>(data[offset++]);
+}
+
+uint16_t ReadUint16(std::span<const std::byte> data, size_t& offset)
+{
+    if (offset + 2 > data.size()) {
+        throw std::invalid_argument("Compact NAT invite is truncated");
+    }
+    const uint16_t value =
+        (static_cast<uint16_t>(std::to_integer<uint8_t>(data[offset])) << 8) |
+        static_cast<uint16_t>(std::to_integer<uint8_t>(data[offset + 1]));
+    offset += 2;
+    return value;
+}
+
+uint64_t ReadUint64(std::span<const std::byte> data, size_t& offset)
+{
+    if (offset + 8 > data.size()) {
+        throw std::invalid_argument("Compact NAT invite is truncated");
+    }
+    uint64_t value = 0;
+    for (int i = 0; i < 8; ++i) {
+        value = (value << 8) | std::to_integer<uint8_t>(data[offset++]);
+    }
+    return value;
+}
+
+void AppendEndpoint(std::vector<std::byte>& output, const NatInviteEndpoint& endpoint, const char* fieldName)
+{
+    if (endpoint.host.empty() && endpoint.port == 0) {
+        output.insert(output.end(), 6, std::byte{0});
+        return;
+    }
+    if (endpoint.host.empty() || endpoint.port == 0) {
+        throw std::invalid_argument(std::string("Compact NAT invite has incomplete ") + fieldName + " endpoint");
+    }
+
+    in_addr address{};
+    if (inet_pton(AF_INET, endpoint.host.c_str(), &address) != 1) {
+        throw std::invalid_argument(
+            std::string("Compact NAT invites require IPv4 ") + fieldName + " endpoint: " + endpoint.host);
+    }
+    const auto* bytes = reinterpret_cast<const uint8_t*>(&address.s_addr);
+    for (int i = 0; i < 4; ++i) {
+        output.push_back(static_cast<std::byte>(bytes[i]));
+    }
+    AppendUint16(output, endpoint.port);
+}
+
+NatInviteEndpoint ReadEndpoint(std::span<const std::byte> data, size_t& offset, const char* fieldName)
+{
+    if (offset + 6 > data.size()) {
+        throw std::invalid_argument("Compact NAT invite is truncated");
+    }
+
+    std::array<uint8_t, 4> raw{};
+    bool allZero = true;
+    for (uint8_t& byte : raw) {
+        byte = std::to_integer<uint8_t>(data[offset++]);
+        allZero = allZero && byte == 0;
+    }
+    const uint16_t port = ReadUint16(data, offset);
+    if (allZero && port == 0) {
+        return {};
+    }
+    if (allZero || port == 0) {
+        throw std::invalid_argument(std::string("Compact NAT invite has invalid ") + fieldName + " endpoint");
+    }
+
+    in_addr address{};
+    std::memcpy(&address.s_addr, raw.data(), raw.size());
+    std::array<char, INET_ADDRSTRLEN> text{};
+    if (inet_ntop(AF_INET, &address, text.data(), static_cast<socklen_t>(text.size())) == nullptr) {
+        throw std::runtime_error(WinsockErrorMessage("inet_ntop(compact-invite)"));
+    }
+
+    NatInviteEndpoint endpoint;
+    endpoint.host = text.data();
+    endpoint.port = port;
+    return endpoint;
+}
+
+std::array<std::byte, UdpCryptoNonceBytes> GenerateCompactInviteNonce()
+{
+    std::array<std::byte, UdpCryptoNonceBytes> nonce{};
+    AppendUint32(nonce, 0, GenerateUdpCryptoNoncePrefix());
+    AppendUint32(nonce, 4, GenerateUdpCryptoNoncePrefix());
+    AppendUint32(nonce, 8, GenerateUdpCryptoNoncePrefix());
+    return nonce;
+}
+
+std::vector<std::byte> BuildCompactInvitePayload(const NatInvite& invite)
+{
+    if (invite.sessionId.empty() || invite.sessionId.size() > 255) {
+        throw std::invalid_argument("Compact NAT invite requires a session id of 1-255 bytes");
+    }
+    if (invite.publicEndpoint.host.empty() || invite.publicEndpoint.port == 0) {
+        throw std::invalid_argument("Compact NAT invite requires a public endpoint");
+    }
+    if (invite.localEndpoint.host.empty() || invite.localEndpoint.port == 0) {
+        throw std::invalid_argument("Compact NAT invite requires a local endpoint");
+    }
+    if (invite.encrypted && invite.accessCodeFingerprint == 0) {
+        throw std::invalid_argument("Encrypted compact NAT invite requires an access-code fingerprint");
+    }
+
+    std::vector<std::byte> payload;
+    payload.reserve(80 + invite.sessionId.size());
+    AppendUint8(payload, CompactInvitePayloadVersion);
+    AppendUint8(payload, invite.encrypted ? CompactInviteFlagEncrypted : 0);
+    AppendEndpoint(payload, invite.publicEndpoint, "public");
+    AppendEndpoint(payload, invite.localEndpoint, "local");
+    AppendEndpoint(payload, invite.stunEndpoint, "stun");
+    AppendUint64(payload, invite.sessionFingerprint);
+    AppendUint64(payload, invite.accessCodeFingerprint);
+    AppendUint64(payload, static_cast<uint64_t>(invite.expiresUnix));
+    AppendUint8(payload, static_cast<uint8_t>(invite.sessionId.size()));
+    for (const char ch : invite.sessionId) {
+        AppendUint8(payload, static_cast<uint8_t>(static_cast<unsigned char>(ch)));
+    }
+    return payload;
+}
+
+NatInvite ParseCompactInvitePayload(std::span<const std::byte> payload)
+{
+    size_t offset = 0;
+    const uint8_t version = ReadUint8(payload, offset);
+    if (version != CompactInvitePayloadVersion) {
+        throw std::invalid_argument("Unsupported compact NAT invite version");
+    }
+    const uint8_t flags = ReadUint8(payload, offset);
+    if ((flags & ~CompactInviteFlagEncrypted) != 0) {
+        throw std::invalid_argument("Compact NAT invite has unsupported flags");
+    }
+
+    NatInvite invite;
+    invite.encrypted = (flags & CompactInviteFlagEncrypted) != 0;
+    invite.publicEndpoint = ReadEndpoint(payload, offset, "public");
+    invite.localEndpoint = ReadEndpoint(payload, offset, "local");
+    invite.stunEndpoint = ReadEndpoint(payload, offset, "stun");
+    invite.sessionFingerprint = ReadUint64(payload, offset);
+    invite.accessCodeFingerprint = ReadUint64(payload, offset);
+    invite.expiresUnix = static_cast<int64_t>(ReadUint64(payload, offset));
+
+    const uint8_t sessionBytes = ReadUint8(payload, offset);
+    if (sessionBytes == 0 || offset + sessionBytes > payload.size()) {
+        throw std::invalid_argument("Compact NAT invite has invalid session id");
+    }
+    invite.sessionId.reserve(sessionBytes);
+    for (uint8_t i = 0; i < sessionBytes; ++i) {
+        invite.sessionId.push_back(static_cast<char>(ReadUint8(payload, offset)));
+    }
+    if (offset != payload.size()) {
+        throw std::invalid_argument("Compact NAT invite has trailing data");
+    }
+    if (invite.publicEndpoint.host.empty() || invite.publicEndpoint.port == 0 ||
+        invite.localEndpoint.host.empty() || invite.localEndpoint.port == 0) {
+        throw std::invalid_argument("Compact NAT invite is missing a required endpoint");
+    }
+    if (invite.encrypted && invite.accessCodeFingerprint == 0) {
+        throw std::invalid_argument("Encrypted compact NAT invite has an empty access-code fingerprint");
+    }
+    return invite;
 }
 
 uint16_t ParsePort(const std::string& text, const std::string& fieldName)
@@ -265,9 +565,8 @@ void SendPacket(SOCKET socket, const sockaddr_in& target, const NatProbePacket& 
 
 } // namespace
 
-NatInvite ParseNatInvite(const std::string& text)
+NatInvite ParseLegacyNatInvite(const std::string& inviteText)
 {
-    const std::string inviteText = TrimInviteLine(text);
     if (inviteText.empty()) {
         throw std::invalid_argument("NAT invite is empty");
     }
@@ -284,7 +583,7 @@ NatInvite ParseNatInvite(const std::string& text)
         offset = separator + 1;
     }
 
-    if (fields.empty() || fields.front() != "screenshare-invite-v1") {
+    if (fields.empty() || fields.front() != LegacyInvitePrefix) {
         throw std::invalid_argument("Unsupported NAT invite format");
     }
 
@@ -333,6 +632,95 @@ NatInvite ParseNatInvite(const std::string& text)
 
     invite.expiresUnix = ParseInt64(require("expires_unix"), "expires_unix");
     return invite;
+}
+
+std::string FormatNatInvite(const NatInvite& invite, const std::optional<UdpCryptoKey>& encryptionKey)
+{
+    NatInvite compactInvite = invite;
+    compactInvite.encrypted = compactInvite.encrypted || encryptionKey.has_value();
+    const std::vector<std::byte> payload = BuildCompactInvitePayload(compactInvite);
+
+    if (!compactInvite.encrypted) {
+        return std::string(CompactPlainInvitePrefix) + Base64UrlEncode(payload);
+    }
+    if (!encryptionKey.has_value()) {
+        throw std::invalid_argument("Encrypted compact NAT invite requires an access code");
+    }
+
+    const std::array<std::byte, UdpCryptoNonceBytes> nonce = GenerateCompactInviteNonce();
+    std::array<std::byte, UdpCryptoTagBytes> tag{};
+    const std::vector<std::byte> authenticatedData = BytesFromString(CompactEncryptedInviteAd);
+    const UdpAesGcm aes(*encryptionKey);
+    const std::vector<std::byte> ciphertext = aes.Encrypt(nonce, authenticatedData, payload, tag);
+
+    std::vector<std::byte> encoded;
+    encoded.reserve(nonce.size() + tag.size() + ciphertext.size());
+    encoded.insert(encoded.end(), nonce.begin(), nonce.end());
+    encoded.insert(encoded.end(), tag.begin(), tag.end());
+    encoded.insert(encoded.end(), ciphertext.begin(), ciphertext.end());
+    return std::string(CompactEncryptedInvitePrefix) + Base64UrlEncode(encoded);
+}
+
+NatInvite ParseNatInvite(const std::string& text)
+{
+    return ParseNatInvite(text, std::nullopt);
+}
+
+NatInvite ParseNatInvite(const std::string& text, const std::optional<UdpCryptoKey>& decryptionKey)
+{
+    const std::string inviteText = TrimInviteLine(text);
+    if (inviteText.empty()) {
+        throw std::invalid_argument("NAT invite is empty");
+    }
+
+    if (StartsWith(inviteText, CompactPlainInvitePrefix)) {
+        const std::string_view encoded(inviteText.data() + CompactPlainInvitePrefix.size(),
+                                       inviteText.size() - CompactPlainInvitePrefix.size());
+        const std::vector<std::byte> payload = Base64UrlDecode(encoded);
+        NatInvite invite = ParseCompactInvitePayload(payload);
+        if (invite.encrypted) {
+            throw std::invalid_argument("Plain compact NAT invite unexpectedly contains encrypted metadata");
+        }
+        return invite;
+    }
+
+    if (StartsWith(inviteText, CompactEncryptedInvitePrefix)) {
+        if (!decryptionKey.has_value()) {
+            throw std::invalid_argument("Encrypted compact NAT invite requires --access-code CODE");
+        }
+
+        const std::string_view encoded(inviteText.data() + CompactEncryptedInvitePrefix.size(),
+                                       inviteText.size() - CompactEncryptedInvitePrefix.size());
+        const std::vector<std::byte> blob = Base64UrlDecode(encoded);
+        if (blob.size() < UdpCryptoNonceBytes + UdpCryptoTagBytes) {
+            throw std::invalid_argument("Encrypted compact NAT invite is truncated");
+        }
+
+        std::array<std::byte, UdpCryptoTagBytes> tag{};
+        std::memcpy(tag.data(), blob.data() + UdpCryptoNonceBytes, tag.size());
+        const std::vector<std::byte> authenticatedData = BytesFromString(CompactEncryptedInviteAd);
+        const UdpAesGcm aes(*decryptionKey);
+        const std::span<const std::byte> nonce(blob.data(), UdpCryptoNonceBytes);
+        const std::span<const std::byte> ciphertext(
+            blob.data() + UdpCryptoNonceBytes + UdpCryptoTagBytes,
+            blob.size() - UdpCryptoNonceBytes - UdpCryptoTagBytes);
+        const auto plaintext = aes.Decrypt(
+            nonce,
+            authenticatedData,
+            ciphertext,
+            std::span<const std::byte, UdpCryptoTagBytes>(tag.data(), tag.size()));
+        if (!plaintext.has_value()) {
+            throw std::invalid_argument("Encrypted compact NAT invite could not be decrypted; check the access code");
+        }
+
+        NatInvite invite = ParseCompactInvitePayload(*plaintext);
+        if (!invite.encrypted) {
+            throw std::invalid_argument("Encrypted compact NAT invite is missing encrypted metadata");
+        }
+        return invite;
+    }
+
+    return ParseLegacyNatInvite(inviteText);
 }
 
 std::vector<std::byte> BuildNatProbeDatagram(
