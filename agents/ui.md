@@ -11,8 +11,8 @@
 - Keep ordinary labels transparent so global dark/light backgrounds do not paint ugly strips behind text.
 - UI Stop should request a graceful engine exit with a hidden stop-file signal before force-killing the process; otherwise Qt reports sender termination as a crash and saved reports may not flush.
 - Primary tabs:
-  - Share screen: one Connection panel with tab-like buttons for Nearby, Internet, and Manual; then friendly display chooser, FPS, resolution, and system-output audio device.
-  - Watch room: one Connection panel with the listen port above tab-like buttons for Nearby (LAN discoverable) and Internet (invite exchange), then mute, volume, preview latency.
+  - Create room: one Room panel with tab-like buttons for Nearby, Internet, and Manual; it opens on Internet by default, then friendly display chooser, FPS, resolution, and system-output audio device.
+  - Join room: one Room panel with the listen port above tab-like buttons for Nearby (LAN discoverable) and Internet (paste room invite); it opens on Internet by default, then mute, volume, preview latency.
   - Watch's Nearby and Internet tabs use the same `ModeBar` + `ModeButton` styling as Share's so the connection-method vocabulary is identical on both sides.
 - Reports should stay easy: enabled by default with `sender-report.zip` / `receiver-report.zip`.
 - The window is a single-column settings shell now; the Command preview and Output console were removed because they pushed every settings row sideways and bloated the chrome. Engine stdout is still captured for NAT-status parsing and the saved-report zip; routine stdout from the UI is mirrored to qDebug so it can be tailed from a terminal build.
@@ -33,7 +33,7 @@
 - Share mode runs quiet background target discovery into the Connection panel's Nearby Devices list and has a manual Refresh button for visible discovery output.
 - The Nearby Devices list combines true LAN receiver advertisements with optional Tailscale peers from `tailscale status --json` when the local Tailscale CLI is installed.
 - Tailscale peers are quick targets at the current Share port only; they do not prove that Watch is running or advertise access-code/security metadata.
-- Internet/NAT fields are a transitional bridge over the CLI invite flow: the UI can create/copy this side's invite using `--make-invite`, paste/extract a friend invite from clipboard text, Share accepts the Watch invite plus this side's invite, and Watch accepts the Share invite so it can send probes from the receive socket.
+- Internet/NAT fields are a transitional bridge over the CLI invite flow: Create room generates/copies the sharer's room invite, Join room pastes that invite and sends probes from the receive socket, and Watch can also create/copy a My invite response. If Share has a Friend invite response, it uses that as `--share` while still passing its own room invite as `--local-invite`. This keeps the one-invite path for LAN/VPN/reachable-NAT while supporting blocked NAT pairs without a server.
 - The UI invite creation uses the shared Access code or explicit plaintext choice. Invite blobs are copied to the clipboard, but the raw access code still has to be shared separately.
 - The Connection panel has one compact status hint for the active method. Keep it short and stateful, not long tutorial prose.
 - The display chooser should show user-readable monitor metadata, such as display index, output name, resolution, position, and primary status, while still passing the numeric `--display N` value to the engine. Prefer the engine's `--list` output over Qt screen ordering so the shown index matches capture exactly; use Qt only as a startup/fallback list.

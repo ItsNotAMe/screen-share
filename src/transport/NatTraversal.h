@@ -1,5 +1,7 @@
 #pragma once
 
+#include "transport/UdpCrypto.h"
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -59,7 +61,9 @@ struct NatProbeDatagramInfo {
     uint64_t accessCodeFingerprint = 0;
 };
 
+std::string FormatNatInvite(const NatInvite& invite, const std::optional<UdpCryptoKey>& encryptionKey);
 NatInvite ParseNatInvite(const std::string& text);
+NatInvite ParseNatInvite(const std::string& text, const std::optional<UdpCryptoKey>& decryptionKey);
 std::vector<std::byte> BuildNatProbeDatagram(
     uint64_t sequence,
     uint64_t sessionFingerprint,

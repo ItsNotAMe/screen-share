@@ -245,12 +245,12 @@ void PrintHelp()
         << "  LAN: add --lan-advertise to --watch/--udp-recv, then use --lan-discover on the sender.\n"
         << "       Optional: --lan-name NAME, --lan-discovery-port PORT, --lan-discover-seconds S.\n"
         << "  NAT: use --stun HOST[:PORT] to print this machine's public UDP endpoint.\n"
-        << "       use --make-invite PORT --stun HOST[:PORT] to print a manual invite blob.\n"
+        << "       use --make-invite PORT --stun HOST[:PORT] to print a compact invite blob.\n"
         << "       The invite output includes Watch/Share command templates for the next step.\n"
         << "       --nat-probe is an optional diagnostic for checking whether peer probes can pass.\n"
         << "       Watch can also use --peer-invite to send punch probes while waiting for Share.\n"
-        << "       Share can use --share \"nat_invite=...\" to send to the peer invite endpoint.\n"
-        << "       Add --local-invite \"nat_invite=...\" on Share to bind the local port from this side's invite.\n"
+        << "       Share can use --share \"ss1e:...\" to send to the peer invite endpoint.\n"
+        << "       Add --local-invite \"ss1e:...\" on Share to bind the local port from this side's invite.\n"
         << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
@@ -265,7 +265,7 @@ void PrintHelp()
         << "  ScreenShare --lan-discover\n"
         << "  ScreenShare --stun stun.l.google.com:19302\n"
         << "  ScreenShare --make-invite 5000 --stun stun.l.google.com:19302 --access-code 123456\n"
-        << "  ScreenShare --nat-probe 5000 --peer-invite \"nat_invite=screenshare-invite-v1;...\" --access-code 123456\n"
+        << "  ScreenShare --nat-probe 5000 --peer-invite \"ss1e:...\" --access-code 123456\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
@@ -280,8 +280,8 @@ void PrintHelp()
         << "  ScreenShare --udp-recv 5000 --preview --audio-playback\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000 --audio-capture system\n"
         << "  ScreenShare --share 203.0.113.10:5000 --udp-local-port 5001 --access-code 123456\n"
-        << "  ScreenShare --share \"nat_invite=screenshare-invite-v1;...\" --local-invite \"nat_invite=screenshare-invite-v1;...\" --access-code 123456\n"
-        << "  ScreenShare --share \"nat_invite=screenshare-invite-v1;...\" --invite-endpoint local --access-code 123456\n"
+        << "  ScreenShare --share \"ss1e:...\" --local-invite \"ss1e:...\" --access-code 123456\n"
+        << "  ScreenShare --share \"ss1e:...\" --invite-endpoint local --access-code 123456\n"
         << "  ScreenShare --display 0 --width 1280 --height 720 --fps 60 --seconds 15 --udp-send 127.0.0.1:5000\n";
 }
 
@@ -2363,7 +2363,9 @@ bool LooksLikeNatInvite(std::string_view text)
     }
     text.remove_prefix(first);
     return text.rfind("nat_invite=", 0) == 0 ||
-           text.rfind("screenshare-invite-v1", 0) == 0;
+           text.rfind("screenshare-invite-v1", 0) == 0 ||
+           text.rfind("ss1p:", 0) == 0 ||
+           text.rfind("ss1e:", 0) == 0;
 }
 
 std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint);
@@ -2638,7 +2640,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             if (!options.peerInvite.empty()) {
                 throw std::invalid_argument("--share invite cannot be combined with --peer-invite");
             }
-            const auto invite = screenshare::ParseNatInvite(*shareTarget);
+            const auto invite = screenshare::ParseNatInvite(*shareTarget, options.accessCodeKey);
             const auto selectedEndpoint = SelectNatInviteEndpoint(invite, options.inviteEndpointPreference);
             options.peerInvite = *shareTarget;
             options.udpSendTarget = FormatNatEndpoint(selectedEndpoint.endpoint);
@@ -2741,7 +2743,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         if (!options.udpSendTargetFromPeerInvite) {
             throw std::invalid_argument("--local-invite requires --share INVITE");
         }
-        const auto localInvite = screenshare::ParseNatInvite(options.localInvite);
+        const auto localInvite = screenshare::ParseNatInvite(options.localInvite, options.accessCodeKey);
         if (!HasNatEndpoint(localInvite.localEndpoint)) {
             throw std::invalid_argument("Local invite does not include a local endpoint");
         }
@@ -4587,23 +4589,19 @@ void RunMakeInvite(const Options& options)
     const auto result = screenshare::QueryPublicUdpEndpoint(config);
     const std::time_t expiresAt =
         std::time(nullptr) + static_cast<std::time_t>(options.inviteTtlSeconds);
-    const std::string sessionFingerprint = FormatSessionFingerprint(options.sessionFingerprint);
-    const std::string accessFingerprint =
-        options.accessCodeProvided ? FormatSessionFingerprint(options.accessCodeFingerprint) : "none";
     const std::string security = options.accessCodeProvided ? "encrypted" : "plaintext";
 
-    std::ostringstream invite;
-    invite
-        << "screenshare-invite-v1"
-        << ";public=" << result.publicAddress << ":" << result.publicPort
-        << ";local=" << result.localAddress << ":" << result.localPort
-        << ";stun=" << result.serverAddress << ":" << result.serverPort
-        << ";session=" << options.sessionId
-        << ";session_fingerprint=" << sessionFingerprint
-        << ";security=" << security
-        << ";access_fingerprint=" << accessFingerprint
-        << ";expires_unix=" << static_cast<long long>(expiresAt);
-    const std::string inviteLine = "nat_invite=" + invite.str();
+    screenshare::NatInvite invite;
+    invite.publicEndpoint = screenshare::NatInviteEndpoint{result.publicAddress, result.publicPort};
+    invite.localEndpoint = screenshare::NatInviteEndpoint{result.localAddress, result.localPort};
+    invite.stunEndpoint = screenshare::NatInviteEndpoint{result.serverAddress, result.serverPort};
+    invite.sessionId = options.sessionId;
+    invite.sessionFingerprint = options.sessionFingerprint;
+    invite.encrypted = options.accessCodeProvided;
+    invite.accessCodeFingerprint = options.accessCodeFingerprint;
+    invite.expiresUnix = static_cast<int64_t>(expiresAt);
+
+    const std::string inviteLine = screenshare::FormatNatInvite(invite, options.accessCodeKey);
     const std::string securityOption = options.accessCodeProvided ? "--access-code CODE" : "--allow-plaintext";
     const std::string peerInvitePlaceholder = PowerShellQuote("<PEER_INVITE>");
     const std::string localInviteArgument = PowerShellQuote(inviteLine);
@@ -4613,6 +4611,7 @@ void RunMakeInvite(const Options& options)
         << "local_udp_endpoint=" << result.localAddress << ":" << result.localPort << "\n"
         << "public_udp_endpoint=" << result.publicAddress << ":" << result.publicPort << "\n"
         << "invite_security=" << security << "\n"
+        << "invite_format=" << (options.accessCodeProvided ? "compact-encrypted" : "compact-plaintext") << "\n"
         << "invite_expires_unix=" << static_cast<long long>(expiresAt) << "\n"
         << inviteLine << "\n"
         << "send_this_invite_to_peer=" << inviteLine << "\n"
@@ -4639,7 +4638,7 @@ std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint)
 
 screenshare::NatInvite ParseValidatedPeerInvite(const Options& options)
 {
-    const auto invite = screenshare::ParseNatInvite(options.peerInvite);
+    const auto invite = screenshare::ParseNatInvite(options.peerInvite, options.accessCodeKey);
     const std::time_t now = std::time(nullptr);
     if (invite.expiresUnix > 0 && invite.expiresUnix < static_cast<int64_t>(now)) {
         std::cerr

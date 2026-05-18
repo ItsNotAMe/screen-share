@@ -13,6 +13,8 @@ namespace screenshare {
 struct DecodedFrameInfo {
     int width = 0;
     int height = 0;
+    int codedWidth = 0;
+    int codedHeight = 0;
     int64_t timestamp100ns = 0;
     int64_t duration100ns = 0;
     uint32_t bytes = 0;
@@ -43,6 +45,10 @@ private:
     DWORD outputStreamId_ = 0;
     int outputWidth_ = 0;
     int outputHeight_ = 0;
+    int outputVisibleLeft_ = 0;
+    int outputVisibleTop_ = 0;
+    int outputVisibleWidth_ = 0;
+    int outputVisibleHeight_ = 0;
     DWORD outputBufferBytes_ = 0;
     bool outputTypeConfigured_ = false;
     bool comInitialized_ = false;

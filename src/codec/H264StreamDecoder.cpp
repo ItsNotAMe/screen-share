@@ -12,6 +12,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <span>
 
 namespace screenshare {
 namespace {
@@ -84,6 +85,111 @@ DWORD Nv12BufferBytes(UINT32 width, UINT32 height)
     }
 
     return static_cast<DWORD>(bytes);
+}
+
+struct VisibleFrameArea {
+    int left = 0;
+    int top = 0;
+    int width = 0;
+    int height = 0;
+};
+
+bool TryReadVideoArea(IMFMediaType* mediaType, const GUID& key, int codedWidth, int codedHeight, VisibleFrameArea& area)
+{
+    if (mediaType == nullptr) {
+        return false;
+    }
+
+    MFVideoArea mfArea{};
+    UINT32 blobSize = 0;
+    if (FAILED(mediaType->GetBlob(
+            key,
+            reinterpret_cast<UINT8*>(&mfArea),
+            static_cast<UINT32>(sizeof(mfArea)),
+            &blobSize)) ||
+        blobSize < sizeof(mfArea)) {
+        return false;
+    }
+
+    VisibleFrameArea candidate;
+    candidate.left = static_cast<int>(mfArea.OffsetX.value);
+    candidate.top = static_cast<int>(mfArea.OffsetY.value);
+    candidate.width = static_cast<int>(mfArea.Area.cx);
+    candidate.height = static_cast<int>(mfArea.Area.cy);
+
+    if (candidate.left < 0 ||
+        candidate.top < 0 ||
+        candidate.width <= 0 ||
+        candidate.height <= 0 ||
+        candidate.left + candidate.width > codedWidth ||
+        candidate.top + candidate.height > codedHeight ||
+        (candidate.left % 2) != 0 ||
+        (candidate.top % 2) != 0 ||
+        (candidate.width % 2) != 0 ||
+        (candidate.height % 2) != 0) {
+        return false;
+    }
+
+    area = candidate;
+    return true;
+}
+
+VisibleFrameArea SelectVisibleFrameArea(IMFMediaType* outputType, int codedWidth, int codedHeight)
+{
+    VisibleFrameArea area{0, 0, codedWidth, codedHeight};
+    for (const GUID* key : {
+             &MF_MT_MINIMUM_DISPLAY_APERTURE,
+             &MF_MT_GEOMETRIC_APERTURE,
+             &MF_MT_PAN_SCAN_APERTURE,
+         }) {
+        if (TryReadVideoArea(outputType, *key, codedWidth, codedHeight, area)) {
+            return area;
+        }
+    }
+    return area;
+}
+
+std::vector<std::byte> CopyVisibleNv12(
+    std::span<const std::byte> source,
+    int codedWidth,
+    int codedHeight,
+    const VisibleFrameArea& visible)
+{
+    const uint64_t codedLumaBytes = static_cast<uint64_t>(codedWidth) * static_cast<uint64_t>(codedHeight);
+    const uint64_t codedRequiredBytes = codedLumaBytes + codedLumaBytes / 2;
+    const uint64_t visibleLumaBytes = static_cast<uint64_t>(visible.width) * static_cast<uint64_t>(visible.height);
+    const uint64_t visibleRequiredBytes = visibleLumaBytes + visibleLumaBytes / 2;
+    if (codedRequiredBytes > source.size() || visibleRequiredBytes > std::numeric_limits<size_t>::max()) {
+        throw std::runtime_error("Decoded NV12 frame data is too small for visible crop");
+    }
+
+    std::vector<std::byte> cropped(static_cast<size_t>(visibleRequiredBytes));
+    const auto* sourceY = source.data();
+    const auto* sourceUv = sourceY + static_cast<size_t>(codedLumaBytes);
+    auto* destinationY = cropped.data();
+    auto* destinationUv = destinationY + static_cast<size_t>(visibleLumaBytes);
+
+    for (int y = 0; y < visible.height; ++y) {
+        const auto* row = sourceY +
+            static_cast<size_t>(visible.top + y) * static_cast<size_t>(codedWidth) +
+            static_cast<size_t>(visible.left);
+        std::memcpy(
+            destinationY + static_cast<size_t>(y) * static_cast<size_t>(visible.width),
+            row,
+            static_cast<size_t>(visible.width));
+    }
+
+    for (int y = 0; y < visible.height / 2; ++y) {
+        const auto* row = sourceUv +
+            static_cast<size_t>((visible.top / 2) + y) * static_cast<size_t>(codedWidth) +
+            static_cast<size_t>(visible.left);
+        std::memcpy(
+            destinationUv + static_cast<size_t>(y) * static_cast<size_t>(visible.width),
+            row,
+            static_cast<size_t>(visible.width));
+    }
+
+    return cropped;
 }
 
 } // namespace
@@ -223,6 +329,10 @@ void H264StreamDecoder::Stop()
     transform_.Reset();
     outputWidth_ = 0;
     outputHeight_ = 0;
+    outputVisibleLeft_ = 0;
+    outputVisibleTop_ = 0;
+    outputVisibleWidth_ = 0;
+    outputVisibleHeight_ = 0;
     outputBufferBytes_ = 0;
     outputTypeConfigured_ = false;
 }
@@ -261,6 +371,11 @@ bool H264StreamDecoder::TryConfigureOutputType()
 
         outputWidth_ = static_cast<int>(width);
         outputHeight_ = static_cast<int>(height);
+        const VisibleFrameArea visible = SelectVisibleFrameArea(outputType.Get(), outputWidth_, outputHeight_);
+        outputVisibleLeft_ = visible.left;
+        outputVisibleTop_ = visible.top;
+        outputVisibleWidth_ = visible.width;
+        outputVisibleHeight_ = visible.height;
         outputBufferBytes_ = Nv12BufferBytes(width, height);
         outputTypeConfigured_ = true;
         return true;
@@ -309,6 +424,10 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
                 outputTypeConfigured_ = false;
                 outputWidth_ = 0;
                 outputHeight_ = 0;
+                outputVisibleLeft_ = 0;
+                outputVisibleTop_ = 0;
+                outputVisibleWidth_ = 0;
+                outputVisibleHeight_ = 0;
                 outputBufferBytes_ = 0;
                 break;
             }
@@ -325,8 +444,10 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             ThrowIfFailed(outputResult, "IMFTransform::ProcessOutput(decoder)");
 
             DecodedFrameInfo frame;
-            frame.width = outputWidth_;
-            frame.height = outputHeight_;
+            frame.width = outputVisibleWidth_ > 0 ? outputVisibleWidth_ : outputWidth_;
+            frame.height = outputVisibleHeight_ > 0 ? outputVisibleHeight_ : outputHeight_;
+            frame.codedWidth = outputWidth_;
+            frame.codedHeight = outputHeight_;
 
             LONGLONG sampleTime = 0;
             LONGLONG sampleDuration = 0;
@@ -351,6 +472,18 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             ThrowIfFailed(contiguousBuffer->Lock(&source, &maxLength, &lockedCurrentLength), "IMFMediaBuffer::Lock(decoder output)");
             std::memcpy(frame.data.data(), source, std::min(currentLength, lockedCurrentLength));
             ThrowIfFailed(contiguousBuffer->Unlock(), "IMFMediaBuffer::Unlock(decoder output)");
+
+            if (frame.width != frame.codedWidth ||
+                frame.height != frame.codedHeight ||
+                outputVisibleLeft_ != 0 ||
+                outputVisibleTop_ != 0) {
+                frame.data = CopyVisibleNv12(
+                    frame.data,
+                    frame.codedWidth,
+                    frame.codedHeight,
+                    VisibleFrameArea{outputVisibleLeft_, outputVisibleTop_, frame.width, frame.height});
+                frame.bytes = static_cast<uint32_t>(frame.data.size());
+            }
 
             frames.push_back(frame);
             break;

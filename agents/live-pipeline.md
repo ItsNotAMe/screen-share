@@ -30,6 +30,8 @@ Important sender stats:
 
 Receiver reassembles UDP fragments, orders H.264 access units, decodes with Media Foundation, and queues preview frames by sender/video timestamps. Audio packets are reassembled, decoded from Opus when needed, and scheduled against the preview playout clock when A/V sync is active.
 
+Media Foundation may decode H.264 into macroblock-padded NV12 surfaces, such as 1920x1088 for a 1920x1080 stream. The decoder should read the output display aperture and repack/crop NV12 to the visible size before handing frames to preview/status; otherwise padded rows can show as a green strip at the bottom.
+
 If Watch stays open while Share stops and starts again, the receiver treats a video frame-id rewind with a newer sender QPC clock as a fresh stream. On that restart it clears pending receiver media queues, restarts H.264 decode/playout, clears audio playout/decoder state, and resets A/V sync diagnostics. It also ignores any late frames whose sender QPC belongs to the previous stream. This is general receiver lifecycle behavior, not a NAT-only path.
 
 Important receiver stats:
