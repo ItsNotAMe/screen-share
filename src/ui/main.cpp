@@ -642,7 +642,7 @@ private:
         auto* titleBlock = new QVBoxLayout;
         titleBlock->setSpacing(2);
         titleBlock->addWidget(makeLabel("ScreenShare", "HeroTitle"));
-        titleBlock->addWidget(makeLabel("Create a direct room or join a friend's screen", "Subtle"));
+        titleBlock->addWidget(makeLabel("Direct screen sharing", "Subtle"));
         header->addLayout(titleBlock, 1);
 
         statusBadge_ = makeLabel("○  Idle", "StatusIdle");
