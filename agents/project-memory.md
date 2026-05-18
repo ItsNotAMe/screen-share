@@ -84,7 +84,7 @@ WGC capture by default
 - PR #84 `Add UI invite test checklist`: README has a two-computer checklist for future UI invite/Tailscale validation.
 - PR #85 `Add direct NAT invite sharing flow`: merged the full direct STUN/manual invite/UDP hole-punching flow into `main`.
 - PR #86 `Clarify room UI setup`: Share/Watch wording, segmented connection tabs, display/audio chooser polish, header status pill, receiver stale-preview blanking, and Windows UDP reconnect resilience for late/restarted Watch.
-- Current room-invite UI work keeps the project no-server/no-external-service: Create room owns one invite, Join room pastes it, and watcher-response/manual endpoint details stay out of the main UI.
+- Current room-invite UI work keeps the project no-server/no-external-service: Create room owns one invite and Join room pastes it, but real NAT testing showed this only works for LAN/VPN/reachable-NAT. Endpoint-filtered NAT can block the watcher probes before Share sees them.
 
 ## Active Memory Files
 
@@ -152,7 +152,7 @@ WGC capture by default
   - Validated against `stun.l.google.com:19302`; output includes local and public UDP endpoints.
   - `--make-invite`, `--nat-probe`, `--udp-local-port`, Watch `--peer-invite`, Share `--share "nat_invite=..."`, `--invite-endpoint auto|public|local`, Share `--local-invite`, and Share auto retarget from Watch probes are now available for manual hole-punch experiments.
   - `--make-invite` prints guided command templates for Watch, Share, and optional probe diagnostics.
-  - Current UI bridge presents one sharer-owned room invite in the main UI; lower-level CLI commands still support manual two-invite experiments.
+  - Current UI bridge presents one sharer-owned room invite in the main UI for LAN/VPN/reachable-NAT; lower-level CLI commands still support manual two-invite experiments.
   - Guided UI work adds create/copy/paste/extract buttons and compact status hints for the one-invite room flow.
   - NAT logs now summarize setup state with `nat_status` / `nat_hint` so reports can distinguish missing probes, rejected probes/media, retarget-without-feedback, and receiving states.
   - Remaining NAT work is deferred unless reports show direct hole punching is insufficient or diagnostics are still confusing.

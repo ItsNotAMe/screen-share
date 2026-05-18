@@ -82,12 +82,15 @@ default, includes a theme toggle in the header, and can generate/copy an encrypt
 code. Create room shows friendly display choices such as resolution, position, and primary monitor
 status while still passing the selected numeric display index to the engine. It also has an
 output-device picker for system audio, which is useful when Windows or a virtual mixer uses a default
-output device that does not contain the audio you actually want to share. For manual internet/NAT
-tests with no server, choose the Internet tab in Create room. That page creates and copies the
-sharer's room invite. Send that invite to your friend; they paste it into Join room. Nearby,
-Internet, and Manual live as tabs in the same Room section so setup uses one mental model instead of
-separate competing panels. The UI opens the Room section on Internet by default because the room
-invite flow is the normal direct-share path.
+output device that does not contain the audio you actually want to share. For direct invite tests
+with no server, choose the Internet tab in Create room. That page creates and copies the sharer's
+room invite. Send that invite to your friend; they paste it into Join room. This one-invite path
+works when the sharer's invite endpoint is reachable, such as LAN, Tailscale/VPN, port-mapped UDP, or
+friendly NAT. It cannot punch through every NAT by itself because the sharer does not know the
+watcher's public endpoint until some packet reaches the sharer. Nearby, Internet, and Manual live as
+tabs in the same Room section so setup uses one mental model instead of separate competing panels.
+The UI opens the Room section on Internet by default because the room invite flow is the normal
+direct-share path.
 
 Common live session:
 
@@ -170,14 +173,13 @@ session fingerprint, access-code fingerprint, and an expiry timestamp. It also p
 `<PEER_INVITE>` in those templates with the invite copied from your friend. If the template contains
 `CODE`, replace it with the same access code used to create the invite.
 
-The desktop UI turns this into a one-invite room flow for the common direct case. Generate or paste
+The desktop UI turns this into a one-invite room flow for reachable direct paths. Generate or paste
 the shared access code first, then choose the Internet tab in Create room. The Create button copies
 the sharer's room invite to the clipboard and shows it in the UI. Send that invite to your friend.
 They open Join room, switch to Internet, paste the room invite, and start watching. The Paste buttons
 can extract an invite from either a raw invite line or copied command output, and the compact status
-line shows what is still missing before starting. While a NAT invite session is running, that same
-status line switches to live setup states such as probing, probe seen, connected, receiving, or
-rejected.
+line shows what is still missing before starting. While an invite session is running, that same status
+line switches to live setup states such as probing, probe seen, connected, receiving, or rejected.
 
 Two-computer UI checklist for invite testing:
 
@@ -191,6 +193,10 @@ Two-computer UI checklist for invite testing:
 6. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
    If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both
    computers.
+
+If Watch stays probing and Share stays waiting for a probe, the receiver's packets did not reach the
+sharer. That is a normal NAT failure for a one-invite, no-server flow. Use Tailscale/manual IP, a
+router port mapping, or a future two-sided response/signaling flow for that network.
 
 For a two-window test on one computer, the two windows cannot both own UDP port `5000`. Use separate
 ports, for example Join room on `5000` and Create room's Internet room port on `5001`, then create a

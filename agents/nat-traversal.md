@@ -32,11 +32,13 @@
 - PR #81 merged: guided UI polish for invite exchange status, clipboard paste/extract, and Share-side guardrails.
 - PR #83 merged: UI live NAT status display from engine `nat_status` / `nat_hint` output.
 - PR #85 merged the full branch to `main`.
+- PR #88 testing showed the one-sharer-invite UI path works locally/reachable-direct, but not through the tested NAT: Watch sent public/local probes while Share saw `udp_nat_probe_packets=0` and stayed `waiting_for_probe`. This is the expected endpoint-filtered NAT deadlock for a one-link, no-server flow, not a decoder/media bug.
 
 ## Follow-Up Shape
 
 - Live Watch probe source retargeting plus Share `--local-invite` binding is the first automatic endpoint selection path; still needed: richer setup summaries and UI guidance.
 - Next diagnostic layer should keep failures readable: no probes seen, probes rejected, retargeted but no feedback, receiver probing, receiver media rejected, and receiver actively receiving.
+- For generic Internet NAT without an external rendezvous/relay, one side must still learn the other side's endpoint somehow. Practical no-server options are Tailscale/manual IP, router port mapping/UPnP, or bringing back a two-sided response invite flow.
 - User already validated the UI-guided direct invite flow after create/copy invite landed. Since later changes only added receiver restart recovery and status display, treat the core invite mechanics as validated.
 - README now carries the two-computer UI checklist for future NAT/Tailscale validation.
 - Still needed: richer live probe/media status only if reports still show confusion.

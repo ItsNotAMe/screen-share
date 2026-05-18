@@ -2,7 +2,7 @@
 
 ## Ordered Roadmap
 
-1. Continue polishing the no-server room invite flow after real two-computer testing. The current direction is: sharer creates/copies one room invite, watcher pastes it, and advanced manual endpoint details stay out of the main UI.
+1. Continue polishing the no-server room invite flow after real two-computer testing. Keep the one-invite path for LAN/VPN/reachable-NAT only, and avoid presenting it as a guaranteed generic NAT traversal solution.
 2. Add multi-viewer sharing so one sender can share with more than one friend. Design it with per-viewer bandwidth, feedback, adaptation, and access control in mind.
 3. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list, locked-room indicators, access-code prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
 4. Add better user-facing diagnostics for common setup mistakes and sync/network states once the transport shape is stable.
@@ -25,6 +25,7 @@ Only pick these up when reports show the need; normal audio and no-audio fallbac
 ## NAT Traversal Follow-Ups
 
 - Keep rendezvous/relay out of the main path unless direct STUN/manual invite/hole punching proves insufficient.
+- Decide the next no-server NAT fallback: hidden two-sided response invite, optional UPnP/NAT-PMP port mapping, or explicitly steering users to Tailscale/manual IP. Latest NAT reports showed Watch sent 74 public/local probes while Share saw `udp_nat_probe_packets=0`, so one sharer invite alone was blocked by the NAT.
 
 ## Conditional / Deferred
 

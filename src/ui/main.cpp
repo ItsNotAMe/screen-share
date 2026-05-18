@@ -761,7 +761,7 @@ private:
         prepareConnectionButton(
             internetConnectionButton_,
             ShareConnectionMethod::InternetInvite,
-            "Create a room invite for direct Internet or NAT traversal.");
+            "Create a room invite for reachable direct paths.");
         prepareConnectionButton(
             manualConnectionButton_,
             ShareConnectionMethod::ManualAddress,
@@ -2486,7 +2486,7 @@ private:
                 return "Live: probe rejected. Check the access code on both sides.";
             }
             if (status == "waiting_for_probe") {
-                return "Live: waiting for Watch to send a probe.";
+                return "Live: no watcher probe has reached this PC.";
             }
             if (status == "forced_endpoint_waiting_for_feedback") {
                 return "Live: sending to the selected endpoint; waiting for feedback.";
@@ -2508,7 +2508,7 @@ private:
                 return "Live: probe send failed. Check the pasted sender invite.";
             }
             if (status == "probing") {
-                return "Live: probing the sender.";
+                return "Live: probing the room invite; no media yet.";
             }
             if (status == "waiting_to_probe") {
                 return "Live: waiting to send the first probe.";
