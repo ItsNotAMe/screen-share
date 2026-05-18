@@ -19,9 +19,37 @@
 namespace screenshare {
 namespace {
 
+std::string WinsockErrorDescription(int error)
+{
+    switch (error) {
+    case WSAEADDRINUSE:
+        return "address already in use";
+    case WSAEADDRNOTAVAIL:
+        return "address not available";
+    case WSAEACCES:
+        return "permission denied";
+    case WSAENETUNREACH:
+        return "network unreachable";
+    case WSAEHOSTUNREACH:
+        return "host unreachable";
+    default:
+        return {};
+    }
+}
+
+std::string WinsockErrorMessage(const std::string& operation, int error)
+{
+    std::string message = operation + " failed with WSA error " + std::to_string(error);
+    const std::string description = WinsockErrorDescription(error);
+    if (!description.empty()) {
+        message += " (" + description + ")";
+    }
+    return message;
+}
+
 std::string WinsockErrorMessage(const char* operation)
 {
-    return std::string(operation) + " failed with WSA error " + std::to_string(WSAGetLastError());
+    return WinsockErrorMessage(operation, WSAGetLastError());
 }
 
 SOCKET AsSocket(uintptr_t socket)
@@ -157,8 +185,16 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     address.sin_port = htons(config.port);
 
     if (bind(udpSocket, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
+        const int error = WSAGetLastError();
         closesocket(udpSocket);
-        throw std::runtime_error(WinsockErrorMessage("bind"));
+        std::string message = WinsockErrorMessage(
+            "bind(receiver 0.0.0.0:" + std::to_string(config.port) + ")",
+            error);
+        if (error == WSAEADDRINUSE) {
+            message += ". The UDP receive port is already in use; close the other process using it or choose "
+                       "a different --watch/--udp-recv port.";
+        }
+        throw std::runtime_error(message);
     }
 
     socket_ = static_cast<uintptr_t>(udpSocket);

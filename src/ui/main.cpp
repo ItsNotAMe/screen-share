@@ -10,6 +10,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonParseError>
+#include <QtCore/QPoint>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSize>
@@ -17,9 +18,11 @@
 #include <QtCore/QTimer>
 #include <QtCore/QVector>
 #include <QtGui/QClipboard>
+#include <QtGui/QScreen>
 #include <QtGui/QTextCursor>
 #include <QtGui/QWheelEvent>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFileDialog>
@@ -129,6 +132,59 @@ QString accessCodeFingerprintText(const QString& accessCode)
     return QStringLiteral("%1")
         .arg(static_cast<qulonglong>(fingerprint), 16, 16, QLatin1Char('0'))
         .toUpper();
+}
+
+struct DisplayChoice {
+    int index = 0;
+    QString outputName;
+    int width = 0;
+    int height = 0;
+    int left = 0;
+    int top = 0;
+    QString adapterName;
+    bool attached = true;
+};
+
+QString displayChoiceText(const DisplayChoice& display, QScreen* primaryScreen)
+{
+    QStringList parts;
+    parts << "Display " + QString::number(display.index);
+    if (!display.outputName.trimmed().isEmpty()) {
+        parts << display.outputName.trimmed();
+    }
+    if (display.width > 0 && display.height > 0) {
+        parts << QString("%1x%2").arg(display.width).arg(display.height);
+    }
+    parts << QString("at %1,%2").arg(display.left).arg(display.top);
+    if (primaryScreen != nullptr && primaryScreen->geometry().topLeft() == QPoint(display.left, display.top)) {
+        parts << "Primary";
+    }
+    if (!display.attached) {
+        parts << "Detached";
+    }
+    return parts.join(" - ");
+}
+
+QVector<DisplayChoice> parseDisplayChoices(const QString& output)
+{
+    QVector<DisplayChoice> displays;
+    const QRegularExpression displayPattern(QStringLiteral(
+        R"display(\[(\d+)\]\s+([^\s]+)\s+(\d+)x(\d+)\s+at\s+\((-?\d+),(-?\d+)\)\s+adapter="([^"]*)"\s+attached=(yes|no))display"));
+    auto matches = displayPattern.globalMatch(output);
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        DisplayChoice display;
+        display.index = match.captured(1).toInt();
+        display.outputName = match.captured(2).trimmed();
+        display.width = match.captured(3).toInt();
+        display.height = match.captured(4).toInt();
+        display.left = match.captured(5).toInt();
+        display.top = match.captured(6).toInt();
+        display.adapterName = match.captured(7).trimmed();
+        display.attached = match.captured(8) == "yes";
+        displays.push_back(std::move(display));
+    }
+    return displays;
 }
 
 QString lastLogFieldValue(const QString& output, const QString& field)
@@ -297,6 +353,13 @@ void prepareInput(QWidget* input)
 {
     input->setFixedHeight(kRowHeight);
     input->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    if (auto* combo = qobject_cast<QComboBox*>(input)) {
+        combo->setMinimumWidth(0);
+        combo->setMinimumContentsLength(12);
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        combo->view()->setTextElideMode(Qt::ElideMiddle);
+    }
     if (qobject_cast<QLineEdit*>(input) != nullptr ||
         qobject_cast<QSpinBox*>(input) != nullptr ||
         qobject_cast<QComboBox*>(input) != nullptr) {
@@ -430,6 +493,19 @@ public:
             finishTailscaleDiscovery(code, status);
         });
 
+        displayProcess_ = new QProcess(this);
+        displayProcess_->setProcessChannelMode(QProcess::MergedChannels);
+        connect(displayProcess_, &QProcess::readyReadStandardOutput, this, [this] {
+            displayOutput_ += QString::fromLocal8Bit(displayProcess_->readAllStandardOutput());
+        });
+        connect(displayProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            Q_UNUSED(error);
+            setDisplayRefreshing(false);
+        });
+        connect(displayProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
+            finishDisplayRefresh(code, status);
+        });
+
         audioDeviceProcess_ = new QProcess(this);
         audioDeviceProcess_->setProcessChannelMode(QProcess::MergedChannels);
         connect(audioDeviceProcess_, &QProcess::readyReadStandardOutput, this, [this] {
@@ -473,6 +549,7 @@ public:
         setRunning(false);
         receiverRefreshTimer_->start();
         QTimer::singleShot(400, this, [this] { startDiscovery(true); });
+        QTimer::singleShot(550, this, [this] { refreshDisplays(true); });
         QTimer::singleShot(700, this, [this] { refreshAudioDevices(true); });
     }
 
@@ -527,7 +604,7 @@ private:
         auto* titleBlock = new QVBoxLayout;
         titleBlock->setSpacing(2);
         titleBlock->addWidget(makeLabel("ScreenShare", "HeroTitle"));
-        titleBlock->addWidget(makeLabel("Fast local screen sharing", "Subtle"));
+        titleBlock->addWidget(makeLabel("Share a room or watch a friend's screen", "Subtle"));
         header->addLayout(titleBlock, 1);
 
         statusBadge_ = makeLabel("Idle", "StatusIdle");
@@ -564,8 +641,8 @@ private:
         layout->setContentsMargins(6, 6, 6, 6);
         layout->setSpacing(6);
 
-        shareModeButton_ = new QPushButton("Share");
-        watchModeButton_ = new QPushButton("Watch");
+        shareModeButton_ = new QPushButton("Share screen");
+        watchModeButton_ = new QPushButton("Watch room");
         shareModeButton_->setCheckable(true);
         watchModeButton_->setCheckable(true);
         shareModeButton_->setObjectName("ModeButton");
@@ -608,7 +685,7 @@ private:
         layout->setSpacing(8);
 
         QVBoxLayout* receiversContent = nullptr;
-        layout->addWidget(makePanel("Targets", &receiversContent));
+        layout->addWidget(makePanel("Nearby Devices", &receiversContent));
         receiverList_ = new QListWidget;
         receiverList_->setObjectName("ReceiverList");
         receiverList_->setMinimumHeight(120);
@@ -637,7 +714,7 @@ private:
         });
 
         QVBoxLayout* connectionContent = nullptr;
-        layout->addWidget(makePanel("Connection", &connectionContent));
+        layout->addWidget(makePanel("Direct Address", &connectionContent));
         shareHostEdit_ = new QLineEdit("127.0.0.1");
         shareHostEdit_->setPlaceholderText("Receiver IP or Tailscale IP");
         sharePortSpin_ = new NoWheelSpinBox;
@@ -649,9 +726,9 @@ private:
         addRow(connectionContent, "Port", sharePortSpin_);
 
         QVBoxLayout* internetContent = nullptr;
-        layout->addWidget(makePanel("Internet", &internetContent));
+        layout->addWidget(makePanel("Internet Invite", &internetContent));
         sharePeerInviteEdit_ = new QLineEdit;
-        sharePeerInviteEdit_->setPlaceholderText("Receiver invite");
+        sharePeerInviteEdit_->setPlaceholderText("Paste friend's Watch invite");
         auto* sharePeerInviteRow = new QWidget;
         sharePeerInviteRow->setObjectName("FormRow");
         auto* sharePeerInviteLayout = new QHBoxLayout(sharePeerInviteRow);
@@ -665,9 +742,9 @@ private:
         pasteSharePeerInviteButton_->setFixedHeight(kRowHeight);
         shareInvitePortSpin_ = new NoWheelSpinBox;
         shareInvitePortSpin_->setRange(1, 65535);
-        shareInvitePortSpin_->setValue(5000);
+        shareInvitePortSpin_->setValue(5001);
         shareLocalInviteEdit_ = new QLineEdit;
-        shareLocalInviteEdit_->setPlaceholderText("Your invite");
+        shareLocalInviteEdit_->setPlaceholderText("Create my invite first");
         auto* shareLocalInviteRow = new QWidget;
         shareLocalInviteRow->setObjectName("FormRow");
         auto* shareLocalInviteLayout = new QHBoxLayout(shareLocalInviteRow);
@@ -695,24 +772,39 @@ private:
         shareLocalInviteLayout->addWidget(shareLocalInviteEdit_, 1);
         shareLocalInviteLayout->addWidget(createShareInviteButton_);
         shareLocalInviteLayout->addWidget(copyShareInviteButton_);
-        addRow(internetContent, "Peer invite", sharePeerInviteRow);
+        addRow(internetContent, "Friend invite", sharePeerInviteRow);
         addRow(internetContent, "Local port", shareInvitePortSpin_);
-        addRow(internetContent, "Your invite", shareLocalInviteRow);
+        addRow(internetContent, "My invite", shareLocalInviteRow);
         shareInternetStatusLabel_ = makeLabel("", "StatusHint");
+        shareInternetStatusLabel_->setWordWrap(true);
         internetContent->addWidget(shareInternetStatusLabel_);
         connect(pasteSharePeerInviteButton_, &QPushButton::clicked, this, [this] {
-            pasteInviteFromClipboard(sharePeerInviteEdit_, "Receiver");
+            pasteInviteFromClipboard(sharePeerInviteEdit_, "Friend's Watch");
         });
         connect(createShareInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Share); });
         connect(copyShareInviteButton_, &QPushButton::clicked, this, [this] {
-            copyInvite(shareLocalInviteEdit_, "Share");
+            copyInvite(shareLocalInviteEdit_, "My Share");
         });
 
         QVBoxLayout* videoContent = nullptr;
         layout->addWidget(makePanel("Video", &videoContent));
-        displaySpin_ = new NoWheelSpinBox;
-        displaySpin_->setRange(0, 16);
-        displaySpin_->setValue(0);
+        auto* displayRow = new QWidget;
+        displayRow->setObjectName("FormRow");
+        prepareInput(displayRow);
+        auto* displayLayout = new QHBoxLayout(displayRow);
+        displayLayout->setContentsMargins(0, 0, 0, 0);
+        displayLayout->setSpacing(8);
+        displayCombo_ = new NoWheelComboBox;
+        populateDisplayChoices();
+        prepareInput(displayCombo_);
+        refreshDisplaysButton_ = new QPushButton("Refresh");
+        refreshDisplaysButton_->setObjectName("SecondaryButton");
+        refreshDisplaysButton_->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+        refreshDisplaysButton_->setIconSize(QSize(14, 14));
+        refreshDisplaysButton_->setCursor(Qt::PointingHandCursor);
+        refreshDisplaysButton_->setFixedHeight(kRowHeight);
+        displayLayout->addWidget(displayCombo_, 1);
+        displayLayout->addWidget(refreshDisplaysButton_);
         fpsSpin_ = new NoWheelSpinBox;
         fpsSpin_->setRange(15, 240);
         fpsSpin_->setValue(60);
@@ -721,12 +813,12 @@ private:
         resolutionCombo_->addItem("1920 × 1080", QSize(1920, 1080));
         resolutionCombo_->addItem("1600 × 900", QSize(1600, 900));
         resolutionCombo_->addItem("1280 × 720", QSize(1280, 720));
-        prepareInput(displaySpin_);
         prepareInput(fpsSpin_);
         prepareInput(resolutionCombo_);
-        addRow(videoContent, "Display", displaySpin_);
+        addRow(videoContent, "Display", displayRow);
         addRow(videoContent, "FPS", fpsSpin_);
         addRow(videoContent, "Resolution", resolutionCombo_);
+        connect(refreshDisplaysButton_, &QPushButton::clicked, this, [this] { refreshDisplays(false); });
 
         QVBoxLayout* audioContent = nullptr;
         layout->addWidget(makePanel("Audio", &audioContent));
@@ -765,7 +857,7 @@ private:
         layout->setSpacing(8);
 
         QVBoxLayout* listenContent = nullptr;
-        layout->addWidget(makePanel("Listen", &listenContent));
+        layout->addWidget(makePanel("Watch Room", &listenContent));
         watchPortSpin_ = new NoWheelSpinBox;
         watchPortSpin_->setRange(1, 65535);
         watchPortSpin_->setValue(5000);
@@ -776,9 +868,9 @@ private:
         addFullRow(listenContent, lanDiscoverableCheck_);
 
         QVBoxLayout* internetContent = nullptr;
-        layout->addWidget(makePanel("Internet", &internetContent));
+        layout->addWidget(makePanel("Internet Invite", &internetContent));
         watchPeerInviteEdit_ = new QLineEdit;
-        watchPeerInviteEdit_->setPlaceholderText("Sender invite");
+        watchPeerInviteEdit_->setPlaceholderText("Paste sharer's Share invite");
         auto* watchPeerInviteRow = new QWidget;
         watchPeerInviteRow->setObjectName("FormRow");
         auto* watchPeerInviteLayout = new QHBoxLayout(watchPeerInviteRow);
@@ -791,7 +883,7 @@ private:
         pasteWatchPeerInviteButton_->setCursor(Qt::PointingHandCursor);
         pasteWatchPeerInviteButton_->setFixedHeight(kRowHeight);
         watchLocalInviteEdit_ = new QLineEdit;
-        watchLocalInviteEdit_->setPlaceholderText("Your invite");
+        watchLocalInviteEdit_->setPlaceholderText("Create my invite first");
         auto* watchLocalInviteRow = new QWidget;
         watchLocalInviteRow->setObjectName("FormRow");
         auto* watchLocalInviteLayout = new QHBoxLayout(watchLocalInviteRow);
@@ -818,16 +910,17 @@ private:
         watchLocalInviteLayout->addWidget(watchLocalInviteEdit_, 1);
         watchLocalInviteLayout->addWidget(createWatchInviteButton_);
         watchLocalInviteLayout->addWidget(copyWatchInviteButton_);
-        addRow(internetContent, "Peer invite", watchPeerInviteRow);
-        addRow(internetContent, "Your invite", watchLocalInviteRow);
+        addRow(internetContent, "Friend invite", watchPeerInviteRow);
+        addRow(internetContent, "My invite", watchLocalInviteRow);
         watchInternetStatusLabel_ = makeLabel("", "StatusHint");
+        watchInternetStatusLabel_->setWordWrap(true);
         internetContent->addWidget(watchInternetStatusLabel_);
         connect(pasteWatchPeerInviteButton_, &QPushButton::clicked, this, [this] {
-            pasteInviteFromClipboard(watchPeerInviteEdit_, "Sender");
+            pasteInviteFromClipboard(watchPeerInviteEdit_, "Sharer's Share");
         });
         connect(createWatchInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Watch); });
         connect(copyWatchInviteButton_, &QPushButton::clicked, this, [this] {
-            copyInvite(watchLocalInviteEdit_, "Watch");
+            copyInvite(watchLocalInviteEdit_, "My Watch");
         });
 
         QVBoxLayout* audioContent = nullptr;
@@ -1024,7 +1117,10 @@ private:
             updateTailscaleReceiverPorts(port);
         });
         bindCheckBox(lanDiscoverableCheck_);
-        bindSpinBox(displaySpin_);
+        connect(displayCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+            displayCombo_->setToolTip(displayCombo_->currentText());
+            refreshCommand();
+        });
         bindSpinBox(fpsSpin_);
         connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
         connect(audioDeviceCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
@@ -1225,11 +1321,11 @@ private:
         if (target == InviteTarget::Share) {
             shareLocalInviteEdit_->setText(invite);
             QApplication::clipboard()->setText(invite);
-            appendOutput("Share invite copied to clipboard. Send it to your friend and paste their receiver invite above.\n");
+            appendOutput("My Share invite was copied. Send it to your friend, then paste their Watch invite above.\n");
         } else if (target == InviteTarget::Watch) {
             watchLocalInviteEdit_->setText(invite);
             QApplication::clipboard()->setText(invite);
-            appendOutput("Watch invite copied to clipboard. Send it to the sharer and paste their sender invite above.\n");
+            appendOutput("My Watch invite was copied. Send it to the sharer, then paste their Share invite above.\n");
         }
         if (!accessCodeEdit_->text().isEmpty()) {
             appendOutput("Use the same access code on both computers.\n");
@@ -1250,7 +1346,7 @@ private:
             } else {
                 args << "--share" << (shareHostEdit_->text().trimmed() + ":" + QString::number(sharePortSpin_->value()));
             }
-            args << "--display" << QString::number(displaySpin_->value());
+            args << "--display" << QString::number(selectedDisplayIndex());
             args << "--fps" << QString::number(fpsSpin_->value());
 
             const QSize resolution = resolutionCombo_->currentData().toSize();
@@ -1353,16 +1449,16 @@ private:
         if (shareMode() && !shareNatInvite && !shareLocalInviteEdit_->text().trimmed().isEmpty()) {
             QMessageBox::warning(
                 this,
-                "Missing peer invite",
-                "Paste the receiver invite before using a local invite.");
+                "Missing friend invite",
+                "Paste your friend's Watch invite before using your Share invite.");
             sharePeerInviteEdit_->setFocus();
             return;
         }
         if (shareMode() && shareNatInvite && shareLocalInviteEdit_->text().trimmed().isEmpty()) {
             QMessageBox::warning(
                 this,
-                "Missing local invite",
-                "Create your invite before starting Share with a receiver invite.");
+                "Missing my invite",
+                "Create your Share invite before starting with your friend's Watch invite.");
             createShareInviteButton_->setFocus();
             return;
         }
@@ -1450,6 +1546,67 @@ private:
             QFile::remove(stopFilePath_);
             stopFilePath_.clear();
         }
+    }
+
+    QVector<DisplayChoice> fallbackDisplayChoices() const
+    {
+        QVector<DisplayChoice> displays;
+        const QList<QScreen*> screens = QApplication::screens();
+        if (screens.isEmpty()) {
+            displays.push_back(DisplayChoice{});
+            return displays;
+        }
+
+        for (int index = 0; index < screens.size(); ++index) {
+            const QRect geometry = screens[index]->geometry();
+            DisplayChoice display;
+            display.index = index;
+            display.outputName = screens[index]->name().trimmed();
+            display.width = geometry.width();
+            display.height = geometry.height();
+            display.left = geometry.x();
+            display.top = geometry.y();
+            displays.push_back(std::move(display));
+        }
+        return displays;
+    }
+
+    void updateDisplayList(const QVector<DisplayChoice>& displays)
+    {
+        if (displayCombo_ == nullptr) {
+            return;
+        }
+
+        const int previousDisplay = selectedDisplayIndex();
+        const bool wasBlocked = displayCombo_->blockSignals(true);
+        displayCombo_->clear();
+
+        const QVector<DisplayChoice> choices = displays.isEmpty() ? fallbackDisplayChoices() : displays;
+        QScreen* primaryScreen = QApplication::primaryScreen();
+        for (const auto& display : choices) {
+            displayCombo_->addItem(displayChoiceText(display, primaryScreen), display.index);
+            if (!display.adapterName.isEmpty()) {
+                displayCombo_->setItemData(displayCombo_->count() - 1, display.adapterName, Qt::ToolTipRole);
+            }
+        }
+
+        const int preferredIndex = displayCombo_->findData(previousDisplay);
+        displayCombo_->setCurrentIndex(preferredIndex >= 0 ? preferredIndex : 0);
+        displayCombo_->setToolTip(displayCombo_->currentText());
+        displayCombo_->blockSignals(wasBlocked);
+    }
+
+    void populateDisplayChoices()
+    {
+        updateDisplayList(fallbackDisplayChoices());
+    }
+
+    int selectedDisplayIndex() const
+    {
+        if (displayCombo_ == nullptr || displayCombo_->currentIndex() < 0) {
+            return 0;
+        }
+        return displayCombo_->currentData().toInt();
     }
 
     QVector<DiscoveredReceiver> parseDiscoveredReceivers(const QString& output) const
@@ -1805,6 +1962,43 @@ private:
         completeReceiverScanIfDone();
     }
 
+    void refreshDisplays(bool automatic)
+    {
+        if (displayProcess_->state() != QProcess::NotRunning) {
+            return;
+        }
+
+        const QString program = enginePath();
+        if (!QFileInfo::exists(program)) {
+            if (!automatic) {
+                QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
+            }
+            return;
+        }
+
+        displayOutput_.clear();
+        if (!automatic) {
+            appendOutput("\nRefreshing displays...\n");
+        }
+        displayProcess_->setProgram(program);
+        displayProcess_->setArguments({"--list"});
+        displayProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
+        setDisplayRefreshing(true);
+        displayProcess_->start();
+    }
+
+    void finishDisplayRefresh(int code, QProcess::ExitStatus status)
+    {
+        setDisplayRefreshing(false);
+        if (status != QProcess::NormalExit || code != 0) {
+            return;
+        }
+
+        const QVector<DisplayChoice> displays = parseDisplayChoices(displayOutput_);
+        updateDisplayList(displays);
+        refreshCommand();
+    }
+
     void refreshAudioDevices(bool automatic)
     {
         if (audioDeviceProcess_->state() != QProcess::NotRunning) {
@@ -2020,6 +2214,14 @@ private:
         }
     }
 
+    void setDisplayRefreshing(bool refreshing)
+    {
+        if (refreshDisplaysButton_ != nullptr) {
+            refreshDisplaysButton_->setEnabled(!refreshing && process_->state() == QProcess::NotRunning);
+            refreshDisplaysButton_->setText(refreshing ? "Scanning..." : "Refresh");
+        }
+    }
+
     void setAudioDeviceRefreshing(bool refreshing)
     {
         if (refreshAudioDevicesButton_ != nullptr) {
@@ -2089,18 +2291,18 @@ private:
     {
         if (!hasLocalInvite && !hasPeerInvite) {
             return share ?
-                "Waiting: create your invite, then paste the receiver invite." :
-                "Waiting: create your invite, then paste the sender invite.";
+                "Room setup: create my Share invite, then paste your friend's Watch invite." :
+                "Room setup: create my Watch invite, then paste the sharer's Share invite.";
         }
         if (!hasLocalInvite) {
             return share ?
-                "Almost: create your invite so Share can bind the right UDP port." :
-                "Almost: create your invite and send it to the sharer.";
+                "Almost: create my Share invite so this side can open the right UDP port." :
+                "Almost: create my Watch invite and send it to the sharer.";
         }
         if (!hasPeerInvite) {
             return share ?
-                "Almost: send your invite, then paste the receiver invite." :
-                "Almost: send your invite, then paste the sender invite.";
+                "Almost: send my Share invite, then paste your friend's Watch invite." :
+                "Almost: send my Watch invite, then paste the sharer's Share invite.";
         }
         return share ?
             "Ready: ask your friend to start Watch, then start Share." :
@@ -2194,6 +2396,12 @@ private:
         if (receiverList_ != nullptr) {
             receiverList_->setEnabled(!running && !receiverScanRunning());
         }
+        if (displayCombo_ != nullptr) {
+            displayCombo_->setEnabled(!running);
+        }
+        if (refreshDisplaysButton_ != nullptr) {
+            refreshDisplaysButton_->setEnabled(!running && displayProcess_->state() == QProcess::NotRunning);
+        }
         if (audioDeviceCombo_ != nullptr) {
             audioDeviceCombo_->setEnabled(!running);
         }
@@ -2247,6 +2455,7 @@ private:
     QProcess* process_ = nullptr;
     QProcess* discoveryProcess_ = nullptr;
     QProcess* tailscaleProcess_ = nullptr;
+    QProcess* displayProcess_ = nullptr;
     QProcess* audioDeviceProcess_ = nullptr;
     QProcess* inviteProcess_ = nullptr;
     QTimer* receiverRefreshTimer_ = nullptr;
@@ -2263,7 +2472,8 @@ private:
     QLabel* shareInternetStatusLabel_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
     QPushButton* findLanButton_ = nullptr;
-    QSpinBox* displaySpin_ = nullptr;
+    QComboBox* displayCombo_ = nullptr;
+    QPushButton* refreshDisplaysButton_ = nullptr;
     QSpinBox* fpsSpin_ = nullptr;
     QComboBox* resolutionCombo_ = nullptr;
     QComboBox* audioDeviceCombo_ = nullptr;
@@ -2296,6 +2506,7 @@ private:
     QString stopFilePath_;
     QString discoveryOutput_;
     QString tailscaleOutput_;
+    QString displayOutput_;
     QString audioDeviceOutput_;
     QString inviteOutput_;
     InviteTarget inviteTarget_ = InviteTarget::None;
@@ -2835,11 +3046,18 @@ int main(int argc, char** argv)
             const QString natStatus = lastLogFieldValue(QString::fromUtf8(
                 "nat_status=probing nat_hint=start_share\n"
                 "nat_status=receiving nat_hint=media_received\n"), "nat_status");
+            const auto displays = parseDisplayChoices(QString::fromUtf8(
+                "[0] \\\\.\\DISPLAY1 2560x1440 at (0,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"
+                "[1] \\\\.\\DISPLAY2 1920x1080 at (-1920,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"));
             return peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("nat_invite=screenshare-invite-v1") &&
                 commandInvite.startsWith("nat_invite=screenshare-invite-v1") &&
-                natStatus == "receiving" ? 0 : 2;
+                natStatus == "receiving" &&
+                displays.size() == 2 &&
+                displays[1].index == 1 &&
+                displays[1].width == 1920 &&
+                displays[1].left == -1920 ? 0 : 2;
         }
     }
 
