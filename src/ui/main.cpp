@@ -667,7 +667,7 @@ private:
         connect(darkModeCheck_, &QCheckBox::toggled, this, [this](bool checked) { applyTheme(checked); });
         header->addWidget(darkModeCheck_, 0, Qt::AlignVCenter);
 
-        actionButton_ = new QPushButton("Start sharing");
+        actionButton_ = new QPushButton("Share");
         actionButton_->setObjectName("PrimaryButton");
         actionButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
         actionButton_->setIconSize(QSize(16, 16));
@@ -818,13 +818,13 @@ private:
         auto* shareLocalInviteLayout = new QHBoxLayout(shareLocalInviteRow);
         shareLocalInviteLayout->setContentsMargins(0, 0, 0, 0);
         shareLocalInviteLayout->setSpacing(8);
-        createShareInviteButton_ = new QPushButton("Create room invite");
+        createShareInviteButton_ = new QPushButton("Create");
         createShareInviteButton_->setObjectName("SecondaryButton");
         createShareInviteButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
         createShareInviteButton_->setIconSize(QSize(14, 14));
         createShareInviteButton_->setCursor(Qt::PointingHandCursor);
         createShareInviteButton_->setFixedHeight(kRowHeight);
-        copyShareInviteButton_ = new QPushButton("Copy room invite");
+        copyShareInviteButton_ = new QPushButton("Copy");
         copyShareInviteButton_->setObjectName("SecondaryButton");
         copyShareInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
         copyShareInviteButton_->setIconSize(QSize(14, 14));
@@ -1003,7 +1003,7 @@ private:
         auto* watchPeerInviteLayout = new QHBoxLayout(watchPeerInviteRow);
         watchPeerInviteLayout->setContentsMargins(0, 0, 0, 0);
         watchPeerInviteLayout->setSpacing(8);
-        pasteWatchPeerInviteButton_ = new QPushButton("Paste room invite");
+        pasteWatchPeerInviteButton_ = new QPushButton("Paste");
         pasteWatchPeerInviteButton_->setObjectName("SecondaryButton");
         pasteWatchPeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
         pasteWatchPeerInviteButton_->setIconSize(QSize(14, 14));
@@ -2374,7 +2374,7 @@ private:
         const bool canCreate = !creating && !running;
         if (createShareInviteButton_ != nullptr) {
             createShareInviteButton_->setEnabled(canCreate);
-            createShareInviteButton_->setText(creating && inviteTarget_ == InviteTarget::Share ? "Creating..." : "Create room invite");
+            createShareInviteButton_->setText(creating && inviteTarget_ == InviteTarget::Share ? "Creating..." : "Create");
         }
         if (copyShareInviteButton_ != nullptr) {
             copyShareInviteButton_->setEnabled(!creating && !shareLocalInviteEdit_->text().trimmed().isEmpty());
@@ -2582,7 +2582,7 @@ private:
     void updateStartButtonText()
     {
         if (actionButton_ != nullptr) {
-            actionButton_->setText(shareMode() ? "Start sharing" : "Start watching");
+            actionButton_->setText(shareMode() ? "Share" : "Watch");
         }
     }
 

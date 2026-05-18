@@ -171,7 +171,7 @@ session fingerprint, access-code fingerprint, and an expiry timestamp. It also p
 `CODE`, replace it with the same access code used to create the invite.
 
 The desktop UI turns this into a one-invite room flow for the common direct case. Generate or paste
-the shared access code first, then choose the Internet tab in Create room. Create room invite copies
+the shared access code first, then choose the Internet tab in Create room. The Create button copies
 the sharer's room invite to the clipboard and shows it in the UI. Send that invite to your friend.
 They open Join room, switch to Internet, paste the room invite, and start watching. The Paste buttons
 can extract an invite from either a raw invite line or copied command output, and the compact status
@@ -183,8 +183,8 @@ Two-computer UI checklist for invite testing:
 
 1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
 2. Generate or paste the same access code on both computers.
-3. On the Share computer, open Create room, switch the Room section to Internet, click Create room
-   invite, and send that invite to the watcher.
+3. On the Share computer, open Create room, switch the Room section to Internet, click Create, and
+   send that invite to the watcher.
 4. On the Watch computer, open Join room, choose the listen port, switch the Room section to
    Internet, and paste the room invite.
 5. Start watching, then start sharing.
