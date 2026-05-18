@@ -2,7 +2,7 @@
 
 ## Ordered Roadmap
 
-1. Make the UI's mental model truly room-first: the sharer creates/hosts a room and the watcher joins/watches a room. Hide invite/manual details behind a simpler host/join flow while keeping Nearby, Internet invite, and Manual as advanced connection methods.
+1. Continue polishing the no-server room invite flow after real two-computer testing. The current direction is: sharer creates/copies one room invite, watcher pastes it, and advanced manual endpoint details stay out of the main UI.
 2. Add multi-viewer sharing so one sender can share with more than one friend. Design it with per-viewer bandwidth, feedback, adaptation, and access control in mind.
 3. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list, locked-room indicators, access-code prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
 4. Add better user-facing diagnostics for common setup mistakes and sync/network states once the transport shape is stable.
