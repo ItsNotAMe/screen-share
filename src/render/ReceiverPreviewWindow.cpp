@@ -305,6 +305,24 @@ void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
     ++framesPresented_;
 }
 
+void ReceiverPreviewWindow::ClearFrame()
+{
+    if (closeRequested_) {
+        return;
+    }
+
+    EnsureWindow(frameWidth_ > 0 ? frameWidth_ : 960, frameHeight_ > 0 ? frameHeight_ : 540);
+    lumaView_.Reset();
+    chromaView_.Reset();
+    lumaTexture_.Reset();
+    chromaTexture_.Reset();
+    lumaDesc_ = {};
+    chromaDesc_ = {};
+    frameWidth_ = 0;
+    frameHeight_ = 0;
+    Render();
+}
+
 void ReceiverPreviewWindow::SetStatusText(std::string_view statusText)
 {
     statusText_.assign(statusText);
@@ -805,18 +823,23 @@ D3D11_VIEWPORT ReceiverPreviewWindow::ComputeViewport() const
 
 void ReceiverPreviewWindow::Render()
 {
-    if (!swapChain_ || !lumaView_ || !chromaView_ || hwnd_ == nullptr || IsIconic(hwnd_) != FALSE) {
+    if (!swapChain_ || hwnd_ == nullptr || IsIconic(hwnd_) != FALSE) {
         return;
     }
 
     UpdateClientSize();
     ResizeSwapChainIfNeeded();
     EnsureRenderTarget();
-    EnsurePipeline();
 
     const float clearColor[] = {0.02f, 0.02f, 0.02f, 1.0f};
     context_->ClearRenderTargetView(renderTarget_.Get(), clearColor);
 
+    if (!lumaView_ || !chromaView_) {
+        ThrowIfFailed(swapChain_->Present(1, 0), "IDXGISwapChain::Present(receiver preview)");
+        return;
+    }
+
+    EnsurePipeline();
     const D3D11_VIEWPORT viewport = ComputeViewport();
 
     ID3D11RenderTargetView* renderTargets[] = {renderTarget_.Get()};

@@ -83,9 +83,9 @@ code. The Share tab shows friendly display choices such as resolution, position,
 status while still passing the selected numeric display index to the engine. It also has an
 output-device picker for system audio, which is useful when Windows or a virtual mixer uses a default
 output device that does not contain the audio you actually want to share. For manual internet/NAT
-tests, choose Internet invite in the Share screen Connection method. That page can create/copy this
+tests, choose the Internet tab in Share screen's Connection section. That page can create/copy this
 side's invite, paste the friend's invite, and wire the matching NAT options into the generated
-command. Nearby/Tailscale and Manual address live in the same Connection section so setup uses one
+command. Nearby, Internet, and Manual live as tabs in the same Connection section so setup uses one
 mental model instead of separate competing panels.
 
 Common live session:
@@ -123,11 +123,12 @@ On the sharing computer, discover nearby receivers:
 ```
 
 The output includes `share_target=HOST:PORT` plus a ready-to-run `ScreenShare --share ...` command.
-The desktop UI exposes the same flow: Watch has a LAN discoverable checkbox, and Share screen has a
-Connection method selector. Choose Nearby/Tailscale to use the auto-refreshing Nearby Devices list
-plus a manual Refresh button. Selecting a discovered receiver fills the address and port; encrypted
-receivers focus the main Access code field when it is empty. Discovery uses UDP port 47995 by
-default; add `--lan-discovery-port PORT` on both sides if you need a different port.
+The desktop UI exposes the same flow: both Share screen and Watch room have a Connection section
+with the same tab vocabulary. Watch room's Nearby tab carries the LAN discoverable checkbox, and
+Share screen's Nearby tab shows the auto-refreshing Nearby Devices list plus a manual Refresh
+button. Selecting a discovered receiver fills the address and port; encrypted receivers focus the
+main Access code field when it is empty. Discovery uses UDP port 47995 by default; add
+`--lan-discovery-port PORT` on both sides if you need a different port.
 When the Tailscale CLI is installed on the sharing computer, the same Nearby Devices list also includes
 online peers from `tailscale status --json` at the currently selected port. These entries are quick
 targets, not confirmed receivers: the UI cannot know whether Watch is actually running or which access
@@ -169,11 +170,11 @@ session fingerprint, access-code fingerprint, and an expiry timestamp. It also p
 `CODE`, replace it with the same access code used to create the invite.
 
 The desktop UI exposes the same invite creation flow. Generate or paste the shared access code first,
-then choose Internet invite in Share screen's Connection method or use the Watch room Connection
-section. Create my invite copies this side's invite to the clipboard and shows it in the UI. Send that
-invite to your friend, paste their invite with Paste friend invite, and start the session normally.
-The Paste buttons can extract an invite from either a raw invite line or copied command output, and
-the compact status line shows what is still missing before starting. While a NAT invite session is
+then choose the Internet tab in either Share screen or Watch room's Connection section. Create my
+invite copies this side's invite to the clipboard and shows it in the UI. Send that invite to your
+friend, paste their invite with Paste invite, and start the session normally. The Paste
+buttons can extract an invite from either a raw invite line or copied command output, and the
+compact status line shows what is still missing before starting. While a NAT invite session is
 running, that same status line switches to live setup states such as probing, probe seen, connected,
 receiving, or rejected.
 
@@ -181,11 +182,11 @@ Two-computer UI checklist for invite testing:
 
 1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
 2. Generate or paste the same access code on both computers.
-3. On the Watch computer, open Watch room, choose the listen port, and click Create my invite.
-   Send that invite to the sharer.
-4. On the Share computer, open Share screen, choose Internet invite in Connection, click Create my
-   invite, send that invite to the watcher, and paste the Watch invite into Friend.
-5. Paste the Share invite into the Watch tab's Friend invite field.
+3. On the Watch computer, open Watch room, choose the listen port, switch the Connection section to
+   the Internet tab, and click Create invite. Send that invite to the sharer.
+4. On the Share computer, open Share screen, switch the Connection section to the Internet tab,
+   click Create invite, send that invite to the watcher, and paste the Watch invite into Friend.
+5. Paste the Share invite into the Watch room's Internet tab Friend field.
 6. Start Watch first, then start Share.
 7. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
    If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both

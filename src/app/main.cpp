@@ -5503,6 +5503,8 @@ void RunUdpReceiverStats(const Options& options)
     bool hasCompletedFrame = false;
     bool hasReceivedStreamTraffic = false;
     bool waitingForStreamLogged = false;
+    bool previewBlankedForNoStream = false;
+    auto lastStreamActivityAt = startedAt;
 
     auto detectReceiverStreamRestart = [&](const screenshare::UdpCompletedFrame& frame) {
         if (!hasCompletedFrame || frame.frameId >= latestFrameId) {
@@ -5581,6 +5583,8 @@ void RunUdpReceiverStats(const Options& options)
         latestFrameBytes = 0;
         latestFragmentCount = 0;
         hasCompletedFrame = false;
+        previewBlankedForNoStream = false;
+        lastStreamActivityAt = Clock::now();
     };
 
     auto updateReportBaselines = [&](const screenshare::UdpReceiverStats& stats,
@@ -5643,6 +5647,8 @@ void RunUdpReceiverStats(const Options& options)
             latestFrameBytes = frame->bytes.size();
             latestFragmentCount = frame->fragmentCount;
             hasCompletedFrame = true;
+            previewBlankedForNoStream = false;
+            lastStreamActivityAt = Clock::now();
 
             if (h264Decoder) {
                 if (!hasH264DecodeStartFrame || frame->frameId >= nextH264DecodeFrameId) {
@@ -5724,6 +5730,16 @@ void RunUdpReceiverStats(const Options& options)
                 stats.framesCompleted != lastFramesCompleted ||
                 stats.audioPacketsCompleted != lastAudioPacketsCompleted;
             if (!hasIncomingActivity) {
+                if (hasReceivedStreamTraffic &&
+                    previewWindow &&
+                    !previewBlankedForNoStream &&
+                    now - lastStreamActivityAt >= std::chrono::seconds(2)) {
+                    previewPlayout.ClearPendingAndRestartClock();
+                    previewWindow->ClearFrame();
+                    latestReceiverHealthTitle = "disconnected | waiting for stream | res 0x0 | fps 0.0 | q 0/0/0";
+                    updatePreviewTitle();
+                    previewBlankedForNoStream = true;
+                }
                 if (!waitingForStreamLogged) {
                     std::cout
                         << "waiting_for_stream"
@@ -5749,6 +5765,8 @@ void RunUdpReceiverStats(const Options& options)
             }
 
             hasReceivedStreamTraffic = true;
+            lastStreamActivityAt = now;
+            previewBlankedForNoStream = false;
             waitingForStreamLogged = false;
 
             std::cout

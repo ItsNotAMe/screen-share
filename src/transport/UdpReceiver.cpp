@@ -4,6 +4,7 @@
 #include "transport/UdpProtocol.h"
 
 #include <winsock2.h>
+#include <mstcpip.h>
 #include <ws2tcpip.h>
 
 #include <algorithm>
@@ -15,6 +16,10 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
 
 namespace screenshare {
 namespace {
@@ -55,6 +60,22 @@ std::string WinsockErrorMessage(const char* operation)
 SOCKET AsSocket(uintptr_t socket)
 {
     return static_cast<SOCKET>(socket);
+}
+
+void DisableUdpConnReset(SOCKET socket)
+{
+    BOOL newBehavior = FALSE;
+    DWORD bytesReturned = 0;
+    static_cast<void>(WSAIoctl(
+        socket,
+        SIO_UDP_CONNRESET,
+        &newBehavior,
+        sizeof(newBehavior),
+        nullptr,
+        0,
+        &bytesReturned,
+        nullptr,
+        nullptr));
 }
 
 } // namespace
@@ -168,6 +189,8 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     if (udpSocket == INVALID_SOCKET) {
         throw std::runtime_error(WinsockErrorMessage("socket"));
     }
+
+    DisableUdpConnReset(udpSocket);
 
     if (config.socketReceiveBufferBytes > 0) {
         const int receiveBufferBytes = static_cast<int>(config.socketReceiveBufferBytes);
