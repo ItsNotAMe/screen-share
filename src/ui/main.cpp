@@ -953,6 +953,7 @@ private:
         sharePeerInviteList_->setUniformItemSizes(true);
         sharePeerInviteList_->setSelectionMode(QAbstractItemView::ExtendedSelection);
         sharePeerInviteList_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        sharePeerInviteList_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::MinimumExpanding);
         sharePeerInviteLayout->addWidget(sharePeerInviteList_);
         auto* sharePeerInviteButtons = new QWidget;
         sharePeerInviteButtons->setObjectName("FormRow");
@@ -977,8 +978,7 @@ private:
         clearSharePeerInviteButton_->setIconSize(QSize(14, 14));
         clearSharePeerInviteButton_->setCursor(Qt::PointingHandCursor);
         clearSharePeerInviteButton_->setFixedHeight(kRowHeight);
-        prepareInput(sharePeerInviteList_);
-        prepareInput(sharePeerInvitePanel);
+        sharePeerInvitePanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::MinimumExpanding);
         sharePeerInviteButtonLayout->addStretch(1);
         sharePeerInviteButtonLayout->addWidget(pasteSharePeerInviteButton_);
         sharePeerInviteButtonLayout->addWidget(removeSharePeerInviteButton_);
