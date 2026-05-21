@@ -193,3 +193,5 @@ WGC capture by default
   - It is Cloudflare Worker + Workers KV for room membership, peer UDP candidates, heartbeat, and cleanup only.
   - It must not relay media or receive raw room keys/passwords.
   - Future native room UX should generate a hidden room key automatically so users get encrypted UDP media without seeing an access-code field.
+  - Native C++ diagnostic integration started with `src/transport/SignalingClient.*` plus `--signal-health`, `--signal-join`, `--signal-peers`, `--signal-heartbeat`, and `--signal-leave`.
+  - These commands test the HTTP room API only; live Share/Watch integration still needs STUN from the real UDP socket, room polling, peer probing, and encrypted media startup.

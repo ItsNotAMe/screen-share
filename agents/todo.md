@@ -2,7 +2,7 @@
 
 ## Ordered Roadmap
 
-1. Add the signaling-backed room flow: Cloudflare Worker for room membership/candidate exchange, then native C++ HTTP polling integration. Keep media direct UDP only.
+1. Wire the native signaling client into the live room flow: use STUN from the real UDP media socket, join/heartbeat/poll the Worker room, probe returned peer candidates, and start direct encrypted UDP media without manual invite exchange.
 2. Replace visible "access code" UX with secure-by-default hidden room keys. The app should auto-generate the key, keep UDP encrypted even with no typed password, and only show a separate room password if the user explicitly enables one.
 3. Validate NAT multi-viewer rooms with real computers using the signaling flow. Follow-ups after testing: per-viewer connection/health display, optional per-viewer bandwidth policy, and better fallback UX for watchers whose NAT still needs direct invite/manual help.
 4. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list, locked-room indicators, optional password prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
