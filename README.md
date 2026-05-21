@@ -91,11 +91,11 @@ watcher's public endpoint until some packet reaches the sharer. Nearby, Internet
 tabs in the same Room section so setup uses one mental model instead of separate competing panels.
 The UI opens the Room section on Internet by default because the room invite flow is the normal
 direct-share path.
-Create room supports target lists instead of a single extra-target box. Nearby can select multiple
-watchers from the list, Manual accepts multiple comma/space-separated `HOST:PORT` targets in the
-Targets field, and Internet has repeatable watcher invite rows. Each Internet watcher row creates a
-viewer-specific sender invite from a unique port; send that invite to that watcher, then paste their
-response invite into the same row before starting Share.
+Create room supports target lists for direct paths and one shared invite for Internet paths. Nearby
+can select multiple watchers from the list, Manual accepts multiple comma/space-separated
+`HOST:PORT` targets in the Targets field, and Internet lets multiple watchers paste the same room
+invite. If a watcher cannot connect through that shared invite, use the optional Friend invite field
+as a one-watcher fallback response.
 
 Common live session:
 
@@ -126,18 +126,12 @@ the Share command:
 ```
 
 This fanout sends the same encoded video/audio packets to each target without re-encoding the
-screen. The desktop UI exposes the same idea through Nearby multi-select, Manual target lists, and
-Internet watcher invite rows.
+screen. The desktop UI exposes the same idea through Nearby multi-select and Manual target lists.
 
-The CLI and UI also have early groundwork for extra NAT invite viewers. Each NAT extra viewer needs
-its own viewer response invite and a matching sharer local invite made from a unique local port:
-
-```powershell
-.\build\release\ScreenShare.exe --share MAIN_INVITE --local-invite MAIN_LOCAL_INVITE --share-target VIEWER2_INVITE --share-target-local-invite VIEWER2_LOCAL_INVITE --access-code CODE
-```
-
-The current UI exposes repeatable NAT watcher rows. Per-viewer connection state is still future room
-UX work.
+For Internet/NAT rooms, create one sharer room invite and send that same invite to each watcher.
+Share binds the room invite port, accepts valid watcher punch probes, and fans out the same encoded
+stream to every watcher endpoint it learns. If a specific NAT pair cannot be reached with the shared
+room invite alone, one watcher can still create a My invite response and send it back as a fallback.
 
 LAN discovery can find a receiver without manually looking up its IP address. On the watching
 computer, start Watch with LAN advertising:
@@ -202,15 +196,13 @@ contains `CODE`, replace it with the same access code used to create the invite.
 
 The desktop UI keeps this as a room flow. Generate or paste the shared access code first, then choose
 the Internet tab in Create room. The Create button copies the sharer's room invite to the clipboard
-and shows it in the UI. Send that invite to your friend. They open Join room, switch to Internet,
+and shows it in the UI. Send that same invite to each watcher. They open Join room, switch to Internet,
 paste the room invite, and can create/copy their own My invite response from the same listen port.
 If the one-invite path stalls, send that response invite back and paste it into Share's Friend invite
 field before starting Share. The Paste buttons can extract an invite from either a raw invite line or
 copied command output, and the compact status line shows what is still missing before starting. While
 an invite session is running, that same status line switches to live setup states such as probing,
-probe seen, connected, receiving, or rejected. To add more NAT watchers from the UI, use Create
-room's More Watchers area: create/copy a watcher-specific invite, send it to that watcher, and paste
-their response invite into the same row.
+probe seen, connected, receiving, or rejected.
 
 Two-computer UI checklist for invite testing:
 
@@ -220,9 +212,9 @@ Two-computer UI checklist for invite testing:
    send that invite to the watcher.
 4. On the Watch computer, open Join room, choose the listen port, switch the Room section to
    Internet, and paste the room invite.
-5. For Internet NAT pairs, click Create beside My invite on Watch, send that response invite back to
-   the sharer, and paste it into Share's Friend invite field. LAN/Tailscale/reachable paths can skip
-   this response invite.
+5. For Internet NAT pairs that do not connect with the shared room invite, click Create beside My
+   invite on Watch, send that response invite back to the sharer, and paste it into Share's Friend
+   invite field. LAN/Tailscale/reachable paths can skip this response invite.
 6. Start watching, then start sharing.
 7. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
    If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both
@@ -257,7 +249,8 @@ sending punch probes from the actual receive socket while waiting for media:
 
 The UI's one-invite room flow starts Share from the sharer's own invite and also passes that invite
 as `--local-invite`, so Share binds to the same local port that created it and waits for Watch probes
-to retarget the media path. For lower-level manual experiments where you already have the receiver's
+to add watcher endpoints to the media path. Multiple watchers can paste the same room invite; Share
+will send to every valid watcher probe it receives. For lower-level manual experiments where you already have the receiver's
 invite, start Share with the receiver's invite and pass the sender's own invite as `--local-invite`:
 
 ```powershell

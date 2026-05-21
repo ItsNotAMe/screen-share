@@ -114,8 +114,7 @@ QString directShareTargetError(const QString& value)
         return {};
     }
     if (looksLikeNatInvite(target)) {
-        return "Extra viewers support direct HOST:PORT targets only for now. "
-               "Use the Internet tab's extra NAT viewer fields for invite viewers.";
+        return "Manual targets use HOST:PORT. Use the Internet tab's shared room invite for NAT watchers.";
     }
 
     const int separator = target.lastIndexOf(':');
@@ -960,24 +959,6 @@ private:
         addRow(internetContent, "Friend invite", sharePeerInviteRow);
         addRow(internetContent, "Room port", shareInvitePortSpin_);
 
-        auto* inviteTargetsHeader = new QWidget;
-        inviteTargetsHeader->setObjectName("FormRow");
-        auto* inviteTargetsHeaderLayout = new QHBoxLayout(inviteTargetsHeader);
-        inviteTargetsHeaderLayout->setContentsMargins(0, 0, 0, 0);
-        inviteTargetsHeaderLayout->setSpacing(8);
-        inviteTargetsHeaderLayout->addWidget(makeLabel("More Watchers", "PanelTitle"), 1);
-        addShareInviteViewerButton_ = new QPushButton("Add");
-        addShareInviteViewerButton_->setObjectName("SecondaryButton");
-        addShareInviteViewerButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
-        addShareInviteViewerButton_->setIconSize(QSize(14, 14));
-        addShareInviteViewerButton_->setCursor(Qt::PointingHandCursor);
-        addShareInviteViewerButton_->setFixedHeight(kRowHeight);
-        inviteTargetsHeaderLayout->addWidget(addShareInviteViewerButton_);
-        internetContent->addWidget(inviteTargetsHeader);
-        shareInviteViewersLayout_ = new QVBoxLayout;
-        shareInviteViewersLayout_->setContentsMargins(0, 0, 0, 0);
-        shareInviteViewersLayout_->setSpacing(10);
-        internetContent->addLayout(shareInviteViewersLayout_);
         connect(createShareInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Share); });
         connect(copyShareInviteButton_, &QPushButton::clicked, this, [this] {
             copyInvite(shareLocalInviteEdit_, "Room");
@@ -985,8 +966,6 @@ private:
         connect(pasteSharePeerInviteButton_, &QPushButton::clicked, this, [this] {
             pasteInviteFromClipboard(sharePeerInviteEdit_, "Friend");
         });
-        connect(addShareInviteViewerButton_, &QPushButton::clicked, this, [this] { addShareInviteViewerRow(); });
-        addShareInviteViewerRow();
 
         auto* manualPage = new QWidget;
         manualPage->setObjectName("OptionPage");
@@ -1940,19 +1919,6 @@ private:
                     }
                 }
             }
-            if (shareConnectionMethod() == ShareConnectionMethod::InternetInvite) {
-                for (const auto& row : shareInviteViewerRows_) {
-                    if (row.peerInviteEdit == nullptr || row.localInviteEdit == nullptr) {
-                        continue;
-                    }
-                    const QString extraPeerInvite = row.peerInviteEdit->text().trimmed();
-                    const QString extraLocalInvite = row.localInviteEdit->text().trimmed();
-                    if (!extraPeerInvite.isEmpty() && !extraLocalInvite.isEmpty()) {
-                        args << "--share-target" << extraPeerInvite
-                             << "--share-target-local-invite" << extraLocalInvite;
-                    }
-                }
-            }
             args << "--display" << QString::number(selectedDisplayIndex());
             args << "--fps" << QString::number(fpsSpin_->value());
 
@@ -2095,9 +2061,6 @@ private:
             return;
         }
         if (!validateDirectShareTargets()) {
-            return;
-        }
-        if (!validateExtraNatViewerInvite()) {
             return;
         }
         if (!confirmShareTarget()) {
@@ -3104,11 +3067,9 @@ private:
             return "Room setup: create a room invite and send it to your friend.";
         }
         if (!hasFriendInvite) {
-            return "Ready for reachable paths" + extraViewersStatusSuffix() +
-                   " If Internet probing stalls, ask your friend to create My invite and paste it here.";
+            return "Ready: share this room invite with each watcher. If Internet probing stalls, ask one watcher for My invite.";
         }
-        return "Ready: sharing will use your friend's response invite and your room invite for the local port" +
-               extraViewersStatusSuffix();
+        return "Ready: using the room invite plus one fallback friend response invite.";
     }
 
     QString extraViewersStatusSuffix() const

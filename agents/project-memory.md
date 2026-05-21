@@ -182,6 +182,5 @@ WGC capture by default
   - Each target owns its own UDP socket, queue, and feedback path; sender telemetry aggregates counters and reports `udp_targets`, `udp_active_targets`, and `udp_failed_targets`.
   - Runtime send/feedback/flush errors on one target should mark only that target failed and keep the remaining viewers alive.
   - The Qt UI exposes direct multi-target sharing through Nearby multi-select and Manual comma/space-separated target lists.
-  - CLI NAT invite fanout groundwork uses `--share-target PEER_INVITE --share-target-local-invite LOCAL_INVITE` for extra viewers; every extra local invite must use a unique sender port.
-  - The Qt UI now has repeatable watcher invite rows in Create room's Internet tab. Each row creates a viewer-specific local invite, accepts that viewer's response invite, and maps to `--share-target INVITE --share-target-local-invite LOCAL_INVITE`.
+  - NAT multi-viewer direction is one shared sharer room invite. Share binds that invite's local port, learns watcher endpoints from valid NAT probes, and fans out the encoded stream to every learned watcher. Per-watcher local invite rows are intentionally not the main UI model.
   - Remaining multi-viewer work is per-viewer health and optional per-viewer bandwidth policy.

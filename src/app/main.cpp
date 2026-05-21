@@ -87,6 +87,8 @@ struct UdpSendTargetSpec {
     std::string inviteEndpoint = "direct";
     uint16_t localPort = 0;
     bool localPortFromLocalInvite = false;
+    bool collectNatProbeTargets = false;
+    bool preferNatProbeTargets = false;
     uint64_t natProbeSessionFingerprint = 0;
 };
 
@@ -223,7 +225,7 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT|INVITE [--display N] [--seconds S]\n"
-        << "              [--share-target HOST:PORT|INVITE] [--share-target-local-invite INVITE]\n"
+        << "              [--share-target HOST:PORT]\n"
         << "              [--invite-endpoint auto|public|local]\n"
         << "              [--local-invite INVITE]\n"
         << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
@@ -272,7 +274,8 @@ void PrintHelp()
         << "       Watch can also use --peer-invite to send punch probes while waiting for Share.\n"
         << "       Share can use --share \"ss1e:...\" to send to the peer invite endpoint.\n"
         << "       Add --local-invite \"ss1e:...\" on Share to bind the local port from this side's invite.\n"
-        << "       Extra NAT viewers use --share-target \"ss1e:...\" plus --share-target-local-invite \"ss1e:...\".\n"
+        << "       Passing the same room invite as --share and --local-invite lets multiple watchers join by probing that invite.\n"
+        << "       Use --share-target HOST:PORT for extra direct/LAN/VPN watchers.\n"
         << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
@@ -2103,6 +2106,7 @@ public:
             aggregate.natProbePacketsReceived += current.natProbePacketsReceived;
             aggregate.natProbeRetargets += current.natProbeRetargets;
             aggregate.natProbeRetargetRejected += current.natProbeRetargetRejected;
+            aggregate.natProbeTargetCount += current.natProbeTargetCount;
             aggregate.natProbeRetargetActive = aggregate.natProbeRetargetActive || current.natProbeRetargetActive;
             if (aggregate.natProbeRetargetEndpoint.empty() && !current.natProbeRetargetEndpoint.empty()) {
                 aggregate.natProbeRetargetEndpoint = current.natProbeRetargetEndpoint;
@@ -3000,6 +3004,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
                 }
                 spec.localPort = localInvite.localEndpoint.port;
                 spec.localPortFromLocalInvite = true;
+                spec.collectNatProbeTargets = true;
+                spec.preferNatProbeTargets = invite.sessionFingerprint == localInvite.sessionFingerprint;
                 spec.natProbeSessionFingerprint = localInvite.sessionFingerprint;
                 applyLocalInviteSession(
                     localInvite,
@@ -4598,6 +4604,8 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                                     "direct",
                                     options.udpLocalPort,
                                     false,
+                                    false,
+                                    false,
                                     0});
                             }
                             std::vector<screenshare::UdpSenderConfig> udpConfigs;
@@ -4614,6 +4622,10 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                                 udpConfig.retargetOnNatProbe =
                                     target.fromPeerInvite &&
                                     options.inviteEndpointPreference == InviteEndpointPreference::Auto;
+                                udpConfig.collectNatProbeTargets =
+                                    udpConfig.retargetOnNatProbe && target.collectNatProbeTargets;
+                                udpConfig.preferNatProbeTargets =
+                                    udpConfig.collectNatProbeTargets && target.preferNatProbeTargets;
                                 udpConfig.natProbeSessionFingerprint =
                                     target.natProbeSessionFingerprint != 0 ?
                                         target.natProbeSessionFingerprint :
@@ -4638,6 +4650,12 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                                 udpConfigs.end(),
                                 [](const screenshare::UdpSenderConfig& config) {
                                     return config.retargetOnNatProbe;
+                                });
+                            const bool anyNatProbeFanout = std::any_of(
+                                udpConfigs.begin(),
+                                udpConfigs.end(),
+                                [](const screenshare::UdpSenderConfig& config) {
+                                    return config.collectNatProbeTargets;
                                 });
                             const bool anyLocalInvitePort = std::any_of(
                                 udpTargets.begin(),
@@ -4668,6 +4686,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                                 << " invite_targets=" << inviteTargetCount
                                 << " invite_endpoint=" << inviteEndpoint
                                 << " nat_probe_retarget=" << (anyRetarget ? "enabled" : "disabled")
+                                << " nat_probe_fanout=" << (anyNatProbeFanout ? "enabled" : "disabled")
                                 << " bitrate_mbps=" << Mbps(udpConfigs.front().pacingBitrate)
                                 << " local_port=" << (udpConfigs.front().localPort == 0 ? std::string("auto") : std::to_string(udpConfigs.front().localPort))
                                 << " local_port_source=" << (anyLocalInvitePort ? "local_invite" : "option_or_auto")
@@ -4829,6 +4848,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " udp_nat_probe_packets=" << udpStatsNow.natProbePacketsReceived
                 << " udp_nat_retargets=" << udpStatsNow.natProbeRetargets
                 << " udp_nat_retarget_rejected=" << udpStatsNow.natProbeRetargetRejected
+                << " udp_nat_probe_targets=" << udpStatsNow.natProbeTargetCount
                 << " udp_nat_retarget_active=" << (udpStatsNow.natProbeRetargetActive ? "yes" : "no")
                 << " udp_nat_retarget_endpoint="
                 << (udpStatsNow.natProbeRetargetEndpoint.empty() ? "none" : udpStatsNow.natProbeRetargetEndpoint)
@@ -4961,6 +4981,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", UDP NAT probe packets: " << udpStats.natProbePacketsReceived
         << ", UDP NAT retargets: " << udpStats.natProbeRetargets
         << ", UDP NAT retarget rejected: " << udpStats.natProbeRetargetRejected
+        << ", UDP NAT probe targets: " << udpStats.natProbeTargetCount
         << ", UDP NAT retarget active: " << (udpStats.natProbeRetargetActive ? "yes" : "no")
         << ", UDP NAT retarget endpoint: "
         << (udpStats.natProbeRetargetEndpoint.empty() ? "none" : udpStats.natProbeRetargetEndpoint)
