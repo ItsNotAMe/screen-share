@@ -31,6 +31,14 @@
 - Qt UI should surface bad access-code paths without exposing secrets: invite decrypt failures, fingerprint mismatches, and rejected-packet counters clear/focus the access-code field and warn once per run.
 - LAN discovery should stay access-code-only for now. It can advertise and compare fingerprints, but it must not broadcast raw access codes.
 
+## Room-Key Direction
+
+- Future room UX should hide "access code" from normal users.
+- Rooms should be encrypted by default even when the user does not type a password.
+- The native app should generate a high-entropy hidden room key automatically and carry it through local invite/session state without sending it to signaling.
+- A visible room password can be added later as an optional extra lock, but it should not be required for encrypted media.
+- The signaling Worker must never receive raw room keys, passwords, or media encryption material. It only sees room IDs, peer IDs, and UDP candidates.
+
 ## LAN Invite Metadata
 
 - PR #58 merged this layer.

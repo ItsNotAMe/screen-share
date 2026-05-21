@@ -67,3 +67,8 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# JavaScript/Worker tooling
+node_modules/
+.wrangler/
+dist/

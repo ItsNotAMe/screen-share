@@ -2,10 +2,11 @@
 
 ## Ordered Roadmap
 
-1. Validate NAT multi-viewer rooms with real computers using one sharer invite plus the optional watcher response invite list. Follow-ups after testing: per-viewer connection/health display, optional per-viewer bandwidth policy, and better fallback UX for watchers whose NAT still needs a response invite.
-2. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list, locked-room indicators, access-code prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
-3. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
-4. Revisit no-port-forward Internet/NAT only if direct STUN/manual invite/UDP hole punching proves insufficient.
+1. Add the signaling-backed room flow: Cloudflare Worker for room membership/candidate exchange, then native C++ HTTP polling integration. Keep media direct UDP only.
+2. Replace visible "access code" UX with secure-by-default hidden room keys. The app should auto-generate the key, keep UDP encrypted even with no typed password, and only show a separate room password if the user explicitly enables one.
+3. Validate NAT multi-viewer rooms with real computers using the signaling flow. Follow-ups after testing: per-viewer connection/health display, optional per-viewer bandwidth policy, and better fallback UX for watchers whose NAT still needs direct invite/manual help.
+4. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list, locked-room indicators, optional password prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
+5. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
 
 ## Live-Streaming Hardening
 
@@ -23,7 +24,7 @@ Only pick these up when reports show the need; normal audio and no-audio fallbac
 
 ## NAT Traversal Follow-Ups
 
-- Keep rendezvous/relay out of the main path unless direct STUN/manual invite/hole punching proves insufficient.
+- Keep media relay/TURN out of the main path unless direct STUN/signaling/manual invite/hole punching proves insufficient.
 - Consider optional UPnP/NAT-PMP port mapping after the two-sided invite flow if users still hit blocked paths.
 
 ## Conditional / Deferred
