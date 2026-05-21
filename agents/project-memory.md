@@ -12,8 +12,8 @@
 
 ## Current State
 
-- `main` is synced to `origin/main` at PR #92, `930085c Merge pull request #92 from ItsNotAMe/feature/ui-extra-viewers`.
-- Active branch: `feature/nat-multi-viewer-targets` for PR #93.
+- `main` is synced to `origin/main` at PR #93, `41a29d9 Merge pull request #93 from ItsNotAMe/feature/nat-multi-viewer-targets`.
+- Active branch: `main`.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
@@ -84,6 +84,7 @@ WGC capture by default
 - PR #84 `Add UI invite test checklist`: README has a two-computer checklist for future UI invite/Tailscale validation.
 - PR #85 `Add direct NAT invite sharing flow`: merged the full direct STUN/manual invite/UDP hole-punching flow into `main`.
 - PR #86 `Clarify room UI setup`: Share/Watch wording, segmented connection tabs, display/audio chooser polish, header status pill, receiver stale-preview blanking, and Windows UDP reconnect resilience for late/restarted Watch.
+- PR #93 `Add NAT multi-viewer room invite targets`: one sharer room invite, optional watcher response invite list, NAT probe-learned fanout through one sender socket, and direct multi-target Share UI cleanup.
 - Current room-invite UI work keeps the project no-server/no-external-service: Create room owns one invite and Join room pastes it, but real NAT testing showed this only works for LAN/VPN/reachable-NAT. Endpoint-filtered NAT can block the watcher probes before Share sees them.
 
 ## Active Memory Files
