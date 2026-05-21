@@ -20,6 +20,11 @@ future work.
 Fanout should isolate runtime target failures: a send/feedback/flush error on one target marks that
 target failed, logs it once, and keeps the rest of the viewers alive. Telemetry includes total,
 active, and failed UDP target counts.
+The Qt UI exposes the first direct-target slice through Create room's Extra IP:port field. It is only
+a command wrapper over repeated `--share-target` arguments, not per-viewer room management yet.
+Do not treat NAT invite fanout as a simple parser change: current fanout uses one `UdpSender` socket
+per direct target, while NAT punching depends on the viewer probing the sender endpoint/port from
+the sharer invite. Multi-viewer NAT needs an explicit per-viewer invite/socket strategy.
 
 `--share` is the normal live preset and should not allow a many-second sender queue to build. It
 defaults to a 1500 ms UDP queue cap unless the user explicitly overrides `--udp-max-queue-ms`.
