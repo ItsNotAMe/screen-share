@@ -34,10 +34,12 @@
 - PR #85 merged the full branch to `main`.
 - PR #88 testing showed the one-sharer-invite UI path works locally/reachable-direct, but not through the tested NAT: Watch sent public/local probes while Share saw `udp_nat_probe_packets=0` and stayed `waiting_for_probe`. This is the expected endpoint-filtered NAT deadlock for a one-link, no-server flow, not a decoder/media bug.
 - Current UI supports the no-server two-sided fallback: Watch can create a My invite response from its listen port, and Share can paste that Friend invite while still passing its own room invite as `--local-invite`.
+- CLI multi-viewer NAT groundwork: extra viewers can be added with `--share-target PEER_INVITE --share-target-local-invite LOCAL_INVITE`. Each extra local invite must be generated from a unique sender port so that Watch probes the same sender socket that will send media. The UI exposes repeatable watcher rows; per-viewer status still needs room work.
 
 ## Follow-Up Shape
 
 - Live Watch probe source retargeting plus Share `--local-invite` binding is the first automatic endpoint selection path; still needed: richer setup summaries and UI guidance.
+- Next multi-viewer UI slice should make watcher rows statusful: each row already owns a sharer local invite and pasted watcher response invite, but it still needs live status.
 - Next diagnostic layer should keep failures readable: no probes seen, probes rejected, retargeted but no feedback, receiver probing, receiver media rejected, and receiver actively receiving.
 - For generic Internet NAT without an external rendezvous/relay, one side must still learn the other side's endpoint somehow. Practical no-server options are the UI two-sided response invite, Tailscale/manual IP, or router port mapping/UPnP. Compact encrypted invites make that exchange shorter and less leaky, but do not remove the need for endpoint exchange.
 - User already validated the UI-guided direct invite flow after create/copy invite landed. Since later changes only added receiver restart recovery and status display, treat the core invite mechanics as validated.

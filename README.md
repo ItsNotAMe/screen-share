@@ -91,9 +91,11 @@ watcher's public endpoint until some packet reaches the sharer. Nearby, Internet
 tabs in the same Room section so setup uses one mental model instead of separate competing panels.
 The UI opens the Room section on Internet by default because the room invite flow is the normal
 direct-share path.
-Create room also has an optional Extra IP:port field for direct multi-viewer fanout. Start Watch on
-each extra computer, then enter comma-separated `HOST:PORT` targets there. Those extra viewers are
-direct targets only for now; NAT invite fanout is still a future room UX step.
+Create room supports target lists instead of a single extra-target box. Nearby can select multiple
+watchers from the list, Manual accepts multiple comma/space-separated `HOST:PORT` targets in the
+Targets field, and Internet has repeatable watcher invite rows. Each Internet watcher row creates a
+viewer-specific sender invite from a unique port; send that invite to that watcher, then paste their
+response invite into the same row before starting Share.
 
 Common live session:
 
@@ -124,8 +126,18 @@ the Share command:
 ```
 
 This fanout sends the same encoded video/audio packets to each target without re-encoding the
-screen. Extra targets are direct `HOST:PORT` only for now; NAT invite fanout still needs more room
-UX and per-viewer connection state.
+screen. The desktop UI exposes the same idea through Nearby multi-select, Manual target lists, and
+Internet watcher invite rows.
+
+The CLI and UI also have early groundwork for extra NAT invite viewers. Each NAT extra viewer needs
+its own viewer response invite and a matching sharer local invite made from a unique local port:
+
+```powershell
+.\build\release\ScreenShare.exe --share MAIN_INVITE --local-invite MAIN_LOCAL_INVITE --share-target VIEWER2_INVITE --share-target-local-invite VIEWER2_LOCAL_INVITE --access-code CODE
+```
+
+The current UI exposes repeatable NAT watcher rows. Per-viewer connection state is still future room
+UX work.
 
 LAN discovery can find a receiver without manually looking up its IP address. On the watching
 computer, start Watch with LAN advertising:
@@ -196,7 +208,9 @@ If the one-invite path stalls, send that response invite back and paste it into 
 field before starting Share. The Paste buttons can extract an invite from either a raw invite line or
 copied command output, and the compact status line shows what is still missing before starting. While
 an invite session is running, that same status line switches to live setup states such as probing,
-probe seen, connected, receiving, or rejected.
+probe seen, connected, receiving, or rejected. To add more NAT watchers from the UI, use Create
+room's More Watchers area: create/copy a watcher-specific invite, send it to that watcher, and paste
+their response invite into the same row.
 
 Two-computer UI checklist for invite testing:
 

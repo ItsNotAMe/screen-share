@@ -46,7 +46,8 @@
 - Form inputs should use `Qt::StrongFocus`, not wheel focus, so scrolling the settings pane does not focus/highlight the field under the pointer.
 - Combo boxes can contain long display/audio labels; keep their size policy shrink-friendly and rely on elided text plus tooltips so the Share settings pane does not clip horizontally.
 - Product direction: the final room model should have the sharer create/host a room. The current Targets list is a transitional UI over today's Watch-advertises/Share-connects transport plus Tailscale quick targets.
-- Multi-viewer first UI slice: Create room has a compact Extra IP:port field that expands comma/space-separated direct `HOST:PORT` entries into repeated `--share-target` arguments. Keep the field clearly labeled as direct extra viewers only until NAT invite fanout and per-viewer state exist.
+- Multi-viewer UI direction: avoid a separate "extra target" box. Nearby supports multi-select from the discovered/Tailscale list, Manual accepts multiple comma/space-separated targets in the main Targets field, and Internet has repeatable watcher invite rows.
+- NAT watcher rows create/copy a sharer local invite for that watcher from a unique local port, paste that watcher's response invite, and pass `--share-target INVITE --share-target-local-invite LOCAL_INVITE`. Future room work should add per-viewer connection state.
 - Tailscale/mesh VPN peers are already usable by manual IP in the Share address field. The Tailscale peer picker is separate from UDP LAN broadcast discovery because mesh VPNs usually do not forward broadcast.
 - Discovery output never includes a raw access code. For encrypted receivers, the UI compares the typed access code with the advertised access-code fingerprint and warns on mismatch.
 - Wrong discovered-receiver access codes should clear the Access code field, disable plaintext, and focus the field so the user can retry immediately.
