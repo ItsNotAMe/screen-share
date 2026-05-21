@@ -1937,6 +1937,12 @@ void MergeReceiverFeedback(
 
 class UdpSenderFanout {
 public:
+    struct Target {
+        std::unique_ptr<screenshare::UdpSender> sender;
+        bool failed = false;
+        std::string error;
+    };
+
     void Open(const std::vector<screenshare::UdpSenderConfig>& configs)
     {
         Close();
@@ -1947,53 +1953,72 @@ public:
         for (const auto& config : configs) {
             auto sender = std::make_unique<screenshare::UdpSender>();
             sender->Open(config);
-            senders_.push_back(std::move(sender));
+            targets_.push_back(Target{std::move(sender)});
         }
     }
 
     void Close()
     {
-        senders_.clear();
+        targets_.clear();
     }
 
     [[nodiscard]] size_t targetCount() const noexcept
     {
-        return senders_.size();
+        return targets_.size();
+    }
+
+    [[nodiscard]] size_t failedTargetCount() const noexcept
+    {
+        return static_cast<size_t>(std::count_if(targets_.begin(), targets_.end(), [](const auto& target) {
+            return target.failed;
+        }));
+    }
+
+    [[nodiscard]] size_t activeTargetCount() const noexcept
+    {
+        return targetCount() - failedTargetCount();
     }
 
     [[nodiscard]] bool isOpen() const noexcept
     {
-        return !senders_.empty() &&
-               std::all_of(senders_.begin(), senders_.end(), [](const auto& sender) {
-                   return sender != nullptr && sender->isOpen();
+        return !targets_.empty() &&
+               std::any_of(targets_.begin(), targets_.end(), [](const auto& target) {
+                   return !target.failed && target.sender != nullptr && target.sender->isOpen();
                });
     }
 
     void SendFrame(const screenshare::EncodedPacket& packet)
     {
-        for (auto& sender : senders_) {
-            sender->SendFrame(packet);
-        }
+        ForEachActiveTarget("video send", [&](screenshare::UdpSender& sender) {
+            sender.SendFrame(packet);
+        });
     }
 
     void SendAudioPacket(const screenshare::UdpAudioPacket& packet)
     {
-        for (auto& sender : senders_) {
-            sender->SendAudioPacket(packet);
-        }
+        ForEachActiveTarget("audio send", [&](screenshare::UdpSender& sender) {
+            sender.SendAudioPacket(packet);
+        });
     }
 
     void SetPacingBitrate(uint32_t bitrate)
     {
-        for (auto& sender : senders_) {
-            sender->SetPacingBitrate(bitrate);
-        }
+        ForEachActiveTarget("pacing update", [&](screenshare::UdpSender& sender) {
+            sender.SetPacingBitrate(bitrate);
+        });
     }
 
     void Flush()
     {
-        for (auto& sender : senders_) {
-            sender->Flush();
+        for (auto& target : targets_) {
+            if (target.failed || target.sender == nullptr) {
+                continue;
+            }
+            try {
+                target.sender->Flush();
+            } catch (const std::exception& error) {
+                MarkFailed(target, "flush", error.what());
+            }
         }
     }
 
@@ -2002,14 +2027,25 @@ public:
     {
         std::optional<screenshare::udp_protocol::FeedbackSnapshot> selectedFeedback;
         bool timeoutUsed = false;
-        for (auto& sender : senders_) {
+        for (auto& target : targets_) {
+            if (target.failed || target.sender == nullptr) {
+                continue;
+            }
             std::chrono::milliseconds timeout = timeoutUsed ? std::chrono::milliseconds(0) : firstTimeout;
-            timeoutUsed = true;
-            while (auto feedback = sender->ReceiveFeedback(timeout)) {
-                if (!selectedFeedback || FeedbackLooksWorse(*feedback, *selectedFeedback)) {
-                    selectedFeedback = *feedback;
+            try {
+                for (;;) {
+                    auto feedback = target.sender->ReceiveFeedback(timeout);
+                    timeoutUsed = true;
+                    if (!feedback) {
+                        break;
+                    }
+                    if (!selectedFeedback || FeedbackLooksWorse(*feedback, *selectedFeedback)) {
+                        selectedFeedback = *feedback;
+                    }
+                    timeout = std::chrono::milliseconds(0);
                 }
-                timeout = std::chrono::milliseconds(0);
+            } catch (const std::exception& error) {
+                MarkFailed(target, "feedback receive", error.what());
             }
         }
         return selectedFeedback;
@@ -2018,8 +2054,11 @@ public:
     [[nodiscard]] screenshare::UdpSenderStats stats() const
     {
         screenshare::UdpSenderStats aggregate;
-        for (const auto& sender : senders_) {
-            const auto current = sender->stats();
+        for (const auto& target : targets_) {
+            if (target.sender == nullptr) {
+                continue;
+            }
+            const auto current = target.sender->stats();
             aggregate.framesSent += current.framesSent;
             aggregate.framesDropped += current.framesDropped;
             aggregate.audioPacketsSent += current.audioPacketsSent;
@@ -2056,7 +2095,37 @@ public:
     }
 
 private:
-    std::vector<std::unique_ptr<screenshare::UdpSender>> senders_;
+    template <typename Fn>
+    void ForEachActiveTarget(const char* operation, Fn&& fn)
+    {
+        bool sentToAnyTarget = false;
+        for (auto& target : targets_) {
+            if (target.failed || target.sender == nullptr) {
+                continue;
+            }
+            try {
+                fn(*target.sender);
+                sentToAnyTarget = true;
+            } catch (const std::exception& error) {
+                MarkFailed(target, operation, error.what());
+            }
+        }
+        if (!sentToAnyTarget && failedTargetCount() == targetCount()) {
+            throw std::runtime_error("All UDP fanout targets failed");
+        }
+    }
+
+    void MarkFailed(Target& target, const char* operation, const std::string& message)
+    {
+        if (target.failed) {
+            return;
+        }
+        target.failed = true;
+        target.error = std::string(operation) + " failed: " + message;
+        std::cerr << "UDP fanout target failed: " << target.error << "\n";
+    }
+
+    std::vector<Target> targets_;
 };
 
 template <typename UdpSenderLike>
@@ -4556,6 +4625,8 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " stream_packets=" << streamPackets
                 << " stream_bytes=" << streamBytes
                 << " udp_targets=" << (udpSender ? udpSender->targetCount() : 0)
+                << " udp_active_targets=" << (udpSender ? udpSender->activeTargetCount() : 0)
+                << " udp_failed_targets=" << (udpSender ? udpSender->failedTargetCount() : 0)
                 << " udp_datagrams=" << udpStatsNow.datagramsSent
                 << " udp_queued=" << udpStatsNow.datagramsQueued
                 << " udp_pending=" << udpStatsNow.pendingDatagrams
@@ -4686,6 +4757,8 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", stream dropped inputs: " << streamDroppedInputFrames
         << ", UDP queued datagrams: " << udpStats.datagramsQueued
         << ", UDP targets: " << (udpSender ? udpSender->targetCount() : 0)
+        << ", UDP active targets: " << (udpSender ? udpSender->activeTargetCount() : 0)
+        << ", UDP failed targets: " << (udpSender ? udpSender->failedTargetCount() : 0)
         << ", UDP datagrams: " << udpStats.datagramsSent
         << ", UDP pending datagrams: " << udpStats.pendingDatagrams
         << ", UDP peak pending datagrams: " << udpStats.peakPendingDatagrams

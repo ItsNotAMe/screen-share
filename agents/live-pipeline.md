@@ -17,6 +17,9 @@ targets. Each target owns its own `UdpSender` socket/queue/feedback path, and ag
 sum packet counters while using max queue delay and worst receiver feedback for adaptation. Extra
 targets are direct `HOST:PORT` only for now; NAT invite fanout and richer per-viewer UI state remain
 future work.
+Fanout should isolate runtime target failures: a send/feedback/flush error on one target marks that
+target failed, logs it once, and keeps the rest of the viewers alive. Telemetry includes total,
+active, and failed UDP target counts.
 
 `--share` is the normal live preset and should not allow a many-second sender queue to build. It
 defaults to a 1500 ms UDP queue cap unless the user explicitly overrides `--udp-max-queue-ms`.
