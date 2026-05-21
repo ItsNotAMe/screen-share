@@ -10,6 +10,7 @@
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/LanDiscovery.h"
 #include "transport/NatTraversal.h"
+#include "transport/SignalingClient.h"
 #include "transport/StunClient.h"
 #include "transport/UdpReceiver.h"
 #include "transport/UdpSender.h"
@@ -60,6 +61,15 @@ enum class InviteEndpointPreference {
     Auto,
     Public,
     Local,
+};
+
+enum class SignalingCommand {
+    None,
+    Health,
+    Join,
+    Peers,
+    Heartbeat,
+    Leave,
 };
 
 constexpr size_t OrderedReceiverStartThresholdFrames = 30;
@@ -192,6 +202,15 @@ struct Options {
     std::string localInvite;
     int natProbeIntervalMs = 250;
     bool natProbeIntervalProvided = false;
+    SignalingCommand signalingCommand = SignalingCommand::None;
+    std::string signalingServerUrl;
+    std::string signalingRoomId;
+    std::string signalingPeerId;
+    std::string signalingCandidate;
+    std::string signalingName;
+    std::string signalingPlatform;
+    int signalingTimeoutMs = 5000;
+    bool signalingTimeoutProvided = false;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
@@ -234,6 +253,12 @@ void PrintHelp()
         << "  ScreenShare --make-invite PORT --stun HOST[:PORT] [--invite-ttl-seconds S]\n"
         << "  ScreenShare --nat-probe PORT --peer-invite INVITE [--seconds S]\n"
         << "              [--nat-probe-interval-ms MS]\n"
+        << "  ScreenShare --signal-health URL [--signal-timeout-ms MS]\n"
+        << "  ScreenShare --signal-join URL --signal-room ROOM --signal-peer-id PEER\n"
+        << "              --signal-candidate IP:PORT [--signal-name NAME]\n"
+        << "  ScreenShare --signal-peers URL --signal-room ROOM --signal-peer-id PEER\n"
+        << "  ScreenShare --signal-heartbeat URL --signal-room ROOM --signal-peer-id PEER\n"
+        << "  ScreenShare --signal-leave URL --signal-room ROOM --signal-peer-id PEER\n"
         << "  ScreenShare --audio-capture system|microphone [--seconds S] [--audio-device-id ID]\n"
         << "              [--audio-send HOST:PORT] [--udp-local-port PORT] [--audio-codec raw|opus]\n"
         << "  ScreenShare --udp-recv PORT [--seconds S] [--dump-h264 PATH] [--decode-h264]\n"
@@ -277,6 +302,8 @@ void PrintHelp()
         << "       Passing the same room invite as --share and --local-invite lets reachable watchers join by probing that invite.\n"
         << "       Add --share-target WATCHER_INVITE for blocked watchers that send back response invites.\n"
         << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
+        << "  Signaling: --signal-* commands test the HTTP room server without starting media.\n"
+        << "             The Worker only exchanges UDP candidates; screen/audio still use direct UDP.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -291,6 +318,8 @@ void PrintHelp()
         << "  ScreenShare --stun stun.l.google.com:19302\n"
         << "  ScreenShare --make-invite 5000 --stun stun.l.google.com:19302 --access-code 123456\n"
         << "  ScreenShare --nat-probe 5000 --peer-invite \"ss1e:...\" --access-code 123456\n"
+        << "  ScreenShare --signal-health https://example.workers.dev\n"
+        << "  ScreenShare --signal-join https://example.workers.dev --signal-room room1 --signal-peer-id alice --signal-candidate 203.0.113.10:5000\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
@@ -2642,6 +2671,22 @@ bool HasUdpSession(const Options& options)
            !options.audioSendTarget.empty();
 }
 
+bool HasSignalingCommand(const Options& options)
+{
+    return options.signalingCommand != SignalingCommand::None;
+}
+
+bool HasSignalingOptions(const Options& options)
+{
+    return HasSignalingCommand(options) ||
+           !options.signalingRoomId.empty() ||
+           !options.signalingPeerId.empty() ||
+           !options.signalingCandidate.empty() ||
+           !options.signalingName.empty() ||
+           !options.signalingPlatform.empty() ||
+           options.signalingTimeoutProvided;
+}
+
 bool HasNatShareTarget(const Options& options)
 {
     if (options.udpSendTargetFromPeerInvite) {
@@ -2750,6 +2795,14 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             return argv[++i];
         };
 
+        auto setSignalingCommand = [&](SignalingCommand command, const char* name) {
+            if (options.signalingCommand != SignalingCommand::None) {
+                throw std::invalid_argument("Only one --signal-* command can be used at a time");
+            }
+            options.signalingCommand = command;
+            options.signalingServerUrl = requireValue(name);
+        };
+
         constexpr std::string_view accessCodePrefix = "--access-code=";
         constexpr std::string_view sessionCodePrefix = "--session-code=";
 
@@ -2821,6 +2874,29 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--nat-probe-interval-ms") {
             options.natProbeIntervalMs = ParseInt(requireValue("--nat-probe-interval-ms"), "--nat-probe-interval-ms");
             options.natProbeIntervalProvided = true;
+        } else if (arg == "--signal-health") {
+            setSignalingCommand(SignalingCommand::Health, "--signal-health");
+        } else if (arg == "--signal-join") {
+            setSignalingCommand(SignalingCommand::Join, "--signal-join");
+        } else if (arg == "--signal-peers") {
+            setSignalingCommand(SignalingCommand::Peers, "--signal-peers");
+        } else if (arg == "--signal-heartbeat") {
+            setSignalingCommand(SignalingCommand::Heartbeat, "--signal-heartbeat");
+        } else if (arg == "--signal-leave") {
+            setSignalingCommand(SignalingCommand::Leave, "--signal-leave");
+        } else if (arg == "--signal-room") {
+            options.signalingRoomId = requireValue("--signal-room");
+        } else if (arg == "--signal-peer-id") {
+            options.signalingPeerId = requireValue("--signal-peer-id");
+        } else if (arg == "--signal-candidate") {
+            options.signalingCandidate = requireValue("--signal-candidate");
+        } else if (arg == "--signal-name") {
+            options.signalingName = requireValue("--signal-name");
+        } else if (arg == "--signal-platform") {
+            options.signalingPlatform = requireValue("--signal-platform");
+        } else if (arg == "--signal-timeout-ms") {
+            options.signalingTimeoutMs = ParseInt(requireValue("--signal-timeout-ms"), "--signal-timeout-ms");
+            options.signalingTimeoutProvided = true;
         } else if (arg == "--invite-endpoint") {
             options.inviteEndpointPreference = ParseInviteEndpointPreference(requireValue("--invite-endpoint"));
             options.inviteEndpointPreferenceProvided = true;
@@ -3109,6 +3185,93 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.generateAccessCode) {
         if (!options.logPath.empty() || !options.saveReportPath.empty()) {
             throw std::invalid_argument("--generate-access-code cannot be combined with --log or --save-report");
+        }
+        options.sessionFingerprint = SessionFingerprint(options.sessionId);
+        return options;
+    }
+
+    if (HasSignalingOptions(options) && !HasSignalingCommand(options)) {
+        throw std::invalid_argument("--signal-room, --signal-peer-id, --signal-candidate, --signal-name, --signal-platform, and --signal-timeout-ms require a --signal-* command");
+    }
+    if (HasSignalingCommand(options)) {
+        if (options.signalingTimeoutMs < 100 || options.signalingTimeoutMs > 30000) {
+            throw std::invalid_argument("--signal-timeout-ms must be between 100 and 30000");
+        }
+        if (options.signalingCommand == SignalingCommand::Health) {
+            if (!options.signalingRoomId.empty() || !options.signalingPeerId.empty() ||
+                !options.signalingCandidate.empty() || !options.signalingName.empty() ||
+                !options.signalingPlatform.empty()) {
+                throw std::invalid_argument("--signal-health only accepts URL and --signal-timeout-ms");
+            }
+        } else {
+            if (options.signalingRoomId.empty()) {
+                throw std::invalid_argument("--signal-room is required for this signaling command");
+            }
+            if (options.signalingPeerId.empty()) {
+                throw std::invalid_argument("--signal-peer-id is required for this signaling command");
+            }
+            screenshare::ValidateSignalingRoomId(options.signalingRoomId);
+            screenshare::ValidateSignalingPeerId(options.signalingPeerId);
+            if (options.signalingCommand == SignalingCommand::Join) {
+                if (options.signalingCandidate.empty()) {
+                    throw std::invalid_argument("--signal-candidate IP:PORT is required for --signal-join");
+                }
+            } else if (!options.signalingCandidate.empty() || !options.signalingName.empty() ||
+                       !options.signalingPlatform.empty()) {
+                throw std::invalid_argument("--signal-candidate, --signal-name, and --signal-platform are only used with --signal-join");
+            }
+        }
+        if (options.generateAccessCode ||
+            options.listDisplays ||
+            options.listH264Encoders ||
+            options.listAudioDevices ||
+            options.lanDiscover ||
+            options.lanAdvertise ||
+            options.stunQuery ||
+            options.makeInvite ||
+            options.natProbe ||
+            HasUdpSession(options) ||
+            options.accessCodeProvided ||
+            options.allowPlaintext ||
+            options.audioCapture ||
+            options.audioDeviceIdProvided ||
+            options.audioCodecProvided ||
+            options.audioPlayback ||
+            options.audioPlaybackLatencyProvided ||
+            options.audioPlaybackMutedProvided ||
+            options.audioPlaybackVolumeProvided ||
+            options.avSync ||
+            options.avSyncDisabled ||
+            options.streamEncode ||
+            options.streamEncoderPreferenceProvided ||
+            options.udpLocalPortProvided ||
+            options.udpPacingOptionProvided ||
+            options.udpMaxQueueMsProvided ||
+            options.adaptBitrate ||
+            options.adaptMinBitrateProvided ||
+            options.adaptReduceCooldownProvided ||
+            options.adaptResolution ||
+            options.adaptResolutionMinScaleProvided ||
+            options.adaptResolutionCooldownProvided ||
+            options.inviteEndpointPreferenceProvided ||
+            !options.localInvite.empty() ||
+            !options.peerInvite.empty() ||
+            secondsProvided ||
+            options.width != 0 ||
+            options.height != 0 ||
+            options.bitrate != 0 ||
+            options.keyframeIntervalProvided ||
+            !options.recordPath.empty() ||
+            !options.capturedBmpPath.empty() ||
+            !options.h264DumpPath.empty() ||
+            options.decodeH264 ||
+            !options.decodedBmpPath.empty() ||
+            options.previewWindow ||
+            options.previewLatencyProvided ||
+            options.previewMaxLateProvided ||
+            options.simulateLossProvided ||
+            options.simulateJitterProvided) {
+            throw std::invalid_argument("--signal-* commands are standalone signaling diagnostics");
         }
         options.sessionFingerprint = SessionFingerprint(options.sessionId);
         return options;
@@ -5015,6 +5178,102 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << "\n";
 }
 
+screenshare::SignalingCandidate ParseSignalingCandidateEndpoint(const std::string& endpoint)
+{
+    std::string host;
+    std::string portText;
+    if (!endpoint.empty() && endpoint.front() == '[') {
+        const size_t close = endpoint.find(']');
+        if (close == std::string::npos || close + 1 >= endpoint.size() || endpoint[close + 1] != ':') {
+            throw std::invalid_argument("--signal-candidate expects IP:PORT");
+        }
+        host = endpoint.substr(1, close - 1);
+        portText = endpoint.substr(close + 2);
+    } else {
+        const size_t separator = endpoint.rfind(':');
+        if (separator == std::string::npos || separator == 0 || separator + 1 >= endpoint.size()) {
+            throw std::invalid_argument("--signal-candidate expects IP:PORT");
+        }
+        host = endpoint.substr(0, separator);
+        portText = endpoint.substr(separator + 1);
+    }
+
+    char* end = nullptr;
+    const long port = std::strtol(portText.c_str(), &end, 10);
+    if (end == portText.c_str() || *end != '\0' || port <= 0 || port > 65535) {
+        throw std::invalid_argument("Invalid UDP port in --signal-candidate: " + endpoint);
+    }
+
+    screenshare::SignalingCandidate candidate;
+    candidate.ip = host;
+    candidate.port = static_cast<uint16_t>(port);
+    screenshare::ValidateSignalingCandidate(candidate);
+    return candidate;
+}
+
+void PrintSignalingPeers(const screenshare::SignalingRoomResponse& response)
+{
+    std::cout
+        << "signaling_result=" << (response.ok ? "ok" : "not_ok") << "\n"
+        << "signaling_peers=" << response.peers.size() << "\n";
+    for (const auto& peer : response.peers) {
+        std::cout
+            << "signaling_peer id=" << peer.peerId
+            << " last_seen=" << peer.lastSeen;
+        if (!peer.metadata.name.empty()) {
+            std::cout << " name=\"" << screenshare::SignalingJsonEscape(peer.metadata.name) << "\"";
+        }
+        if (!peer.metadata.platform.empty()) {
+            std::cout << " platform=\"" << screenshare::SignalingJsonEscape(peer.metadata.platform) << "\"";
+        }
+        std::cout << "\n";
+        for (const auto& candidate : peer.candidates) {
+            std::cout
+                << "signaling_candidate peer=" << peer.peerId
+                << " type=" << candidate.type
+                << " endpoint=" << candidate.ip << ":" << candidate.port
+                << " protocol=" << candidate.protocol << "\n";
+        }
+    }
+}
+
+void RunSignaling(const Options& options)
+{
+    screenshare::SignalingClientConfig config;
+    config.serverUrl = options.signalingServerUrl;
+    config.timeout = std::chrono::milliseconds(options.signalingTimeoutMs);
+    screenshare::SignalingClient client(std::move(config));
+
+    switch (options.signalingCommand) {
+    case SignalingCommand::Health:
+        client.Health();
+        std::cout << "signaling_health=ok\n";
+        break;
+    case SignalingCommand::Join: {
+        screenshare::SignalingPeerState peer;
+        peer.peerId = options.signalingPeerId;
+        peer.candidates.push_back(ParseSignalingCandidateEndpoint(options.signalingCandidate));
+        peer.metadata.name = options.signalingName;
+        peer.metadata.platform = options.signalingPlatform;
+        PrintSignalingPeers(client.Join(options.signalingRoomId, peer));
+        break;
+    }
+    case SignalingCommand::Peers:
+        PrintSignalingPeers(client.Peers(options.signalingRoomId, options.signalingPeerId));
+        break;
+    case SignalingCommand::Heartbeat:
+        client.Heartbeat(options.signalingRoomId, options.signalingPeerId);
+        std::cout << "signaling_heartbeat=ok\n";
+        break;
+    case SignalingCommand::Leave:
+        client.Leave(options.signalingRoomId, options.signalingPeerId);
+        std::cout << "signaling_leave=ok\n";
+        break;
+    case SignalingCommand::None:
+        throw std::logic_error("RunSignaling called without a signaling command");
+    }
+}
+
 void RunLanDiscovery(const Options& options)
 {
     const auto timeout = std::chrono::seconds(options.lanDiscoverSeconds);
@@ -6625,6 +6884,9 @@ int main(int argc, char** argv)
             exitCode = 0;
         } else if (options.natProbe) {
             RunNatProbe(options);
+            exitCode = 0;
+        } else if (HasSignalingCommand(options)) {
+            RunSignaling(options);
             exitCode = 0;
         } else if (options.stunQuery) {
             RunStunQuery(options);

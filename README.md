@@ -251,6 +251,22 @@ UDP probes. The intended next room flow is secure by default: the native app sho
 room key automatically, keep UDP video/audio encrypted even when the user does not type a password,
 and reserve visible passwords for an optional extra lock.
 
+The native CLI has standalone signaling diagnostics for testing a deployed Worker before it is wired
+into the live room flow:
+
+```powershell
+.\build\release\ScreenShare.exe --signal-health https://YOUR-WORKER.workers.dev
+.\build\release\ScreenShare.exe --signal-join https://YOUR-WORKER.workers.dev --signal-room room1 --signal-peer-id alice --signal-candidate 203.0.113.10:5000
+.\build\release\ScreenShare.exe --signal-peers https://YOUR-WORKER.workers.dev --signal-room room1 --signal-peer-id alice
+.\build\release\ScreenShare.exe --signal-heartbeat https://YOUR-WORKER.workers.dev --signal-room room1 --signal-peer-id alice
+.\build\release\ScreenShare.exe --signal-leave https://YOUR-WORKER.workers.dev --signal-room room1 --signal-peer-id alice
+```
+
+These commands do not start capture, preview, or audio. They only verify the HTTP room API and print
+returned peer UDP candidates. The later live flow should use STUN from the real UDP media socket,
+join the room with that candidate, poll/heartbeat while connecting, send UDP probes to returned
+peers, and then keep the media path direct.
+
 For a two-window test on one computer, the two windows cannot both own UDP port `5000`. Use separate
 ports, for example Join room on `5000` and Create room's Internet room port on `5001`, then create a
 fresh room invite after changing either port.

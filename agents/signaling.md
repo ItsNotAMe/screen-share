@@ -26,6 +26,14 @@
 
 ## Implementation Notes
 
-- Start with HTTP polling; no WebSockets needed yet.
+- Native diagnostics use `src/transport/SignalingClient.*` and WinHTTP.
+- Current CLI checks:
+  - `--signal-health URL`
+  - `--signal-join URL --signal-room ROOM --signal-peer-id PEER --signal-candidate IP:PORT`
+  - `--signal-peers URL --signal-room ROOM --signal-peer-id PEER`
+  - `--signal-heartbeat URL --signal-room ROOM --signal-peer-id PEER`
+  - `--signal-leave URL --signal-room ROOM --signal-peer-id PEER`
+- These are standalone diagnostics only; they do not yet start capture, preview, audio, STUN, or UDP probing.
+- Live integration should still use HTTP polling; no WebSockets needed yet.
 - Workers KV is acceptable for the first small implementation, but it is eventually consistent. If room state races become a real problem, move live room state to Durable Objects.
 - Keep room TTLs short and delete empty rooms.
