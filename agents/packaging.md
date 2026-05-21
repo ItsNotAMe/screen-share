@@ -13,6 +13,8 @@ Desired packaging behavior:
 
 When testing on another computer, delete old copied folders first. Stale DLLs next to the exe can cause Windows loader errors before the app starts.
 
+Do not mix MSYS2 `mingw64` and `ucrt64` runtime DLLs. `ScreenShareUi.exe` is built from the UCRT toolchain, so Qt, ICU, `libstdc++-6.dll`, `libgcc_s_seh-1.dll`, and `libwinpthread-1.dll` should all come from `C:/msys64/ucrt64/bin`.
+
 Current validation:
 
 - `cmake --build --preset debug` creates `build/debug/ScreenShare-debug-windows-x64.zip`.

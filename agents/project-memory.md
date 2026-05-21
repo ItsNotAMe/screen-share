@@ -198,5 +198,6 @@ WGC capture by default
   - Runtime live signaling now periodically rejoins the room as heartbeat/polling. Share can start before Watch and wait for peers; Watch can add newly discovered room peers as NAT probe targets; Share can add newly discovered watcher candidates to the active sender socket.
   - The UI default Internet path now uses Worker signaling: Share has Server/Room/Port and copies a `screenshare-room-v1` link; Watch pastes that link and launches `--watch PORT --signal-server URL --signal-room ROOM`.
   - Manual NAT invite fields still exist behind a fallback checkbox.
-  - `ScreenShareUi` runs `windeployqt` through `cmake/RunWindeployQt.cmake`; a broken local deploy tool should warn but not fail the compile or delete the exe.
+  - `ScreenShareUi` runs `windeployqt` through `cmake/RunWindeployQt.cmake`; the script always verifies/copies the current Qt DLLs/plugins and resolved MinGW runtime deps so the release UI does not keep stale mismatched Qt files.
+  - Keep the UI runtime consistently UCRT (`C:/msys64/ucrt64/bin`); mixing `mingw64` and `ucrt64` Qt/ICU/libstdc++ DLLs causes Windows entry-point loader errors before the app starts.
   - Remaining signaling TODO is hidden room-key encryption and real multi-computer validation.

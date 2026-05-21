@@ -1,3 +1,7 @@
+if(POLICY CMP0207)
+    cmake_policy(SET CMP0207 NEW)
+endif()
+
 foreach(required_var IN ITEMS INPUT_DIR EXECUTABLE_NAME SOURCE_DIR STAGING_DIR OUTPUT_ZIP)
     if(NOT DEFINED ${required_var} OR "${${required_var}}" STREQUAL "")
         message(FATAL_ERROR "${required_var} is required")
@@ -77,6 +81,7 @@ if(package_executables OR input_libraries)
     file(GET_RUNTIME_DEPENDENCIES
         RESOLVED_DEPENDENCIES_VAR resolved_runtime_dependencies
         UNRESOLVED_DEPENDENCIES_VAR unresolved_runtime_dependencies
+        CONFLICTING_DEPENDENCIES_PREFIX conflicting_runtime_dependencies
         ${runtime_dependency_inputs}
         DIRECTORIES ${runtime_search_dirs}
         PRE_EXCLUDE_REGEXES
@@ -89,6 +94,23 @@ if(package_executables OR input_libraries)
     list(SORT resolved_runtime_dependencies)
     foreach(resolved_runtime_dependency IN LISTS resolved_runtime_dependencies)
         copy_package_file("${resolved_runtime_dependency}")
+    endforeach()
+    foreach(conflicting_runtime_dependency_name IN LISTS conflicting_runtime_dependencies_FILENAMES)
+        set(conflicting_runtime_dependency_paths "${conflicting_runtime_dependencies_${conflicting_runtime_dependency_name}}")
+        set(preferred_runtime_dependency)
+        foreach(conflicting_runtime_dependency_path IN LISTS conflicting_runtime_dependency_paths)
+            get_filename_component(conflicting_runtime_dependency_dir "${conflicting_runtime_dependency_path}" DIRECTORY)
+            if(conflicting_runtime_dependency_dir STREQUAL INPUT_DIR)
+                set(preferred_runtime_dependency "${conflicting_runtime_dependency_path}")
+                break()
+            endif()
+        endforeach()
+        if(NOT preferred_runtime_dependency AND conflicting_runtime_dependency_paths)
+            list(GET conflicting_runtime_dependency_paths 0 preferred_runtime_dependency)
+        endif()
+        if(preferred_runtime_dependency)
+            copy_package_file("${preferred_runtime_dependency}")
+        endif()
     endforeach()
     foreach(unresolved_runtime_dependency IN LISTS unresolved_runtime_dependencies)
         if(NOT unresolved_runtime_dependency MATCHES "^(api-ms-win|ext-ms)-")

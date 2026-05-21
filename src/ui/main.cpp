@@ -55,12 +55,49 @@
 #include <string_view>
 #include <utility>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
 namespace {
 
 constexpr const char* kRoomLinkPrefix = "screenshare-room-v1;";
 
-QString enginePath()
+QStringList startupArguments(int argc, char** argv)
 {
+#ifdef _WIN32
+    int wideArgc = 0;
+    LPWSTR* wideArgv = CommandLineToArgvW(GetCommandLineW(), &wideArgc);
+    if (wideArgv != nullptr) {
+        QStringList arguments;
+        arguments.reserve(wideArgc);
+        for (int index = 0; index < wideArgc; ++index) {
+            arguments.push_back(QString::fromWCharArray(wideArgv[index]));
+        }
+        LocalFree(wideArgv);
+        return arguments;
+    }
+#endif
+
+    QStringList arguments;
+    arguments.reserve(argc);
+    for (int index = 0; index < argc; ++index) {
+        arguments.push_back(QString::fromLocal8Bit(argv[index]));
+    }
+    return arguments;
+}
+
+QString enginePath(const QString& uiExecutablePath = QString())
+{
+    if (!uiExecutablePath.isEmpty()) {
+        const QDir appDir(QFileInfo(uiExecutablePath).absoluteDir());
+        const QString besideUi = appDir.filePath("ScreenShare.exe");
+        if (QFileInfo::exists(besideUi)) {
+            return besideUi;
+        }
+    }
+
     const QDir appDir(QCoreApplication::applicationDirPath());
     const QString besideUi = appDir.filePath("ScreenShare.exe");
     if (QFileInfo::exists(besideUi)) {
@@ -4279,10 +4316,16 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 
 int main(int argc, char** argv)
 {
-    for (int index = 1; index < argc; ++index) {
-        const QString arg = QString::fromLocal8Bit(argv[index]);
+    bool guiSmokeTest = false;
+    const QStringList arguments = startupArguments(argc, argv);
+    for (int index = 1; index < arguments.size(); ++index) {
+        const QString arg = arguments[index];
+        if (arg == "--gui-smoke-test") {
+            guiSmokeTest = true;
+            continue;
+        }
         if (arg == "--self-test") {
-            if (!QFileInfo::exists(enginePath())) {
+            if (!QFileInfo::exists(enginePath(arguments.front()))) {
                 return 1;
             }
             const auto peers = parseTailscaleStatusReceivers(QString::fromUtf8(R"json({
@@ -4352,6 +4395,10 @@ int main(int argc, char** argv)
     QApplication app(argc, argv);
     QApplication::setStyle("Fusion");
     app.setStyleSheet(appStyleSheet(true));
+
+    if (guiSmokeTest) {
+        return 0;
+    }
 
     MainWindow window;
     window.show();
