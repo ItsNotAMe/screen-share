@@ -195,3 +195,5 @@ WGC capture by default
   - Future native room UX should generate a hidden room key automatically so users get encrypted UDP media without seeing an access-code field.
   - Native C++ diagnostic integration started with `src/transport/SignalingClient.*` plus `--signal-health`, `--signal-join`, `--signal-peers`, `--signal-heartbeat`, and `--signal-leave`.
   - These commands test the HTTP room API only; live Share/Watch integration still needs STUN from the real UDP socket, room polling, peer probing, and encrypted media startup.
+  - First live signaling bridge is in progress: `--watch PORT --signal-server URL --signal-room ROOM` publishes the watcher candidate and turns returned peers into NAT probe targets; `--share-room PORT --signal-server URL --signal-room ROOM` publishes the sharer candidate and turns returned peers into UDP send targets.
+  - Current live bridge does setup-time discovery only. Continuous heartbeat/polling, sharer-first waiting, late watcher updates, UI wiring, and hidden room-key encryption are still TODO.

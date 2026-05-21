@@ -34,6 +34,14 @@
   - `--signal-heartbeat URL --signal-room ROOM --signal-peer-id PEER`
   - `--signal-leave URL --signal-room ROOM --signal-peer-id PEER`
 - These are standalone diagnostics only; they do not yet start capture, preview, audio, STUN, or UDP probing.
+- First live bridge:
+  - `--watch PORT --signal-server URL --signal-room ROOM`
+  - `--share-room PORT --signal-server URL --signal-room ROOM`
+  - `--signal-stun HOST[:PORT]` overrides the default STUN server.
+  - `--signal-setup-seconds S` controls startup peer discovery.
+  - Watch room peers become NAT probe targets.
+  - Share room peers become UDP send targets on one local room port.
+- Current live bridge is setup-time discovery. Next work should add continuous room polling/heartbeat while waiting/running so sharer-first rooms and late/rejoining watchers work naturally.
 - Live integration should still use HTTP polling; no WebSockets needed yet.
 - Workers KV is acceptable for the first small implementation, but it is eventually consistent. If room state races become a real problem, move live room state to Durable Objects.
 - Keep room TTLs short and delete empty rooms.
