@@ -22,6 +22,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
+#include <QtCore/QUuid>
 #include <QtCore/QVector>
 #include <QtGui/QClipboard>
 #include <QtGui/QScreen>
@@ -55,6 +56,8 @@
 #include <utility>
 
 namespace {
+
+constexpr const char* kRoomLinkPrefix = "screenshare-room-v1;";
 
 QString enginePath()
 {
@@ -182,6 +185,72 @@ QString extractInviteLine(const QString& output)
         return invites.front();
     }
     return {};
+}
+
+QString generatedRoomId()
+{
+    const QString id = QUuid::createUuid().toString(QUuid::Id128).left(10).toLower();
+    return "room-" + id;
+}
+
+bool validRoomId(const QString& roomId)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9_-]{3,96}$"));
+    return pattern.match(roomId).hasMatch();
+}
+
+QString roomLink(const QString& server, const QString& room, int port)
+{
+    return QStringLiteral("%1server=%2;room=%3;port=%4")
+        .arg(QString::fromUtf8(kRoomLinkPrefix), server.trimmed(), room.trimmed(), QString::number(port));
+}
+
+bool parseRoomLink(const QString& text, QString* server, QString* room, int* port)
+{
+    const QString trimmed = text.trimmed();
+    const int prefixIndex = trimmed.indexOf(QString::fromUtf8(kRoomLinkPrefix));
+    if (prefixIndex < 0) {
+        return false;
+    }
+
+    const QString link = trimmed.mid(prefixIndex + QString::fromUtf8(kRoomLinkPrefix).size());
+    const QStringList fields = link.split(';', Qt::SkipEmptyParts);
+    QString parsedServer;
+    QString parsedRoom;
+    int parsedPort = 0;
+    for (const QString& field : fields) {
+        const int separator = field.indexOf('=');
+        if (separator <= 0) {
+            continue;
+        }
+        const QString key = field.left(separator).trimmed();
+        const QString value = field.mid(separator + 1).trimmed();
+        if (key == "server") {
+            parsedServer = value;
+        } else if (key == "room") {
+            parsedRoom = value;
+        } else if (key == "port") {
+            bool ok = false;
+            const int valuePort = value.toInt(&ok);
+            if (ok && valuePort >= 1 && valuePort <= 65535) {
+                parsedPort = valuePort;
+            }
+        }
+    }
+
+    if (parsedServer.isEmpty() || !validRoomId(parsedRoom) || parsedPort == 0) {
+        return false;
+    }
+    if (server != nullptr) {
+        *server = parsedServer;
+    }
+    if (room != nullptr) {
+        *room = parsedRoom;
+    }
+    if (port != nullptr) {
+        *port = parsedPort;
+    }
+    return true;
 }
 
 QString accessCodeFingerprintText(const QString& accessCode)
@@ -321,6 +390,7 @@ constexpr int kReceiverRefreshMs = 15000;
 constexpr int kPeerStatusPollMs = 500;
 constexpr int kPeerActivityTimeoutMs = 3000;
 constexpr const char* kDefaultStunServer = "stun.l.google.com:19302";
+constexpr const char* kDefaultSignalServer = "";
 
 enum class ReceiverSource {
     Lan,
@@ -691,6 +761,7 @@ public:
         connect(peerStatusTimer_, &QTimer::timeout, this, [this] { checkPeerActivityTimeout(); });
 
         buildUi();
+        updateInternetAdvancedVisibility();
         refreshReportPath();
         refreshCommand();
         setRunning(false);
@@ -913,9 +984,48 @@ private:
         auto* internetContent = new QVBoxLayout(internetPage);
         internetContent->setContentsMargins(0, 0, 0, 0);
         internetContent->setSpacing(8);
+        shareSignalServerEdit_ = new QLineEdit(QString::fromUtf8(kDefaultSignalServer));
+        shareSignalServerEdit_->setPlaceholderText("https://your-worker.workers.dev");
+        prepareInput(shareSignalServerEdit_);
+        addRow(internetContent, "Server", shareSignalServerEdit_);
+        shareSignalRoomEdit_ = new QLineEdit(generatedRoomId());
+        shareSignalRoomEdit_->setPlaceholderText("room-name");
+        auto* shareRoomRow = new QWidget;
+        shareRoomRow->setObjectName("FormRow");
+        auto* shareRoomLayout = new QHBoxLayout(shareRoomRow);
+        shareRoomLayout->setContentsMargins(0, 0, 0, 0);
+        shareRoomLayout->setSpacing(8);
+        newShareRoomButton_ = new QPushButton("New");
+        newShareRoomButton_->setObjectName("SecondaryButton");
+        newShareRoomButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
+        newShareRoomButton_->setIconSize(QSize(14, 14));
+        newShareRoomButton_->setCursor(Qt::PointingHandCursor);
+        newShareRoomButton_->setFixedHeight(kRowHeight);
+        copyShareRoomButton_ = new QPushButton("Copy");
+        copyShareRoomButton_->setObjectName("SecondaryButton");
+        copyShareRoomButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+        copyShareRoomButton_->setIconSize(QSize(14, 14));
+        copyShareRoomButton_->setCursor(Qt::PointingHandCursor);
+        copyShareRoomButton_->setFixedHeight(kRowHeight);
+        prepareInput(shareSignalRoomEdit_);
+        prepareInput(shareRoomRow);
+        shareRoomLayout->addWidget(shareSignalRoomEdit_, 1);
+        shareRoomLayout->addWidget(newShareRoomButton_);
+        shareRoomLayout->addWidget(copyShareRoomButton_);
+        addRow(internetContent, "Room", shareRoomRow);
         shareInvitePortSpin_ = new NoWheelSpinBox;
         shareInvitePortSpin_->setRange(1, 65535);
         shareInvitePortSpin_->setValue(5001);
+        prepareInput(shareInvitePortSpin_);
+        addRow(internetContent, "Port", shareInvitePortSpin_);
+        shareLegacyInviteCheck_ = new QCheckBox("Manual invite fallback");
+        shareLegacyInviteCheck_->setToolTip("Only use this if the Worker room path is unavailable.");
+        addFullRow(internetContent, shareLegacyInviteCheck_);
+        shareLegacyInvitePanel_ = new QWidget;
+        shareLegacyInvitePanel_->setObjectName("OptionPage");
+        auto* shareLegacyContent = new QVBoxLayout(shareLegacyInvitePanel_);
+        shareLegacyContent->setContentsMargins(0, 0, 0, 0);
+        shareLegacyContent->setSpacing(8);
         shareLocalInviteEdit_ = new QLineEdit;
         shareLocalInviteEdit_->setPlaceholderText("Create a room invite");
         auto* shareLocalInviteRow = new QWidget;
@@ -935,13 +1045,12 @@ private:
         copyShareInviteButton_->setIconSize(QSize(14, 14));
         copyShareInviteButton_->setCursor(Qt::PointingHandCursor);
         copyShareInviteButton_->setFixedHeight(kRowHeight);
-        prepareInput(shareInvitePortSpin_);
         prepareInput(shareLocalInviteEdit_);
         prepareInput(shareLocalInviteRow);
         shareLocalInviteLayout->addWidget(shareLocalInviteEdit_, 1);
         shareLocalInviteLayout->addWidget(createShareInviteButton_);
         shareLocalInviteLayout->addWidget(copyShareInviteButton_);
-        addRow(internetContent, "Room invite", shareLocalInviteRow);
+        addRow(shareLegacyContent, "Room invite", shareLocalInviteRow);
         auto* sharePeerInvitePanel = new QWidget;
         sharePeerInvitePanel->setObjectName("OptionPage");
         auto* sharePeerInviteLayout = new QVBoxLayout(sharePeerInvitePanel);
@@ -984,9 +1093,20 @@ private:
         sharePeerInviteButtonLayout->addWidget(removeSharePeerInviteButton_);
         sharePeerInviteButtonLayout->addWidget(clearSharePeerInviteButton_);
         sharePeerInviteLayout->addWidget(sharePeerInviteButtons);
-        addRow(internetContent, "Watcher invites", sharePeerInvitePanel);
-        addRow(internetContent, "Room port", shareInvitePortSpin_);
+        addRow(shareLegacyContent, "Watcher invites", sharePeerInvitePanel);
+        internetContent->addWidget(shareLegacyInvitePanel_);
 
+        connect(newShareRoomButton_, &QPushButton::clicked, this, [this] {
+            shareSignalRoomEdit_->setText(generatedRoomId());
+        });
+        connect(copyShareRoomButton_, &QPushButton::clicked, this, [this] {
+            copyShareRoomLink();
+        });
+        connect(shareLegacyInviteCheck_, &QCheckBox::toggled, this, [this] {
+            updateInternetAdvancedVisibility();
+            updateInternetStatus();
+            refreshCommand();
+        });
         connect(createShareInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Share); });
         connect(copyShareInviteButton_, &QPushButton::clicked, this, [this] {
             copyInvite(shareLocalInviteEdit_, "Room");
@@ -1158,6 +1278,36 @@ private:
         auto* watchInternetContent = new QVBoxLayout(watchInternetPage);
         watchInternetContent->setContentsMargins(0, 0, 0, 0);
         watchInternetContent->setSpacing(8);
+        watchSignalServerEdit_ = new QLineEdit(QString::fromUtf8(kDefaultSignalServer));
+        watchSignalServerEdit_->setPlaceholderText("https://your-worker.workers.dev");
+        prepareInput(watchSignalServerEdit_);
+        addRow(watchInternetContent, "Server", watchSignalServerEdit_);
+        watchSignalRoomEdit_ = new QLineEdit;
+        watchSignalRoomEdit_->setPlaceholderText("room-name");
+        auto* watchRoomRow = new QWidget;
+        watchRoomRow->setObjectName("FormRow");
+        auto* watchRoomLayout = new QHBoxLayout(watchRoomRow);
+        watchRoomLayout->setContentsMargins(0, 0, 0, 0);
+        watchRoomLayout->setSpacing(8);
+        pasteWatchRoomLinkButton_ = new QPushButton("Paste");
+        pasteWatchRoomLinkButton_->setObjectName("SecondaryButton");
+        pasteWatchRoomLinkButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
+        pasteWatchRoomLinkButton_->setIconSize(QSize(14, 14));
+        pasteWatchRoomLinkButton_->setCursor(Qt::PointingHandCursor);
+        pasteWatchRoomLinkButton_->setFixedHeight(kRowHeight);
+        prepareInput(watchSignalRoomEdit_);
+        prepareInput(watchRoomRow);
+        watchRoomLayout->addWidget(watchSignalRoomEdit_, 1);
+        watchRoomLayout->addWidget(pasteWatchRoomLinkButton_);
+        addRow(watchInternetContent, "Room", watchRoomRow);
+        watchLegacyInviteCheck_ = new QCheckBox("Manual invite fallback");
+        watchLegacyInviteCheck_->setToolTip("Only use this if the Worker room path is unavailable.");
+        addFullRow(watchInternetContent, watchLegacyInviteCheck_);
+        watchLegacyInvitePanel_ = new QWidget;
+        watchLegacyInvitePanel_->setObjectName("OptionPage");
+        auto* watchLegacyContent = new QVBoxLayout(watchLegacyInvitePanel_);
+        watchLegacyContent->setContentsMargins(0, 0, 0, 0);
+        watchLegacyContent->setSpacing(8);
         watchPeerInviteEdit_ = new QLineEdit;
         watchPeerInviteEdit_->setPlaceholderText("Paste room invite from sharer");
         auto* watchPeerInviteRow = new QWidget;
@@ -1175,7 +1325,7 @@ private:
         prepareInput(watchPeerInviteRow);
         watchPeerInviteLayout->addWidget(watchPeerInviteEdit_, 1);
         watchPeerInviteLayout->addWidget(pasteWatchPeerInviteButton_);
-        addRow(watchInternetContent, "Room invite", watchPeerInviteRow);
+        addRow(watchLegacyContent, "Room invite", watchPeerInviteRow);
         watchLocalInviteEdit_ = new QLineEdit;
         watchLocalInviteEdit_->setPlaceholderText("Create response invite");
         auto* watchLocalInviteRow = new QWidget;
@@ -1200,7 +1350,8 @@ private:
         watchLocalInviteLayout->addWidget(watchLocalInviteEdit_, 1);
         watchLocalInviteLayout->addWidget(createWatchInviteButton_);
         watchLocalInviteLayout->addWidget(copyWatchInviteButton_);
-        addRow(watchInternetContent, "My invite", watchLocalInviteRow);
+        addRow(watchLegacyContent, "My invite", watchLocalInviteRow);
+        watchInternetContent->addWidget(watchLegacyInvitePanel_);
 
         watchConnectionStack_->addPage(watchNearbyPage);
         watchConnectionStack_->addPage(watchInternetPage);
@@ -1210,6 +1361,14 @@ private:
         watchInternetStatusLabel_->setWordWrap(true);
         watchConnectionContent->addWidget(watchInternetStatusLabel_);
 
+        connect(pasteWatchRoomLinkButton_, &QPushButton::clicked, this, [this] {
+            pasteWatchRoomLink();
+        });
+        connect(watchLegacyInviteCheck_, &QCheckBox::toggled, this, [this] {
+            updateInternetAdvancedVisibility();
+            updateInternetStatus();
+            refreshCommand();
+        });
         connect(pasteWatchPeerInviteButton_, &QPushButton::clicked, this, [this] {
             pasteInviteFromClipboard(watchPeerInviteEdit_, "Room");
         });
@@ -1371,6 +1530,10 @@ private:
 
         bindLineEdit(shareHostEdit_);
         connect(shareHostEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
+        bindLineEdit(shareSignalServerEdit_);
+        connect(shareSignalServerEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
+        bindLineEdit(shareSignalRoomEdit_);
+        connect(shareSignalRoomEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(shareLocalInviteEdit_);
         connect(shareLocalInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInviteButtons(); });
         bindSpinBox(shareInvitePortSpin_);
@@ -1394,6 +1557,10 @@ private:
             updateInternetStatus();
         });
         connect(lanDiscoverableCheck_, &QCheckBox::toggled, this, [this] { updateInternetStatus(); });
+        bindLineEdit(watchSignalServerEdit_);
+        connect(watchSignalServerEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
+        bindLineEdit(watchSignalRoomEdit_);
+        connect(watchSignalRoomEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(watchPeerInviteEdit_);
         connect(watchPeerInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(watchLocalInviteEdit_);
@@ -1521,6 +1688,81 @@ private:
         }
         QApplication::clipboard()->setText(invite);
         appendOutput(label + " invite copied to clipboard\n");
+    }
+
+    bool shareUsesLegacyInvite() const
+    {
+        return shareLegacyInviteCheck_ != nullptr && shareLegacyInviteCheck_->isChecked();
+    }
+
+    bool watchUsesLegacyInvite() const
+    {
+        return watchLegacyInviteCheck_ != nullptr && watchLegacyInviteCheck_->isChecked();
+    }
+
+    QString shareSignalServer() const
+    {
+        return shareSignalServerEdit_ == nullptr ? QString() : shareSignalServerEdit_->text().trimmed();
+    }
+
+    QString watchSignalServer() const
+    {
+        return watchSignalServerEdit_ == nullptr ? QString() : watchSignalServerEdit_->text().trimmed();
+    }
+
+    QString shareSignalRoom() const
+    {
+        return shareSignalRoomEdit_ == nullptr ? QString() : shareSignalRoomEdit_->text().trimmed();
+    }
+
+    QString watchSignalRoom() const
+    {
+        return watchSignalRoomEdit_ == nullptr ? QString() : watchSignalRoomEdit_->text().trimmed();
+    }
+
+    void updateInternetAdvancedVisibility()
+    {
+        if (shareLegacyInvitePanel_ != nullptr) {
+            shareLegacyInvitePanel_->setVisible(shareUsesLegacyInvite());
+        }
+        if (watchLegacyInvitePanel_ != nullptr) {
+            watchLegacyInvitePanel_->setVisible(watchUsesLegacyInvite());
+        }
+    }
+
+    void copyShareRoomLink()
+    {
+        const QString server = shareSignalServer();
+        const QString room = shareSignalRoom();
+        if (server.isEmpty()) {
+            QMessageBox::information(this, "Room", "Enter your signaling server first.");
+            shareSignalServerEdit_->setFocus();
+            return;
+        }
+        if (!validRoomId(room)) {
+            QMessageBox::information(this, "Room", "Room names need 3-96 letters, numbers, dashes, or underscores.");
+            shareSignalRoomEdit_->setFocus();
+            return;
+        }
+
+        QApplication::clipboard()->setText(roomLink(server, room, shareInvitePortSpin_->value()));
+        appendOutput("Room link copied to clipboard\n");
+    }
+
+    void pasteWatchRoomLink()
+    {
+        QString server;
+        QString room;
+        int port = 0;
+        if (!parseRoomLink(QApplication::clipboard()->text(), &server, &room, &port)) {
+            QMessageBox::warning(this, "Room", "The clipboard does not contain a ScreenShare room link.");
+            return;
+        }
+
+        watchSignalServerEdit_->setText(server);
+        watchSignalRoomEdit_->setText(room);
+        watchPortSpin_->setValue(port);
+        appendOutput("Room link pasted from clipboard\n");
     }
 
     void pasteInviteFromClipboard(QLineEdit* edit, const QString& label)
@@ -1863,14 +2105,23 @@ private:
         QStringList args;
         if (shareMode()) {
             if (shareConnectionMethod() == ShareConnectionMethod::InternetInvite) {
-                const QString localInvite = shareLocalInviteEdit_->text().trimmed();
-                const QStringList watcherInvites = currentWatcherResponseInvites();
-                args << "--share" << (watcherInvites.isEmpty() ? localInvite : watcherInvites.front());
-                if (!localInvite.isEmpty()) {
-                    args << "--local-invite" << localInvite;
-                }
-                for (int index = 1; index < watcherInvites.size(); ++index) {
-                    args << "--share-target" << watcherInvites[index];
+                if (shareUsesLegacyInvite()) {
+                    const QString localInvite = shareLocalInviteEdit_->text().trimmed();
+                    const QStringList watcherInvites = currentWatcherResponseInvites();
+                    args << "--share" << (watcherInvites.isEmpty() ? localInvite : watcherInvites.front());
+                    if (!localInvite.isEmpty()) {
+                        args << "--local-invite" << localInvite;
+                    }
+                    for (int index = 1; index < watcherInvites.size(); ++index) {
+                        args << "--share-target" << watcherInvites[index];
+                    }
+                } else {
+                    args << "--share-room" << QString::number(shareInvitePortSpin_->value())
+                         << "--signal-server" << shareSignalServer()
+                         << "--signal-room" << shareSignalRoom();
+                    if (!stunServer().isEmpty()) {
+                        args << "--signal-stun" << stunServer();
+                    }
                 }
             } else {
                 const QStringList targets = currentDirectShareTargets();
@@ -1902,9 +2153,17 @@ private:
                     args << "--lan-advertise";
                 }
             } else {
-                const QString peerInvite = watchPeerInviteEdit_->text().trimmed();
-                if (!peerInvite.isEmpty()) {
-                    args << "--peer-invite" << peerInvite;
+                if (watchUsesLegacyInvite()) {
+                    const QString peerInvite = watchPeerInviteEdit_->text().trimmed();
+                    if (!peerInvite.isEmpty()) {
+                        args << "--peer-invite" << peerInvite;
+                    }
+                } else {
+                    args << "--signal-server" << watchSignalServer()
+                         << "--signal-room" << watchSignalRoom();
+                    if (!stunServer().isEmpty()) {
+                        args << "--signal-stun" << stunServer();
+                    }
                 }
             }
             args << "--preview-latency-ms" << QString::number(previewLatencySpin_->value());
@@ -1981,6 +2240,29 @@ private:
         }
     }
 
+    bool validateWorkerRoomFields(bool share)
+    {
+        QLineEdit* serverEdit = share ? shareSignalServerEdit_ : watchSignalServerEdit_;
+        QLineEdit* roomEdit = share ? shareSignalRoomEdit_ : watchSignalRoomEdit_;
+        const QString server = serverEdit == nullptr ? QString() : serverEdit->text().trimmed();
+        const QString room = roomEdit == nullptr ? QString() : roomEdit->text().trimmed();
+        if (server.isEmpty()) {
+            QMessageBox::warning(this, "Missing server", "Enter your signaling server URL.");
+            if (serverEdit != nullptr) {
+                serverEdit->setFocus();
+            }
+            return false;
+        }
+        if (!validRoomId(room)) {
+            QMessageBox::warning(this, "Room name", "Room names need 3-96 letters, numbers, dashes, or underscores.");
+            if (roomEdit != nullptr) {
+                roomEdit->setFocus();
+            }
+            return false;
+        }
+        return true;
+    }
+
     void startProcess()
     {
         if (process_->state() != QProcess::NotRunning) {
@@ -1989,7 +2271,11 @@ private:
         if (shareMode()) {
             const ShareConnectionMethod method = shareConnectionMethod();
             if (method == ShareConnectionMethod::InternetInvite) {
-                if (shareLocalInviteEdit_->text().trimmed().isEmpty()) {
+                if (!shareUsesLegacyInvite()) {
+                    if (!validateWorkerRoomFields(true)) {
+                        return;
+                    }
+                } else if (shareLocalInviteEdit_->text().trimmed().isEmpty()) {
                     QMessageBox::warning(
                         this,
                         "Missing room invite",
@@ -2012,6 +2298,11 @@ private:
                         "Choose one or more nearby devices, or switch the connection method to Manual address.");
                     return;
                 }
+            }
+        } else if (watchConnectionMethod() == WatchConnectionMethod::InternetInvite &&
+                   !watchUsesLegacyInvite()) {
+            if (!validateWorkerRoomFields(false)) {
+                return;
             }
         } else if (watchConnectionMethod() == WatchConnectionMethod::InternetInvite &&
                    watchPeerInviteEdit_->text().trimmed().isEmpty()) {
@@ -2855,9 +3146,19 @@ private:
 
     void updateInviteButtons()
     {
+        updateInternetAdvancedVisibility();
         const bool creating = inviteGenerating();
         const bool running = process_ != nullptr && process_->state() != QProcess::NotRunning;
         const bool canCreate = !creating && !running;
+        if (newShareRoomButton_ != nullptr) {
+            newShareRoomButton_->setEnabled(!running);
+        }
+        if (copyShareRoomButton_ != nullptr) {
+            copyShareRoomButton_->setEnabled(!running);
+        }
+        if (pasteWatchRoomLinkButton_ != nullptr) {
+            pasteWatchRoomLinkButton_->setEnabled(!running);
+        }
         if (createShareInviteButton_ != nullptr) {
             createShareInviteButton_->setEnabled(canCreate);
             createShareInviteButton_->setText(creating && inviteTarget_ == InviteTarget::Share ? "Creating..." : "Create");
@@ -2919,8 +3220,11 @@ private:
                    QString::number(watchPortSpin_->value()) +
                    ". Toggle LAN discoverable if friends should find this room automatically.";
         case WatchConnectionMethod::InternetInvite:
-            return watchRoomInviteStatusText(
-                watchPeerInviteEdit_ != nullptr && !watchPeerInviteEdit_->text().trimmed().isEmpty());
+            if (watchUsesLegacyInvite()) {
+                return watchRoomInviteStatusText(
+                    watchPeerInviteEdit_ != nullptr && !watchPeerInviteEdit_->text().trimmed().isEmpty());
+            }
+            return watchWorkerRoomStatusText();
         }
         return {};
     }
@@ -2948,11 +3252,36 @@ private:
             return QStringLiteral("Ready to start: sharing to %1 manual watchers.").arg(targets.size());
         }
         case ShareConnectionMethod::InternetInvite:
-            return shareRoomInviteStatusText(
-                !shareLocalInviteEdit_->text().trimmed().isEmpty(),
-                currentWatcherResponseInvites().size());
+            if (shareUsesLegacyInvite()) {
+                return shareRoomInviteStatusText(
+                    !shareLocalInviteEdit_->text().trimmed().isEmpty(),
+                    currentWatcherResponseInvites().size());
+            }
+            return shareWorkerRoomStatusText();
         }
         return {};
+    }
+
+    QString shareWorkerRoomStatusText() const
+    {
+        if (shareSignalServer().isEmpty()) {
+            return "Enter your signaling server, then copy the room link to your friend.";
+        }
+        if (!validRoomId(shareSignalRoom())) {
+            return "Choose a room name with letters, numbers, dashes, or underscores.";
+        }
+        return "Ready: copy the room link, send it to your friend, then start sharing.";
+    }
+
+    QString watchWorkerRoomStatusText() const
+    {
+        if (watchSignalServer().isEmpty() || watchSignalRoom().isEmpty()) {
+            return "Paste the room link from the sharer, or enter the server and room manually.";
+        }
+        if (!validRoomId(watchSignalRoom())) {
+            return "Room names need letters, numbers, dashes, or underscores.";
+        }
+        return "Ready to watch: this room will use signaling and direct UDP.";
     }
 
     QString shareRoomInviteStatusText(bool hasRoomInvite, int watcherInviteCount) const
@@ -3352,6 +3681,12 @@ private:
     QPushButton* manualConnectionButton_ = nullptr;
     PageStack* shareConnectionStack_ = nullptr;
     ShareConnectionMethod shareConnectionMethod_ = ShareConnectionMethod::InternetInvite;
+    QLineEdit* shareSignalServerEdit_ = nullptr;
+    QLineEdit* shareSignalRoomEdit_ = nullptr;
+    QPushButton* newShareRoomButton_ = nullptr;
+    QPushButton* copyShareRoomButton_ = nullptr;
+    QCheckBox* shareLegacyInviteCheck_ = nullptr;
+    QWidget* shareLegacyInvitePanel_ = nullptr;
     QLineEdit* shareHostEdit_ = nullptr;
     QLineEdit* shareLocalInviteEdit_ = nullptr;
     QListWidget* sharePeerInviteList_ = nullptr;
@@ -3376,6 +3711,11 @@ private:
     QPushButton* watchInternetButton_ = nullptr;
     PageStack* watchConnectionStack_ = nullptr;
     WatchConnectionMethod watchConnectionMethod_ = WatchConnectionMethod::InternetInvite;
+    QLineEdit* watchSignalServerEdit_ = nullptr;
+    QLineEdit* watchSignalRoomEdit_ = nullptr;
+    QPushButton* pasteWatchRoomLinkButton_ = nullptr;
+    QCheckBox* watchLegacyInviteCheck_ = nullptr;
+    QWidget* watchLegacyInvitePanel_ = nullptr;
     QLineEdit* watchPeerInviteEdit_ = nullptr;
     QPushButton* pasteWatchPeerInviteButton_ = nullptr;
     QLineEdit* watchLocalInviteEdit_ = nullptr;
@@ -3981,6 +4321,14 @@ int main(int argc, char** argv)
             const auto displays = parseDisplayChoices(QString::fromUtf8(
                 "[0] \\\\.\\DISPLAY1 2560x1440 at (0,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"
                 "[1] \\\\.\\DISPLAY2 1920x1080 at (-1920,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"));
+            QString parsedRoomServer;
+            QString parsedRoom;
+            int parsedRoomPort = 0;
+            const bool parsedRoomLink = parseRoomLink(
+                "copied room: screenshare-room-v1;server=https://example.workers.dev;room=room-abc_123;port=5001",
+                &parsedRoomServer,
+                &parsedRoom,
+                &parsedRoomPort);
             return peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("ss1e:") &&
@@ -3993,7 +4341,11 @@ int main(int argc, char** argv)
                 displays.size() == 2 &&
                 displays[1].index == 1 &&
                 displays[1].width == 1920 &&
-                displays[1].left == -1920 ? 0 : 2;
+                displays[1].left == -1920 &&
+                parsedRoomLink &&
+                parsedRoomServer == "https://example.workers.dev" &&
+                parsedRoom == "room-abc_123" &&
+                parsedRoomPort == 5001 ? 0 : 2;
         }
     }
 

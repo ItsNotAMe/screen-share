@@ -145,13 +145,10 @@ if(SCREENSHARE_BUILD_QT_UI)
         )
         if(WIN32 AND SCREENSHARE_WINDEPLOYQT_EXECUTABLE)
             add_custom_command(TARGET ScreenShareUi POST_BUILD
-                COMMAND "${SCREENSHARE_WINDEPLOYQT_EXECUTABLE}"
-                    --no-translations
-                    --no-system-d3d-compiler
-                    --no-system-dxc-compiler
-                    --no-opengl-sw
-                    --compiler-runtime
-                    "$<TARGET_FILE:ScreenShareUi>"
+                COMMAND "${CMAKE_COMMAND}"
+                    "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_WINDEPLOYQT_EXECUTABLE}"
+                    "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:ScreenShareUi>"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
                 COMMENT "Deploying Qt runtime next to ScreenShareUi.exe"
                 VERBATIM
             )

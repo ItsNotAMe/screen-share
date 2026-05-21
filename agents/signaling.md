@@ -44,6 +44,7 @@
 - Runtime live signaling uses periodic `join` calls as both heartbeat and peer refresh.
 - Share no longer requires Watch to be present during startup; it can wait for room peers and add them while running.
 - Watch can add newly discovered room peers as NAT probe targets while running.
+- The Qt UI's default Internet path now launches the live signaling bridge directly and exchanges a small `screenshare-room-v1` link that contains server, room ID, and port. This link is not a secret.
 - Live integration should still use HTTP polling; no WebSockets needed yet.
 - Workers KV is acceptable for the first small implementation, but it is eventually consistent. If room state races become a real problem, move live room state to Durable Objects.
 - Keep room TTLs short and delete empty rooms.

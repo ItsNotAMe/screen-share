@@ -196,4 +196,7 @@ WGC capture by default
   - Native C++ diagnostic integration started with `src/transport/SignalingClient.*` plus `--signal-health`, `--signal-join`, `--signal-peers`, `--signal-heartbeat`, and `--signal-leave`.
   - Live Share/Watch CLI integration is in progress: `--watch PORT --signal-server URL --signal-room ROOM` publishes the watcher candidate and turns returned peers into NAT probe targets; `--share-room PORT --signal-server URL --signal-room ROOM` publishes the sharer candidate and turns returned peers into UDP send targets.
   - Runtime live signaling now periodically rejoins the room as heartbeat/polling. Share can start before Watch and wait for peers; Watch can add newly discovered room peers as NAT probe targets; Share can add newly discovered watcher candidates to the active sender socket.
-  - Remaining signaling TODO is UI wiring for the Worker room flow, hidden room-key encryption, and real multi-computer validation.
+  - The UI default Internet path now uses Worker signaling: Share has Server/Room/Port and copies a `screenshare-room-v1` link; Watch pastes that link and launches `--watch PORT --signal-server URL --signal-room ROOM`.
+  - Manual NAT invite fields still exist behind a fallback checkbox.
+  - `ScreenShareUi` runs `windeployqt` through `cmake/RunWindeployQt.cmake`; a broken local deploy tool should warn but not fail the compile or delete the exe.
+  - Remaining signaling TODO is hidden room-key encryption and real multi-computer validation.
