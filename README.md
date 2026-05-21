@@ -94,8 +94,8 @@ direct-share path.
 Create room supports target lists for direct paths and one shared invite for Internet paths. Nearby
 can select multiple watchers from the list, Manual accepts multiple comma/space-separated
 `HOST:PORT` targets in the Targets field, and Internet lets multiple watchers paste the same room
-invite. If some watchers cannot connect through that shared invite, paste their watcher response
-invites into the optional Watcher invites field.
+invite. If some watchers cannot connect through that shared invite, paste each watcher response
+invite into the optional Watcher invites list.
 
 Common live session:
 
@@ -200,7 +200,7 @@ the Internet tab in Create room. The Create button copies the sharer's room invi
 and shows it in the UI. Send that same invite to each watcher. They open Join room, switch to Internet,
 paste the room invite, and can create/copy their own My invite response from the same listen port.
 If the one-invite path stalls for any watcher, paste that watcher's response invite into Share's
-Watcher invites field before starting Share. The Paste buttons can extract an invite from either a raw invite line or
+Watcher invites list before starting Share. The Paste buttons can extract invite links from either raw invite lines or
 copied command output, and the compact status line shows what is still missing before starting. While
 an invite session is running, that same status line switches to live setup states such as probing,
 probe seen, connected, receiving, or rejected.
@@ -215,7 +215,7 @@ Two-computer UI checklist for invite testing:
    Internet, and paste the room invite.
 5. For Internet NAT pairs that do not connect with the shared room invite, click Create beside My
    invite on Watch, send that response invite back to the sharer, and paste it into Share's Watcher
-   invites field. LAN/Tailscale/reachable paths can skip this response invite.
+   invites list. LAN/Tailscale/reachable paths can skip this response invite.
 6. Start watching, then start sharing.
 7. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
    If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both

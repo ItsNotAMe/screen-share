@@ -2,7 +2,7 @@
 
 ## Ordered Roadmap
 
-1. Validate NAT multi-viewer rooms with real computers using one sharer invite plus optional watcher response invites. Follow-ups after testing: per-viewer connection/health display, clearer per-viewer labels, optional per-viewer bandwidth policy, and better fallback UX for watchers whose NAT still needs a response invite.
+1. Validate NAT multi-viewer rooms with real computers using one sharer invite plus the optional watcher response invite list. Follow-ups after testing: per-viewer connection/health display, optional per-viewer bandwidth policy, and better fallback UX for watchers whose NAT still needs a response invite.
 2. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list, locked-room indicators, access-code prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
 3. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
 4. Revisit no-port-forward Internet/NAT only if direct STUN/manual invite/UDP hole punching proves insufficient.

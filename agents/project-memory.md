@@ -12,8 +12,8 @@
 
 ## Current State
 
-- `main` is synced to `origin/main` at PR #86, `a729b3d Merge pull request #86 from ItsNotAMe/feature/clear-room-ui`.
-- Active branch: `main`.
+- `main` is synced to `origin/main` at PR #92, `930085c Merge pull request #92 from ItsNotAMe/feature/ui-extra-viewers`.
+- Active branch: `feature/nat-multi-viewer-targets` for PR #93.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
@@ -182,5 +182,5 @@ WGC capture by default
   - Each target owns its own UDP socket, queue, and feedback path; sender telemetry aggregates counters and reports `udp_targets`, `udp_active_targets`, and `udp_failed_targets`.
   - Runtime send/feedback/flush errors on one target should mark only that target failed and keep the remaining viewers alive.
   - The Qt UI exposes direct multi-target sharing through Nearby multi-select and Manual comma/space-separated target lists.
-  - NAT multi-viewer direction is one shared sharer room invite plus optional watcher response invites. Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends outward to any pasted watcher response invite endpoints, and fans out the encoded stream through the same sender socket. Per-watcher sharer-local invite rows are intentionally not the main UI model.
+  - NAT multi-viewer direction is one shared sharer room invite plus an optional watcher response invite list. Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends outward to any pasted watcher response invite endpoints, and fans out the encoded stream through the same sender socket. Per-watcher sharer-local invite rows are intentionally not the main UI model.
   - Remaining multi-viewer work is per-viewer health and optional per-viewer bandwidth policy.

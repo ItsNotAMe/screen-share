@@ -942,24 +942,49 @@ private:
         shareLocalInviteLayout->addWidget(createShareInviteButton_);
         shareLocalInviteLayout->addWidget(copyShareInviteButton_);
         addRow(internetContent, "Room invite", shareLocalInviteRow);
-        sharePeerInviteEdit_ = new QLineEdit;
-        sharePeerInviteEdit_->setPlaceholderText("Optional watcher response invites");
-        auto* sharePeerInviteRow = new QWidget;
-        sharePeerInviteRow->setObjectName("FormRow");
-        auto* sharePeerInviteLayout = new QHBoxLayout(sharePeerInviteRow);
+        auto* sharePeerInvitePanel = new QWidget;
+        sharePeerInvitePanel->setObjectName("OptionPage");
+        auto* sharePeerInviteLayout = new QVBoxLayout(sharePeerInvitePanel);
         sharePeerInviteLayout->setContentsMargins(0, 0, 0, 0);
         sharePeerInviteLayout->setSpacing(8);
+        sharePeerInviteList_ = new QListWidget;
+        sharePeerInviteList_->setObjectName("WatcherInviteList");
+        sharePeerInviteList_->setMinimumHeight(92);
+        sharePeerInviteList_->setUniformItemSizes(true);
+        sharePeerInviteList_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        sharePeerInviteList_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        sharePeerInviteLayout->addWidget(sharePeerInviteList_);
+        auto* sharePeerInviteButtons = new QWidget;
+        sharePeerInviteButtons->setObjectName("FormRow");
+        auto* sharePeerInviteButtonLayout = new QHBoxLayout(sharePeerInviteButtons);
+        sharePeerInviteButtonLayout->setContentsMargins(0, 0, 0, 0);
+        sharePeerInviteButtonLayout->setSpacing(8);
         pasteSharePeerInviteButton_ = new QPushButton("Paste");
         pasteSharePeerInviteButton_->setObjectName("SecondaryButton");
         pasteSharePeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
         pasteSharePeerInviteButton_->setIconSize(QSize(14, 14));
         pasteSharePeerInviteButton_->setCursor(Qt::PointingHandCursor);
         pasteSharePeerInviteButton_->setFixedHeight(kRowHeight);
-        prepareInput(sharePeerInviteEdit_);
-        prepareInput(sharePeerInviteRow);
-        sharePeerInviteLayout->addWidget(sharePeerInviteEdit_, 1);
-        sharePeerInviteLayout->addWidget(pasteSharePeerInviteButton_);
-        addRow(internetContent, "Watcher invites", sharePeerInviteRow);
+        removeSharePeerInviteButton_ = new QPushButton("Remove");
+        removeSharePeerInviteButton_->setObjectName("SecondaryButton");
+        removeSharePeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogCancelButton));
+        removeSharePeerInviteButton_->setIconSize(QSize(14, 14));
+        removeSharePeerInviteButton_->setCursor(Qt::PointingHandCursor);
+        removeSharePeerInviteButton_->setFixedHeight(kRowHeight);
+        clearSharePeerInviteButton_ = new QPushButton("Clear");
+        clearSharePeerInviteButton_->setObjectName("SecondaryButton");
+        clearSharePeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogDiscardButton));
+        clearSharePeerInviteButton_->setIconSize(QSize(14, 14));
+        clearSharePeerInviteButton_->setCursor(Qt::PointingHandCursor);
+        clearSharePeerInviteButton_->setFixedHeight(kRowHeight);
+        prepareInput(sharePeerInviteList_);
+        prepareInput(sharePeerInvitePanel);
+        sharePeerInviteButtonLayout->addStretch(1);
+        sharePeerInviteButtonLayout->addWidget(pasteSharePeerInviteButton_);
+        sharePeerInviteButtonLayout->addWidget(removeSharePeerInviteButton_);
+        sharePeerInviteButtonLayout->addWidget(clearSharePeerInviteButton_);
+        sharePeerInviteLayout->addWidget(sharePeerInviteButtons);
+        addRow(internetContent, "Watcher invites", sharePeerInvitePanel);
         addRow(internetContent, "Room port", shareInvitePortSpin_);
 
         connect(createShareInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Share); });
@@ -967,7 +992,16 @@ private:
             copyInvite(shareLocalInviteEdit_, "Room");
         });
         connect(pasteSharePeerInviteButton_, &QPushButton::clicked, this, [this] {
-            pasteInviteFromClipboard(sharePeerInviteEdit_, "Watcher");
+            pasteWatcherInvitesFromClipboard();
+        });
+        connect(removeSharePeerInviteButton_, &QPushButton::clicked, this, [this] {
+            removeSelectedWatcherInvites();
+        });
+        connect(clearSharePeerInviteButton_, &QPushButton::clicked, this, [this] {
+            clearWatcherInvites();
+        });
+        connect(sharePeerInviteList_, &QListWidget::itemSelectionChanged, this, [this] {
+            updateInviteButtons();
         });
 
         auto* manualPage = new QWidget;
@@ -1339,8 +1373,6 @@ private:
         connect(shareHostEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(shareLocalInviteEdit_);
         connect(shareLocalInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInviteButtons(); });
-        bindLineEdit(sharePeerInviteEdit_);
-        connect(sharePeerInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindSpinBox(shareInvitePortSpin_);
         connect(shareInvitePortSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { clearShareLocalInvite(); });
         bindSpinBox(sharePortSpin_);
@@ -1503,6 +1535,114 @@ private:
         }
         edit->setText(invite);
         appendOutput(label + " invite pasted from clipboard\n");
+    }
+
+    QString watcherInviteDisplayText(int index, const QString& invite) const
+    {
+        QString shortened = invite;
+        if (shortened.size() > 44) {
+            shortened = shortened.left(24) + "..." + shortened.right(12);
+        }
+        return QStringLiteral("Watcher %1  %2").arg(index + 1).arg(shortened);
+    }
+
+    void refreshWatcherInviteListLabels()
+    {
+        if (sharePeerInviteList_ == nullptr) {
+            return;
+        }
+        for (int index = 0; index < sharePeerInviteList_->count(); ++index) {
+            auto* item = sharePeerInviteList_->item(index);
+            if (item == nullptr) {
+                continue;
+            }
+            const QString invite = item->data(Qt::UserRole).toString();
+            item->setText(watcherInviteDisplayText(index, invite));
+            item->setToolTip(invite);
+        }
+    }
+
+    int addWatcherInvites(const QStringList& invites)
+    {
+        if (sharePeerInviteList_ == nullptr) {
+            return 0;
+        }
+
+        int added = 0;
+        for (const QString& rawInvite : invites) {
+            const QString invite = normalizeInviteText(rawInvite);
+            if (!looksLikeNatInvite(invite)) {
+                continue;
+            }
+            bool exists = false;
+            for (int index = 0; index < sharePeerInviteList_->count(); ++index) {
+                const auto* item = sharePeerInviteList_->item(index);
+                if (item != nullptr && item->data(Qt::UserRole).toString() == invite) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (exists) {
+                continue;
+            }
+            auto* item = new QListWidgetItem;
+            item->setData(Qt::UserRole, invite);
+            sharePeerInviteList_->addItem(item);
+            ++added;
+        }
+
+        if (added > 0) {
+            refreshWatcherInviteListLabels();
+            updateInternetStatus();
+            refreshCommand();
+            updateInviteButtons();
+        }
+        return added;
+    }
+
+    void pasteWatcherInvitesFromClipboard()
+    {
+        const QStringList invites = extractInviteLines(QApplication::clipboard()->text());
+        if (invites.isEmpty()) {
+            QMessageBox::warning(this, "Watcher invites", "The clipboard does not contain a ScreenShare invite.");
+            return;
+        }
+        const int added = addWatcherInvites(invites);
+        if (added == 0) {
+            QMessageBox::information(this, "Watcher invites", "Those watcher invites are already in the list.");
+            return;
+        }
+        appendOutput(QStringLiteral("Added %1 watcher invite%2\n")
+            .arg(added)
+            .arg(added == 1 ? QString() : QStringLiteral("s")));
+    }
+
+    void removeSelectedWatcherInvites()
+    {
+        if (sharePeerInviteList_ == nullptr) {
+            return;
+        }
+        const QList<QListWidgetItem*> selected = sharePeerInviteList_->selectedItems();
+        for (auto* item : selected) {
+            delete sharePeerInviteList_->takeItem(sharePeerInviteList_->row(item));
+        }
+        if (!selected.isEmpty()) {
+            refreshWatcherInviteListLabels();
+            updateInternetStatus();
+            refreshCommand();
+            updateInviteButtons();
+        }
+    }
+
+    void clearWatcherInvites()
+    {
+        if (sharePeerInviteList_ == nullptr || sharePeerInviteList_->count() == 0) {
+            return;
+        }
+        sharePeerInviteList_->clear();
+        updateInternetStatus();
+        refreshCommand();
+        updateInviteButtons();
     }
 
     bool inviteGenerating() const
@@ -1705,10 +1845,17 @@ private:
 
     QStringList currentWatcherResponseInvites() const
     {
-        if (sharePeerInviteEdit_ == nullptr) {
+        QStringList invites;
+        if (sharePeerInviteList_ == nullptr) {
             return {};
         }
-        return extractInviteLines(sharePeerInviteEdit_->text());
+        for (int index = 0; index < sharePeerInviteList_->count(); ++index) {
+            const auto* item = sharePeerInviteList_->item(index);
+            if (item != nullptr) {
+                invites.push_back(item->data(Qt::UserRole).toString());
+            }
+        }
+        return invites;
     }
 
     QStringList currentArguments() const
@@ -1804,7 +1951,7 @@ private:
                 args[index + 1] = "<room invite>";
                 ++index;
             } else if (args[index] == "--share-target" && looksLikeNatInvite(args[index + 1])) {
-                args[index + 1] = "<extra viewer invite>";
+                args[index + 1] = "<watcher invite>";
                 ++index;
             }
         }
@@ -1848,17 +1995,6 @@ private:
                         "Missing room invite",
                         "Create a room invite before starting.");
                     createShareInviteButton_->setFocus();
-                    return;
-                }
-                if (sharePeerInviteEdit_ != nullptr &&
-                    !sharePeerInviteEdit_->text().trimmed().isEmpty() &&
-                    currentWatcherResponseInvites().isEmpty()) {
-                    QMessageBox::warning(
-                        this,
-                        "Watcher invites",
-                        "Paste valid watcher response invites, or clear the watcher invites field.");
-                    sharePeerInviteEdit_->setFocus();
-                    sharePeerInviteEdit_->selectAll();
                     return;
                 }
             } else {
@@ -2732,6 +2868,15 @@ private:
         if (pasteSharePeerInviteButton_ != nullptr) {
             pasteSharePeerInviteButton_->setEnabled(!creating && !running);
         }
+        if (removeSharePeerInviteButton_ != nullptr && sharePeerInviteList_ != nullptr) {
+            removeSharePeerInviteButton_->setEnabled(
+                !creating &&
+                !running &&
+                !sharePeerInviteList_->selectedItems().isEmpty());
+        }
+        if (clearSharePeerInviteButton_ != nullptr && sharePeerInviteList_ != nullptr) {
+            clearSharePeerInviteButton_->setEnabled(!creating && !running && sharePeerInviteList_->count() > 0);
+        }
         if (pasteWatchPeerInviteButton_ != nullptr) {
             pasteWatchPeerInviteButton_->setEnabled(!creating && !running);
         }
@@ -2939,6 +3084,9 @@ private:
         }
         if (sharePortSpin_ != nullptr) {
             sharePortSpin_->setEnabled(!running);
+        }
+        if (sharePeerInviteList_ != nullptr) {
+            sharePeerInviteList_->setEnabled(!running);
         }
         if (watchNearbyButton_ != nullptr) {
             watchNearbyButton_->setEnabled(!running);
@@ -3206,11 +3354,13 @@ private:
     ShareConnectionMethod shareConnectionMethod_ = ShareConnectionMethod::InternetInvite;
     QLineEdit* shareHostEdit_ = nullptr;
     QLineEdit* shareLocalInviteEdit_ = nullptr;
-    QLineEdit* sharePeerInviteEdit_ = nullptr;
+    QListWidget* sharePeerInviteList_ = nullptr;
     QSpinBox* shareInvitePortSpin_ = nullptr;
     QPushButton* createShareInviteButton_ = nullptr;
     QPushButton* copyShareInviteButton_ = nullptr;
     QPushButton* pasteSharePeerInviteButton_ = nullptr;
+    QPushButton* removeSharePeerInviteButton_ = nullptr;
+    QPushButton* clearSharePeerInviteButton_ = nullptr;
     QLabel* shareInternetStatusLabel_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
     QPushButton* findLanButton_ = nullptr;
@@ -3500,22 +3650,22 @@ QPlainTextEdit {
     font-family: "Cascadia Mono", "Consolas";
     font-size: 9.5pt;
 }
-QListWidget#ReceiverList {
+QListWidget#ReceiverList, QListWidget#WatcherInviteList {
     background: #0b0f14;
     border: 1px solid #2a3340;
     border-radius: 8px;
     padding: 4px;
     color: #e6ecf2;
 }
-QListWidget#ReceiverList::item {
+QListWidget#ReceiverList::item, QListWidget#WatcherInviteList::item {
     border-radius: 6px;
     padding: 8px 10px;
 }
-QListWidget#ReceiverList::item:selected {
+QListWidget#ReceiverList::item:selected, QListWidget#WatcherInviteList::item:selected {
     background: #1a9b89;
     color: #ffffff;
 }
-QListWidget#ReceiverList::item:hover {
+QListWidget#ReceiverList::item:hover, QListWidget#WatcherInviteList::item:hover {
     background: #1c232c;
 }
 QScrollBar:vertical {
@@ -3747,22 +3897,22 @@ QPlainTextEdit {
     font-family: "Cascadia Mono", "Consolas";
     font-size: 9.5pt;
 }
-QListWidget#ReceiverList {
+QListWidget#ReceiverList, QListWidget#WatcherInviteList {
     background: #ffffff;
     border: 1px solid #cfd6df;
     border-radius: 8px;
     padding: 4px;
     color: #15202b;
 }
-QListWidget#ReceiverList::item {
+QListWidget#ReceiverList::item, QListWidget#WatcherInviteList::item {
     border-radius: 6px;
     padding: 8px 10px;
 }
-QListWidget#ReceiverList::item:selected {
+QListWidget#ReceiverList::item:selected, QListWidget#WatcherInviteList::item:selected {
     background: #157a6e;
     color: #ffffff;
 }
-QListWidget#ReceiverList::item:hover {
+QListWidget#ReceiverList::item:hover, QListWidget#WatcherInviteList::item:hover {
     background: #eef1f6;
 }
 QScrollBar:vertical {
