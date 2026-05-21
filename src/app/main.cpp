@@ -183,6 +183,7 @@ struct Options {
     bool avSyncExplicit = false;
     bool avSyncDisabled = false;
     bool sharePreset = false;
+    bool shareRoom = false;
     bool lanDiscover = false;
     int lanDiscoverSeconds = 2;
     bool lanAdvertise = false;
@@ -203,14 +204,19 @@ struct Options {
     int natProbeIntervalMs = 250;
     bool natProbeIntervalProvided = false;
     SignalingCommand signalingCommand = SignalingCommand::None;
+    bool signalingLive = false;
     std::string signalingServerUrl;
     std::string signalingRoomId;
     std::string signalingPeerId;
     std::string signalingCandidate;
     std::string signalingName;
     std::string signalingPlatform;
+    screenshare::StunServerTarget signalingStunServer{"stun.l.google.com", 19302};
     int signalingTimeoutMs = 5000;
     bool signalingTimeoutProvided = false;
+    int signalingSetupSeconds = 5;
+    bool signalingSetupSecondsProvided = false;
+    std::vector<screenshare::UdpNatProbeTarget> signalingNatProbeTargets;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
@@ -247,7 +253,9 @@ void PrintHelp()
         << "              [--share-target HOST:PORT|WATCHER_INVITE]\n"
         << "              [--invite-endpoint auto|public|local]\n"
         << "              [--local-invite INVITE]\n"
+        << "  ScreenShare --share-room PORT --signal-server URL --signal-room ROOM [--seconds S]\n"
         << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
+        << "              [--signal-server URL --signal-room ROOM]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
         << "  ScreenShare --make-invite PORT --stun HOST[:PORT] [--invite-ttl-seconds S]\n"
@@ -304,6 +312,7 @@ void PrintHelp()
         << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
         << "  Signaling: --signal-* commands test the HTTP room server without starting media.\n"
         << "             The Worker only exchanges UDP candidates; screen/audio still use direct UDP.\n"
+        << "             Live room setup uses --signal-server URL --signal-room ROOM with --share-room or --watch.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -321,6 +330,8 @@ void PrintHelp()
         << "  ScreenShare --signal-health https://example.workers.dev\n"
         << "  ScreenShare --signal-join https://example.workers.dev --signal-room room1 --signal-peer-id alice --signal-candidate 203.0.113.10:5000\n"
         << "  ScreenShare --watch 5000\n"
+        << "  ScreenShare --watch 5000 --signal-server https://example.workers.dev --signal-room room1\n"
+        << "  ScreenShare --share-room 5001 --signal-server https://example.workers.dev --signal-room room1\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
@@ -1920,7 +1931,7 @@ const char* ReceiverNatHint(
         return "check_peer_invite_endpoint";
     }
     if (status == "probing") {
-        return "start_share_with_receiver_invite_and_local_invite";
+        return "start_share_or_wait_for_signaling_peer";
     }
     return "waiting_to_send_first_probe";
 }
@@ -2666,7 +2677,8 @@ bool StopRequested(const Options& options)
 
 bool HasUdpSession(const Options& options)
 {
-    return options.udpReceivePort != 0 ||
+    return options.shareRoom ||
+           options.udpReceivePort != 0 ||
            !options.udpSendTarget.empty() ||
            !options.audioSendTarget.empty();
 }
@@ -2679,12 +2691,14 @@ bool HasSignalingCommand(const Options& options)
 bool HasSignalingOptions(const Options& options)
 {
     return HasSignalingCommand(options) ||
+           options.signalingLive ||
            !options.signalingRoomId.empty() ||
            !options.signalingPeerId.empty() ||
            !options.signalingCandidate.empty() ||
            !options.signalingName.empty() ||
            !options.signalingPlatform.empty() ||
-           options.signalingTimeoutProvided;
+           options.signalingTimeoutProvided ||
+           options.signalingSetupSecondsProvided;
 }
 
 bool HasNatShareTarget(const Options& options)
@@ -2715,6 +2729,14 @@ bool LooksLikeNatInvite(std::string_view text)
 
 std::string FormatNatEndpoint(const screenshare::NatInviteEndpoint& endpoint);
 screenshare::NatInvite ParseValidatedPeerInvite(const Options& options);
+
+uint64_t NatProbeSessionFingerprint(const Options& options)
+{
+    if (options.signalingLive) {
+        return SessionFingerprint(options.signalingRoomId);
+    }
+    return (options.sessionIdProvided || options.sessionIdFromLocalInvite) ? options.sessionFingerprint : 0;
+}
 
 struct SelectedNatInviteEndpoint {
     screenshare::NatInviteEndpoint endpoint;
@@ -2781,6 +2803,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     options.sessionId = std::move(defaultSessionId);
     bool secondsProvided = false;
     std::optional<std::string> shareTarget;
+    std::optional<uint16_t> shareRoomPort;
     std::vector<ExtraShareTargetOption> extraShareTargets;
     bool sessionFromLocalInvite = false;
     std::optional<uint16_t> watchPort;
@@ -2874,6 +2897,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--nat-probe-interval-ms") {
             options.natProbeIntervalMs = ParseInt(requireValue("--nat-probe-interval-ms"), "--nat-probe-interval-ms");
             options.natProbeIntervalProvided = true;
+        } else if (arg == "--signal-server") {
+            options.signalingServerUrl = requireValue("--signal-server");
+            options.signalingLive = true;
         } else if (arg == "--signal-health") {
             setSignalingCommand(SignalingCommand::Health, "--signal-health");
         } else if (arg == "--signal-join") {
@@ -2894,14 +2920,22 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.signalingName = requireValue("--signal-name");
         } else if (arg == "--signal-platform") {
             options.signalingPlatform = requireValue("--signal-platform");
+        } else if (arg == "--signal-stun") {
+            options.signalingStunServer = screenshare::ParseStunServerTarget(requireValue("--signal-stun"));
+            options.signalingLive = true;
         } else if (arg == "--signal-timeout-ms") {
             options.signalingTimeoutMs = ParseInt(requireValue("--signal-timeout-ms"), "--signal-timeout-ms");
             options.signalingTimeoutProvided = true;
+        } else if (arg == "--signal-setup-seconds") {
+            options.signalingSetupSeconds = ParseInt(requireValue("--signal-setup-seconds"), "--signal-setup-seconds");
+            options.signalingSetupSecondsProvided = true;
         } else if (arg == "--invite-endpoint") {
             options.inviteEndpointPreference = ParseInviteEndpointPreference(requireValue("--invite-endpoint"));
             options.inviteEndpointPreferenceProvided = true;
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
+        } else if (arg == "--share-room") {
+            shareRoomPort = screenshare::ParseUdpReceivePort(requireValue("--share-room"));
         } else if (arg == "--share-target" || arg == "--viewer") {
             extraShareTargets.push_back(ExtraShareTargetOption{requireValue(arg.c_str()), {}});
         } else if (arg == "--share-target-local-invite" || arg == "--viewer-local-invite") {
@@ -3093,11 +3127,14 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         return spec;
     };
 
-    if (shareTarget && watchPort) {
-        throw std::invalid_argument("--share cannot be combined with --watch");
+    if (shareTarget && shareRoomPort) {
+        throw std::invalid_argument("--share cannot be combined with --share-room");
     }
-    if (!extraShareTargets.empty() && !shareTarget) {
-        throw std::invalid_argument("--share-target requires --share");
+    if ((shareTarget || shareRoomPort) && watchPort) {
+        throw std::invalid_argument("--share/--share-room cannot be combined with --watch");
+    }
+    if (!extraShareTargets.empty() && !shareTarget && !shareRoomPort) {
+        throw std::invalid_argument("--share-target requires --share or --share-room");
     }
     if (shareTarget) {
         if (!options.udpSendTarget.empty()) {
@@ -3164,6 +3201,46 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.udpMaxQueueMs = DefaultShareUdpMaxQueueMs;
         }
     }
+    if (shareRoomPort) {
+        if (!options.udpSendTarget.empty()) {
+            throw std::invalid_argument("--share-room cannot be combined with --udp-send");
+        }
+        if (options.udpReceivePort != 0) {
+            throw std::invalid_argument("--share-room cannot be combined with --udp-recv");
+        }
+        if (!options.audioSendTarget.empty()) {
+            throw std::invalid_argument("--share-room cannot be combined with --audio-send");
+        }
+        if (!options.localInvite.empty() || !options.peerInvite.empty()) {
+            throw std::invalid_argument("--share-room uses signaling and cannot be combined with --local-invite or --peer-invite");
+        }
+        if (!extraShareTargets.empty()) {
+            throw std::invalid_argument("--share-target is not supported with --share-room; signaling supplies room peers");
+        }
+        if (!options.signalingLive) {
+            throw std::invalid_argument("--share-room requires --signal-server URL");
+        }
+        options.shareRoom = true;
+        options.udpLocalPort = *shareRoomPort;
+        options.udpLocalPortProvided = true;
+        options.streamEncode = true;
+        options.adaptBitrate = true;
+        options.adaptResolution = true;
+        if (!options.audioCapture) {
+            options.audioCapture = true;
+            options.audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
+        }
+        if (!options.streamEncoderPreferenceProvided) {
+            options.streamEncoderPreference = StreamEncoderPreference::Software;
+        }
+        options.sharePreset = true;
+        if (!secondsProvided) {
+            options.seconds = 0;
+        }
+        if (!options.udpMaxQueueMsProvided) {
+            options.udpMaxQueueMs = DefaultShareUdpMaxQueueMs;
+        }
+    }
     if (watchPort) {
         if (options.udpReceivePort != 0) {
             throw std::invalid_argument("--watch cannot be combined with --udp-recv");
@@ -3190,17 +3267,20 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         return options;
     }
 
-    if (HasSignalingOptions(options) && !HasSignalingCommand(options)) {
-        throw std::invalid_argument("--signal-room, --signal-peer-id, --signal-candidate, --signal-name, --signal-platform, and --signal-timeout-ms require a --signal-* command");
+    if (HasSignalingOptions(options) && !HasSignalingCommand(options) && !options.signalingLive) {
+        throw std::invalid_argument("--signal-room, --signal-peer-id, --signal-candidate, --signal-name, --signal-platform, --signal-stun, --signal-setup-seconds, and --signal-timeout-ms require --signal-server or a --signal-* command");
     }
     if (HasSignalingCommand(options)) {
+        if (options.signalingLive) {
+            throw std::invalid_argument("--signal-server cannot be combined with standalone --signal-* diagnostics");
+        }
         if (options.signalingTimeoutMs < 100 || options.signalingTimeoutMs > 30000) {
             throw std::invalid_argument("--signal-timeout-ms must be between 100 and 30000");
         }
         if (options.signalingCommand == SignalingCommand::Health) {
             if (!options.signalingRoomId.empty() || !options.signalingPeerId.empty() ||
                 !options.signalingCandidate.empty() || !options.signalingName.empty() ||
-                !options.signalingPlatform.empty()) {
+                !options.signalingPlatform.empty() || options.signalingSetupSecondsProvided) {
                 throw std::invalid_argument("--signal-health only accepts URL and --signal-timeout-ms");
             }
         } else {
@@ -3217,8 +3297,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
                     throw std::invalid_argument("--signal-candidate IP:PORT is required for --signal-join");
                 }
             } else if (!options.signalingCandidate.empty() || !options.signalingName.empty() ||
-                       !options.signalingPlatform.empty()) {
-                throw std::invalid_argument("--signal-candidate, --signal-name, and --signal-platform are only used with --signal-join");
+                       !options.signalingPlatform.empty() || options.signalingSetupSecondsProvided) {
+                throw std::invalid_argument("--signal-candidate, --signal-name, --signal-platform, and --signal-setup-seconds are only used with --signal-join or --signal-server");
             }
         }
         if (options.generateAccessCode ||
@@ -3275,6 +3355,34 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         }
         options.sessionFingerprint = SessionFingerprint(options.sessionId);
         return options;
+    }
+    if (options.signalingLive) {
+        if (options.signalingServerUrl.empty()) {
+            throw std::invalid_argument("Live signaling requires --signal-server URL");
+        }
+        if (options.signalingRoomId.empty()) {
+            throw std::invalid_argument("--signal-server requires --signal-room ROOM");
+        }
+        screenshare::ValidateSignalingRoomId(options.signalingRoomId);
+        if (options.signalingPeerId.empty()) {
+            options.signalingPeerId = options.sessionId;
+        }
+        screenshare::ValidateSignalingPeerId(options.signalingPeerId);
+        if (!options.signalingCandidate.empty()) {
+            throw std::invalid_argument("--signal-candidate is only used with --signal-join diagnostics");
+        }
+        if (options.signalingTimeoutMs < 100 || options.signalingTimeoutMs > 30000) {
+            throw std::invalid_argument("--signal-timeout-ms must be between 100 and 30000");
+        }
+        if (options.signalingSetupSeconds < 1 || options.signalingSetupSeconds > 60) {
+            throw std::invalid_argument("--signal-setup-seconds must be between 1 and 60");
+        }
+        if (!options.shareRoom && options.udpReceivePort == 0) {
+            throw std::invalid_argument("--signal-server requires --share-room or --watch/--udp-recv");
+        }
+        if (options.stunQuery || options.makeInvite || options.natProbe || options.lanDiscover) {
+            throw std::invalid_argument("--signal-server cannot be combined with standalone NAT/LAN diagnostics");
+        }
     }
 
     if (options.audioDeviceIdProvided && !options.audioCapture) {
@@ -3408,9 +3516,10 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         options.udpReceivePort == 0 &&
         options.udpSendTarget.empty() &&
         options.audioSendTarget.empty() &&
+        !options.shareRoom &&
         !options.makeInvite &&
         !options.natProbe) {
-        throw std::invalid_argument("--access-code requires --share, --watch, --udp-send, --udp-recv, --audio-send, --make-invite, or --nat-probe");
+        throw std::invalid_argument("--access-code requires --share, --share-room, --watch, --udp-send, --udp-recv, --audio-send, --make-invite, or --nat-probe");
     }
     if (options.allowPlaintext && options.accessCodeProvided) {
         throw std::invalid_argument("--allow-plaintext cannot be combined with --access-code");
@@ -3489,27 +3598,27 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (!options.udpSendTarget.empty()) {
         static_cast<void>(screenshare::ParseUdpSenderTarget(options.udpSendTarget));
     }
-    if (options.udpPacingOptionProvided && options.udpSendTarget.empty()) {
-        throw std::invalid_argument("--no-udp-pacing requires --udp-send");
+    if (options.udpPacingOptionProvided && options.udpSendTarget.empty() && !options.shareRoom) {
+        throw std::invalid_argument("--no-udp-pacing requires --udp-send or --share-room");
     }
-    if (options.udpMaxQueueMsProvided && options.udpSendTarget.empty()) {
-        throw std::invalid_argument("--udp-max-queue-ms requires --udp-send");
+    if (options.udpMaxQueueMsProvided && options.udpSendTarget.empty() && !options.shareRoom) {
+        throw std::invalid_argument("--udp-max-queue-ms requires --udp-send or --share-room");
     }
-    if (options.udpLocalPortProvided && options.udpSendTarget.empty() && options.audioSendTarget.empty()) {
-        throw std::invalid_argument("--udp-local-port requires --udp-send, --share, or --audio-send");
+    if (options.udpLocalPortProvided && options.udpSendTarget.empty() && options.audioSendTarget.empty() && !options.shareRoom) {
+        throw std::invalid_argument("--udp-local-port requires --udp-send, --share, --share-room, or --audio-send");
     }
     if (options.udpMaxQueueMs < 0 || options.udpMaxQueueMs > 5000) {
         throw std::invalid_argument("--udp-max-queue-ms must be between 0 and 5000");
     }
     if ((options.adaptResolution || options.adaptResolutionMinScaleProvided || options.adaptResolutionCooldownProvided) &&
-        options.udpSendTarget.empty()) {
-        throw std::invalid_argument("--adapt-resolution, --adapt-resolution-min-scale, and --adapt-resolution-cooldown require --udp-send");
+        options.udpSendTarget.empty() && !options.shareRoom) {
+        throw std::invalid_argument("--adapt-resolution, --adapt-resolution-min-scale, and --adapt-resolution-cooldown require --udp-send or --share-room");
     }
-    if (options.adaptBitrate && options.udpSendTarget.empty()) {
-        throw std::invalid_argument("--adapt-bitrate requires --udp-send");
+    if (options.adaptBitrate && options.udpSendTarget.empty() && !options.shareRoom) {
+        throw std::invalid_argument("--adapt-bitrate requires --udp-send or --share-room");
     }
-    if ((options.adaptMinBitrateProvided || options.adaptReduceCooldownProvided) && options.udpSendTarget.empty()) {
-        throw std::invalid_argument("--adapt-min-bitrate-mbps and --adapt-reduce-cooldown require --udp-send");
+    if ((options.adaptMinBitrateProvided || options.adaptReduceCooldownProvided) && options.udpSendTarget.empty() && !options.shareRoom) {
+        throw std::invalid_argument("--adapt-min-bitrate-mbps and --adapt-reduce-cooldown require --udp-send or --share-room");
     }
     if (options.adaptResolution && !options.recordPath.empty()) {
         throw std::invalid_argument("--adapt-resolution cannot be combined with --record");
@@ -3585,7 +3694,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.simulateLossProvided || options.simulateJitterProvided)) {
         throw std::invalid_argument("--list-audio-devices cannot be combined with capture, stream, receiver, or video options");
     }
-    const bool audioCaptureWithVideoSend = options.audioCapture && !options.udpSendTarget.empty();
+    const bool audioCaptureWithVideoSend = options.audioCapture && (!options.udpSendTarget.empty() || options.shareRoom);
     if (options.audioCapture && !audioCaptureWithVideoSend &&
         (options.listDisplays || options.listH264Encoders || options.listAudioDevices ||
          options.width != 0 || options.height != 0 || !options.recordPath.empty() || !options.capturedBmpPath.empty() ||
@@ -4797,9 +4906,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                                 udpConfig.natProbeSessionFingerprint =
                                     target.natProbeSessionFingerprint != 0 ?
                                         target.natProbeSessionFingerprint :
-                                        ((options.sessionIdProvided || options.sessionIdFromLocalInvite) ?
-                                            options.sessionFingerprint :
-                                            0);
+                                        NatProbeSessionFingerprint(options);
                                 if (options.audioCapture) {
                                     udpConfig.maxQueuedDatagrams = 16'384;
                                 }
@@ -5274,6 +5381,146 @@ void RunSignaling(const Options& options)
     }
 }
 
+std::string SignalingCandidateEndpoint(const screenshare::SignalingCandidate& candidate)
+{
+    return candidate.ip + ":" + std::to_string(candidate.port);
+}
+
+void MergeSignalingPeers(
+    std::map<std::string, screenshare::SignalingPeer>& peersById,
+    const screenshare::SignalingRoomResponse& response)
+{
+    if (!response.ok) {
+        throw std::runtime_error("Signaling room response was not ok");
+    }
+    for (const auto& peer : response.peers) {
+        if (peer.candidates.empty()) {
+            continue;
+        }
+        peersById[peer.peerId] = peer;
+    }
+}
+
+void PrepareLiveSignaling(Options& options)
+{
+    if (!options.signalingLive) {
+        return;
+    }
+
+    const uint16_t localPort = options.shareRoom ? options.udpLocalPort : options.udpReceivePort;
+    if (localPort == 0) {
+        throw std::invalid_argument("Live signaling needs a non-zero local UDP port");
+    }
+
+    screenshare::StunQueryConfig stunConfig;
+    stunConfig.server = options.signalingStunServer;
+    stunConfig.timeout = std::chrono::milliseconds(options.signalingTimeoutMs);
+    stunConfig.localPort = localPort;
+
+    std::cout
+        << "signaling_live_stun=starting"
+        << " server=" << stunConfig.server.host << ":" << stunConfig.server.port
+        << " local_port=" << localPort
+        << " room=" << options.signalingRoomId
+        << " peer_id=" << options.signalingPeerId
+        << "\n";
+    const auto stun = screenshare::QueryPublicUdpEndpoint(stunConfig);
+
+    screenshare::SignalingPeerState peer;
+    peer.peerId = options.signalingPeerId;
+    peer.metadata.name = options.signalingName.empty() ? options.lanName : options.signalingName;
+    peer.metadata.platform = options.signalingPlatform.empty() ? "windows" : options.signalingPlatform;
+    peer.candidates.push_back(screenshare::SignalingCandidate{
+        "srflx",
+        stun.publicAddress,
+        stun.publicPort,
+        "udp",
+    });
+
+    screenshare::SignalingClientConfig clientConfig;
+    clientConfig.serverUrl = options.signalingServerUrl;
+    clientConfig.timeout = std::chrono::milliseconds(options.signalingTimeoutMs);
+    screenshare::SignalingClient client(std::move(clientConfig));
+
+    std::map<std::string, screenshare::SignalingPeer> peersById;
+    const auto startedAt = std::chrono::steady_clock::now();
+    const auto deadline = startedAt + std::chrono::seconds(options.signalingSetupSeconds);
+    int polls = 0;
+    do {
+        MergeSignalingPeers(peersById, client.Join(options.signalingRoomId, peer));
+        ++polls;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    } while (true);
+
+    std::cout
+        << "signaling_live_join=ok"
+        << " room=" << options.signalingRoomId
+        << " peer_id=" << options.signalingPeerId
+        << " local_udp_endpoint=" << stun.localAddress << ":" << stun.localPort
+        << " public_udp_endpoint=" << stun.publicAddress << ":" << stun.publicPort
+        << " polls=" << polls
+        << " peers=" << peersById.size()
+        << "\n";
+
+    std::vector<UdpSendTargetSpec> sendTargets;
+    std::vector<screenshare::UdpNatProbeTarget> probeTargets;
+    const uint64_t probeSession = NatProbeSessionFingerprint(options);
+    for (const auto& [peerId, peerInfo] : peersById) {
+        for (const auto& candidate : peerInfo.candidates) {
+            const std::string endpoint = SignalingCandidateEndpoint(candidate);
+            std::cout
+                << "signaling_live_peer id=" << peerId
+                << " endpoint=" << endpoint
+                << " type=" << candidate.type
+                << " protocol=" << candidate.protocol
+                << "\n";
+
+            if (options.shareRoom) {
+                sendTargets.push_back(UdpSendTargetSpec{
+                    endpoint,
+                    true,
+                    "signaling",
+                    sendTargets.empty() ? localPort : static_cast<uint16_t>(0),
+                    false,
+                    true,
+                    true,
+                    probeSession});
+            } else {
+                probeTargets.push_back(screenshare::UdpNatProbeTarget{
+                    candidate.ip,
+                    candidate.port,
+                    false});
+            }
+        }
+    }
+
+    if (options.shareRoom) {
+        if (sendTargets.empty()) {
+            throw std::runtime_error(
+                "No signaling peers found for --share-room. Start Watch first or increase --signal-setup-seconds.");
+        }
+        options.udpSendTargetSpecs = std::move(sendTargets);
+        options.udpSendTargets.clear();
+        for (const auto& target : options.udpSendTargetSpecs) {
+            options.udpSendTargets.push_back(target.target);
+        }
+        options.udpSendTarget = options.udpSendTargets.front();
+        options.udpSendTargetFromPeerInvite = true;
+        options.udpSendPeerInviteEndpoint = "signaling";
+    } else {
+        options.signalingNatProbeTargets = std::move(probeTargets);
+        if (options.signalingNatProbeTargets.empty()) {
+            std::cout
+                << "signaling_live_warning=no_peers_yet"
+                << " room=" << options.signalingRoomId
+                << " hint=start_share_within_worker_peer_ttl_or_increase_setup_time\n";
+        }
+    }
+}
+
 void RunLanDiscovery(const Options& options)
 {
     const auto timeout = std::chrono::seconds(options.lanDiscoverSeconds);
@@ -5480,7 +5727,7 @@ void RunUdpReceiverStats(const Options& options)
     config.accessCodeFingerprint = options.accessCodeFingerprint;
     config.encryptionKey = options.accessCodeKey;
     config.natProbeInterval = std::chrono::milliseconds(options.natProbeIntervalMs);
-    config.natProbeSessionFingerprint = options.sessionIdProvided ? options.sessionFingerprint : 0;
+    config.natProbeSessionFingerprint = NatProbeSessionFingerprint(options);
     bool peerInviteHasDistinctLocalEndpoint = false;
     if (peerInvite) {
         config.natProbeTargets.push_back(screenshare::UdpNatProbeTarget{
@@ -5499,6 +5746,10 @@ void RunUdpReceiverStats(const Options& options)
                 true});
         }
     }
+    config.natProbeTargets.insert(
+        config.natProbeTargets.end(),
+        options.signalingNatProbeTargets.begin(),
+        options.signalingNatProbeTargets.end());
     receiver.Open(config);
 
     std::unique_ptr<screenshare::LanDiscoveryResponder> lanDiscoveryResponder;
@@ -6262,6 +6513,7 @@ void RunUdpReceiverStats(const Options& options)
     bool waitingForStreamLogged = false;
     bool previewBlankedForNoStream = false;
     auto lastStreamActivityAt = startedAt;
+    const bool hasNatProbeSetup = peerInvite.has_value() || !options.signalingNatProbeTargets.empty();
 
     auto detectReceiverStreamRestart = [&](const screenshare::UdpCompletedFrame& frame) {
         if (!hasCompletedFrame || frame.frameId >= latestFrameId) {
@@ -6503,8 +6755,8 @@ void RunUdpReceiverStats(const Options& options)
                         << " session=" << options.sessionId
                         << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                         << " seen_stream=" << (hasReceivedStreamTraffic ? "yes" : "no")
-                        << " nat_status=" << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
-                        << " nat_hint=" << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+                        << " nat_status=" << ReceiverNatStatus(hasNatProbeSetup, stats, hasReceivedStreamTraffic)
+                        << " nat_hint=" << ReceiverNatHint(hasNatProbeSetup, stats, hasReceivedStreamTraffic)
                         << " udp_datagrams=" << stats.datagramsReceived
                         << " accepted_datagrams=" << stats.datagramsAccepted
                         << " nat_probe_public_sent=" << stats.natProbePublicPacketsSent
@@ -6531,8 +6783,8 @@ void RunUdpReceiverStats(const Options& options)
                 << " session=" << options.sessionId
                 << " session_fingerprint=" << FormatSessionFingerprint(options.sessionFingerprint)
                 << " receiver_health=" << ReceiverHealthState(health)
-                << " nat_status=" << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
-                << " nat_hint=" << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+                << " nat_status=" << ReceiverNatStatus(hasNatProbeSetup, stats, hasReceivedStreamTraffic)
+                << " nat_hint=" << ReceiverNatHint(hasNatProbeSetup, stats, hasReceivedStreamTraffic)
                 << " udp_datagrams_per_second=" << datagramsPerSecond
                 << " accepted_datagrams=" << stats.datagramsAccepted
                 << " access_rejected_datagrams=" << stats.accessRejectedDatagrams
@@ -6734,8 +6986,8 @@ void RunUdpReceiverStats(const Options& options)
         << ", session: " << options.sessionId
         << ", session fingerprint: " << FormatSessionFingerprint(options.sessionFingerprint)
         << ", receiver health: " << ReceiverHealthState(finalHealth)
-        << ", NAT status: " << ReceiverNatStatus(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
-        << ", NAT hint: " << ReceiverNatHint(peerInvite.has_value(), stats, hasReceivedStreamTraffic)
+        << ", NAT status: " << ReceiverNatStatus(hasNatProbeSetup, stats, hasReceivedStreamTraffic)
+        << ", NAT hint: " << ReceiverNatHint(hasNatProbeSetup, stats, hasReceivedStreamTraffic)
         << ", accepted datagrams: " << stats.datagramsAccepted
         << ", access rejected datagrams: " << stats.accessRejectedDatagrams
         << ", crypto rejected datagrams: " << stats.cryptoRejectedDatagrams
@@ -6870,7 +7122,8 @@ int main(int argc, char** argv)
             std::cout << "Saving run report to " << saveReportPath->string() << "\n";
         }
 
-        const Options options = ParseOptions(argc, argv, reportContext.sessionId);
+        Options options = ParseOptions(argc, argv, reportContext.sessionId);
+        PrepareLiveSignaling(options);
         reportContext.sessionId = options.sessionId;
         reportContext.sessionFingerprint = options.sessionFingerprint;
         reportContext.accessCodeRequired = options.accessCodeProvided;

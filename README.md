@@ -267,6 +267,24 @@ returned peer UDP candidates. The later live flow should use STUN from the real 
 join the room with that candidate, poll/heartbeat while connecting, send UDP probes to returned
 peers, and then keep the media path direct.
 
+The first native live signaling bridge is also available from the CLI. Start Watch with a room:
+
+```powershell
+.\build\release\ScreenShare.exe --watch 5000 --signal-server https://YOUR-WORKER.workers.dev --signal-room room1
+```
+
+Then start Share from its room UDP port:
+
+```powershell
+.\build\release\ScreenShare.exe --share-room 5001 --signal-server https://YOUR-WORKER.workers.dev --signal-room room1
+```
+
+Both sides use STUN to publish their public UDP candidate to the Worker. Share resolves the room's
+watcher candidates into UDP send targets, while Watch resolves room candidates into NAT probe
+targets. Use `--signal-stun HOST[:PORT]` to override the default STUN server and
+`--signal-setup-seconds S` to wait longer for room peers during startup. This first bridge discovers
+peers during startup; continuous room polling and sharer-first room waiting are follow-up work.
+
 For a two-window test on one computer, the two windows cannot both own UDP port `5000`. Use separate
 ports, for example Join room on `5000` and Create room's Internet room port on `5001`, then create a
 fresh room invite after changing either port.
