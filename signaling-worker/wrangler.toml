@@ -1,0 +1,7 @@
+name = "screenshare-signaling"
+main = "src/index.ts"
+compatibility_date = "2026-05-21"
+
+[[kv_namespaces]]
+binding = "ROOMS"
+id = "replace-with-rooms-kv-namespace-id"

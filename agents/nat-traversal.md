@@ -6,7 +6,8 @@
   - Tailscale/manual IP is already usable through the Share address field.
   - Tailscale peer picking is merged as a separate UI path through optional `tailscale status --json` integration when the CLI is installed. Do not expect UDP LAN broadcast discovery to cross Tailscale.
   - Current focus is STUN plus manual invite exchange for direct UDP hole punching.
-  - Hosted rendezvous/relay is a far-back fallback only if direct hole punching plus Tailscale/manual IP are not enough. Do not prioritize it while direct hole punching is viable.
+  - Hosted signaling is now acceptable because it only exchanges room membership and UDP candidates. It must not relay media.
+  - Hosted media relay/TURN remains a far-back fallback only if direct hole punching plus Tailscale/manual IP are not enough.
 - Keep LAN discovery separate from Internet traversal. LAN discovery is broadcast-based and does not cross most routers or mesh VPN boundaries.
 
 ## Current State
@@ -35,6 +36,7 @@
 - PR #88 testing showed the one-sharer-invite UI path works locally/reachable-direct, but not through the tested NAT: Watch sent public/local probes while Share saw `udp_nat_probe_packets=0` and stayed `waiting_for_probe`. This is the expected endpoint-filtered NAT deadlock for a one-link, no-server flow, not a decoder/media bug.
 - Current UI supports the no-server two-sided fallback: Watch can create a My invite response from its listen port, and Share can paste one or more watcher response invites while still passing its own room invite as `--local-invite`.
 - NAT multi-viewer direction: the cleaner path is one sharer room invite plus optional watcher response invites. Share binds the room invite local port, accepts valid Watch NAT probes on that socket, sends outward to pasted watcher response endpoints, and fans out media to every learned watcher endpoint. The old per-watcher sharer-local invite model should not be the main UI model.
+- Signaling direction: `signaling-worker/` is the first room-membership/candidate-exchange backend. Native integration should still use one UDP socket, STUN, simultaneous UDP probes, and direct encrypted UDP media.
 
 ## Follow-Up Shape
 
@@ -45,4 +47,4 @@
 - User already validated the UI-guided direct invite flow after create/copy invite landed. Since later changes only added receiver restart recovery and status display, treat the core invite mechanics as validated.
 - README now carries the two-computer UI checklist for future NAT/Tailscale validation.
 - Still needed: richer live probe/media status only if reports still show confusion.
-- Keep rendezvous/relay out of the current workstream unless direct mode proves insufficient for the target users.
+- Keep media relay out of the current workstream unless direct mode proves insufficient for the target users.

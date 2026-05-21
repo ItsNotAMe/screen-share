@@ -14,6 +14,7 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 - `src/transport/LanDiscovery.*`: opt-in LAN receiver discovery helper used by CLI and Qt UI.
 - `src/transport/StunClient.*`: standalone STUN Binding Request helper used by CLI NAT diagnostics.
 - `src/ui/`: optional Qt Widgets desktop control UI that launches the CLI engine.
+- `signaling-worker/`: optional Cloudflare Worker TypeScript project for room membership and UDP candidate exchange. It is signaling only; media remains direct native UDP.
 
 ## Build Shape
 

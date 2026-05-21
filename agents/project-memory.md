@@ -13,7 +13,7 @@
 ## Current State
 
 - `main` is synced to `origin/main` at PR #93, `41a29d9 Merge pull request #93 from ItsNotAMe/feature/nat-multi-viewer-targets`.
-- Active branch: `main`.
+- Active branch: `feature/signaling-worker`.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
@@ -99,6 +99,7 @@ WGC capture by default
 - `agents/lan-discovery.md`: LAN discovery protocol and test notes.
 - `agents/nat-traversal.md`: STUN/manual invite/hole-punching direction.
 - `agents/security.md`: local access-code and future encryption notes.
+- `agents/signaling.md`: signaling backend direction and room-flow constraints.
 
 ## Current Direction
 
@@ -185,3 +186,8 @@ WGC capture by default
   - The Qt UI exposes direct multi-target sharing through Nearby multi-select and Manual comma/space-separated target lists.
   - NAT multi-viewer direction is one shared sharer room invite plus an optional watcher response invite list. Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends outward to any pasted watcher response invite endpoints, and fans out the encoded stream through the same sender socket. Per-watcher sharer-local invite rows are intentionally not the main UI model.
   - Remaining multi-viewer work is per-viewer health and optional per-viewer bandwidth policy.
+- Signaling direction:
+  - First backend lives under `signaling-worker/`.
+  - It is Cloudflare Worker + Workers KV for room membership, peer UDP candidates, heartbeat, and cleanup only.
+  - It must not relay media or receive raw room keys/passwords.
+  - Future native room UX should generate a hidden room key automatically so users get encrypted UDP media without seeing an access-code field.

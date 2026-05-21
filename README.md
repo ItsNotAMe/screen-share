@@ -225,6 +225,13 @@ If Watch stays probing and Share stays waiting for a probe, the receiver's packe
 sharer. That is a normal NAT failure for a one-invite, no-server flow. Try the Watch-side My invite
 response, Tailscale/manual IP, or a router port mapping for that network.
 
+An experimental HTTP signaling backend lives in [`signaling-worker/`](signaling-worker/README.md).
+It is a Cloudflare Worker that stores short-lived room membership and peer UDP candidates only.
+It does not relay media, cannot receive UDP, and still requires the native app to use STUN and direct
+UDP probes. The intended next room flow is secure by default: the native app should generate a hidden
+room key automatically, keep UDP video/audio encrypted even when the user does not type a password,
+and reserve visible passwords for an optional extra lock.
+
 For a two-window test on one computer, the two windows cannot both own UDP port `5000`. Use separate
 ports, for example Join room on `5000` and Create room's Internet room port on `5001`, then create a
 fresh room invite after changing either port.
