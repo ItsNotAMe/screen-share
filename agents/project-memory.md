@@ -182,5 +182,5 @@ WGC capture by default
   - Each target owns its own UDP socket, queue, and feedback path; sender telemetry aggregates counters and reports `udp_targets`, `udp_active_targets`, and `udp_failed_targets`.
   - Runtime send/feedback/flush errors on one target should mark only that target failed and keep the remaining viewers alive.
   - The Qt UI exposes direct multi-target sharing through Nearby multi-select and Manual comma/space-separated target lists.
-  - NAT multi-viewer direction is one shared sharer room invite. Share binds that invite's local port, learns watcher endpoints from valid NAT probes, and fans out the encoded stream to every learned watcher. Per-watcher local invite rows are intentionally not the main UI model.
+  - NAT multi-viewer direction is one shared sharer room invite plus optional watcher response invites. Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends outward to any pasted watcher response invite endpoints, and fans out the encoded stream through the same sender socket. Per-watcher sharer-local invite rows are intentionally not the main UI model.
   - Remaining multi-viewer work is per-viewer health and optional per-viewer bandwidth policy.

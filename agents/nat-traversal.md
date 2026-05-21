@@ -33,8 +33,8 @@
 - PR #83 merged: UI live NAT status display from engine `nat_status` / `nat_hint` output.
 - PR #85 merged the full branch to `main`.
 - PR #88 testing showed the one-sharer-invite UI path works locally/reachable-direct, but not through the tested NAT: Watch sent public/local probes while Share saw `udp_nat_probe_packets=0` and stayed `waiting_for_probe`. This is the expected endpoint-filtered NAT deadlock for a one-link, no-server flow, not a decoder/media bug.
-- Current UI supports the no-server two-sided fallback: Watch can create a My invite response from its listen port, and Share can paste that Friend invite while still passing its own room invite as `--local-invite`.
-- NAT multi-viewer direction: the cleaner path is one sharer room invite. Share binds the room invite local port, accepts valid Watch NAT probes on that socket, and fans out media to every learned watcher endpoint. The old per-watcher local invite model remains lower-level/fallback CLI plumbing, but it should not be the main UI model.
+- Current UI supports the no-server two-sided fallback: Watch can create a My invite response from its listen port, and Share can paste one or more watcher response invites while still passing its own room invite as `--local-invite`.
+- NAT multi-viewer direction: the cleaner path is one sharer room invite plus optional watcher response invites. Share binds the room invite local port, accepts valid Watch NAT probes on that socket, sends outward to pasted watcher response endpoints, and fans out media to every learned watcher endpoint. The old per-watcher sharer-local invite model should not be the main UI model.
 
 ## Follow-Up Shape
 

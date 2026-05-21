@@ -131,39 +131,55 @@ QString directShareTargetError(const QString& value)
     return {};
 }
 
-QString extractInviteLine(const QString& output)
+QString normalizeInviteText(QString invite)
 {
-    const auto normalizeInvite = [](QString invite) {
-        invite = invite.trimmed();
-        if (invite.startsWith("screenshare-invite-v1")) {
-            invite.prepend("nat_invite=");
+    invite = invite.trimmed();
+    if (invite.startsWith("screenshare-invite-v1")) {
+        invite.prepend("nat_invite=");
+    }
+    return invite;
+}
+
+QStringList extractInviteLines(const QString& output)
+{
+    QStringList invites;
+    const auto addInvite = [&invites](const QString& rawInvite) {
+        const QString invite = normalizeInviteText(rawInvite);
+        if (looksLikeNatInvite(invite) && !invites.contains(invite)) {
+            invites.push_back(invite);
         }
-        return invite;
     };
 
-    const QString trimmed = normalizeInvite(output);
+    const QString trimmed = normalizeInviteText(output);
     if (looksLikeNatInvite(trimmed)) {
-        return trimmed;
+        invites.push_back(trimmed);
+        return invites;
     }
 
     const QStringList lines = output.split(QRegularExpression(QStringLiteral("[\r\n]+")), Qt::SkipEmptyParts);
     for (const QString& line : lines) {
         if (line.startsWith("send_this_invite_to_peer=")) {
-            return normalizeInvite(line.mid(QStringLiteral("send_this_invite_to_peer=").size()));
+            addInvite(line.mid(QStringLiteral("send_this_invite_to_peer=").size()));
         }
     }
     for (const QString& line : lines) {
-        const QString invite = normalizeInvite(line);
-        if (looksLikeNatInvite(invite)) {
-            return invite;
-        }
+        addInvite(line);
     }
 
     const QRegularExpression invitePattern(
         QStringLiteral(R"(((?:nat_invite=)?(?:screenshare-invite-v1;|ss1[pe]:)[^\s'"`]+))"));
-    const QRegularExpressionMatch match = invitePattern.match(output);
-    if (match.hasMatch()) {
-        return normalizeInvite(match.captured(1));
+    QRegularExpressionMatchIterator matches = invitePattern.globalMatch(output);
+    while (matches.hasNext()) {
+        addInvite(matches.next().captured(1));
+    }
+    return invites;
+}
+
+QString extractInviteLine(const QString& output)
+{
+    const QStringList invites = extractInviteLines(output);
+    if (!invites.isEmpty()) {
+        return invites.front();
     }
     return {};
 }
@@ -314,7 +330,6 @@ enum class ReceiverSource {
 enum class InviteTarget {
     None,
     Share,
-    ShareExtraViewer,
     Watch,
 };
 
@@ -345,18 +360,6 @@ struct AudioOutputDevice {
     QString name;
     QString id;
     bool isDefault = false;
-};
-
-struct ShareInviteViewerRow {
-    QWidget* container = nullptr;
-    QLabel* titleLabel = nullptr;
-    QSpinBox* portSpin = nullptr;
-    QLineEdit* localInviteEdit = nullptr;
-    QPushButton* createButton = nullptr;
-    QPushButton* copyButton = nullptr;
-    QLineEdit* peerInviteEdit = nullptr;
-    QPushButton* pasteButton = nullptr;
-    QPushButton* removeButton = nullptr;
 };
 
 QVector<DiscoveredReceiver> parseTailscaleStatusReceivers(const QString& output, int port)
@@ -940,7 +943,7 @@ private:
         shareLocalInviteLayout->addWidget(copyShareInviteButton_);
         addRow(internetContent, "Room invite", shareLocalInviteRow);
         sharePeerInviteEdit_ = new QLineEdit;
-        sharePeerInviteEdit_->setPlaceholderText("Paste friend response invite");
+        sharePeerInviteEdit_->setPlaceholderText("Optional watcher response invites");
         auto* sharePeerInviteRow = new QWidget;
         sharePeerInviteRow->setObjectName("FormRow");
         auto* sharePeerInviteLayout = new QHBoxLayout(sharePeerInviteRow);
@@ -956,7 +959,7 @@ private:
         prepareInput(sharePeerInviteRow);
         sharePeerInviteLayout->addWidget(sharePeerInviteEdit_, 1);
         sharePeerInviteLayout->addWidget(pasteSharePeerInviteButton_);
-        addRow(internetContent, "Friend invite", sharePeerInviteRow);
+        addRow(internetContent, "Watcher invites", sharePeerInviteRow);
         addRow(internetContent, "Room port", shareInvitePortSpin_);
 
         connect(createShareInviteButton_, &QPushButton::clicked, this, [this] { startInviteGeneration(InviteTarget::Share); });
@@ -964,7 +967,7 @@ private:
             copyInvite(shareLocalInviteEdit_, "Room");
         });
         connect(pasteSharePeerInviteButton_, &QPushButton::clicked, this, [this] {
-            pasteInviteFromClipboard(sharePeerInviteEdit_, "Friend");
+            pasteInviteFromClipboard(sharePeerInviteEdit_, "Watcher");
         });
 
         auto* manualPage = new QWidget;
@@ -1311,182 +1314,6 @@ private:
         }
     }
 
-    int nextShareInviteViewerPort() const
-    {
-        int port = shareInvitePortSpin_ == nullptr ? 5001 : shareInvitePortSpin_->value() + 1;
-        bool used = true;
-        while (used && port <= 65535) {
-            used = shareInvitePortSpin_ != nullptr && shareInvitePortSpin_->value() == port;
-            if (!used) {
-                for (const auto& row : shareInviteViewerRows_) {
-                    if (row.portSpin != nullptr && row.portSpin->value() == port) {
-                        used = true;
-                        break;
-                    }
-                }
-            }
-            if (used) {
-                ++port;
-            }
-        }
-        return std::min(port, 65535);
-    }
-
-    void addShareInviteViewerRow()
-    {
-        if (shareInviteViewersLayout_ == nullptr) {
-            return;
-        }
-
-        ShareInviteViewerRow row;
-        row.container = new QWidget;
-        row.container->setObjectName("OptionPage");
-        auto* layout = new QVBoxLayout(row.container);
-        layout->setContentsMargins(0, 0, 0, 0);
-        layout->setSpacing(8);
-
-        auto* header = new QWidget;
-        header->setObjectName("FormRow");
-        auto* headerLayout = new QHBoxLayout(header);
-        headerLayout->setContentsMargins(0, 0, 0, 0);
-        headerLayout->setSpacing(8);
-        row.titleLabel = makeLabel("", "Subtle");
-        headerLayout->addSpacing(kLabelWidth);
-        headerLayout->addWidget(row.titleLabel, 1);
-        row.removeButton = new QPushButton("Remove");
-        row.removeButton->setObjectName("SecondaryButton");
-        row.removeButton->setIcon(style()->standardIcon(QStyle::SP_DialogCancelButton));
-        row.removeButton->setIconSize(QSize(14, 14));
-        row.removeButton->setCursor(Qt::PointingHandCursor);
-        row.removeButton->setFixedHeight(kRowHeight);
-        headerLayout->addWidget(row.removeButton);
-        layout->addWidget(header);
-
-        row.portSpin = new NoWheelSpinBox;
-        row.portSpin->setRange(1, 65535);
-        row.portSpin->setValue(nextShareInviteViewerPort());
-        prepareInput(row.portSpin);
-        addRow(layout, "Port", row.portSpin);
-
-        row.localInviteEdit = new QLineEdit;
-        row.localInviteEdit->setPlaceholderText("Create this watcher invite");
-        auto* localInviteRow = new QWidget;
-        localInviteRow->setObjectName("FormRow");
-        auto* localInviteLayout = new QHBoxLayout(localInviteRow);
-        localInviteLayout->setContentsMargins(0, 0, 0, 0);
-        localInviteLayout->setSpacing(8);
-        row.createButton = new QPushButton("Create");
-        row.createButton->setObjectName("SecondaryButton");
-        row.createButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
-        row.createButton->setIconSize(QSize(14, 14));
-        row.createButton->setCursor(Qt::PointingHandCursor);
-        row.createButton->setFixedHeight(kRowHeight);
-        row.copyButton = new QPushButton("Copy");
-        row.copyButton->setObjectName("SecondaryButton");
-        row.copyButton->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
-        row.copyButton->setIconSize(QSize(14, 14));
-        row.copyButton->setCursor(Qt::PointingHandCursor);
-        row.copyButton->setFixedHeight(kRowHeight);
-        prepareInput(row.localInviteEdit);
-        prepareInput(localInviteRow);
-        localInviteLayout->addWidget(row.localInviteEdit, 1);
-        localInviteLayout->addWidget(row.createButton);
-        localInviteLayout->addWidget(row.copyButton);
-        addRow(layout, "My invite", localInviteRow);
-
-        row.peerInviteEdit = new QLineEdit;
-        row.peerInviteEdit->setPlaceholderText("Paste watcher response invite");
-        auto* peerInviteRow = new QWidget;
-        peerInviteRow->setObjectName("FormRow");
-        auto* peerInviteLayout = new QHBoxLayout(peerInviteRow);
-        peerInviteLayout->setContentsMargins(0, 0, 0, 0);
-        peerInviteLayout->setSpacing(8);
-        row.pasteButton = new QPushButton("Paste");
-        row.pasteButton->setObjectName("SecondaryButton");
-        row.pasteButton->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
-        row.pasteButton->setIconSize(QSize(14, 14));
-        row.pasteButton->setCursor(Qt::PointingHandCursor);
-        row.pasteButton->setFixedHeight(kRowHeight);
-        prepareInput(row.peerInviteEdit);
-        prepareInput(peerInviteRow);
-        peerInviteLayout->addWidget(row.peerInviteEdit, 1);
-        peerInviteLayout->addWidget(row.pasteButton);
-        addRow(layout, "Response", peerInviteRow);
-
-        shareInviteViewersLayout_->addWidget(row.container);
-        shareInviteViewerRows_.push_back(row);
-
-        connect(row.portSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this, localInvite = row.localInviteEdit] {
-            if (localInvite != nullptr && !localInvite->text().isEmpty()) {
-                localInvite->clear();
-            }
-            refreshCommand();
-        });
-        connect(row.localInviteEdit, &QLineEdit::textChanged, this, [this] {
-            updateInviteButtons();
-            refreshCommand();
-        });
-        connect(row.peerInviteEdit, &QLineEdit::textChanged, this, [this] {
-            updateInternetStatus();
-            refreshCommand();
-        });
-        connect(row.createButton, &QPushButton::clicked, this, [this, portSpin = row.portSpin, localInvite = row.localInviteEdit, button = row.createButton] {
-            shareInviteTargetPortSpin_ = portSpin;
-            shareInviteTargetLocalInviteEdit_ = localInvite;
-            shareInviteTargetCreateButton_ = button;
-            startInviteGeneration(InviteTarget::ShareExtraViewer);
-        });
-        connect(row.copyButton, &QPushButton::clicked, this, [this, localInvite = row.localInviteEdit] {
-            copyInvite(localInvite, "Watcher");
-        });
-        connect(row.pasteButton, &QPushButton::clicked, this, [this, peerInvite = row.peerInviteEdit] {
-            pasteInviteFromClipboard(peerInvite, "Watcher");
-        });
-        connect(row.removeButton, &QPushButton::clicked, this, [this, container = row.container] {
-            removeShareInviteViewerRow(container);
-        });
-
-        renumberShareInviteViewerRows();
-        updateInviteButtons();
-        refreshCommand();
-        updateInternetStatus();
-    }
-
-    void removeShareInviteViewerRow(QWidget* container)
-    {
-        if (container == nullptr || inviteGenerating()) {
-            return;
-        }
-        for (int index = 0; index < shareInviteViewerRows_.size(); ++index) {
-            if (shareInviteViewerRows_[index].container != container) {
-                continue;
-            }
-            if (shareInviteViewersLayout_ != nullptr) {
-                shareInviteViewersLayout_->removeWidget(container);
-            }
-            container->deleteLater();
-            shareInviteViewerRows_.removeAt(index);
-            break;
-        }
-        renumberShareInviteViewerRows();
-        updateInviteButtons();
-        refreshCommand();
-        updateInternetStatus();
-    }
-
-    void renumberShareInviteViewerRows()
-    {
-        for (int index = 0; index < shareInviteViewerRows_.size(); ++index) {
-            auto& row = shareInviteViewerRows_[index];
-            if (row.titleLabel != nullptr) {
-                row.titleLabel->setText(QStringLiteral("Watcher %1").arg(index + 2));
-            }
-            if (row.removeButton != nullptr) {
-                row.removeButton->setEnabled(!running_ && !inviteGenerating());
-            }
-        }
-    }
-
     void bindCommandRefresh()
     {
         const auto bindLineEdit = [this](QLineEdit* edit) {
@@ -1637,15 +1464,6 @@ private:
         }
     }
 
-    void clearShareExtraLocalInvite()
-    {
-        for (auto& row : shareInviteViewerRows_) {
-            if (row.localInviteEdit != nullptr && !row.localInviteEdit->text().isEmpty()) {
-                row.localInviteEdit->clear();
-            }
-        }
-    }
-
     void clearWatchLocalInvite()
     {
         if (watchLocalInviteEdit_ != nullptr && !watchLocalInviteEdit_->text().isEmpty()) {
@@ -1656,7 +1474,6 @@ private:
     void clearLocalInvites()
     {
         clearShareLocalInvite();
-        clearShareExtraLocalInvite();
         clearWatchLocalInvite();
     }
 
@@ -1697,9 +1514,6 @@ private:
     {
         if (target == InviteTarget::Share) {
             return shareInvitePortSpin_->value();
-        }
-        if (target == InviteTarget::ShareExtraViewer) {
-            return shareInviteTargetPortSpin_ == nullptr ? 0 : shareInviteTargetPortSpin_->value();
         }
         if (target == InviteTarget::Watch) {
             return watchPortSpin_->value();
@@ -1775,11 +1589,7 @@ private:
         }
 
         const InviteTarget target = inviteTarget_;
-        QLineEdit* targetLocalInviteEdit = shareInviteTargetLocalInviteEdit_;
         inviteTarget_ = InviteTarget::None;
-        shareInviteTargetPortSpin_ = nullptr;
-        shareInviteTargetLocalInviteEdit_ = nullptr;
-        shareInviteTargetCreateButton_ = nullptr;
         updateInviteButtons();
 
         if (status != QProcess::NormalExit || code != 0) {
@@ -1797,12 +1607,6 @@ private:
             shareLocalInviteEdit_->setText(invite);
             QApplication::clipboard()->setText(invite);
             appendOutput("Room invite copied. Send it to your friend so they can Join room.\n");
-        } else if (target == InviteTarget::ShareExtraViewer) {
-            if (targetLocalInviteEdit != nullptr) {
-                targetLocalInviteEdit->setText(invite);
-            }
-            QApplication::clipboard()->setText(invite);
-            appendOutput("Watcher invite copied. Send it to that watcher, then paste their response invite here.\n");
         } else if (target == InviteTarget::Watch) {
             watchLocalInviteEdit_->setText(invite);
             QApplication::clipboard()->setText(invite);
@@ -1899,16 +1703,27 @@ private:
         return {};
     }
 
+    QStringList currentWatcherResponseInvites() const
+    {
+        if (sharePeerInviteEdit_ == nullptr) {
+            return {};
+        }
+        return extractInviteLines(sharePeerInviteEdit_->text());
+    }
+
     QStringList currentArguments() const
     {
         QStringList args;
         if (shareMode()) {
             if (shareConnectionMethod() == ShareConnectionMethod::InternetInvite) {
                 const QString localInvite = shareLocalInviteEdit_->text().trimmed();
-                const QString peerInvite = sharePeerInviteEdit_->text().trimmed();
-                args << "--share" << (peerInvite.isEmpty() ? localInvite : peerInvite);
+                const QStringList watcherInvites = currentWatcherResponseInvites();
+                args << "--share" << (watcherInvites.isEmpty() ? localInvite : watcherInvites.front());
                 if (!localInvite.isEmpty()) {
                     args << "--local-invite" << localInvite;
+                }
+                for (int index = 1; index < watcherInvites.size(); ++index) {
+                    args << "--share-target" << watcherInvites[index];
                 }
             } else {
                 const QStringList targets = currentDirectShareTargets();
@@ -2033,6 +1848,17 @@ private:
                         "Missing room invite",
                         "Create a room invite before starting.");
                     createShareInviteButton_->setFocus();
+                    return;
+                }
+                if (sharePeerInviteEdit_ != nullptr &&
+                    !sharePeerInviteEdit_->text().trimmed().isEmpty() &&
+                    currentWatcherResponseInvites().isEmpty()) {
+                    QMessageBox::warning(
+                        this,
+                        "Watcher invites",
+                        "Paste valid watcher response invites, or clear the watcher invites field.");
+                    sharePeerInviteEdit_->setFocus();
+                    sharePeerInviteEdit_->selectAll();
                     return;
                 }
             } else {
@@ -2357,62 +2183,6 @@ private:
                 shareHostEdit_->selectAll();
                 return false;
             }
-        }
-        return true;
-    }
-
-    bool validateExtraNatViewerInvite()
-    {
-        if (!shareMode() ||
-            shareConnectionMethod() != ShareConnectionMethod::InternetInvite) {
-            return true;
-        }
-
-        QSet<int> ports;
-        if (shareInvitePortSpin_ != nullptr) {
-            ports.insert(shareInvitePortSpin_->value());
-        }
-        for (int index = 0; index < shareInviteViewerRows_.size(); ++index) {
-            const auto& row = shareInviteViewerRows_[index];
-            if (row.peerInviteEdit == nullptr || row.localInviteEdit == nullptr || row.portSpin == nullptr) {
-                continue;
-            }
-
-            const QString peerInvite = row.peerInviteEdit->text().trimmed();
-            const QString localInvite = row.localInviteEdit->text().trimmed();
-            if (peerInvite.isEmpty() && localInvite.isEmpty()) {
-                continue;
-            }
-
-            const QString label = QStringLiteral("Watcher %1").arg(index + 2);
-            if (peerInvite.isEmpty()) {
-                QMessageBox::warning(this, label, "Paste this watcher's response invite, or remove the watcher row.");
-                row.peerInviteEdit->setFocus();
-                return false;
-            }
-            if (localInvite.isEmpty()) {
-                QMessageBox::warning(this, label, "Create this watcher's local invite, or remove the watcher row.");
-                row.createButton->setFocus();
-                return false;
-            }
-            if (!looksLikeNatInvite(peerInvite)) {
-                QMessageBox::warning(this, label, "The response field must contain a ScreenShare invite.");
-                row.peerInviteEdit->setFocus();
-                row.peerInviteEdit->selectAll();
-                return false;
-            }
-            if (!looksLikeNatInvite(localInvite)) {
-                QMessageBox::warning(this, label, "The local invite field must contain a ScreenShare invite.");
-                row.localInviteEdit->setFocus();
-                row.localInviteEdit->selectAll();
-                return false;
-            }
-            if (ports.contains(row.portSpin->value())) {
-                QMessageBox::warning(this, label, "Use a unique local port for each watcher invite.");
-                row.portSpin->setFocus();
-                return false;
-            }
-            ports.insert(row.portSpin->value());
         }
         return true;
     }
@@ -2962,27 +2732,6 @@ private:
         if (pasteSharePeerInviteButton_ != nullptr) {
             pasteSharePeerInviteButton_->setEnabled(!creating && !running);
         }
-        if (addShareInviteViewerButton_ != nullptr) {
-            addShareInviteViewerButton_->setEnabled(!creating && !running);
-        }
-        for (auto& row : shareInviteViewerRows_) {
-            if (row.createButton != nullptr) {
-                row.createButton->setEnabled(canCreate);
-                row.createButton->setText(
-                    creating &&
-                    inviteTarget_ == InviteTarget::ShareExtraViewer &&
-                    shareInviteTargetCreateButton_ == row.createButton ? "Creating..." : "Create");
-            }
-            if (row.copyButton != nullptr && row.localInviteEdit != nullptr) {
-                row.copyButton->setEnabled(!creating && !row.localInviteEdit->text().trimmed().isEmpty());
-            }
-            if (row.pasteButton != nullptr) {
-                row.pasteButton->setEnabled(!creating && !running);
-            }
-            if (row.removeButton != nullptr) {
-                row.removeButton->setEnabled(!creating && !running);
-            }
-        }
         if (pasteWatchPeerInviteButton_ != nullptr) {
             pasteWatchPeerInviteButton_->setEnabled(!creating && !running);
         }
@@ -3056,39 +2805,22 @@ private:
         case ShareConnectionMethod::InternetInvite:
             return shareRoomInviteStatusText(
                 !shareLocalInviteEdit_->text().trimmed().isEmpty(),
-                sharePeerInviteEdit_ != nullptr && !sharePeerInviteEdit_->text().trimmed().isEmpty());
+                currentWatcherResponseInvites().size());
         }
         return {};
     }
 
-    QString shareRoomInviteStatusText(bool hasRoomInvite, bool hasFriendInvite) const
+    QString shareRoomInviteStatusText(bool hasRoomInvite, int watcherInviteCount) const
     {
         if (!hasRoomInvite) {
             return "Room setup: create a room invite and send it to your friend.";
         }
-        if (!hasFriendInvite) {
+        if (watcherInviteCount <= 0) {
             return "Ready: share this room invite with each watcher. If Internet probing stalls, ask one watcher for My invite.";
         }
-        return "Ready: using the room invite plus one fallback friend response invite.";
-    }
-
-    QString extraViewersStatusSuffix() const
-    {
-        int count = 0;
-        for (const auto& row : shareInviteViewerRows_) {
-            if (row.peerInviteEdit != nullptr &&
-                row.localInviteEdit != nullptr &&
-                !row.peerInviteEdit->text().trimmed().isEmpty() &&
-                !row.localInviteEdit->text().trimmed().isEmpty()) {
-                ++count;
-            }
-        }
-        if (count <= 0) {
-            return ".";
-        }
-        return QStringLiteral(" plus %1 more invite watcher%2.")
-            .arg(count)
-            .arg(count == 1 ? QString() : QStringLiteral("s"));
+        return QStringLiteral("Ready: using the room invite plus %1 watcher response invite%2.")
+            .arg(watcherInviteCount)
+            .arg(watcherInviteCount == 1 ? QString() : QStringLiteral("s"));
     }
 
     QString watchRoomInviteStatusText(bool hasRoomInvite) const
@@ -3207,20 +2939,6 @@ private:
         }
         if (sharePortSpin_ != nullptr) {
             sharePortSpin_->setEnabled(!running);
-        }
-        if (addShareInviteViewerButton_ != nullptr) {
-            addShareInviteViewerButton_->setEnabled(!running && !inviteGenerating());
-        }
-        for (auto& row : shareInviteViewerRows_) {
-            if (row.portSpin != nullptr) {
-                row.portSpin->setEnabled(!running);
-            }
-            if (row.localInviteEdit != nullptr) {
-                row.localInviteEdit->setEnabled(!running);
-            }
-            if (row.peerInviteEdit != nullptr) {
-                row.peerInviteEdit->setEnabled(!running);
-            }
         }
         if (watchNearbyButton_ != nullptr) {
             watchNearbyButton_->setEnabled(!running);
@@ -3493,12 +3211,6 @@ private:
     QPushButton* createShareInviteButton_ = nullptr;
     QPushButton* copyShareInviteButton_ = nullptr;
     QPushButton* pasteSharePeerInviteButton_ = nullptr;
-    QVBoxLayout* shareInviteViewersLayout_ = nullptr;
-    QPushButton* addShareInviteViewerButton_ = nullptr;
-    QVector<ShareInviteViewerRow> shareInviteViewerRows_;
-    QSpinBox* shareInviteTargetPortSpin_ = nullptr;
-    QLineEdit* shareInviteTargetLocalInviteEdit_ = nullptr;
-    QPushButton* shareInviteTargetCreateButton_ = nullptr;
     QLabel* shareInternetStatusLabel_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
     QPushButton* findLanButton_ = nullptr;

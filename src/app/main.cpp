@@ -225,7 +225,7 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT|INVITE [--display N] [--seconds S]\n"
-        << "              [--share-target HOST:PORT]\n"
+        << "              [--share-target HOST:PORT|WATCHER_INVITE]\n"
         << "              [--invite-endpoint auto|public|local]\n"
         << "              [--local-invite INVITE]\n"
         << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
@@ -274,8 +274,8 @@ void PrintHelp()
         << "       Watch can also use --peer-invite to send punch probes while waiting for Share.\n"
         << "       Share can use --share \"ss1e:...\" to send to the peer invite endpoint.\n"
         << "       Add --local-invite \"ss1e:...\" on Share to bind the local port from this side's invite.\n"
-        << "       Passing the same room invite as --share and --local-invite lets multiple watchers join by probing that invite.\n"
-        << "       Use --share-target HOST:PORT for extra direct/LAN/VPN watchers.\n"
+        << "       Passing the same room invite as --share and --local-invite lets reachable watchers join by probing that invite.\n"
+        << "       Add --share-target WATCHER_INVITE for blocked watchers that send back response invites.\n"
         << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
@@ -2984,10 +2984,6 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     const auto makeShareTargetSpec = [&](const ExtraShareTargetOption& targetOption, bool primary) {
         UdpSendTargetSpec spec;
         if (LooksLikeNatInvite(targetOption.target)) {
-            if (!primary && targetOption.localInvite.empty()) {
-                throw std::invalid_argument(
-                    "--share-target INVITE requires --share-target-local-invite INVITE so the sender can bind the matching local port");
-            }
             const auto invite = screenshare::ParseNatInvite(targetOption.target, options.accessCodeKey);
             const auto selectedEndpoint = SelectNatInviteEndpoint(invite, options.inviteEndpointPreference);
             spec.target = FormatNatEndpoint(selectedEndpoint.endpoint);
@@ -4613,6 +4609,15 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                             for (size_t targetIndex = 0; targetIndex < udpTargets.size(); ++targetIndex) {
                                 const auto& target = udpTargets[targetIndex];
                                 auto udpConfig = screenshare::ParseUdpSenderTarget(target.target);
+                                if (targetIndex > 0 &&
+                                    target.fromPeerInvite &&
+                                    target.localPort == 0 &&
+                                    !udpConfigs.empty() &&
+                                    udpConfigs.front().collectNatProbeTargets) {
+                                    udpConfigs.front().additionalTargets.push_back(
+                                        screenshare::UdpSenderEndpoint{udpConfig.host, udpConfig.port});
+                                    continue;
+                                }
                                 udpConfig.localPort = target.localPort;
                                 udpConfig.pacingEnabled = options.udpPacing;
                                 udpConfig.pacingBitrate = combinedUdpPacingBitrate();

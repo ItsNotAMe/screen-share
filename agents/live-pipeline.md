@@ -23,10 +23,11 @@ active, and failed UDP target counts.
 The Qt UI exposes direct multi-target sharing without a separate extra-target box: Nearby is a
 multi-select target list, and Manual accepts multiple comma/space-separated direct targets in its
 main Targets field.
-Internet/NAT multi-viewer should use one sharer room invite. Share binds the invite's local port,
-learns watcher endpoints from valid NAT probes, and sends each queued datagram to every learned
-watcher endpoint. Future work should show per-viewer connection state if real reports show users
-need it.
+Internet/NAT multi-viewer should use one sharer room invite plus optional watcher response invites.
+Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends
+outward to any pasted watcher response invite endpoints, and sends each queued datagram to every
+known watcher endpoint through that same sender socket. Future work should show per-viewer
+connection state if real reports show users need it.
 
 `--share` is the normal live preset and should not allow a many-second sender queue to build. It
 defaults to a 1500 ms UDP queue cap unless the user explicitly overrides `--udp-max-queue-ms`.

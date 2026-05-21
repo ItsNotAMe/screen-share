@@ -19,9 +19,15 @@
 
 namespace screenshare {
 
+struct UdpSenderEndpoint {
+    std::string host;
+    uint16_t port = 0;
+};
+
 struct UdpSenderConfig {
     std::string host;
     uint16_t port = 0;
+    std::vector<UdpSenderEndpoint> additionalTargets;
     uint16_t localPort = 0;
     uint32_t maxPayloadBytes = 1'200;
     uint32_t pacingBitrate = 0;
@@ -156,6 +162,7 @@ private:
 
     uintptr_t socket_ = 0;
     std::vector<std::byte> address_;
+    std::vector<std::vector<std::byte>> additionalAddresses_;
     std::vector<std::vector<std::byte>> natProbeAddresses_;
     int addressLength_ = 0;
     UdpSenderConfig config_{};
