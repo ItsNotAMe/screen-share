@@ -120,6 +120,7 @@ public:
     void Open(const UdpReceiverConfig& config);
     void Close();
     void ResetMediaQueues();
+    bool AddNatProbeTarget(const UdpNatProbeTarget& target);
     [[nodiscard]] std::optional<UdpCompletedFrame> ReceiveFrame(std::chrono::milliseconds timeout);
     [[nodiscard]] std::optional<UdpCompletedAudioPacket> PopAudioPacket();
     bool SendFeedback(const udp_protocol::FeedbackSnapshot& feedback);

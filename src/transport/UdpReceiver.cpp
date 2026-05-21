@@ -266,6 +266,49 @@ void UdpReceiver::ResetMediaQueues()
     pendingAudioPackets_.clear();
 }
 
+bool UdpReceiver::AddNatProbeTarget(const UdpNatProbeTarget& target)
+{
+    if (!isOpen()) {
+        throw std::logic_error("UdpReceiver::Open must be called before AddNatProbeTarget");
+    }
+    if (target.host.empty() || target.port == 0) {
+        throw std::invalid_argument("UDP NAT probe target must have host and port");
+    }
+
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+
+    addrinfo* resolved = nullptr;
+    const std::string port = std::to_string(target.port);
+    const int addressResult = getaddrinfo(target.host.c_str(), port.c_str(), &hints, &resolved);
+    if (addressResult != 0 || resolved == nullptr) {
+        throw std::runtime_error("getaddrinfo failed for UDP NAT probe target " + target.host + ":" + port);
+    }
+
+    NatProbeTargetAddress resolvedTarget;
+    resolvedTarget.address.resize(static_cast<size_t>(resolved->ai_addrlen));
+    std::memcpy(resolvedTarget.address.data(), resolved->ai_addr, static_cast<size_t>(resolved->ai_addrlen));
+    resolvedTarget.addressLength = static_cast<int>(resolved->ai_addrlen);
+    resolvedTarget.localEndpoint = target.localEndpoint;
+    freeaddrinfo(resolved);
+
+    const auto duplicate = std::find_if(
+        natProbeTargets_.begin(),
+        natProbeTargets_.end(),
+        [&](const NatProbeTargetAddress& existing) {
+            return existing.address == resolvedTarget.address;
+        });
+    if (duplicate != natProbeTargets_.end()) {
+        return false;
+    }
+
+    natProbeTargets_.push_back(std::move(resolvedTarget));
+    nextNatProbeAt_ = Clock::now();
+    return true;
+}
+
 std::optional<UdpCompletedFrame> UdpReceiver::ReceiveFrame(std::chrono::milliseconds timeout)
 {
     if (!isOpen()) {
