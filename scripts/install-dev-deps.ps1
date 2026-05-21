@@ -39,6 +39,7 @@ $MsysBash = Join-Path $MsysRoot "usr\bin\bash.exe"
 $UcrtBin = Join-Path $MsysRoot "ucrt64\bin"
 $MsysUsrBin = Join-Path $MsysRoot "usr\bin"
 $NativePathTouched = $false
+$InstalledNode = $false
 
 if ($NativeOnly -and $WorkerOnly) {
     throw "Use only one of -NativeOnly or -WorkerOnly."
@@ -224,6 +225,7 @@ function Ensure-Node {
     Write-Step "Installing Node.js LTS"
     Invoke-WingetInstall "OpenJS.NodeJS.LTS"
     Add-ProcessPath "C:\Program Files\nodejs"
+    $script:InstalledNode = $true
 }
 
 function Install-WorkerPackages {
@@ -302,4 +304,7 @@ if (-not $SkipWorker) {
     Write-Info "  cd signaling-worker"
     Write-Info "  npm run typecheck"
     Write-Info "  npx wrangler deploy"
+}
+if ($NativePathTouched -or $InstalledNode) {
+    Write-Info "Open a new terminal after installation if node/npm/cmake are not visible in your current shell."
 }
