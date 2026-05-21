@@ -96,6 +96,40 @@ bool looksLikeNatInvite(QString value)
            value.startsWith("ss1e:");
 }
 
+QStringList parseExtraShareTargets(QString value)
+{
+    value.replace(',', ' ');
+    value.replace(';', ' ');
+    value.replace('\r', ' ');
+    value.replace('\n', ' ');
+    return value.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+}
+
+QString directShareTargetError(const QString& value)
+{
+    const QString target = value.trimmed();
+    if (target.isEmpty()) {
+        return {};
+    }
+    if (looksLikeNatInvite(target)) {
+        return "Extra viewers support direct HOST:PORT targets only for now. "
+               "Paste NAT response invites in Friend invite instead.";
+    }
+
+    const int separator = target.lastIndexOf(':');
+    if (separator <= 0 || separator == target.size() - 1) {
+        return "Extra viewers must be written as HOST:PORT.";
+    }
+
+    bool ok = false;
+    const int port = target.mid(separator + 1).toInt(&ok);
+    if (!ok || port < 1 || port > 65535) {
+        return "Extra viewer ports must be between 1 and 65535.";
+    }
+
+    return {};
+}
+
 QString extractInviteLine(const QString& output)
 {
     const auto normalizeInvite = [](QString invite) {
@@ -931,6 +965,15 @@ private:
         shareConnectionStack_->addPage(internetPage);
         shareConnectionStack_->addPage(manualPage);
         connectionContent->addWidget(shareConnectionStack_);
+
+        shareExtraViewersEdit_ = new QLineEdit;
+        shareExtraViewersEdit_->setPlaceholderText("Direct only: 192.168.1.128:5000, 100.x.y.z:5000");
+        shareExtraViewersEdit_->setToolTip(
+            "Optional direct extra viewers by IP:port. Start Watch on each computer, then enter each HOST:PORT here. "
+            "Use Friend invite for the main NAT viewer; NAT invite fanout for multiple viewers is a later room feature.");
+        prepareInput(shareExtraViewersEdit_);
+        addRow(connectionContent, "Extra IP:port", shareExtraViewersEdit_);
+
         shareInternetStatusLabel_ = makeLabel("", "StatusHint");
         shareInternetStatusLabel_->setWordWrap(true);
         connectionContent->addWidget(shareInternetStatusLabel_);
@@ -1278,6 +1321,8 @@ private:
 
         bindLineEdit(shareHostEdit_);
         connect(shareHostEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
+        bindLineEdit(shareExtraViewersEdit_);
+        connect(shareExtraViewersEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(shareLocalInviteEdit_);
         connect(shareLocalInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInviteButtons(); });
         bindLineEdit(sharePeerInviteEdit_);
@@ -1572,6 +1617,12 @@ private:
             } else {
                 args << "--share" << (shareHostEdit_->text().trimmed() + ":" + QString::number(sharePortSpin_->value()));
             }
+            if (shareExtraViewersEdit_ != nullptr) {
+                const QStringList extraTargets = parseExtraShareTargets(shareExtraViewersEdit_->text());
+                for (const QString& target : extraTargets) {
+                    args << "--share-target" << target;
+                }
+            }
             args << "--display" << QString::number(selectedDisplayIndex());
             args << "--fps" << QString::number(fpsSpin_->value());
 
@@ -1702,6 +1753,9 @@ private:
                 "Missing room invite",
                 "Paste the room invite from the sharer before watching.");
             watchPeerInviteEdit_->setFocus();
+            return;
+        }
+        if (!validateExtraShareTargets()) {
             return;
         }
         if (!confirmShareTarget()) {
@@ -1968,6 +2022,25 @@ private:
 
         shareHostEdit_->setFocus();
         return false;
+    }
+
+    bool validateExtraShareTargets()
+    {
+        if (!shareMode() || shareExtraViewersEdit_ == nullptr) {
+            return true;
+        }
+
+        const QStringList targets = parseExtraShareTargets(shareExtraViewersEdit_->text());
+        for (const QString& target : targets) {
+            const QString error = directShareTargetError(target);
+            if (!error.isEmpty()) {
+                QMessageBox::warning(this, "Extra viewers", error + "\n\nProblem target: " + target);
+                shareExtraViewersEdit_->setFocus();
+                shareExtraViewersEdit_->selectAll();
+                return false;
+            }
+        }
+        return true;
     }
 
     bool sameDiscoveredReceiver(const DiscoveredReceiver& lhs, const DiscoveredReceiver& rhs) const
@@ -2555,7 +2628,7 @@ private:
         switch (shareConnectionMethod()) {
         case ShareConnectionMethod::Nearby:
             if (selectedReceiverApplies()) {
-                return "Ready to start: sharing to the selected nearby device.";
+                return "Ready to start: sharing to the selected nearby device" + extraViewersStatusSuffix();
             }
             return "Choose a nearby device, or switch to Manual address or Internet invite.";
         case ShareConnectionMethod::ManualAddress: {
@@ -2563,7 +2636,7 @@ private:
             if (host.isEmpty()) {
                 return "Enter the receiver address and port.";
             }
-            return "Ready to start: sharing to " + host + ":" + QString::number(sharePortSpin_->value()) + ".";
+            return "Ready to start: sharing to " + host + ":" + QString::number(sharePortSpin_->value()) + extraViewersStatusSuffix();
         }
         case ShareConnectionMethod::InternetInvite:
             return shareRoomInviteStatusText(
@@ -2579,9 +2652,25 @@ private:
             return "Room setup: create a room invite and send it to your friend.";
         }
         if (!hasFriendInvite) {
-            return "Ready for reachable paths. If Internet probing stalls, ask your friend to create My invite and paste it here.";
+            return "Ready for reachable paths" + extraViewersStatusSuffix() +
+                   " If Internet probing stalls, ask your friend to create My invite and paste it here.";
         }
-        return "Ready: sharing will use your friend's response invite and your room invite for the local port.";
+        return "Ready: sharing will use your friend's response invite and your room invite for the local port" +
+               extraViewersStatusSuffix();
+    }
+
+    QString extraViewersStatusSuffix() const
+    {
+        if (shareExtraViewersEdit_ == nullptr) {
+            return ".";
+        }
+        const int count = parseExtraShareTargets(shareExtraViewersEdit_->text()).size();
+        if (count <= 0) {
+            return ".";
+        }
+        return QStringLiteral(" plus %1 extra direct viewer%2.")
+            .arg(count)
+            .arg(count == 1 ? QString() : QStringLiteral("s"));
     }
 
     QString watchRoomInviteStatusText(bool hasRoomInvite) const
@@ -2694,6 +2783,9 @@ private:
         }
         if (manualConnectionButton_ != nullptr) {
             manualConnectionButton_->setEnabled(!running);
+        }
+        if (shareExtraViewersEdit_ != nullptr) {
+            shareExtraViewersEdit_->setEnabled(!running);
         }
         if (watchNearbyButton_ != nullptr) {
             watchNearbyButton_->setEnabled(!running);
@@ -2960,6 +3052,7 @@ private:
     PageStack* shareConnectionStack_ = nullptr;
     ShareConnectionMethod shareConnectionMethod_ = ShareConnectionMethod::InternetInvite;
     QLineEdit* shareHostEdit_ = nullptr;
+    QLineEdit* shareExtraViewersEdit_ = nullptr;
     QLineEdit* shareLocalInviteEdit_ = nullptr;
     QLineEdit* sharePeerInviteEdit_ = nullptr;
     QSpinBox* shareInvitePortSpin_ = nullptr;

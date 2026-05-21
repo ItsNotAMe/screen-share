@@ -91,6 +91,9 @@ watcher's public endpoint until some packet reaches the sharer. Nearby, Internet
 tabs in the same Room section so setup uses one mental model instead of separate competing panels.
 The UI opens the Room section on Internet by default because the room invite flow is the normal
 direct-share path.
+Create room also has an optional Extra IP:port field for direct multi-viewer fanout. Start Watch on
+each extra computer, then enter comma-separated `HOST:PORT` targets there. Those extra viewers are
+direct targets only for now; NAT invite fanout is still a future room UX step.
 
 Common live session:
 

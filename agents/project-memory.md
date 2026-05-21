@@ -181,4 +181,6 @@ WGC capture by default
   - First slice is direct UDP fanout: one encoded video/audio stream is sent to multiple direct `HOST:PORT` targets using separate `UdpSender` instances.
   - Each target owns its own UDP socket, queue, and feedback path; sender telemetry aggregates counters and reports `udp_targets`, `udp_active_targets`, and `udp_failed_targets`.
   - Runtime send/feedback/flush errors on one target should mark only that target failed and keep the remaining viewers alive.
-  - Remaining multi-viewer work is UI room controls, per-viewer health, optional per-viewer bandwidth policy, and NAT invite fanout.
+  - The Qt UI has a compact Create room "Extra IP:port" field that expands direct extra `HOST:PORT` targets into repeated `--share-target` arguments.
+  - NAT invite fanout should be designed separately; it is not a safe parser-only extension because punching depends on which sender socket/port each viewer probes.
+  - Remaining multi-viewer work is per-viewer health, optional per-viewer bandwidth policy, and NAT invite fanout.
