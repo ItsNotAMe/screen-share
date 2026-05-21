@@ -27,6 +27,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -98,6 +99,7 @@ struct Options {
     bool streamEncoderPreferenceProvided = false;
     StreamEncoderPreference streamEncoderPreference = StreamEncoderPreference::Auto;
     std::string udpSendTarget;
+    std::vector<std::string> udpSendTargets;
     uint16_t udpLocalPort = 0;
     bool udpLocalPortProvided = false;
     bool udpPacing = true;
@@ -204,7 +206,8 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT|INVITE [--display N] [--seconds S]\n"
-        << "              [--invite-endpoint auto|public|local] [--local-invite INVITE]\n"
+        << "              [--share-target HOST:PORT] [--invite-endpoint auto|public|local]\n"
+        << "              [--local-invite INVITE]\n"
         << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
@@ -1510,6 +1513,8 @@ struct AudioCaptureWorkerStats {
 
 class AudioUdpCaptureWorker {
 public:
+    using SendAudioPacketFn = std::function<void(const screenshare::UdpAudioPacket&)>;
+
     AudioUdpCaptureWorker() = default;
 
     ~AudioUdpCaptureWorker()
@@ -1521,7 +1526,7 @@ public:
     AudioUdpCaptureWorker& operator=(const AudioUdpCaptureWorker&) = delete;
 
     void Start(
-        screenshare::UdpSender& sender,
+        SendAudioPacketFn sendAudioPacket,
         screenshare::AudioCaptureSource source,
         const std::string& deviceId,
         screenshare::udp_protocol::AudioCodec codec)
@@ -1535,8 +1540,8 @@ public:
             error_.clear();
         }
 
-        thread_ = std::thread([this, &sender, source, deviceId, codec] {
-            Run(sender, source, deviceId, codec);
+        thread_ = std::thread([this, sendAudioPacket = std::move(sendAudioPacket), source, deviceId, codec] {
+            Run(sendAudioPacket, source, deviceId, codec);
         });
     }
 
@@ -1564,7 +1569,7 @@ public:
 
 private:
     void Run(
-        screenshare::UdpSender& sender,
+        const SendAudioPacketFn& sendAudioPacket,
         screenshare::AudioCaptureSource source,
         const std::string& deviceId,
         screenshare::udp_protocol::AudioCodec codec)
@@ -1619,7 +1624,7 @@ private:
                     codec == screenshare::udp_protocol::AudioCodec::Opus ?
                         BuildOpusUdpAudioPacket(*packet, *opusEncoder) :
                         BuildRawUdpAudioPacket(*packet, format, udpSampleFormat);
-                sender.SendAudioPacket(audioPacket);
+                sendAudioPacket(audioPacket);
 
                 std::lock_guard lock(mutex_);
                 ++stats_.packets;
@@ -1867,8 +1872,196 @@ const char* ReceiverNatHint(
     return "waiting_to_send_first_probe";
 }
 
+bool FeedbackLooksWorse(
+    const screenshare::udp_protocol::FeedbackSnapshot& candidate,
+    const screenshare::udp_protocol::FeedbackSnapshot& current)
+{
+    const auto severity = [](screenshare::udp_protocol::FeedbackHealthState state) {
+        switch (state) {
+        case screenshare::udp_protocol::FeedbackHealthState::PreviewDrop:
+            return 6;
+        case screenshare::udp_protocol::FeedbackHealthState::Recovering:
+            return 5;
+        case screenshare::udp_protocol::FeedbackHealthState::Loss:
+            return 4;
+        case screenshare::udp_protocol::FeedbackHealthState::Buffering:
+            return 3;
+        case screenshare::udp_protocol::FeedbackHealthState::Waiting:
+            return 2;
+        case screenshare::udp_protocol::FeedbackHealthState::Unknown:
+            return 1;
+        case screenshare::udp_protocol::FeedbackHealthState::Ok:
+            return 0;
+        }
+        return 1;
+    };
+
+    const int candidateSeverity = severity(candidate.healthState);
+    const int currentSeverity = severity(current.healthState);
+    if (candidateSeverity != currentSeverity) {
+        return candidateSeverity > currentSeverity;
+    }
+
+    const uint64_t candidateDrops =
+        candidate.droppedDatagrams +
+        candidate.invalidDatagrams +
+        candidate.incompleteFramesDropped +
+        candidate.decodeResyncs +
+        candidate.decodeSkippedPackets +
+        candidate.previewLateDrops +
+        candidate.previewOverflowDrops;
+    const uint64_t currentDrops =
+        current.droppedDatagrams +
+        current.invalidDatagrams +
+        current.incompleteFramesDropped +
+        current.decodeResyncs +
+        current.decodeSkippedPackets +
+        current.previewLateDrops +
+        current.previewOverflowDrops;
+    if (candidateDrops != currentDrops) {
+        return candidateDrops > currentDrops;
+    }
+
+    return candidate.sequence > current.sequence;
+}
+
+void MergeReceiverFeedback(
+    screenshare::UdpSenderStats& aggregate,
+    const screenshare::udp_protocol::FeedbackSnapshot& feedback)
+{
+    if (!aggregate.hasFeedback || FeedbackLooksWorse(feedback, aggregate.latestFeedback)) {
+        aggregate.latestFeedback = feedback;
+    }
+    aggregate.hasFeedback = true;
+}
+
+class UdpSenderFanout {
+public:
+    void Open(const std::vector<screenshare::UdpSenderConfig>& configs)
+    {
+        Close();
+        if (configs.empty()) {
+            throw std::invalid_argument("UDP sender fanout needs at least one target");
+        }
+
+        for (const auto& config : configs) {
+            auto sender = std::make_unique<screenshare::UdpSender>();
+            sender->Open(config);
+            senders_.push_back(std::move(sender));
+        }
+    }
+
+    void Close()
+    {
+        senders_.clear();
+    }
+
+    [[nodiscard]] size_t targetCount() const noexcept
+    {
+        return senders_.size();
+    }
+
+    [[nodiscard]] bool isOpen() const noexcept
+    {
+        return !senders_.empty() &&
+               std::all_of(senders_.begin(), senders_.end(), [](const auto& sender) {
+                   return sender != nullptr && sender->isOpen();
+               });
+    }
+
+    void SendFrame(const screenshare::EncodedPacket& packet)
+    {
+        for (auto& sender : senders_) {
+            sender->SendFrame(packet);
+        }
+    }
+
+    void SendAudioPacket(const screenshare::UdpAudioPacket& packet)
+    {
+        for (auto& sender : senders_) {
+            sender->SendAudioPacket(packet);
+        }
+    }
+
+    void SetPacingBitrate(uint32_t bitrate)
+    {
+        for (auto& sender : senders_) {
+            sender->SetPacingBitrate(bitrate);
+        }
+    }
+
+    void Flush()
+    {
+        for (auto& sender : senders_) {
+            sender->Flush();
+        }
+    }
+
+    [[nodiscard]] std::optional<screenshare::udp_protocol::FeedbackSnapshot> ReceiveFeedback(
+        std::chrono::milliseconds firstTimeout)
+    {
+        std::optional<screenshare::udp_protocol::FeedbackSnapshot> selectedFeedback;
+        bool timeoutUsed = false;
+        for (auto& sender : senders_) {
+            std::chrono::milliseconds timeout = timeoutUsed ? std::chrono::milliseconds(0) : firstTimeout;
+            timeoutUsed = true;
+            while (auto feedback = sender->ReceiveFeedback(timeout)) {
+                if (!selectedFeedback || FeedbackLooksWorse(*feedback, *selectedFeedback)) {
+                    selectedFeedback = *feedback;
+                }
+                timeout = std::chrono::milliseconds(0);
+            }
+        }
+        return selectedFeedback;
+    }
+
+    [[nodiscard]] screenshare::UdpSenderStats stats() const
+    {
+        screenshare::UdpSenderStats aggregate;
+        for (const auto& sender : senders_) {
+            const auto current = sender->stats();
+            aggregate.framesSent += current.framesSent;
+            aggregate.framesDropped += current.framesDropped;
+            aggregate.audioPacketsSent += current.audioPacketsSent;
+            aggregate.audioPacketsDropped += current.audioPacketsDropped;
+            aggregate.audioFramesSent += current.audioFramesSent;
+            aggregate.audioDatagramsQueued += current.audioDatagramsQueued;
+            aggregate.audioPayloadBytesSent += current.audioPayloadBytesSent;
+            aggregate.datagramsQueued += current.datagramsQueued;
+            aggregate.datagramsSent += current.datagramsSent;
+            aggregate.datagramsDropped += current.datagramsDropped;
+            aggregate.payloadBytesSent += current.payloadBytesSent;
+            aggregate.wireBytesSent += current.wireBytesSent;
+            aggregate.pendingDatagrams += current.pendingDatagrams;
+            aggregate.peakPendingDatagrams = std::max(aggregate.peakPendingDatagrams, current.peakPendingDatagrams);
+            aggregate.pendingQueueDelayMs = std::max(aggregate.pendingQueueDelayMs, current.pendingQueueDelayMs);
+            aggregate.peakQueueDelayMs = std::max(aggregate.peakQueueDelayMs, current.peakQueueDelayMs);
+            aggregate.feedbackPacketsReceived += current.feedbackPacketsReceived;
+            aggregate.invalidFeedbackPackets += current.invalidFeedbackPackets;
+            aggregate.feedbackAccessRejected += current.feedbackAccessRejected;
+            aggregate.feedbackCryptoRejected += current.feedbackCryptoRejected;
+            aggregate.natProbePacketsReceived += current.natProbePacketsReceived;
+            aggregate.natProbeRetargets += current.natProbeRetargets;
+            aggregate.natProbeRetargetRejected += current.natProbeRetargetRejected;
+            aggregate.natProbeRetargetActive = aggregate.natProbeRetargetActive || current.natProbeRetargetActive;
+            if (aggregate.natProbeRetargetEndpoint.empty() && !current.natProbeRetargetEndpoint.empty()) {
+                aggregate.natProbeRetargetEndpoint = current.natProbeRetargetEndpoint;
+            }
+            aggregate.encryptionEnabled = aggregate.encryptionEnabled || current.encryptionEnabled;
+            if (current.hasFeedback) {
+                MergeReceiverFeedback(aggregate, current.latestFeedback);
+            }
+        }
+        return aggregate;
+    }
+
+private:
+    std::vector<std::unique_ptr<screenshare::UdpSender>> senders_;
+};
+
+template <typename UdpSenderLike>
 std::optional<screenshare::udp_protocol::FeedbackSnapshot> DrainUdpFeedback(
-    screenshare::UdpSender& udpSender,
+    UdpSenderLike& udpSender,
     std::chrono::milliseconds firstTimeout)
 {
     auto latestFeedback = udpSender.ReceiveFeedback(firstTimeout);
@@ -2413,6 +2606,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     options.sessionId = std::move(defaultSessionId);
     bool secondsProvided = false;
     std::optional<std::string> shareTarget;
+    std::vector<std::string> extraShareTargets;
     std::optional<uint16_t> watchPort;
 
     for (int i = 1; i < argc; ++i) {
@@ -2501,6 +2695,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.inviteEndpointPreferenceProvided = true;
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
+        } else if (arg == "--share-target" || arg == "--viewer") {
+            extraShareTargets.push_back(requireValue(arg.c_str()));
         } else if (arg == "--watch") {
             watchPort = screenshare::ParseUdpReceivePort(requireValue("--watch"));
         } else if (arg == "--audio-capture") {
@@ -2537,7 +2733,11 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.streamEncoderPreference = ParseStreamEncoderPreference(requireValue("--stream-encoder"));
             options.streamEncoderPreferenceProvided = true;
         } else if (arg == "--udp-send") {
-            options.udpSendTarget = requireValue("--udp-send");
+            const std::string target = requireValue("--udp-send");
+            if (options.udpSendTarget.empty()) {
+                options.udpSendTarget = target;
+            }
+            options.udpSendTargets.push_back(target);
             options.streamEncode = true;
         } else if (arg == "--udp-local-port") {
             options.udpLocalPort = screenshare::ParseUdpReceivePort(requireValue("--udp-local-port"));
@@ -2626,6 +2826,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (shareTarget && watchPort) {
         throw std::invalid_argument("--share cannot be combined with --watch");
     }
+    if (!extraShareTargets.empty() && !shareTarget) {
+        throw std::invalid_argument("--share-target requires --share");
+    }
     if (shareTarget) {
         if (!options.udpSendTarget.empty()) {
             throw std::invalid_argument("--share cannot be combined with --udp-send");
@@ -2648,6 +2851,14 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.udpSendPeerInviteEndpoint = selectedEndpoint.name;
         } else {
             options.udpSendTarget = *shareTarget;
+        }
+        options.udpSendTargets.push_back(options.udpSendTarget);
+        for (const auto& target : extraShareTargets) {
+            if (LooksLikeNatInvite(target)) {
+                throw std::invalid_argument("--share-target currently accepts HOST:PORT direct targets only");
+            }
+            static_cast<void>(screenshare::ParseUdpSenderTarget(target));
+            options.udpSendTargets.push_back(target);
         }
         options.streamEncode = true;
         options.adaptBitrate = true;
@@ -3681,6 +3892,9 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     }
     if (!options.udpSendTarget.empty()) {
         std::cout << ", UDP sending to " << options.udpSendTarget;
+        if (options.udpSendTargets.size() > 1) {
+            std::cout << " plus " << (options.udpSendTargets.size() - 1) << " extra target(s)";
+        }
         if (peerInvite && options.udpSendTargetFromPeerInvite) {
             std::cout << " from peer invite endpoint=" << options.udpSendPeerInviteEndpoint;
         }
@@ -3788,7 +4002,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     double totalStreamEncodeMs = 0.0;
     uint64_t totalStreamEncodeCalls = 0;
     bool capturedBmpWritten = false;
-    std::unique_ptr<screenshare::UdpSender> udpSender;
+    std::unique_ptr<UdpSenderFanout> udpSender;
     std::unique_ptr<AudioUdpCaptureWorker> audioCaptureWorker;
     uint64_t audioPacingBitrate = 0;
     bool audioPacingApplied = false;
@@ -4181,42 +4395,55 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
 
                     if (!options.udpSendTarget.empty()) {
                         if (!udpSender) {
-                            auto udpConfig = screenshare::ParseUdpSenderTarget(options.udpSendTarget);
-                            udpConfig.localPort = options.udpLocalPort;
-                            udpConfig.pacingEnabled = options.udpPacing;
-                            udpConfig.pacingBitrate = combinedUdpPacingBitrate();
-                            udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
-                            udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
-                            udpConfig.encryptionKey = options.accessCodeKey;
-                            udpConfig.retargetOnNatProbe =
-                                options.udpSendTargetFromPeerInvite &&
-                                options.inviteEndpointPreference == InviteEndpointPreference::Auto;
-                            udpConfig.natProbeSessionFingerprint =
-                                options.sessionIdProvided ? options.sessionFingerprint : 0;
-                            if (options.audioCapture) {
-                                udpConfig.maxQueuedDatagrams = 16'384;
+                            const std::vector<std::string> udpTargets =
+                                options.udpSendTargets.empty() ?
+                                    std::vector<std::string>{options.udpSendTarget} :
+                                    options.udpSendTargets;
+                            std::vector<screenshare::UdpSenderConfig> udpConfigs;
+                            udpConfigs.reserve(udpTargets.size());
+                            for (size_t targetIndex = 0; targetIndex < udpTargets.size(); ++targetIndex) {
+                                auto udpConfig = screenshare::ParseUdpSenderTarget(udpTargets[targetIndex]);
+                                udpConfig.localPort = targetIndex == 0 ? options.udpLocalPort : 0;
+                                udpConfig.pacingEnabled = options.udpPacing;
+                                udpConfig.pacingBitrate = combinedUdpPacingBitrate();
+                                udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
+                                udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
+                                udpConfig.encryptionKey = options.accessCodeKey;
+                                udpConfig.retargetOnNatProbe =
+                                    targetIndex == 0 &&
+                                    options.udpSendTargetFromPeerInvite &&
+                                    options.inviteEndpointPreference == InviteEndpointPreference::Auto;
+                                udpConfig.natProbeSessionFingerprint =
+                                    options.sessionIdProvided ? options.sessionFingerprint : 0;
+                                if (options.audioCapture) {
+                                    udpConfig.maxQueuedDatagrams = 16'384;
+                                }
+                                udpConfigs.push_back(std::move(udpConfig));
                             }
-                            udpSender = std::make_unique<screenshare::UdpSender>();
-                            udpSender->Open(udpConfig);
+                            udpSender = std::make_unique<UdpSenderFanout>();
+                            udpSender->Open(udpConfigs);
                             std::cout
-                                << "UDP sender pacing=" << (udpConfig.pacingEnabled ? "enabled" : "disabled")
+                                << "UDP sender pacing=" << (udpConfigs.front().pacingEnabled ? "enabled" : "disabled")
+                                << " targets=" << udpTargets.size()
                                 << " target_source=" << (options.udpSendTargetFromPeerInvite ? "peer_invite" : "direct")
                                 << " invite_endpoint=" << (options.udpSendTargetFromPeerInvite ? options.udpSendPeerInviteEndpoint : "none")
-                                << " nat_probe_retarget=" << (udpConfig.retargetOnNatProbe ? "enabled" : "disabled")
-                                << " bitrate_mbps=" << Mbps(udpConfig.pacingBitrate)
-                                << " local_port=" << (udpConfig.localPort == 0 ? std::string("auto") : std::to_string(udpConfig.localPort))
+                                << " nat_probe_retarget=" << (udpConfigs.front().retargetOnNatProbe ? "enabled" : "disabled")
+                                << " bitrate_mbps=" << Mbps(udpConfigs.front().pacingBitrate)
+                                << " local_port=" << (udpConfigs.front().localPort == 0 ? std::string("auto") : std::to_string(udpConfigs.front().localPort))
                                 << " local_port_source=" << (options.udpLocalPortFromLocalInvite ? "local_invite" : "option_or_auto")
-                                << " max_queue_ms=" << udpConfig.maxQueueDelay.count()
+                                << " max_queue_ms=" << udpConfigs.front().maxQueueDelay.count()
                                 << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
                                 << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
                                 << " adapt_reduce_cooldown_s=" << options.adaptReduceCooldownSeconds
-                                << " max_queued_datagrams=" << udpConfig.maxQueuedDatagrams
+                                << " max_queued_datagrams=" << udpConfigs.front().maxQueuedDatagrams
                                 << " access_code=" << (options.accessCodeProvided ? "required" : "none")
                                 << "\n";
                             if (options.audioCapture) {
                                 audioCaptureWorker = std::make_unique<AudioUdpCaptureWorker>();
                                 audioCaptureWorker->Start(
-                                    *udpSender,
+                                    [udpSender = udpSender.get()](const screenshare::UdpAudioPacket& packet) {
+                                        udpSender->SendAudioPacket(packet);
+                                    },
                                     options.audioCaptureSource,
                                     options.audioDeviceId,
                                     options.audioCodec);
@@ -4328,6 +4555,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " stream_encoded_frames=" << streamEncodedFrames
                 << " stream_packets=" << streamPackets
                 << " stream_bytes=" << streamBytes
+                << " udp_targets=" << (udpSender ? udpSender->targetCount() : 0)
                 << " udp_datagrams=" << udpStatsNow.datagramsSent
                 << " udp_queued=" << udpStatsNow.datagramsQueued
                 << " udp_pending=" << udpStatsNow.pendingDatagrams
@@ -4457,6 +4685,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", stream queued inputs: " << streamQueuedInputs
         << ", stream dropped inputs: " << streamDroppedInputFrames
         << ", UDP queued datagrams: " << udpStats.datagramsQueued
+        << ", UDP targets: " << (udpSender ? udpSender->targetCount() : 0)
         << ", UDP datagrams: " << udpStats.datagramsSent
         << ", UDP pending datagrams: " << udpStats.pendingDatagrams
         << ", UDP peak pending datagrams: " << udpStats.peakPendingDatagrams

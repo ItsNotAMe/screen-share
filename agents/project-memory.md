@@ -177,3 +177,7 @@ WGC capture by default
   - Reports showed the bad path was not LAN discovery/plaintext/encryption or native resolution alone.
   - The NVIDIA hardware H.264 MFT built an input queue and dropped frames; local tests showed software had zero `stream_dropped` at 640x360, 1280x720/60, and native 2560x1440/60.
   - `--share` now defaults to software encoding while `--stream-encoder hardware` remains available for experiments.
+- Multi-viewer direction:
+  - First slice is direct UDP fanout: one encoded video/audio stream is sent to multiple direct `HOST:PORT` targets using separate `UdpSender` instances.
+  - Each target owns its own UDP socket, queue, and feedback path; sender telemetry aggregates counters and reports `udp_targets`.
+  - Remaining multi-viewer work is UI room controls, per-viewer health, optional per-viewer bandwidth policy, and NAT invite fanout.

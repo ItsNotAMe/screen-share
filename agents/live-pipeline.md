@@ -12,6 +12,12 @@ For live UDP:
 4. The UDP sender paces datagrams by current video bitrate with modest headroom plus audio payload bitrate.
 5. Receiver feedback updates bitrate/resolution policy when `--adapt-bitrate` / `--adapt-resolution` are enabled.
 
+The first multi-viewer slice keeps one encoder and fans out encoded packets to multiple direct UDP
+targets. Each target owns its own `UdpSender` socket/queue/feedback path, and aggregate sender stats
+sum packet counters while using max queue delay and worst receiver feedback for adaptation. Extra
+targets are direct `HOST:PORT` only for now; NAT invite fanout and richer per-viewer UI state remain
+future work.
+
 `--share` is the normal live preset and should not allow a many-second sender queue to build. It
 defaults to a 1500 ms UDP queue cap unless the user explicitly overrides `--udp-max-queue-ms`.
 Raw `--udp-send` keeps the uncapped diagnostic default.
