@@ -12,8 +12,8 @@
 
 ## Current State
 
-- `main` is synced to `origin/main` at PR #93, `41a29d9 Merge pull request #93 from ItsNotAMe/feature/nat-multi-viewer-targets`.
-- Active branch: `feature/signaling-worker`.
+- `main` is synced to `origin/main` at PR #94, `d81b13b Merge pull request #94 from ItsNotAMe/feature/signaling-worker`.
+- Active branch: `main`.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
@@ -86,6 +86,7 @@ WGC capture by default
 - PR #85 `Add direct NAT invite sharing flow`: merged the full direct STUN/manual invite/UDP hole-punching flow into `main`.
 - PR #86 `Clarify room UI setup`: Share/Watch wording, segmented connection tabs, display/audio chooser polish, header status pill, receiver stale-preview blanking, and Windows UDP reconnect resilience for late/restarted Watch.
 - PR #93 `Add NAT multi-viewer room invite targets`: one sharer room invite, optional watcher response invite list, NAT probe-learned fanout through one sender socket, and direct multi-target Share UI cleanup.
+- PR #94 `Add Cloudflare signaling worker scaffold`: signaling-only Worker project, Windows dependency bootstrap script, Worker lockfile/typecheck config, and hidden room-key direction docs.
 - Current room-invite UI work keeps the project no-server/no-external-service: Create room owns one invite and Join room pastes it, but real NAT testing showed this only works for LAN/VPN/reachable-NAT. Endpoint-filtered NAT can block the watcher probes before Share sees them.
 
 ## Active Memory Files
