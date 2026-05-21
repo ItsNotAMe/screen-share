@@ -113,6 +113,17 @@ own diagnostic session ID.
 Use `--allow-plaintext` instead of `--access-code` only when you intentionally want an unencrypted
 local UDP session.
 
+For a first direct multi-viewer test, start Watch on each receiver, then add extra direct targets on
+the Share command:
+
+```powershell
+.\build\release\ScreenShare.exe --share 192.168.1.127:5000 --share-target 192.168.1.128:5000 --access-code CODE
+```
+
+This fanout sends the same encoded video/audio packets to each target without re-encoding the
+screen. Extra targets are direct `HOST:PORT` only for now; NAT invite fanout still needs more room
+UX and per-viewer connection state.
+
 LAN discovery can find a receiver without manually looking up its IP address. On the watching
 computer, start Watch with LAN advertising:
 
