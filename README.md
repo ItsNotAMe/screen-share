@@ -27,6 +27,25 @@ Requirements:
 - Optional: Qt 6 Widgets (`mingw-w64-ucrt-x86_64-qt6-base` on MSYS2 UCRT64) for the desktop control UI
 - Optional: FFmpeg for inspecting generated MP4 files
 
+To bootstrap the common Windows/MSYS2 setup, run the install script from PowerShell:
+
+```powershell
+.\scripts\install-dev-deps.ps1
+```
+
+Useful variants:
+
+```powershell
+.\scripts\install-dev-deps.ps1 -DryRun
+.\scripts\install-dev-deps.ps1 -SkipQt -SkipFfmpeg
+.\scripts\install-dev-deps.ps1 -WorkerOnly
+.\scripts\install-dev-deps.ps1 -InstallWindowsSdk
+```
+
+The script installs MSYS2 native packages, optional Qt/FFmpeg packages, Node.js LTS for the
+signaling Worker, and runs `npm install` in `signaling-worker/`. It does not deploy anything to
+Cloudflare.
+
 ```powershell
 cmake --preset debug
 cmake --build --preset debug

@@ -135,6 +135,12 @@ Install dependencies:
 npm install
 ```
 
+From the repository root, you can also install Node.js LTS and these npm dependencies with:
+
+```powershell
+.\scripts\install-dev-deps.ps1 -WorkerOnly
+```
+
 Create the KV namespace:
 
 ```powershell

@@ -15,6 +15,7 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 - `src/transport/StunClient.*`: standalone STUN Binding Request helper used by CLI NAT diagnostics.
 - `src/ui/`: optional Qt Widgets desktop control UI that launches the CLI engine.
 - `signaling-worker/`: optional Cloudflare Worker TypeScript project for room membership and UDP candidate exchange. It is signaling only; media remains direct native UDP.
+- `scripts/install-dev-deps.ps1`: Windows bootstrap script for MSYS2 native packages, optional Qt/FFmpeg, Node.js LTS, and signaling Worker npm dependencies.
 
 ## Build Shape
 
