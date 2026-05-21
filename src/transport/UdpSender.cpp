@@ -310,6 +310,31 @@ void UdpSender::Close()
     }
 }
 
+bool UdpSender::AddAdditionalTarget(const UdpSenderEndpoint& target)
+{
+    if (!isOpen()) {
+        throw std::logic_error("UdpSender::Open must be called before AddAdditionalTarget");
+    }
+    if (target.host.empty()) {
+        throw std::invalid_argument("UDP additional target host is empty");
+    }
+    if (target.port == 0) {
+        throw std::invalid_argument("UDP additional target port must be non-zero");
+    }
+
+    std::vector<std::byte> address = ResolveUdpAddress(target.host, target.port);
+    std::lock_guard lock(mutex_);
+    if (address == address_ ||
+        std::find(additionalAddresses_.begin(), additionalAddresses_.end(), address) != additionalAddresses_.end() ||
+        std::find(natProbeAddresses_.begin(), natProbeAddresses_.end(), address) != natProbeAddresses_.end()) {
+        return false;
+    }
+
+    additionalAddresses_.push_back(std::move(address));
+    config_.additionalTargets.push_back(target);
+    return true;
+}
+
 void UdpSender::SendFrame(const EncodedPacket& packet)
 {
     if (!isOpen()) {

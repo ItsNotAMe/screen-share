@@ -21,6 +21,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -217,6 +218,8 @@ struct Options {
     int signalingSetupSeconds = 5;
     bool signalingSetupSecondsProvided = false;
     std::vector<screenshare::UdpNatProbeTarget> signalingNatProbeTargets;
+    bool signalingLocalCandidateAvailable = false;
+    screenshare::SignalingCandidate signalingLocalCandidate;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
@@ -2026,6 +2029,17 @@ public:
         targets_.clear();
     }
 
+    bool AddAdditionalTarget(const screenshare::UdpSenderEndpoint& endpoint)
+    {
+        for (auto& target : targets_) {
+            if (target.failed || target.sender == nullptr || !target.sender->isOpen()) {
+                continue;
+            }
+            return target.sender->AddAdditionalTarget(endpoint);
+        }
+        throw std::runtime_error("No active UDP sender target is available for live signaling");
+    }
+
     [[nodiscard]] size_t targetCount() const noexcept
     {
         return targets_.size();
@@ -2217,6 +2231,202 @@ void RecordLatestReceiverFeedback(
     if (feedback) {
         reportContext.latestReceiverFeedback = *feedback;
     }
+}
+
+std::string SignalingCandidateEndpoint(const screenshare::SignalingCandidate& candidate)
+{
+    return candidate.ip + ":" + std::to_string(candidate.port);
+}
+
+void MergeSignalingPeers(
+    std::map<std::string, screenshare::SignalingPeer>& peersById,
+    const screenshare::SignalingRoomResponse& response)
+{
+    if (!response.ok) {
+        throw std::runtime_error("Signaling room response was not ok");
+    }
+    for (const auto& peer : response.peers) {
+        if (peer.candidates.empty()) {
+            continue;
+        }
+        peersById[peer.peerId] = peer;
+    }
+}
+
+screenshare::SignalingPeerState BuildLiveSignalingPeerState(const Options& options)
+{
+    if (!options.signalingLocalCandidateAvailable) {
+        throw std::logic_error("Live signaling local candidate is not available");
+    }
+
+    screenshare::SignalingPeerState peer;
+    peer.peerId = options.signalingPeerId;
+    peer.metadata.name = options.signalingName.empty() ? options.lanName : options.signalingName;
+    peer.metadata.platform = options.signalingPlatform.empty() ? "windows" : options.signalingPlatform;
+    peer.candidates.push_back(options.signalingLocalCandidate);
+    return peer;
+}
+
+struct LiveSignalingPeerCandidate {
+    std::string peerId;
+    screenshare::SignalingCandidate candidate;
+};
+
+class LiveSignalingRuntime {
+public:
+    ~LiveSignalingRuntime()
+    {
+        Stop();
+    }
+
+    void Start(const Options& options)
+    {
+        Stop();
+
+        screenshare::SignalingClientConfig clientConfig;
+        clientConfig.serverUrl = options.signalingServerUrl;
+        clientConfig.timeout = std::chrono::milliseconds(options.signalingTimeoutMs);
+
+        auto state = std::make_shared<State>();
+        state->roomId = options.signalingRoomId;
+        state->peer = BuildLiveSignalingPeerState(options);
+        state_ = state;
+        worker_ = std::thread(&LiveSignalingRuntime::Run, std::move(state), std::move(clientConfig));
+
+        std::cout
+            << "signaling_live_refresh=started"
+            << " room=" << options.signalingRoomId
+            << " peer_id=" << options.signalingPeerId
+            << " interval_ms=" << PollInterval.count()
+            << "\n";
+    }
+
+    void Stop()
+    {
+        if (state_) {
+            {
+                std::lock_guard lock(state_->mutex);
+                state_->stopRequested = true;
+            }
+            state_->wake.notify_all();
+            state_.reset();
+        }
+        if (worker_.joinable()) {
+            worker_.detach();
+        }
+    }
+
+    std::vector<LiveSignalingPeerCandidate> DrainDiscoveredPeers()
+    {
+        if (!state_) {
+            return {};
+        }
+
+        std::lock_guard lock(state_->mutex);
+        std::vector<LiveSignalingPeerCandidate> peers;
+        peers.swap(state_->discoveredPeers);
+        return peers;
+    }
+
+private:
+    static constexpr std::chrono::milliseconds PollInterval{2000};
+
+    struct State {
+        mutable std::mutex mutex;
+        std::condition_variable wake;
+        std::string roomId;
+        screenshare::SignalingPeerState peer;
+        std::set<std::string> seenCandidates;
+        std::vector<LiveSignalingPeerCandidate> discoveredPeers;
+        bool stopRequested = false;
+    };
+
+    [[nodiscard]] static std::string CandidateKey(
+        const std::string& peerId,
+        const screenshare::SignalingCandidate& candidate)
+    {
+        return peerId + "|" + candidate.ip + ":" + std::to_string(candidate.port) + "|" + candidate.protocol;
+    }
+
+    static void RecordPeers(const std::shared_ptr<State>& state, const screenshare::SignalingRoomResponse& response)
+    {
+        if (!response.ok) {
+            throw std::runtime_error("Signaling room response was not ok");
+        }
+
+        std::lock_guard lock(state->mutex);
+        for (const auto& peer : response.peers) {
+            if (peer.peerId == state->peer.peerId) {
+                continue;
+            }
+            for (const auto& candidate : peer.candidates) {
+                const std::string key = CandidateKey(peer.peerId, candidate);
+                if (!state->seenCandidates.insert(key).second) {
+                    continue;
+                }
+                state->discoveredPeers.push_back(LiveSignalingPeerCandidate{peer.peerId, candidate});
+            }
+        }
+    }
+
+    [[nodiscard]] static bool WaitForNextPoll(const std::shared_ptr<State>& state)
+    {
+        std::unique_lock lock(state->mutex);
+        return state->wake.wait_for(lock, PollInterval, [&]() {
+            return state->stopRequested;
+        });
+    }
+
+    [[nodiscard]] static bool stopRequested(const std::shared_ptr<State>& state)
+    {
+        std::lock_guard lock(state->mutex);
+        return state->stopRequested;
+    }
+
+    static void Run(std::shared_ptr<State> state, screenshare::SignalingClientConfig clientConfig)
+    {
+        screenshare::SignalingClient client(std::move(clientConfig));
+
+        while (!stopRequested(state)) {
+            try {
+                RecordPeers(state, client.Join(state->roomId, state->peer));
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "signaling_live_refresh=error"
+                    << " room=" << state->roomId
+                    << " peer_id=" << state->peer.peerId
+                    << " error=\"" << error.what() << "\""
+                    << "\n";
+            }
+
+            if (WaitForNextPoll(state)) {
+                break;
+            }
+        }
+
+        // Do not block shutdown on a best-effort leave request. The Worker TTL
+        // cleanup removes stale room peers if the app exits or the network path
+        // is already gone.
+    }
+
+    std::thread worker_;
+    std::shared_ptr<State> state_;
+};
+
+UdpSendTargetSpec SignalingSendTargetSpec(
+    const screenshare::SignalingCandidate& candidate,
+    uint16_t localPort,
+    uint64_t probeSession)
+{
+    return UdpSendTargetSpec{
+        SignalingCandidateEndpoint(candidate),
+        true,
+        "signaling",
+        localPort,
+        false,
+        true,
+        true,
+        probeSession};
 }
 
 class AdaptiveBitrateAdvisor {
@@ -4392,6 +4602,10 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << ", min scale " << options.adaptResolutionMinScale
                 << ", resolution cooldown " << options.adaptResolutionCooldownSeconds << "s";
         }
+    } else if (options.shareRoom) {
+        std::cout
+            << ", live signaling room sharing on UDP local port " << options.udpLocalPort
+            << ", waiting for room peers";
     }
     if (options.audioCapture) {
         std::cout
@@ -4473,8 +4687,19 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     bool capturedBmpWritten = false;
     std::unique_ptr<UdpSenderFanout> udpSender;
     std::unique_ptr<AudioUdpCaptureWorker> audioCaptureWorker;
+    std::unique_ptr<LiveSignalingRuntime> liveSignalingRuntime;
+    std::vector<UdpSendTargetSpec> udpSendTargetSpecs = options.udpSendTargetSpecs;
+    std::set<std::string> liveSignalingSendTargets;
     uint64_t audioPacingBitrate = 0;
     bool audioPacingApplied = false;
+
+    for (const auto& target : udpSendTargetSpecs) {
+        liveSignalingSendTargets.insert(target.target);
+    }
+    if (options.signalingLive && options.shareRoom) {
+        liveSignalingRuntime = std::make_unique<LiveSignalingRuntime>();
+        liveSignalingRuntime->Start(options);
+    }
 
     auto streamUdpPacingBitrate = [&]() -> uint64_t {
         if (streamBitrate == 0) {
@@ -4505,6 +4730,40 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
             if (udpSender) {
                 udpSender->SendFrame(packet);
             }
+        }
+    };
+
+    auto drainLiveSignalingSendTargets = [&]() {
+        if (!liveSignalingRuntime) {
+            return;
+        }
+
+        const uint64_t probeSession = NatProbeSessionFingerprint(options);
+        for (const auto& peer : liveSignalingRuntime->DrainDiscoveredPeers()) {
+            const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
+            if (!liveSignalingSendTargets.insert(endpoint).second) {
+                continue;
+            }
+
+            UdpSendTargetSpec target = SignalingSendTargetSpec(
+                peer.candidate,
+                udpSendTargetSpecs.empty() ? options.udpLocalPort : static_cast<uint16_t>(0),
+                probeSession);
+            udpSendTargetSpecs.push_back(target);
+
+            bool active = false;
+            if (udpSender) {
+                active = udpSender->AddAdditionalTarget(
+                    screenshare::UdpSenderEndpoint{peer.candidate.ip, peer.candidate.port});
+            }
+
+            std::cout
+                << "signaling_live_sender_peer=added"
+                << " room=" << options.signalingRoomId
+                << " peer_id=" << peer.peerId
+                << " endpoint=" << endpoint
+                << " active=" << (udpSender ? (active ? "yes" : "duplicate") : "pending")
+                << "\n";
         }
     };
 
@@ -4705,6 +4964,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     while (keepRunning()) {
         std::this_thread::sleep_until(nextFrameAt);
         nextFrameAt += targetFrameTime;
+        drainLiveSignalingSendTargets();
 
         const auto captureStartedAt = Clock::now();
         const auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(0));
@@ -4862,9 +5122,11 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                         }
                     }
 
-                    if (!options.udpSendTarget.empty()) {
+                    const bool hasUdpSendTargets =
+                        !udpSendTargetSpecs.empty() || !options.udpSendTarget.empty();
+                    if (hasUdpSendTargets) {
                         if (!udpSender) {
-                            std::vector<UdpSendTargetSpec> udpTargets = options.udpSendTargetSpecs;
+                            std::vector<UdpSendTargetSpec> udpTargets = udpSendTargetSpecs;
                             if (udpTargets.empty()) {
                                 udpTargets.push_back(UdpSendTargetSpec{
                                     options.udpSendTarget,
@@ -5381,26 +5643,6 @@ void RunSignaling(const Options& options)
     }
 }
 
-std::string SignalingCandidateEndpoint(const screenshare::SignalingCandidate& candidate)
-{
-    return candidate.ip + ":" + std::to_string(candidate.port);
-}
-
-void MergeSignalingPeers(
-    std::map<std::string, screenshare::SignalingPeer>& peersById,
-    const screenshare::SignalingRoomResponse& response)
-{
-    if (!response.ok) {
-        throw std::runtime_error("Signaling room response was not ok");
-    }
-    for (const auto& peer : response.peers) {
-        if (peer.candidates.empty()) {
-            continue;
-        }
-        peersById[peer.peerId] = peer;
-    }
-}
-
 void PrepareLiveSignaling(Options& options)
 {
     if (!options.signalingLive) {
@@ -5426,16 +5668,13 @@ void PrepareLiveSignaling(Options& options)
         << "\n";
     const auto stun = screenshare::QueryPublicUdpEndpoint(stunConfig);
 
-    screenshare::SignalingPeerState peer;
-    peer.peerId = options.signalingPeerId;
-    peer.metadata.name = options.signalingName.empty() ? options.lanName : options.signalingName;
-    peer.metadata.platform = options.signalingPlatform.empty() ? "windows" : options.signalingPlatform;
-    peer.candidates.push_back(screenshare::SignalingCandidate{
+    options.signalingLocalCandidate = screenshare::SignalingCandidate{
         "srflx",
         stun.publicAddress,
         stun.publicPort,
-        "udp",
-    });
+        "udp"};
+    options.signalingLocalCandidateAvailable = true;
+    const screenshare::SignalingPeerState peer = BuildLiveSignalingPeerState(options);
 
     screenshare::SignalingClientConfig clientConfig;
     clientConfig.serverUrl = options.signalingServerUrl;
@@ -5479,15 +5718,10 @@ void PrepareLiveSignaling(Options& options)
                 << "\n";
 
             if (options.shareRoom) {
-                sendTargets.push_back(UdpSendTargetSpec{
-                    endpoint,
-                    true,
-                    "signaling",
+                sendTargets.push_back(SignalingSendTargetSpec(
+                    candidate,
                     sendTargets.empty() ? localPort : static_cast<uint16_t>(0),
-                    false,
-                    true,
-                    true,
-                    probeSession});
+                    probeSession));
             } else {
                 probeTargets.push_back(screenshare::UdpNatProbeTarget{
                     candidate.ip,
@@ -5499,8 +5733,11 @@ void PrepareLiveSignaling(Options& options)
 
     if (options.shareRoom) {
         if (sendTargets.empty()) {
-            throw std::runtime_error(
-                "No signaling peers found for --share-room. Start Watch first or increase --signal-setup-seconds.");
+            std::cout
+                << "signaling_live_warning=no_peers_yet"
+                << " room=" << options.signalingRoomId
+                << " hint=share_will_wait_for_signaling_peers\n";
+            return;
         }
         options.udpSendTargetSpecs = std::move(sendTargets);
         options.udpSendTargets.clear();
@@ -5751,6 +5988,36 @@ void RunUdpReceiverStats(const Options& options)
         options.signalingNatProbeTargets.begin(),
         options.signalingNatProbeTargets.end());
     receiver.Open(config);
+    std::unique_ptr<LiveSignalingRuntime> liveSignalingRuntime;
+    if (options.signalingLive && !options.shareRoom) {
+        liveSignalingRuntime = std::make_unique<LiveSignalingRuntime>();
+        liveSignalingRuntime->Start(options);
+    }
+
+    auto drainLiveSignalingProbeTargets = [&]() {
+        if (!liveSignalingRuntime) {
+            return 0;
+        }
+
+        int added = 0;
+        for (const auto& peer : liveSignalingRuntime->DrainDiscoveredPeers()) {
+            const screenshare::UdpNatProbeTarget target{
+                peer.candidate.ip,
+                peer.candidate.port,
+                false};
+            if (!receiver.AddNatProbeTarget(target)) {
+                continue;
+            }
+            ++added;
+            std::cout
+                << "signaling_live_receiver_peer=added"
+                << " room=" << options.signalingRoomId
+                << " peer_id=" << peer.peerId
+                << " endpoint=" << SignalingCandidateEndpoint(peer.candidate)
+                << "\n";
+        }
+        return added;
+    };
 
     std::unique_ptr<screenshare::LanDiscoveryResponder> lanDiscoveryResponder;
     if (options.lanAdvertise) {
@@ -6513,7 +6780,7 @@ void RunUdpReceiverStats(const Options& options)
     bool waitingForStreamLogged = false;
     bool previewBlankedForNoStream = false;
     auto lastStreamActivityAt = startedAt;
-    const bool hasNatProbeSetup = peerInvite.has_value() || !options.signalingNatProbeTargets.empty();
+    bool hasNatProbeSetup = peerInvite.has_value() || !options.signalingNatProbeTargets.empty();
 
     auto detectReceiverStreamRestart = [&](const screenshare::UdpCompletedFrame& frame) {
         if (!hasCompletedFrame || frame.frameId >= latestFrameId) {
@@ -6627,6 +6894,9 @@ void RunUdpReceiverStats(const Options& options)
     };
 
     while (shouldContinue()) {
+        if (drainLiveSignalingProbeTargets() > 0) {
+            hasNatProbeSetup = true;
+        }
         if (previewWindow && mediaPlaybackAllowed()) {
             presentPreviewReady(false);
         }
@@ -7156,7 +7426,7 @@ int main(int argc, char** argv)
         } else if (options.listAudioDevices) {
             PrintAudioDevices();
             exitCode = 0;
-        } else if (options.audioCapture && options.udpSendTarget.empty()) {
+        } else if (options.audioCapture && options.udpSendTarget.empty() && !options.shareRoom) {
             RunAudioCaptureStats(options, reportContext);
             exitCode = 0;
         } else if (options.udpReceivePort != 0) {

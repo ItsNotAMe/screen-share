@@ -99,6 +99,7 @@ public:
 
     void Open(const UdpSenderConfig& config);
     void Close();
+    bool AddAdditionalTarget(const UdpSenderEndpoint& target);
     void SendFrame(const EncodedPacket& packet);
     void SendAudioPacket(const UdpAudioPacket& packet);
     void SetPacingBitrate(uint32_t bitrate);
