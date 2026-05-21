@@ -99,6 +99,32 @@ std::string SocketAddressToString(const void* address, int addressLength)
     return std::string(host.data()) + ":" + std::to_string(ntohs(ipv4->sin_port));
 }
 
+std::vector<std::byte> CopySocketAddress(const sockaddr* address, size_t addressLength)
+{
+    std::vector<std::byte> bytes(addressLength);
+    std::memcpy(bytes.data(), address, addressLength);
+    return bytes;
+}
+
+std::vector<std::byte> ResolveUdpAddress(const std::string& host, uint16_t port)
+{
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+
+    addrinfo* resolved = nullptr;
+    const std::string portText = std::to_string(port);
+    const int addressResult = getaddrinfo(host.c_str(), portText.c_str(), &hints, &resolved);
+    if (addressResult != 0 || resolved == nullptr) {
+        throw std::runtime_error("getaddrinfo failed for UDP target " + host + ":" + portText);
+    }
+
+    std::vector<std::byte> address = CopySocketAddress(resolved->ai_addr, resolved->ai_addrlen);
+    freeaddrinfo(resolved);
+    return address;
+}
+
 } // namespace
 
 UdpSender::UdpSender()
@@ -142,6 +168,17 @@ void UdpSender::Open(const UdpSenderConfig& config)
     }
     if (config.encryptionKey && config.accessCodeFingerprint == 0) {
         throw std::invalid_argument("UDP encryption requires an access code fingerprint");
+    }
+    if (config.maxNatProbeTargets == 0) {
+        throw std::invalid_argument("UDP NAT probe target limit must be non-zero");
+    }
+    for (const auto& target : config.additionalTargets) {
+        if (target.host.empty()) {
+            throw std::invalid_argument("UDP additional target host is empty");
+        }
+        if (target.port == 0) {
+            throw std::invalid_argument("UDP additional target port must be non-zero");
+        }
     }
 
     std::unique_ptr<UdpAesGcm> crypto;
@@ -198,6 +235,18 @@ void UdpSender::Open(const UdpSenderConfig& config)
         }
     }
 
+    std::vector<std::vector<std::byte>> additionalAddresses;
+    additionalAddresses.reserve(config.additionalTargets.size());
+    try {
+        for (const auto& target : config.additionalTargets) {
+            additionalAddresses.push_back(ResolveUdpAddress(target.host, target.port));
+        }
+    } catch (...) {
+        closesocket(udpSocket);
+        freeaddrinfo(resolved);
+        throw;
+    }
+
     {
         std::lock_guard lock(mutex_);
         address_.resize(static_cast<size_t>(resolved->ai_addrlen));
@@ -205,6 +254,8 @@ void UdpSender::Open(const UdpSenderConfig& config)
 
         socket_ = static_cast<uintptr_t>(udpSocket);
         addressLength_ = static_cast<int>(resolved->ai_addrlen);
+        additionalAddresses_ = std::move(additionalAddresses);
+        natProbeAddresses_.clear();
         config_ = config;
         stats_ = {};
         stats_.encryptionEnabled = crypto != nullptr;
@@ -246,6 +297,8 @@ void UdpSender::Close()
     {
         std::lock_guard lock(mutex_);
         address_.clear();
+        additionalAddresses_.clear();
+        natProbeAddresses_.clear();
         addressLength_ = 0;
         crypto_.reset();
         videoNoncePrefix_ = 0;
@@ -468,6 +521,7 @@ UdpSenderStats UdpSender::stats() const
 {
     std::lock_guard lock(mutex_);
     UdpSenderStats snapshot = stats_;
+    snapshot.natProbeTargetCount = static_cast<uint64_t>(natProbeAddresses_.size());
     snapshot.pendingDatagrams =
         static_cast<uint64_t>(queue_.size()) + (datagramInFlight_ ? 1ULL : 0ULL);
     const auto now = Clock::now();
@@ -794,32 +848,53 @@ void UdpSender::WorkerLoop()
 
 void UdpSender::SendDatagramBytes(const std::vector<std::byte>& datagram)
 {
-    std::vector<std::byte> address;
-    int addressLength = 0;
+    std::vector<std::vector<std::byte>> addresses;
     {
         std::lock_guard lock(mutex_);
-        address = address_;
-        addressLength = addressLength_;
+        if (address_.empty() || addressLength_ <= 0) {
+            throw std::runtime_error("UDP sender target address is not available");
+        }
+        if (!config_.preferNatProbeTargets || (additionalAddresses_.empty() && natProbeAddresses_.empty())) {
+            addresses.push_back(address_);
+        }
+        for (const auto& address : additionalAddresses_) {
+            if (std::find(addresses.begin(), addresses.end(), address) == addresses.end()) {
+                addresses.push_back(address);
+            }
+        }
+        for (const auto& address : natProbeAddresses_) {
+            if (std::find(addresses.begin(), addresses.end(), address) == addresses.end()) {
+                addresses.push_back(address);
+            }
+        }
     }
-    if (address.empty() || addressLength <= 0) {
+
+    if (addresses.empty()) {
         throw std::runtime_error("UDP sender target address is not available");
     }
 
-    const int sent = sendto(
-        AsSocket(socket_),
-        reinterpret_cast<const char*>(datagram.data()),
-        static_cast<int>(datagram.size()),
-        0,
-        reinterpret_cast<const sockaddr*>(address.data()),
-        addressLength);
+    uint64_t sentDatagrams = 0;
+    uint64_t sentBytes = 0;
+    for (const auto& address : addresses) {
+        const int sent = sendto(
+            AsSocket(socket_),
+            reinterpret_cast<const char*>(datagram.data()),
+            static_cast<int>(datagram.size()),
+            0,
+            reinterpret_cast<const sockaddr*>(address.data()),
+            static_cast<int>(address.size()));
 
-    if (sent == SOCKET_ERROR) {
-        throw std::runtime_error(WinsockErrorMessage("sendto"));
+        if (sent == SOCKET_ERROR) {
+            throw std::runtime_error(WinsockErrorMessage("sendto"));
+        }
+
+        ++sentDatagrams;
+        sentBytes += static_cast<uint64_t>(sent);
     }
 
     std::lock_guard lock(mutex_);
-    ++stats_.datagramsSent;
-    stats_.wireBytesSent += static_cast<uint64_t>(sent);
+    stats_.datagramsSent += sentDatagrams;
+    stats_.wireBytesSent += sentBytes;
 }
 
 void UdpSender::MaybeRetargetFromNatProbe(
@@ -850,6 +925,27 @@ void UdpSender::MaybeRetargetFromNatProbe(
 
     std::vector<std::byte> candidate(static_cast<size_t>(addressLength));
     std::memcpy(candidate.data(), address, static_cast<size_t>(addressLength));
+    if (config_.collectNatProbeTargets) {
+        const bool isPrimary = candidate == address_;
+        const bool alreadyKnown = std::find(
+            natProbeAddresses_.begin(),
+            natProbeAddresses_.end(),
+            candidate) != natProbeAddresses_.end();
+        if (!isPrimary && !alreadyKnown) {
+            if (natProbeAddresses_.size() >= config_.maxNatProbeTargets) {
+                ++stats_.natProbeRetargetRejected;
+                return;
+            }
+            natProbeAddresses_.push_back(std::move(candidate));
+            ++stats_.natProbeRetargets;
+        }
+
+        stats_.natProbeTargetCount = static_cast<uint64_t>(natProbeAddresses_.size());
+        stats_.natProbeRetargetActive = true;
+        stats_.natProbeRetargetEndpoint = SocketAddressToString(address, addressLength);
+        return;
+    }
+
     const bool changed = candidate != address_;
     if (changed) {
         address_ = std::move(candidate);

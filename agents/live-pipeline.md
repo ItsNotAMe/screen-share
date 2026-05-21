@@ -15,16 +15,19 @@ For live UDP:
 The first multi-viewer slice keeps one encoder and fans out encoded packets to multiple direct UDP
 targets. Each target owns its own `UdpSender` socket/queue/feedback path, and aggregate sender stats
 sum packet counters while using max queue delay and worst receiver feedback for adaptation. Extra
-targets are direct `HOST:PORT` only for now; NAT invite fanout and richer per-viewer UI state remain
-future work.
+targets can be direct `HOST:PORT` or invite-based when paired with a matching local invite. Richer
+per-viewer UI state remains future work.
 Fanout should isolate runtime target failures: a send/feedback/flush error on one target marks that
 target failed, logs it once, and keeps the rest of the viewers alive. Telemetry includes total,
 active, and failed UDP target counts.
-The Qt UI exposes the first direct-target slice through Create room's Extra IP:port field. It is only
-a command wrapper over repeated `--share-target` arguments, not per-viewer room management yet.
-Do not treat NAT invite fanout as a simple parser change: current fanout uses one `UdpSender` socket
-per direct target, while NAT punching depends on the viewer probing the sender endpoint/port from
-the sharer invite. Multi-viewer NAT needs an explicit per-viewer invite/socket strategy.
+The Qt UI exposes direct multi-target sharing without a separate extra-target box: Nearby is a
+multi-select target list, and Manual accepts multiple comma/space-separated direct targets in its
+main Targets field.
+Internet/NAT multi-viewer should use one sharer room invite plus optional watcher response invites.
+Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends
+outward to any pasted watcher response invite endpoints, and sends each queued datagram to every
+known watcher endpoint through that same sender socket. Future work should show per-viewer
+connection state if real reports show users need it.
 
 `--share` is the normal live preset and should not allow a many-second sender queue to build. It
 defaults to a 1500 ms UDP queue cap unless the user explicitly overrides `--udp-max-queue-ms`.

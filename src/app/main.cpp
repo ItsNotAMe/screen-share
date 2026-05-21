@@ -36,6 +36,7 @@
 #include <mutex>
 #include <optional>
 #include <random>
+#include <set>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -80,6 +81,22 @@ constexpr uint32_t DefaultUdpPacingHeadroomPercent = 125;
 constexpr int MaxAvSyncCorrectionBiasMs = 250;
 constexpr uint64_t AvSyncVideoOnlyFallbackFrames = 30;
 
+struct UdpSendTargetSpec {
+    std::string target;
+    bool fromPeerInvite = false;
+    std::string inviteEndpoint = "direct";
+    uint16_t localPort = 0;
+    bool localPortFromLocalInvite = false;
+    bool collectNatProbeTargets = false;
+    bool preferNatProbeTargets = false;
+    uint64_t natProbeSessionFingerprint = 0;
+};
+
+struct ExtraShareTargetOption {
+    std::string target;
+    std::string localInvite;
+};
+
 struct Options {
     bool listDisplays = false;
     bool listH264Encoders = false;
@@ -100,6 +117,7 @@ struct Options {
     StreamEncoderPreference streamEncoderPreference = StreamEncoderPreference::Auto;
     std::string udpSendTarget;
     std::vector<std::string> udpSendTargets;
+    std::vector<UdpSendTargetSpec> udpSendTargetSpecs;
     uint16_t udpLocalPort = 0;
     bool udpLocalPortProvided = false;
     bool udpPacing = true;
@@ -178,6 +196,7 @@ struct Options {
     std::string logPath;
     std::string sessionId;
     bool sessionIdProvided = false;
+    bool sessionIdFromLocalInvite = false;
     std::string stopFilePath;
     bool generateAccessCode = false;
     bool allowPlaintext = false;
@@ -206,7 +225,8 @@ void PrintHelp()
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
         << "  ScreenShare --share HOST:PORT|INVITE [--display N] [--seconds S]\n"
-        << "              [--share-target HOST:PORT] [--invite-endpoint auto|public|local]\n"
+        << "              [--share-target HOST:PORT|WATCHER_INVITE]\n"
+        << "              [--invite-endpoint auto|public|local]\n"
         << "              [--local-invite INVITE]\n"
         << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
@@ -254,6 +274,8 @@ void PrintHelp()
         << "       Watch can also use --peer-invite to send punch probes while waiting for Share.\n"
         << "       Share can use --share \"ss1e:...\" to send to the peer invite endpoint.\n"
         << "       Add --local-invite \"ss1e:...\" on Share to bind the local port from this side's invite.\n"
+        << "       Passing the same room invite as --share and --local-invite lets reachable watchers join by probing that invite.\n"
+        << "       Add --share-target WATCHER_INVITE for blocked watchers that send back response invites.\n"
         << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
@@ -1764,9 +1786,11 @@ const char* FeedbackAccessText(const screenshare::UdpSenderStats& stats)
     return stats.latestFeedback.accessCodeFingerprint == 0 ? "none" : "required";
 }
 
+bool HasNatShareTarget(const Options& options);
+
 const char* SenderNatStatus(const Options& options, const screenshare::UdpSenderStats& stats)
 {
-    if (!options.udpSendTargetFromPeerInvite) {
+    if (!HasNatShareTarget(options)) {
         return "none";
     }
     if (stats.feedbackPacketsReceived > 0) {
@@ -2082,6 +2106,7 @@ public:
             aggregate.natProbePacketsReceived += current.natProbePacketsReceived;
             aggregate.natProbeRetargets += current.natProbeRetargets;
             aggregate.natProbeRetargetRejected += current.natProbeRetargetRejected;
+            aggregate.natProbeTargetCount += current.natProbeTargetCount;
             aggregate.natProbeRetargetActive = aggregate.natProbeRetargetActive || current.natProbeRetargetActive;
             if (aggregate.natProbeRetargetEndpoint.empty() && !current.natProbeRetargetEndpoint.empty()) {
                 aggregate.natProbeRetargetEndpoint = current.natProbeRetargetEndpoint;
@@ -2617,6 +2642,19 @@ bool HasUdpSession(const Options& options)
            !options.audioSendTarget.empty();
 }
 
+bool HasNatShareTarget(const Options& options)
+{
+    if (options.udpSendTargetFromPeerInvite) {
+        return true;
+    }
+    return std::any_of(
+        options.udpSendTargetSpecs.begin(),
+        options.udpSendTargetSpecs.end(),
+        [](const UdpSendTargetSpec& target) {
+            return target.fromPeerInvite;
+        });
+}
+
 bool LooksLikeNatInvite(std::string_view text)
 {
     const size_t first = text.find_first_not_of(" \t\r\n");
@@ -2660,6 +2698,29 @@ SelectedNatInviteEndpoint SelectNatInviteEndpoint(
     return {invite.publicEndpoint, preference == InviteEndpointPreference::Auto ? "auto-public" : "public"};
 }
 
+screenshare::NatInvite ParseValidatedLocalInviteForShare(
+    const Options& options,
+    const std::string& inviteText,
+    const char* optionName)
+{
+    const auto invite = screenshare::ParseNatInvite(inviteText, options.accessCodeKey);
+    const std::string label = optionName != nullptr ? optionName : "Local invite";
+    if (!HasNatEndpoint(invite.localEndpoint)) {
+        throw std::invalid_argument(label + " does not include a local endpoint");
+    }
+    if (invite.encrypted) {
+        if (!options.accessCodeProvided) {
+            throw std::invalid_argument(label + " requires --access-code CODE");
+        }
+        if (options.accessCodeFingerprint != invite.accessCodeFingerprint) {
+            throw std::invalid_argument("Access code does not match the " + label + " fingerprint");
+        }
+    } else if (!options.allowPlaintext) {
+        throw std::invalid_argument(label + " is plaintext; rerun with --allow-plaintext");
+    }
+    return invite;
+}
+
 void WarnIfPlaintextUdpSession(const Options& options)
 {
     if (HasUdpSession(options) && !options.accessCodeProvided && !options.allowPlaintext) {
@@ -2675,7 +2736,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     options.sessionId = std::move(defaultSessionId);
     bool secondsProvided = false;
     std::optional<std::string> shareTarget;
-    std::vector<std::string> extraShareTargets;
+    std::vector<ExtraShareTargetOption> extraShareTargets;
+    bool sessionFromLocalInvite = false;
     std::optional<uint16_t> watchPort;
 
     for (int i = 1; i < argc; ++i) {
@@ -2765,7 +2827,15 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--share") {
             shareTarget = requireValue("--share");
         } else if (arg == "--share-target" || arg == "--viewer") {
-            extraShareTargets.push_back(requireValue(arg.c_str()));
+            extraShareTargets.push_back(ExtraShareTargetOption{requireValue(arg.c_str()), {}});
+        } else if (arg == "--share-target-local-invite" || arg == "--viewer-local-invite") {
+            if (extraShareTargets.empty()) {
+                throw std::invalid_argument(std::string(arg) + " must follow --share-target INVITE");
+            }
+            if (!extraShareTargets.back().localInvite.empty()) {
+                throw std::invalid_argument("Each --share-target accepts only one --share-target-local-invite");
+            }
+            extraShareTargets.back().localInvite = requireValue(arg.c_str());
         } else if (arg == "--watch") {
             watchPort = screenshare::ParseUdpReceivePort(requireValue("--watch"));
         } else if (arg == "--audio-capture") {
@@ -2892,6 +2962,61 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         }
     }
 
+    const auto applyLocalInviteSession = [&](const screenshare::NatInvite& invite, const char* optionName) {
+        if (invite.sessionId.empty()) {
+            return;
+        }
+        if (options.sessionIdProvided) {
+            if (options.sessionId != invite.sessionId) {
+                throw std::invalid_argument(
+                    std::string(optionName) + " session does not match the current --session");
+            }
+            return;
+        }
+        if (sessionFromLocalInvite) {
+            return;
+        }
+        options.sessionId = invite.sessionId;
+        options.sessionIdFromLocalInvite = true;
+        sessionFromLocalInvite = true;
+    };
+
+    const auto makeShareTargetSpec = [&](const ExtraShareTargetOption& targetOption, bool primary) {
+        UdpSendTargetSpec spec;
+        if (LooksLikeNatInvite(targetOption.target)) {
+            const auto invite = screenshare::ParseNatInvite(targetOption.target, options.accessCodeKey);
+            const auto selectedEndpoint = SelectNatInviteEndpoint(invite, options.inviteEndpointPreference);
+            spec.target = FormatNatEndpoint(selectedEndpoint.endpoint);
+            spec.fromPeerInvite = true;
+            spec.inviteEndpoint = selectedEndpoint.name;
+
+            if (!targetOption.localInvite.empty()) {
+                const auto localInvite = ParseValidatedLocalInviteForShare(
+                    options,
+                    targetOption.localInvite,
+                    primary ? "--local-invite" : "--share-target-local-invite");
+                if (primary && options.udpLocalPortProvided && options.udpLocalPort != localInvite.localEndpoint.port) {
+                    throw std::invalid_argument("--udp-local-port does not match the local invite port");
+                }
+                spec.localPort = localInvite.localEndpoint.port;
+                spec.localPortFromLocalInvite = true;
+                spec.collectNatProbeTargets = true;
+                spec.preferNatProbeTargets = invite.sessionFingerprint == localInvite.sessionFingerprint;
+                spec.natProbeSessionFingerprint = localInvite.sessionFingerprint;
+                applyLocalInviteSession(
+                    localInvite,
+                    primary ? "--local-invite" : "--share-target-local-invite");
+            }
+        } else {
+            if (!targetOption.localInvite.empty()) {
+                throw std::invalid_argument("--share-target-local-invite can only be used with --share-target INVITE");
+            }
+            static_cast<void>(screenshare::ParseUdpSenderTarget(targetOption.target));
+            spec.target = targetOption.target;
+        }
+        return spec;
+    };
+
     if (shareTarget && watchPort) {
         throw std::invalid_argument("--share cannot be combined with --watch");
     }
@@ -2908,26 +3033,42 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         if (!options.audioSendTarget.empty()) {
             throw std::invalid_argument("--share cannot be combined with --audio-send");
         }
+        ExtraShareTargetOption primaryTarget{*shareTarget, options.localInvite};
         if (LooksLikeNatInvite(*shareTarget)) {
             if (!options.peerInvite.empty()) {
                 throw std::invalid_argument("--share invite cannot be combined with --peer-invite");
             }
-            const auto invite = screenshare::ParseNatInvite(*shareTarget, options.accessCodeKey);
-            const auto selectedEndpoint = SelectNatInviteEndpoint(invite, options.inviteEndpointPreference);
             options.peerInvite = *shareTarget;
-            options.udpSendTarget = FormatNatEndpoint(selectedEndpoint.endpoint);
-            options.udpSendTargetFromPeerInvite = true;
-            options.udpSendPeerInviteEndpoint = selectedEndpoint.name;
-        } else {
-            options.udpSendTarget = *shareTarget;
+        } else if (!options.localInvite.empty()) {
+            throw std::invalid_argument("--local-invite requires --share INVITE");
         }
-        options.udpSendTargets.push_back(options.udpSendTarget);
+
+        auto primarySpec = makeShareTargetSpec(primaryTarget, true);
+        if (primarySpec.localPort == 0 && options.udpLocalPortProvided) {
+            primarySpec.localPort = options.udpLocalPort;
+        }
+        options.udpSendTarget = primarySpec.target;
+        options.udpSendTargetFromPeerInvite = primarySpec.fromPeerInvite;
+        options.udpSendPeerInviteEndpoint = primarySpec.inviteEndpoint;
+        options.udpLocalPort = primarySpec.localPort;
+        if (options.udpLocalPort != 0) {
+            options.udpLocalPortProvided = true;
+        }
+        options.udpLocalPortFromLocalInvite = primarySpec.localPortFromLocalInvite;
+        options.udpSendTargetSpecs.push_back(primarySpec);
+        options.udpSendTargets.push_back(primarySpec.target);
+
+        std::set<uint16_t> usedLocalPorts;
+        if (primarySpec.localPort != 0) {
+            usedLocalPorts.insert(primarySpec.localPort);
+        }
         for (const auto& target : extraShareTargets) {
-            if (LooksLikeNatInvite(target)) {
-                throw std::invalid_argument("--share-target currently accepts HOST:PORT direct targets only");
+            auto extraSpec = makeShareTargetSpec(target, false);
+            if (extraSpec.localPort != 0 && !usedLocalPorts.insert(extraSpec.localPort).second) {
+                throw std::invalid_argument("Each NAT share target local invite must use a unique local port");
             }
-            static_cast<void>(screenshare::ParseUdpSenderTarget(target));
-            options.udpSendTargets.push_back(target);
+            options.udpSendTargetSpecs.push_back(extraSpec);
+            options.udpSendTargets.push_back(extraSpec.target);
         }
         options.streamEncode = true;
         options.adaptBitrate = true;
@@ -3016,34 +3157,12 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.inviteTtlSeconds < 30 || options.inviteTtlSeconds > 3600) {
         throw std::invalid_argument("--invite-ttl-seconds must be between 30 and 3600");
     }
-    if (options.inviteEndpointPreferenceProvided && !options.udpSendTargetFromPeerInvite) {
-        throw std::invalid_argument("--invite-endpoint requires --share INVITE");
+    if (options.inviteEndpointPreferenceProvided && !HasNatShareTarget(options)) {
+        throw std::invalid_argument("--invite-endpoint requires --share INVITE or --share-target INVITE");
     }
     if (!options.localInvite.empty()) {
         if (!options.udpSendTargetFromPeerInvite) {
             throw std::invalid_argument("--local-invite requires --share INVITE");
-        }
-        const auto localInvite = screenshare::ParseNatInvite(options.localInvite, options.accessCodeKey);
-        if (!HasNatEndpoint(localInvite.localEndpoint)) {
-            throw std::invalid_argument("Local invite does not include a local endpoint");
-        }
-        if (localInvite.encrypted) {
-            if (!options.accessCodeProvided) {
-                throw std::invalid_argument("Local invite requires --access-code CODE");
-            }
-            if (options.accessCodeFingerprint != localInvite.accessCodeFingerprint) {
-                throw std::invalid_argument("Access code does not match the local invite fingerprint");
-            }
-        } else if (!options.allowPlaintext) {
-            throw std::invalid_argument("Local invite is plaintext; rerun with --allow-plaintext");
-        }
-        if (options.udpLocalPortProvided && options.udpLocalPort != localInvite.localEndpoint.port) {
-            throw std::invalid_argument("--udp-local-port does not match the local invite port");
-        }
-        options.udpLocalPort = localInvite.localEndpoint.port;
-        options.udpLocalPortFromLocalInvite = true;
-        if (!options.sessionIdProvided && !localInvite.sessionId.empty()) {
-            options.sessionId = localInvite.sessionId;
         }
     }
     if (!options.peerInvite.empty() &&
@@ -3964,6 +4083,15 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         if (options.udpSendTargets.size() > 1) {
             std::cout << " plus " << (options.udpSendTargets.size() - 1) << " extra target(s)";
         }
+        const size_t inviteTargetCount = static_cast<size_t>(std::count_if(
+            options.udpSendTargetSpecs.begin(),
+            options.udpSendTargetSpecs.end(),
+            [](const UdpSendTargetSpec& target) {
+                return target.fromPeerInvite;
+            }));
+        if (inviteTargetCount > 0) {
+            std::cout << ", NAT invite targets " << inviteTargetCount;
+        }
         if (peerInvite && options.udpSendTargetFromPeerInvite) {
             std::cout << " from peer invite endpoint=" << options.udpSendPeerInviteEndpoint;
         }
@@ -4464,26 +4592,51 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
 
                     if (!options.udpSendTarget.empty()) {
                         if (!udpSender) {
-                            const std::vector<std::string> udpTargets =
-                                options.udpSendTargets.empty() ?
-                                    std::vector<std::string>{options.udpSendTarget} :
-                                    options.udpSendTargets;
+                            std::vector<UdpSendTargetSpec> udpTargets = options.udpSendTargetSpecs;
+                            if (udpTargets.empty()) {
+                                udpTargets.push_back(UdpSendTargetSpec{
+                                    options.udpSendTarget,
+                                    false,
+                                    "direct",
+                                    options.udpLocalPort,
+                                    false,
+                                    false,
+                                    false,
+                                    0});
+                            }
                             std::vector<screenshare::UdpSenderConfig> udpConfigs;
                             udpConfigs.reserve(udpTargets.size());
                             for (size_t targetIndex = 0; targetIndex < udpTargets.size(); ++targetIndex) {
-                                auto udpConfig = screenshare::ParseUdpSenderTarget(udpTargets[targetIndex]);
-                                udpConfig.localPort = targetIndex == 0 ? options.udpLocalPort : 0;
+                                const auto& target = udpTargets[targetIndex];
+                                auto udpConfig = screenshare::ParseUdpSenderTarget(target.target);
+                                if (targetIndex > 0 &&
+                                    target.fromPeerInvite &&
+                                    target.localPort == 0 &&
+                                    !udpConfigs.empty() &&
+                                    udpConfigs.front().collectNatProbeTargets) {
+                                    udpConfigs.front().additionalTargets.push_back(
+                                        screenshare::UdpSenderEndpoint{udpConfig.host, udpConfig.port});
+                                    continue;
+                                }
+                                udpConfig.localPort = target.localPort;
                                 udpConfig.pacingEnabled = options.udpPacing;
                                 udpConfig.pacingBitrate = combinedUdpPacingBitrate();
                                 udpConfig.maxQueueDelay = std::chrono::milliseconds(options.udpMaxQueueMs);
                                 udpConfig.accessCodeFingerprint = options.accessCodeFingerprint;
                                 udpConfig.encryptionKey = options.accessCodeKey;
                                 udpConfig.retargetOnNatProbe =
-                                    targetIndex == 0 &&
-                                    options.udpSendTargetFromPeerInvite &&
+                                    target.fromPeerInvite &&
                                     options.inviteEndpointPreference == InviteEndpointPreference::Auto;
+                                udpConfig.collectNatProbeTargets =
+                                    udpConfig.retargetOnNatProbe && target.collectNatProbeTargets;
+                                udpConfig.preferNatProbeTargets =
+                                    udpConfig.collectNatProbeTargets && target.preferNatProbeTargets;
                                 udpConfig.natProbeSessionFingerprint =
-                                    options.sessionIdProvided ? options.sessionFingerprint : 0;
+                                    target.natProbeSessionFingerprint != 0 ?
+                                        target.natProbeSessionFingerprint :
+                                        ((options.sessionIdProvided || options.sessionIdFromLocalInvite) ?
+                                            options.sessionFingerprint :
+                                            0);
                                 if (options.audioCapture) {
                                     udpConfig.maxQueuedDatagrams = 16'384;
                                 }
@@ -4491,15 +4644,57 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                             }
                             udpSender = std::make_unique<UdpSenderFanout>();
                             udpSender->Open(udpConfigs);
+                            const size_t inviteTargetCount = static_cast<size_t>(std::count_if(
+                                udpTargets.begin(),
+                                udpTargets.end(),
+                                [](const UdpSendTargetSpec& target) {
+                                    return target.fromPeerInvite;
+                                }));
+                            const bool anyRetarget = std::any_of(
+                                udpConfigs.begin(),
+                                udpConfigs.end(),
+                                [](const screenshare::UdpSenderConfig& config) {
+                                    return config.retargetOnNatProbe;
+                                });
+                            const bool anyNatProbeFanout = std::any_of(
+                                udpConfigs.begin(),
+                                udpConfigs.end(),
+                                [](const screenshare::UdpSenderConfig& config) {
+                                    return config.collectNatProbeTargets;
+                                });
+                            const bool anyLocalInvitePort = std::any_of(
+                                udpTargets.begin(),
+                                udpTargets.end(),
+                                [](const UdpSendTargetSpec& target) {
+                                    return target.localPortFromLocalInvite;
+                                });
+                            std::string inviteEndpoint = "none";
+                            if (inviteTargetCount == 1) {
+                                const auto iterator = std::find_if(
+                                    udpTargets.begin(),
+                                    udpTargets.end(),
+                                    [](const UdpSendTargetSpec& target) {
+                                        return target.fromPeerInvite;
+                                    });
+                                if (iterator != udpTargets.end()) {
+                                    inviteEndpoint = iterator->inviteEndpoint;
+                                }
+                            } else if (inviteTargetCount > 1) {
+                                inviteEndpoint = "mixed";
+                            }
                             std::cout
                                 << "UDP sender pacing=" << (udpConfigs.front().pacingEnabled ? "enabled" : "disabled")
                                 << " targets=" << udpTargets.size()
-                                << " target_source=" << (options.udpSendTargetFromPeerInvite ? "peer_invite" : "direct")
-                                << " invite_endpoint=" << (options.udpSendTargetFromPeerInvite ? options.udpSendPeerInviteEndpoint : "none")
-                                << " nat_probe_retarget=" << (udpConfigs.front().retargetOnNatProbe ? "enabled" : "disabled")
+                                << " target_source="
+                                << (inviteTargetCount == 0 ? "direct" :
+                                    (inviteTargetCount == udpTargets.size() ? "peer_invite" : "mixed"))
+                                << " invite_targets=" << inviteTargetCount
+                                << " invite_endpoint=" << inviteEndpoint
+                                << " nat_probe_retarget=" << (anyRetarget ? "enabled" : "disabled")
+                                << " nat_probe_fanout=" << (anyNatProbeFanout ? "enabled" : "disabled")
                                 << " bitrate_mbps=" << Mbps(udpConfigs.front().pacingBitrate)
                                 << " local_port=" << (udpConfigs.front().localPort == 0 ? std::string("auto") : std::to_string(udpConfigs.front().localPort))
-                                << " local_port_source=" << (options.udpLocalPortFromLocalInvite ? "local_invite" : "option_or_auto")
+                                << " local_port_source=" << (anyLocalInvitePort ? "local_invite" : "option_or_auto")
                                 << " max_queue_ms=" << udpConfigs.front().maxQueueDelay.count()
                                 << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
                                 << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
@@ -4658,6 +4853,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " udp_nat_probe_packets=" << udpStatsNow.natProbePacketsReceived
                 << " udp_nat_retargets=" << udpStatsNow.natProbeRetargets
                 << " udp_nat_retarget_rejected=" << udpStatsNow.natProbeRetargetRejected
+                << " udp_nat_probe_targets=" << udpStatsNow.natProbeTargetCount
                 << " udp_nat_retarget_active=" << (udpStatsNow.natProbeRetargetActive ? "yes" : "no")
                 << " udp_nat_retarget_endpoint="
                 << (udpStatsNow.natProbeRetargetEndpoint.empty() ? "none" : udpStatsNow.natProbeRetargetEndpoint)
@@ -4790,6 +4986,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         << ", UDP NAT probe packets: " << udpStats.natProbePacketsReceived
         << ", UDP NAT retargets: " << udpStats.natProbeRetargets
         << ", UDP NAT retarget rejected: " << udpStats.natProbeRetargetRejected
+        << ", UDP NAT probe targets: " << udpStats.natProbeTargetCount
         << ", UDP NAT retarget active: " << (udpStats.natProbeRetargetActive ? "yes" : "no")
         << ", UDP NAT retarget endpoint: "
         << (udpStats.natProbeRetargetEndpoint.empty() ? "none" : udpStats.natProbeRetargetEndpoint)
