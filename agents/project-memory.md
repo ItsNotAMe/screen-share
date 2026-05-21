@@ -179,5 +179,6 @@ WGC capture by default
   - `--share` now defaults to software encoding while `--stream-encoder hardware` remains available for experiments.
 - Multi-viewer direction:
   - First slice is direct UDP fanout: one encoded video/audio stream is sent to multiple direct `HOST:PORT` targets using separate `UdpSender` instances.
-  - Each target owns its own UDP socket, queue, and feedback path; sender telemetry aggregates counters and reports `udp_targets`.
+  - Each target owns its own UDP socket, queue, and feedback path; sender telemetry aggregates counters and reports `udp_targets`, `udp_active_targets`, and `udp_failed_targets`.
+  - Runtime send/feedback/flush errors on one target should mark only that target failed and keep the remaining viewers alive.
   - Remaining multi-viewer work is UI room controls, per-viewer health, optional per-viewer bandwidth policy, and NAT invite fanout.
