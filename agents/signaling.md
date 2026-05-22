@@ -35,8 +35,9 @@
   - `--signal-leave URL --signal-room ROOM --signal-peer-id PEER`
 - These are standalone diagnostics only; they do not start capture, preview, audio, STUN, or UDP probing.
 - Live CLI bridge:
-  - `--watch PORT --signal-server URL --signal-room ROOM`
-  - `--share-room PORT --signal-server URL --signal-room ROOM`
+  - `--watch PORT --signal-room ROOM`
+  - `--share-room PORT --signal-room ROOM`
+  - `--signal-server URL` overrides the built-in Worker for diagnostics or alternate deployments.
   - `--signal-stun HOST[:PORT]` overrides the default STUN server.
   - `--signal-setup-seconds S` controls startup peer discovery.
   - Watch room peers become NAT probe targets.
@@ -44,7 +45,7 @@
 - Runtime live signaling uses periodic `join` calls as both heartbeat and peer refresh.
 - Share no longer requires Watch to be present during startup; it can wait for room peers and add them while running.
 - Watch can add newly discovered room peers as NAT probe targets while running.
-- The Qt UI's default Internet path now launches the live signaling bridge directly and exchanges a small `screenshare-room-v1` link that contains server, room ID, and port. This link is not a secret.
+- The Qt UI's default Internet path now launches the live signaling bridge directly against the built-in Worker URL `https://screenshare-signaling.bit-yeet.workers.dev` and exchanges a small `screenshare-room-v1` link that contains room ID and port only. This link is not a secret.
 - Live integration should still use HTTP polling; no WebSockets needed yet.
 - Workers KV is acceptable for the first small implementation, but it is eventually consistent. If room state races become a real problem, move live room state to Durable Objects.
 - Keep room TTLs short and delete empty rooms.

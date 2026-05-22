@@ -105,9 +105,9 @@ status while still passing the selected numeric display index to the engine. It 
 output-device picker for system audio, which is useful when Windows or a virtual mixer uses a default
 output device that does not contain the audio you actually want to share.
 
-The UI opens the Room section on Internet by default. Enter your deployed signaling Worker URL and
-room name on Create room, then copy the room link and send it to your friend. Join room can paste
-that link to fill the server, room, and port. The Worker only exchanges UDP candidates; video and
+The UI opens the Room section on Internet by default. Keep or change the generated room name on
+Create room, then copy the room link and send it to your friend. Join room can paste
+that link to fill the room and port. The built-in Worker only exchanges UDP candidates; video and
 audio still go directly between computers. Nearby, Internet, and Manual live as tabs in the same
 Room section so setup uses one mental model instead of separate competing panels.
 
@@ -214,9 +214,10 @@ prints `watch_command_template`, `share_command_template`, and `probe_command_te
 Replace `<PEER_INVITE>` in those templates with the invite copied from your friend. If the template
 contains `CODE`, replace it with the same access code used to create the invite.
 
-The desktop UI now keeps the normal Internet flow as a Worker room. On Create room, enter the
-signaling server, keep or change the generated room name, then copy the room link. On Join room,
-paste that room link. The compact status line shows what is still missing before starting. While a
+The desktop UI now keeps the normal Internet flow as a Worker room. On Create room, keep or change
+the generated room name, then copy the room link. On Join room, paste that room link. The Worker
+server is built into the app, so users do not paste a server URL. The compact status line shows what
+is still missing before starting. While a
 session is running, that same status line switches to live setup states such as connecting, live, or
 disconnected. The older invite buttons are under Manual invite fallback and are only needed for
 manual experiments.
@@ -224,8 +225,7 @@ manual experiments.
 Two-computer UI checklist for Worker room testing:
 
 1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
-2. On the Share computer, open Create room, use Internet, enter your Worker server URL, and copy the
-   room link.
+2. On the Share computer, open Create room, use Internet, and copy the room link.
 3. Send that room link to the watcher.
 4. On the Watch computer, open Join room, choose the listen port, switch the Room section to
    Internet, and paste the room link.
@@ -261,16 +261,17 @@ returned peer UDP candidates.
 The native live signaling bridge is also available from the CLI. Start Watch with a room:
 
 ```powershell
-.\build\release\ScreenShare.exe --watch 5000 --signal-server https://YOUR-WORKER.workers.dev --signal-room room1
+.\build\release\ScreenShare.exe --watch 5000 --signal-room room1
 ```
 
 Then start Share from its room UDP port:
 
 ```powershell
-.\build\release\ScreenShare.exe --share-room 5001 --signal-server https://YOUR-WORKER.workers.dev --signal-room room1
+.\build\release\ScreenShare.exe --share-room 5001 --signal-room room1
 ```
 
-Both sides use STUN to publish their public UDP candidate to the Worker. Share resolves the room's
+Live room commands use the built-in ScreenShare signaling Worker by default. Add
+`--signal-server URL` only to test a different Worker. Both sides use STUN to publish their public UDP candidate to the Worker. Share resolves the room's
 watcher candidates into UDP send targets, while Watch resolves room candidates into NAT probe
 targets. Use `--signal-stun HOST[:PORT]` to override the default STUN server and
 `--signal-setup-seconds S` to wait longer for room peers during startup. After startup, both sides

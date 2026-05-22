@@ -91,6 +91,7 @@ constexpr int DefaultShareUdpMaxQueueMs = 1500;
 constexpr uint32_t DefaultUdpPacingHeadroomPercent = 125;
 constexpr int MaxAvSyncCorrectionBiasMs = 250;
 constexpr uint64_t AvSyncVideoOnlyFallbackFrames = 30;
+constexpr std::string_view DefaultSignalingServerUrl = "https://screenshare-signaling.bit-yeet.workers.dev";
 
 struct UdpSendTargetSpec {
     std::string target;
@@ -256,9 +257,9 @@ void PrintHelp()
         << "              [--share-target HOST:PORT|WATCHER_INVITE]\n"
         << "              [--invite-endpoint auto|public|local]\n"
         << "              [--local-invite INVITE]\n"
-        << "  ScreenShare --share-room PORT --signal-server URL --signal-room ROOM [--seconds S]\n"
+        << "  ScreenShare --share-room PORT --signal-room ROOM [--signal-server URL] [--seconds S]\n"
         << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
-        << "              [--signal-server URL --signal-room ROOM]\n"
+        << "              [--signal-room ROOM] [--signal-server URL]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
         << "  ScreenShare --make-invite PORT --stun HOST[:PORT] [--invite-ttl-seconds S]\n"
@@ -315,7 +316,7 @@ void PrintHelp()
         << "       Use --invite-endpoint local to test same-LAN/VPN invite endpoints.\n"
         << "  Signaling: --signal-* commands test the HTTP room server without starting media.\n"
         << "             The Worker only exchanges UDP candidates; screen/audio still use direct UDP.\n"
-        << "             Live room setup uses --signal-server URL --signal-room ROOM with --share-room or --watch.\n"
+        << "             Live room setup uses --signal-room ROOM with --share-room or --watch; --signal-server overrides the built-in Worker.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -333,8 +334,8 @@ void PrintHelp()
         << "  ScreenShare --signal-health https://example.workers.dev\n"
         << "  ScreenShare --signal-join https://example.workers.dev --signal-room room1 --signal-peer-id alice --signal-candidate 203.0.113.10:5000\n"
         << "  ScreenShare --watch 5000\n"
-        << "  ScreenShare --watch 5000 --signal-server https://example.workers.dev --signal-room room1\n"
-        << "  ScreenShare --share-room 5001 --signal-server https://example.workers.dev --signal-room room1\n"
+        << "  ScreenShare --watch 5000 --signal-room room1\n"
+        << "  ScreenShare --share-room 5001 --signal-room room1\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
@@ -3427,9 +3428,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         if (!extraShareTargets.empty()) {
             throw std::invalid_argument("--share-target is not supported with --share-room; signaling supplies room peers");
         }
-        if (!options.signalingLive) {
-            throw std::invalid_argument("--share-room requires --signal-server URL");
-        }
+        options.signalingLive = true;
         options.shareRoom = true;
         options.udpLocalPort = *shareRoomPort;
         options.udpLocalPortProvided = true;
@@ -3462,6 +3461,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         options.previewWindow = true;
         options.decodeH264 = true;
         options.audioPlayback = true;
+    }
+    if (watchPort && !options.signalingRoomId.empty()) {
+        options.signalingLive = true;
     }
 
     if (options.adaptResolutionMinScaleProvided || options.adaptResolutionCooldownProvided) {
@@ -3568,10 +3570,10 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     }
     if (options.signalingLive) {
         if (options.signalingServerUrl.empty()) {
-            throw std::invalid_argument("Live signaling requires --signal-server URL");
+            options.signalingServerUrl = std::string(DefaultSignalingServerUrl);
         }
         if (options.signalingRoomId.empty()) {
-            throw std::invalid_argument("--signal-server requires --signal-room ROOM");
+            throw std::invalid_argument("Live signaling requires --signal-room ROOM");
         }
         screenshare::ValidateSignalingRoomId(options.signalingRoomId);
         if (options.signalingPeerId.empty()) {

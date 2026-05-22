@@ -63,6 +63,7 @@
 namespace {
 
 constexpr const char* kRoomLinkPrefix = "screenshare-room-v1;";
+constexpr const char* kDefaultSignalServer = "https://screenshare-signaling.bit-yeet.workers.dev";
 
 QStringList startupArguments(int argc, char** argv)
 {
@@ -236,10 +237,15 @@ bool validRoomId(const QString& roomId)
     return pattern.match(roomId).hasMatch();
 }
 
-QString roomLink(const QString& server, const QString& room, int port)
+QString roomLink(const QString& room, int port)
 {
-    return QStringLiteral("%1server=%2;room=%3;port=%4")
-        .arg(QString::fromUtf8(kRoomLinkPrefix), server.trimmed(), room.trimmed(), QString::number(port));
+    return QStringLiteral("%1room=%2;port=%3")
+        .arg(QString::fromUtf8(kRoomLinkPrefix), room.trimmed(), QString::number(port));
+}
+
+QString defaultSignalServer()
+{
+    return QString::fromUtf8(kDefaultSignalServer);
 }
 
 bool parseRoomLink(const QString& text, QString* server, QString* room, int* port)
@@ -275,11 +281,11 @@ bool parseRoomLink(const QString& text, QString* server, QString* room, int* por
         }
     }
 
-    if (parsedServer.isEmpty() || !validRoomId(parsedRoom) || parsedPort == 0) {
+    if (!validRoomId(parsedRoom) || parsedPort == 0) {
         return false;
     }
     if (server != nullptr) {
-        *server = parsedServer;
+        *server = parsedServer.isEmpty() ? defaultSignalServer() : parsedServer;
     }
     if (room != nullptr) {
         *room = parsedRoom;
@@ -427,7 +433,6 @@ constexpr int kReceiverRefreshMs = 15000;
 constexpr int kPeerStatusPollMs = 500;
 constexpr int kPeerActivityTimeoutMs = 3000;
 constexpr const char* kDefaultStunServer = "stun.l.google.com:19302";
-constexpr const char* kDefaultSignalServer = "";
 
 enum class ReceiverSource {
     Lan,
@@ -1021,10 +1026,7 @@ private:
         auto* internetContent = new QVBoxLayout(internetPage);
         internetContent->setContentsMargins(0, 0, 0, 0);
         internetContent->setSpacing(8);
-        shareSignalServerEdit_ = new QLineEdit(QString::fromUtf8(kDefaultSignalServer));
-        shareSignalServerEdit_->setPlaceholderText("https://your-worker.workers.dev");
-        prepareInput(shareSignalServerEdit_);
-        addRow(internetContent, "Server", shareSignalServerEdit_);
+        shareSignalServerEdit_ = new QLineEdit(defaultSignalServer(), internetPage);
         shareSignalRoomEdit_ = new QLineEdit(generatedRoomId());
         shareSignalRoomEdit_->setPlaceholderText("room-name");
         auto* shareRoomRow = new QWidget;
@@ -1315,10 +1317,7 @@ private:
         auto* watchInternetContent = new QVBoxLayout(watchInternetPage);
         watchInternetContent->setContentsMargins(0, 0, 0, 0);
         watchInternetContent->setSpacing(8);
-        watchSignalServerEdit_ = new QLineEdit(QString::fromUtf8(kDefaultSignalServer));
-        watchSignalServerEdit_->setPlaceholderText("https://your-worker.workers.dev");
-        prepareInput(watchSignalServerEdit_);
-        addRow(watchInternetContent, "Server", watchSignalServerEdit_);
+        watchSignalServerEdit_ = new QLineEdit(defaultSignalServer(), watchInternetPage);
         watchSignalRoomEdit_ = new QLineEdit;
         watchSignalRoomEdit_->setPlaceholderText("room-name");
         auto* watchRoomRow = new QWidget;
@@ -1739,12 +1738,14 @@ private:
 
     QString shareSignalServer() const
     {
-        return shareSignalServerEdit_ == nullptr ? QString() : shareSignalServerEdit_->text().trimmed();
+        const QString server = shareSignalServerEdit_ == nullptr ? QString() : shareSignalServerEdit_->text().trimmed();
+        return server.isEmpty() ? defaultSignalServer() : server;
     }
 
     QString watchSignalServer() const
     {
-        return watchSignalServerEdit_ == nullptr ? QString() : watchSignalServerEdit_->text().trimmed();
+        const QString server = watchSignalServerEdit_ == nullptr ? QString() : watchSignalServerEdit_->text().trimmed();
+        return server.isEmpty() ? defaultSignalServer() : server;
     }
 
     QString shareSignalRoom() const
@@ -1769,34 +1770,27 @@ private:
 
     void copyShareRoomLink()
     {
-        const QString server = shareSignalServer();
         const QString room = shareSignalRoom();
-        if (server.isEmpty()) {
-            QMessageBox::information(this, "Room", "Enter your signaling server first.");
-            shareSignalServerEdit_->setFocus();
-            return;
-        }
         if (!validRoomId(room)) {
             QMessageBox::information(this, "Room", "Room names need 3-96 letters, numbers, dashes, or underscores.");
             shareSignalRoomEdit_->setFocus();
             return;
         }
 
-        QApplication::clipboard()->setText(roomLink(server, room, shareInvitePortSpin_->value()));
+        QApplication::clipboard()->setText(roomLink(room, shareInvitePortSpin_->value()));
         appendOutput("Room link copied to clipboard\n");
     }
 
     void pasteWatchRoomLink()
     {
-        QString server;
         QString room;
         int port = 0;
-        if (!parseRoomLink(QApplication::clipboard()->text(), &server, &room, &port)) {
+        if (!parseRoomLink(QApplication::clipboard()->text(), nullptr, &room, &port)) {
             QMessageBox::warning(this, "Room", "The clipboard does not contain a ScreenShare room link.");
             return;
         }
 
-        watchSignalServerEdit_->setText(server);
+        watchSignalServerEdit_->setText(defaultSignalServer());
         watchSignalRoomEdit_->setText(room);
         watchPortSpin_->setValue(port);
         appendOutput("Room link pasted from clipboard\n");
@@ -2279,17 +2273,8 @@ private:
 
     bool validateWorkerRoomFields(bool share)
     {
-        QLineEdit* serverEdit = share ? shareSignalServerEdit_ : watchSignalServerEdit_;
         QLineEdit* roomEdit = share ? shareSignalRoomEdit_ : watchSignalRoomEdit_;
-        const QString server = serverEdit == nullptr ? QString() : serverEdit->text().trimmed();
         const QString room = roomEdit == nullptr ? QString() : roomEdit->text().trimmed();
-        if (server.isEmpty()) {
-            QMessageBox::warning(this, "Missing server", "Enter your signaling server URL.");
-            if (serverEdit != nullptr) {
-                serverEdit->setFocus();
-            }
-            return false;
-        }
         if (!validRoomId(room)) {
             QMessageBox::warning(this, "Room name", "Room names need 3-96 letters, numbers, dashes, or underscores.");
             if (roomEdit != nullptr) {
@@ -3301,9 +3286,6 @@ private:
 
     QString shareWorkerRoomStatusText() const
     {
-        if (shareSignalServer().isEmpty()) {
-            return "Enter your signaling server, then copy the room link to your friend.";
-        }
         if (!validRoomId(shareSignalRoom())) {
             return "Choose a room name with letters, numbers, dashes, or underscores.";
         }
@@ -3312,8 +3294,8 @@ private:
 
     QString watchWorkerRoomStatusText() const
     {
-        if (watchSignalServer().isEmpty() || watchSignalRoom().isEmpty()) {
-            return "Paste the room link from the sharer, or enter the server and room manually.";
+        if (watchSignalRoom().isEmpty()) {
+            return "Paste the room link from the sharer, or enter the room name manually.";
         }
         if (!validRoomId(watchSignalRoom())) {
             return "Room names need letters, numbers, dashes, or underscores.";
@@ -4368,7 +4350,7 @@ int main(int argc, char** argv)
             QString parsedRoom;
             int parsedRoomPort = 0;
             const bool parsedRoomLink = parseRoomLink(
-                "copied room: screenshare-room-v1;server=https://example.workers.dev;room=room-abc_123;port=5001",
+                "copied room: screenshare-room-v1;room=room-abc_123;port=5001",
                 &parsedRoomServer,
                 &parsedRoom,
                 &parsedRoomPort);
@@ -4386,7 +4368,7 @@ int main(int argc, char** argv)
                 displays[1].width == 1920 &&
                 displays[1].left == -1920 &&
                 parsedRoomLink &&
-                parsedRoomServer == "https://example.workers.dev" &&
+                parsedRoomServer == defaultSignalServer() &&
                 parsedRoom == "room-abc_123" &&
                 parsedRoomPort == 5001 ? 0 : 2;
         }
