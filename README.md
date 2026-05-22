@@ -106,11 +106,12 @@ output-device picker for system audio, which is useful when Windows or a virtual
 output device that does not contain the audio you actually want to share.
 
 The UI opens the Room section on Internet by default. Keep or change the generated room name on
-Create room, then copy the secure room link and send it to your friend. Join room can paste
-that link to fill the room name and hidden room key while keeping its own local listen port. The
-built-in Worker only exchanges UDP candidates; video and audio still go directly between computers.
-The Worker does not receive the hidden room key. Nearby, Internet, and Manual live as tabs in the
-same Room section so setup uses one mental model instead of separate competing panels.
+Create room, then start sharing. Join room can pick the active room from the list or paste the copied
+room link while keeping its own local listen port. The built-in Worker only exchanges UDP
+candidates; video and audio still go directly between computers. Rooms use a random automatic UDP
+encryption key from the room service without showing an access-code field. Nearby, Internet, and
+Manual live as tabs in the same Room section so setup uses one mental model instead of separate
+competing panels.
 
 Create room supports target lists for direct paths. Nearby can select multiple watchers from the
 list, Manual accepts multiple comma/space-separated `HOST:PORT` targets in the Targets field, and
@@ -216,21 +217,21 @@ Replace `<PEER_INVITE>` in those templates with the invite copied from your frie
 contains `CODE`, replace it with the same access code used to create the invite.
 
 The desktop UI now keeps the normal Internet flow as a Worker room. On Create room, keep or change
-the generated room name, then copy the secure room link. On Join room, paste that room link. The
-link carries a hidden room key so media stays encrypted without typing an access code, and the
-Worker server is built into the app, so users do not paste a server URL. The compact status line
-shows what is still missing before starting. While a
-session is running, that same status line switches to live setup states such as connecting, live, or
-disconnected. The older invite buttons are under Manual invite fallback and are only needed for
-manual experiments.
+the generated room name, then start sharing or copy the short room link. On Join room, choose the
+room from the active list or paste that room link. The room service creates a random automatic UDP
+encryption key for the room, so media stays encrypted without typing an access code and without
+requiring a copied secret link. The Worker server is built into the app, so users do not paste a server URL.
+The compact status line shows what is still missing before starting. While a session is running,
+that same status line switches to live setup states such as connecting, live, or disconnected. The
+older invite buttons are under Manual invite fallback and are only needed for manual experiments.
 
 Two-computer UI checklist for Worker room testing:
 
 1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
-2. On the Share computer, open Create room, use Internet, and copy the secure room link.
-3. Send that room link to the watcher.
+2. On the Share computer, open Create room, use Internet, and start sharing.
+3. Optionally copy/send the short room link if the watcher does not see the room list yet.
 4. On the Watch computer, open Join room, choose the listen port, switch the Room section to
-   Internet, and paste the room link.
+   Internet, and pick the active room or paste the room link.
 5. Start watching and sharing in either order.
 6. A healthy run should move from connecting to live on both sides.
    If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both
@@ -243,9 +244,9 @@ An experimental HTTP signaling backend lives in [`signaling-worker/`](signaling-
 It is a Cloudflare Worker that stores live room membership and peer UDP candidates in a per-room
 Durable Object, plus small browseable active-room summaries in KV for diagnostics/future room lists.
 It does not relay media, cannot receive UDP, and still requires the native app to use STUN and direct
-UDP probes. The normal room flow is secure by default: the native app generates a hidden room key
-automatically, keeps UDP video/audio encrypted even when the user does not type a password, and
-reserves visible passwords for an optional extra lock later.
+UDP probes. The normal room flow gets a random UDP encryption key from the room's Durable Object
+during signaling setup, passes it into the native UDP crypto path automatically, and keeps the
+access-code UI hidden; visible room passwords remain a planned optional lock for private rooms.
 
 The native CLI has standalone signaling diagnostics for testing a deployed Worker before it is wired
 into the live room flow:

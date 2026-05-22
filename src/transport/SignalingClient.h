@@ -35,6 +35,7 @@ struct SignalingPeerState {
 
 struct SignalingRoomResponse {
     bool ok = false;
+    std::string roomAccessKey;
     std::vector<SignalingPeer> peers;
 };
 

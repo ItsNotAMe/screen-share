@@ -26,7 +26,7 @@
 - PR #57 merged this layer.
 - CLI adds `--generate-access-code` for CNG-generated 20-character base32-ish codes grouped with dashes.
 - CLI adds `--allow-plaintext` to explicitly acknowledge unencrypted UDP mode and suppress the plaintext warning.
-- Qt UI Worker rooms generate a hidden room key and pass it to the engine as `--access-code` automatically. Users copy the secure room link instead of typing an access code.
+- Qt UI Worker rooms let the engine receive a random room access key from signaling and use it as `--access-code` automatically. Users do not type an access code for normal rooms.
 - Qt UI manual/Nearby/fallback flows still use the visible access-code field or explicit plaintext checkbox.
 - Qt UI can generate and copy a manual access code; command preview continues to redact the raw code.
 - Qt UI should surface bad access-code paths without exposing secrets: invite decrypt failures, fingerprint mismatches, and rejected-packet counters clear/focus the access-code field and warn once per run.
@@ -36,9 +36,9 @@
 
 - Worker rooms hide "access code" from normal users.
 - Rooms are encrypted by default even when the user does not type a password.
-- The native app generates a high-entropy hidden room key automatically and carries it in the room link/session state without sending it to signaling.
+- The signaling Durable Object generates a random hidden UDP access key for no-password public rooms. This encrypts UDP media without a user-visible access code, but anyone allowed to join the public room can receive the key.
 - A visible room password can be added later as an optional extra lock, but it should not be required for encrypted media.
-- The signaling Worker must never receive raw room keys, passwords, or media encryption material. It only sees room IDs, peer IDs, and UDP candidates.
+- Future room passwords must never be sent to the signaling Worker. It only sees room IDs, peer IDs, and UDP candidates.
 
 ## LAN Invite Metadata
 

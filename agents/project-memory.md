@@ -192,15 +192,15 @@ WGC capture by default
   - First backend lives under `signaling-worker/`.
   - It is Cloudflare Worker + Durable Object for live room membership, peer UDP candidates, heartbeat, and cleanup only; Workers KV is used only for a browseable active-room directory/index.
   - Durable Object room state replaced KV room storage after real reports showed asymmetric visibility (`Watch` saw `Share`, while `Share` stayed at zero targets) during rapid join/poll cycles.
-  - It must not relay media or receive raw room keys/passwords.
-  - Native room UX generates a hidden room key automatically so users get encrypted UDP media without seeing an access-code field.
+  - It must not relay media or receive room passwords/user-visible access codes.
+  - For no-password public rooms, the Durable Object generates and stores a random room access key. Native clients use it as the hidden UDP access code so users get encrypted UDP media without seeing an access-code field. This is encryption, not private access control; optional room passwords should be added as the private-room layer.
   - Native C++ diagnostic integration started with `src/transport/SignalingClient.*` plus `--signal-health`, `--signal-join`, `--signal-peers`, `--signal-heartbeat`, and `--signal-leave`.
   - Live Share/Watch CLI integration is in progress: `--watch PORT --signal-room ROOM` publishes the watcher candidate and turns returned peers into NAT probe targets; `--share-room PORT --signal-room ROOM` publishes the sharer candidate and turns returned peers into UDP send targets. `--signal-server URL` overrides the built-in Worker.
   - Runtime live signaling now periodically rejoins the room as heartbeat/polling. Share can start before Watch and wait for peers; Watch can add newly discovered room peers as NAT probe targets; Share can add newly discovered watcher candidates to the active sender socket.
-  - The UI default Internet path now uses the built-in Worker `https://screenshare-signaling.bit-yeet.workers.dev`: Share has Room/Port and copies a secure `screenshare-room-v1;room=...;key=...` link; Watch pastes that link but keeps its own local watch port, then launches `--watch PORT --signal-room ROOM --access-code <hidden room key>` with the server supplied internally. The Worker receives the room ID/candidates, not the key.
+  - The UI default Internet path now uses the built-in Worker `https://screenshare-signaling.bit-yeet.workers.dev`: Share has Room/Port and copies a short `screenshare-room-v1;room=...` link; Watch can pick an active room from `GET /rooms` or paste the link. The engine receives the room access key from signaling during join and uses it as the hidden UDP access code.
   - `GET /rooms` returns KV-backed active-room summaries for browse/debug views, but verifies each listed room against its Durable Object so stale KV entries do not stay visible in the API. `GET /rooms/:roomId/summary` returns one safe summary or `null`.
   - Live signaling publishes a `host` local candidate alongside the `srflx` STUN candidate when available, so same-PC and same-LAN room tests can use the direct local path instead of relying on router hairpin behavior.
   - Manual NAT invite fields still exist behind a fallback checkbox.
   - `ScreenShareUi` runs `windeployqt` through `cmake/RunWindeployQt.cmake`; the script always verifies/copies the current Qt DLLs/plugins and resolved MinGW runtime deps so the release UI does not keep stale mismatched Qt files.
   - Keep the UI runtime consistently UCRT (`C:/msys64/ucrt64/bin`); mixing `mingw64` and `ucrt64` Qt/ICU/libstdc++ DLLs causes Windows entry-point loader errors before the app starts.
-  - Remaining signaling TODO is real multi-computer/multi-viewer validation and later UI room-list browsing.
+  - Remaining signaling TODO is real multi-computer/multi-viewer validation, optional room passwords, and per-viewer health.

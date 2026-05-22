@@ -6,13 +6,13 @@
 - Media relay is not part of the current plan.
 - The first backend is `signaling-worker/`, a Cloudflare Worker using a Durable Object for live room state, with Workers KV used only as a browseable active-room directory/index.
 - The Worker stores short-lived room membership and peer UDP candidates in the Durable Object only.
-- KV active-room entries contain safe summaries: room ID, peer count, timestamps, and whether the full room key is still required.
+- KV active-room entries contain safe summaries: room ID, peer count, timestamps, and whether an extra room secret is required.
 - The Worker cannot receive UDP and does not replace STUN.
 
 ## Security Model
 
-- Do not send room keys, room passwords, access codes, or media encryption material to the Worker.
-- Normal room UX should be encrypted by default with a hidden app-generated room key.
+- Do not send room passwords or user-visible access codes to the Worker.
+- Normal no-password room UX gets a random room access key from the Durable Object and uses it as a hidden UDP access code. This is public-room encryption, not private room access control.
 - A visible password is optional future UX, not required for encryption.
 - The Worker room ID is a lookup name, not a secret.
 
@@ -45,12 +45,12 @@
   - Share room peers become UDP send targets on one local room port.
 - Runtime live signaling uses periodic `join` calls as both heartbeat and peer refresh.
 - Runtime live signaling sends `leave` on normal shutdown/Stop. Background polling/leave uses a short timeout so the Qt UI's graceful Stop window can finish cleanup before force-kill. The Worker removes the current peer from the room Durable Object on leave; if a process crashes or the network path is gone, stale-peer cleanup remains the fallback.
-- `GET /rooms` reads the KV active-room directory and verifies listed rooms against their Durable Objects for browse/debug UI. It is not the signaling source of truth and does not return peer candidates or room keys.
+- `GET /rooms` reads the KV active-room directory and verifies listed rooms against their Durable Objects for browse/debug UI. It is not the signaling source of truth and does not return peer candidates or passwords.
 - `GET /rooms/:roomId/summary` returns one safe summary or `null`; it is useful for pruning stale KV directory entries.
 - Share no longer requires Watch to be present during startup; it can wait for room peers and add them while running.
 - If Share starts before Watch, the sender must create its UDP sender lazily when the first Worker peer candidate arrives. Do not tie UDP sender creation only to initial stream encoder startup.
 - Watch can add newly discovered room peers as NAT probe targets while running.
-- The Qt UI's default Internet path now launches the live signaling bridge directly against the built-in Worker URL `https://screenshare-signaling.bit-yeet.workers.dev` and exchanges a small `screenshare-room-v1` link with the room ID plus a hidden room key. The link is a secret, but the Worker only receives the room ID.
+- The Qt UI's default Internet path now launches the live signaling bridge directly against the built-in Worker URL `https://screenshare-signaling.bit-yeet.workers.dev`, copies short `screenshare-room-v1;room=...` links, and can also join from the active room list. The Worker sees room IDs/candidates and distributes a random room access key for public rooms; future room passwords should stay local.
 - Room links should not set the watcher's UDP listen port. Each side publishes its own chosen UDP port through Worker candidates, which also keeps same-PC tests from binding both processes to the same port.
 - Live room joins publish both `srflx` STUN/public candidates and a `host` local candidate when STUN reveals a usable local address. This keeps same-PC and same-LAN tests from depending on NAT hairpin support.
 - Live integration should still use HTTP polling; no WebSockets needed yet.
