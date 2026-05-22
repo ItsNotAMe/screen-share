@@ -2,7 +2,7 @@ export interface Env {
   ROOMS: KVNamespace;
 }
 
-type CandidateType = "srflx";
+type CandidateType = "host" | "srflx";
 type CandidateProtocol = "udp";
 
 interface Candidate {
@@ -130,8 +130,8 @@ function validateCandidate(candidate: unknown): Candidate {
   if (!isObject(candidate)) {
     throw new HttpError(400, "invalid_candidate", "Candidate must be an object.");
   }
-  if (candidate.type !== "srflx") {
-    throw new HttpError(400, "invalid_candidate_type", "Only srflx UDP candidates are supported.");
+  if (candidate.type !== "srflx" && candidate.type !== "host") {
+    throw new HttpError(400, "invalid_candidate_type", "Only srflx/host UDP candidates are supported.");
   }
   if (candidate.protocol !== "udp") {
     throw new HttpError(400, "invalid_candidate_protocol", "Only UDP candidates are supported.");
@@ -148,7 +148,7 @@ function validateCandidate(candidate: unknown): Candidate {
     throw new HttpError(400, "invalid_candidate_port", "Candidate port must be 1-65535.");
   }
   return {
-    type: "srflx",
+    type: candidate.type,
     ip,
     port,
     protocol: "udp",

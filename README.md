@@ -271,7 +271,10 @@ Then start Share from its room UDP port:
 ```
 
 Live room commands use the built-in ScreenShare signaling Worker by default. Add
-`--signal-server URL` only to test a different Worker. Both sides use STUN to publish their public UDP candidate to the Worker. Share resolves the room's
+`--signal-server URL` only to test a different Worker. Both sides use STUN to publish their public
+UDP candidate to the Worker and also publish a local host candidate when one is available. The local
+candidate makes same-PC and same-LAN room tests use the direct local path instead of depending on
+router hairpin behavior. Share resolves the room's
 watcher candidates into UDP send targets, while Watch resolves room candidates into NAT probe
 targets. Use `--signal-stun HOST[:PORT]` to override the default STUN server and
 `--signal-setup-seconds S` to wait longer for room peers during startup. After startup, both sides

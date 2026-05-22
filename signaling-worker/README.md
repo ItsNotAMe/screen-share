@@ -89,6 +89,12 @@ Upserts this peer, cleans stale peers, and returns every other peer in the room.
       "ip": "1.2.3.4",
       "port": 62000,
       "protocol": "udp"
+    },
+    {
+      "type": "host",
+      "ip": "192.168.1.23",
+      "port": 5000,
+      "protocol": "udp"
     }
   ],
   "metadata": {
@@ -179,7 +185,8 @@ curl -X POST https://YOUR_WORKER.workers.dev/rooms/test-room/join \
   -d '{
     "peerId": "alice",
     "candidates": [
-      { "type": "srflx", "ip": "1.2.3.4", "port": 62000, "protocol": "udp" }
+      { "type": "srflx", "ip": "1.2.3.4", "port": 62000, "protocol": "udp" },
+      { "type": "host", "ip": "192.168.1.23", "port": 5000, "protocol": "udp" }
     ],
     "metadata": { "name": "Alice", "platform": "windows" }
   }'

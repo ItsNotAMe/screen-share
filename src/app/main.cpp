@@ -221,6 +221,8 @@ struct Options {
     std::vector<screenshare::UdpNatProbeTarget> signalingNatProbeTargets;
     bool signalingLocalCandidateAvailable = false;
     screenshare::SignalingCandidate signalingLocalCandidate;
+    bool signalingHostCandidateAvailable = false;
+    screenshare::SignalingCandidate signalingHostCandidate;
     std::string saveReportPath;
     std::string logPath;
     std::string sessionId;
@@ -2239,6 +2241,13 @@ std::string SignalingCandidateEndpoint(const screenshare::SignalingCandidate& ca
     return candidate.ip + ":" + std::to_string(candidate.port);
 }
 
+bool IsUsableHostSignalingAddress(const std::string& address)
+{
+    return !address.empty() &&
+           address != "0.0.0.0" &&
+           address != "127.0.0.1";
+}
+
 void MergeSignalingPeers(
     std::map<std::string, screenshare::SignalingPeer>& peersById,
     const screenshare::SignalingRoomResponse& response)
@@ -2265,6 +2274,14 @@ screenshare::SignalingPeerState BuildLiveSignalingPeerState(const Options& optio
     peer.metadata.name = options.signalingName.empty() ? options.lanName : options.signalingName;
     peer.metadata.platform = options.signalingPlatform.empty() ? "windows" : options.signalingPlatform;
     peer.candidates.push_back(options.signalingLocalCandidate);
+    if (options.signalingHostCandidateAvailable) {
+        const bool duplicate =
+            options.signalingHostCandidate.ip == options.signalingLocalCandidate.ip &&
+            options.signalingHostCandidate.port == options.signalingLocalCandidate.port;
+        if (!duplicate) {
+            peer.candidates.push_back(options.signalingHostCandidate);
+        }
+    }
     return peer;
 }
 
@@ -5676,6 +5693,14 @@ void PrepareLiveSignaling(Options& options)
         stun.publicPort,
         "udp"};
     options.signalingLocalCandidateAvailable = true;
+    if (IsUsableHostSignalingAddress(stun.localAddress) && stun.localPort != 0) {
+        options.signalingHostCandidate = screenshare::SignalingCandidate{
+            "host",
+            stun.localAddress,
+            stun.localPort,
+            "udp"};
+        options.signalingHostCandidateAvailable = true;
+    }
     const screenshare::SignalingPeerState peer = BuildLiveSignalingPeerState(options);
 
     screenshare::SignalingClientConfig clientConfig;
@@ -5702,6 +5727,7 @@ void PrepareLiveSignaling(Options& options)
         << " peer_id=" << options.signalingPeerId
         << " local_udp_endpoint=" << stun.localAddress << ":" << stun.localPort
         << " public_udp_endpoint=" << stun.publicAddress << ":" << stun.publicPort
+        << " host_candidate=" << (options.signalingHostCandidateAvailable ? "yes" : "no")
         << " polls=" << polls
         << " peers=" << peersById.size()
         << "\n";
