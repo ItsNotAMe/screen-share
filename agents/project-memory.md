@@ -12,8 +12,7 @@
 
 ## Current State
 
-- `main` is synced to `origin/main` at PR #99, `6127249 Merge pull request #99 from ItsNotAMe/feature/hidden-room-keys`.
-- Active branch: `feature/room-directory`.
+- `main` is synced to `origin/main` at PR #100, `fb6791f Merge pull request #100 from ItsNotAMe/feature/room-directory`.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
@@ -88,7 +87,7 @@ WGC capture by default
 - PR #93 `Add NAT multi-viewer room invite targets`: one sharer room invite, optional watcher response invite list, NAT probe-learned fanout through one sender socket, and direct multi-target Share UI cleanup.
 - PR #94 `Add Cloudflare signaling worker scaffold`: signaling-only Worker project, Windows dependency bootstrap script, Worker lockfile/typecheck config, and hidden room-key direction docs.
 - PR #99 `Secure Worker room signaling`: hidden app-generated room keys in secure room links, Durable Object live room state, static-candidate fanout fix, and clearer direct-UDP-blocked diagnostics.
-- Current room-invite UI work keeps the project no-server/no-external-service: Create room owns one invite and Join room pastes it, but real NAT testing showed this only works for LAN/VPN/reachable-NAT. Endpoint-filtered NAT can block the watcher probes before Share sees them.
+- PR #100 `Add active room directory`: KV-backed active room summaries plus safe `GET /rooms` and `GET /rooms/:roomId/summary`, with Durable Objects still verified as the live source of truth.
 
 ## Active Memory Files
 
