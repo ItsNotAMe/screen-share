@@ -16,11 +16,14 @@ C++ client <-> C++ client direct UDP probes
 C++ client <-> C++ client encrypted UDP video/audio
 ```
 
-The Worker stores live room membership in a Durable Object, with Workers KV kept
-as a compatibility binding. The Durable Object gives each room one ordered state
-holder, which avoids the eventual-consistency and last-writer-wins races that
-KV has during rapid join/poll cycles. Peer entries are still stale-cleaned after
-60 seconds.
+The Worker stores live room membership in a Durable Object and writes a small
+Workers KV active-room directory entry for browse/debug UI. The Durable Object
+gives each room one ordered state holder, which avoids the eventual-consistency
+and last-writer-wins races that KV has during rapid join/poll cycles. Peer
+entries are still stale-cleaned after 60 seconds.
+
+KV is only a directory/index here. It should not contain peer UDP candidates,
+room keys, room passwords, access codes, or media encryption material.
 
 ## Why Signaling Is Needed
 
@@ -119,6 +122,40 @@ Response:
 
 Returns all peers except `alice` after stale-peer cleanup.
 
+### `GET /rooms?limit=100`
+
+Returns browseable active-room summaries from KV after verifying each listed
+room against its Durable Object. This is a directory/debug view, not the source
+of truth for signaling and not enough to join a private room. Because the
+directory starts from KV, brand-new rooms can take a few seconds to appear.
+
+```json
+{
+  "ok": true,
+  "rooms": [
+    {
+      "roomId": "test-room",
+      "peerCount": 2,
+      "updatedAt": 1760000000000,
+      "expiresAt": 1760000180000,
+      "requiresRoomKey": true
+    }
+  ]
+}
+```
+
+### `GET /rooms/:roomId/summary`
+
+Returns one safe active-room summary, or `null` if the room has no live peers.
+This endpoint does not return peer candidates or room keys.
+
+```json
+{
+  "ok": true,
+  "room": null
+}
+```
+
 ### `POST /rooms/:roomId/heartbeat`
 
 Updates `lastSeen` for a joined peer.
@@ -207,10 +244,16 @@ curl -X POST https://YOUR_WORKER.workers.dev/rooms/test-room/join \
 curl "https://YOUR_WORKER.workers.dev/rooms/test-room/peers?peerId=alice"
 ```
 
+```bash
+curl "https://YOUR_WORKER.workers.dev/rooms"
+```
+
 ## Notes
 
 - No WebSockets are needed for the first version; simple HTTP polling is enough.
 - Workers KV is eventually consistent. Live room membership uses a Durable
   Object because signaling needs immediate peer visibility.
+- Workers KV is used for active room summaries so rooms are easy to inspect in
+  Cloudflare KV and later from a native room-list view.
 - The Worker is intentionally low bandwidth: short JSON requests, short room TTL,
   and heartbeat cleanup.

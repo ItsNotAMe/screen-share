@@ -2,10 +2,9 @@
 
 ## Ordered Roadmap
 
-1. Add a KV-backed active room directory for browseable room summaries while keeping live signaling state in Durable Objects. Include a safe `GET /rooms` endpoint for future UI room-list viewing.
-2. Validate NAT multi-viewer rooms with real computers using the signaling flow. Follow-ups after testing: per-viewer connection/health display, optional per-viewer bandwidth policy, and better fallback UX for watchers whose NAT still needs direct invite/manual help.
-3. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list, locked-room indicators, optional password prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
-4. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
+1. Validate NAT multi-viewer rooms with real computers using the signaling flow. Follow-ups after testing: per-viewer connection/health display, optional per-viewer bandwidth policy, and better fallback UX for watchers whose NAT still needs direct invite/manual help.
+2. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list using `GET /rooms`, locked-room indicators, optional password prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
+3. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
 
 ## Live-Streaming Hardening
 
