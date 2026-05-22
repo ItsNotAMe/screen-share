@@ -1,5 +1,8 @@
+import { DurableObject } from "cloudflare:workers";
+
 export interface Env {
   ROOMS: KVNamespace;
+  ROOM_OBJECTS: DurableObjectNamespace<RoomObject>;
 }
 
 type CandidateType = "host" | "srflx";
@@ -83,6 +86,14 @@ function normalizePath(pathname: string): string {
 
 function roomKey(roomId: string): string {
   return `room:${roomId}`;
+}
+
+function roomPeerPrefix(roomId: string): string {
+  return `room:${roomId}:peer:`;
+}
+
+function roomPeerKey(roomId: string, peerId: string): string {
+  return `${roomPeerPrefix(roomId)}${peerId}`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -212,36 +223,73 @@ async function readJson<T>(request: Request): Promise<T> {
   }
 }
 
-async function loadRoom(env: Env, roomId: string): Promise<Room> {
-  const stored = await env.ROOMS.get<Room>(roomKey(roomId), "json");
-  if (!stored || !Array.isArray(stored.peers)) {
-    return { peers: [] };
+function normalizeStoredPeer(value: unknown): Peer | undefined {
+  if (!isObject(value) || typeof value.peerId !== "string" || !Array.isArray(value.candidates)) {
+    return undefined;
   }
+
+  const candidates: Candidate[] = [];
+  for (const candidate of value.candidates) {
+    try {
+      candidates.push(validateCandidate(candidate));
+    } catch {
+      return undefined;
+    }
+  }
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  let metadata: PeerMetadata | undefined;
+  try {
+    metadata = validateMetadata(value.metadata);
+  } catch {
+    return undefined;
+  }
+
+  const lastSeen = typeof value.lastSeen === "number" && Number.isFinite(value.lastSeen) ? value.lastSeen : 0;
   return {
-    peers: stored.peers.filter((peer) => typeof peer.peerId === "string" && Array.isArray(peer.candidates)),
+    peerId: value.peerId,
+    candidates,
+    metadata,
+    lastSeen,
   };
 }
 
-async function saveRoom(env: Env, roomId: string, room: Room): Promise<void> {
-  if (room.peers.length === 0) {
-    await env.ROOMS.delete(roomKey(roomId));
-    return;
+async function loadRoom(env: Env, roomId: string, now = Date.now()): Promise<Room> {
+  const listed = await env.ROOMS.list({ prefix: roomPeerPrefix(roomId), limit: 1000 });
+  const peers: Peer[] = [];
+  const deletes: Promise<void>[] = [];
+
+  await Promise.all(listed.keys.map(async (key) => {
+    const stored = await env.ROOMS.get<unknown>(key.name, "json");
+    const peer = normalizeStoredPeer(stored);
+    if (!peer || now - peer.lastSeen > STALE_PEER_MS) {
+      deletes.push(env.ROOMS.delete(key.name));
+      return;
+    }
+    peers.push(peer);
+  }));
+
+  if (deletes.length > 0) {
+    await Promise.all(deletes);
   }
-  await env.ROOMS.put(roomKey(roomId), JSON.stringify(room), {
+
+  return { peers };
+}
+
+async function savePeer(env: Env, roomId: string, peer: Peer): Promise<void> {
+  await env.ROOMS.put(roomPeerKey(roomId, peer.peerId), JSON.stringify(peer), {
     expirationTtl: ROOM_TTL_SECONDS,
   });
 }
 
-function cleanupPeers(room: Room, now = Date.now()): Room {
-  return {
-    peers: room.peers.filter((peer) => now - peer.lastSeen <= STALE_PEER_MS),
-  };
+async function deletePeer(env: Env, roomId: string, peerId: string): Promise<void> {
+  await env.ROOMS.delete(roomPeerKey(roomId, peerId));
 }
 
-function upsertPeer(room: Room, peer: Peer): Room {
-  const peers = room.peers.filter((existing) => existing.peerId !== peer.peerId);
-  peers.push(peer);
-  return { peers };
+async function cleanupLegacyRoom(env: Env, roomId: string): Promise<void> {
+  await env.ROOMS.delete(roomKey(roomId));
 }
 
 function otherPeers(room: Room, peerId: string): Peer[] {
@@ -276,10 +324,11 @@ async function handleJoin(request: Request, env: Env, roomId: string): Promise<R
   const candidates = validateCandidates(body.candidates);
   const metadata = validateMetadata(body.metadata);
   const now = Date.now();
+  const peer = { peerId, candidates, metadata, lastSeen: now };
 
-  let room = cleanupPeers(await loadRoom(env, roomId), now);
-  room = upsertPeer(room, { peerId, candidates, metadata, lastSeen: now });
-  await saveRoom(env, roomId, room);
+  const room = await loadRoom(env, roomId, now);
+  await savePeer(env, roomId, peer);
+  await cleanupLegacyRoom(env, roomId);
 
   return jsonResponse({ ok: true, peers: otherPeers(room, peerId) });
 }
@@ -287,8 +336,7 @@ async function handleJoin(request: Request, env: Env, roomId: string): Promise<R
 async function handlePeers(request: Request, env: Env, roomId: string): Promise<Response> {
   const url = new URL(request.url);
   const peerId = validatePeerId(url.searchParams.get("peerId"));
-  const room = cleanupPeers(await loadRoom(env, roomId));
-  await saveRoom(env, roomId, room);
+  const room = await loadRoom(env, roomId);
 
   return jsonResponse({ ok: true, peers: otherPeers(room, peerId) });
 }
@@ -297,14 +345,13 @@ async function handleHeartbeat(request: Request, env: Env, roomId: string): Prom
   const body = await readJson<PeerRequest>(request);
   const peerId = validatePeerId(body.peerId);
   const now = Date.now();
-  const room = cleanupPeers(await loadRoom(env, roomId), now);
-  const peer = room.peers.find((existing) => existing.peerId === peerId);
+  const peer = normalizeStoredPeer(await env.ROOMS.get<unknown>(roomPeerKey(roomId, peerId), "json"));
   if (!peer) {
-    await saveRoom(env, roomId, room);
+    await deletePeer(env, roomId, peerId);
     throw new HttpError(404, "peer_not_found", "Peer is not in this room.");
   }
   peer.lastSeen = now;
-  await saveRoom(env, roomId, room);
+  await savePeer(env, roomId, peer);
 
   return jsonResponse({ ok: true });
 }
@@ -312,11 +359,144 @@ async function handleHeartbeat(request: Request, env: Env, roomId: string): Prom
 async function handleLeave(request: Request, env: Env, roomId: string): Promise<Response> {
   const body = await readJson<PeerRequest>(request);
   const peerId = validatePeerId(body.peerId);
-  const room = cleanupPeers(await loadRoom(env, roomId));
-  const nextRoom = { peers: room.peers.filter((peer) => peer.peerId !== peerId) };
-  await saveRoom(env, roomId, nextRoom);
+  await deletePeer(env, roomId, peerId);
+  await cleanupLegacyRoom(env, roomId);
 
   return jsonResponse({ ok: true });
+}
+
+export class RoomObject extends DurableObject<Env> {
+  private peers: Map<string, Peer> | undefined;
+
+  async fetch(request: Request): Promise<Response> {
+    try {
+      return await this.route(request);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return jsonResponse({ ok: false, error: error.code, message: error.message }, error.status);
+      }
+      console.error("Unhandled room object error", error);
+      return jsonResponse({ ok: false, error: "internal_error", message: "Internal server error." }, 500);
+    }
+  }
+
+  private async route(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const pathname = normalizePath(url.pathname);
+    const match = pathname.match(/^\/rooms\/([^/]+)\/(join|peers|heartbeat|leave)$/);
+    if (!match) {
+      throw new HttpError(404, "not_found", "Endpoint not found.");
+    }
+
+    const action = match[2];
+    if (action === "join" && request.method === "POST") {
+      return this.handleJoin(request);
+    }
+    if (action === "peers" && request.method === "GET") {
+      return this.handlePeers(request);
+    }
+    if (action === "heartbeat" && request.method === "POST") {
+      return this.handleHeartbeat(request);
+    }
+    if (action === "leave" && request.method === "POST") {
+      return this.handleLeave(request);
+    }
+
+    throw new HttpError(405, "method_not_allowed", "Method not allowed for this endpoint.");
+  }
+
+  private async loadPeers(): Promise<Map<string, Peer>> {
+    if (this.peers) {
+      return this.peers;
+    }
+
+    const stored = await this.ctx.storage.get<Peer[]>("peers");
+    const peers = new Map<string, Peer>();
+    if (Array.isArray(stored)) {
+      for (const value of stored) {
+        const peer = normalizeStoredPeer(value);
+        if (peer) {
+          peers.set(peer.peerId, peer);
+        }
+      }
+    }
+    this.peers = peers;
+    return peers;
+  }
+
+  private async savePeers(peers: Map<string, Peer>): Promise<void> {
+    if (peers.size === 0) {
+      await this.ctx.storage.delete("peers");
+      return;
+    }
+    await this.ctx.storage.put("peers", [...peers.values()]);
+  }
+
+  private cleanupPeers(peers: Map<string, Peer>, now = Date.now()): boolean {
+    let changed = false;
+    for (const [peerId, peer] of peers) {
+      if (now - peer.lastSeen > STALE_PEER_MS) {
+        peers.delete(peerId);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  private async handleJoin(request: Request): Promise<Response> {
+    const body = await readJson<JoinRequest>(request);
+    const peerId = validatePeerId(body.peerId);
+    const candidates = validateCandidates(body.candidates);
+    const metadata = validateMetadata(body.metadata);
+    const now = Date.now();
+    const peers = await this.loadPeers();
+    this.cleanupPeers(peers, now);
+
+    peers.set(peerId, { peerId, candidates, metadata, lastSeen: now });
+    await this.savePeers(peers);
+
+    return jsonResponse({ ok: true, peers: otherPeers({ peers: [...peers.values()] }, peerId) });
+  }
+
+  private async handlePeers(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const peerId = validatePeerId(url.searchParams.get("peerId"));
+    const peers = await this.loadPeers();
+    const changed = this.cleanupPeers(peers);
+    if (changed) {
+      await this.savePeers(peers);
+    }
+
+    return jsonResponse({ ok: true, peers: otherPeers({ peers: [...peers.values()] }, peerId) });
+  }
+
+  private async handleHeartbeat(request: Request): Promise<Response> {
+    const body = await readJson<PeerRequest>(request);
+    const peerId = validatePeerId(body.peerId);
+    const now = Date.now();
+    const peers = await this.loadPeers();
+    this.cleanupPeers(peers, now);
+    const peer = peers.get(peerId);
+    if (!peer) {
+      await this.savePeers(peers);
+      throw new HttpError(404, "peer_not_found", "Peer is not in this room.");
+    }
+
+    peer.lastSeen = now;
+    await this.savePeers(peers);
+
+    return jsonResponse({ ok: true });
+  }
+
+  private async handleLeave(request: Request): Promise<Response> {
+    const body = await readJson<PeerRequest>(request);
+    const peerId = validatePeerId(body.peerId);
+    const peers = await this.loadPeers();
+    peers.delete(peerId);
+    await this.savePeers(peers);
+
+    return jsonResponse({ ok: true });
+  }
 }
 
 async function routeRequest(request: Request, env: Env): Promise<Response> {
@@ -340,6 +520,11 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
 
   const roomId = validateRoomId(decodeURIComponent(match[1]));
   const action = match[2];
+
+  if (env.ROOM_OBJECTS) {
+    const id = env.ROOM_OBJECTS.idFromName(roomId);
+    return env.ROOM_OBJECTS.get(id).fetch(request);
+  }
 
   if (action === "join" && request.method === "POST") {
     return handleJoin(request, env, roomId);

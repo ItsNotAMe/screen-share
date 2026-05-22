@@ -4,7 +4,7 @@
 
 - Signaling is allowed as a lightweight coordination layer.
 - Media relay is not part of the current plan.
-- The first backend is `signaling-worker/`, a Cloudflare Worker using Workers KV.
+- The first backend is `signaling-worker/`, a Cloudflare Worker using a Durable Object for live room state, with Workers KV kept as a compatibility binding.
 - The Worker stores short-lived room membership and peer UDP candidates only.
 - The Worker cannot receive UDP and does not replace STUN.
 
@@ -43,13 +43,13 @@
   - Watch room peers become NAT probe targets.
   - Share room peers become UDP send targets on one local room port.
 - Runtime live signaling uses periodic `join` calls as both heartbeat and peer refresh.
-- Runtime live signaling sends `leave` on normal shutdown/Stop. Background polling/leave uses a short timeout so the Qt UI's graceful Stop window can finish cleanup before force-kill. The Worker deletes the room key when the last peer leaves; if a process crashes or the network path is gone, the short KV TTL remains the fallback cleanup.
+- Runtime live signaling sends `leave` on normal shutdown/Stop. Background polling/leave uses a short timeout so the Qt UI's graceful Stop window can finish cleanup before force-kill. The Worker removes the current peer from the room Durable Object on leave; if a process crashes or the network path is gone, stale-peer cleanup remains the fallback.
 - Share no longer requires Watch to be present during startup; it can wait for room peers and add them while running.
 - If Share starts before Watch, the sender must create its UDP sender lazily when the first Worker peer candidate arrives. Do not tie UDP sender creation only to initial stream encoder startup.
 - Watch can add newly discovered room peers as NAT probe targets while running.
-- The Qt UI's default Internet path now launches the live signaling bridge directly against the built-in Worker URL `https://screenshare-signaling.bit-yeet.workers.dev` and exchanges a small `screenshare-room-v1` link that contains only the room ID. This link is not a secret.
+- The Qt UI's default Internet path now launches the live signaling bridge directly against the built-in Worker URL `https://screenshare-signaling.bit-yeet.workers.dev` and exchanges a small `screenshare-room-v1` link with the room ID plus a hidden room key. The link is a secret, but the Worker only receives the room ID.
 - Room links should not set the watcher's UDP listen port. Each side publishes its own chosen UDP port through Worker candidates, which also keeps same-PC tests from binding both processes to the same port.
 - Live room joins publish both `srflx` STUN/public candidates and a `host` local candidate when STUN reveals a usable local address. This keeps same-PC and same-LAN tests from depending on NAT hairpin support.
 - Live integration should still use HTTP polling; no WebSockets needed yet.
-- Workers KV is acceptable for the first small implementation, but it is eventually consistent. If room state races become a real problem, move live room state to Durable Objects.
+- Workers KV was too eventually consistent for rapid room join/poll cycles. Live room state now uses Durable Objects to avoid asymmetric "Watch sees Share, Share sees nobody" reports.
 - Keep room TTLs short and delete empty rooms.

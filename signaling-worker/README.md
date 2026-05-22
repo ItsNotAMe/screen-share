@@ -16,9 +16,11 @@ C++ client <-> C++ client direct UDP probes
 C++ client <-> C++ client encrypted UDP video/audio
 ```
 
-The Worker stores short-lived room membership in Workers KV through the `ROOMS`
-binding. Room entries expire quickly and stale peers are removed after 60
-seconds.
+The Worker stores live room membership in a Durable Object, with Workers KV kept
+as a compatibility binding. The Durable Object gives each room one ordered state
+holder, which avoids the eventual-consistency and last-writer-wins races that
+KV has during rapid join/poll cycles. Peer entries are still stale-cleaned after
+60 seconds.
 
 ## Why Signaling Is Needed
 
@@ -127,7 +129,7 @@ Updates `lastSeen` for a joined peer.
 
 ### `POST /rooms/:roomId/leave`
 
-Removes a peer from the room. Empty rooms are deleted from KV.
+Removes a peer from the room. Empty rooms clear their Durable Object room state.
 
 ```json
 { "peerId": "alice" }
@@ -153,12 +155,21 @@ Create the KV namespace:
 npx wrangler kv namespace create ROOMS
 ```
 
-Copy the generated namespace ID into `wrangler.toml`:
+Copy the generated namespace ID into `wrangler.toml`. The Durable Object binding
+and migration are already in `wrangler.toml`:
 
 ```toml
 [[kv_namespaces]]
 binding = "ROOMS"
 id = "your-namespace-id"
+
+[[durable_objects.bindings]]
+name = "ROOM_OBJECTS"
+class_name = "RoomObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomObject"]
 ```
 
 Deploy:
@@ -199,8 +210,7 @@ curl "https://YOUR_WORKER.workers.dev/rooms/test-room/peers?peerId=alice"
 ## Notes
 
 - No WebSockets are needed for the first version; simple HTTP polling is enough.
-- Workers KV is eventually consistent. It is acceptable for this first small
-  signaling layer, but Durable Objects would be a better fit if we later need
-  strongly consistent room state.
+- Workers KV is eventually consistent. Live room membership uses a Durable
+  Object because signaling needs immediate peer visibility.
 - The Worker is intentionally low bandwidth: short JSON requests, short room TTL,
   and heartbeat cleanup.

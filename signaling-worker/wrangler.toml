@@ -5,3 +5,11 @@ compatibility_date = "2026-05-21"
 [[kv_namespaces]]
 binding = "ROOMS"
 id = "ab4659f75bf04b1eb097c5b688094bae"
+
+[[durable_objects.bindings]]
+name = "ROOM_OBJECTS"
+class_name = "RoomObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomObject"]
