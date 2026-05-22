@@ -12,8 +12,8 @@
 
 ## Current State
 
-- `main` is synced to `origin/main` at PR #94, `d81b13b Merge pull request #94 from ItsNotAMe/feature/signaling-worker`.
-- Active branch: `main`.
+- `main` is synced to `origin/main` at PR #99, `6127249 Merge pull request #99 from ItsNotAMe/feature/hidden-room-keys`.
+- Active branch: `feature/room-directory`.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
@@ -87,6 +87,7 @@ WGC capture by default
 - PR #86 `Clarify room UI setup`: Share/Watch wording, segmented connection tabs, display/audio chooser polish, header status pill, receiver stale-preview blanking, and Windows UDP reconnect resilience for late/restarted Watch.
 - PR #93 `Add NAT multi-viewer room invite targets`: one sharer room invite, optional watcher response invite list, NAT probe-learned fanout through one sender socket, and direct multi-target Share UI cleanup.
 - PR #94 `Add Cloudflare signaling worker scaffold`: signaling-only Worker project, Windows dependency bootstrap script, Worker lockfile/typecheck config, and hidden room-key direction docs.
+- PR #99 `Secure Worker room signaling`: hidden app-generated room keys in secure room links, Durable Object live room state, static-candidate fanout fix, and clearer direct-UDP-blocked diagnostics.
 - Current room-invite UI work keeps the project no-server/no-external-service: Create room owns one invite and Join room pastes it, but real NAT testing showed this only works for LAN/VPN/reachable-NAT. Endpoint-filtered NAT can block the watcher probes before Share sees them.
 
 ## Active Memory Files
@@ -190,16 +191,17 @@ WGC capture by default
   - Remaining multi-viewer work is per-viewer health and optional per-viewer bandwidth policy.
 - Signaling direction:
   - First backend lives under `signaling-worker/`.
-  - It is Cloudflare Worker + Durable Object for live room membership, peer UDP candidates, heartbeat, and cleanup only; Workers KV remains a compatibility binding.
+  - It is Cloudflare Worker + Durable Object for live room membership, peer UDP candidates, heartbeat, and cleanup only; Workers KV is used only for a browseable active-room directory/index.
   - Durable Object room state replaced KV room storage after real reports showed asymmetric visibility (`Watch` saw `Share`, while `Share` stayed at zero targets) during rapid join/poll cycles.
   - It must not relay media or receive raw room keys/passwords.
-  - Future native room UX should generate a hidden room key automatically so users get encrypted UDP media without seeing an access-code field.
+  - Native room UX generates a hidden room key automatically so users get encrypted UDP media without seeing an access-code field.
   - Native C++ diagnostic integration started with `src/transport/SignalingClient.*` plus `--signal-health`, `--signal-join`, `--signal-peers`, `--signal-heartbeat`, and `--signal-leave`.
   - Live Share/Watch CLI integration is in progress: `--watch PORT --signal-room ROOM` publishes the watcher candidate and turns returned peers into NAT probe targets; `--share-room PORT --signal-room ROOM` publishes the sharer candidate and turns returned peers into UDP send targets. `--signal-server URL` overrides the built-in Worker.
   - Runtime live signaling now periodically rejoins the room as heartbeat/polling. Share can start before Watch and wait for peers; Watch can add newly discovered room peers as NAT probe targets; Share can add newly discovered watcher candidates to the active sender socket.
   - The UI default Internet path now uses the built-in Worker `https://screenshare-signaling.bit-yeet.workers.dev`: Share has Room/Port and copies a secure `screenshare-room-v1;room=...;key=...` link; Watch pastes that link but keeps its own local watch port, then launches `--watch PORT --signal-room ROOM --access-code <hidden room key>` with the server supplied internally. The Worker receives the room ID/candidates, not the key.
+  - `GET /rooms` returns KV-backed active-room summaries for browse/debug views, but verifies each listed room against its Durable Object so stale KV entries do not stay visible in the API. `GET /rooms/:roomId/summary` returns one safe summary or `null`.
   - Live signaling publishes a `host` local candidate alongside the `srflx` STUN candidate when available, so same-PC and same-LAN room tests can use the direct local path instead of relying on router hairpin behavior.
   - Manual NAT invite fields still exist behind a fallback checkbox.
   - `ScreenShareUi` runs `windeployqt` through `cmake/RunWindeployQt.cmake`; the script always verifies/copies the current Qt DLLs/plugins and resolved MinGW runtime deps so the release UI does not keep stale mismatched Qt files.
   - Keep the UI runtime consistently UCRT (`C:/msys64/ucrt64/bin`); mixing `mingw64` and `ucrt64` Qt/ICU/libstdc++ DLLs causes Windows entry-point loader errors before the app starts.
-  - Remaining signaling TODO is hidden room-key encryption and real multi-computer validation.
+  - Remaining signaling TODO is real multi-computer/multi-viewer validation and later UI room-list browsing.

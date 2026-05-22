@@ -240,11 +240,12 @@ If Watch and Share stay connecting, the peers did not complete UDP hole punching
 IP, the Internet tab's Manual invite fallback, or a router port mapping for that network.
 
 An experimental HTTP signaling backend lives in [`signaling-worker/`](signaling-worker/README.md).
-It is a Cloudflare Worker that stores short-lived room membership and peer UDP candidates only.
+It is a Cloudflare Worker that stores live room membership and peer UDP candidates in a per-room
+Durable Object, plus small browseable active-room summaries in KV for diagnostics/future room lists.
 It does not relay media, cannot receive UDP, and still requires the native app to use STUN and direct
-UDP probes. The intended next room flow is secure by default: the native app should generate a hidden
-room key automatically, keep UDP video/audio encrypted even when the user does not type a password,
-and reserve visible passwords for an optional extra lock.
+UDP probes. The normal room flow is secure by default: the native app generates a hidden room key
+automatically, keeps UDP video/audio encrypted even when the user does not type a password, and
+reserves visible passwords for an optional extra lock later.
 
 The native CLI has standalone signaling diagnostics for testing a deployed Worker before it is wired
 into the live room flow:

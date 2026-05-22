@@ -4,8 +4,9 @@
 
 - Signaling is allowed as a lightweight coordination layer.
 - Media relay is not part of the current plan.
-- The first backend is `signaling-worker/`, a Cloudflare Worker using a Durable Object for live room state, with Workers KV kept as a compatibility binding.
-- The Worker stores short-lived room membership and peer UDP candidates only.
+- The first backend is `signaling-worker/`, a Cloudflare Worker using a Durable Object for live room state, with Workers KV used only as a browseable active-room directory/index.
+- The Worker stores short-lived room membership and peer UDP candidates in the Durable Object only.
+- KV active-room entries contain safe summaries: room ID, peer count, timestamps, and whether the full room key is still required.
 - The Worker cannot receive UDP and does not replace STUN.
 
 ## Security Model
@@ -44,6 +45,8 @@
   - Share room peers become UDP send targets on one local room port.
 - Runtime live signaling uses periodic `join` calls as both heartbeat and peer refresh.
 - Runtime live signaling sends `leave` on normal shutdown/Stop. Background polling/leave uses a short timeout so the Qt UI's graceful Stop window can finish cleanup before force-kill. The Worker removes the current peer from the room Durable Object on leave; if a process crashes or the network path is gone, stale-peer cleanup remains the fallback.
+- `GET /rooms` reads the KV active-room directory and verifies listed rooms against their Durable Objects for browse/debug UI. It is not the signaling source of truth and does not return peer candidates or room keys.
+- `GET /rooms/:roomId/summary` returns one safe summary or `null`; it is useful for pruning stale KV directory entries.
 - Share no longer requires Watch to be present during startup; it can wait for room peers and add them while running.
 - If Share starts before Watch, the sender must create its UDP sender lazily when the first Worker peer candidate arrives. Do not tie UDP sender creation only to initial stream encoder startup.
 - Watch can add newly discovered room peers as NAT probe targets while running.
@@ -52,4 +55,4 @@
 - Live room joins publish both `srflx` STUN/public candidates and a `host` local candidate when STUN reveals a usable local address. This keeps same-PC and same-LAN tests from depending on NAT hairpin support.
 - Live integration should still use HTTP polling; no WebSockets needed yet.
 - Workers KV was too eventually consistent for rapid room join/poll cycles. Live room state now uses Durable Objects to avoid asymmetric "Watch sees Share, Share sees nobody" reports.
-- Keep room TTLs short and delete empty rooms.
+- Keep room TTLs short, delete empty rooms, and let the KV directory expire stale summaries quickly.
