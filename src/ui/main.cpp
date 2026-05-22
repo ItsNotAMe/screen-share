@@ -392,8 +392,7 @@ AccessCodeProblem detectAccessCodeProblem(const QString& output)
 {
     if (output.contains("requires --access-code CODE", Qt::CaseInsensitive) ||
         output.contains("requires an access code", Qt::CaseInsensitive) ||
-        output.contains("--access-code CODE or --allow-plaintext", Qt::CaseInsensitive) ||
-        lastLogFieldValue(output, "access_code") == "required") {
+        output.contains("--access-code CODE or --allow-plaintext", Qt::CaseInsensitive)) {
         return AccessCodeProblem::Required;
     }
 
@@ -4319,6 +4318,9 @@ int main(int argc, char** argv)
             const bool rejectedPacketsDetected =
                 detectAccessCodeProblem("access_rejected_datagrams=2 crypto_rejected_datagrams=0") ==
                 AccessCodeProblem::Mismatch;
+            const bool normalEncryptedTelemetryIgnored =
+                detectAccessCodeProblem("UDP sender pacing=enabled access_code=required udp_feedback_access=required") ==
+                AccessCodeProblem::None;
             const auto displays = parseDisplayChoices(QString::fromUtf8(
                 "[0] \\\\.\\DISPLAY1 2560x1440 at (0,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"
                 "[1] \\\\.\\DISPLAY2 1920x1080 at (-1920,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"));
@@ -4346,6 +4348,7 @@ int main(int argc, char** argv)
                 missingAccessCodeDetected &&
                 mismatchedAccessCodeDetected &&
                 rejectedPacketsDetected &&
+                normalEncryptedTelemetryIgnored &&
                 displays.size() == 2 &&
                 displays[1].index == 1 &&
                 displays[1].width == 1920 &&
