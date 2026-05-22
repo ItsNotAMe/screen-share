@@ -14,6 +14,7 @@ Only pick these up when reports show the need; normal audio and no-audio fallbac
 - Include receiver A/V sync/playout fields in receiver feedback summaries so sender reports can diagnose title values like `av -600ms` without separately collecting the receiver log.
 - Investigate small-drift audio time-stretching only if A/V catch-up drops become audible or too frequent; keep hard drops for large real-time recovery.
 - Improve the title text if users confuse diagnostic A/V estimates with true audible drift.
+- Make sender CLI/report NAT status freshness-aware, so `nat_status=connected` does not stay sticky forever after the last receiver feedback packet.
 - Make `--stream-encoder auto` smarter by detecting hardware encoder input drops and falling back to software or marking that hardware encoder as unhealthy.
 - Measure and report max encoder input queue age in milliseconds.
 - Prefer dropping stale queued encoder input before it becomes visible latency.

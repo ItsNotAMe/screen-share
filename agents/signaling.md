@@ -43,6 +43,7 @@
   - Watch room peers become NAT probe targets.
   - Share room peers become UDP send targets on one local room port.
 - Runtime live signaling uses periodic `join` calls as both heartbeat and peer refresh.
+- Runtime live signaling sends `leave` on normal shutdown/Stop. Background polling/leave uses a short timeout so the Qt UI's graceful Stop window can finish cleanup before force-kill. The Worker deletes the room key when the last peer leaves; if a process crashes or the network path is gone, the short KV TTL remains the fallback cleanup.
 - Share no longer requires Watch to be present during startup; it can wait for room peers and add them while running.
 - If Share starts before Watch, the sender must create its UDP sender lazily when the first Worker peer candidate arrives. Do not tie UDP sender creation only to initial stream encoder startup.
 - Watch can add newly discovered room peers as NAT probe targets while running.

@@ -574,95 +574,101 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
         return std::nullopt;
     }
 
-    fd_set readSet;
-    FD_ZERO(&readSet);
-    FD_SET(AsSocket(socket_), &readSet);
+    constexpr int MaxDatagramsToInspect = 1024;
+    for (int inspected = 0; inspected < MaxDatagramsToInspect; ++inspected) {
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(AsSocket(socket_), &readSet);
 
-    timeval waitTime{};
-    waitTime.tv_sec = static_cast<long>(timeout.count() / 1000);
-    waitTime.tv_usec = static_cast<long>((timeout.count() % 1000) * 1000);
+        const auto wait = inspected == 0 ? timeout : std::chrono::milliseconds(0);
+        timeval waitTime{};
+        waitTime.tv_sec = static_cast<long>(wait.count() / 1000);
+        waitTime.tv_usec = static_cast<long>((wait.count() % 1000) * 1000);
 
-    const int ready = select(0, &readSet, nullptr, nullptr, &waitTime);
-    if (ready == SOCKET_ERROR) {
-        throw std::runtime_error(WinsockErrorMessage("select(feedback)"));
-    }
-    if (ready == 0) {
-        return std::nullopt;
-    }
-
-    std::array<std::byte, 512> buffer{};
-    sockaddr_storage senderAddress{};
-    int senderAddressLength = sizeof(senderAddress);
-    const int received = recvfrom(
-        AsSocket(socket_),
-        reinterpret_cast<char*>(buffer.data()),
-        static_cast<int>(buffer.size()),
-        0,
-        reinterpret_cast<sockaddr*>(&senderAddress),
-        &senderAddressLength);
-    if (received == SOCKET_ERROR) {
-        if (WSAGetLastError() == WSAECONNRESET) {
+        const int ready = select(0, &readSet, nullptr, nullptr, &waitTime);
+        if (ready == SOCKET_ERROR) {
+            throw std::runtime_error(WinsockErrorMessage("select(feedback)"));
+        }
+        if (ready == 0) {
             return std::nullopt;
         }
-        throw std::runtime_error(WinsockErrorMessage("recvfrom(feedback)"));
-    }
 
-    const std::span<const std::byte> receivedDatagram(
-        buffer.data(),
-        static_cast<size_t>(received));
-    if (const auto probe = ParseNatProbeDatagram(receivedDatagram)) {
-        MaybeRetargetFromNatProbe(&senderAddress, senderAddressLength, *probe);
-        return std::nullopt;
-    }
+        std::array<std::byte, 512> buffer{};
+        sockaddr_storage senderAddress{};
+        int senderAddressLength = sizeof(senderAddress);
+        const int received = recvfrom(
+            AsSocket(socket_),
+            reinterpret_cast<char*>(buffer.data()),
+            static_cast<int>(buffer.size()),
+            0,
+            reinterpret_cast<sockaddr*>(&senderAddress),
+            &senderAddressLength);
+        if (received == SOCKET_ERROR) {
+            if (WSAGetLastError() == WSAECONNRESET) {
+                return std::nullopt;
+            }
+            throw std::runtime_error(WinsockErrorMessage("recvfrom(feedback)"));
+        }
 
-    std::optional<std::vector<std::byte>> decryptedFeedbackDatagram;
-    std::span<const std::byte> parseDatagram = receivedDatagram;
-    bool cryptoRejected = false;
-    if (receivedDatagram.size() == sizeof(udp_protocol::FeedbackPacket)) {
-        udp_protocol::FeedbackPacket packet{};
-        std::memcpy(&packet, receivedDatagram.data(), sizeof(packet));
-        const uint32_t flags = udp_protocol::FromNetwork32(packet.flags);
-        if ((flags & udp_protocol::PacketFlagEncrypted) != 0) {
-            if (!crypto_) {
-                cryptoRejected = true;
-            } else {
-                decryptedFeedbackDatagram = DecryptFeedbackDatagram(receivedDatagram);
-                if (decryptedFeedbackDatagram) {
-                    parseDatagram = std::span<const std::byte>(
-                        decryptedFeedbackDatagram->data(),
-                        decryptedFeedbackDatagram->size());
-                } else {
+        const std::span<const std::byte> receivedDatagram(
+            buffer.data(),
+            static_cast<size_t>(received));
+        if (const auto probe = ParseNatProbeDatagram(receivedDatagram)) {
+            MaybeRetargetFromNatProbe(&senderAddress, senderAddressLength, *probe);
+            continue;
+        }
+
+        std::optional<std::vector<std::byte>> decryptedFeedbackDatagram;
+        std::span<const std::byte> parseDatagram = receivedDatagram;
+        bool cryptoRejected = false;
+        if (receivedDatagram.size() == sizeof(udp_protocol::FeedbackPacket)) {
+            udp_protocol::FeedbackPacket packet{};
+            std::memcpy(&packet, receivedDatagram.data(), sizeof(packet));
+            const uint32_t flags = udp_protocol::FromNetwork32(packet.flags);
+            if ((flags & udp_protocol::PacketFlagEncrypted) != 0) {
+                if (!crypto_) {
                     cryptoRejected = true;
+                } else {
+                    decryptedFeedbackDatagram = DecryptFeedbackDatagram(receivedDatagram);
+                    if (decryptedFeedbackDatagram) {
+                        parseDatagram = std::span<const std::byte>(
+                            decryptedFeedbackDatagram->data(),
+                            decryptedFeedbackDatagram->size());
+                    } else {
+                        cryptoRejected = true;
+                    }
                 }
+            } else if (crypto_) {
+                cryptoRejected = true;
             }
         } else if (crypto_) {
             cryptoRejected = true;
         }
-    } else if (crypto_) {
-        cryptoRejected = true;
+
+        std::lock_guard lock(mutex_);
+        if (cryptoRejected) {
+            ++stats_.feedbackCryptoRejected;
+            continue;
+        }
+
+        const auto feedback = udp_protocol::ParseFeedbackDatagram(parseDatagram);
+        if (!feedback) {
+            ++stats_.invalidFeedbackPackets;
+            continue;
+        }
+        if (config_.accessCodeFingerprint != 0 &&
+            feedback->accessCodeFingerprint != config_.accessCodeFingerprint) {
+            ++stats_.feedbackAccessRejected;
+            continue;
+        }
+
+        ++stats_.feedbackPacketsReceived;
+        stats_.hasFeedback = true;
+        stats_.latestFeedback = *feedback;
+        return feedback;
     }
 
-    std::lock_guard lock(mutex_);
-    if (cryptoRejected) {
-        ++stats_.feedbackCryptoRejected;
-        return std::nullopt;
-    }
-
-    const auto feedback = udp_protocol::ParseFeedbackDatagram(parseDatagram);
-    if (!feedback) {
-        ++stats_.invalidFeedbackPackets;
-        return std::nullopt;
-    }
-    if (config_.accessCodeFingerprint != 0 &&
-        feedback->accessCodeFingerprint != config_.accessCodeFingerprint) {
-        ++stats_.feedbackAccessRejected;
-        return std::nullopt;
-    }
-
-    ++stats_.feedbackPacketsReceived;
-    stats_.hasFeedback = true;
-    stats_.latestFeedback = *feedback;
-    return feedback;
+    return std::nullopt;
 }
 
 std::vector<std::byte> UdpSender::BuildDatagram(

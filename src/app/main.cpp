@@ -2303,7 +2303,9 @@ public:
 
         screenshare::SignalingClientConfig clientConfig;
         clientConfig.serverUrl = options.signalingServerUrl;
-        clientConfig.timeout = std::chrono::milliseconds(options.signalingTimeoutMs);
+        clientConfig.timeout = std::min(
+            std::chrono::milliseconds(options.signalingTimeoutMs),
+            BackgroundRequestTimeout);
 
         auto state = std::make_shared<State>();
         state->roomId = options.signalingRoomId;
@@ -2321,16 +2323,18 @@ public:
 
     void Stop()
     {
+        std::shared_ptr<State> state;
         if (state_) {
+            state = state_;
             {
-                std::lock_guard lock(state_->mutex);
-                state_->stopRequested = true;
+                std::lock_guard lock(state->mutex);
+                state->stopRequested = true;
             }
-            state_->wake.notify_all();
+            state->wake.notify_all();
             state_.reset();
         }
         if (worker_.joinable()) {
-            worker_.detach();
+            worker_.join();
         }
     }
 
@@ -2348,6 +2352,7 @@ public:
 
 private:
     static constexpr std::chrono::milliseconds PollInterval{2000};
+    static constexpr std::chrono::milliseconds BackgroundRequestTimeout{2000};
 
     struct State {
         mutable std::mutex mutex;
@@ -2422,9 +2427,21 @@ private:
             }
         }
 
-        // Do not block shutdown on a best-effort leave request. The Worker TTL
-        // cleanup removes stale room peers if the app exits or the network path
-        // is already gone.
+        try {
+            client.Leave(state->roomId, state->peer.peerId);
+            std::cout
+                << "signaling_live_leave=ok"
+                << " room=" << state->roomId
+                << " peer_id=" << state->peer.peerId
+                << "\n" << std::flush;
+        } catch (const std::exception& error) {
+            std::cerr
+                << "signaling_live_leave=error"
+                << " room=" << state->roomId
+                << " peer_id=" << state->peer.peerId
+                << " error=\"" << error.what() << "\""
+                << "\n";
+        }
     }
 
     std::thread worker_;
@@ -4468,7 +4485,7 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
                     << " udp_feedback_access=" << FeedbackAccessText(udpStatsNow);
             }
             std::cout
-                << "\n";
+                << "\n" << std::flush;
 
             intervalPackets = 0;
             intervalFrames = 0;
@@ -5442,7 +5459,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " bitrate_adaptation=" << bitrateAdaptationStatus
                 << " bitrate_adaptations=" << bitrateAdaptations
                 << " bitrate_adaptation_failures=" << bitrateAdaptationFailures
-                << "\n";
+                << "\n" << std::flush;
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
             intervalRepeatedFrames = 0;
@@ -7077,7 +7094,7 @@ void RunUdpReceiverStats(const Options& options)
                         << " stream_stale_frames=" << receiverStreamStaleFrames
                         << " completed_frames=" << stats.framesCompleted
                         << " audio_packets=" << stats.audioPacketsCompleted
-                        << "\n";
+                        << "\n" << std::flush;
                     waitingForStreamLogged = true;
                 }
                 updateReportBaselines(stats, previewLateDrops, previewOverflowDrops, now);
@@ -7211,7 +7228,7 @@ void RunUdpReceiverStats(const Options& options)
                     << " latest_fragments=" << latestFragmentCount;
             }
 
-            std::cout << "\n";
+            std::cout << "\n" << std::flush;
 
             updateReportBaselines(stats, previewLateDrops, previewOverflowDrops, now);
         }

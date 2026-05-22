@@ -430,7 +430,8 @@ constexpr int kRowHeight = 34;
 constexpr int kLabelWidth = 96;
 constexpr int kReceiverRefreshMs = 15000;
 constexpr int kPeerStatusPollMs = 500;
-constexpr int kPeerActivityTimeoutMs = 3000;
+constexpr int kWatchPeerActivityTimeoutMs = 3000;
+constexpr int kSharePeerActivityTimeoutMs = 5000;
 constexpr const char* kDefaultStunServer = "stun.l.google.com:19302";
 
 enum class ReceiverSource {
@@ -3536,7 +3537,6 @@ private:
         peerConnected_ = false;
         peerActivitySeen_ = false;
         lastShareFeedbackPackets_ = 0;
-        lastShareNatProbePackets_ = 0;
         lastWatchCompletedFrames_ = 0;
         lastWatchPayloadBytes_ = 0;
         lastWatchDecodedFrames_ = 0;
@@ -3559,7 +3559,8 @@ private:
         if (!running_ || !peerConnected_ || !peerActivitySeen_) {
             return;
         }
-        if (peerActivityTimer_.isValid() && peerActivityTimer_.elapsed() > kPeerActivityTimeoutMs) {
+        const int timeoutMs = shareMode() ? kSharePeerActivityTimeoutMs : kWatchPeerActivityTimeoutMs;
+        if (peerActivityTimer_.isValid() && peerActivityTimer_.elapsed() > timeoutMs) {
             peerConnected_ = false;
             applyStatusBadge();
             updateInternetStatus();
@@ -3588,9 +3589,7 @@ private:
         }
         bool activeNow = false;
         if (shareMode()) {
-            const bool feedbackActive = counterIncreased(text, "udp_feedback_packets", lastShareFeedbackPackets_);
-            const bool probeActive = counterIncreased(text, "udp_nat_probe_packets", lastShareNatProbePackets_);
-            activeNow = feedbackActive || probeActive;
+            activeNow = counterIncreased(text, "udp_feedback_packets", lastShareFeedbackPackets_);
         } else {
             const bool framesActive = counterIncreased(text, "completed_frames", lastWatchCompletedFrames_);
             const bool payloadActive = counterIncreased(text, "payload_bytes", lastWatchPayloadBytes_);
@@ -3657,7 +3656,6 @@ private:
     bool peerActivitySeen_ = false;
     QElapsedTimer peerActivityTimer_;
     qulonglong lastShareFeedbackPackets_ = 0;
-    qulonglong lastShareNatProbePackets_ = 0;
     qulonglong lastWatchCompletedFrames_ = 0;
     qulonglong lastWatchPayloadBytes_ = 0;
     qulonglong lastWatchDecodedFrames_ = 0;
