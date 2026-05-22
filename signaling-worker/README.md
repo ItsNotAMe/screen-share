@@ -11,19 +11,18 @@ ScreenShare keeps the media path native and direct:
 
 ```text
 C++ client -> STUN -> public UDP candidate
-C++ client -> Worker HTTPS room API -> peer candidate exchange
+C++ client -> Worker HTTPS/WebSocket room API -> peer candidate exchange
 C++ client <-> C++ client direct UDP probes
 C++ client <-> C++ client encrypted UDP video/audio
 ```
 
-The Worker stores live room membership in a Durable Object and writes a small
-Workers KV active-room directory entry for browse/debug UI. The Durable Object
-gives each room one ordered state holder, which avoids the eventual-consistency
-and last-writer-wins races that KV has during rapid join/poll cycles. Peer
-entries are still stale-cleaned after 60 seconds.
+The Worker stores live room membership and safe room metadata in per-room Durable Objects, and stores
+the browseable active-room list in a small directory Durable Object. Each room has one ordered state
+holder, which avoids the eventual-consistency and last-writer-wins races that KV has during rapid
+join/poll cycles. Peer entries are still stale-cleaned after 60 seconds.
 
-KV is only a directory/index here. It should not contain peer UDP candidates,
-room passwords, access codes, or user-visible secrets.
+KV is retained only for legacy/fallback storage. It should not contain peer UDP
+candidates, plaintext room passwords, access codes, or user-visible secrets.
 
 ## Why Signaling Is Needed
 
@@ -43,32 +42,38 @@ The intended native client flow is:
 2. Client discovers its public UDP endpoint using STUN from that same socket.
 3. Client joins a Worker room over HTTPS with its peer ID and UDP candidate.
 4. Worker returns other peers in the room.
-5. Client sends UDP probes to each returned peer candidate.
-6. Peers simultaneously probe each other.
-7. NAT hole punching succeeds when both NATs allow the peer packets.
-8. Direct UDP P2P begins.
-9. Screen-sharing traffic bypasses the Worker entirely.
+5. Client opens the room event WebSocket for peer join/update notifications.
+6. Client sends UDP probes to each returned or newly announced peer candidate.
+7. Peers simultaneously probe each other.
+8. NAT hole punching succeeds when both NATs allow the peer packets.
+9. Direct UDP P2P begins.
+10. Screen-sharing traffic bypasses the Worker entirely.
 
 STUN is still required. The Cloudflare Worker cannot receive UDP packets and
 cannot perform the STUN step for the client.
 
 ## Security Model
 
-The Worker should never receive a room password or any raw user secret. For
-no-password public rooms, the Durable Object creates and stores the random UDP
-room access key that native clients use for automatic encryption.
+For no-password public rooms, the Durable Object creates and stores the random
+UDP room access key that native clients use for automatic encryption. For locked
+rooms, clients send the room password over HTTPS during join; the Durable Object
+stores a salted PBKDF2 verifier, rejects wrong passwords before returning the
+room access key, and never stores the plaintext password. Native clients also
+mix the password into the UDP key locally.
 
 The product direction is:
 
 - Rooms are encrypted by default.
 - The Durable Object generates a random automatic UDP encryption key for no-password public rooms.
 - Normal users should not see an "access code" field.
-- A visible room password can be added later as an optional extra lock.
+- A visible room password is an optional extra lock. It is sent to the Worker only over HTTPS for verification and is not stored as plaintext.
 - The room ID used with this Worker is public room metadata, not a private access-control secret.
 
 The Worker validates request shape and candidate values. No-password rooms are
 public rooms: any client that joins the room can receive the room access key.
-Optional passwords are the future private-room layer.
+Optional passwords are the private-room layer; the Worker advertises only whether
+a password is required, and rejects incorrect passwords before adding the peer to
+the room.
 
 ## API
 
@@ -106,6 +111,11 @@ Upserts this peer, cleans stale peers, and returns every other peer in the room.
   "metadata": {
     "name": "Alice",
     "platform": "windows"
+  },
+  "room": {
+    "name": "Movie night",
+    "password": "optional-room-password",
+    "passwordProtected": true
   }
 }
 ```
@@ -116,21 +126,50 @@ Response:
 {
   "ok": true,
   "roomAccessKey": "random-public-room-access-key",
+  "roomName": "Movie night",
+  "passwordProtected": true,
   "peers": []
 }
 ```
 
 ### `GET /rooms/:roomId/peers?peerId=alice`
 
-Returns the room access key and all peers except `alice` after stale-peer cleanup.
+Returns the room access key, safe room metadata, and all peers except `alice` after stale-peer cleanup.
+For locked rooms, send `X-ScreenShare-Room-Password` with the percent-encoded password; wrong or
+missing passwords are rejected.
+
+### `GET /rooms/:roomId/events?peerId=alice`
+
+Upgrades to a WebSocket for room change notifications. For locked rooms, add
+`X-ScreenShare-Room-Password` with the percent-encoded password; wrong or missing passwords are
+rejected before the socket opens.
+
+The first message is a `hello` event with the currently known peers. Later messages are
+`peer_joined`, `peer_updated`, or `peer_left`. Native clients still keep a slower HTTP `join`
+heartbeat/fallback, but they no longer need to poll every few seconds to discover late peers.
+
+```json
+{
+  "ok": true,
+  "type": "peer_joined",
+  "roomId": "test-room",
+  "peer": {
+    "peerId": "bob",
+    "candidates": [
+      { "type": "srflx", "ip": "5.6.7.8", "port": 62001, "protocol": "udp" }
+    ],
+    "metadata": { "name": "Bob", "platform": "windows" },
+    "lastSeen": 1760000000000
+  }
+}
+```
 
 ### `GET /rooms?limit=100`
 
-Returns browseable active-room summaries from KV after verifying each listed
-room against its Durable Object. This is a directory/debug view, not the source
-of truth for signaling. It is enough to pick a no-password public room in the
-native UI, but future password-locked rooms will still need the password locally.
-Because the directory starts from KV, brand-new rooms can take a few seconds to appear.
+Returns browseable active-room summaries from the directory Durable Object after
+verifying each listed room against its room Durable Object. This is a
+directory/debug view, not the source of truth for signaling. Locked rooms are
+listed as locked, but the password is never included.
 
 ```json
 {
@@ -138,10 +177,12 @@ Because the directory starts from KV, brand-new rooms can take a few seconds to 
   "rooms": [
     {
       "roomId": "test-room",
+      "name": "Movie night",
       "peerCount": 2,
       "updatedAt": 1760000000000,
       "expiresAt": 1760000180000,
-      "requiresRoomKey": false
+      "requiresRoomKey": true,
+      "passwordProtected": true
     }
   ]
 }
@@ -207,9 +248,17 @@ id = "your-namespace-id"
 name = "ROOM_OBJECTS"
 class_name = "RoomObject"
 
+[[durable_objects.bindings]]
+name = "ROOM_DIRECTORY"
+class_name = "RoomDirectoryObject"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomObject"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RoomDirectoryObject"]
 ```
 
 Deploy:
@@ -253,10 +302,11 @@ curl "https://YOUR_WORKER.workers.dev/rooms"
 
 ## Notes
 
-- No WebSockets are needed for the first version; simple HTTP polling is enough.
+- Room events use WebSockets so peers do not need short-interval HTTP polling.
 - Workers KV is eventually consistent. Live room membership uses a Durable
   Object because signaling needs immediate peer visibility.
-- Workers KV is used for active room summaries so rooms are easy to inspect in
-  Cloudflare KV and later from a native room-list view.
+- The native room-list view uses a directory Durable Object for immediate active
+  room summaries. Summaries may contain a friendly room name and lock flag, but
+  never passwords or peer candidates.
 - The Worker is intentionally low bandwidth: short JSON requests, short room TTL,
   and heartbeat cleanup.

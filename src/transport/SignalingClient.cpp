@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace screenshare {
 namespace {
@@ -224,9 +225,73 @@ std::string RoomPath(const std::string& roomId, std::string_view action)
     return "/rooms/" + UrlEncode(roomId) + "/" + std::string(action);
 }
 
+std::string RoomEventsPath(
+    const std::string& roomId,
+    const std::string& peerId)
+{
+    return RoomPath(roomId, "events") + "?peerId=" + UrlEncode(peerId);
+}
+
+std::string ReadResponseBody(HINTERNET request)
+{
+    std::string body;
+    while (true) {
+        DWORD available = 0;
+        if (!WinHttpQueryDataAvailable(request, &available)) {
+            throw std::runtime_error(WinHttpErrorMessage("WinHttpQueryDataAvailable"));
+        }
+        if (available == 0) {
+            break;
+        }
+        const size_t oldSize = body.size();
+        body.resize(oldSize + available);
+        DWORD read = 0;
+        if (!WinHttpReadData(request, body.data() + oldSize, available, &read)) {
+            throw std::runtime_error(WinHttpErrorMessage("WinHttpReadData"));
+        }
+        body.resize(oldSize + read);
+    }
+    return body;
+}
+
 std::string PeerRequestJson(const std::string& peerId)
 {
     return "{\"peerId\":\"" + SignalingJsonEscape(peerId) + "\"}";
+}
+
+void ValidateSignalingRoomName(const std::string& roomName)
+{
+    if (roomName.size() > 80) {
+        throw std::invalid_argument("Signaling room name must be 80 bytes or shorter");
+    }
+    for (const unsigned char ch : roomName) {
+        if (ch < 0x20) {
+            throw std::invalid_argument("Signaling room name must not contain control characters");
+        }
+    }
+}
+
+void ValidateSignalingRoomPassword(const std::string& roomPassword)
+{
+    if (roomPassword.empty()) {
+        return;
+    }
+    if (roomPassword.size() > 128) {
+        throw std::invalid_argument("Signaling room password must be 128 bytes or shorter");
+    }
+    for (const unsigned char ch : roomPassword) {
+        if (ch < 0x20) {
+            throw std::invalid_argument("Signaling room password must not contain control characters");
+        }
+    }
+}
+
+std::wstring RoomPasswordHeader(const std::string& roomPassword)
+{
+    if (roomPassword.empty()) {
+        return {};
+    }
+    return L"X-ScreenShare-Room-Password: " + Utf8ToWide(UrlEncode(roomPassword)) + L"\r\n";
 }
 
 std::string JoinRequestJson(const SignalingPeerState& peer)
@@ -256,6 +321,28 @@ std::string JoinRequestJson(const SignalingPeerState& peer)
                 json += ",";
             }
             json += "\"platform\":\"" + SignalingJsonEscape(peer.metadata.platform) + "\"";
+        }
+        json += "}";
+    }
+    if (!peer.roomName.empty() || peer.passwordProtected || !peer.roomPassword.empty()) {
+        json += ",\"room\":{";
+        bool wrote = false;
+        if (!peer.roomName.empty()) {
+            json += "\"name\":\"" + SignalingJsonEscape(peer.roomName) + "\"";
+            wrote = true;
+        }
+        if (!peer.roomPassword.empty()) {
+            if (wrote) {
+                json += ",";
+            }
+            json += "\"password\":\"" + SignalingJsonEscape(peer.roomPassword) + "\"";
+            wrote = true;
+        }
+        if (peer.passwordProtected) {
+            if (wrote) {
+                json += ",";
+            }
+            json += "\"passwordProtected\":true";
         }
         json += "}";
     }
@@ -523,6 +610,11 @@ int64_t JsonIntegerOrZero(const JsonValue* value)
     return static_cast<int64_t>(value->numberValue);
 }
 
+bool JsonBoolOrFalse(const JsonValue* value)
+{
+    return value != nullptr && value->type == JsonType::Bool && value->boolValue;
+}
+
 SignalingCandidate ParseCandidate(const JsonValue& value)
 {
     if (value.type != JsonType::Object) {
@@ -576,6 +668,11 @@ SignalingRoomResponse ParseRoomResponse(const std::string& text)
     const JsonValue* ok = root.Find("ok");
     response.ok = ok != nullptr && ok->type == JsonType::Bool && ok->boolValue;
     response.roomAccessKey = JsonStringOrEmpty(root.Find("roomAccessKey"));
+    response.roomName = JsonStringOrEmpty(root.Find("roomName"));
+    response.passwordProtected = JsonBoolOrFalse(root.Find("passwordProtected"));
+    if (response.roomName.size() > 80) {
+        throw std::runtime_error("Signaling response room name is invalid");
+    }
     if (!response.roomAccessKey.empty() &&
         (response.roomAccessKey.size() < 8 ||
          response.roomAccessKey.size() > 128 ||
@@ -715,17 +812,158 @@ SignalingRoomResponse SignalingClient::Join(const std::string& roomId, const Sig
     for (const auto& candidate : peer.candidates) {
         ValidateSignalingCandidate(candidate);
     }
+    ValidateSignalingRoomName(peer.roomName);
+    ValidateSignalingRoomPassword(peer.roomPassword);
     return ParseRoomResponse(Request(L"POST", RoomPath(roomId, "join"), JoinRequestJson(peer)));
 }
 
-SignalingRoomResponse SignalingClient::Peers(const std::string& roomId, const std::string& peerId)
+SignalingRoomResponse SignalingClient::Peers(
+    const std::string& roomId,
+    const std::string& peerId,
+    const std::string& roomPassword)
 {
     ValidateSignalingRoomId(roomId);
     ValidateSignalingPeerId(peerId);
+    ValidateSignalingRoomPassword(roomPassword);
+    std::string path = RoomPath(roomId, "peers") + "?peerId=" + UrlEncode(peerId);
     return ParseRoomResponse(Request(
         L"GET",
-        RoomPath(roomId, "peers") + "?peerId=" + UrlEncode(peerId),
-        std::nullopt));
+        path,
+        std::nullopt,
+        RoomPasswordHeader(roomPassword)));
+}
+
+void SignalingClient::ListenRoomEvents(
+    const std::string& roomId,
+    const std::string& peerId,
+    const std::string& roomPassword,
+    const std::function<void(const std::string&)>& onEvent,
+    const std::function<bool()>& shouldStop)
+{
+    ValidateSignalingRoomId(roomId);
+    ValidateSignalingPeerId(peerId);
+    ValidateSignalingRoomPassword(roomPassword);
+
+    const WinHttpHandle session(WinHttpOpen(
+        L"ScreenShare/0.1",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME,
+        WINHTTP_NO_PROXY_BYPASS,
+        0));
+    if (!session) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpOpen"));
+    }
+
+    const int timeoutMs = static_cast<int>(config_.timeout.count());
+    if (!WinHttpSetTimeouts(session.get(), timeoutMs, timeoutMs, timeoutMs, timeoutMs)) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpSetTimeouts"));
+    }
+
+    const WinHttpHandle connection(WinHttpConnect(
+        session.get(),
+        url_.host.c_str(),
+        static_cast<INTERNET_PORT>(url_.port),
+        0));
+    if (!connection) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpConnect"));
+    }
+
+    const std::wstring path = url_.pathPrefix + Utf8ToWide(RoomEventsPath(roomId, peerId));
+    const WinHttpHandle request(WinHttpOpenRequest(
+        connection.get(),
+        L"GET",
+        path.c_str(),
+        nullptr,
+        WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES,
+        url_.secure ? WINHTTP_FLAG_SECURE : 0));
+    if (!request) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpOpenRequest"));
+    }
+
+    if (!WinHttpSetOption(request.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0)) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpSetOption(websocket)"));
+    }
+    const std::wstring extraHeaders = RoomPasswordHeader(roomPassword);
+    const wchar_t* headers = extraHeaders.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : extraHeaders.c_str();
+    const DWORD headerBytes = extraHeaders.empty() ? 0 : static_cast<DWORD>(-1);
+    if (!WinHttpSendRequest(
+            request.get(),
+            headers,
+            headerBytes,
+            WINHTTP_NO_REQUEST_DATA,
+            0,
+            0,
+            0)) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpSendRequest"));
+    }
+    if (!WinHttpReceiveResponse(request.get(), nullptr)) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpReceiveResponse"));
+    }
+
+    DWORD statusCode = 0;
+    DWORD statusCodeBytes = sizeof(statusCode);
+    if (!WinHttpQueryHeaders(
+            request.get(),
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX,
+            &statusCode,
+            &statusCodeBytes,
+            WINHTTP_NO_HEADER_INDEX)) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpQueryHeaders(status)"));
+    }
+    if (statusCode != 101) {
+        const std::string body = ReadResponseBody(request.get());
+        ThrowIfErrorResponse(body);
+        throw std::runtime_error(
+            "Signaling room events returned HTTP " + std::to_string(statusCode) +
+            (body.empty() ? std::string{} : ": " + body));
+    }
+
+    const WinHttpHandle websocket(WinHttpWebSocketCompleteUpgrade(request.get(), 0));
+    if (!websocket) {
+        throw std::runtime_error(WinHttpErrorMessage("WinHttpWebSocketCompleteUpgrade"));
+    }
+
+    std::vector<char> buffer(16 * 1024);
+    std::string message;
+    while (!shouldStop()) {
+        DWORD bytesRead = 0;
+        WINHTTP_WEB_SOCKET_BUFFER_TYPE bufferType = WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE;
+        const DWORD result = WinHttpWebSocketReceive(
+            websocket.get(),
+            buffer.data(),
+            static_cast<DWORD>(buffer.size()),
+            &bytesRead,
+            &bufferType);
+        if (result == ERROR_WINHTTP_TIMEOUT) {
+            continue;
+        }
+        if (result != NO_ERROR) {
+            throw std::runtime_error(WindowsErrorMessage("WinHttpWebSocketReceive", result));
+        }
+        if (bufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) {
+            break;
+        }
+        if (bufferType != WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE &&
+            bufferType != WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE) {
+            continue;
+        }
+
+        message.append(buffer.data(), buffer.data() + bytesRead);
+        if (bufferType == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE) {
+            if (!message.empty()) {
+                onEvent(message);
+            }
+            message.clear();
+        }
+    }
+
+    WinHttpWebSocketClose(
+        websocket.get(),
+        WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
+        nullptr,
+        0);
 }
 
 void SignalingClient::Heartbeat(const std::string& roomId, const std::string& peerId)
@@ -755,7 +993,8 @@ void SignalingClient::Leave(const std::string& roomId, const std::string& peerId
 std::string SignalingClient::Request(
     const wchar_t* method,
     const std::string& pathAndQuery,
-    const std::optional<std::string>& jsonBody)
+    const std::optional<std::string>& jsonBody,
+    const std::wstring& extraHeaders)
 {
     const WinHttpHandle session(WinHttpOpen(
         L"ScreenShare/0.1",
@@ -794,15 +1033,13 @@ std::string SignalingClient::Request(
         throw std::runtime_error(WinHttpErrorMessage("WinHttpOpenRequest"));
     }
 
-    const wchar_t* headers = WINHTTP_NO_ADDITIONAL_HEADERS;
-    DWORD headerBytes = 0;
+    std::wstring headers;
     if (jsonBody) {
         headers = L"Content-Type: application/json\r\nAccept: application/json\r\n";
-        headerBytes = static_cast<DWORD>(-1);
     } else {
         headers = L"Accept: application/json\r\n";
-        headerBytes = static_cast<DWORD>(-1);
     }
+    headers += extraHeaders;
 
     void* bodyPointer = WINHTTP_NO_REQUEST_DATA;
     DWORD bodyBytes = 0;
@@ -813,8 +1050,8 @@ std::string SignalingClient::Request(
 
     if (!WinHttpSendRequest(
             request.get(),
-            headers,
-            headerBytes,
+            headers.c_str(),
+            static_cast<DWORD>(-1),
             bodyPointer,
             bodyBytes,
             bodyBytes,
@@ -837,23 +1074,7 @@ std::string SignalingClient::Request(
         throw std::runtime_error(WinHttpErrorMessage("WinHttpQueryHeaders(status)"));
     }
 
-    std::string body;
-    while (true) {
-        DWORD available = 0;
-        if (!WinHttpQueryDataAvailable(request.get(), &available)) {
-            throw std::runtime_error(WinHttpErrorMessage("WinHttpQueryDataAvailable"));
-        }
-        if (available == 0) {
-            break;
-        }
-        const size_t oldSize = body.size();
-        body.resize(oldSize + available);
-        DWORD read = 0;
-        if (!WinHttpReadData(request.get(), body.data() + oldSize, available, &read)) {
-            throw std::runtime_error(WinHttpErrorMessage("WinHttpReadData"));
-        }
-        body.resize(oldSize + read);
-    }
+    const std::string body = ReadResponseBody(request.get());
 
     if (statusCode < 200 || statusCode >= 300) {
         ThrowIfErrorResponse(body);

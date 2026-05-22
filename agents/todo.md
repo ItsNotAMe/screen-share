@@ -2,11 +2,10 @@
 
 ## Ordered Roadmap
 
-1. Validate the Worker room-list flow on real computers: one watcher first, then two or more watchers.
-2. Add private-room UX around room name + optional password: friendly room naming, password prompt/field, locked-room indication in the room list, and local-only key protection/derivation that never sends the password to the Worker.
-3. Add per-viewer connection/health display for multi-viewer Share sessions.
-4. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: available rooms/devices list, locked-room indicators, optional password prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
-5. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
+1. Validate Worker room events on real computers: open room, locked/password room, watcher-first, sharer-first, and two or more watchers with WebSocket peer notifications plus HTTP fallback.
+2. Add per-viewer connection/health display for multi-viewer Share sessions.
+3. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: available rooms/devices list, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
+4. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
 
 ## Report-Driven Follow-Ups
 

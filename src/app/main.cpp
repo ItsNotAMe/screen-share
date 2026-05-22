@@ -215,6 +215,8 @@ struct Options {
     std::string signalingCandidate;
     std::string signalingName;
     std::string signalingPlatform;
+    std::string signalingRoomName;
+    std::string signalingRoomPassword;
     screenshare::StunServerTarget signalingStunServer{"stun.l.google.com", 19302};
     int signalingTimeoutMs = 5000;
     bool signalingTimeoutProvided = false;
@@ -261,9 +263,10 @@ void PrintHelp()
         << "              [--share-target HOST:PORT|WATCHER_INVITE]\n"
         << "              [--invite-endpoint auto|public|local]\n"
         << "              [--local-invite INVITE]\n"
-        << "  ScreenShare --share-room PORT --signal-room ROOM [--signal-server URL] [--seconds S]\n"
+        << "  ScreenShare --share-room PORT --signal-room ROOM [--signal-room-name NAME]\n"
+        << "              [--signal-room-password PASSWORD] [--signal-server URL] [--seconds S]\n"
         << "  ScreenShare --watch PORT [--seconds S] [--peer-invite INVITE]\n"
-        << "              [--signal-room ROOM] [--signal-server URL]\n"
+        << "              [--signal-room ROOM] [--signal-room-password PASSWORD] [--signal-server URL]\n"
         << "  ScreenShare --lan-discover [--lan-discover-seconds S]\n"
         << "  ScreenShare --stun HOST[:PORT] [--stun-timeout-ms MS]\n"
         << "  ScreenShare --make-invite PORT --stun HOST[:PORT] [--invite-ttl-seconds S]\n"
@@ -271,7 +274,7 @@ void PrintHelp()
         << "              [--nat-probe-interval-ms MS]\n"
         << "  ScreenShare --signal-health URL [--signal-timeout-ms MS]\n"
         << "  ScreenShare --signal-join URL --signal-room ROOM --signal-peer-id PEER\n"
-        << "              --signal-candidate IP:PORT [--signal-name NAME]\n"
+        << "              --signal-candidate IP:PORT [--signal-name NAME] [--signal-room-name NAME]\n"
         << "  ScreenShare --signal-peers URL --signal-room ROOM --signal-peer-id PEER\n"
         << "  ScreenShare --signal-heartbeat URL --signal-room ROOM --signal-peer-id PEER\n"
         << "  ScreenShare --signal-leave URL --signal-room ROOM --signal-peer-id PEER\n"
@@ -321,6 +324,7 @@ void PrintHelp()
         << "  Signaling: --signal-* commands test the HTTP room server without starting media.\n"
         << "             The Worker only exchanges UDP candidates; screen/audio still use direct UDP.\n"
         << "             Live room setup uses --signal-room ROOM with --share-room or --watch; --signal-server overrides the built-in Worker.\n"
+        << "             Optional --signal-room-password is verified by the Worker over HTTPS and mixed locally into the UDP encryption key.\n"
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
@@ -339,7 +343,7 @@ void PrintHelp()
         << "  ScreenShare --signal-join https://example.workers.dev --signal-room room1 --signal-peer-id alice --signal-candidate 203.0.113.10:5000\n"
         << "  ScreenShare --watch 5000\n"
         << "  ScreenShare --watch 5000 --signal-room room1\n"
-        << "  ScreenShare --share-room 5001 --signal-room room1\n"
+        << "  ScreenShare --share-room 5001 --signal-room room1 --signal-room-name \"Movie night\"\n"
         << "  ScreenShare --share 127.0.0.1:5000 --session game-night --save-report sender-report.zip\n"
         << "  ScreenShare --share 127.0.0.1:5000 --access-code 123456\n"
         << "  ScreenShare --audio-capture system --seconds 5\n"
@@ -701,6 +705,36 @@ std::string ParseAccessCode(const char* value)
     }
 
     return accessCode;
+}
+
+std::string ParseSignalingRoomName(const char* value)
+{
+    const std::string roomName = value != nullptr ? value : "";
+    if (roomName.empty() || roomName.size() > 80) {
+        throw std::invalid_argument("--signal-room-name must be between 1 and 80 bytes");
+    }
+    for (const char ch : roomName) {
+        const unsigned char valueByte = static_cast<unsigned char>(ch);
+        if (valueByte < 32U || valueByte == 127U) {
+            throw std::invalid_argument("--signal-room-name may not contain control characters");
+        }
+    }
+    return roomName;
+}
+
+std::string ParseSignalingRoomPassword(const char* value)
+{
+    const std::string password = value != nullptr ? value : "";
+    if (password.empty() || password.size() > 128) {
+        throw std::invalid_argument("--signal-room-password must be between 1 and 128 bytes");
+    }
+    for (const char ch : password) {
+        const unsigned char valueByte = static_cast<unsigned char>(ch);
+        if (valueByte < 32U || valueByte == 127U) {
+            throw std::invalid_argument("--signal-room-password may not contain control characters");
+        }
+    }
+    return password;
 }
 
 std::string DefaultLanName()
@@ -2285,14 +2319,22 @@ void ApplySignalingRoomAccessKey(Options& options, const screenshare::SignalingR
     if (response.roomAccessKey.empty()) {
         throw std::runtime_error("Signaling server did not provide a room encryption key");
     }
+    if (response.passwordProtected && options.signalingRoomPassword.empty()) {
+        throw std::runtime_error("Signaling room requires a password");
+    }
 
-    const std::string accessCode = ParseAccessCode(response.roomAccessKey.c_str());
-    options.accessCodeFingerprint = screenshare::UdpAccessCodeFingerprint(accessCode);
-    options.accessCodeKey = screenshare::DeriveUdpCryptoKey(accessCode);
+    std::string keyMaterial = response.roomAccessKey;
+    if (response.passwordProtected) {
+        keyMaterial += "\npassword:";
+        keyMaterial += options.signalingRoomPassword;
+    }
+    options.accessCodeFingerprint = screenshare::UdpAccessCodeFingerprint(keyMaterial);
+    options.accessCodeKey = screenshare::DeriveUdpCryptoKey(keyMaterial);
     options.accessCodeProvided = true;
     std::cout
         << "signaling_room_encryption=ready"
         << " room=" << options.signalingRoomId
+        << " password=" << (response.passwordProtected ? "yes" : "no")
         << " source=server\n";
 }
 
@@ -2306,6 +2348,9 @@ screenshare::SignalingPeerState BuildLiveSignalingPeerState(const Options& optio
     peer.peerId = options.signalingPeerId;
     peer.metadata.name = options.signalingName.empty() ? options.lanName : options.signalingName;
     peer.metadata.platform = options.signalingPlatform.empty() ? "windows" : options.signalingPlatform;
+    peer.roomName = options.signalingRoomName;
+    peer.roomPassword = options.signalingRoomPassword;
+    peer.passwordProtected = !options.signalingRoomPassword.empty();
     peer.candidates.push_back(options.signalingLocalCandidate);
     if (options.signalingHostCandidateAvailable) {
         const bool duplicate =
@@ -2350,7 +2395,8 @@ public:
             << "signaling_live_refresh=started"
             << " room=" << options.signalingRoomId
             << " peer_id=" << options.signalingPeerId
-            << " interval_ms=" << PollInterval.count()
+            << " events=websocket"
+            << " fallback_interval_ms=" << FallbackRefreshInterval.count()
             << "\n";
     }
 
@@ -2384,8 +2430,9 @@ public:
     }
 
 private:
-    static constexpr std::chrono::milliseconds PollInterval{2000};
-    static constexpr std::chrono::milliseconds BackgroundRequestTimeout{2000};
+    static constexpr std::chrono::milliseconds FallbackRefreshInterval{30000};
+    static constexpr std::chrono::milliseconds EventReconnectDelay{5000};
+    static constexpr std::chrono::milliseconds BackgroundRequestTimeout{250};
 
     struct State {
         mutable std::mutex mutex;
@@ -2394,6 +2441,7 @@ private:
         screenshare::SignalingPeerState peer;
         std::set<std::string> seenCandidates;
         std::vector<LiveSignalingPeerCandidate> discoveredPeers;
+        bool refreshRequested = false;
         bool stopRequested = false;
     };
 
@@ -2425,10 +2473,35 @@ private:
         }
     }
 
-    [[nodiscard]] static bool WaitForNextPoll(const std::shared_ptr<State>& state)
+    static void RequestRefresh(const std::shared_ptr<State>& state)
+    {
+        {
+            std::lock_guard lock(state->mutex);
+            if (state->stopRequested) {
+                return;
+            }
+            state->refreshRequested = true;
+        }
+        state->wake.notify_all();
+    }
+
+    [[nodiscard]] static bool WaitForNextRefresh(const std::shared_ptr<State>& state)
     {
         std::unique_lock lock(state->mutex);
-        return state->wake.wait_for(lock, PollInterval, [&]() {
+        state->wake.wait_for(lock, FallbackRefreshInterval, [&]() {
+            return state->stopRequested || state->refreshRequested;
+        });
+        if (state->stopRequested) {
+            return true;
+        }
+        state->refreshRequested = false;
+        return false;
+    }
+
+    [[nodiscard]] static bool WaitForEventReconnect(const std::shared_ptr<State>& state)
+    {
+        std::unique_lock lock(state->mutex);
+        return state->wake.wait_for(lock, EventReconnectDelay, [&]() {
             return state->stopRequested;
         });
     }
@@ -2439,8 +2512,54 @@ private:
         return state->stopRequested;
     }
 
+    static void RunEvents(std::shared_ptr<State> state, screenshare::SignalingClientConfig clientConfig)
+    {
+        while (!stopRequested(state)) {
+            try {
+                screenshare::SignalingClient client(clientConfig);
+                client.ListenRoomEvents(
+                    state->roomId,
+                    state->peer.peerId,
+                    state->peer.roomPassword,
+                    [state](const std::string& message) {
+                        const bool shouldRefresh =
+                            message.find("\"type\":\"hello\"") != std::string::npos ||
+                            message.find("\"type\":\"peer_joined\"") != std::string::npos ||
+                            message.find("\"type\":\"peer_updated\"") != std::string::npos;
+                        std::cout
+                            << "signaling_live_event=received"
+                            << " room=" << state->roomId
+                            << " peer_id=" << state->peer.peerId
+                            << " bytes=" << message.size()
+                            << " refresh=" << (shouldRefresh ? "yes" : "no")
+                            << "\n";
+                        if (shouldRefresh) {
+                            RequestRefresh(state);
+                        }
+                    },
+                    [state]() {
+                        return stopRequested(state);
+                    });
+            } catch (const std::exception& error) {
+                if (!stopRequested(state)) {
+                    std::cerr
+                        << "signaling_live_events=error"
+                        << " room=" << state->roomId
+                        << " peer_id=" << state->peer.peerId
+                        << " error=\"" << error.what() << "\""
+                        << "\n";
+                }
+            }
+
+            if (WaitForEventReconnect(state)) {
+                break;
+            }
+        }
+    }
+
     static void Run(std::shared_ptr<State> state, screenshare::SignalingClientConfig clientConfig)
     {
+        std::thread eventsWorker(&LiveSignalingRuntime::RunEvents, state, clientConfig);
         screenshare::SignalingClient client(std::move(clientConfig));
 
         while (!stopRequested(state)) {
@@ -2455,9 +2574,18 @@ private:
                     << "\n";
             }
 
-            if (WaitForNextPoll(state)) {
+            if (WaitForNextRefresh(state)) {
                 break;
             }
+        }
+
+        {
+            std::lock_guard lock(state->mutex);
+            state->stopRequested = true;
+        }
+        state->wake.notify_all();
+        if (eventsWorker.joinable()) {
+            eventsWorker.join();
         }
 
         try {
@@ -2975,6 +3103,8 @@ bool HasSignalingOptions(const Options& options)
            !options.signalingCandidate.empty() ||
            !options.signalingName.empty() ||
            !options.signalingPlatform.empty() ||
+           !options.signalingRoomName.empty() ||
+           !options.signalingRoomPassword.empty() ||
            options.signalingTimeoutProvided ||
            options.signalingSetupSecondsProvided;
 }
@@ -3201,6 +3331,10 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.signalingName = requireValue("--signal-name");
         } else if (arg == "--signal-platform") {
             options.signalingPlatform = requireValue("--signal-platform");
+        } else if (arg == "--signal-room-name") {
+            options.signalingRoomName = ParseSignalingRoomName(requireValue("--signal-room-name"));
+        } else if (arg == "--signal-room-password") {
+            options.signalingRoomPassword = ParseSignalingRoomPassword(requireValue("--signal-room-password"));
         } else if (arg == "--signal-stun") {
             options.signalingStunServer = screenshare::ParseStunServerTarget(requireValue("--signal-stun"));
             options.signalingLive = true;
@@ -3550,7 +3684,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     }
 
     if (HasSignalingOptions(options) && !HasSignalingCommand(options) && !options.signalingLive) {
-        throw std::invalid_argument("--signal-room, --signal-peer-id, --signal-candidate, --signal-name, --signal-platform, --signal-stun, --signal-setup-seconds, and --signal-timeout-ms require --signal-server or a --signal-* command");
+        throw std::invalid_argument("--signal-room, --signal-peer-id, --signal-candidate, --signal-name, --signal-platform, --signal-room-name, --signal-room-password, --signal-stun, --signal-setup-seconds, and --signal-timeout-ms require --signal-server or a --signal-* command");
     }
     if (HasSignalingCommand(options)) {
         if (options.signalingLive) {
@@ -3562,7 +3696,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         if (options.signalingCommand == SignalingCommand::Health) {
             if (!options.signalingRoomId.empty() || !options.signalingPeerId.empty() ||
                 !options.signalingCandidate.empty() || !options.signalingName.empty() ||
-                !options.signalingPlatform.empty() || options.signalingSetupSecondsProvided) {
+                !options.signalingPlatform.empty() || !options.signalingRoomName.empty() ||
+                !options.signalingRoomPassword.empty() || options.signalingSetupSecondsProvided) {
                 throw std::invalid_argument("--signal-health only accepts URL and --signal-timeout-ms");
             }
         } else {
@@ -3579,8 +3714,10 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
                     throw std::invalid_argument("--signal-candidate IP:PORT is required for --signal-join");
                 }
             } else if (!options.signalingCandidate.empty() || !options.signalingName.empty() ||
-                       !options.signalingPlatform.empty() || options.signalingSetupSecondsProvided) {
-                throw std::invalid_argument("--signal-candidate, --signal-name, --signal-platform, and --signal-setup-seconds are only used with --signal-join or --signal-server");
+                       !options.signalingPlatform.empty() || !options.signalingRoomName.empty() ||
+                       (options.signalingCommand != SignalingCommand::Peers && !options.signalingRoomPassword.empty()) ||
+                       options.signalingSetupSecondsProvided) {
+                throw std::invalid_argument("--signal-candidate, --signal-name, --signal-platform, --signal-room-name, and --signal-setup-seconds are only used with --signal-join or --signal-server; --signal-room-password is also allowed with --signal-peers");
             }
         }
         if (options.generateAccessCode ||
@@ -3661,6 +3798,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         }
         if (!options.shareRoom && options.udpReceivePort == 0) {
             throw std::invalid_argument("--signal-server requires --share-room or --watch/--udp-recv");
+        }
+        if (!options.signalingRoomPassword.empty() && (options.accessCodeProvided || options.allowPlaintext)) {
+            throw std::invalid_argument("--signal-room-password cannot be combined with --access-code or --allow-plaintext");
         }
         if (options.stunQuery || options.makeInvite || options.natProbe || options.lanDiscover) {
             throw std::invalid_argument("--signal-server cannot be combined with standalone NAT/LAN diagnostics");
@@ -4068,19 +4208,24 @@ std::string CurrentLocalTimeText()
 
 bool IsSensitiveOption(std::string_view option)
 {
-    return option == "--access-code" || option == "--session-code";
+    return option == "--access-code" || option == "--session-code" || option == "--signal-room-password";
 }
 
 bool RedactInlineSensitiveOption(std::string& option)
 {
     constexpr std::string_view accessCodePrefix = "--access-code=";
     constexpr std::string_view sessionCodePrefix = "--session-code=";
+    constexpr std::string_view signalingRoomPasswordPrefix = "--signal-room-password=";
     if (option.rfind(accessCodePrefix, 0) == 0) {
         option = std::string(accessCodePrefix) + "<redacted>";
         return true;
     }
     if (option.rfind(sessionCodePrefix, 0) == 0) {
         option = std::string(sessionCodePrefix) + "<redacted>";
+        return true;
+    }
+    if (option.rfind(signalingRoomPasswordPrefix, 0) == 0) {
+        option = std::string(signalingRoomPasswordPrefix) + "<redacted>";
         return true;
     }
     return false;
@@ -5666,6 +5811,8 @@ void PrintSignalingPeers(const screenshare::SignalingRoomResponse& response)
 {
     std::cout
         << "signaling_result=" << (response.ok ? "ok" : "not_ok") << "\n"
+        << "signaling_room_name=\"" << screenshare::SignalingJsonEscape(response.roomName) << "\"\n"
+        << "signaling_room_password=" << (response.passwordProtected ? "required" : "none") << "\n"
         << "signaling_peers=" << response.peers.size() << "\n";
     for (const auto& peer : response.peers) {
         std::cout
@@ -5706,11 +5853,17 @@ void RunSignaling(const Options& options)
         peer.candidates.push_back(ParseSignalingCandidateEndpoint(options.signalingCandidate));
         peer.metadata.name = options.signalingName;
         peer.metadata.platform = options.signalingPlatform;
+        peer.roomName = options.signalingRoomName;
+        peer.roomPassword = options.signalingRoomPassword;
+        peer.passwordProtected = !options.signalingRoomPassword.empty();
         PrintSignalingPeers(client.Join(options.signalingRoomId, peer));
         break;
     }
     case SignalingCommand::Peers:
-        PrintSignalingPeers(client.Peers(options.signalingRoomId, options.signalingPeerId));
+        PrintSignalingPeers(client.Peers(
+            options.signalingRoomId,
+            options.signalingPeerId,
+            options.signalingRoomPassword));
         break;
     case SignalingCommand::Heartbeat:
         client.Heartbeat(options.signalingRoomId, options.signalingPeerId);
@@ -5772,19 +5925,10 @@ void PrepareLiveSignaling(Options& options)
     screenshare::SignalingClient client(std::move(clientConfig));
 
     std::map<std::string, screenshare::SignalingPeer> peersById;
-    const auto startedAt = std::chrono::steady_clock::now();
-    const auto deadline = startedAt + std::chrono::seconds(options.signalingSetupSeconds);
-    int polls = 0;
-    do {
-        const auto response = client.Join(options.signalingRoomId, peer);
-        ApplySignalingRoomAccessKey(options, response);
-        MergeSignalingPeers(peersById, response);
-        ++polls;
-        if (std::chrono::steady_clock::now() >= deadline) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    } while (true);
+    const auto response = client.Join(options.signalingRoomId, peer);
+    ApplySignalingRoomAccessKey(options, response);
+    MergeSignalingPeers(peersById, response);
+    const int polls = 1;
 
     std::cout
         << "signaling_live_join=ok"
@@ -6267,12 +6411,6 @@ void RunUdpReceiverStats(const Options& options)
         h264Decoder = std::make_unique<screenshare::H264StreamDecoder>();
         h264Decoder->Start();
     }
-    if (options.previewWindow) {
-        previewWindow = std::make_unique<screenshare::ReceiverPreviewWindow>();
-        previewWindow->SetStatusText("waiting | res 0x0 | fps 0.0 | lat 0/0ms | q 0/0/0 | resync 0 | skip 0 | drops 0/0 | reset 0 | shown 0 | av wait");
-        previewWindow->Show();
-    }
-
     using Clock = std::chrono::steady_clock;
     PreviewPlayoutBuffer previewPlayout{
         std::chrono::milliseconds(options.previewLatencyMs),
@@ -6358,13 +6496,18 @@ void RunUdpReceiverStats(const Options& options)
         printAudioControls();
     };
 
-    if (previewWindow) {
+    auto ensurePreviewWindow = [&]() {
+        if (!options.previewWindow || previewWindow) {
+            return;
+        }
+        previewWindow = std::make_unique<screenshare::ReceiverPreviewWindow>();
         screenshare::ReceiverPreviewControlCallbacks callbacks;
         callbacks.toggleAudioMute = toggleAudioMute;
         callbacks.adjustAudioVolumePercent = adjustAudioVolume;
         previewWindow->SetControlCallbacks(std::move(callbacks));
         updatePreviewTitle();
-    }
+        previewWindow->Show();
+    };
 
     auto restartPreviewPlayoutClock = [&]() {
         if (previewWindow) {
@@ -6749,6 +6892,9 @@ void RunUdpReceiverStats(const Options& options)
             h264DecodedWidth = decodedFrame.width;
             h264DecodedHeight = decodedFrame.height;
             latestDecodedFrame = decodedFrame;
+            if (options.previewWindow) {
+                ensurePreviewWindow();
+            }
             if (previewWindow) {
                 previewPlayout.Enqueue(std::move(decodedFrame));
             }
@@ -6973,8 +7119,13 @@ void RunUdpReceiverStats(const Options& options)
         lastReportAt = now;
     };
 
+    bool previewCloseRequested = false;
     auto shouldContinue = [&]() {
         if (previewWindow && !previewWindow->PumpMessages()) {
+            if (!previewCloseRequested) {
+                previewCloseRequested = true;
+                std::cout << "preview_closed=stop\n" << std::flush;
+            }
             return false;
         }
         if (StopRequested(options)) {
@@ -7267,6 +7418,12 @@ void RunUdpReceiverStats(const Options& options)
 
             updateReportBaselines(stats, previewLateDrops, previewOverflowDrops, now);
         }
+    }
+
+    if (previewCloseRequested) {
+        receiver.Close();
+        std::cout << "watch_stop=preview_closed\n" << std::flush;
+        return;
     }
 
     drainCompletedAudioPackets();

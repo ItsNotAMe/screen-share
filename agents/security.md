@@ -37,8 +37,8 @@
 - Worker rooms hide "access code" from normal users.
 - Rooms are encrypted by default even when the user does not type a password.
 - The signaling Durable Object generates a random hidden UDP access key for no-password public rooms. This encrypts UDP media without a user-visible access code, but anyone allowed to join the public room can receive the key.
-- A visible room password can be added later as an optional extra lock, but it should not be required for encrypted media.
-- Future room passwords must never be sent to the signaling Worker. It only sees room IDs, peer IDs, and UDP candidates.
+- A visible room password is optional. When present, the Worker verifies it over HTTPS using a stored salted verifier before returning the room access key.
+- The native app still mixes the room password locally into the hidden room access key before deriving UDP crypto keys. The Worker must not store plaintext room passwords.
 
 ## LAN Invite Metadata
 

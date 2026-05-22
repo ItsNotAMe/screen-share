@@ -10,6 +10,14 @@ id = "ab4659f75bf04b1eb097c5b688094bae"
 name = "ROOM_OBJECTS"
 class_name = "RoomObject"
 
+[[durable_objects.bindings]]
+name = "ROOM_DIRECTORY"
+class_name = "RoomDirectoryObject"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomObject"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RoomDirectoryObject"]

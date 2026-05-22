@@ -105,13 +105,13 @@ status while still passing the selected numeric display index to the engine. It 
 output-device picker for system audio, which is useful when Windows or a virtual mixer uses a default
 output device that does not contain the audio you actually want to share.
 
-The UI opens the Room section on Internet by default. Keep or change the generated room name on
-Create room, then start sharing. Join room can pick the active room from the list or paste the copied
-room link while keeping its own local listen port. The built-in Worker only exchanges UDP
-candidates; video and audio still go directly between computers. Rooms use a random automatic UDP
-encryption key from the room service without showing an access-code field. Nearby, Internet, and
-Manual live as tabs in the same Room section so setup uses one mental model instead of separate
-competing panels.
+The UI opens the Room section on Internet by default. Keep or change the generated room ID, give it
+a friendly room name, and optionally set a room password. Join room can pick the active room from
+the list or paste the copied room link while keeping its own local listen port. The built-in Worker
+only exchanges UDP candidates and safe room metadata; video and audio still go directly between
+computers. Rooms use a random automatic UDP encryption key from the room service without showing an
+access-code field. If a room password is set, the Worker stores a salted password verifier, rejects
+wrong passwords before joining, and the native app still mixes the password into the UDP key.
 
 Create room supports target lists for direct paths. Nearby can select multiple watchers from the
 list, Manual accepts multiple comma/space-separated `HOST:PORT` targets in the Targets field, and
@@ -217,10 +217,12 @@ Replace `<PEER_INVITE>` in those templates with the invite copied from your frie
 contains `CODE`, replace it with the same access code used to create the invite.
 
 The desktop UI now keeps the normal Internet flow as a Worker room. On Create room, keep or change
-the generated room name, then start sharing or copy the short room link. On Join room, choose the
-room from the active list or paste that room link. The room service creates a random automatic UDP
-encryption key for the room, so media stays encrypted without typing an access code and without
-requiring a copied secret link. The Worker server is built into the app, so users do not paste a server URL.
+the generated room ID, add a friendly name, optionally add a password, then start sharing or copy
+the short room link. On Join room, choose the room from the active list or paste that room link. The
+room service creates a random automatic UDP encryption key for the room, so media stays encrypted
+without typing an access code and without requiring a copied secret link. Locked rooms still appear
+in the room list, but watchers need the password to join. The Worker server is built into the app,
+so users do not paste a server URL.
 The compact status line shows what is still missing before starting. While a session is running,
 that same status line switches to live setup states such as connecting, live, or disconnected. The
 older invite buttons are under Manual invite fallback and are only needed for manual experiments.
@@ -240,13 +242,15 @@ Two-computer UI checklist for Worker room testing:
 If Watch and Share stay connecting, the peers did not complete UDP hole punching. Try Tailscale/manual
 IP, the Internet tab's Manual invite fallback, or a router port mapping for that network.
 
-An experimental HTTP signaling backend lives in [`signaling-worker/`](signaling-worker/README.md).
-It is a Cloudflare Worker that stores live room membership and peer UDP candidates in a per-room
-Durable Object, plus small browseable active-room summaries in KV for diagnostics/future room lists.
-It does not relay media, cannot receive UDP, and still requires the native app to use STUN and direct
-UDP probes. The normal room flow gets a random UDP encryption key from the room's Durable Object
-during signaling setup, passes it into the native UDP crypto path automatically, and keeps the
-access-code UI hidden; visible room passwords remain a planned optional lock for private rooms.
+An experimental HTTP/WebSocket signaling backend lives in [`signaling-worker/`](signaling-worker/README.md).
+It is a Cloudflare Worker that stores live room membership and peer UDP candidates in per-room
+Durable Objects, plus browseable active-room summaries in a small directory Durable Object for the
+room list. It does not relay media, cannot receive UDP, and still requires the native app to use
+STUN and direct UDP probes. The normal room flow gets a random UDP encryption key from the room's
+Durable Object during signaling setup, passes it into the native UDP crypto path automatically, and
+keeps the access-code UI hidden. Optional room passwords are sent to the Worker over HTTPS for
+verification; the Worker stores only a salted verifier, never the plaintext password, and the native
+app also mixes the typed password into the UDP encryption key.
 
 The native CLI has standalone signaling diagnostics for testing a deployed Worker before it is wired
 into the live room flow:
@@ -271,7 +275,7 @@ The native live signaling bridge is also available from the CLI. Start Watch wit
 Then start Share from its room UDP port:
 
 ```powershell
-.\build\release\ScreenShare.exe --share-room 5001 --signal-room room1
+.\build\release\ScreenShare.exe --share-room 5001 --signal-room room1 --signal-room-name "Movie night"
 ```
 
 Live room commands use the built-in ScreenShare signaling Worker by default. Add
@@ -280,11 +284,13 @@ UDP candidate to the Worker and also publish a local host candidate when one is 
 candidate makes same-PC and same-LAN room tests use the direct local path instead of depending on
 router hairpin behavior. Share resolves the room's
 watcher candidates into UDP send targets, while Watch resolves room candidates into NAT probe
-targets. Use `--signal-stun HOST[:PORT]` to override the default STUN server and
-`--signal-setup-seconds S` to wait longer for room peers during startup. After startup, both sides
-keep rejoining the room in the background as a heartbeat and peer refresh. That means Share can start
-before Watch, Watch can start before Share, and late/rejoining watchers can be discovered without
-restarting the current side.
+targets. Use `--signal-stun HOST[:PORT]` to override the default STUN server. Add
+`--signal-room-password PASSWORD` on both sides for a locked room; the Worker verifies it before
+returning the room's UDP key. After startup, both sides
+open a room event WebSocket for immediate peer-change notifications, with a slower background HTTP
+rejoin kept as heartbeat/fallback. That means Share can start before Watch, Watch can start before
+Share, and late/rejoining watchers can be discovered without restarting the current side or waiting
+for a short polling interval.
 
 For a two-window test on one computer, the two windows cannot both own UDP port `5000`. Use separate
 ports, for example Join room on `5000` and Create room's Internet room port on `5001`, then create a

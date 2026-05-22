@@ -237,10 +237,36 @@ QString generatedRoomId()
     return "room-" + id;
 }
 
+QString defaultRoomName()
+{
+    const QByteArray computerName = qgetenv("COMPUTERNAME");
+    if (!computerName.isEmpty()) {
+        return QString::fromLocal8Bit(computerName) + "'s room";
+    }
+    const QByteArray userName = qgetenv("USERNAME");
+    if (!userName.isEmpty()) {
+        return QString::fromLocal8Bit(userName) + "'s room";
+    }
+    return "ScreenShare room";
+}
+
 bool validRoomId(const QString& roomId)
 {
     static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9_-]{3,96}$"));
     return pattern.match(roomId).hasMatch();
+}
+
+bool validOptionalRoomText(const QString& text, int maxLength)
+{
+    if (text.size() > maxLength) {
+        return false;
+    }
+    for (const QChar ch : text) {
+        if (ch.unicode() < 0x20 || ch.unicode() == 0x7f) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool validRoomKey(const QString& roomKey)
@@ -417,11 +443,14 @@ AccessCodeProblem detectAccessCodeProblem(const QString& output)
 {
     if (output.contains("requires --access-code CODE", Qt::CaseInsensitive) ||
         output.contains("requires an access code", Qt::CaseInsensitive) ||
+        output.contains("requires a password", Qt::CaseInsensitive) ||
         output.contains("--access-code CODE or --allow-plaintext", Qt::CaseInsensitive)) {
         return AccessCodeProblem::Required;
     }
 
     if (output.contains("could not be decrypted", Qt::CaseInsensitive) ||
+        output.contains("invalid_room_password", Qt::CaseInsensitive) ||
+        output.contains("room password is incorrect", Qt::CaseInsensitive) ||
         output.contains("access code does not match", Qt::CaseInsensitive) ||
         output.contains("does not match the peer invite fingerprint", Qt::CaseInsensitive) ||
         output.contains("does not match the local invite fingerprint", Qt::CaseInsensitive) ||
@@ -496,9 +525,11 @@ struct DiscoveredReceiver {
 
 struct ActiveRoom {
     QString roomId;
+    QString name;
     int peerCount = 0;
     qint64 updatedAt = 0;
     qint64 expiresAt = 0;
+    bool passwordProtected = false;
 };
 
 struct AudioOutputDevice {
@@ -522,9 +553,14 @@ QVector<ActiveRoom> parseActiveRooms(const QByteArray& payload)
         const QJsonObject object = value.toObject();
         ActiveRoom room;
         room.roomId = object.value("roomId").toString().trimmed();
+        room.name = object.value("name").toString().trimmed();
+        if (room.name.size() > 80 || !validOptionalRoomText(room.name, 80)) {
+            room.name.clear();
+        }
         room.peerCount = object.value("peerCount").toInt();
         room.updatedAt = static_cast<qint64>(object.value("updatedAt").toDouble());
         room.expiresAt = static_cast<qint64>(object.value("expiresAt").toDouble());
+        room.passwordProtected = object.value("passwordProtected").toBool(object.value("requiresRoomKey").toBool(false));
         if (validRoomId(room.roomId) && room.peerCount > 0 && room.updatedAt > 0) {
             activeRooms.push_back(std::move(room));
         }
@@ -1147,7 +1183,16 @@ private:
         shareRoomLayout->addWidget(shareSignalRoomEdit_, 1);
         shareRoomLayout->addWidget(newShareRoomButton_);
         shareRoomLayout->addWidget(copyShareRoomButton_);
-        addRow(internetContent, "Room", shareRoomRow);
+        addRow(internetContent, "Room ID", shareRoomRow);
+        shareRoomNameEdit_ = new QLineEdit(defaultRoomName());
+        shareRoomNameEdit_->setPlaceholderText("Friendly room name");
+        prepareInput(shareRoomNameEdit_);
+        addRow(internetContent, "Name", shareRoomNameEdit_);
+        shareRoomPasswordEdit_ = new QLineEdit;
+        shareRoomPasswordEdit_->setPlaceholderText("Optional");
+        shareRoomPasswordEdit_->setEchoMode(QLineEdit::Password);
+        prepareInput(shareRoomPasswordEdit_);
+        addRow(internetContent, "Password", shareRoomPasswordEdit_);
         shareInvitePortSpin_ = new NoWheelSpinBox;
         shareInvitePortSpin_->setRange(1, 65535);
         shareInvitePortSpin_->setValue(5001);
@@ -1434,6 +1479,11 @@ private:
         watchRoomLayout->addWidget(watchSignalRoomEdit_, 1);
         watchRoomLayout->addWidget(pasteWatchRoomLinkButton_);
         addRow(watchInternetContent, "Room", watchRoomRow);
+        watchRoomPasswordEdit_ = new QLineEdit;
+        watchRoomPasswordEdit_->setPlaceholderText("Only for locked rooms");
+        watchRoomPasswordEdit_->setEchoMode(QLineEdit::Password);
+        prepareInput(watchRoomPasswordEdit_);
+        addRow(watchInternetContent, "Password", watchRoomPasswordEdit_);
         activeRoomList_ = new QListWidget;
         activeRoomList_->setObjectName("ActiveRoomList");
         activeRoomList_->setMinimumHeight(108);
@@ -1714,6 +1764,13 @@ private:
         connect(shareHostEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(shareSignalRoomEdit_);
         connect(shareSignalRoomEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
+        bindLineEdit(shareRoomNameEdit_);
+        connect(shareRoomNameEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
+        bindLineEdit(shareRoomPasswordEdit_);
+        connect(shareRoomPasswordEdit_, &QLineEdit::textChanged, this, [this] {
+            updateSecurityVisibility();
+            updateInternetStatus();
+        });
         bindLineEdit(shareLocalInviteEdit_);
         connect(shareLocalInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInviteButtons(); });
         bindSpinBox(shareInvitePortSpin_);
@@ -1753,6 +1810,11 @@ private:
             watchRoomKey_.clear();
             updateSecurityVisibility();
             refreshCommand();
+        });
+        bindLineEdit(watchRoomPasswordEdit_);
+        connect(watchRoomPasswordEdit_, &QLineEdit::textChanged, this, [this] {
+            updateSecurityVisibility();
+            updateInternetStatus();
         });
         bindLineEdit(watchPeerInviteEdit_);
         connect(watchPeerInviteEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
@@ -1876,8 +1938,12 @@ private:
 
     QString activeRoomDisplayText(const ActiveRoom& room) const
     {
-        return QStringLiteral("%1    %2 peer%3    %4")
-            .arg(room.roomId)
+        const QString title = room.name.isEmpty()
+            ? room.roomId
+            : QStringLiteral("%1  (%2)").arg(room.name, room.roomId);
+        return QStringLiteral("%1    %2    %3 peer%4    %5")
+            .arg(title)
+            .arg(room.passwordProtected ? QStringLiteral("Locked") : QStringLiteral("Open"))
             .arg(room.peerCount)
             .arg(room.peerCount == 1 ? QString() : QStringLiteral("s"))
             .arg(formatRoomAge(room.updatedAt));
@@ -1975,10 +2041,14 @@ private:
             const ActiveRoom& room = activeRooms_[index];
             auto* item = new QListWidgetItem(activeRoomDisplayText(room));
             item->setData(Qt::UserRole, index);
-            item->setToolTip(QStringLiteral("%1\n%2 peer%3\nAutomatic UDP encryption")
+            item->setToolTip(QStringLiteral("%1%2\n%3 peer%4\n%5")
                 .arg(room.roomId)
+                .arg(room.name.isEmpty() ? QString() : QStringLiteral("\n%1").arg(room.name))
                 .arg(room.peerCount)
-                .arg(room.peerCount == 1 ? QString() : QStringLiteral("s")));
+                .arg(room.peerCount == 1 ? QString() : QStringLiteral("s"))
+                .arg(room.passwordProtected
+                    ? QStringLiteral("Password required; UDP encryption stays automatic")
+                    : QStringLiteral("Automatic UDP encryption")));
             activeRoomList_->addItem(item);
             if (room.roomId == selectedRoom) {
                 item->setSelected(true);
@@ -2019,7 +2089,13 @@ private:
         updateInternetStatus();
         refreshCommand();
         if (activeRoomStatusLabel_ != nullptr) {
-            activeRoomStatusLabel_->setText("Selected room. Press Start to join.");
+            activeRoomStatusLabel_->setText(activeRooms_[index].passwordProtected
+                ? "Selected locked room. Enter the password, then Start."
+                : "Selected room. Press Start to join.");
+        }
+        if (activeRooms_[index].passwordProtected && watchRoomPasswordEdit_ != nullptr &&
+            watchRoomPasswordEdit_->text().isEmpty()) {
+            watchRoomPasswordEdit_->setFocus();
         }
     }
 
@@ -2052,9 +2128,36 @@ private:
         return shareSignalRoomEdit_ == nullptr ? QString() : shareSignalRoomEdit_->text().trimmed();
     }
 
+    QString shareRoomName() const
+    {
+        return shareRoomNameEdit_ == nullptr ? QString() : shareRoomNameEdit_->text().trimmed();
+    }
+
+    QString shareRoomPassword() const
+    {
+        return shareRoomPasswordEdit_ == nullptr ? QString() : shareRoomPasswordEdit_->text();
+    }
+
     QString watchSignalRoom() const
     {
         return watchSignalRoomEdit_ == nullptr ? QString() : watchSignalRoomEdit_->text().trimmed();
+    }
+
+    QString watchRoomPassword() const
+    {
+        return watchRoomPasswordEdit_ == nullptr ? QString() : watchRoomPasswordEdit_->text();
+    }
+
+    const ActiveRoom* selectedActiveRoom() const
+    {
+        const QString roomId = watchSignalRoom();
+        if (roomId.isEmpty()) {
+            return nullptr;
+        }
+        const auto it = std::find_if(activeRooms_.begin(), activeRooms_.end(), [&](const ActiveRoom& room) {
+            return room.roomId == roomId;
+        });
+        return it == activeRooms_.end() ? nullptr : &*it;
     }
 
     bool usingWorkerRoomFlow() const
@@ -2101,8 +2204,12 @@ private:
             roomKeyStatusLabel_->setVisible(workerRoom);
             if (workerRoom) {
                 roomKeyStatusLabel_->setText(shareMode()
-                    ? "Public room. The server gives joiners an automatic UDP encryption key."
-                    : "Choose a room or paste a room link. UDP encryption is automatic.");
+                    ? (shareRoomPassword().isEmpty()
+                        ? "Open room. UDP encryption is automatic."
+                        : "Locked room. The password is verified over HTTPS and mixed into UDP encryption.")
+                    : (watchRoomPassword().isEmpty()
+                        ? "Choose a room. UDP encryption is automatic."
+                        : "This password is verified over HTTPS and mixed into UDP encryption."));
             }
         }
     }
@@ -2126,7 +2233,9 @@ private:
             return;
         }
         QApplication::clipboard()->setText(roomLink(room, QString()));
-        appendOutput("Room link copied to clipboard\n");
+        appendOutput(shareRoomPassword().isEmpty()
+            ? "Room link copied to clipboard\n"
+            : "Room link copied to clipboard. Send the password separately.\n");
     }
 
     void pasteWatchRoomLink()
@@ -2501,6 +2610,12 @@ private:
                 } else {
                     args << "--share-room" << QString::number(shareInvitePortSpin_->value())
                          << "--signal-room" << shareSignalRoom();
+                    if (!shareRoomName().isEmpty()) {
+                        args << "--signal-room-name" << shareRoomName();
+                    }
+                    if (!shareRoomPassword().isEmpty()) {
+                        args << "--signal-room-password" << shareRoomPassword();
+                    }
                     if (!stunServer().isEmpty()) {
                         args << "--signal-stun" << stunServer();
                     }
@@ -2542,6 +2657,9 @@ private:
                     }
                 } else {
                     args << "--signal-room" << watchSignalRoom();
+                    if (!watchRoomPassword().isEmpty() && watchRoomKey_.isEmpty()) {
+                        args << "--signal-room-password" << watchRoomPassword();
+                    }
                     if (!stunServer().isEmpty()) {
                         args << "--signal-stun" << stunServer();
                     }
@@ -2573,6 +2691,9 @@ private:
         QStringList args = currentArguments();
         for (int index = 0; index + 1 < args.size(); ++index) {
             if (args[index] == "--access-code") {
+                args[index + 1] = "<redacted>";
+                ++index;
+            } else if (args[index] == "--signal-room-password") {
                 args[index + 1] = "<redacted>";
                 ++index;
             } else if (args[index] == "--audio-device-id") {
@@ -2631,6 +2752,32 @@ private:
                 roomEdit->setFocus();
             }
             return false;
+        }
+        if (share && !validOptionalRoomText(shareRoomName(), 80)) {
+            QMessageBox::warning(this, "Room name", "The friendly room name must be 80 characters or fewer and cannot contain control characters.");
+            if (shareRoomNameEdit_ != nullptr) {
+                shareRoomNameEdit_->setFocus();
+            }
+            return false;
+        }
+        const QString password = share ? shareRoomPassword() : watchRoomPassword();
+        if (!password.isEmpty() && !validOptionalRoomText(password, 128)) {
+            QMessageBox::warning(this, "Room password", "Room passwords must be 128 characters or fewer and cannot contain control characters.");
+            QLineEdit* passwordEdit = share ? shareRoomPasswordEdit_ : watchRoomPasswordEdit_;
+            if (passwordEdit != nullptr) {
+                passwordEdit->setFocus();
+            }
+            return false;
+        }
+        if (!share) {
+            const ActiveRoom* roomInfo = selectedActiveRoom();
+            if (roomInfo != nullptr && roomInfo->passwordProtected && password.isEmpty()) {
+                QMessageBox::warning(this, "Room password", "This room is locked. Enter its password before watching.");
+                if (watchRoomPasswordEdit_ != nullptr) {
+                    watchRoomPasswordEdit_->setFocus();
+                }
+                return false;
+            }
         }
         return true;
     }
@@ -2698,6 +2845,8 @@ private:
         runtimeNatHint_.clear();
         processOutputParseBuffer_.clear();
         accessCodeWarningShown_ = false;
+        roomAlreadyOpenWarningShown_ = false;
+        roomWatcherMismatchLogged_ = false;
         runtimeNatShareMode_ = shareMode();
         updateInternetStatus();
         if (discoveryProcess_->state() != QProcess::NotRunning) {
@@ -2709,7 +2858,7 @@ private:
             tailscaleProcess_->waitForFinished(500);
         }
         setDiscovering(false);
-        if (effectiveAccessCode().isEmpty() && !allowPlaintextCheck_->isChecked()) {
+        if (!usingWorkerRoomFlow() && effectiveAccessCode().isEmpty() && !allowPlaintextCheck_->isChecked()) {
             QMessageBox::warning(
                 this,
                 "Security choice",
@@ -2748,8 +2897,14 @@ private:
         if (process_->state() == QProcess::NotRunning) {
             return;
         }
+        if (stopRequested_) {
+            return;
+        }
+        constexpr int kForceStopDelayMs = 1500;
         appendOutput("Stopping...\n");
         stopRequested_ = true;
+        applyStatusBadge();
+        updateInternetStatus();
 
         QFile stopFile(stopFilePath_);
         if (stopFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
@@ -2759,12 +2914,17 @@ private:
             appendOutput("Could not write graceful stop signal; forcing close if needed\n");
         }
 
-        if (!process_->waitForFinished(7000)) {
-            appendOutput("Graceful stop timed out; forcing process closed...\n");
+        const quint64 runSerialAtStop = runSerial_;
+        QTimer::singleShot(kForceStopDelayMs, this, [this, runSerialAtStop] {
+            if (!stopRequested_ ||
+                runSerialAtStop != runSerial_ ||
+                process_->state() == QProcess::NotRunning) {
+                return;
+            }
+            appendOutput("Stop cleanup timed out; forcing process closed...\n");
             forcedStop_ = true;
             process_->kill();
-            process_->waitForFinished(1000);
-        }
+        });
     }
 
     void cleanupStopFile()
@@ -3387,7 +3547,10 @@ private:
     {
         if (!shareMode()) {
             watchRoomKey_.clear();
-            if (watchSignalRoomEdit_ != nullptr) {
+            if (watchRoomPasswordEdit_ != nullptr && usingWorkerRoomFlow()) {
+                watchRoomPasswordEdit_->clear();
+                watchRoomPasswordEdit_->setFocus();
+            } else if (watchSignalRoomEdit_ != nullptr) {
                 watchSignalRoomEdit_->setFocus();
             }
         } else if (copyShareRoomButton_ != nullptr) {
@@ -3542,8 +3705,17 @@ private:
         if (copyShareRoomButton_ != nullptr) {
             copyShareRoomButton_->setEnabled(!running);
         }
+        if (shareRoomNameEdit_ != nullptr) {
+            shareRoomNameEdit_->setEnabled(!running);
+        }
+        if (shareRoomPasswordEdit_ != nullptr) {
+            shareRoomPasswordEdit_->setEnabled(!running);
+        }
         if (pasteWatchRoomLinkButton_ != nullptr) {
             pasteWatchRoomLinkButton_->setEnabled(!running);
+        }
+        if (watchRoomPasswordEdit_ != nullptr) {
+            watchRoomPasswordEdit_->setEnabled(!running);
         }
         if (refreshRoomsButton_ != nullptr) {
             refreshRoomsButton_->setEnabled(!running && !roomDirectoryRefreshing_);
@@ -3657,7 +3829,16 @@ private:
     QString shareWorkerRoomStatusText() const
     {
         if (!validRoomId(shareSignalRoom())) {
-            return "Choose a room name with letters, numbers, dashes, or underscores.";
+            return "Choose a room ID with letters, numbers, dashes, or underscores.";
+        }
+        if (!validOptionalRoomText(shareRoomName(), 80)) {
+            return "Shorten the room name or remove control characters.";
+        }
+        if (!shareRoomPassword().isEmpty() && !validOptionalRoomText(shareRoomPassword(), 128)) {
+            return "Shorten the room password or remove control characters.";
+        }
+        if (!shareRoomPassword().isEmpty()) {
+            return "Ready: start sharing. Friends can pick this locked room, then enter the password.";
         }
         return "Ready: start sharing. Friends can pick this room from the list or use the copied link.";
     }
@@ -3669,6 +3850,13 @@ private:
         }
         if (!validRoomId(watchSignalRoom())) {
             return "Room names need letters, numbers, dashes, or underscores.";
+        }
+        if (!watchRoomPassword().isEmpty() && !validOptionalRoomText(watchRoomPassword(), 128)) {
+            return "Shorten the room password or remove control characters.";
+        }
+        const ActiveRoom* room = selectedActiveRoom();
+        if (room != nullptr && room->passwordProtected && watchRoomPassword().isEmpty()) {
+            return "This room is locked. Enter the password to watch.";
         }
         return "Ready to watch: this room will use signaling and direct UDP.";
     }
@@ -3699,6 +3887,9 @@ private:
 
     QString runtimeInternetStatusText(bool share) const
     {
+        if (running_ && stopRequested_ && share == shareMode()) {
+            return share ? "Stopping Share..." : "Stopping Watch...";
+        }
         if (running_ && share == shareMode() && peerActivitySeen_ && !peerConnected_) {
             return share ?
                 "Disconnected: receiver feedback stopped." :
@@ -3722,7 +3913,9 @@ private:
                 return "Live: probe seen; checking the media path.";
             }
             if (status == "probe_rejected") {
-                return "Live: probe rejected. Check the access code on both sides.";
+                return usingWorkerRoomFlow() ?
+                    "Live: a watcher failed the room/password check. Share is still available." :
+                    "Live: probe rejected. Check the access code on both sides.";
             }
             if (status == "direct_udp_blocked") {
                 return "Blocked: signaling worked, but direct UDP did not cross the networks.";
@@ -3741,7 +3934,9 @@ private:
                 return "Live: media is arriving.";
             }
             if (status == "media_rejected") {
-                return "Live: media rejected. Check access code or plaintext mode.";
+                return usingWorkerRoomFlow() ?
+                    "Live: room password or encryption mismatch." :
+                    "Live: media rejected. Check access code or plaintext mode.";
             }
             if (status == "incoming_unaccepted") {
                 return "Live: packets arrived but were not accepted.";
@@ -3806,6 +4001,15 @@ private:
         if (shareHostEdit_ != nullptr) {
             shareHostEdit_->setEnabled(!running);
         }
+        if (shareSignalRoomEdit_ != nullptr) {
+            shareSignalRoomEdit_->setEnabled(!running);
+        }
+        if (shareRoomNameEdit_ != nullptr) {
+            shareRoomNameEdit_->setEnabled(!running);
+        }
+        if (shareRoomPasswordEdit_ != nullptr) {
+            shareRoomPasswordEdit_->setEnabled(!running);
+        }
         if (sharePortSpin_ != nullptr) {
             sharePortSpin_->setEnabled(!running);
         }
@@ -3817,6 +4021,12 @@ private:
         }
         if (watchInternetButton_ != nullptr) {
             watchInternetButton_->setEnabled(!running);
+        }
+        if (watchSignalRoomEdit_ != nullptr) {
+            watchSignalRoomEdit_->setEnabled(!running);
+        }
+        if (watchRoomPasswordEdit_ != nullptr) {
+            watchRoomPasswordEdit_->setEnabled(!running);
         }
         if (displayCombo_ != nullptr) {
             displayCombo_->setEnabled(!running);
@@ -3858,6 +4068,15 @@ private:
             }
             if (statusOpacityEffect_ != nullptr) {
                 statusOpacityEffect_->setOpacity(1.0);
+            }
+        } else if (stopRequested_) {
+            statusBadge_->setText("◌  Stopping");
+            statusBadge_->setProperty("class", "StatusConnecting");
+            statusBadge_->setToolTip(shareMode() ?
+                "Share is stopping." :
+                "Watch is stopping.");
+            if (statusPulseAnimation_ != nullptr && statusPulseAnimation_->state() != QAbstractAnimation::Running) {
+                statusPulseAnimation_->start();
             }
         } else if (peerConnected_) {
             statusBadge_->setText("●  Live");
@@ -3903,9 +4122,45 @@ private:
         if (processOutputParseBuffer_.size() > MaxParseBuffer) {
             processOutputParseBuffer_.remove(0, processOutputParseBuffer_.size() - MaxParseBuffer);
         }
+        handleRoomAlreadyOpenProblem(processOutputParseBuffer_);
         handleAccessCodeProblem(processOutputParseBuffer_);
         updateRuntimeNatStatus(processOutputParseBuffer_);
+        handlePreviewClosedSignal(processOutputParseBuffer_);
         updateConnectionState(processOutputParseBuffer_);
+    }
+
+    void handleRoomAlreadyOpenProblem(const QString& text)
+    {
+        if (roomAlreadyOpenWarningShown_ ||
+            !text.contains("room_already_open", Qt::CaseInsensitive)) {
+            return;
+        }
+
+        roomAlreadyOpenWarningShown_ = true;
+        stopProcess();
+        if (shareSignalRoomEdit_ != nullptr) {
+            shareSignalRoomEdit_->setFocus();
+        }
+        QMessageBox::warning(
+            this,
+            "Room already open",
+            "That room ID is already active as an open room, so it cannot be locked mid-session. Choose New room, or remove the password to join the open room.");
+    }
+
+    void handlePreviewClosedSignal(const QString& text)
+    {
+        if (shareMode() ||
+            stopRequested_ ||
+            process_ == nullptr ||
+            process_->state() == QProcess::NotRunning ||
+            !text.contains("preview_closed=stop")) {
+            return;
+        }
+
+        appendOutput("Preview window closed; stopping Watch...\n");
+        stopProcess();
+        applyStatusBadge();
+        updateInternetStatus();
     }
 
     void handleAccessCodeProblem(const QString& text)
@@ -3919,19 +4174,29 @@ private:
             return;
         }
 
+        if (usingWorkerRoomFlow() && shareMode() && problem == AccessCodeProblem::Mismatch) {
+            if (!roomWatcherMismatchLogged_) {
+                appendOutput("A watcher failed the room/password encryption check; keeping Share running.\n");
+                roomWatcherMismatchLogged_ = true;
+            }
+            return;
+        }
+
         accessCodeWarningShown_ = true;
         if (usingWorkerRoomFlow()) {
             if (problem == AccessCodeProblem::Required) {
+                stopProcess();
                 clearRoomKeyForRetry(
-                    "This room expects encrypted traffic. Choose the same room on both computers, then start again.",
+                    "This room expects encrypted traffic. Choose the same room on both computers, then start again. If the room is locked, enter the room password.",
                     "Room encryption required");
                 return;
             }
 
+            stopProcess();
             clearRoomKeyForRetry(
                 process_ != nullptr && process_->state() != QProcess::NotRunning ?
-                    "The stream was rejected by the room encryption key. Stop the current run, choose the same room on both computers, then start again." :
-                    "The stream was rejected by the room encryption key. Choose the same room on both computers, then start again.",
+                    "The stream was rejected by the room encryption key. Stop the current run, check the room/password, then start again." :
+                    "The stream was rejected by the room encryption key. Check the room/password, then start again.",
                 "Room encryption mismatch");
             return;
         }
@@ -4096,6 +4361,8 @@ private:
     PageStack* shareConnectionStack_ = nullptr;
     ShareConnectionMethod shareConnectionMethod_ = ShareConnectionMethod::InternetInvite;
     QLineEdit* shareSignalRoomEdit_ = nullptr;
+    QLineEdit* shareRoomNameEdit_ = nullptr;
+    QLineEdit* shareRoomPasswordEdit_ = nullptr;
     QPushButton* newShareRoomButton_ = nullptr;
     QPushButton* copyShareRoomButton_ = nullptr;
     QCheckBox* shareLegacyInviteCheck_ = nullptr;
@@ -4126,6 +4393,7 @@ private:
     WatchConnectionMethod watchConnectionMethod_ = WatchConnectionMethod::InternetInvite;
     QLineEdit* watchSignalRoomEdit_ = nullptr;
     QString watchRoomKey_;
+    QLineEdit* watchRoomPasswordEdit_ = nullptr;
     QPushButton* pasteWatchRoomLinkButton_ = nullptr;
     QListWidget* activeRoomList_ = nullptr;
     QLabel* activeRoomStatusLabel_ = nullptr;
@@ -4186,6 +4454,8 @@ private:
     QString processOutputParseBuffer_;
     bool runtimeNatShareMode_ = true;
     bool accessCodeWarningShown_ = false;
+    bool roomAlreadyOpenWarningShown_ = false;
+    bool roomWatcherMismatchLogged_ = false;
 };
 
 QString appStyleSheet(bool darkMode)
@@ -4756,10 +5026,12 @@ int main(int argc, char** argv)
                 "rooms": [
                     {
                         "roomId": "room-beta",
+                        "name": "Beta Room",
                         "peerCount": 2,
                         "updatedAt": 1760000001000,
                         "expiresAt": 1760000181000,
-                        "requiresRoomKey": false
+                        "requiresRoomKey": false,
+                        "passwordProtected": false
                     },
                     {
                         "roomId": "bad room",
@@ -4770,10 +5042,12 @@ int main(int argc, char** argv)
                     },
                     {
                         "roomId": "room-alpha",
+                        "name": "Alpha Room",
                         "peerCount": 1,
                         "updatedAt": 1760000002000,
                         "expiresAt": 1760000182000,
-                        "requiresRoomKey": false
+                        "requiresRoomKey": true,
+                        "passwordProtected": true
                     }
                 ]
             })json"));
@@ -4818,7 +5092,11 @@ int main(int argc, char** argv)
                 displays[1].left == -1920 &&
                 activeRooms.size() == 2 &&
                 activeRooms[0].roomId == "room-alpha" &&
+                activeRooms[0].name == "Alpha Room" &&
+                activeRooms[0].passwordProtected &&
                 activeRooms[1].roomId == "room-beta" &&
+                activeRooms[1].name == "Beta Room" &&
+                !activeRooms[1].passwordProtected &&
                 parsedRoomLink &&
                 parsedRoomServer == defaultSignalServer() &&
                 parsedRoom == "room-abc_123" &&

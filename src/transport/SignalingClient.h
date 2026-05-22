@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -31,11 +32,16 @@ struct SignalingPeerState {
     std::string peerId;
     std::vector<SignalingCandidate> candidates;
     SignalingPeerMetadata metadata;
+    std::string roomName;
+    std::string roomPassword;
+    bool passwordProtected = false;
 };
 
 struct SignalingRoomResponse {
     bool ok = false;
     std::string roomAccessKey;
+    std::string roomName;
+    bool passwordProtected = false;
     std::vector<SignalingPeer> peers;
 };
 
@@ -50,7 +56,16 @@ public:
 
     void Health();
     SignalingRoomResponse Join(const std::string& roomId, const SignalingPeerState& peer);
-    SignalingRoomResponse Peers(const std::string& roomId, const std::string& peerId);
+    SignalingRoomResponse Peers(
+        const std::string& roomId,
+        const std::string& peerId,
+        const std::string& roomPassword = {});
+    void ListenRoomEvents(
+        const std::string& roomId,
+        const std::string& peerId,
+        const std::string& roomPassword,
+        const std::function<void(const std::string&)>& onEvent,
+        const std::function<bool()>& shouldStop);
     void Heartbeat(const std::string& roomId, const std::string& peerId);
     void Leave(const std::string& roomId, const std::string& peerId);
 
@@ -65,7 +80,8 @@ private:
     [[nodiscard]] std::string Request(
         const wchar_t* method,
         const std::string& pathAndQuery,
-        const std::optional<std::string>& jsonBody);
+        const std::optional<std::string>& jsonBody,
+        const std::wstring& extraHeaders = {});
 
     SignalingClientConfig config_;
     ParsedUrl url_;
