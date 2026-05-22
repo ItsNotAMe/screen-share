@@ -117,7 +117,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         list(APPEND CMAKE_PREFIX_PATH "C:/msys64/ucrt64")
     endif()
 
-    find_package(Qt6 QUIET COMPONENTS Widgets)
+    find_package(Qt6 QUIET COMPONENTS Network Widgets)
     if(Qt6_FOUND)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
@@ -127,7 +127,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
         )
-        target_link_libraries(ScreenShareUi PRIVATE Qt6::Widgets bcrypt shell32)
+        target_link_libraries(ScreenShareUi PRIVATE Qt6::Network Qt6::Widgets bcrypt shell32)
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX

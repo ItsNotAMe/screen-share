@@ -23,7 +23,7 @@ and last-writer-wins races that KV has during rapid join/poll cycles. Peer
 entries are still stale-cleaned after 60 seconds.
 
 KV is only a directory/index here. It should not contain peer UDP candidates,
-room keys, room passwords, access codes, or media encryption material.
+room passwords, access codes, or user-visible secrets.
 
 ## Why Signaling Is Needed
 
@@ -54,20 +54,21 @@ cannot perform the STUN step for the client.
 
 ## Security Model
 
-The Worker should never receive the media encryption key, room password, or any
-raw user secret.
+The Worker should never receive a room password or any raw user secret. For
+no-password public rooms, the Durable Object creates and stores the random UDP
+room access key that native clients use for automatic encryption.
 
 The product direction is:
 
 - Rooms are encrypted by default.
-- The native app generates a hidden room key automatically.
+- The Durable Object generates a random automatic UDP encryption key for no-password public rooms.
 - Normal users should not see an "access code" field.
 - A visible room password can be added later as an optional extra lock.
-- The room ID used with this Worker is only a lookup name, not the encryption
-  secret.
+- The room ID used with this Worker is public room metadata, not a private access-control secret.
 
-The Worker validates request shape and candidate values, but it does not decide
-who can decrypt media. UDP media encryption remains end-to-end in the C++ app.
+The Worker validates request shape and candidate values. No-password rooms are
+public rooms: any client that joins the room can receive the room access key.
+Optional passwords are the future private-room layer.
 
 ## API
 
@@ -114,20 +115,22 @@ Response:
 ```json
 {
   "ok": true,
+  "roomAccessKey": "random-public-room-access-key",
   "peers": []
 }
 ```
 
 ### `GET /rooms/:roomId/peers?peerId=alice`
 
-Returns all peers except `alice` after stale-peer cleanup.
+Returns the room access key and all peers except `alice` after stale-peer cleanup.
 
 ### `GET /rooms?limit=100`
 
 Returns browseable active-room summaries from KV after verifying each listed
 room against its Durable Object. This is a directory/debug view, not the source
-of truth for signaling and not enough to join a private room. Because the
-directory starts from KV, brand-new rooms can take a few seconds to appear.
+of truth for signaling. It is enough to pick a no-password public room in the
+native UI, but future password-locked rooms will still need the password locally.
+Because the directory starts from KV, brand-new rooms can take a few seconds to appear.
 
 ```json
 {
@@ -138,7 +141,7 @@ directory starts from KV, brand-new rooms can take a few seconds to appear.
       "peerCount": 2,
       "updatedAt": 1760000000000,
       "expiresAt": 1760000180000,
-      "requiresRoomKey": true
+      "requiresRoomKey": false
     }
   ]
 }
@@ -147,7 +150,7 @@ directory starts from KV, brand-new rooms can take a few seconds to appear.
 ### `GET /rooms/:roomId/summary`
 
 Returns one safe active-room summary, or `null` if the room has no live peers.
-This endpoint does not return peer candidates or room keys.
+This endpoint does not return peer candidates or user passwords.
 
 ```json
 {

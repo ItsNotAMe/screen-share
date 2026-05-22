@@ -575,6 +575,15 @@ SignalingRoomResponse ParseRoomResponse(const std::string& text)
     SignalingRoomResponse response;
     const JsonValue* ok = root.Find("ok");
     response.ok = ok != nullptr && ok->type == JsonType::Bool && ok->boolValue;
+    response.roomAccessKey = JsonStringOrEmpty(root.Find("roomAccessKey"));
+    if (!response.roomAccessKey.empty() &&
+        (response.roomAccessKey.size() < 8 ||
+         response.roomAccessKey.size() > 128 ||
+         !std::all_of(response.roomAccessKey.begin(), response.roomAccessKey.end(), [](char ch) {
+             return std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '-';
+         }))) {
+        throw std::runtime_error("Signaling response room access key is invalid");
+    }
     const JsonValue* peers = root.Find("peers");
     if (peers != nullptr && peers->type == JsonType::Array) {
         for (const auto& peer : peers->arrayValue) {

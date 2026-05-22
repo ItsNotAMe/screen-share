@@ -7,6 +7,7 @@
 #include <QtCore/QAbstractAnimation>
 #include <QtCore/QPropertyAnimation>
 #include <QtCore/QEasingCurve>
+#include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -15,6 +16,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonParseError>
+#include <QtCore/QJsonValue>
 #include <QtCore/QPoint>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
@@ -22,12 +24,16 @@
 #include <QtCore/QStringList>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtCore/QUuid>
 #include <QtCore/QVector>
 #include <QtGui/QClipboard>
 #include <QtGui/QScreen>
 #include <QtGui/QTextCursor>
 #include <QtGui/QWheelEvent>
+#include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkReply>
+#include <QtNetwork/QNetworkRequest>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QButtonGroup>
@@ -448,6 +454,7 @@ void repolish(QWidget* widget)
 constexpr int kRowHeight = 34;
 constexpr int kLabelWidth = 96;
 constexpr int kReceiverRefreshMs = 15000;
+constexpr int kRoomDirectoryRefreshMs = 10000;
 constexpr int kPeerStatusPollMs = 500;
 constexpr int kWatchPeerActivityTimeoutMs = 3000;
 constexpr int kSharePeerActivityTimeoutMs = 5000;
@@ -487,11 +494,69 @@ struct DiscoveredReceiver {
     ReceiverSource source = ReceiverSource::Lan;
 };
 
+struct ActiveRoom {
+    QString roomId;
+    int peerCount = 0;
+    qint64 updatedAt = 0;
+    qint64 expiresAt = 0;
+};
+
 struct AudioOutputDevice {
     QString name;
     QString id;
     bool isDefault = false;
 };
+
+QVector<ActiveRoom> parseActiveRooms(const QByteArray& payload)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return {};
+    }
+
+    const QJsonArray rooms = document.object().value("rooms").toArray();
+    QVector<ActiveRoom> activeRooms;
+    activeRooms.reserve(rooms.size());
+    for (const QJsonValue& value : rooms) {
+        const QJsonObject object = value.toObject();
+        ActiveRoom room;
+        room.roomId = object.value("roomId").toString().trimmed();
+        room.peerCount = object.value("peerCount").toInt();
+        room.updatedAt = static_cast<qint64>(object.value("updatedAt").toDouble());
+        room.expiresAt = static_cast<qint64>(object.value("expiresAt").toDouble());
+        if (validRoomId(room.roomId) && room.peerCount > 0 && room.updatedAt > 0) {
+            activeRooms.push_back(std::move(room));
+        }
+    }
+    std::sort(activeRooms.begin(), activeRooms.end(), [](const ActiveRoom& lhs, const ActiveRoom& rhs) {
+        if (lhs.updatedAt != rhs.updatedAt) {
+            return lhs.updatedAt > rhs.updatedAt;
+        }
+        return lhs.roomId < rhs.roomId;
+    });
+    return activeRooms;
+}
+
+QString formatRoomAge(qint64 updatedAt)
+{
+    if (updatedAt <= 0) {
+        return "unknown";
+    }
+    const qint64 ageMs = std::max<qint64>(0, QDateTime::currentMSecsSinceEpoch() - updatedAt);
+    const qint64 seconds = ageMs / 1000;
+    if (seconds < 5) {
+        return "just now";
+    }
+    if (seconds < 60) {
+        return QString::number(seconds) + "s ago";
+    }
+    const qint64 minutes = seconds / 60;
+    if (minutes < 60) {
+        return QString::number(minutes) + "m ago";
+    }
+    return QString::number(minutes / 60) + "h ago";
+}
 
 QVector<DiscoveredReceiver> parseTailscaleStatusReceivers(const QString& output, int port)
 {
@@ -813,24 +878,35 @@ public:
             finishInviteGeneration(code, status);
         });
 
+        roomDirectoryNetwork_ = new QNetworkAccessManager(this);
+
         receiverRefreshTimer_ = new QTimer(this);
         receiverRefreshTimer_->setInterval(kReceiverRefreshMs);
         connect(receiverRefreshTimer_, &QTimer::timeout, this, [this] { startDiscovery(true); });
+
+        roomDirectoryRefreshTimer_ = new QTimer(this);
+        roomDirectoryRefreshTimer_->setInterval(kRoomDirectoryRefreshMs);
+        connect(roomDirectoryRefreshTimer_, &QTimer::timeout, this, [this] {
+            if (shouldRefreshRoomDirectory()) {
+                startRoomDirectoryRefresh(true);
+            }
+        });
 
         peerStatusTimer_ = new QTimer(this);
         peerStatusTimer_->setInterval(kPeerStatusPollMs);
         connect(peerStatusTimer_, &QTimer::timeout, this, [this] { checkPeerActivityTimeout(); });
 
         buildUi();
-        ensureShareRoomKey();
         updateInternetAdvancedVisibility();
         updateSecurityVisibility();
         refreshReportPath();
         refreshCommand();
         setRunning(false);
         receiverRefreshTimer_->start();
+        roomDirectoryRefreshTimer_->start();
         peerStatusTimer_->start();
         QTimer::singleShot(400, this, [this] { startDiscovery(true); });
+        QTimer::singleShot(500, this, [this] { startRoomDirectoryRefresh(true); });
         QTimer::singleShot(550, this, [this] { refreshDisplays(true); });
         QTimer::singleShot(700, this, [this] { refreshAudioDevices(true); });
     }
@@ -1156,8 +1232,9 @@ private:
         internetContent->addWidget(shareLegacyInvitePanel_);
 
         connect(newShareRoomButton_, &QPushButton::clicked, this, [this] {
-            rotateShareRoomKey();
             shareSignalRoomEdit_->setText(generatedRoomId());
+            updateSecurityVisibility();
+            refreshCommand();
         });
         connect(copyShareRoomButton_, &QPushButton::clicked, this, [this] {
             copyShareRoomLink();
@@ -1357,6 +1434,29 @@ private:
         watchRoomLayout->addWidget(watchSignalRoomEdit_, 1);
         watchRoomLayout->addWidget(pasteWatchRoomLinkButton_);
         addRow(watchInternetContent, "Room", watchRoomRow);
+        activeRoomList_ = new QListWidget;
+        activeRoomList_->setObjectName("ActiveRoomList");
+        activeRoomList_->setMinimumHeight(108);
+        activeRoomList_->setUniformItemSizes(true);
+        activeRoomList_->setSelectionMode(QAbstractItemView::SingleSelection);
+        activeRoomList_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        activeRoomList_->setToolTip("Pick an active room to join. Rooms use automatic UDP encryption.");
+        watchInternetContent->addWidget(activeRoomList_);
+        auto* activeRoomsFooter = new QWidget;
+        activeRoomsFooter->setObjectName("FormRow");
+        auto* activeRoomsFooterLayout = new QHBoxLayout(activeRoomsFooter);
+        activeRoomsFooterLayout->setContentsMargins(0, 0, 0, 0);
+        activeRoomsFooterLayout->setSpacing(8);
+        activeRoomStatusLabel_ = makeLabel("Rooms update automatically", "Subtle");
+        activeRoomsFooterLayout->addWidget(activeRoomStatusLabel_, 1);
+        refreshRoomsButton_ = new QPushButton("Refresh");
+        refreshRoomsButton_->setObjectName("SecondaryButton");
+        refreshRoomsButton_->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+        refreshRoomsButton_->setIconSize(QSize(14, 14));
+        refreshRoomsButton_->setCursor(Qt::PointingHandCursor);
+        refreshRoomsButton_->setFixedHeight(kRowHeight);
+        activeRoomsFooterLayout->addWidget(refreshRoomsButton_);
+        watchInternetContent->addWidget(activeRoomsFooter);
         watchLegacyInviteCheck_ = new QCheckBox("Manual invite fallback");
         watchLegacyInviteCheck_->setToolTip("Only use this if the Worker room path is unavailable.");
         addFullRow(watchInternetContent, watchLegacyInviteCheck_);
@@ -1420,6 +1520,12 @@ private:
 
         connect(pasteWatchRoomLinkButton_, &QPushButton::clicked, this, [this] {
             pasteWatchRoomLink();
+        });
+        connect(refreshRoomsButton_, &QPushButton::clicked, this, [this] {
+            startRoomDirectoryRefresh(false);
+        });
+        connect(activeRoomList_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+            selectActiveRoomItem(item);
         });
         connect(watchLegacyInviteCheck_, &QCheckBox::toggled, this, [this] {
             updateInternetAdvancedVisibility();
@@ -1578,6 +1684,9 @@ private:
         if (!running_) {
             updateStartButtonText();
         }
+        if (shouldRefreshRoomDirectory()) {
+            startRoomDirectoryRefresh(true);
+        }
     }
 
     void bindCommandRefresh()
@@ -1707,6 +1816,9 @@ private:
         updateSecurityVisibility();
         updateInternetStatus();
         refreshCommand();
+        if (shouldRefreshRoomDirectory()) {
+            startRoomDirectoryRefresh(true);
+        }
     }
 
     QString defaultReportName() const
@@ -1762,6 +1874,155 @@ private:
         clearWatchLocalInvite();
     }
 
+    QString activeRoomDisplayText(const ActiveRoom& room) const
+    {
+        return QStringLiteral("%1    %2 peer%3    %4")
+            .arg(room.roomId)
+            .arg(room.peerCount)
+            .arg(room.peerCount == 1 ? QString() : QStringLiteral("s"))
+            .arg(formatRoomAge(room.updatedAt));
+    }
+
+    QString roomDirectoryUrl() const
+    {
+        QString base = defaultSignalServer();
+        while (base.endsWith('/')) {
+            base.chop(1);
+        }
+        return base + "/rooms?limit=100";
+    }
+
+    bool shouldRefreshRoomDirectory() const
+    {
+        return optionStack_ != nullptr &&
+               !running_ &&
+               !shareMode() &&
+               watchConnectionMethod() == WatchConnectionMethod::InternetInvite &&
+               !watchUsesLegacyInvite();
+    }
+
+    void setRoomDirectoryRefreshing(bool refreshing)
+    {
+        roomDirectoryRefreshing_ = refreshing;
+        const bool enabled = !refreshing && !running_;
+        if (refreshRoomsButton_ != nullptr) {
+            refreshRoomsButton_->setEnabled(enabled);
+            refreshRoomsButton_->setText(refreshing ? "Loading..." : "Refresh");
+        }
+        if (activeRoomList_ != nullptr) {
+            activeRoomList_->setEnabled(enabled);
+        }
+        if (refreshing && activeRoomStatusLabel_ != nullptr) {
+            activeRoomStatusLabel_->setText("Loading active rooms");
+        }
+    }
+
+    void startRoomDirectoryRefresh(bool quiet)
+    {
+        if (roomDirectoryNetwork_ == nullptr || roomDirectoryRefreshing_) {
+            return;
+        }
+
+        roomDirectoryRefreshQuiet_ = quiet;
+        setRoomDirectoryRefreshing(true);
+        QNetworkRequest request{QUrl(roomDirectoryUrl())};
+        request.setHeader(QNetworkRequest::UserAgentHeader, "ScreenShareUi");
+        request.setRawHeader("Accept", "application/json");
+        roomDirectoryReply_ = roomDirectoryNetwork_->get(request);
+        connect(roomDirectoryReply_, &QNetworkReply::finished, this, [this] {
+            finishRoomDirectoryRefresh();
+        });
+    }
+
+    void finishRoomDirectoryRefresh()
+    {
+        QNetworkReply* reply = roomDirectoryReply_;
+        roomDirectoryReply_ = nullptr;
+        if (reply == nullptr) {
+            setRoomDirectoryRefreshing(false);
+            return;
+        }
+
+        const QNetworkReply::NetworkError error = reply->error();
+        const QString errorText = reply->errorString();
+        const QByteArray body = reply->readAll();
+        reply->deleteLater();
+        setRoomDirectoryRefreshing(false);
+
+        if (error != QNetworkReply::NoError) {
+            if (activeRoomStatusLabel_ != nullptr) {
+                activeRoomStatusLabel_->setText("Room list unavailable");
+            }
+            if (!roomDirectoryRefreshQuiet_) {
+                QMessageBox::warning(this, "Rooms", "Could not load active rooms: " + errorText);
+            }
+            return;
+        }
+
+        activeRooms_ = parseActiveRooms(body);
+        updateActiveRoomList();
+    }
+
+    void updateActiveRoomList()
+    {
+        if (activeRoomList_ == nullptr) {
+            return;
+        }
+
+        const QString selectedRoom = watchSignalRoom();
+        activeRoomList_->clear();
+        for (int index = 0; index < activeRooms_.size(); ++index) {
+            const ActiveRoom& room = activeRooms_[index];
+            auto* item = new QListWidgetItem(activeRoomDisplayText(room));
+            item->setData(Qt::UserRole, index);
+            item->setToolTip(QStringLiteral("%1\n%2 peer%3\nAutomatic UDP encryption")
+                .arg(room.roomId)
+                .arg(room.peerCount)
+                .arg(room.peerCount == 1 ? QString() : QStringLiteral("s")));
+            activeRoomList_->addItem(item);
+            if (room.roomId == selectedRoom) {
+                item->setSelected(true);
+            }
+        }
+        updateActiveRoomStatus();
+    }
+
+    void updateActiveRoomStatus()
+    {
+        if (activeRoomStatusLabel_ == nullptr || roomDirectoryRefreshing_) {
+            return;
+        }
+        if (activeRooms_.isEmpty()) {
+            activeRoomStatusLabel_->setText("No active rooms");
+            return;
+        }
+        activeRoomStatusLabel_->setText(QStringLiteral("%1 active room%2")
+            .arg(activeRooms_.size())
+            .arg(activeRooms_.size() == 1 ? QString() : QStringLiteral("s")));
+    }
+
+    void selectActiveRoomItem(QListWidgetItem* item)
+    {
+        if (item == nullptr) {
+            return;
+        }
+        bool ok = false;
+        const int index = item->data(Qt::UserRole).toInt(&ok);
+        if (!ok || index < 0 || index >= activeRooms_.size()) {
+            return;
+        }
+
+        setWatchConnectionMethod(WatchConnectionMethod::InternetInvite);
+        watchRoomKey_.clear();
+        watchSignalRoomEdit_->setText(activeRooms_[index].roomId);
+        updateSecurityVisibility();
+        updateInternetStatus();
+        refreshCommand();
+        if (activeRoomStatusLabel_ != nullptr) {
+            activeRoomStatusLabel_->setText("Selected room. Press Start to join.");
+        }
+    }
+
     void copyInvite(QLineEdit* edit, const QString& label)
     {
         if (edit == nullptr) {
@@ -1809,7 +2070,11 @@ private:
         if (!usingWorkerRoomFlow()) {
             return {};
         }
-        return shareMode() ? shareRoomKey_ : watchRoomKey_;
+        const QString explicitKey = shareMode() ? QString() : watchRoomKey_;
+        if (!explicitKey.isEmpty()) {
+            return explicitKey;
+        }
+        return {};
     }
 
     QString effectiveAccessCode() const
@@ -1818,28 +2083,6 @@ private:
             return currentRoomKey();
         }
         return accessCodeEdit_ == nullptr ? QString() : accessCodeEdit_->text();
-    }
-
-    bool ensureShareRoomKey()
-    {
-        if (!shareRoomKey_.isEmpty()) {
-            return true;
-        }
-        try {
-            shareRoomKey_ = QString::fromStdString(screenshare::GenerateUdpAccessCode());
-            updateSecurityVisibility();
-            refreshCommand();
-            return true;
-        } catch (const std::exception& error) {
-            QMessageBox::critical(this, "Room key", QString::fromLocal8Bit(error.what()));
-            return false;
-        }
-    }
-
-    void rotateShareRoomKey()
-    {
-        shareRoomKey_.clear();
-        ensureShareRoomKey();
     }
 
     void updateSecurityVisibility()
@@ -1858,8 +2101,8 @@ private:
             roomKeyStatusLabel_->setVisible(workerRoom);
             if (workerRoom) {
                 roomKeyStatusLabel_->setText(shareMode()
-                    ? "Room links include an automatic encryption key."
-                    : "Paste the full room link to use its encryption key.");
+                    ? "Public room. The server gives joiners an automatic UDP encryption key."
+                    : "Choose a room or paste a room link. UDP encryption is automatic.");
             }
         }
     }
@@ -1882,12 +2125,8 @@ private:
             shareSignalRoomEdit_->setFocus();
             return;
         }
-        if (!ensureShareRoomKey()) {
-            return;
-        }
-
-        QApplication::clipboard()->setText(roomLink(room, shareRoomKey_));
-        appendOutput("Secure room link copied to clipboard\n");
+        QApplication::clipboard()->setText(roomLink(room, QString()));
+        appendOutput("Room link copied to clipboard\n");
     }
 
     void pasteWatchRoomLink()
@@ -1905,8 +2144,8 @@ private:
         updateSecurityVisibility();
         refreshCommand();
         appendOutput(roomKey.isEmpty()
-            ? "Room link pasted without an encryption key\n"
-            : "Secure room link pasted from clipboard\n");
+            ? "Room link pasted from clipboard\n"
+            : "Room link with legacy encryption key pasted from clipboard\n");
     }
 
     void pasteInviteFromClipboard(QLineEdit* edit, const QString& label)
@@ -2408,9 +2647,6 @@ private:
                     if (!validateWorkerRoomFields(true)) {
                         return;
                     }
-                    if (!ensureShareRoomKey()) {
-                        return;
-                    }
                 } else if (shareLocalInviteEdit_->text().trimmed().isEmpty()) {
                     QMessageBox::warning(
                         this,
@@ -2438,14 +2674,6 @@ private:
         } else if (watchConnectionMethod() == WatchConnectionMethod::InternetInvite &&
                    !watchUsesLegacyInvite()) {
             if (!validateWorkerRoomFields(false)) {
-                return;
-            }
-            if (watchRoomKey_.isEmpty()) {
-                QMessageBox::warning(
-                    this,
-                    "Room link",
-                    "Paste the full room link from the sharer. A room name alone does not include the encryption key.");
-                watchSignalRoomEdit_->setFocus();
                 return;
             }
         } else if (watchConnectionMethod() == WatchConnectionMethod::InternetInvite &&
@@ -3317,6 +3545,12 @@ private:
         if (pasteWatchRoomLinkButton_ != nullptr) {
             pasteWatchRoomLinkButton_->setEnabled(!running);
         }
+        if (refreshRoomsButton_ != nullptr) {
+            refreshRoomsButton_->setEnabled(!running && !roomDirectoryRefreshing_);
+        }
+        if (activeRoomList_ != nullptr) {
+            activeRoomList_->setEnabled(!running && !roomDirectoryRefreshing_);
+        }
         if (createShareInviteButton_ != nullptr) {
             createShareInviteButton_->setEnabled(canCreate);
             createShareInviteButton_->setText(creating && inviteTarget_ == InviteTarget::Share ? "Creating..." : "Create");
@@ -3425,19 +3659,16 @@ private:
         if (!validRoomId(shareSignalRoom())) {
             return "Choose a room name with letters, numbers, dashes, or underscores.";
         }
-        return "Ready: copy the secure room link, send it to your friend, then start sharing.";
+        return "Ready: start sharing. Friends can pick this room from the list or use the copied link.";
     }
 
     QString watchWorkerRoomStatusText() const
     {
         if (watchSignalRoom().isEmpty()) {
-            return "Paste the secure room link from the sharer.";
+            return "Choose an active room or paste a room link.";
         }
         if (!validRoomId(watchSignalRoom())) {
             return "Room names need letters, numbers, dashes, or underscores.";
-        }
-        if (watchRoomKey_.isEmpty()) {
-            return "Paste the full room link so Watch gets the encryption key.";
         }
         return "Ready to watch: this room will use signaling and direct UDP.";
     }
@@ -3600,6 +3831,9 @@ private:
             refreshAudioDevicesButton_->setEnabled(!running && audioDeviceProcess_->state() == QProcess::NotRunning);
         }
         updateInviteButtons();
+        if (!running && shouldRefreshRoomDirectory()) {
+            startRoomDirectoryRefresh(true);
+        }
     }
 
     void updateStartButtonText()
@@ -3689,16 +3923,16 @@ private:
         if (usingWorkerRoomFlow()) {
             if (problem == AccessCodeProblem::Required) {
                 clearRoomKeyForRetry(
-                    "Paste the full room link from the sharer. A room name alone does not include the encryption key.",
-                    "Room link required");
+                    "This room expects encrypted traffic. Choose the same room on both computers, then start again.",
+                    "Room encryption required");
                 return;
             }
 
             clearRoomKeyForRetry(
                 process_ != nullptr && process_->state() != QProcess::NotRunning ?
-                    "The stream was rejected by the room key. Stop the current run, paste the latest room link from the sharer, then start again." :
-                    "The stream was rejected by the room key. Paste the latest room link from the sharer, then start again.",
-                "Room key mismatch");
+                    "The stream was rejected by the room encryption key. Stop the current run, choose the same room on both computers, then start again." :
+                    "The stream was rejected by the room encryption key. Choose the same room on both computers, then start again.",
+                "Room encryption mismatch");
             return;
         }
 
@@ -3848,7 +4082,10 @@ private:
     QProcess* displayProcess_ = nullptr;
     QProcess* audioDeviceProcess_ = nullptr;
     QProcess* inviteProcess_ = nullptr;
+    QNetworkAccessManager* roomDirectoryNetwork_ = nullptr;
+    QNetworkReply* roomDirectoryReply_ = nullptr;
     QTimer* receiverRefreshTimer_ = nullptr;
+    QTimer* roomDirectoryRefreshTimer_ = nullptr;
     QTimer* peerStatusTimer_ = nullptr;
 
     QListWidget* receiverList_ = nullptr;
@@ -3859,7 +4096,6 @@ private:
     PageStack* shareConnectionStack_ = nullptr;
     ShareConnectionMethod shareConnectionMethod_ = ShareConnectionMethod::InternetInvite;
     QLineEdit* shareSignalRoomEdit_ = nullptr;
-    QString shareRoomKey_;
     QPushButton* newShareRoomButton_ = nullptr;
     QPushButton* copyShareRoomButton_ = nullptr;
     QCheckBox* shareLegacyInviteCheck_ = nullptr;
@@ -3891,6 +4127,9 @@ private:
     QLineEdit* watchSignalRoomEdit_ = nullptr;
     QString watchRoomKey_;
     QPushButton* pasteWatchRoomLinkButton_ = nullptr;
+    QListWidget* activeRoomList_ = nullptr;
+    QLabel* activeRoomStatusLabel_ = nullptr;
+    QPushButton* refreshRoomsButton_ = nullptr;
     QCheckBox* watchLegacyInviteCheck_ = nullptr;
     QWidget* watchLegacyInvitePanel_ = nullptr;
     QLineEdit* watchPeerInviteEdit_ = nullptr;
@@ -3928,9 +4167,12 @@ private:
     QVector<DiscoveredReceiver> discoveredReceivers_;
     QVector<DiscoveredReceiver> lanReceivers_;
     QVector<DiscoveredReceiver> tailscaleReceivers_;
+    QVector<ActiveRoom> activeRooms_;
     bool discoverySelectFirst_ = false;
     bool discoveryLogOutput_ = false;
     bool tailscaleLogOutput_ = false;
+    bool roomDirectoryRefreshing_ = false;
+    bool roomDirectoryRefreshQuiet_ = false;
     bool receiverScanNotificationShown_ = false;
     bool audioDeviceLogOutput_ = false;
     bool selectedReceiverKnown_ = false;
@@ -4169,22 +4411,22 @@ QPlainTextEdit {
     font-family: "Cascadia Mono", "Consolas";
     font-size: 9.5pt;
 }
-QListWidget#ReceiverList, QListWidget#WatcherInviteList {
+QListWidget#ReceiverList, QListWidget#WatcherInviteList, QListWidget#ActiveRoomList {
     background: #0b0f14;
     border: 1px solid #2a3340;
     border-radius: 8px;
     padding: 4px;
     color: #e6ecf2;
 }
-QListWidget#ReceiverList::item, QListWidget#WatcherInviteList::item {
+QListWidget#ReceiverList::item, QListWidget#WatcherInviteList::item, QListWidget#ActiveRoomList::item {
     border-radius: 6px;
     padding: 8px 10px;
 }
-QListWidget#ReceiverList::item:selected, QListWidget#WatcherInviteList::item:selected {
+QListWidget#ReceiverList::item:selected, QListWidget#WatcherInviteList::item:selected, QListWidget#ActiveRoomList::item:selected {
     background: #1a9b89;
     color: #ffffff;
 }
-QListWidget#ReceiverList::item:hover, QListWidget#WatcherInviteList::item:hover {
+QListWidget#ReceiverList::item:hover, QListWidget#WatcherInviteList::item:hover, QListWidget#ActiveRoomList::item:hover {
     background: #1c232c;
 }
 QScrollBar:vertical {
@@ -4416,22 +4658,22 @@ QPlainTextEdit {
     font-family: "Cascadia Mono", "Consolas";
     font-size: 9.5pt;
 }
-QListWidget#ReceiverList, QListWidget#WatcherInviteList {
+QListWidget#ReceiverList, QListWidget#WatcherInviteList, QListWidget#ActiveRoomList {
     background: #ffffff;
     border: 1px solid #cfd6df;
     border-radius: 8px;
     padding: 4px;
     color: #15202b;
 }
-QListWidget#ReceiverList::item, QListWidget#WatcherInviteList::item {
+QListWidget#ReceiverList::item, QListWidget#WatcherInviteList::item, QListWidget#ActiveRoomList::item {
     border-radius: 6px;
     padding: 8px 10px;
 }
-QListWidget#ReceiverList::item:selected, QListWidget#WatcherInviteList::item:selected {
+QListWidget#ReceiverList::item:selected, QListWidget#WatcherInviteList::item:selected, QListWidget#ActiveRoomList::item:selected {
     background: #157a6e;
     color: #ffffff;
 }
-QListWidget#ReceiverList::item:hover, QListWidget#WatcherInviteList::item:hover {
+QListWidget#ReceiverList::item:hover, QListWidget#WatcherInviteList::item:hover, QListWidget#ActiveRoomList::item:hover {
     background: #eef1f6;
 }
 QScrollBar:vertical {
@@ -4509,6 +4751,32 @@ int main(int argc, char** argv)
             const auto displays = parseDisplayChoices(QString::fromUtf8(
                 "[0] \\\\.\\DISPLAY1 2560x1440 at (0,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"
                 "[1] \\\\.\\DISPLAY2 1920x1080 at (-1920,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"));
+            const auto activeRooms = parseActiveRooms(QByteArrayLiteral(R"json({
+                "ok": true,
+                "rooms": [
+                    {
+                        "roomId": "room-beta",
+                        "peerCount": 2,
+                        "updatedAt": 1760000001000,
+                        "expiresAt": 1760000181000,
+                        "requiresRoomKey": false
+                    },
+                    {
+                        "roomId": "bad room",
+                        "peerCount": 1,
+                        "updatedAt": 1760000002000,
+                        "expiresAt": 1760000182000,
+                        "requiresRoomKey": false
+                    },
+                    {
+                        "roomId": "room-alpha",
+                        "peerCount": 1,
+                        "updatedAt": 1760000002000,
+                        "expiresAt": 1760000182000,
+                        "requiresRoomKey": false
+                    }
+                ]
+            })json"));
             QString parsedRoomServer;
             QString parsedRoom;
             QString parsedRoomKey;
@@ -4526,6 +4794,14 @@ int main(int argc, char** argv)
                 nullptr,
                 &parsedLegacyRoom,
                 &parsedLegacyRoomPort);
+            QString parsedShortRoom;
+            QString parsedShortRoomKey;
+            const bool parsedShortRoomLink = parseRoomLink(
+                roomLink("room-public", QString()),
+                nullptr,
+                &parsedShortRoom,
+                nullptr,
+                &parsedShortRoomKey);
             return peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("ss1e:") &&
@@ -4540,6 +4816,9 @@ int main(int argc, char** argv)
                 displays[1].index == 1 &&
                 displays[1].width == 1920 &&
                 displays[1].left == -1920 &&
+                activeRooms.size() == 2 &&
+                activeRooms[0].roomId == "room-alpha" &&
+                activeRooms[1].roomId == "room-beta" &&
                 parsedRoomLink &&
                 parsedRoomServer == defaultSignalServer() &&
                 parsedRoom == "room-abc_123" &&
@@ -4547,7 +4826,10 @@ int main(int argc, char** argv)
                 parsedRoomPort == 0 &&
                 parsedLegacyRoomLink &&
                 parsedLegacyRoom == "room-abc_123" &&
-                parsedLegacyRoomPort == 5001 ? 0 : 2;
+                parsedLegacyRoomPort == 5001 &&
+                parsedShortRoomLink &&
+                parsedShortRoom == "room-public" &&
+                parsedShortRoomKey.isEmpty() ? 0 : 2;
         }
     }
 

@@ -29,6 +29,7 @@ interface Peer {
 
 interface Room {
   peers: Peer[];
+  roomAccessKey?: string;
 }
 
 interface RoomSummary {
@@ -36,7 +37,7 @@ interface RoomSummary {
   peerCount: number;
   updatedAt: number;
   expiresAt: number;
-  requiresRoomKey: true;
+  requiresRoomKey: boolean;
 }
 
 interface JoinRequest {
@@ -57,6 +58,7 @@ const MAX_CANDIDATES = 8;
 const MAX_ROOM_LIST_LIMIT = 250;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 240;
+const ROOM_ACCESS_KEY_BYTES = 32;
 
 const rateBuckets = new Map<string, { windowStart: number; count: number }>();
 
@@ -98,6 +100,10 @@ function roomKey(roomId: string): string {
   return `room:${roomId}`;
 }
 
+function roomAccessKeyKey(roomId: string): string {
+  return `room:${roomId}:access-key`;
+}
+
 function roomPeerPrefix(roomId: string): string {
   return `room:${roomId}:peer:`;
 }
@@ -108,6 +114,20 @@ function roomPeerKey(roomId: string, peerId: string): string {
 
 function roomDirectoryKey(roomId: string): string {
   return `${ROOM_DIRECTORY_PREFIX}${roomId}`;
+}
+
+function randomRoomAccessKey(): string {
+  const bytes = new Uint8Array(ROOM_ACCESS_KEY_BYTES);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function validRoomAccessKey(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{32,128}$/.test(value);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -289,7 +309,24 @@ async function loadRoom(env: Env, roomId: string, now = Date.now()): Promise<Roo
     await Promise.all(deletes);
   }
 
-  return { peers };
+  const storedRoomAccessKey = await env.ROOMS.get(roomAccessKeyKey(roomId));
+  const roomAccessKey = validRoomAccessKey(storedRoomAccessKey) ? storedRoomAccessKey : undefined;
+  return { peers, roomAccessKey };
+}
+
+async function ensureRoomAccessKey(env: Env, roomId: string, room: Room): Promise<string> {
+  if (validRoomAccessKey(room.roomAccessKey)) {
+    await env.ROOMS.put(roomAccessKeyKey(roomId), room.roomAccessKey, {
+      expirationTtl: ROOM_TTL_SECONDS,
+    });
+    return room.roomAccessKey;
+  }
+  const roomAccessKey = randomRoomAccessKey();
+  room.roomAccessKey = roomAccessKey;
+  await env.ROOMS.put(roomAccessKeyKey(roomId), roomAccessKey, {
+    expirationTtl: ROOM_TTL_SECONDS,
+  });
+  return roomAccessKey;
 }
 
 async function savePeer(env: Env, roomId: string, peer: Peer): Promise<void> {
@@ -321,7 +358,7 @@ function roomSummary(roomId: string, peers: Peer[], now = Date.now()): RoomSumma
     peerCount: activePeers.length,
     updatedAt,
     expiresAt: updatedAt + ROOM_TTL_SECONDS * 1000,
-    requiresRoomKey: true,
+    requiresRoomKey: false,
   };
 }
 
@@ -331,7 +368,7 @@ function normalizeRoomSummary(value: unknown, now = Date.now()): RoomSummary | u
       typeof value.peerCount !== "number" ||
       typeof value.updatedAt !== "number" ||
       typeof value.expiresAt !== "number" ||
-      value.requiresRoomKey !== true) {
+      typeof value.requiresRoomKey !== "boolean") {
     return undefined;
   }
   try {
@@ -349,7 +386,7 @@ function normalizeRoomSummary(value: unknown, now = Date.now()): RoomSummary | u
     peerCount: value.peerCount,
     updatedAt: value.updatedAt,
     expiresAt: value.expiresAt,
-    requiresRoomKey: true,
+    requiresRoomKey: false,
   };
 }
 
@@ -459,12 +496,13 @@ async function handleJoin(request: Request, env: Env, roomId: string): Promise<R
   const peer = { peerId, candidates, metadata, lastSeen: now };
 
   const room = await loadRoom(env, roomId, now);
+  const roomAccessKey = await ensureRoomAccessKey(env, roomId, room);
   const nextPeers = [...otherPeers(room, peerId), peer];
   await savePeer(env, roomId, peer);
   await cleanupLegacyRoom(env, roomId);
   await trySyncRoomDirectory(env, roomId, nextPeers, now);
 
-  return jsonResponse({ ok: true, peers: otherPeers(room, peerId) });
+  return jsonResponse({ ok: true, roomAccessKey, peers: otherPeers(room, peerId) });
 }
 
 async function handlePeers(request: Request, env: Env, roomId: string): Promise<Response> {
@@ -472,8 +510,12 @@ async function handlePeers(request: Request, env: Env, roomId: string): Promise<
   const peerId = validatePeerId(url.searchParams.get("peerId"));
   const room = await loadRoom(env, roomId);
   await trySyncRoomDirectory(env, roomId, room.peers);
+  if (room.peers.length === 0) {
+    return jsonResponse({ ok: true, peers: [] });
+  }
+  const roomAccessKey = await ensureRoomAccessKey(env, roomId, room);
 
-  return jsonResponse({ ok: true, peers: otherPeers(room, peerId) });
+  return jsonResponse({ ok: true, roomAccessKey, peers: otherPeers(room, peerId) });
 }
 
 async function handleHeartbeat(request: Request, env: Env, roomId: string): Promise<Response> {
@@ -497,13 +539,18 @@ async function handleLeave(request: Request, env: Env, roomId: string): Promise<
   const peerId = validatePeerId(body.peerId);
   await deletePeer(env, roomId, peerId);
   await cleanupLegacyRoom(env, roomId);
-  await trySyncRoomDirectory(env, roomId, (await loadRoom(env, roomId)).peers);
+  const room = await loadRoom(env, roomId);
+  if (room.peers.length === 0) {
+    await env.ROOMS.delete(roomAccessKeyKey(roomId));
+  }
+  await trySyncRoomDirectory(env, roomId, room.peers);
 
   return jsonResponse({ ok: true });
 }
 
 export class RoomObject extends DurableObject<Env> {
   private peers: Map<string, Peer> | undefined;
+  private roomAccessKey: string | undefined;
 
   async fetch(request: Request): Promise<Response> {
     try {
@@ -565,9 +612,26 @@ export class RoomObject extends DurableObject<Env> {
     return peers;
   }
 
+  private async ensureRoomAccessKey(): Promise<string> {
+    if (validRoomAccessKey(this.roomAccessKey)) {
+      return this.roomAccessKey;
+    }
+    const stored = await this.ctx.storage.get<string>("roomAccessKey");
+    if (validRoomAccessKey(stored)) {
+      this.roomAccessKey = stored;
+      return stored;
+    }
+    const roomAccessKey = randomRoomAccessKey();
+    this.roomAccessKey = roomAccessKey;
+    await this.ctx.storage.put("roomAccessKey", roomAccessKey);
+    return roomAccessKey;
+  }
+
   private async savePeers(roomId: string, peers: Map<string, Peer>, now = Date.now()): Promise<void> {
     if (peers.size === 0) {
       await this.ctx.storage.delete("peers");
+      await this.ctx.storage.delete("roomAccessKey");
+      this.roomAccessKey = undefined;
       await trySyncRoomDirectory(this.env, roomId, [], now);
       return;
     }
@@ -594,11 +658,12 @@ export class RoomObject extends DurableObject<Env> {
     const now = Date.now();
     const peers = await this.loadPeers();
     this.cleanupPeers(peers, now);
+    const roomAccessKey = await this.ensureRoomAccessKey();
 
     peers.set(peerId, { peerId, candidates, metadata, lastSeen: now });
     await this.savePeers(roomId, peers, now);
 
-    return jsonResponse({ ok: true, peers: otherPeers({ peers: [...peers.values()] }, peerId) });
+    return jsonResponse({ ok: true, roomAccessKey, peers: otherPeers({ peers: [...peers.values()] }, peerId) });
   }
 
   private async handlePeers(request: Request, roomId: string): Promise<Response> {
@@ -609,8 +674,12 @@ export class RoomObject extends DurableObject<Env> {
     if (changed) {
       await this.savePeers(roomId, peers);
     }
+    if (peers.size === 0) {
+      return jsonResponse({ ok: true, peers: [] });
+    }
+    const roomAccessKey = await this.ensureRoomAccessKey();
 
-    return jsonResponse({ ok: true, peers: otherPeers({ peers: [...peers.values()] }, peerId) });
+    return jsonResponse({ ok: true, roomAccessKey, peers: otherPeers({ peers: [...peers.values()] }, peerId) });
   }
 
   private async handleHeartbeat(request: Request, roomId: string): Promise<Response> {

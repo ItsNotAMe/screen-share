@@ -2277,6 +2277,25 @@ void MergeSignalingPeers(
     }
 }
 
+void ApplySignalingRoomAccessKey(Options& options, const screenshare::SignalingRoomResponse& response)
+{
+    if (options.accessCodeProvided || options.allowPlaintext) {
+        return;
+    }
+    if (response.roomAccessKey.empty()) {
+        throw std::runtime_error("Signaling server did not provide a room encryption key");
+    }
+
+    const std::string accessCode = ParseAccessCode(response.roomAccessKey.c_str());
+    options.accessCodeFingerprint = screenshare::UdpAccessCodeFingerprint(accessCode);
+    options.accessCodeKey = screenshare::DeriveUdpCryptoKey(accessCode);
+    options.accessCodeProvided = true;
+    std::cout
+        << "signaling_room_encryption=ready"
+        << " room=" << options.signalingRoomId
+        << " source=server\n";
+}
+
 screenshare::SignalingPeerState BuildLiveSignalingPeerState(const Options& options)
 {
     if (!options.signalingLocalCandidateAvailable) {
@@ -5757,7 +5776,9 @@ void PrepareLiveSignaling(Options& options)
     const auto deadline = startedAt + std::chrono::seconds(options.signalingSetupSeconds);
     int polls = 0;
     do {
-        MergeSignalingPeers(peersById, client.Join(options.signalingRoomId, peer));
+        const auto response = client.Join(options.signalingRoomId, peer);
+        ApplySignalingRoomAccessKey(options, response);
+        MergeSignalingPeers(peersById, response);
         ++polls;
         if (std::chrono::steady_clock::now() >= deadline) {
             break;
