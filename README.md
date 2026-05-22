@@ -13,7 +13,9 @@ The first milestone is a pure C++ capture foundation:
 - Capture system or microphone audio with WASAPI.
 - Send Opus-compressed audio packets over UDP by default and optionally play them on the receiver with a small jitter buffer.
 
-Direct Internet/NAT traversal is experimental and currently uses manual invite exchange plus UDP hole punching.
+Direct Internet/NAT traversal is experimental and currently uses STUN plus a lightweight signaling
+Worker to coordinate UDP hole punching. Media stays direct UDP; the Worker does not relay video or
+audio.
 
 ## Build
 
@@ -97,24 +99,23 @@ Start the desktop control UI:
 The UI starts and stops the same `ScreenShare.exe` engine beside it. Use Create room on the
 sending computer and Join room on the receiving computer. Reports are enabled by default so a
 test run can be sent as a zip without collecting separate log files. The UI opens in dark mode by
-default, includes a theme toggle in the header, and can generate/copy an encrypted-session access
-code. Create room shows friendly display choices such as resolution, position, and primary monitor
+default and includes a theme toggle in the header. Create room shows friendly display choices such
+as resolution, position, and primary monitor
 status while still passing the selected numeric display index to the engine. It also has an
 output-device picker for system audio, which is useful when Windows or a virtual mixer uses a default
-output device that does not contain the audio you actually want to share. For direct invite tests
-with no server, choose the Internet tab in Create room. That page creates and copies the sharer's
-room invite. Send that invite to your friend; they paste it into Join room. This one-invite path
-works when the sharer's invite endpoint is reachable, such as LAN, Tailscale/VPN, port-mapped UDP, or
-friendly NAT. It cannot punch through every NAT by itself because the sharer does not know the
-watcher's public endpoint until some packet reaches the sharer. Nearby, Internet, and Manual live as
-tabs in the same Room section so setup uses one mental model instead of separate competing panels.
-The UI opens the Room section on Internet by default because the room invite flow is the normal
-direct-share path.
-Create room supports target lists for direct paths and one shared invite for Internet paths. Nearby
-can select multiple watchers from the list, Manual accepts multiple comma/space-separated
-`HOST:PORT` targets in the Targets field, and Internet lets multiple watchers paste the same room
-invite. If some watchers cannot connect through that shared invite, paste each watcher response
-invite into the optional Watcher invites list.
+output device that does not contain the audio you actually want to share.
+
+The UI opens the Room section on Internet by default. Keep or change the generated room name on
+Create room, then copy the room link and send it to your friend. Join room can paste
+that link to fill the room name while keeping its own local listen port. The built-in Worker only exchanges UDP candidates; video and
+audio still go directly between computers. Nearby, Internet, and Manual live as tabs in the same
+Room section so setup uses one mental model instead of separate competing panels.
+
+Create room supports target lists for direct paths. Nearby can select multiple watchers from the
+list, Manual accepts multiple comma/space-separated `HOST:PORT` targets in the Targets field, and
+Internet uses the Worker room flow by default. The old manual NAT invite fields are still available
+from the Internet tab's Manual invite fallback checkbox for experiments where signaling is not
+available.
 
 Common live session:
 
@@ -147,11 +148,10 @@ the Share command:
 This fanout sends the same encoded video/audio packets to each target without re-encoding the
 screen. The desktop UI exposes the same idea through Nearby multi-select and Manual target lists.
 
-For Internet/NAT rooms, create one sharer room invite and send that same invite to each watcher.
-Share binds the room invite port, accepts valid watcher punch probes, and fans out the same encoded
-stream to every watcher endpoint it learns. If a strict NAT blocks a watcher probe from reaching
-Share, that watcher can create a My invite response and send it back; paste one or more response
-invites into Share so it can send outward to those watchers too.
+For Internet/NAT rooms, the UI's default path uses the signaling Worker room flow. Share opens one
+room port, publishes its STUN candidate, and adds watchers discovered through the room. Watch joins
+the same room and sends UDP punch probes to discovered sharers. The old manual one-invite flow still
+exists behind the Manual invite fallback checkbox for experiments without a Worker.
 
 LAN discovery can find a receiver without manually looking up its IP address. On the watching
 computer, start Watch with LAN advertising:
@@ -214,35 +214,28 @@ prints `watch_command_template`, `share_command_template`, and `probe_command_te
 Replace `<PEER_INVITE>` in those templates with the invite copied from your friend. If the template
 contains `CODE`, replace it with the same access code used to create the invite.
 
-The desktop UI keeps this as a room flow. Generate or paste the shared access code first, then choose
-the Internet tab in Create room. The Create button copies the sharer's room invite to the clipboard
-and shows it in the UI. Send that same invite to each watcher. They open Join room, switch to Internet,
-paste the room invite, and can create/copy their own My invite response from the same listen port.
-If the one-invite path stalls for any watcher, paste that watcher's response invite into Share's
-Watcher invites list before starting Share. The Paste buttons can extract invite links from either raw invite lines or
-copied command output, and the compact status line shows what is still missing before starting. While
-an invite session is running, that same status line switches to live setup states such as probing,
-probe seen, connected, receiving, or rejected.
+The desktop UI now keeps the normal Internet flow as a Worker room. On Create room, keep or change
+the generated room name, then copy the room link. On Join room, paste that room link. The Worker
+server is built into the app, so users do not paste a server URL. The compact status line shows what
+is still missing before starting. While a
+session is running, that same status line switches to live setup states such as connecting, live, or
+disconnected. The older invite buttons are under Manual invite fallback and are only needed for
+manual experiments.
 
-Two-computer UI checklist for invite testing:
+Two-computer UI checklist for Worker room testing:
 
 1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
-2. Generate or paste the same access code on both computers.
-3. On the Share computer, open Create room, switch the Room section to Internet, click Create, and
-   send that invite to the watcher.
+2. On the Share computer, open Create room, use Internet, and copy the room link.
+3. Send that room link to the watcher.
 4. On the Watch computer, open Join room, choose the listen port, switch the Room section to
-   Internet, and paste the room invite.
-5. For Internet NAT pairs that do not connect with the shared room invite, click Create beside My
-   invite on Watch, send that response invite back to the sharer, and paste it into Share's Watcher
-   invites list. LAN/Tailscale/reachable paths can skip this response invite.
-6. Start watching, then start sharing.
-7. A healthy run should move from probing/probe seen to receiving on Watch and connected on Share.
+   Internet, and paste the room link.
+5. Start watching and sharing in either order.
+6. A healthy run should move from connecting to live on both sides.
    If it does not, keep the generated `sender-report.zip` and `receiver-report.zip` from both
    computers.
 
-If Watch stays probing and Share stays waiting for a probe, the receiver's packets did not reach the
-sharer. That is a normal NAT failure for a one-invite, no-server flow. Try the Watch-side My invite
-response, Tailscale/manual IP, or a router port mapping for that network.
+If Watch and Share stay connecting, the peers did not complete UDP hole punching. Try Tailscale/manual
+IP, the Internet tab's Manual invite fallback, or a router port mapping for that network.
 
 An experimental HTTP signaling backend lives in [`signaling-worker/`](signaling-worker/README.md).
 It is a Cloudflare Worker that stores short-lived room membership and peer UDP candidates only.
@@ -268,16 +261,20 @@ returned peer UDP candidates.
 The native live signaling bridge is also available from the CLI. Start Watch with a room:
 
 ```powershell
-.\build\release\ScreenShare.exe --watch 5000 --signal-server https://YOUR-WORKER.workers.dev --signal-room room1
+.\build\release\ScreenShare.exe --watch 5000 --signal-room room1
 ```
 
 Then start Share from its room UDP port:
 
 ```powershell
-.\build\release\ScreenShare.exe --share-room 5001 --signal-server https://YOUR-WORKER.workers.dev --signal-room room1
+.\build\release\ScreenShare.exe --share-room 5001 --signal-room room1
 ```
 
-Both sides use STUN to publish their public UDP candidate to the Worker. Share resolves the room's
+Live room commands use the built-in ScreenShare signaling Worker by default. Add
+`--signal-server URL` only to test a different Worker. Both sides use STUN to publish their public
+UDP candidate to the Worker and also publish a local host candidate when one is available. The local
+candidate makes same-PC and same-LAN room tests use the direct local path instead of depending on
+router hairpin behavior. Share resolves the room's
 watcher candidates into UDP send targets, while Watch resolves room candidates into NAT probe
 targets. Use `--signal-stun HOST[:PORT]` to override the default STUN server and
 `--signal-setup-seconds S` to wait longer for room peers during startup. After startup, both sides

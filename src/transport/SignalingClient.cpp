@@ -663,8 +663,8 @@ void ValidateSignalingPeerId(const std::string& peerId)
 
 void ValidateSignalingCandidate(const SignalingCandidate& candidate)
 {
-    if (candidate.type != "srflx") {
-        throw std::invalid_argument("Signaling candidate type must be srflx");
+    if (candidate.type != "srflx" && candidate.type != "host") {
+        throw std::invalid_argument("Signaling candidate type must be srflx or host");
     }
     if (candidate.protocol != "udp") {
         throw std::invalid_argument("Signaling candidate protocol must be udp");
