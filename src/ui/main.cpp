@@ -1026,7 +1026,6 @@ private:
         auto* internetContent = new QVBoxLayout(internetPage);
         internetContent->setContentsMargins(0, 0, 0, 0);
         internetContent->setSpacing(8);
-        shareSignalServerEdit_ = new QLineEdit(defaultSignalServer(), internetPage);
         shareSignalRoomEdit_ = new QLineEdit(generatedRoomId());
         shareSignalRoomEdit_->setPlaceholderText("room-name");
         auto* shareRoomRow = new QWidget;
@@ -1317,7 +1316,6 @@ private:
         auto* watchInternetContent = new QVBoxLayout(watchInternetPage);
         watchInternetContent->setContentsMargins(0, 0, 0, 0);
         watchInternetContent->setSpacing(8);
-        watchSignalServerEdit_ = new QLineEdit(defaultSignalServer(), watchInternetPage);
         watchSignalRoomEdit_ = new QLineEdit;
         watchSignalRoomEdit_->setPlaceholderText("room-name");
         auto* watchRoomRow = new QWidget;
@@ -1566,8 +1564,6 @@ private:
 
         bindLineEdit(shareHostEdit_);
         connect(shareHostEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
-        bindLineEdit(shareSignalServerEdit_);
-        connect(shareSignalServerEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(shareSignalRoomEdit_);
         connect(shareSignalRoomEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(shareLocalInviteEdit_);
@@ -1593,8 +1589,6 @@ private:
             updateInternetStatus();
         });
         connect(lanDiscoverableCheck_, &QCheckBox::toggled, this, [this] { updateInternetStatus(); });
-        bindLineEdit(watchSignalServerEdit_);
-        connect(watchSignalServerEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(watchSignalRoomEdit_);
         connect(watchSignalRoomEdit_, &QLineEdit::textChanged, this, [this] { updateInternetStatus(); });
         bindLineEdit(watchPeerInviteEdit_);
@@ -1736,18 +1730,6 @@ private:
         return watchLegacyInviteCheck_ != nullptr && watchLegacyInviteCheck_->isChecked();
     }
 
-    QString shareSignalServer() const
-    {
-        const QString server = shareSignalServerEdit_ == nullptr ? QString() : shareSignalServerEdit_->text().trimmed();
-        return server.isEmpty() ? defaultSignalServer() : server;
-    }
-
-    QString watchSignalServer() const
-    {
-        const QString server = watchSignalServerEdit_ == nullptr ? QString() : watchSignalServerEdit_->text().trimmed();
-        return server.isEmpty() ? defaultSignalServer() : server;
-    }
-
     QString shareSignalRoom() const
     {
         return shareSignalRoomEdit_ == nullptr ? QString() : shareSignalRoomEdit_->text().trimmed();
@@ -1790,7 +1772,6 @@ private:
             return;
         }
 
-        watchSignalServerEdit_->setText(defaultSignalServer());
         watchSignalRoomEdit_->setText(room);
         watchPortSpin_->setValue(port);
         appendOutput("Room link pasted from clipboard\n");
@@ -2148,7 +2129,6 @@ private:
                     }
                 } else {
                     args << "--share-room" << QString::number(shareInvitePortSpin_->value())
-                         << "--signal-server" << shareSignalServer()
                          << "--signal-room" << shareSignalRoom();
                     if (!stunServer().isEmpty()) {
                         args << "--signal-stun" << stunServer();
@@ -2190,8 +2170,7 @@ private:
                         args << "--peer-invite" << peerInvite;
                     }
                 } else {
-                    args << "--signal-server" << watchSignalServer()
-                         << "--signal-room" << watchSignalRoom();
+                    args << "--signal-room" << watchSignalRoom();
                     if (!stunServer().isEmpty()) {
                         args << "--signal-stun" << stunServer();
                     }
@@ -3700,7 +3679,6 @@ private:
     QPushButton* manualConnectionButton_ = nullptr;
     PageStack* shareConnectionStack_ = nullptr;
     ShareConnectionMethod shareConnectionMethod_ = ShareConnectionMethod::InternetInvite;
-    QLineEdit* shareSignalServerEdit_ = nullptr;
     QLineEdit* shareSignalRoomEdit_ = nullptr;
     QPushButton* newShareRoomButton_ = nullptr;
     QPushButton* copyShareRoomButton_ = nullptr;
@@ -3730,7 +3708,6 @@ private:
     QPushButton* watchInternetButton_ = nullptr;
     PageStack* watchConnectionStack_ = nullptr;
     WatchConnectionMethod watchConnectionMethod_ = WatchConnectionMethod::InternetInvite;
-    QLineEdit* watchSignalServerEdit_ = nullptr;
     QLineEdit* watchSignalRoomEdit_ = nullptr;
     QPushButton* pasteWatchRoomLinkButton_ = nullptr;
     QCheckBox* watchLegacyInviteCheck_ = nullptr;
