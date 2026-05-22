@@ -107,7 +107,7 @@ output device that does not contain the audio you actually want to share.
 
 The UI opens the Room section on Internet by default. Keep or change the generated room name on
 Create room, then copy the room link and send it to your friend. Join room can paste
-that link to fill the room and port. The built-in Worker only exchanges UDP candidates; video and
+that link to fill the room name while keeping its own local listen port. The built-in Worker only exchanges UDP candidates; video and
 audio still go directly between computers. Nearby, Internet, and Manual live as tabs in the same
 Room section so setup uses one mental model instead of separate competing panels.
 

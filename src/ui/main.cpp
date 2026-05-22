@@ -237,10 +237,10 @@ bool validRoomId(const QString& roomId)
     return pattern.match(roomId).hasMatch();
 }
 
-QString roomLink(const QString& room, int port)
+QString roomLink(const QString& room)
 {
-    return QStringLiteral("%1room=%2;port=%3")
-        .arg(QString::fromUtf8(kRoomLinkPrefix), room.trimmed(), QString::number(port));
+    return QStringLiteral("%1room=%2")
+        .arg(QString::fromUtf8(kRoomLinkPrefix), room.trimmed());
 }
 
 QString defaultSignalServer()
@@ -281,7 +281,7 @@ bool parseRoomLink(const QString& text, QString* server, QString* room, int* por
         }
     }
 
-    if (!validRoomId(parsedRoom) || parsedPort == 0) {
+    if (!validRoomId(parsedRoom)) {
         return false;
     }
     if (server != nullptr) {
@@ -1759,7 +1759,7 @@ private:
             return;
         }
 
-        QApplication::clipboard()->setText(roomLink(room, shareInvitePortSpin_->value()));
+        QApplication::clipboard()->setText(roomLink(room));
         appendOutput("Room link copied to clipboard\n");
     }
 
@@ -1773,7 +1773,6 @@ private:
         }
 
         watchSignalRoomEdit_->setText(room);
-        watchPortSpin_->setValue(port);
         appendOutput("Room link pasted from clipboard\n");
     }
 
@@ -4327,10 +4326,17 @@ int main(int argc, char** argv)
             QString parsedRoom;
             int parsedRoomPort = 0;
             const bool parsedRoomLink = parseRoomLink(
-                "copied room: screenshare-room-v1;room=room-abc_123;port=5001",
+                "copied room: screenshare-room-v1;room=room-abc_123",
                 &parsedRoomServer,
                 &parsedRoom,
                 &parsedRoomPort);
+            QString parsedLegacyRoom;
+            int parsedLegacyRoomPort = 0;
+            const bool parsedLegacyRoomLink = parseRoomLink(
+                "copied room: screenshare-room-v1;room=room-abc_123;port=5001",
+                nullptr,
+                &parsedLegacyRoom,
+                &parsedLegacyRoomPort);
             return peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("ss1e:") &&
@@ -4347,7 +4353,10 @@ int main(int argc, char** argv)
                 parsedRoomLink &&
                 parsedRoomServer == defaultSignalServer() &&
                 parsedRoom == "room-abc_123" &&
-                parsedRoomPort == 5001 ? 0 : 2;
+                parsedRoomPort == 0 &&
+                parsedLegacyRoomLink &&
+                parsedLegacyRoom == "room-abc_123" &&
+                parsedLegacyRoomPort == 5001 ? 0 : 2;
         }
     }
 

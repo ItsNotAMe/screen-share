@@ -45,7 +45,8 @@
 - Runtime live signaling uses periodic `join` calls as both heartbeat and peer refresh.
 - Share no longer requires Watch to be present during startup; it can wait for room peers and add them while running.
 - Watch can add newly discovered room peers as NAT probe targets while running.
-- The Qt UI's default Internet path now launches the live signaling bridge directly against the built-in Worker URL `https://screenshare-signaling.bit-yeet.workers.dev` and exchanges a small `screenshare-room-v1` link that contains room ID and port only. This link is not a secret.
+- The Qt UI's default Internet path now launches the live signaling bridge directly against the built-in Worker URL `https://screenshare-signaling.bit-yeet.workers.dev` and exchanges a small `screenshare-room-v1` link that contains only the room ID. This link is not a secret.
+- Room links should not set the watcher's UDP listen port. Each side publishes its own chosen UDP port through Worker candidates, which also keeps same-PC tests from binding both processes to the same port.
 - Live room joins publish both `srflx` STUN/public candidates and a `host` local candidate when STUN reveals a usable local address. This keeps same-PC and same-LAN tests from depending on NAT hairpin support.
 - Live integration should still use HTTP polling; no WebSockets needed yet.
 - Workers KV is acceptable for the first small implementation, but it is eventually consistent. If room state races become a real problem, move live room state to Durable Objects.
