@@ -91,6 +91,8 @@ constexpr int DefaultShareUdpMaxQueueMs = 1500;
 constexpr uint32_t DefaultUdpPacingHeadroomPercent = 125;
 constexpr int MaxAvSyncCorrectionBiasMs = 250;
 constexpr uint64_t AvSyncVideoOnlyFallbackFrames = 30;
+constexpr uint64_t SenderDirectUdpBlockedDatagrams = 1024;
+constexpr uint64_t ReceiverDirectUdpBlockedNatProbes = 120;
 constexpr std::string_view DefaultSignalingServerUrl = "https://screenshare-signaling.bit-yeet.workers.dev";
 
 struct UdpSendTargetSpec {
@@ -1854,6 +1856,9 @@ const char* SenderNatStatus(const Options& options, const screenshare::UdpSender
     if (stats.natProbePacketsReceived > 0) {
         return "probe_seen";
     }
+    if (stats.datagramsSent >= SenderDirectUdpBlockedDatagrams) {
+        return "direct_udp_blocked";
+    }
     if (stats.datagramsSent > 0) {
         return "waiting_for_probe";
     }
@@ -1880,6 +1885,9 @@ const char* SenderNatHint(const Options& options, const screenshare::UdpSenderSt
     }
     if (status == "probe_seen") {
         return "probe_seen_no_endpoint_change";
+    }
+    if (status == "direct_udp_blocked") {
+        return "signaling_ok_but_no_udp_path_try_tailscale_or_relay";
     }
     if (status == "waiting_for_probe") {
         return "start_watch_with_peer_invite_or_check_firewall";
@@ -1909,6 +1917,9 @@ const char* ReceiverNatStatus(
     if (stats.natProbeSendErrors > 0) {
         return "probe_send_errors";
     }
+    if (stats.natProbePublicPacketsSent + stats.natProbeLocalPacketsSent >= ReceiverDirectUdpBlockedNatProbes) {
+        return "direct_udp_blocked";
+    }
     if (stats.natProbePublicPacketsSent > 0 || stats.natProbeLocalPacketsSent > 0) {
         return "probing";
     }
@@ -1935,6 +1946,9 @@ const char* ReceiverNatHint(
     }
     if (status == "probe_send_errors") {
         return "check_peer_invite_endpoint";
+    }
+    if (status == "direct_udp_blocked") {
+        return "signaling_ok_but_no_udp_path_try_tailscale_or_relay";
     }
     if (status == "probing") {
         return "start_share_or_wait_for_signaling_peer";

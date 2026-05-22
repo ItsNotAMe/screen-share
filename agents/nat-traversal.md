@@ -37,6 +37,7 @@
 - Current UI supports the no-server two-sided fallback: Watch can create a My invite response from its listen port, and Share can paste one or more watcher response invites while still passing its own room invite as `--local-invite`.
 - NAT multi-viewer direction: the cleaner path is one sharer room invite plus optional watcher response invites. Share binds the room invite local port, accepts valid Watch NAT probes on that socket, sends outward to pasted watcher response endpoints, and fans out media to every learned watcher endpoint. The old per-watcher sharer-local invite model should not be the main UI model.
 - Signaling direction: `signaling-worker/` is the first room-membership/candidate-exchange backend. Native integration should still use one UDP socket, STUN, simultaneous UDP probes, and direct encrypted UDP media.
+- Cross-LAN report from 2026-05-22 showed successful Worker signaling but no direct UDP packets crossed. The regression was in the signaling room sender path: when a peer had both public and host candidates, `preferNatProbeTargets` treated the host candidate as enough to suppress the primary public candidate before any probe-derived endpoint existed. Keep static public/host candidates active until a real NAT-probe endpoint is learned; only then prefer probe endpoints.
 
 ## Follow-Up Shape
 

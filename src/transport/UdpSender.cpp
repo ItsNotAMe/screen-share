@@ -885,12 +885,15 @@ void UdpSender::SendDatagramBytes(const std::vector<std::byte>& datagram)
         if (address_.empty() || addressLength_ <= 0) {
             throw std::runtime_error("UDP sender target address is not available");
         }
-        if (!config_.preferNatProbeTargets || (additionalAddresses_.empty() && natProbeAddresses_.empty())) {
+        const bool useStaticTargets = !config_.preferNatProbeTargets || natProbeAddresses_.empty();
+        if (useStaticTargets) {
             addresses.push_back(address_);
         }
-        for (const auto& address : additionalAddresses_) {
-            if (std::find(addresses.begin(), addresses.end(), address) == addresses.end()) {
-                addresses.push_back(address);
+        if (useStaticTargets) {
+            for (const auto& address : additionalAddresses_) {
+                if (std::find(addresses.begin(), addresses.end(), address) == addresses.end()) {
+                    addresses.push_back(address);
+                }
             }
         }
         for (const auto& address : natProbeAddresses_) {

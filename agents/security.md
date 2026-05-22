@@ -26,16 +26,17 @@
 - PR #57 merged this layer.
 - CLI adds `--generate-access-code` for CNG-generated 20-character base32-ish codes grouped with dashes.
 - CLI adds `--allow-plaintext` to explicitly acknowledge unencrypted UDP mode and suppress the plaintext warning.
-- Qt UI requires either an access code or the explicit plaintext checkbox before Start.
-- Qt UI can generate and copy an access code; command preview continues to redact the raw code.
+- Qt UI Worker rooms generate a hidden room key and pass it to the engine as `--access-code` automatically. Users copy the secure room link instead of typing an access code.
+- Qt UI manual/Nearby/fallback flows still use the visible access-code field or explicit plaintext checkbox.
+- Qt UI can generate and copy a manual access code; command preview continues to redact the raw code.
 - Qt UI should surface bad access-code paths without exposing secrets: invite decrypt failures, fingerprint mismatches, and rejected-packet counters clear/focus the access-code field and warn once per run.
 - LAN discovery should stay access-code-only for now. It can advertise and compare fingerprints, but it must not broadcast raw access codes.
 
 ## Room-Key Direction
 
-- Future room UX should hide "access code" from normal users.
-- Rooms should be encrypted by default even when the user does not type a password.
-- The native app should generate a high-entropy hidden room key automatically and carry it through local invite/session state without sending it to signaling.
+- Worker rooms hide "access code" from normal users.
+- Rooms are encrypted by default even when the user does not type a password.
+- The native app generates a high-entropy hidden room key automatically and carries it in the room link/session state without sending it to signaling.
 - A visible room password can be added later as an optional extra lock, but it should not be required for encrypted media.
 - The signaling Worker must never receive raw room keys, passwords, or media encryption material. It only sees room IDs, peer IDs, and UDP candidates.
 

@@ -2,7 +2,7 @@
 
 ## Ordered Roadmap
 
-1. Replace visible "access code" UX with secure-by-default hidden room keys. The app should auto-generate the key, keep UDP encrypted even with no typed password, and only show a separate room password if the user explicitly enables one.
+1. Add a KV-backed active room directory for browseable room summaries while keeping live signaling state in Durable Objects. Include a safe `GET /rooms` endpoint for future UI room-list viewing.
 2. Validate NAT multi-viewer rooms with real computers using the signaling flow. Follow-ups after testing: per-viewer connection/health display, optional per-viewer bandwidth policy, and better fallback UX for watchers whose NAT still needs direct invite/manual help.
 3. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: auto-updating available rooms/devices list, locked-room indicators, optional password prompt on join, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
 4. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
@@ -25,6 +25,9 @@ Only pick these up when reports show the need; normal audio and no-audio fallbac
 ## NAT Traversal Follow-Ups
 
 - Keep media relay/TURN out of the main path unless direct STUN/signaling/manual invite/hole punching proves insufficient.
+- Re-test cross-LAN Worker rooms after the static-candidate fanout fix; if `direct_udp_blocked` still appears, compare whether sender is transmitting to the peer public endpoint before deciding on fallback UX.
+- Re-test opening a second fresh Worker room after deploying the Durable Object signaling state change; the 2026-05-22 report showed Watch saw Share while Share stayed at zero targets, consistent with KV eventual-consistency races.
+- If repeated reports still show true `direct_udp_blocked`, decide on the fallback UX: recommend Tailscale/mesh VPN clearly, or add an optional relay/TURN path for networks that refuse UDP hole punching.
 - Consider optional UPnP/NAT-PMP port mapping after the two-sided invite flow if users still hit blocked paths.
 
 ## Conditional / Deferred

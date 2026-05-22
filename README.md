@@ -106,10 +106,11 @@ output-device picker for system audio, which is useful when Windows or a virtual
 output device that does not contain the audio you actually want to share.
 
 The UI opens the Room section on Internet by default. Keep or change the generated room name on
-Create room, then copy the room link and send it to your friend. Join room can paste
-that link to fill the room name while keeping its own local listen port. The built-in Worker only exchanges UDP candidates; video and
-audio still go directly between computers. Nearby, Internet, and Manual live as tabs in the same
-Room section so setup uses one mental model instead of separate competing panels.
+Create room, then copy the secure room link and send it to your friend. Join room can paste
+that link to fill the room name and hidden room key while keeping its own local listen port. The
+built-in Worker only exchanges UDP candidates; video and audio still go directly between computers.
+The Worker does not receive the hidden room key. Nearby, Internet, and Manual live as tabs in the
+same Room section so setup uses one mental model instead of separate competing panels.
 
 Create room supports target lists for direct paths. Nearby can select multiple watchers from the
 list, Manual accepts multiple comma/space-separated `HOST:PORT` targets in the Targets field, and
@@ -215,9 +216,10 @@ Replace `<PEER_INVITE>` in those templates with the invite copied from your frie
 contains `CODE`, replace it with the same access code used to create the invite.
 
 The desktop UI now keeps the normal Internet flow as a Worker room. On Create room, keep or change
-the generated room name, then copy the room link. On Join room, paste that room link. The Worker
-server is built into the app, so users do not paste a server URL. The compact status line shows what
-is still missing before starting. While a
+the generated room name, then copy the secure room link. On Join room, paste that room link. The
+link carries a hidden room key so media stays encrypted without typing an access code, and the
+Worker server is built into the app, so users do not paste a server URL. The compact status line
+shows what is still missing before starting. While a
 session is running, that same status line switches to live setup states such as connecting, live, or
 disconnected. The older invite buttons are under Manual invite fallback and are only needed for
 manual experiments.
@@ -225,7 +227,7 @@ manual experiments.
 Two-computer UI checklist for Worker room testing:
 
 1. On both computers, start `ScreenShareUi.exe` from the same fresh portable build folder.
-2. On the Share computer, open Create room, use Internet, and copy the room link.
+2. On the Share computer, open Create room, use Internet, and copy the secure room link.
 3. Send that room link to the watcher.
 4. On the Watch computer, open Join room, choose the listen port, switch the Room section to
    Internet, and paste the room link.
