@@ -44,6 +44,7 @@
   - Share room peers become UDP send targets on one local room port.
 - Runtime live signaling uses periodic `join` calls as both heartbeat and peer refresh.
 - Share no longer requires Watch to be present during startup; it can wait for room peers and add them while running.
+- If Share starts before Watch, the sender must create its UDP sender lazily when the first Worker peer candidate arrives. Do not tie UDP sender creation only to initial stream encoder startup.
 - Watch can add newly discovered room peers as NAT probe targets while running.
 - The Qt UI's default Internet path now launches the live signaling bridge directly against the built-in Worker URL `https://screenshare-signaling.bit-yeet.workers.dev` and exchanges a small `screenshare-room-v1` link that contains only the room ID. This link is not a secret.
 - Room links should not set the watcher's UDP listen port. Each side publishes its own chosen UDP port through Worker candidates, which also keeps same-PC tests from binding both processes to the same port.
