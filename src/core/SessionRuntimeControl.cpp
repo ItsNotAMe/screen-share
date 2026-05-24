@@ -58,6 +58,51 @@ std::optional<RuntimeResolutionRequest> NullSessionRuntimeControl::TakeResolutio
     return std::nullopt;
 }
 
+bool MemorySessionRuntimeControl::StopRequested()
+{
+    std::scoped_lock lock(mutex_);
+    return stopRequested_;
+}
+
+std::optional<RuntimeResolutionRequest> MemorySessionRuntimeControl::TakeResolutionRequest()
+{
+    std::scoped_lock lock(mutex_);
+    auto request = resolutionRequest_;
+    resolutionRequest_.reset();
+    return request;
+}
+
+void MemorySessionRuntimeControl::RequestStop()
+{
+    std::scoped_lock lock(mutex_);
+    stopRequested_ = true;
+}
+
+void MemorySessionRuntimeControl::ResetStop()
+{
+    std::scoped_lock lock(mutex_);
+    stopRequested_ = false;
+}
+
+void MemorySessionRuntimeControl::RequestResolution(RuntimeResolutionRequest request)
+{
+    std::scoped_lock lock(mutex_);
+    resolutionRequest_ = request;
+}
+
+void MemorySessionRuntimeControl::ClearResolutionRequest()
+{
+    std::scoped_lock lock(mutex_);
+    resolutionRequest_.reset();
+}
+
+void MemorySessionRuntimeControl::Reset()
+{
+    std::scoped_lock lock(mutex_);
+    stopRequested_ = false;
+    resolutionRequest_.reset();
+}
+
 FileSessionRuntimeControl::FileSessionRuntimeControl(std::string stopFilePath, std::string controlFilePath)
     : stopFilePath_(std::move(stopFilePath)),
       controlFilePath_(std::move(controlFilePath))
