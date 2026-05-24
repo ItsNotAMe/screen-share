@@ -35,8 +35,7 @@ else()
     set(SCREENSHARE_OPUS_TARGET ScreenShareOpus)
 endif()
 
-add_executable(ScreenShare
-    src/app/main.cpp
+add_library(ScreenShareCore STATIC
     src/audio/OpusCodec.cpp
     src/audio/WasapiCapture.cpp
     src/audio/WasapiRenderer.cpp
@@ -46,6 +45,7 @@ add_executable(ScreenShare
     src/codec/H264EncoderProbe.cpp
     src/codec/H264StreamDecoder.cpp
     src/codec/H264StreamEncoder.cpp
+    src/core/SessionBackend.cpp
     src/render/ReceiverPreviewWindow.cpp
     src/transport/NatTraversal.cpp
     src/transport/SignalingClient.cpp
@@ -58,9 +58,9 @@ add_executable(ScreenShare
     src/video/Nv12Convert.cpp
 )
 
-target_compile_features(ScreenShare PRIVATE cxx_std_20)
+target_compile_features(ScreenShareCore PUBLIC cxx_std_20)
 
-target_include_directories(ScreenShare PRIVATE
+target_include_directories(ScreenShareCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
@@ -72,24 +72,20 @@ if(WIN32)
         list(SORT _cppwinrt_include_dirs)
         list(REVERSE _cppwinrt_include_dirs)
         list(GET _cppwinrt_include_dirs 0 _cppwinrt_include_dir)
-        target_include_directories(ScreenShare PRIVATE "${_cppwinrt_include_dir}")
+        target_include_directories(ScreenShareCore PUBLIC "${_cppwinrt_include_dir}")
     endif()
 endif()
 
-target_compile_definitions(ScreenShare PRIVATE
+target_compile_definitions(ScreenShareCore PUBLIC
     WIN32_LEAN_AND_MEAN
     NOMINMAX
 )
 
 if(MSVC)
-    target_compile_options(ScreenShare PRIVATE /W4 /permissive- /EHsc)
+    target_compile_options(ScreenShareCore PRIVATE /W4 /permissive- /EHsc)
 endif()
 
-if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
-    target_link_options(ScreenShare PRIVATE -static)
-endif()
-
-target_link_libraries(ScreenShare PRIVATE
+target_link_libraries(ScreenShareCore PUBLIC
     ${SCREENSHARE_OPUS_TARGET}
     d3d11
     d3dcompiler
@@ -112,6 +108,18 @@ target_link_libraries(ScreenShare PRIVATE
     ws2_32
 )
 
+add_executable(ScreenShare
+    src/app/main.cpp
+)
+
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
+    target_link_options(ScreenShare PRIVATE -static)
+endif()
+
+target_link_libraries(ScreenShare PRIVATE
+    ScreenShareCore
+)
+
 if(SCREENSHARE_BUILD_QT_UI)
     if(WIN32 AND EXISTS "C:/msys64/ucrt64/lib/cmake/Qt6")
         list(APPEND CMAKE_PREFIX_PATH "C:/msys64/ucrt64")
@@ -122,14 +130,13 @@ if(SCREENSHARE_BUILD_QT_UI)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
             src/ui/resources.qrc
-            src/transport/UdpCrypto.cpp
         )
         set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)
         target_compile_features(ScreenShareUi PRIVATE cxx_std_20)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
         )
-        target_link_libraries(ScreenShareUi PRIVATE Qt6::Network Qt6::Svg Qt6::Widgets bcrypt shell32)
+        target_link_libraries(ScreenShareUi PRIVATE ScreenShareCore Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX
