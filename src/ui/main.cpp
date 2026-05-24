@@ -1,4 +1,5 @@
 #include "transport/UdpCrypto.h"
+#include "ui/ProcessSessionBackend.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QByteArray>
@@ -1044,39 +1045,33 @@ public:
         resize(640, 820);
         setMinimumSize(560, 720);
 
-        process_ = new QProcess(this);
-        process_->setProcessChannelMode(QProcess::MergedChannels);
-        connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
-            handleProcessOutput(QString::fromLocal8Bit(process_->readAllStandardOutput()));
+        sessionBackend_ = new ProcessSessionBackend(this);
+        sessionBackend_->setOutputHandler([this](const QString& text) {
+            handleProcessOutput(text);
         });
-        connect(process_, &QProcess::started, this, [this] {
+        sessionBackend_->setMessageHandler([this](const QString& text) {
+            appendOutput(text);
+        });
+        sessionBackend_->setStartedHandler([this] {
             appendOutput("Started " + QFileInfo(enginePath()).fileName() + "\n");
             setRunning(true);
         });
-        connect(process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-            Q_UNUSED(error);
-            appendOutput("Process error: " + process_->errorString() + "\n");
-            cleanupStopFile();
-            cleanupControlFile();
+        sessionBackend_->setErrorHandler([this](const QString& errorString) {
+            appendOutput("Process error: " + errorString + "\n");
             setRunning(false);
         });
-        connect(process_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
-            const QString remaining = QString::fromLocal8Bit(process_->readAllStandardOutput());
-            if (!remaining.isEmpty()) {
-                handleProcessOutput(remaining);
+        sessionBackend_->setFinishedHandler([this](const ProcessSessionBackend::FinishInfo& info) {
+            if (!info.remainingOutput.isEmpty()) {
+                handleProcessOutput(info.remainingOutput);
             }
-            if (stopRequested_) {
-                appendOutput(forcedStop_ ?
+            if (info.stopRequested) {
+                appendOutput(info.forcedStop ?
                     "Process was forced closed after stop timed out\n" :
-                    "Process stopped cleanly with exit code " + QString::number(code) + "\n");
+                    "Process stopped cleanly with exit code " + QString::number(info.exitCode) + "\n");
             } else {
-                const QString statusText = status == QProcess::NormalExit ? "finished" : "crashed";
-                appendOutput("Process " + statusText + " with exit code " + QString::number(code) + "\n");
+                const QString statusText = info.exitStatus == QProcess::NormalExit ? "finished" : "crashed";
+                appendOutput("Process " + statusText + " with exit code " + QString::number(info.exitCode) + "\n");
             }
-            cleanupStopFile();
-            cleanupControlFile();
-            stopRequested_ = false;
-            forcedStop_ = false;
             setRunning(false);
         });
 
@@ -2669,7 +2664,7 @@ private:
         if (inviteGenerating()) {
             return;
         }
-        if (process_->state() != QProcess::NotRunning) {
+        if (sessionRunning()) {
             QMessageBox::information(this, "Already running", "Stop the current session before creating an invite.");
             return;
         }
@@ -3030,11 +3025,12 @@ private:
 
     void writeRuntimeResolutionCommand()
     {
-        if (!running_ || !shareMode() || controlFilePath_.isEmpty()) {
+        const QString controlFilePath = sessionBackend_ == nullptr ? QString() : sessionBackend_->controlFilePath();
+        if (!running_ || !shareMode() || controlFilePath.isEmpty()) {
             return;
         }
 
-        QFile controlFile(controlFilePath_);
+        QFile controlFile(controlFilePath);
         if (!controlFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
             appendOutput("Could not write runtime resolution command\n");
             return;
@@ -3059,9 +3055,19 @@ private:
         }
     }
 
+    bool sessionRunning() const
+    {
+        return sessionBackend_ != nullptr && sessionBackend_->isRunning();
+    }
+
+    bool sessionStopRequested() const
+    {
+        return sessionBackend_ != nullptr && sessionBackend_->stopRequested();
+    }
+
     void toggleProcess()
     {
-        if (process_->state() == QProcess::NotRunning) {
+        if (!sessionRunning()) {
             startProcess();
         } else {
             stopProcess();
@@ -3110,7 +3116,7 @@ private:
 
     void startProcess()
     {
-        if (process_->state() != QProcess::NotRunning) {
+        if (sessionRunning()) {
             return;
         }
         if (shareMode()) {
@@ -3197,89 +3203,27 @@ private:
             return;
         }
 
-        stopRequested_ = false;
-        forcedStop_ = false;
-        cleanupStopFile();
-        cleanupControlFile();
-        stopFilePath_ = QDir::temp().filePath(
-            "ScreenShare-stop-" +
-            QString::number(QCoreApplication::applicationPid()) +
-            "-" +
-            QString::number(++runSerial_) +
-            ".signal");
-        QFile::remove(stopFilePath_);
-        if (shareMode()) {
-            controlFilePath_ = QDir::temp().filePath(
-                "ScreenShare-control-" +
-                QString::number(QCoreApplication::applicationPid()) +
-                "-" +
-                QString::number(runSerial_) +
-                ".txt");
-            QFile::remove(controlFilePath_);
-        }
-
         const QStringList displayArgs = displayArguments();
-        QStringList args = currentArguments();
-        args << "--stop-file" << stopFilePath_;
-        if (!controlFilePath_.isEmpty()) {
-            args << "--control-file" << controlFilePath_;
-        }
         appendOutput("\n" + formatCommand(program, displayArgs) + "\n");
-        process_->setProgram(program);
-        process_->setArguments(args);
-        process_->setWorkingDirectory(QFileInfo(program).absolutePath());
-        process_->start();
+        ProcessSessionBackend::StartRequest request;
+        request.program = program;
+        request.arguments = currentArguments();
+        request.enableControlFile = shareMode();
+        QString errorMessage;
+        if (!sessionBackend_->start(request, &errorMessage) && !errorMessage.isEmpty()) {
+            appendOutput("Process error: " + errorMessage + "\n");
+        }
     }
 
     void stopProcess()
     {
-        if (process_->state() == QProcess::NotRunning) {
+        if (!sessionRunning() || sessionStopRequested()) {
             return;
         }
-        if (stopRequested_) {
-            return;
-        }
-        constexpr int kForceStopDelayMs = 1500;
         appendOutput("Stopping...\n");
-        stopRequested_ = true;
+        sessionBackend_->stop();
         applyStatusBadge();
         updateInternetStatus();
-
-        QFile stopFile(stopFilePath_);
-        if (stopFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-            stopFile.write("stop\n");
-            stopFile.close();
-        } else {
-            appendOutput("Could not write graceful stop signal; forcing close if needed\n");
-        }
-
-        const quint64 runSerialAtStop = runSerial_;
-        QTimer::singleShot(kForceStopDelayMs, this, [this, runSerialAtStop] {
-            if (!stopRequested_ ||
-                runSerialAtStop != runSerial_ ||
-                process_->state() == QProcess::NotRunning) {
-                return;
-            }
-            appendOutput("Stop cleanup timed out; forcing process closed...\n");
-            forcedStop_ = true;
-            process_->kill();
-        });
-    }
-
-    void cleanupStopFile()
-    {
-        if (!stopFilePath_.isEmpty()) {
-            QFile::remove(stopFilePath_);
-            stopFilePath_.clear();
-        }
-    }
-
-    void cleanupControlFile()
-    {
-        if (!controlFilePath_.isEmpty()) {
-            QFile::remove(controlFilePath_);
-            controlFilePath_.clear();
-        }
     }
 
     QVector<DisplayChoice> fallbackDisplayChoices() const
@@ -3697,7 +3641,7 @@ private:
         if (automatic && !shareMode()) {
             return;
         }
-        if (process_->state() != QProcess::NotRunning) {
+        if (sessionRunning()) {
             if (!automatic) {
                 QMessageBox::information(this, "Already running", "Stop the current session before refreshing targets.");
             }
@@ -4032,14 +3976,14 @@ private:
     void setDiscovering(bool discovering)
     {
         if (findLanButton_ != nullptr) {
-            findLanButton_->setEnabled(!discovering && process_->state() == QProcess::NotRunning);
+            findLanButton_->setEnabled(!discovering && !sessionRunning());
             findLanButton_->setText(discovering ? "Scanning..." : "Refresh");
         }
         updateReceiverStatus(discovering);
         if (receiverList_ != nullptr) {
             receiverList_->setEnabled(!discovering);
         }
-        if (process_->state() == QProcess::NotRunning) {
+        if (!sessionRunning()) {
             if (discovering) {
                 statusBadge_->setText("◔  Finding");
                 statusBadge_->setProperty("class", "StatusConnecting");
@@ -4054,7 +3998,7 @@ private:
     void setDisplayRefreshing(bool refreshing)
     {
         if (refreshDisplaysButton_ != nullptr) {
-            refreshDisplaysButton_->setEnabled(!refreshing && process_->state() == QProcess::NotRunning);
+            refreshDisplaysButton_->setEnabled(!refreshing && !sessionRunning());
             refreshDisplaysButton_->setText(refreshing ? "Scanning..." : "Refresh");
         }
     }
@@ -4062,7 +4006,7 @@ private:
     void setAudioDeviceRefreshing(bool refreshing)
     {
         if (refreshAudioDevicesButton_ != nullptr) {
-            refreshAudioDevicesButton_->setEnabled(!refreshing && process_->state() == QProcess::NotRunning);
+            refreshAudioDevicesButton_->setEnabled(!refreshing && !sessionRunning());
             refreshAudioDevicesButton_->setText(refreshing ? "Scanning..." : "Refresh");
         }
         if (audioDeviceStatusLabel_ != nullptr) {
@@ -4078,7 +4022,7 @@ private:
     {
         updateInternetAdvancedVisibility();
         const bool creating = inviteGenerating();
-        const bool running = process_ != nullptr && process_->state() != QProcess::NotRunning;
+        const bool running = sessionRunning();
         const bool canCreate = !creating && !running;
         if (newShareRoomButton_ != nullptr) {
             newShareRoomButton_->setEnabled(!running);
@@ -4269,7 +4213,7 @@ private:
 
     QString runtimeInternetStatusText(bool share) const
     {
-        if (running_ && stopRequested_ && share == shareMode()) {
+        if (running_ && sessionStopRequested() && share == shareMode()) {
             return share ? "Stopping Share..." : "Stopping Watch...";
         }
         if (running_ && share == shareMode() && peerActivitySeen_ && !peerConnected_) {
@@ -4457,7 +4401,7 @@ private:
             if (statusOpacityEffect_ != nullptr) {
                 statusOpacityEffect_->setOpacity(1.0);
             }
-        } else if (stopRequested_) {
+        } else if (sessionStopRequested()) {
             statusBadge_->setText("◌  Stopping");
             statusBadge_->setProperty("class", "StatusConnecting");
             statusBadge_->setToolTip(shareMode() ?
@@ -4539,9 +4483,8 @@ private:
     void handlePreviewClosedSignal(const QString& text)
     {
         if (shareMode() ||
-            stopRequested_ ||
-            process_ == nullptr ||
-            process_->state() == QProcess::NotRunning ||
+            sessionStopRequested() ||
+            !sessionRunning() ||
             !text.contains("preview_closed=stop")) {
             return;
         }
@@ -4583,7 +4526,7 @@ private:
 
             stopProcess();
             clearRoomKeyForRetry(
-                process_ != nullptr && process_->state() != QProcess::NotRunning ?
+                sessionRunning() ?
                     "The stream was rejected by the room encryption key. Stop the current run, check the room/password, then start again." :
                     "The stream was rejected by the room encryption key. Check the room/password, then start again.",
                 "Room encryption mismatch");
@@ -4598,7 +4541,7 @@ private:
         }
 
         clearAccessCodeForRetry(
-            process_ != nullptr && process_->state() != QProcess::NotRunning ?
+            sessionRunning() ?
                 "The room invite or incoming packets were rejected with this access code. Stop the current run, enter the same access code on both computers, then start again." :
                 "The room invite or incoming packets were rejected with this access code. Enter the same access code on both computers, then start again.");
     }
@@ -4855,7 +4798,7 @@ private:
 
     void updateConnectionState(const QString& text)
     {
-        if (process_ == nullptr || process_->state() == QProcess::NotRunning) {
+        if (!sessionRunning()) {
             return;
         }
         bool activeNow = false;
@@ -4921,7 +4864,7 @@ private:
     QLabel* commandPreview_ = nullptr;
     QPlainTextEdit* outputEdit_ = nullptr;
     QPushButton* actionButton_ = nullptr;
-    QProcess* process_ = nullptr;
+    ProcessSessionBackend* sessionBackend_ = nullptr;
     bool running_ = false;
     bool peerConnected_ = false;
     bool peerActivitySeen_ = false;
@@ -5012,11 +4955,6 @@ private:
     QLineEdit* reportPathEdit_ = nullptr;
     QPushButton* browseReportButton_ = nullptr;
     bool reportPathEdited_ = false;
-    bool stopRequested_ = false;
-    bool forcedStop_ = false;
-    quint64 runSerial_ = 0;
-    QString stopFilePath_;
-    QString controlFilePath_;
     QString discoveryOutput_;
     QString tailscaleOutput_;
     QString displayOutput_;
