@@ -1,3 +1,5 @@
+#include "app/ScreenShareApp.h"
+
 #include "audio/OpusCodec.h"
 #include "audio/WasapiCapture.h"
 #include "audio/WasapiRenderer.h"
@@ -7827,7 +7829,7 @@ void RunUdpReceiverStats(
 
 } // namespace
 
-int main(int argc, char** argv)
+int RunScreenShareApp(int argc, char** argv)
 {
     std::unique_ptr<ScopedLogRedirect> logRedirect;
     const auto saveReportPath = FindPathArgument(argc, argv, "--save-report");
