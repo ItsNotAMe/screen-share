@@ -110,6 +110,7 @@ WGC capture by default
 - `src/core/SessionCommand.*`: typed room Share/Watch config to engine-argument bridge used by the current process adapter while the in-process backend is being extracted.
 - `src/core/SessionRuntimeControl.*`: shared stop/runtime-settings control interface. CLI runs currently use the file-backed implementation; the future in-process backend can use the memory-backed implementation for stop/settings requests.
 - `src/app/ScreenShareApp.*`: callable CLI app runner built as the `ScreenShareAppRunner` static library and used by the tiny `src/app/ScreenShareMain.cpp` executable entry point. This keeps the orchestration separable for later in-process backend extraction.
+- `src/app/InProcessSessionBackend.*`: first pure C++ `ISessionBackend` adapter that runs `ScreenShareAppRunner` on a worker thread with `MemorySessionRuntimeControl`. It is not the Qt default yet.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
   The Qt UI embeds the current mark/icons through `src/ui/resources.qrc` and links/packages QtSvg for SVG rendering.
