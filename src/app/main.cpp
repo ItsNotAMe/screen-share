@@ -2053,12 +2053,31 @@ void MergeReceiverFeedback(
     aggregate.hasFeedback = true;
 }
 
+std::string UdpEndpointText(const std::string& host, uint16_t port)
+{
+    return host + ":" + std::to_string(port);
+}
+
 class UdpSenderFanout {
 public:
     struct Target {
         std::unique_ptr<screenshare::UdpSender> sender;
+        std::string endpoint;
+        std::vector<std::string> additionalEndpoints;
         bool failed = false;
         std::string error;
+    };
+
+    struct ViewerSnapshot {
+        size_t group = 0;
+        std::string endpoint;
+        bool failed = false;
+        std::string error;
+        uint64_t feedbackPacketsReceived = 0;
+        uint64_t pendingDatagrams = 0;
+        uint64_t pendingQueueDelayMs = 0;
+        bool hasFeedback = false;
+        screenshare::udp_protocol::FeedbackSnapshot latestFeedback{};
     };
 
     void Open(const std::vector<screenshare::UdpSenderConfig>& configs)
@@ -2071,7 +2090,14 @@ public:
         for (const auto& config : configs) {
             auto sender = std::make_unique<screenshare::UdpSender>();
             sender->Open(config);
-            targets_.push_back(Target{std::move(sender)});
+            Target target;
+            target.sender = std::move(sender);
+            target.endpoint = UdpEndpointText(config.host, config.port);
+            target.additionalEndpoints.reserve(config.additionalTargets.size());
+            for (const auto& additional : config.additionalTargets) {
+                target.additionalEndpoints.push_back(UdpEndpointText(additional.host, additional.port));
+            }
+            targets_.push_back(std::move(target));
         }
     }
 
@@ -2086,7 +2112,11 @@ public:
             if (target.failed || target.sender == nullptr || !target.sender->isOpen()) {
                 continue;
             }
-            return target.sender->AddAdditionalTarget(endpoint);
+            const bool added = target.sender->AddAdditionalTarget(endpoint);
+            if (added) {
+                target.additionalEndpoints.push_back(UdpEndpointText(endpoint.host, endpoint.port));
+            }
+            return added;
         }
         throw std::runtime_error("No active UDP sender target is available for live signaling");
     }
@@ -2220,8 +2250,61 @@ public:
             if (current.hasFeedback) {
                 MergeReceiverFeedback(aggregate, current.latestFeedback);
             }
+            for (const auto& peer : current.feedbackPeers) {
+                auto existing = std::find_if(
+                    aggregate.feedbackPeers.begin(),
+                    aggregate.feedbackPeers.end(),
+                    [&](const screenshare::UdpSenderStats::FeedbackPeer& candidate) {
+                        return candidate.endpoint == peer.endpoint;
+                    });
+                if (existing == aggregate.feedbackPeers.end()) {
+                    aggregate.feedbackPeers.push_back(peer);
+                } else {
+                    existing->packetsReceived += peer.packetsReceived;
+                    existing->latestFeedback = peer.latestFeedback;
+                }
+            }
         }
         return aggregate;
+    }
+
+    [[nodiscard]] std::vector<ViewerSnapshot> viewerSnapshots() const
+    {
+        std::vector<ViewerSnapshot> snapshots;
+        for (size_t targetIndex = 0; targetIndex < targets_.size(); ++targetIndex) {
+            const auto& target = targets_[targetIndex];
+            const screenshare::UdpSenderStats stats =
+                target.sender != nullptr ? target.sender->stats() : screenshare::UdpSenderStats{};
+
+            auto buildSnapshot = [&](const std::string& endpoint) {
+                ViewerSnapshot snapshot;
+                snapshot.group = targetIndex;
+                snapshot.endpoint = endpoint;
+                snapshot.failed = target.failed;
+                snapshot.error = target.error;
+                snapshot.pendingDatagrams = stats.pendingDatagrams;
+                snapshot.pendingQueueDelayMs = stats.pendingQueueDelayMs;
+                return snapshot;
+            };
+
+            if (stats.feedbackPeers.empty()) {
+                snapshots.push_back(buildSnapshot(target.endpoint));
+                continue;
+            }
+
+            std::set<std::string> emittedEndpoints;
+            for (const auto& peer : stats.feedbackPeers) {
+                if (!emittedEndpoints.insert(peer.endpoint).second) {
+                    continue;
+                }
+                ViewerSnapshot snapshot = buildSnapshot(peer.endpoint);
+                snapshot.feedbackPacketsReceived = peer.packetsReceived;
+                snapshot.hasFeedback = true;
+                snapshot.latestFeedback = peer.latestFeedback;
+                snapshots.push_back(std::move(snapshot));
+            }
+        }
+        return snapshots;
     }
 
 private:
@@ -2281,6 +2364,42 @@ void RecordLatestReceiverFeedback(
 {
     if (feedback) {
         reportContext.latestReceiverFeedback = *feedback;
+    }
+}
+
+void PrintViewerSnapshots(const UdpSenderFanout& udpSender)
+{
+    const auto viewers = udpSender.viewerSnapshots();
+    for (size_t index = 0; index < viewers.size(); ++index) {
+        const auto& viewer = viewers[index];
+        const char* state =
+            viewer.failed ? "failed" :
+            (viewer.hasFeedback ? "feedback" : "waiting");
+        std::cout
+            << "viewer_target=" << index
+            << " viewer_group=" << viewer.group
+            << " viewer_endpoint=" << (viewer.endpoint.empty() ? "unknown" : viewer.endpoint)
+            << " viewer_state=" << state
+            << " viewer_feedback_packets=" << viewer.feedbackPacketsReceived
+            << " viewer_pending=" << viewer.pendingDatagrams
+            << " viewer_queue_ms=" << viewer.pendingQueueDelayMs
+            << " viewer_feedback_health="
+            << (viewer.hasFeedback ?
+                screenshare::udp_protocol::FeedbackHealthStateName(viewer.latestFeedback.healthState) :
+                "none")
+            << " viewer_feedback_completed_frames="
+            << (viewer.hasFeedback ? viewer.latestFeedback.completedFrames : 0)
+            << " viewer_feedback_resyncs="
+            << (viewer.hasFeedback ? viewer.latestFeedback.decodeResyncs : 0)
+            << " viewer_feedback_session="
+            << (viewer.hasFeedback && viewer.latestFeedback.sessionFingerprint != 0 ?
+                FormatSessionFingerprint(viewer.latestFeedback.sessionFingerprint) :
+                "none")
+            << " viewer_feedback_access="
+            << (viewer.hasFeedback ?
+                (viewer.latestFeedback.accessCodeFingerprint == 0 ? "none" : "required") :
+                "unknown")
+            << "\n";
     }
 }
 
@@ -5638,6 +5757,10 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
                 << " bitrate_adaptations=" << bitrateAdaptations
                 << " bitrate_adaptation_failures=" << bitrateAdaptationFailures
                 << "\n" << std::flush;
+            if (udpSender) {
+                PrintViewerSnapshots(*udpSender);
+                std::cout << std::flush;
+            }
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
             intervalRepeatedFrames = 0;

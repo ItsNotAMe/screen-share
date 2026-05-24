@@ -73,6 +73,12 @@ struct UdpSenderStats {
     bool hasFeedback = false;
     bool encryptionEnabled = false;
     udp_protocol::FeedbackSnapshot latestFeedback;
+    struct FeedbackPeer {
+        std::string endpoint;
+        uint64_t packetsReceived = 0;
+        udp_protocol::FeedbackSnapshot latestFeedback;
+    };
+    std::vector<FeedbackPeer> feedbackPeers;
 };
 
 struct UdpAudioPacket {
@@ -165,6 +171,7 @@ private:
     std::vector<std::byte> address_;
     std::vector<std::vector<std::byte>> additionalAddresses_;
     std::vector<std::vector<std::byte>> natProbeAddresses_;
+    std::vector<UdpSenderStats::FeedbackPeer> feedbackPeers_;
     int addressLength_ = 0;
     UdpSenderConfig config_{};
     UdpSenderStats stats_{};
