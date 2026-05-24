@@ -111,7 +111,8 @@ target_link_libraries(ScreenShareCore PUBLIC
 )
 
 add_executable(ScreenShare
-    src/app/main.cpp
+    src/app/ScreenShareApp.cpp
+    src/app/ScreenShareMain.cpp
 )
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)

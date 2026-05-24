@@ -109,6 +109,7 @@ WGC capture by default
 - `src/core/SessionBackend.h`: first in-process session backend API shape for future direct UI/backend integration.
 - `src/core/SessionCommand.*`: typed room Share/Watch config to engine-argument bridge used by the current process adapter while the in-process backend is being extracted.
 - `src/core/SessionRuntimeControl.*`: shared stop/runtime-settings control interface. CLI runs currently use the file-backed implementation; the future in-process backend can use the memory-backed implementation for stop/settings requests.
+- `src/app/ScreenShareApp.*`: callable CLI app runner used by the tiny `src/app/ScreenShareMain.cpp` executable entry point. This keeps the orchestration separable for later in-process backend extraction.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
   The Qt UI embeds the current mark/icons through `src/ui/resources.qrc` and links/packages QtSvg for SVG rendering.
@@ -143,7 +144,7 @@ WGC capture by default
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
   - Stop now uses a hidden stop-file signal so the engine exits cleanly before force-kill fallback.
-  - Current UI live sessions go through `src/ui/ProcessSessionBackend.*`, which wraps the existing `ScreenShare.exe` child process behind a backend adapter. Room-based Share/Watch arguments are now built from typed configs through `src/core/SessionCommand.*`, and stop/runtime resolution controls now route through `src/core/SessionRuntimeControl.*` with both file-backed and memory-backed implementations. The first backend split added `ScreenShareCore` plus `src/core/SessionBackend.h`; the next UI architecture step is to replace the process adapter with a concrete in-process session backend running off the UI thread and consuming typed state/events plus media surfaces for active share/watch screens.
+  - Current UI live sessions go through `src/ui/ProcessSessionBackend.*`, which wraps the existing `ScreenShare.exe` child process behind a backend adapter. Room-based Share/Watch arguments are now built from typed configs through `src/core/SessionCommand.*`, stop/runtime resolution controls now route through `src/core/SessionRuntimeControl.*` with both file-backed and memory-backed implementations, and the CLI app runner has been split into `src/app/ScreenShareApp.*` behind a tiny executable `ScreenShareMain.cpp`. The first backend split added `ScreenShareCore` plus `src/core/SessionBackend.h`; the next UI architecture step is to replace the process adapter with a concrete in-process session backend running off the UI thread and consuming typed state/events plus media surfaces for active share/watch screens.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.
   - `--lan-discover` search mode.

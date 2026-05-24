@@ -4,7 +4,8 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 
 ## Source Layout
 
-- `src/app/main.cpp`: command-line parsing, top-level sender/receiver loops, adaptation policy, stats printing, logging.
+- `src/app/ScreenShareApp.cpp`: command-line parsing, top-level sender/receiver loops, adaptation policy, stats printing, logging.
+- `src/app/ScreenShareMain.cpp`: tiny executable entry point that calls the app runner.
 - `src/core/`: shared backend/session API, room command builders, runtime-control interfaces, and native core-library entry points that are intended to be used by both the CLI and UI.
 - `src/capture/`: Windows Graphics Capture and DXGI Desktop Duplication capture path, HDR/scRGB handling, GPU scaling/NV12 generation.
 - `src/codec/`: H.264 file encoder, H.264 stream encoder/decoder, H.264 bitstream helpers, encoder probing.
