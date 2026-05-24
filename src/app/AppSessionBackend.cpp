@@ -1,17 +1,18 @@
-#include "app/InProcessSessionBackend.h"
+#include "app/AppSessionBackend.h"
 
 #include "app/ScreenShareApp.h"
 #include "core/SessionCommand.h"
 
 #include <exception>
+#include <string_view>
 #include <utility>
 
 namespace screenshare {
 namespace {
 
-std::vector<std::string> AddExecutableName(std::vector<std::string> arguments)
+std::vector<std::string> AddExecutableName(std::vector<std::string> arguments, std::string executablePath)
 {
-    arguments.insert(arguments.begin(), "ScreenShare");
+    arguments.insert(arguments.begin(), std::move(executablePath));
     return arguments;
 }
 
@@ -24,6 +25,8 @@ RuntimeResolutionRequest BuildRuntimeResolutionRequest(const StreamSettings& set
         request.mode = RuntimeResolutionMode::Fixed;
         request.width = settings.outputResolution->width;
         request.height = settings.outputResolution->height;
+    } else if (!settings.adaptResolution) {
+        request.mode = RuntimeResolutionMode::Native;
     }
     return request;
 }
@@ -41,25 +44,22 @@ SessionEvent BuildErrorEvent(SessionRole role, SessionState state, std::string m
 
 } // namespace
 
-InProcessSessionBackend::~InProcessSessionBackend()
+AppSessionBackend::~AppSessionBackend()
 {
-    Stop();
-    if (worker_.joinable()) {
-        worker_.join();
-    }
+    Shutdown();
 }
 
-void InProcessSessionBackend::StartShare(const ShareSessionConfig& config, ISessionObserver& observer)
+void AppSessionBackend::StartShare(const ShareSessionConfig& config, ISessionObserver& observer)
 {
-    Start(SessionRole::Share, BuildShareRoomArguments(config), observer);
+    StartArguments(SessionRole::Share, BuildShareRoomArguments(config), observer);
 }
 
-void InProcessSessionBackend::StartWatch(const WatchSessionConfig& config, ISessionObserver& observer)
+void AppSessionBackend::StartWatch(const WatchSessionConfig& config, ISessionObserver& observer)
 {
-    Start(SessionRole::Watch, BuildWatchRoomArguments(config), observer);
+    StartArguments(SessionRole::Watch, BuildWatchRoomArguments(config), observer);
 }
 
-void InProcessSessionBackend::Stop()
+void AppSessionBackend::Stop()
 {
     bool shouldNotify = false;
     {
@@ -79,7 +79,14 @@ void InProcessSessionBackend::Stop()
     }
 }
 
-void InProcessSessionBackend::ApplyStreamSettings(const StreamSettings& settings)
+void AppSessionBackend::Shutdown()
+{
+    DetachObserver();
+    Stop();
+    JoinWorker();
+}
+
+void AppSessionBackend::ApplyStreamSettings(const StreamSettings& settings)
 {
     runtimeControl_.RequestResolution(BuildRuntimeResolutionRequest(settings));
 
@@ -91,10 +98,11 @@ void InProcessSessionBackend::ApplyStreamSettings(const StreamSettings& settings
     Notify(SessionEventType::SettingsChanged, currentState, "Stream settings queued");
 }
 
-void InProcessSessionBackend::Start(
+void AppSessionBackend::StartArguments(
     SessionRole role,
     std::vector<std::string> arguments,
-    ISessionObserver& observer)
+    ISessionObserver& observer,
+    std::string executablePath)
 {
     JoinFinishedWorker();
 
@@ -122,11 +130,14 @@ void InProcessSessionBackend::Start(
 
     Notify(SessionEventType::StateChanged, SessionState::Starting, "Starting session");
 
-    worker_ = std::thread([this, arguments = AddExecutableName(std::move(arguments))]() mutable {
+    worker_ = std::thread([this, arguments = AddExecutableName(std::move(arguments), std::move(executablePath))]() mutable {
         Notify(SessionEventType::StateChanged, SessionState::Connecting, "Connecting session");
 
         ScreenShareAppRunContext context;
         context.runtimeControl = &runtimeControl_;
+        context.outputHandler = [this](std::string_view text) {
+            Notify(SessionEventType::LogLine, SessionState::Idle, std::string(text));
+        };
 
         int exitCode = 1;
         try {
@@ -156,26 +167,41 @@ void InProcessSessionBackend::Start(
     });
 }
 
-void InProcessSessionBackend::JoinFinishedWorker()
+void AppSessionBackend::DetachObserver()
+{
+    std::scoped_lock lock(mutex_);
+    observer_ = nullptr;
+}
+
+void AppSessionBackend::JoinWorker()
+{
+    if (worker_.joinable() && worker_.get_id() != std::this_thread::get_id()) {
+        worker_.join();
+    }
+}
+
+void AppSessionBackend::JoinFinishedWorker()
 {
     bool shouldJoin = false;
     {
         std::scoped_lock lock(mutex_);
         shouldJoin = worker_.joinable() && IsTerminalSessionState(state_);
     }
-    if (shouldJoin && worker_.get_id() != std::this_thread::get_id()) {
-        worker_.join();
+    if (shouldJoin) {
+        JoinWorker();
     }
 }
 
-void InProcessSessionBackend::Notify(SessionEventType type, SessionState state, std::string message)
+void AppSessionBackend::Notify(SessionEventType type, SessionState state, std::string message)
 {
     ISessionObserver* observer = nullptr;
     SessionEvent event;
     {
         std::scoped_lock lock(mutex_);
-        state_ = state;
-        summary_ = message;
+        if (type == SessionEventType::StateChanged || type == SessionEventType::Error) {
+            state_ = state;
+            summary_ = message;
+        }
         observer = observer_;
         event.type = type;
         event.status = BuildStatusLocked();
@@ -187,7 +213,7 @@ void InProcessSessionBackend::Notify(SessionEventType type, SessionState state, 
     }
 }
 
-SessionStatus InProcessSessionBackend::BuildStatusLocked() const
+SessionStatus AppSessionBackend::BuildStatusLocked() const
 {
     SessionStatus status;
     status.role = role_;

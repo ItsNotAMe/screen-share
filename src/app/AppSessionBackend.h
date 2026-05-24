@@ -10,21 +10,28 @@
 
 namespace screenshare {
 
-class InProcessSessionBackend final : public ISessionBackend {
+class AppSessionBackend final : public ISessionBackend {
 public:
-    InProcessSessionBackend() = default;
-    ~InProcessSessionBackend() override;
+    AppSessionBackend() = default;
+    ~AppSessionBackend() override;
 
-    InProcessSessionBackend(const InProcessSessionBackend&) = delete;
-    InProcessSessionBackend& operator=(const InProcessSessionBackend&) = delete;
+    AppSessionBackend(const AppSessionBackend&) = delete;
+    AppSessionBackend& operator=(const AppSessionBackend&) = delete;
 
     void StartShare(const ShareSessionConfig& config, ISessionObserver& observer) override;
     void StartWatch(const WatchSessionConfig& config, ISessionObserver& observer) override;
+    void StartArguments(
+        SessionRole role,
+        std::vector<std::string> arguments,
+        ISessionObserver& observer,
+        std::string executablePath = "ScreenShare");
+    void Shutdown();
     void Stop() override;
     void ApplyStreamSettings(const StreamSettings& settings) override;
 
 private:
-    void Start(SessionRole role, std::vector<std::string> arguments, ISessionObserver& observer);
+    void DetachObserver();
+    void JoinWorker();
     void JoinFinishedWorker();
     void Notify(SessionEventType type, SessionState state, std::string message);
     SessionStatus BuildStatusLocked() const;

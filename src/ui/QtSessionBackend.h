@@ -1,34 +1,33 @@
 #pragma once
 
+#include "app/AppSessionBackend.h"
+
 #include <QtCore/QObject>
-#include <QtCore/QProcess>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 
 #include <functional>
-#include <utility>
 
-class ProcessSessionBackend final : public QObject {
+class QtSessionBackend final : public QObject, private screenshare::ISessionObserver {
 public:
     struct StartRequest {
-        QString program;
+        screenshare::SessionRole role = screenshare::SessionRole::Share;
         QStringList arguments;
-        bool enableControlFile = false;
+        QString executablePath;
     };
 
     struct FinishInfo {
         int exitCode = 0;
-        QProcess::ExitStatus exitStatus = QProcess::NormalExit;
         QString remainingOutput;
         bool stopRequested = false;
-        bool forcedStop = false;
+        bool failed = false;
     };
 
-    explicit ProcessSessionBackend(QObject* parent = nullptr);
+    explicit QtSessionBackend(QObject* parent = nullptr);
+    ~QtSessionBackend() override;
 
     bool isRunning() const;
     bool stopRequested() const;
-    QString controlFilePath() const;
 
     void setOutputHandler(std::function<void(const QString&)> handler);
     void setMessageHandler(std::function<void(const QString&)> handler);
@@ -38,20 +37,20 @@ public:
 
     bool start(const StartRequest& request, QString* errorMessage = nullptr);
     void stop();
+    void applyStreamSettings(const screenshare::StreamSettings& settings);
 
 private:
-    void cleanupStopFile();
-    void cleanupControlFile();
+    void OnSessionEvent(const screenshare::SessionEvent& event) override;
+    void handleSessionEvent(const screenshare::SessionEvent& event);
+    void finish(bool failed);
 
-    QProcess process_;
+    screenshare::AppSessionBackend backend_;
     std::function<void(const QString&)> outputHandler_;
     std::function<void(const QString&)> messageHandler_;
     std::function<void()> startedHandler_;
     std::function<void(const QString&)> errorHandler_;
     std::function<void(const FinishInfo&)> finishedHandler_;
+    bool running_ = false;
     bool stopRequested_ = false;
-    bool forcedStop_ = false;
-    quint64 runSerial_ = 0;
-    QString stopFilePath_;
-    QString controlFilePath_;
+    bool finished_ = false;
 };

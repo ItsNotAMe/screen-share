@@ -3,19 +3,19 @@
 ## Current UI Direction
 
 - Use Qt Widgets for the first real desktop UI.
-- Keep the first phase as a small control shell over the existing `ScreenShare.exe` engine.
+- The UI should call the native backend in-process for live Share/Watch sessions instead of being a launcher shell.
 - Visual direction: modern, simple, practical. Avoid dense advanced settings until the core flow feels good.
 - Dark mode is the default, with a visible light/dark toggle in the header.
 - Form rows should use explicit layout margins; Qt stylesheet padding on `QGroupBox` can cause first-paint overlap until resize.
 - Avoid `QGroupBox` for the option sections; use plain `QFrame#Panel` sections with a title label plus form grid.
 - Keep ordinary labels transparent so global dark/light backgrounds do not paint ugly strips behind text.
-- UI Stop should request a graceful engine exit with a hidden stop-file signal before force-killing the process; otherwise Qt reports sender termination as a crash and saved reports may not flush.
+- UI Stop should request a graceful backend exit through memory runtime control.
 - Primary tabs:
   - Create room: one Room panel with tab-like buttons for Nearby, Internet, and Manual; it opens on Internet by default, then friendly display chooser, FPS, resolution, and system-output audio device.
   - Join room: one Room panel with the listen port above tab-like buttons for Nearby (LAN discoverable) and Internet (paste room invite); it opens on Internet by default, then mute, volume, preview latency.
   - Watch's Nearby and Internet tabs use the same `ModeBar` + `ModeButton` styling as Share's so the connection-method vocabulary is identical on both sides.
 - Reports should stay easy: enabled by default with `sender-report.zip` / `receiver-report.zip`.
-- The window is a single-column settings shell now; the Command preview and Output console were removed because they pushed every settings row sideways and bloated the chrome. Engine stdout is still captured for NAT-status parsing and the saved-report zip; routine stdout from the UI is mirrored to qDebug so it can be tailed from a terminal build.
+- The window is a single-column settings shell now; the Command preview and Output console were removed because they pushed every settings row sideways and bloated the chrome. Backend stdout is still captured for NAT-status parsing and the saved-report zip; routine stdout from the UI is mirrored to qDebug so it can be tailed from a terminal build.
 - Streaming indicator: header pill has four states. `○ Idle` (gray, no pulse) when nothing runs; `◔ Connecting` (amber, pulsing) when the engine is running but no peer has been observed yet; `● Live` (green, pulsing) while peer activity is actively increasing; `× Disconnected` (red, no pulse) after a previously live peer stops responding. Do not make Live sticky: Share watches increasing `udp_feedback_packets` from the receiver with a longer anti-flicker timeout, Watch watches increasing `completed_frames` / `payload_bytes` / `h264_decoded_frames` / `audio_packets`, and a timer drops to Disconnected after a quiet period.
 - Share status depends on receiver feedback reaching the sender. The media UDP sockets disable Windows `SIO_UDP_CONNRESET` best-effort so starting Share before Watch, or restarting Watch while Share keeps running, does not leave the sender feedback path stuck after an ICMP "port unreachable" reset.
 - Sender feedback receive drains through NAT probes and invalid packets instead of stopping at the first non-feedback datagram. Otherwise queued probes can make old feedback leak out slowly and keep the Share UI falsely Live long after Watch exits.
@@ -25,10 +25,10 @@
 
 ## Implementation Notes
 
-- `ScreenShareUi.exe` lives beside `ScreenShare.exe` and launches it with `QProcess`.
-- `ScreenShareUi.exe` links `ScreenShareCore`, but live sessions still run through `src/ui/ProcessSessionBackend.*`, a `QProcess` adapter around `ScreenShare.exe`, until a concrete in-process session backend is implemented.
+- `ScreenShareUi.exe` lives beside `ScreenShare.exe`; live Share/Watch sessions use `src/ui/QtSessionBackend.*` over `src/app/AppSessionBackend.*`.
+- `ScreenShareUi.exe` links `ScreenShareAppRunner`, which includes the app runner and app session backend. Short helper diagnostics can still invoke `ScreenShare.exe` when useful.
 - Room-based Share/Watch launch arguments are built through `src/core/SessionCommand.*` from typed session configs; manual/NAT fallback paths still use UI-local argument assembly until the revamped room model replaces them.
-- CLI stop files and runtime resolution control files now flow through `src/core/SessionRuntimeControl.*`; the process adapter still writes files, while the in-process backend can use the memory-backed control object directly.
+- CLI stop files and runtime resolution control files now flow through `src/core/SessionRuntimeControl.*`; UI live sessions use the memory-backed control object directly.
 - `--share` is the sender preset, so it already enables system audio, adaptive bitrate, and adaptive resolution.
 - Share audio uses Windows' default output unless `--audio-device-id` is supplied. The UI should expose a sender-side output-device picker because virtual mixers can make the Windows default endpoint differ from the device that actually contains app audio.
 - `--watch` is the receiver preset, so it already enables preview, audio playback, and default A/V sync.
