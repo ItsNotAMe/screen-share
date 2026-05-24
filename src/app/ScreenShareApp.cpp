@@ -7831,6 +7831,27 @@ void RunUdpReceiverStats(
 
 int RunScreenShareApp(int argc, char** argv)
 {
+    return RunScreenShareApp(argc, argv, ScreenShareAppRunContext{});
+}
+
+int RunScreenShareApp(const std::vector<std::string>& arguments, const ScreenShareAppRunContext& context)
+{
+    std::vector<std::string> normalizedArguments = arguments;
+    if (normalizedArguments.empty()) {
+        normalizedArguments.emplace_back("ScreenShare");
+    }
+
+    std::vector<char*> argv;
+    argv.reserve(normalizedArguments.size());
+    for (std::string& argument : normalizedArguments) {
+        argv.push_back(argument.data());
+    }
+
+    return RunScreenShareApp(static_cast<int>(argv.size()), argv.data(), context);
+}
+
+int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& context)
+{
     std::unique_ptr<ScopedLogRedirect> logRedirect;
     const auto saveReportPath = FindPathArgument(argc, argv, "--save-report");
     const auto explicitLogPath = FindPathArgument(argc, argv, "--log");
@@ -7855,9 +7876,11 @@ int RunScreenShareApp(int argc, char** argv)
 
         Options options = ParseOptions(argc, argv, reportContext.sessionId);
         PrepareLiveSignaling(options);
-        screenshare::FileSessionRuntimeControl runtimeControl(
+        screenshare::FileSessionRuntimeControl fileRuntimeControl(
             options.stopFilePath,
             options.controlFilePath);
+        screenshare::ISessionRuntimeControl& runtimeControl =
+            context.runtimeControl != nullptr ? *context.runtimeControl : fileRuntimeControl;
         reportContext.sessionId = options.sessionId;
         reportContext.sessionFingerprint = options.sessionFingerprint;
         reportContext.accessCodeRequired = options.accessCodeProvided;
