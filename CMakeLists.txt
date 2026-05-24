@@ -5,7 +5,7 @@ project(ScreenShareNative LANGUAGES CXX)
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
 option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
-option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets is available" ON)
+option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets and Svg are available" ON)
 
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
@@ -117,7 +117,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         list(APPEND CMAKE_PREFIX_PATH "C:/msys64/ucrt64")
     endif()
 
-    find_package(Qt6 QUIET COMPONENTS Network Widgets)
+    find_package(Qt6 QUIET COMPONENTS Network Svg Widgets)
     if(Qt6_FOUND)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
@@ -129,7 +129,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
         )
-        target_link_libraries(ScreenShareUi PRIVATE Qt6::Network Qt6::Widgets bcrypt shell32)
+        target_link_libraries(ScreenShareUi PRIVATE Qt6::Network Qt6::Svg Qt6::Widgets bcrypt shell32)
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX
@@ -156,7 +156,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             )
         endif()
     else()
-        message(WARNING "Qt 6 Widgets was not found; ScreenShareUi target will not be built")
+        message(WARNING "Qt 6 Network, Svg, and Widgets were not found; ScreenShareUi target will not be built")
     endif()
 endif()
 

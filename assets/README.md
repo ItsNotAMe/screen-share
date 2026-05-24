@@ -8,5 +8,5 @@ This folder holds design and UI asset drafts.
 - `ui/icons/`: first-pass button icon set for the revamped native UI.
 
 The SVG icons use `currentColor` so the UI can tint them for normal, hover, disabled, and danger
-states when they are wired into the application.
-The current Qt UI embeds the brand mark and button icons through `src/ui/resources.qrc`.
+states. The current Qt UI embeds the SVG mark and button icons through `src/ui/resources.qrc` and
+links QtSvg so those resources render in packaged builds.

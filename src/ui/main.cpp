@@ -5472,6 +5472,9 @@ int main(int argc, char** argv)
                 detectAccessCodeProblem("UDP sender pacing=enabled access_code=required udp_feedback_access=required") ==
                 AccessCodeProblem::None;
             const bool resourcesAvailable =
+                !appIcon().isNull() &&
+                !uiIcon("share").isNull() &&
+                !uiIcon("watch").isNull() &&
                 QFileInfo::exists(QStringLiteral(":/screenshare/brand/screenshare-mark.svg")) &&
                 QFileInfo::exists(QStringLiteral(":/screenshare/ui/icons/share.svg")) &&
                 QFileInfo::exists(QStringLiteral(":/screenshare/ui/icons/watch.svg"));

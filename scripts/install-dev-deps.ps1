@@ -176,6 +176,7 @@ function Install-MsysPackages {
 
     if (-not $SkipQt) {
         $packages += "mingw-w64-ucrt-x86_64-qt6-base"
+        $packages += "mingw-w64-ucrt-x86_64-qt6-svg"
     }
     if (-not $SkipFfmpeg) {
         $packages += "mingw-w64-ucrt-x86_64-ffmpeg"

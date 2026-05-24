@@ -15,7 +15,7 @@
 - `main` is synced to `origin/main` at PR #102, `264a8e7 Add joinable room list with room access keys (#102)`.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
 - Normal/default CMake builds now also create portable zip packages.
-- The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
+- The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets and Svg are available.
 - `scripts/install-dev-deps.ps1` bootstraps Windows dev dependencies: MSYS2 native packages, optional Qt/FFmpeg, Node.js LTS, and signaling Worker npm packages.
 - Current stable live run shape:
 
@@ -106,7 +106,7 @@ WGC capture by default
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
-  The Qt UI embeds the current mark/icons through `src/ui/resources.qrc`.
+  The Qt UI embeds the current mark/icons through `src/ui/resources.qrc` and links/packages QtSvg for SVG rendering.
 
 ## Current Direction
 
@@ -133,11 +133,12 @@ WGC capture by default
   - Audio: `--audio-playback-muted`, `--audio-playback-volume PERCENT`, M mute, + and - volume.
   - DXGI's default Alt+Enter handling is disabled so the app-owned fullscreen restore keeps the title bar.
 - Qt control UI is merged:
-  - optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
+  - optional `ScreenShareUi.exe` when Qt 6 Widgets and Svg are available.
   - dark-mode default with theme toggle.
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
   - Stop now uses a hidden stop-file signal so the engine exits cleanly before force-kill fallback.
+  - Current UI still launches `ScreenShare.exe` as a child process. The revamped UI direction should refactor the engine into a reusable backend/core API used directly by both CLI and UI, keeping the process launcher only as a fallback/diagnostic path.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.
   - `--lan-discover` search mode.

@@ -47,6 +47,7 @@ function(repair_qt_runtime_deploy qt_bin_dir)
     foreach(runtime_name IN ITEMS
         Qt6Core.dll
         Qt6Gui.dll
+        Qt6Svg.dll
         Qt6Widgets.dll
     )
         set(runtime_path "${qt_bin_dir}/${runtime_name}")
@@ -60,6 +61,7 @@ function(repair_qt_runtime_deploy qt_bin_dir)
         platforms
         styles
         imageformats
+        iconengines
     )
         copy_qt_plugin_dir("${qt_plugin_root}" "${plugin_name}" "${target_dir}" runtime_inputs)
     endforeach()
