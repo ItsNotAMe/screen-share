@@ -28,6 +28,7 @@
 #include <QtCore/QUuid>
 #include <QtCore/QVector>
 #include <QtGui/QClipboard>
+#include <QtGui/QIcon>
 #include <QtGui/QScreen>
 #include <QtGui/QTextCursor>
 #include <QtGui/QWheelEvent>
@@ -72,6 +73,25 @@ namespace {
 constexpr const char* kRoomLinkPrefix = "screenshare-room-v1;";
 constexpr const char* kDefaultSignalServer = "https://screenshare-signaling.bit-yeet.workers.dev";
 constexpr int kDisplaySizeRole = Qt::UserRole + 1;
+
+QIcon appIcon()
+{
+    return QIcon(QStringLiteral(":/screenshare/brand/screenshare-mark.svg"));
+}
+
+QIcon uiIcon(const char* name)
+{
+    return QIcon(QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(QString::fromUtf8(name)));
+}
+
+void setButtonIcon(QPushButton* button, const char* name, int size = 14)
+{
+    if (button == nullptr) {
+        return;
+    }
+    button->setIcon(uiIcon(name));
+    button->setIconSize(QSize(size, size));
+}
 
 QStringList startupArguments(int argc, char** argv)
 {
@@ -887,6 +907,7 @@ public:
     MainWindow()
     {
         setWindowTitle("ScreenShare");
+        setWindowIcon(appIcon());
         resize(640, 820);
         setMinimumSize(560, 720);
 
@@ -1125,8 +1146,7 @@ private:
 
         actionButton_ = new QPushButton("Share");
         actionButton_->setObjectName("PrimaryButton");
-        actionButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
-        actionButton_->setIconSize(QSize(16, 16));
+        setButtonIcon(actionButton_, "share", 16);
         actionButton_->setCursor(Qt::PointingHandCursor);
         actionButton_->setMinimumHeight(40);
         actionButton_->setMinimumWidth(140);
@@ -1152,10 +1172,8 @@ private:
         watchModeButton_->setCheckable(true);
         shareModeButton_->setObjectName("ModeButton");
         watchModeButton_->setObjectName("ModeButton");
-        shareModeButton_->setIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
-        watchModeButton_->setIcon(style()->standardIcon(QStyle::SP_DesktopIcon));
-        shareModeButton_->setIconSize(QSize(16, 16));
-        watchModeButton_->setIconSize(QSize(16, 16));
+        setButtonIcon(shareModeButton_, "share", 16);
+        setButtonIcon(watchModeButton_, "watch", 16);
         shareModeButton_->setCursor(Qt::PointingHandCursor);
         watchModeButton_->setCursor(Qt::PointingHandCursor);
         shareModeButton_->setChecked(true);
@@ -1249,8 +1267,7 @@ private:
         receiversFooterLayout->addWidget(receiverStatusLabel_, 1);
         findLanButton_ = new QPushButton("Refresh");
         findLanButton_->setObjectName("SecondaryButton");
-        findLanButton_->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
-        findLanButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(findLanButton_, "refresh");
         findLanButton_->setCursor(Qt::PointingHandCursor);
         findLanButton_->setFixedHeight(kRowHeight);
         receiversFooterLayout->addWidget(findLanButton_);
@@ -1279,14 +1296,12 @@ private:
         shareRoomLayout->setSpacing(8);
         newShareRoomButton_ = new QPushButton("New");
         newShareRoomButton_->setObjectName("SecondaryButton");
-        newShareRoomButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
-        newShareRoomButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(newShareRoomButton_, "room");
         newShareRoomButton_->setCursor(Qt::PointingHandCursor);
         newShareRoomButton_->setFixedHeight(kRowHeight);
         copyShareRoomButton_ = new QPushButton("Copy");
         copyShareRoomButton_->setObjectName("SecondaryButton");
-        copyShareRoomButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
-        copyShareRoomButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(copyShareRoomButton_, "copy");
         copyShareRoomButton_->setCursor(Qt::PointingHandCursor);
         copyShareRoomButton_->setFixedHeight(kRowHeight);
         prepareInput(shareSignalRoomEdit_);
@@ -1326,14 +1341,12 @@ private:
         shareLocalInviteLayout->setSpacing(8);
         createShareInviteButton_ = new QPushButton("Create");
         createShareInviteButton_->setObjectName("SecondaryButton");
-        createShareInviteButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
-        createShareInviteButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(createShareInviteButton_, "room");
         createShareInviteButton_->setCursor(Qt::PointingHandCursor);
         createShareInviteButton_->setFixedHeight(kRowHeight);
         copyShareInviteButton_ = new QPushButton("Copy");
         copyShareInviteButton_->setObjectName("SecondaryButton");
-        copyShareInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
-        copyShareInviteButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(copyShareInviteButton_, "copy");
         copyShareInviteButton_->setCursor(Qt::PointingHandCursor);
         copyShareInviteButton_->setFixedHeight(kRowHeight);
         prepareInput(shareLocalInviteEdit_);
@@ -1362,20 +1375,17 @@ private:
         sharePeerInviteButtonLayout->setSpacing(8);
         pasteSharePeerInviteButton_ = new QPushButton("Paste");
         pasteSharePeerInviteButton_->setObjectName("SecondaryButton");
-        pasteSharePeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
-        pasteSharePeerInviteButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(pasteSharePeerInviteButton_, "paste");
         pasteSharePeerInviteButton_->setCursor(Qt::PointingHandCursor);
         pasteSharePeerInviteButton_->setFixedHeight(kRowHeight);
         removeSharePeerInviteButton_ = new QPushButton("Remove");
         removeSharePeerInviteButton_->setObjectName("SecondaryButton");
-        removeSharePeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogCancelButton));
-        removeSharePeerInviteButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(removeSharePeerInviteButton_, "remove");
         removeSharePeerInviteButton_->setCursor(Qt::PointingHandCursor);
         removeSharePeerInviteButton_->setFixedHeight(kRowHeight);
         clearSharePeerInviteButton_ = new QPushButton("Clear");
         clearSharePeerInviteButton_->setObjectName("SecondaryButton");
-        clearSharePeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogDiscardButton));
-        clearSharePeerInviteButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(clearSharePeerInviteButton_, "remove");
         clearSharePeerInviteButton_->setCursor(Qt::PointingHandCursor);
         clearSharePeerInviteButton_->setFixedHeight(kRowHeight);
         sharePeerInvitePanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::MinimumExpanding);
@@ -1463,8 +1473,7 @@ private:
         prepareInput(displayCombo_);
         refreshDisplaysButton_ = new QPushButton("Refresh");
         refreshDisplaysButton_->setObjectName("SecondaryButton");
-        refreshDisplaysButton_->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
-        refreshDisplaysButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(refreshDisplaysButton_, "refresh");
         refreshDisplaysButton_->setCursor(Qt::PointingHandCursor);
         refreshDisplaysButton_->setFixedHeight(kRowHeight);
         displayLayout->addWidget(displayCombo_, 1);
@@ -1494,8 +1503,7 @@ private:
         prepareInput(audioDeviceCombo_);
         refreshAudioDevicesButton_ = new QPushButton("Refresh");
         refreshAudioDevicesButton_->setObjectName("SecondaryButton");
-        refreshAudioDevicesButton_->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
-        refreshAudioDevicesButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(refreshAudioDevicesButton_, "refresh");
         refreshAudioDevicesButton_->setCursor(Qt::PointingHandCursor);
         refreshAudioDevicesButton_->setFixedHeight(kRowHeight);
         audioDeviceLayout->addWidget(audioDeviceCombo_, 1);
@@ -1582,8 +1590,7 @@ private:
         watchRoomLayout->setSpacing(8);
         pasteWatchRoomLinkButton_ = new QPushButton("Paste");
         pasteWatchRoomLinkButton_->setObjectName("SecondaryButton");
-        pasteWatchRoomLinkButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
-        pasteWatchRoomLinkButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(pasteWatchRoomLinkButton_, "paste");
         pasteWatchRoomLinkButton_->setCursor(Qt::PointingHandCursor);
         pasteWatchRoomLinkButton_->setFixedHeight(kRowHeight);
         prepareInput(watchSignalRoomEdit_);
@@ -1613,8 +1620,7 @@ private:
         activeRoomsFooterLayout->addWidget(activeRoomStatusLabel_, 1);
         refreshRoomsButton_ = new QPushButton("Refresh");
         refreshRoomsButton_->setObjectName("SecondaryButton");
-        refreshRoomsButton_->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
-        refreshRoomsButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(refreshRoomsButton_, "refresh");
         refreshRoomsButton_->setCursor(Qt::PointingHandCursor);
         refreshRoomsButton_->setFixedHeight(kRowHeight);
         activeRoomsFooterLayout->addWidget(refreshRoomsButton_);
@@ -1636,8 +1642,7 @@ private:
         watchPeerInviteLayout->setSpacing(8);
         pasteWatchPeerInviteButton_ = new QPushButton("Paste");
         pasteWatchPeerInviteButton_->setObjectName("SecondaryButton");
-        pasteWatchPeerInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
-        pasteWatchPeerInviteButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(pasteWatchPeerInviteButton_, "paste");
         pasteWatchPeerInviteButton_->setCursor(Qt::PointingHandCursor);
         pasteWatchPeerInviteButton_->setFixedHeight(kRowHeight);
         prepareInput(watchPeerInviteEdit_);
@@ -1654,14 +1659,12 @@ private:
         watchLocalInviteLayout->setSpacing(8);
         createWatchInviteButton_ = new QPushButton("Create");
         createWatchInviteButton_->setObjectName("SecondaryButton");
-        createWatchInviteButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
-        createWatchInviteButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(createWatchInviteButton_, "room");
         createWatchInviteButton_->setCursor(Qt::PointingHandCursor);
         createWatchInviteButton_->setFixedHeight(kRowHeight);
         copyWatchInviteButton_ = new QPushButton("Copy");
         copyWatchInviteButton_->setObjectName("SecondaryButton");
-        copyWatchInviteButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
-        copyWatchInviteButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(copyWatchInviteButton_, "copy");
         copyWatchInviteButton_->setCursor(Qt::PointingHandCursor);
         copyWatchInviteButton_->setFixedHeight(kRowHeight);
         prepareInput(watchLocalInviteEdit_);
@@ -1748,14 +1751,12 @@ private:
         prepareInput(accessCodeEdit_);
         generateAccessCodeButton_ = new QPushButton("Generate");
         generateAccessCodeButton_->setObjectName("SecondaryButton");
-        generateAccessCodeButton_->setIcon(style()->standardIcon(QStyle::SP_FileDialogNewFolder));
-        generateAccessCodeButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(generateAccessCodeButton_, "lock");
         generateAccessCodeButton_->setCursor(Qt::PointingHandCursor);
         generateAccessCodeButton_->setFixedHeight(kRowHeight);
         copyAccessCodeButton_ = new QPushButton("Copy");
         copyAccessCodeButton_->setObjectName("SecondaryButton");
-        copyAccessCodeButton_->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
-        copyAccessCodeButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(copyAccessCodeButton_, "copy");
         copyAccessCodeButton_->setCursor(Qt::PointingHandCursor);
         copyAccessCodeButton_->setFixedHeight(kRowHeight);
         accessLayout->addWidget(accessCodeEdit_, 1);
@@ -1796,8 +1797,7 @@ private:
         reportPathEdit_ = new QLineEdit;
         browseReportButton_ = new QPushButton("Browse");
         browseReportButton_->setObjectName("SecondaryButton");
-        browseReportButton_->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
-        browseReportButton_->setIconSize(QSize(14, 14));
+        setButtonIcon(browseReportButton_, "report");
         browseReportButton_->setCursor(Qt::PointingHandCursor);
         prepareInput(reportPathEdit_);
         browseReportButton_->setFixedHeight(kRowHeight);
@@ -4207,12 +4207,11 @@ private:
         running_ = running;
         if (running) {
             actionButton_->setText("Stop");
-            actionButton_->setIcon(style()->standardIcon(QStyle::SP_MediaStop));
+            setButtonIcon(actionButton_, "stop", 16);
             actionButton_->setProperty("class", "Danger");
             resetPeerStatus();
         } else {
             updateStartButtonText();
-            actionButton_->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
             actionButton_->setProperty("class", "");
             resetPeerStatus();
             runtimeNatStatus_.clear();
@@ -4297,6 +4296,7 @@ private:
     {
         if (actionButton_ != nullptr) {
             actionButton_->setText(shareMode() ? "Share" : "Watch");
+            setButtonIcon(actionButton_, shareMode() ? "share" : "watch", 16);
         }
     }
 
@@ -5471,6 +5471,10 @@ int main(int argc, char** argv)
             const bool normalEncryptedTelemetryIgnored =
                 detectAccessCodeProblem("UDP sender pacing=enabled access_code=required udp_feedback_access=required") ==
                 AccessCodeProblem::None;
+            const bool resourcesAvailable =
+                QFileInfo::exists(QStringLiteral(":/screenshare/brand/screenshare-mark.svg")) &&
+                QFileInfo::exists(QStringLiteral(":/screenshare/ui/icons/share.svg")) &&
+                QFileInfo::exists(QStringLiteral(":/screenshare/ui/icons/watch.svg"));
             const auto displays = parseDisplayChoices(QString::fromUtf8(
                 "[0] \\\\.\\DISPLAY1 2560x1440 at (0,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"
                 "[1] \\\\.\\DISPLAY2 1920x1080 at (-1920,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"));
@@ -5541,6 +5545,7 @@ int main(int argc, char** argv)
                 mismatchedAccessCodeDetected &&
                 rejectedPacketsDetected &&
                 normalEncryptedTelemetryIgnored &&
+                resourcesAvailable &&
                 displays.size() == 2 &&
                 displays[1].index == 1 &&
                 displays[1].width == 1920 &&
@@ -5573,6 +5578,7 @@ int main(int argc, char** argv)
 
     QApplication app(argc, argv);
     QApplication::setStyle("Fusion");
+    app.setWindowIcon(appIcon());
     app.setStyleSheet(appStyleSheet(true));
 
     if (guiSmokeTest) {

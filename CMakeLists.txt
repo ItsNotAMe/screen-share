@@ -121,8 +121,10 @@ if(SCREENSHARE_BUILD_QT_UI)
     if(Qt6_FOUND)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
+            src/ui/resources.qrc
             src/transport/UdpCrypto.cpp
         )
+        set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)
         target_compile_features(ScreenShareUi PRIVATE cxx_std_20)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src

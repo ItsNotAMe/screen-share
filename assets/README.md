@@ -9,3 +9,4 @@ This folder holds design and UI asset drafts.
 
 The SVG icons use `currentColor` so the UI can tint them for normal, hover, disabled, and danger
 states when they are wired into the application.
+The current Qt UI embeds the brand mark and button icons through `src/ui/resources.qrc`.

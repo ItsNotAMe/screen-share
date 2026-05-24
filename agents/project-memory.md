@@ -106,6 +106,7 @@ WGC capture by default
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
+  The Qt UI embeds the current mark/icons through `src/ui/resources.qrc`.
 
 ## Current Direction
 
