@@ -23,6 +23,7 @@ Only you can fully validate these because they need real machines/networks.
 - Started the backend/core split: reusable native modules now build as `ScreenShareCore`, both CLI and Qt UI link it, and `src/core/SessionBackend.h` defines the first in-process share/watch session contract.
 - Wrapped the current Qt live-session process launcher in `src/ui/ProcessSessionBackend.*`, so the UI has a backend adapter boundary before the real in-process backend replaces it.
 - Added `src/core/SessionCommand.*` so the room-based UI flow builds Share/Watch engine arguments from typed session configs instead of hand-assembling those arguments directly in the window.
+- Added `src/core/SessionRuntimeControl.*` so stop requests and runtime resolution changes are behind an interface; the CLI still uses file-backed control, and the future in-process backend can provide an in-memory implementation.
 - Added per-viewer connection/health display for multi-viewer Share sessions.
 - Added mid-session Share resolution changes. Resolution now has Auto plus explicit tiers at or below the selected display size; the UI sends runtime commands and the sender restarts capture/encoding without closing the room.
 - Added sharper GPU capture resizing and light receiver-side upscale sharpening for desktop text.

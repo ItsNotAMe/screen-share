@@ -47,6 +47,7 @@ add_library(ScreenShareCore STATIC
     src/codec/H264StreamEncoder.cpp
     src/core/SessionBackend.cpp
     src/core/SessionCommand.cpp
+    src/core/SessionRuntimeControl.cpp
     src/render/ReceiverPreviewWindow.cpp
     src/transport/NatTraversal.cpp
     src/transport/SignalingClient.cpp

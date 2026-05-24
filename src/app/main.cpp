@@ -7,6 +7,7 @@
 #include "codec/H264FileEncoder.h"
 #include "codec/H264StreamDecoder.h"
 #include "codec/H264StreamEncoder.h"
+#include "core/SessionRuntimeControl.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/LanDiscovery.h"
 #include "transport/NatTraversal.h"
@@ -3196,156 +3197,6 @@ std::optional<std::filesystem::path> FindPathArgument(int argc, char** argv, con
     return path;
 }
 
-bool StopRequested(const Options& options)
-{
-    if (options.stopFilePath.empty()) {
-        return false;
-    }
-    std::error_code error;
-    return std::filesystem::exists(options.stopFilePath, error);
-}
-
-enum class RuntimeResolutionMode {
-    Auto,
-    Native,
-    Fixed,
-};
-
-struct RuntimeResolutionRequest {
-    RuntimeResolutionMode mode = RuntimeResolutionMode::Auto;
-    int width = 0;
-    int height = 0;
-};
-
-struct RuntimeControlFileState {
-    std::optional<std::filesystem::file_time_type> lastWriteTime;
-    std::string lastContent;
-};
-
-std::string TrimAscii(std::string_view value)
-{
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
-        value.remove_prefix(1);
-    }
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
-        value.remove_suffix(1);
-    }
-    return std::string(value);
-}
-
-std::string LowerAscii(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return value;
-}
-
-bool ParsePositiveInt(std::string_view value, int& out)
-{
-    const std::string text = TrimAscii(value);
-    if (text.empty()) {
-        return false;
-    }
-    char* end = nullptr;
-    const long parsed = std::strtol(text.c_str(), &end, 10);
-    if (end == text.c_str() || *end != '\0' || parsed <= 0 || parsed > std::numeric_limits<int>::max()) {
-        return false;
-    }
-    out = static_cast<int>(parsed);
-    return true;
-}
-
-std::optional<RuntimeResolutionRequest> ParseRuntimeResolutionRequest(std::string_view content)
-{
-    std::optional<RuntimeResolutionRequest> request;
-    std::istringstream input{std::string(content)};
-    std::string line;
-    while (std::getline(input, line)) {
-        line = TrimAscii(line);
-        if (line.empty() || line.front() == '#') {
-            continue;
-        }
-
-        const std::string lowerLine = LowerAscii(line);
-        if (lowerLine.rfind("resolution", 0) != 0) {
-            continue;
-        }
-        const size_t separator = line.find_first_of("= \t");
-        if (separator == std::string::npos) {
-            continue;
-        }
-        std::string value = TrimAscii(std::string_view(line).substr(separator + 1));
-        if (!value.empty() && value.front() == '=') {
-            value = TrimAscii(std::string_view(value).substr(1));
-        }
-
-        const std::string lowerValue = LowerAscii(value);
-        RuntimeResolutionRequest parsed;
-        if (lowerValue == "auto") {
-            parsed.mode = RuntimeResolutionMode::Auto;
-            request = parsed;
-            continue;
-        }
-        if (lowerValue == "native") {
-            parsed.mode = RuntimeResolutionMode::Native;
-            request = parsed;
-            continue;
-        }
-
-        const size_t x = lowerValue.find('x');
-        if (x == std::string::npos) {
-            continue;
-        }
-        int width = 0;
-        int height = 0;
-        if (!ParsePositiveInt(std::string_view(lowerValue).substr(0, x), width) ||
-            !ParsePositiveInt(std::string_view(lowerValue).substr(x + 1), height) ||
-            (width % 2) != 0 ||
-            (height % 2) != 0) {
-            continue;
-        }
-
-        parsed.mode = RuntimeResolutionMode::Fixed;
-        parsed.width = width;
-        parsed.height = height;
-        request = parsed;
-    }
-    return request;
-}
-
-std::optional<RuntimeResolutionRequest> ReadRuntimeResolutionRequest(
-    const Options& options,
-    RuntimeControlFileState& state)
-{
-    if (options.controlFilePath.empty()) {
-        return std::nullopt;
-    }
-
-    std::error_code error;
-    const auto writeTime = std::filesystem::last_write_time(options.controlFilePath, error);
-    if (error) {
-        return std::nullopt;
-    }
-    if (state.lastWriteTime && *state.lastWriteTime == writeTime) {
-        return std::nullopt;
-    }
-
-    std::ifstream file(options.controlFilePath, std::ios::binary);
-    if (!file) {
-        return std::nullopt;
-    }
-    std::ostringstream content;
-    content << file.rdbuf();
-    state.lastWriteTime = writeTime;
-    const std::string text = content.str();
-    if (text == state.lastContent) {
-        return std::nullopt;
-    }
-    state.lastContent = text;
-    return ParseRuntimeResolutionRequest(text);
-}
-
 bool HasUdpSession(const Options& options)
 {
     return options.shareRoom ||
@@ -4770,7 +4621,10 @@ void PrintAudioDevices()
     printDevices(screenshare::AudioCaptureSource::Microphone);
 }
 
-void RunAudioCaptureStats(const Options& options, SavedReportContext& reportContext)
+void RunAudioCaptureStats(
+    const Options& options,
+    SavedReportContext& reportContext,
+    screenshare::ISessionRuntimeControl& runtimeControl)
 {
     screenshare::WasapiCapture capture;
     screenshare::AudioCaptureConfig config;
@@ -4887,7 +4741,7 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
         }
     };
 
-    while (!StopRequested(options) && Clock::now() - startedAt < std::chrono::seconds(options.seconds)) {
+    while (!runtimeControl.StopRequested() && Clock::now() - startedAt < std::chrono::seconds(options.seconds)) {
         if (auto packet = capture.CapturePacket(std::chrono::milliseconds(100))) {
             recordPacket(*packet);
         } else {
@@ -5009,7 +4863,10 @@ void RunAudioCaptureStats(const Options& options, SavedReportContext& reportCont
         << "\n";
 }
 
-void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
+void RunCaptureStats(
+    const Options& options,
+    SavedReportContext& reportContext,
+    screenshare::ISessionRuntimeControl& runtimeControl)
 {
     std::optional<screenshare::NatInvite> peerInvite;
     if (!options.peerInvite.empty()) {
@@ -5195,7 +5052,6 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     std::unique_ptr<LiveSignalingRuntime> liveSignalingRuntime;
     std::vector<UdpSendTargetSpec> udpSendTargetSpecs = options.udpSendTargetSpecs;
     std::set<std::string> liveSignalingSendTargets;
-    RuntimeControlFileState runtimeControlFile;
     uint64_t audioPacingBitrate = 0;
     bool audioPacingApplied = false;
 
@@ -5609,13 +5465,13 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     };
 
     auto applyRuntimeResolutionControl = [&]() {
-        const auto request = ReadRuntimeResolutionRequest(options, runtimeControlFile);
+        const auto request = runtimeControl.TakeResolutionRequest();
         if (!request) {
             return;
         }
 
         switch (request->mode) {
-        case RuntimeResolutionMode::Auto:
+        case screenshare::RuntimeResolutionMode::Auto:
             if (adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
                 return;
             }
@@ -5625,7 +5481,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
             restartStreamOutput(0, 0, 1.0, "auto", "control_file");
             std::cout << "runtime_resolution_mode=auto\n";
             break;
-        case RuntimeResolutionMode::Native:
+        case screenshare::RuntimeResolutionMode::Native:
             if (!adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
                 return;
             }
@@ -5635,7 +5491,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
             restartStreamOutput(0, 0, 1.0, "manual", "control_file_native");
             std::cout << "runtime_resolution_mode=native\n";
             break;
-        case RuntimeResolutionMode::Fixed:
+        case screenshare::RuntimeResolutionMode::Fixed:
             if (!adaptiveResolutionEnabled &&
                 config.targetWidth == request->width &&
                 config.targetHeight == request->height) {
@@ -5656,7 +5512,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
     auto nextFrameAt = Clock::now();
     auto keepRunning = [&]() {
-        if (StopRequested(options)) {
+        if (runtimeControl.StopRequested()) {
             return false;
         }
         return options.seconds == 0 || Clock::now() - startedAt < std::chrono::seconds(options.seconds);
@@ -6537,7 +6393,9 @@ void RunNatProbe(const Options& options)
     }
 }
 
-void RunUdpReceiverStats(const Options& options)
+void RunUdpReceiverStats(
+    const Options& options,
+    screenshare::ISessionRuntimeControl& runtimeControl)
 {
     std::optional<screenshare::NatInvite> peerInvite;
     if (!options.peerInvite.empty()) {
@@ -7479,7 +7337,7 @@ void RunUdpReceiverStats(const Options& options)
             }
             return false;
         }
-        if (StopRequested(options)) {
+        if (runtimeControl.StopRequested()) {
             return false;
         }
         if (options.previewWindow && options.seconds == 0) {
@@ -7995,6 +7853,9 @@ int main(int argc, char** argv)
 
         Options options = ParseOptions(argc, argv, reportContext.sessionId);
         PrepareLiveSignaling(options);
+        screenshare::FileSessionRuntimeControl runtimeControl(
+            options.stopFilePath,
+            options.controlFilePath);
         reportContext.sessionId = options.sessionId;
         reportContext.sessionFingerprint = options.sessionFingerprint;
         reportContext.accessCodeRequired = options.accessCodeProvided;
@@ -8028,13 +7889,13 @@ int main(int argc, char** argv)
             PrintAudioDevices();
             exitCode = 0;
         } else if (options.audioCapture && options.udpSendTarget.empty() && !options.shareRoom) {
-            RunAudioCaptureStats(options, reportContext);
+            RunAudioCaptureStats(options, reportContext, runtimeControl);
             exitCode = 0;
         } else if (options.udpReceivePort != 0) {
-            RunUdpReceiverStats(options);
+            RunUdpReceiverStats(options, runtimeControl);
             exitCode = 0;
         } else {
-            RunCaptureStats(options, reportContext);
+            RunCaptureStats(options, reportContext, runtimeControl);
             exitCode = 0;
         }
     } catch (const std::invalid_argument& error) {
