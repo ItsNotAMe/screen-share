@@ -7,6 +7,7 @@
 - Use local `git` and `gh` for GitHub work; do not use the GitHub connector for this repo.
 - Keep PRs cohesive and reviewable; slightly bigger PRs are fine when they advance one clear step. Self-review before opening or merging.
 - Prefer the cleanest simple design when it has no real product or maintenance downside, even if it takes more implementation effort.
+- Do not keep compatibility/fallback code for a feature that is being replaced unless there is a concrete product or diagnostic reason.
 - Avoid branch, commit, PR, or tracked-file text that depends on one contributor's local tooling.
 - After each completed work step or PR merge, mention the next recommended step.
 - Durable repo memory lives under `agents/`; update it when project direction or implementation facts change.
@@ -15,7 +16,7 @@
 
 - `main` is synced to `origin/main` after the backend API split and UI process-adapter merge.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
-- Reusable native engine modules now build through the `ScreenShareCore` static library target; `ScreenShare.exe` links it, and `ScreenShareUi.exe` links it for shared backend code.
+- Reusable native engine modules now build through `ScreenShareCore`; `ScreenShare.exe` links the app runner, and `ScreenShareUi.exe` links `ScreenShareAppRunner` for app-backed live sessions.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets and Svg are available.
 - `scripts/install-dev-deps.ps1` bootstraps Windows dev dependencies: MSYS2 native packages, optional Qt/FFmpeg, Node.js LTS, and signaling Worker npm packages.
@@ -106,11 +107,12 @@ WGC capture by default
 - `agents/nat-traversal.md`: STUN/manual invite/hole-punching direction.
 - `agents/security.md`: local access-code and future encryption notes.
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
-- `src/core/SessionBackend.h`: first in-process session backend API shape for future direct UI/backend integration.
-- `src/core/SessionCommand.*`: typed room Share/Watch config to engine-argument bridge used by the current process adapter while the in-process backend is being extracted.
-- `src/core/SessionRuntimeControl.*`: shared stop/runtime-settings control interface. CLI runs currently use the file-backed implementation; the future in-process backend can use the memory-backed implementation for stop/settings requests.
-- `src/app/ScreenShareApp.*`: callable CLI app runner built as the `ScreenShareAppRunner` static library and used by the tiny `src/app/ScreenShareMain.cpp` executable entry point. This keeps the orchestration separable for later in-process backend extraction.
-- `src/app/InProcessSessionBackend.*`: first pure C++ `ISessionBackend` adapter that runs `ScreenShareAppRunner` on a worker thread with `MemorySessionRuntimeControl`. It is not the Qt default yet.
+- `src/core/SessionBackend.h`: shared session backend API shape for UI/backend integration work.
+- `src/core/SessionCommand.*`: typed room Share/Watch config to engine-argument bridge used by the UI and app session backend.
+- `src/core/SessionRuntimeControl.*`: shared stop/runtime-settings control interface. CLI runs use the file-backed implementation; the app session backend uses the memory-backed implementation for stop/settings requests.
+- `src/app/ScreenShareApp.*`: callable CLI app runner built as the `ScreenShareAppRunner` static library and used by both the tiny `src/app/ScreenShareMain.cpp` executable entry point and the app session backend.
+- `src/app/AppSessionBackend.*`: pure C++ `ISessionBackend` adapter that runs `ScreenShareAppRunner` on a worker thread with `MemorySessionRuntimeControl`.
+- `src/ui/QtSessionBackend.*`: Qt-thread bridge for the app session backend. Live Share/Watch in the desktop UI no longer launches `ScreenShare.exe` as a child process.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
   The Qt UI embeds the current mark/icons through `src/ui/resources.qrc` and links/packages QtSvg for SVG rendering.
@@ -144,8 +146,8 @@ WGC capture by default
   - dark-mode default with theme toggle.
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
-  - Stop now uses a hidden stop-file signal so the engine exits cleanly before force-kill fallback.
-  - Current UI live sessions go through `src/ui/ProcessSessionBackend.*`, which wraps the existing `ScreenShare.exe` child process behind a backend adapter. Room-based Share/Watch arguments are now built from typed configs through `src/core/SessionCommand.*`, stop/runtime resolution controls now route through `src/core/SessionRuntimeControl.*` with both file-backed and memory-backed implementations, and the CLI app runner has been split into `src/app/ScreenShareApp.*` behind a tiny executable `ScreenShareMain.cpp`. The first backend split added `ScreenShareCore` plus `src/core/SessionBackend.h`; the next UI architecture step is to replace the process adapter with a concrete in-process session backend running off the UI thread and consuming typed state/events plus media surfaces for active share/watch screens.
+  - Live Share/Watch runs now go through `src/ui/QtSessionBackend.*` and `src/app/AppSessionBackend.*`, so the UI calls the app runner on a worker thread instead of launching `ScreenShare.exe`.
+  - Room-based Share/Watch arguments are built from typed configs through `src/core/SessionCommand.*`; stop/runtime resolution controls route through `src/core/SessionRuntimeControl.*` with file-backed control for CLI runs and memory-backed control for UI runs. The next UI architecture step is typed state/log parsing parity and eventually media surfaces for active share/watch screens.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.
   - `--lan-discover` search mode.

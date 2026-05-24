@@ -97,8 +97,9 @@ Start the desktop control UI:
 .\build\release\ScreenShareUi.exe
 ```
 
-The UI starts and stops the same `ScreenShare.exe` engine beside it. Use Create room on the
-sending computer and Join room on the receiving computer. Reports are enabled by default so a
+The UI runs live Share/Watch sessions through the native backend in the same process; the
+`ScreenShare.exe` CLI beside it remains available for helper diagnostics and direct command-line
+tests. Use Create room on the sending computer and Join room on the receiving computer. Reports are enabled by default so a
 test run can be sent as a zip without collecting separate log files. The UI opens in dark mode by
 default and includes a theme toggle in the header. Create room shows friendly display choices such
 as resolution, position, and primary monitor

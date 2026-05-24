@@ -828,6 +828,76 @@ private:
     std::mutex& mutex_;
 };
 
+class CallbackStreambuf : public std::streambuf {
+public:
+    explicit CallbackStreambuf(std::function<void(std::string_view)> handler)
+        : handler_(std::move(handler))
+    {
+    }
+
+private:
+    int overflow(int ch) override
+    {
+        if (traits_type::eq_int_type(ch, traits_type::eof())) {
+            return traits_type::not_eof(ch);
+        }
+
+        const char c = traits_type::to_char_type(ch);
+        std::lock_guard lock(mutex_);
+        handler_(std::string_view(&c, 1));
+        return ch;
+    }
+
+    std::streamsize xsputn(const char* text, std::streamsize count) override
+    {
+        if (count <= 0) {
+            return 0;
+        }
+
+        std::lock_guard lock(mutex_);
+        handler_(std::string_view(text, static_cast<size_t>(count)));
+        return count;
+    }
+
+    int sync() override
+    {
+        return 0;
+    }
+
+    std::function<void(std::string_view)> handler_;
+    std::mutex mutex_;
+};
+
+class ScopedCallbackLogRedirect {
+public:
+    explicit ScopedCallbackLogRedirect(std::function<void(std::string_view)> handler)
+        : outputBuffer_(std::move(handler))
+    {
+        oldCout_ = std::cout.rdbuf(&outputBuffer_);
+        oldCerr_ = std::cerr.rdbuf(&outputBuffer_);
+    }
+
+    ~ScopedCallbackLogRedirect()
+    {
+        std::cout.flush();
+        std::cerr.flush();
+        if (oldCout_ != nullptr) {
+            std::cout.rdbuf(oldCout_);
+        }
+        if (oldCerr_ != nullptr) {
+            std::cerr.rdbuf(oldCerr_);
+        }
+    }
+
+    ScopedCallbackLogRedirect(const ScopedCallbackLogRedirect&) = delete;
+    ScopedCallbackLogRedirect& operator=(const ScopedCallbackLogRedirect&) = delete;
+
+private:
+    CallbackStreambuf outputBuffer_;
+    std::streambuf* oldCout_ = nullptr;
+    std::streambuf* oldCerr_ = nullptr;
+};
+
 class ScopedLogRedirect {
 public:
     explicit ScopedLogRedirect(const std::filesystem::path& path, bool announce = true)
@@ -7852,6 +7922,10 @@ int RunScreenShareApp(const std::vector<std::string>& arguments, const ScreenSha
 
 int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& context)
 {
+    std::unique_ptr<ScopedCallbackLogRedirect> callbackLogRedirect;
+    if (context.outputHandler) {
+        callbackLogRedirect = std::make_unique<ScopedCallbackLogRedirect>(context.outputHandler);
+    }
     std::unique_ptr<ScopedLogRedirect> logRedirect;
     const auto saveReportPath = FindPathArgument(argc, argv, "--save-report");
     const auto explicitLogPath = FindPathArgument(argc, argv, "--log");

@@ -1,7 +1,7 @@
 #include "core/SessionCommand.h"
 #include "core/SessionRuntimeControl.h"
 #include "transport/UdpCrypto.h"
-#include "ui/ProcessSessionBackend.h"
+#include "ui/QtSessionBackend.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QByteArray>
@@ -63,9 +63,12 @@
 #include <QtWidgets/QWidget>
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <mutex>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -1064,32 +1067,30 @@ public:
         resize(640, 820);
         setMinimumSize(560, 720);
 
-        sessionBackend_ = new ProcessSessionBackend(this);
+        sessionBackend_ = new QtSessionBackend(this);
         sessionBackend_->setOutputHandler([this](const QString& text) {
-            handleProcessOutput(text);
+            handleSessionOutput(text);
         });
         sessionBackend_->setMessageHandler([this](const QString& text) {
             appendOutput(text);
         });
         sessionBackend_->setStartedHandler([this] {
-            appendOutput("Started " + QFileInfo(enginePath()).fileName() + "\n");
+            appendOutput("Started native engine\n");
             setRunning(true);
         });
         sessionBackend_->setErrorHandler([this](const QString& errorString) {
-            appendOutput("Process error: " + errorString + "\n");
-            setRunning(false);
+            appendOutput("Session error: " + errorString + "\n");
         });
-        sessionBackend_->setFinishedHandler([this](const ProcessSessionBackend::FinishInfo& info) {
+        sessionBackend_->setFinishedHandler([this](const QtSessionBackend::FinishInfo& info) {
             if (!info.remainingOutput.isEmpty()) {
-                handleProcessOutput(info.remainingOutput);
+                handleSessionOutput(info.remainingOutput);
             }
             if (info.stopRequested) {
-                appendOutput(info.forcedStop ?
-                    "Process was forced closed after stop timed out\n" :
-                    "Process stopped cleanly with exit code " + QString::number(info.exitCode) + "\n");
+                appendOutput("Session stopped cleanly\n");
+            } else if (info.failed) {
+                appendOutput("Session failed with exit code " + QString::number(info.exitCode) + "\n");
             } else {
-                const QString statusText = info.exitStatus == QProcess::NormalExit ? "finished" : "crashed";
-                appendOutput("Process " + statusText + " with exit code " + QString::number(info.exitCode) + "\n");
+                appendOutput("Session finished with exit code " + QString::number(info.exitCode) + "\n");
             }
             setRunning(false);
         });
@@ -1297,7 +1298,7 @@ private:
         actionButton_->setCursor(Qt::PointingHandCursor);
         actionButton_->setMinimumHeight(40);
         actionButton_->setMinimumWidth(140);
-        connect(actionButton_, &QPushButton::clicked, this, [this] { toggleProcess(); });
+        connect(actionButton_, &QPushButton::clicked, this, [this] { toggleSession(); });
         header->addWidget(actionButton_, 0, Qt::AlignVCenter);
 
         return header;
@@ -2872,21 +2873,6 @@ private:
         return QSize(match.captured(1).toInt(), match.captured(2).toInt());
     }
 
-    QString runtimeResolutionCommandText() const
-    {
-        const QString choice = currentResolutionChoice();
-        if (choice == "auto" || choice == "native") {
-            return "resolution=" + choice + "\n";
-        }
-        const QSize resolution = currentFixedResolution();
-        if (resolution.width() > 0 && resolution.height() > 0) {
-            return QStringLiteral("resolution=%1x%2\n")
-                .arg(resolution.width())
-                .arg(resolution.height());
-        }
-        return QStringLiteral("resolution=auto\n");
-    }
-
     QString resolutionStatusText() const
     {
         const QString choice = currentResolutionChoice();
@@ -3119,19 +3105,11 @@ private:
 
     void writeRuntimeResolutionCommand()
     {
-        const QString controlFilePath = sessionBackend_ == nullptr ? QString() : sessionBackend_->controlFilePath();
-        if (!running_ || !shareMode() || controlFilePath.isEmpty()) {
+        if (!running_ || !shareMode() || sessionBackend_ == nullptr) {
             return;
         }
 
-        QFile controlFile(controlFilePath);
-        if (!controlFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-            appendOutput("Could not write runtime resolution command\n");
-            return;
-        }
-        const QString command = runtimeResolutionCommandText();
-        controlFile.write(command.toUtf8());
-        controlFile.close();
+        sessionBackend_->applyStreamSettings(currentStreamSettings());
         appendOutput("Requested stream resolution: " + resolutionStatusText() + "\n");
     }
 
@@ -3159,12 +3137,12 @@ private:
         return sessionBackend_ != nullptr && sessionBackend_->stopRequested();
     }
 
-    void toggleProcess()
+    void toggleSession()
     {
         if (!sessionRunning()) {
-            startProcess();
+            startSession();
         } else {
-            stopProcess();
+            stopSession();
         }
     }
 
@@ -3208,7 +3186,7 @@ private:
         return true;
     }
 
-    void startProcess()
+    void startSession()
     {
         if (sessionRunning()) {
             return;
@@ -3269,7 +3247,7 @@ private:
         }
         runtimeNatStatus_.clear();
         runtimeNatHint_.clear();
-        processOutputParseBuffer_.clear();
+        sessionOutputParseBuffer_.clear();
         accessCodeWarningShown_ = false;
         roomAlreadyOpenWarningShown_ = false;
         roomWatcherMismatchLogged_ = false;
@@ -3291,25 +3269,19 @@ private:
                 "Generate or paste an access code, or allow plaintext for this run.");
             return;
         }
-        const QString program = enginePath();
-        if (!QFileInfo::exists(program)) {
-            QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
-            return;
-        }
-
         const QStringList displayArgs = displayArguments();
-        appendOutput("\n" + formatCommand(program, displayArgs) + "\n");
-        ProcessSessionBackend::StartRequest request;
-        request.program = program;
+        appendOutput("\n" + formatCommand(enginePath(), displayArgs) + "\n");
+        QtSessionBackend::StartRequest request;
+        request.role = shareMode() ? screenshare::SessionRole::Share : screenshare::SessionRole::Watch;
         request.arguments = currentArguments();
-        request.enableControlFile = shareMode();
+        request.executablePath = enginePath();
         QString errorMessage;
         if (!sessionBackend_->start(request, &errorMessage) && !errorMessage.isEmpty()) {
-            appendOutput("Process error: " + errorMessage + "\n");
+            appendOutput("Session error: " + errorMessage + "\n");
         }
     }
 
-    void stopProcess()
+    void stopSession()
     {
         if (!sessionRunning() || sessionStopRequested()) {
             return;
@@ -4395,7 +4367,7 @@ private:
             resetPeerStatus();
             runtimeNatStatus_.clear();
             runtimeNatHint_.clear();
-            processOutputParseBuffer_.clear();
+            sessionOutputParseBuffer_.clear();
         }
         applyStatusBadge();
         repolish(actionButton_);
@@ -4538,22 +4510,22 @@ private:
         repolish(statusBadge_);
     }
 
-    void handleProcessOutput(const QString& text)
+    void handleSessionOutput(const QString& text)
     {
         appendOutput(text);
-        processOutputParseBuffer_ += text;
+        sessionOutputParseBuffer_ += text;
         // Each sender stat line is roughly 2 KB. Keep multiple full lines so
         // the connection-state parser always has a complete tail to look at.
         constexpr qsizetype MaxParseBuffer = 32768;
-        if (processOutputParseBuffer_.size() > MaxParseBuffer) {
-            processOutputParseBuffer_.remove(0, processOutputParseBuffer_.size() - MaxParseBuffer);
+        if (sessionOutputParseBuffer_.size() > MaxParseBuffer) {
+            sessionOutputParseBuffer_.remove(0, sessionOutputParseBuffer_.size() - MaxParseBuffer);
         }
-        handleRoomAlreadyOpenProblem(processOutputParseBuffer_);
-        handleAccessCodeProblem(processOutputParseBuffer_);
-        updateRuntimeNatStatus(processOutputParseBuffer_);
-        handlePreviewClosedSignal(processOutputParseBuffer_);
+        handleRoomAlreadyOpenProblem(sessionOutputParseBuffer_);
+        handleAccessCodeProblem(sessionOutputParseBuffer_);
+        updateRuntimeNatStatus(sessionOutputParseBuffer_);
+        handlePreviewClosedSignal(sessionOutputParseBuffer_);
         updateShareViewerStatus(text);
-        updateConnectionState(processOutputParseBuffer_);
+        updateConnectionState(sessionOutputParseBuffer_);
     }
 
     void handleRoomAlreadyOpenProblem(const QString& text)
@@ -4564,7 +4536,7 @@ private:
         }
 
         roomAlreadyOpenWarningShown_ = true;
-        stopProcess();
+        stopSession();
         if (shareSignalRoomEdit_ != nullptr) {
             shareSignalRoomEdit_->setFocus();
         }
@@ -4584,7 +4556,7 @@ private:
         }
 
         appendOutput("Preview window closed; stopping Watch...\n");
-        stopProcess();
+        stopSession();
         applyStatusBadge();
         updateInternetStatus();
     }
@@ -4611,14 +4583,14 @@ private:
         accessCodeWarningShown_ = true;
         if (usingWorkerRoomFlow()) {
             if (problem == AccessCodeProblem::Required) {
-                stopProcess();
+                stopSession();
                 clearRoomKeyForRetry(
                     "This room expects encrypted traffic. Choose the same room on both computers, then start again. If the room is locked, enter the room password.",
                     "Room encryption required");
                 return;
             }
 
-            stopProcess();
+            stopSession();
             clearRoomKeyForRetry(
                 sessionRunning() ?
                     "The stream was rejected by the room encryption key. Stop the current run, check the room/password, then start again." :
@@ -4958,7 +4930,7 @@ private:
     QLabel* commandPreview_ = nullptr;
     QPlainTextEdit* outputEdit_ = nullptr;
     QPushButton* actionButton_ = nullptr;
-    ProcessSessionBackend* sessionBackend_ = nullptr;
+    QtSessionBackend* sessionBackend_ = nullptr;
     bool running_ = false;
     bool peerConnected_ = false;
     bool peerActivitySeen_ = false;
@@ -5074,7 +5046,7 @@ private:
     QString selectedReceiverAccessFingerprint_;
     QString runtimeNatStatus_;
     QString runtimeNatHint_;
-    QString processOutputParseBuffer_;
+    QString sessionOutputParseBuffer_;
     QString shareViewerParseBuffer_;
     QVector<ShareViewerStatus> shareViewers_;
     QElapsedTimer shareViewerClock_;
@@ -5788,6 +5760,56 @@ int main(int argc, char** argv)
             const bool memoryControlReset =
                 !memoryControl.StopRequested() &&
                 !memoryControl.TakeResolutionRequest();
+            class AppSessionSelfTestObserver final : public screenshare::ISessionObserver {
+            public:
+                void OnSessionEvent(const screenshare::SessionEvent& event) override
+                {
+                    std::scoped_lock lock(mutex_);
+                    if (event.type == screenshare::SessionEventType::LogLine) {
+                        output_ += event.message;
+                    }
+                    if (screenshare::IsTerminalSessionState(event.status.state)) {
+                        terminalState_ = event.status.state;
+                        done_ = true;
+                        condition_.notify_all();
+                    }
+                }
+
+                bool wait()
+                {
+                    std::unique_lock lock(mutex_);
+                    return condition_.wait_for(lock, std::chrono::seconds(5), [this] {
+                        return done_;
+                    });
+                }
+
+                bool ok() const
+                {
+                    std::scoped_lock lock(mutex_);
+                    return done_ &&
+                        terminalState_ == screenshare::SessionState::Stopped &&
+                        !output_.empty();
+                }
+
+            private:
+                mutable std::mutex mutex_;
+                std::condition_variable condition_;
+                std::string output_;
+                screenshare::SessionState terminalState_ = screenshare::SessionState::Idle;
+                bool done_ = false;
+            };
+            AppSessionSelfTestObserver appSessionSelfTestObserver;
+            bool appSessionBackendOk = false;
+            {
+                screenshare::AppSessionBackend appSelfTestBackend;
+                appSelfTestBackend.StartArguments(
+                    screenshare::SessionRole::Share,
+                    std::vector<std::string>{"--generate-access-code"},
+                    appSessionSelfTestObserver);
+                appSessionBackendOk =
+                    appSessionSelfTestObserver.wait() &&
+                    appSessionSelfTestObserver.ok();
+            }
             const bool selfTestOk = peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("ss1e:") &&
@@ -5832,7 +5854,8 @@ int main(int argc, char** argv)
                 memoryResolutionOk &&
                 memoryStopInitiallyClear &&
                 memoryStopRequested &&
-                memoryControlReset;
+                memoryControlReset &&
+                appSessionBackendOk;
             return selfTestOk ? 0 : 2;
         }
     }

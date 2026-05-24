@@ -111,7 +111,7 @@ target_link_libraries(ScreenShareCore PUBLIC
 )
 
 add_library(ScreenShareAppRunner STATIC
-    src/app/InProcessSessionBackend.cpp
+    src/app/AppSessionBackend.cpp
     src/app/ScreenShareApp.cpp
 )
 
@@ -150,7 +150,7 @@ if(SCREENSHARE_BUILD_QT_UI)
     if(Qt6_FOUND)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
-            src/ui/ProcessSessionBackend.cpp
+            src/ui/QtSessionBackend.cpp
             src/ui/resources.qrc
         )
         set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)
@@ -158,7 +158,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
         )
-        target_link_libraries(ScreenShareUi PRIVATE ScreenShareCore Qt6::Network Qt6::Svg Qt6::Widgets shell32)
+        target_link_libraries(ScreenShareUi PRIVATE ScreenShareAppRunner Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX
