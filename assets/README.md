@@ -7,6 +7,6 @@ This folder holds design and UI asset drafts.
 - `brand/screenshare-logo.svg`: horizontal logo/wordmark source.
 - `ui/icons/`: first-pass button icon set for the revamped native UI.
 
-The SVG icons use `currentColor` so the UI can tint them for normal, hover, disabled, and danger
-states. The current Qt UI embeds the SVG mark and button icons through `src/ui/resources.qrc` and
-links QtSvg so those resources render in packaged builds.
+The brand SVGs carry fixed ScreenShare identity colors. The UI icons use `currentColor`; the Qt UI
+renders them through QtSvg with explicit theme colors for normal, hover, checked, and disabled
+button states.

@@ -29,12 +29,15 @@
 #include <QtCore/QVector>
 #include <QtGui/QClipboard>
 #include <QtGui/QIcon>
+#include <QtGui/QPainter>
+#include <QtGui/QPixmap>
 #include <QtGui/QScreen>
 #include <QtGui/QTextCursor>
 #include <QtGui/QWheelEvent>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
+#include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QButtonGroup>
@@ -73,6 +76,8 @@ namespace {
 constexpr const char* kRoomLinkPrefix = "screenshare-room-v1;";
 constexpr const char* kDefaultSignalServer = "https://screenshare-signaling.bit-yeet.workers.dev";
 constexpr int kDisplaySizeRole = Qt::UserRole + 1;
+constexpr const char* kIconNameProperty = "screenShareIconName";
+constexpr const char* kIconSizeProperty = "screenShareIconSize";
 
 QIcon appIcon()
 {
@@ -84,12 +89,140 @@ QIcon uiIcon(const char* name)
     return QIcon(QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(QString::fromUtf8(name)));
 }
 
-void setButtonIcon(QPushButton* button, const char* name, int size = 14)
+QByteArray readUiIconSvg(const QString& name)
+{
+    QFile file(QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(name));
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    return file.readAll();
+}
+
+QPixmap renderUiIconPixmap(const QString& name, int size, const char* color, qreal devicePixelRatio)
+{
+    QByteArray svg = readUiIconSvg(name);
+    if (svg.isEmpty()) {
+        return {};
+    }
+    svg.replace("currentColor", color);
+
+    QSvgRenderer renderer(svg);
+    if (!renderer.isValid()) {
+        return {};
+    }
+
+    const int pixelSize = std::max(1, static_cast<int>(std::ceil(size * devicePixelRatio)));
+    QPixmap pixmap(pixelSize, pixelSize);
+    pixmap.setDevicePixelRatio(devicePixelRatio);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    renderer.render(&painter, QRectF(0, 0, size, size));
+    return pixmap;
+}
+
+bool canRenderUiIconSvg(const QString& name, const char* color)
+{
+    QByteArray svg = readUiIconSvg(name);
+    if (svg.isEmpty()) {
+        return false;
+    }
+    svg.replace("currentColor", color);
+    return QSvgRenderer(svg).isValid();
+}
+
+const char* iconColorForButton(const QPushButton* button, bool darkMode, QIcon::Mode mode, QIcon::State state)
+{
+    const QString objectName = button == nullptr ? QString() : button->objectName();
+    const QString className = button == nullptr ? QString() : button->property("class").toString();
+    const bool primary = objectName == QStringLiteral("PrimaryButton");
+    const bool secondary = objectName == QStringLiteral("SecondaryButton");
+    const bool ghost = objectName == QStringLiteral("GhostButton");
+    const bool modeButton = objectName == QStringLiteral("ModeButton");
+    const bool checked = state == QIcon::On || mode == QIcon::Selected;
+
+    if (mode == QIcon::Disabled) {
+        return darkMode ? "#5d6776" : "#8a95a3";
+    }
+    if (primary || className == QStringLiteral("Danger") || checked) {
+        return "#ffffff";
+    }
+    if (mode == QIcon::Active) {
+        return darkMode ? "#e6ecf2" : "#15202b";
+    }
+    if (secondary) {
+        return darkMode ? "#dde4ee" : "#243140";
+    }
+    if (ghost || modeButton) {
+        return darkMode ? "#a5b1c0" : "#5e6b7a";
+    }
+    return darkMode ? "#e6ecf2" : "#15202b";
+}
+
+QIcon buttonIcon(const QPushButton* button, const QString& name, int size, bool darkMode)
+{
+    QIcon icon;
+    constexpr qreal kNormalScale = 1.0;
+    constexpr qreal kHighScale = 2.0;
+    for (const qreal scale : {kNormalScale, kHighScale}) {
+        icon.addPixmap(
+            renderUiIconPixmap(name, size, iconColorForButton(button, darkMode, QIcon::Normal, QIcon::Off), scale),
+            QIcon::Normal,
+            QIcon::Off);
+        icon.addPixmap(
+            renderUiIconPixmap(name, size, iconColorForButton(button, darkMode, QIcon::Normal, QIcon::On), scale),
+            QIcon::Normal,
+            QIcon::On);
+        icon.addPixmap(
+            renderUiIconPixmap(name, size, iconColorForButton(button, darkMode, QIcon::Active, QIcon::Off), scale),
+            QIcon::Active,
+            QIcon::Off);
+        icon.addPixmap(
+            renderUiIconPixmap(name, size, iconColorForButton(button, darkMode, QIcon::Active, QIcon::On), scale),
+            QIcon::Active,
+            QIcon::On);
+        icon.addPixmap(
+            renderUiIconPixmap(name, size, iconColorForButton(button, darkMode, QIcon::Disabled, QIcon::Off), scale),
+            QIcon::Disabled,
+            QIcon::Off);
+        icon.addPixmap(
+            renderUiIconPixmap(name, size, iconColorForButton(button, darkMode, QIcon::Disabled, QIcon::On), scale),
+            QIcon::Disabled,
+            QIcon::On);
+        icon.addPixmap(
+            renderUiIconPixmap(name, size, iconColorForButton(button, darkMode, QIcon::Selected, QIcon::Off), scale),
+            QIcon::Selected,
+            QIcon::Off);
+        icon.addPixmap(
+            renderUiIconPixmap(name, size, iconColorForButton(button, darkMode, QIcon::Selected, QIcon::On), scale),
+            QIcon::Selected,
+            QIcon::On);
+    }
+    return icon;
+}
+
+void refreshButtonIcon(QPushButton* button, bool darkMode)
 {
     if (button == nullptr) {
         return;
     }
-    button->setIcon(uiIcon(name));
+    const QString iconName = button->property(kIconNameProperty).toString();
+    const int iconSize = button->property(kIconSizeProperty).toInt();
+    if (iconName.isEmpty() || iconSize <= 0) {
+        return;
+    }
+    button->setIcon(buttonIcon(button, iconName, iconSize, darkMode));
+    button->setIconSize(QSize(iconSize, iconSize));
+}
+
+void setButtonIcon(QPushButton* button, const char* name, int size = 14, bool darkMode = true)
+{
+    if (button == nullptr) {
+        return;
+    }
+    button->setProperty(kIconNameProperty, QString::fromUtf8(name));
+    button->setProperty(kIconSizeProperty, size);
+    refreshButtonIcon(button, darkMode);
     button->setIconSize(QSize(size, size));
 }
 
@@ -2915,7 +3048,15 @@ private:
     void applyTheme(bool darkMode)
     {
         qApp->setStyleSheet(appStyleSheet(darkMode));
+        refreshButtonIcons(darkMode);
         repolish(this);
+    }
+
+    void refreshButtonIcons(bool darkMode)
+    {
+        for (QPushButton* button : findChildren<QPushButton*>()) {
+            refreshButtonIcon(button, darkMode);
+        }
     }
 
     void toggleProcess()
@@ -5475,6 +5616,8 @@ int main(int argc, char** argv)
                 !appIcon().isNull() &&
                 !uiIcon("share").isNull() &&
                 !uiIcon("watch").isNull() &&
+                canRenderUiIconSvg(QStringLiteral("share"), "#ffffff") &&
+                canRenderUiIconSvg(QStringLiteral("watch"), "#ffffff") &&
                 QFileInfo::exists(QStringLiteral(":/screenshare/brand/screenshare-mark.svg")) &&
                 QFileInfo::exists(QStringLiteral(":/screenshare/ui/icons/share.svg")) &&
                 QFileInfo::exists(QStringLiteral(":/screenshare/ui/icons/watch.svg"));

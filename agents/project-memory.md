@@ -6,6 +6,7 @@
 - No web app, no C#.
 - Use local `git` and `gh` for GitHub work; do not use the GitHub connector for this repo.
 - Keep PRs small. Self-review before opening or merging.
+- Prefer the cleanest simple design when it has no real product or maintenance downside, even if it takes more implementation effort.
 - Avoid branch, commit, PR, or tracked-file text that depends on one contributor's local tooling.
 - After each completed work step or PR merge, mention the next recommended step.
 - Durable repo memory lives under `agents/`; update it when project direction or implementation facts change.
