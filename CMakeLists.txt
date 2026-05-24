@@ -129,6 +129,7 @@ if(SCREENSHARE_BUILD_QT_UI)
     if(Qt6_FOUND)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
+            src/ui/ProcessSessionBackend.cpp
             src/ui/resources.qrc
         )
         set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)

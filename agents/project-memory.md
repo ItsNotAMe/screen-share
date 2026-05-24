@@ -141,7 +141,7 @@ WGC capture by default
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
   - Stop now uses a hidden stop-file signal so the engine exits cleanly before force-kill fallback.
-  - Current UI still launches `ScreenShare.exe` as a child process. The first backend split added `ScreenShareCore` plus `src/core/SessionBackend.h`; the next UI architecture step is to run a concrete session backend off the UI thread and consume typed state/events plus media surfaces for active share/watch screens, keeping the process launcher only as a fallback/diagnostic path.
+  - Current UI live sessions go through `src/ui/ProcessSessionBackend.*`, which wraps the existing `ScreenShare.exe` child process behind a backend adapter. The first backend split added `ScreenShareCore` plus `src/core/SessionBackend.h`; the next UI architecture step is to replace the process adapter with a concrete in-process session backend running off the UI thread and consuming typed state/events plus media surfaces for active share/watch screens.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.
   - `--lan-discover` search mode.
