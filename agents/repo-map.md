@@ -4,7 +4,7 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 
 ## Source Layout
 
-- `src/app/ScreenShareApp.cpp`: command-line parsing, top-level sender/receiver loops, adaptation policy, stats printing, logging.
+- `src/app/ScreenShareApp.*`: callable app runner for command-line parsing, top-level sender/receiver loops, adaptation policy, stats printing, logging.
 - `src/app/ScreenShareMain.cpp`: tiny executable entry point that calls the app runner.
 - `src/core/`: shared backend/session API, room command builders, runtime-control interfaces, and native core-library entry points that are intended to be used by both the CLI and UI.
 - `src/capture/`: Windows Graphics Capture and DXGI Desktop Duplication capture path, HDR/scRGB handling, GPU scaling/NV12 generation.
@@ -25,5 +25,6 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 - Debug preset output: `build/debug/ScreenShare.exe`.
 - Release preset output: `build/release/ScreenShare.exe`.
 - `ScreenShareCore` is a static library target containing the reusable native engine modules.
+- `ScreenShareAppRunner` is a static library target containing the app runner; `ScreenShare.exe` is a tiny main linked against it.
 - If Qt 6 Widgets and Svg are available at configure time, builds also output `ScreenShareUi.exe`.
 - Normal default builds create portable zip packages; see `agents/packaging.md`.

@@ -5,7 +5,7 @@
 - Build a native Windows C++ screen-sharing app for friends.
 - No web app, no C#.
 - Use local `git` and `gh` for GitHub work; do not use the GitHub connector for this repo.
-- Keep PRs small. Self-review before opening or merging.
+- Keep PRs cohesive and reviewable; slightly bigger PRs are fine when they advance one clear step. Self-review before opening or merging.
 - Prefer the cleanest simple design when it has no real product or maintenance downside, even if it takes more implementation effort.
 - Avoid branch, commit, PR, or tracked-file text that depends on one contributor's local tooling.
 - After each completed work step or PR merge, mention the next recommended step.
@@ -109,7 +109,7 @@ WGC capture by default
 - `src/core/SessionBackend.h`: first in-process session backend API shape for future direct UI/backend integration.
 - `src/core/SessionCommand.*`: typed room Share/Watch config to engine-argument bridge used by the current process adapter while the in-process backend is being extracted.
 - `src/core/SessionRuntimeControl.*`: shared stop/runtime-settings control interface. CLI runs currently use the file-backed implementation; the future in-process backend can use the memory-backed implementation for stop/settings requests.
-- `src/app/ScreenShareApp.*`: callable CLI app runner used by the tiny `src/app/ScreenShareMain.cpp` executable entry point. This keeps the orchestration separable for later in-process backend extraction.
+- `src/app/ScreenShareApp.*`: callable CLI app runner built as the `ScreenShareAppRunner` static library and used by the tiny `src/app/ScreenShareMain.cpp` executable entry point. This keeps the orchestration separable for later in-process backend extraction.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
   The Qt UI embeds the current mark/icons through `src/ui/resources.qrc` and links/packages QtSvg for SVG rendering.

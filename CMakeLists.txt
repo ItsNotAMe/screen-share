@@ -110,8 +110,25 @@ target_link_libraries(ScreenShareCore PUBLIC
     ws2_32
 )
 
-add_executable(ScreenShare
+add_library(ScreenShareAppRunner STATIC
     src/app/ScreenShareApp.cpp
+)
+
+target_compile_features(ScreenShareAppRunner PUBLIC cxx_std_20)
+
+target_include_directories(ScreenShareAppRunner PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(ScreenShareAppRunner PUBLIC
+    ScreenShareCore
+)
+
+if(MSVC)
+    target_compile_options(ScreenShareAppRunner PRIVATE /W4 /permissive- /EHsc)
+endif()
+
+add_executable(ScreenShare
     src/app/ScreenShareMain.cpp
 )
 
@@ -120,7 +137,7 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_R
 endif()
 
 target_link_libraries(ScreenShare PRIVATE
-    ScreenShareCore
+    ScreenShareAppRunner
 )
 
 if(SCREENSHARE_BUILD_QT_UI)
