@@ -58,6 +58,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <string_view>
 #include <utility>
 
@@ -70,6 +71,7 @@ namespace {
 
 constexpr const char* kRoomLinkPrefix = "screenshare-room-v1;";
 constexpr const char* kDefaultSignalServer = "https://screenshare-signaling.bit-yeet.workers.dev";
+constexpr int kDisplaySizeRole = Qt::UserRole + 1;
 
 QStringList startupArguments(int argc, char** argv)
 {
@@ -387,6 +389,97 @@ QString displayChoiceText(const DisplayChoice& display, QScreen* primaryScreen)
         parts << "Detached";
     }
     return parts.join(" - ");
+}
+
+bool validResolutionSize(const QSize& size)
+{
+    return size.width() > 0 && size.height() > 0;
+}
+
+QSize evenResolutionSize(QSize size)
+{
+    if (!validResolutionSize(size)) {
+        return {};
+    }
+    size.setWidth(size.width() - (size.width() % 2));
+    size.setHeight(size.height() - (size.height() % 2));
+    return validResolutionSize(size) ? size : QSize();
+}
+
+QString resolutionChoiceValue(const QSize& size)
+{
+    return QStringLiteral("%1x%2").arg(size.width()).arg(size.height());
+}
+
+QString resolutionChoiceText(const QSize& size)
+{
+    return QStringLiteral("%1 × %2").arg(size.width()).arg(size.height());
+}
+
+QVector<QSize> resolutionChoicesForDisplay(QSize displaySize)
+{
+    displaySize = evenResolutionSize(displaySize);
+    const bool hasDisplaySize = validResolutionSize(displaySize);
+    const double displayAspect = hasDisplaySize ?
+        static_cast<double>(displaySize.width()) / static_cast<double>(displaySize.height()) :
+        16.0 / 9.0;
+
+    QVector<QSize> choices;
+    auto addChoice = [&](QSize size) {
+        size = evenResolutionSize(size);
+        if (!validResolutionSize(size)) {
+            return;
+        }
+        if (hasDisplaySize && (size.width() > displaySize.width() || size.height() > displaySize.height())) {
+            return;
+        }
+        const auto duplicate = std::find_if(choices.begin(), choices.end(), [&](const QSize& existing) {
+            return existing.width() == size.width() && existing.height() == size.height();
+        });
+        if (duplicate == choices.end()) {
+            choices.push_back(size);
+        }
+    };
+
+    addChoice(displaySize);
+
+    const QVector<QSize> common16x9 = {
+        QSize(3840, 2160),
+        QSize(2560, 1440),
+        QSize(1920, 1080),
+        QSize(1600, 900),
+        QSize(1280, 720),
+    };
+    for (const QSize& size : common16x9) {
+        const double aspect = static_cast<double>(size.width()) / static_cast<double>(size.height());
+        if (!hasDisplaySize || std::abs(aspect - displayAspect) < 0.02) {
+            addChoice(size);
+        }
+    }
+
+    if (hasDisplaySize && choices.size() < 3) {
+        for (const double scale : {0.75, 0.625, 0.5}) {
+            addChoice(QSize(
+                static_cast<int>(std::round(static_cast<double>(displaySize.width()) * scale)),
+                static_cast<int>(std::round(static_cast<double>(displaySize.height()) * scale))));
+        }
+    }
+
+    if (choices.isEmpty()) {
+        for (const QSize& size : common16x9) {
+            addChoice(size);
+        }
+    }
+
+    std::sort(choices.begin(), choices.end(), [](const QSize& lhs, const QSize& rhs) {
+        const qint64 lhsArea = static_cast<qint64>(lhs.width()) * static_cast<qint64>(lhs.height());
+        const qint64 rhsArea = static_cast<qint64>(rhs.width()) * static_cast<qint64>(rhs.height());
+        if (lhsArea != rhsArea) {
+            return lhsArea > rhsArea;
+        }
+        return lhs.width() > rhs.width();
+    });
+    return choices;
 }
 
 QVector<DisplayChoice> parseDisplayChoices(const QString& output)
@@ -1380,12 +1473,7 @@ private:
         fpsSpin_->setRange(15, 240);
         fpsSpin_->setValue(60);
         resolutionCombo_ = new NoWheelComboBox;
-        resolutionCombo_->addItem("Auto", QStringLiteral("auto"));
-        resolutionCombo_->addItem("Native", QStringLiteral("native"));
-        resolutionCombo_->addItem("2560 × 1440", QStringLiteral("2560x1440"));
-        resolutionCombo_->addItem("1920 × 1080", QStringLiteral("1920x1080"));
-        resolutionCombo_->addItem("1600 × 900", QStringLiteral("1600x900"));
-        resolutionCombo_->addItem("1280 × 720", QStringLiteral("1280x720"));
+        populateResolutionChoices();
         prepareInput(fpsSpin_);
         prepareInput(resolutionCombo_);
         addRow(videoContent, "Display", displayRow);
@@ -1807,10 +1895,12 @@ private:
         bindCheckBox(lanDiscoverableCheck_);
         connect(displayCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
             displayCombo_->setToolTip(displayCombo_->currentText());
+            populateResolutionChoices();
             refreshCommand();
         });
         bindSpinBox(fpsSpin_);
         connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+            resolutionCombo_->setToolTip(resolutionCombo_->currentText());
             refreshCommand();
             writeRuntimeResolutionCommand();
         });
@@ -3088,6 +3178,7 @@ private:
         QScreen* primaryScreen = QApplication::primaryScreen();
         for (const auto& display : choices) {
             displayCombo_->addItem(displayChoiceText(display, primaryScreen), display.index);
+            displayCombo_->setItemData(displayCombo_->count() - 1, QSize(display.width, display.height), kDisplaySizeRole);
             if (!display.adapterName.isEmpty()) {
                 displayCombo_->setItemData(displayCombo_->count() - 1, display.adapterName, Qt::ToolTipRole);
             }
@@ -3097,6 +3188,7 @@ private:
         displayCombo_->setCurrentIndex(preferredIndex >= 0 ? preferredIndex : 0);
         displayCombo_->setToolTip(displayCombo_->currentText());
         displayCombo_->blockSignals(wasBlocked);
+        populateResolutionChoices();
     }
 
     void populateDisplayChoices()
@@ -3110,6 +3202,38 @@ private:
             return 0;
         }
         return displayCombo_->currentData().toInt();
+    }
+
+    QSize selectedDisplaySize() const
+    {
+        if (displayCombo_ == nullptr || displayCombo_->currentIndex() < 0) {
+            return {};
+        }
+        return displayCombo_->itemData(displayCombo_->currentIndex(), kDisplaySizeRole).toSize();
+    }
+
+    void populateResolutionChoices()
+    {
+        if (resolutionCombo_ == nullptr) {
+            return;
+        }
+
+        const QString previousChoice = currentResolutionChoice();
+        const QSize displaySize = selectedDisplaySize();
+        const bool wasBlocked = resolutionCombo_->blockSignals(true);
+        resolutionCombo_->clear();
+        resolutionCombo_->addItem("Auto", QStringLiteral("auto"));
+        for (const QSize& size : resolutionChoicesForDisplay(displaySize)) {
+            resolutionCombo_->addItem(resolutionChoiceText(size), resolutionChoiceValue(size));
+        }
+
+        int preferredIndex = resolutionCombo_->findData(previousChoice);
+        if (preferredIndex < 0 && previousChoice == "native" && validResolutionSize(displaySize)) {
+            preferredIndex = resolutionCombo_->findData(resolutionChoiceValue(evenResolutionSize(displaySize)));
+        }
+        resolutionCombo_->setCurrentIndex(preferredIndex >= 0 ? preferredIndex : 0);
+        resolutionCombo_->setToolTip(resolutionCombo_->currentText());
+        resolutionCombo_->blockSignals(wasBlocked);
     }
 
     QVector<DiscoveredReceiver> parseDiscoveredReceivers(const QString& output) const
@@ -5350,6 +5474,8 @@ int main(int argc, char** argv)
             const auto displays = parseDisplayChoices(QString::fromUtf8(
                 "[0] \\\\.\\DISPLAY1 2560x1440 at (0,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"
                 "[1] \\\\.\\DISPLAY2 1920x1080 at (-1920,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"));
+            const auto qhdResolutionChoices = resolutionChoicesForDisplay(QSize(2560, 1440));
+            const auto fhdResolutionChoices = resolutionChoicesForDisplay(QSize(1920, 1080));
             const auto activeRooms = parseActiveRooms(QByteArrayLiteral(R"json({
                 "ok": true,
                 "rooms": [
@@ -5419,6 +5545,11 @@ int main(int argc, char** argv)
                 displays[1].index == 1 &&
                 displays[1].width == 1920 &&
                 displays[1].left == -1920 &&
+                qhdResolutionChoices.contains(QSize(2560, 1440)) &&
+                qhdResolutionChoices.contains(QSize(1920, 1080)) &&
+                !qhdResolutionChoices.contains(QSize(3840, 2160)) &&
+                fhdResolutionChoices.contains(QSize(1920, 1080)) &&
+                !fhdResolutionChoices.contains(QSize(2560, 1440)) &&
                 activeRooms.size() == 2 &&
                 activeRooms[0].roomId == "room-alpha" &&
                 activeRooms[0].name == "Alpha Room" &&

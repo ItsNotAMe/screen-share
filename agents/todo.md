@@ -6,7 +6,7 @@ Only you can fully validate these because they need real machines/networks.
 
 - Worker room validation already tested: open room across two LANs, and locked/password room locally.
 - Remaining Worker room validation: locked/password room across two LANs, watcher joins an idle room before Share resumes, sharer reconnect, and two or more watchers with WebSocket peer notifications plus HTTP fallback.
-- Mid-session stream settings validation: while sharing, switch Resolution between Auto, Native, and explicit tiers and confirm Watch keeps receiving after each restart.
+- Mid-session stream settings validation: while sharing, switch Resolution between Auto and explicit tiers at or below the display size and confirm Watch keeps receiving after each restart.
 
 ## Build Work
 
@@ -18,8 +18,8 @@ Only you can fully validate these because they need real machines/networks.
 ## Completed Build Work
 
 - Added per-viewer connection/health display for multi-viewer Share sessions.
-- Added mid-session Share resolution changes. Resolution now has Auto, Native, and explicit tiers; the UI sends runtime commands and the sender restarts capture/encoding without closing the room.
-- Added a 2560x1440 Share resolution tier plus sharper GPU capture resizing and light receiver-side upscale sharpening for desktop text.
+- Added mid-session Share resolution changes. Resolution now has Auto plus explicit tiers at or below the selected display size; the UI sends runtime commands and the sender restarts capture/encoding without closing the room.
+- Added sharper GPU capture resizing and light receiver-side upscale sharpening for desktop text.
 
 ## Report-Driven Follow-Ups
 

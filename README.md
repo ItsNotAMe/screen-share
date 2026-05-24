@@ -103,10 +103,10 @@ default and includes a theme toggle in the header. Create room shows friendly di
 as resolution, position, and primary monitor
 status while still passing the selected numeric display index to the engine. Resolution defaults to
 Auto for sharing, which starts at native resolution and lets the sender step through adaptive tiers.
-During a live Share session, the Resolution picker can switch between Auto, Native, and explicit
-tiers such as 2560x1440 and 1920x1080 without closing the room; the sender restarts capture and
-encoding in place. Capture resizing uses a sharper GPU filter for desktop text, and the receiver
-adds light luma sharpening only when the preview is enlarged. It also has an
+During a live Share session, the Resolution picker can switch between Auto and explicit tiers at or
+below the selected display size without closing the room; the sender restarts capture and encoding
+in place. Capture resizing uses a sharper GPU filter for desktop text, and the receiver adds light
+luma sharpening only when the preview is enlarged. It also has an
 output-device picker for system audio, which is useful when Windows or a virtual mixer uses a default
 output device that does not contain the audio you actually want to share.
 
