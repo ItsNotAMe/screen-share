@@ -1,4 +1,5 @@
 #include "core/SessionCommand.h"
+#include "core/SessionRuntimeControl.h"
 #include "transport/UdpCrypto.h"
 #include "ui/ProcessSessionBackend.h"
 
@@ -5761,6 +5762,16 @@ int main(int argc, char** argv)
                 "--access-code", "room-key",
                 "--save-report", "receiver-report.zip",
             };
+            const auto runtimeResolution =
+                screenshare::ParseRuntimeResolutionRequest("resolution = 1920x1080\n");
+            const auto ignoredRuntimeResolution =
+                screenshare::ParseRuntimeResolutionRequest("resolution = 1919x1080\n");
+            const bool runtimeResolutionOk =
+                runtimeResolution &&
+                runtimeResolution->mode == screenshare::RuntimeResolutionMode::Fixed &&
+                runtimeResolution->width == 1920 &&
+                runtimeResolution->height == 1080 &&
+                !ignoredRuntimeResolution;
             const bool selfTestOk = peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("ss1e:") &&
@@ -5800,7 +5811,8 @@ int main(int argc, char** argv)
                 parsedShortRoom == "room-public" &&
                 parsedShortRoomKey.isEmpty() &&
                 shareRoomArgumentsOk &&
-                watchRoomArgumentsOk;
+                watchRoomArgumentsOk &&
+                runtimeResolutionOk;
             return selfTestOk ? 0 : 2;
         }
     }
