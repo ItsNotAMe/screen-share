@@ -28,7 +28,7 @@
 - `ScreenShareUi.exe` lives beside `ScreenShare.exe` and launches it with `QProcess`.
 - `ScreenShareUi.exe` links `ScreenShareCore`, but live sessions still run through `src/ui/ProcessSessionBackend.*`, a `QProcess` adapter around `ScreenShare.exe`, until a concrete in-process session backend is implemented.
 - Room-based Share/Watch launch arguments are built through `src/core/SessionCommand.*` from typed session configs; manual/NAT fallback paths still use UI-local argument assembly until the revamped room model replaces them.
-- CLI stop files and runtime resolution control files now flow through `src/core/SessionRuntimeControl.*`; the process adapter still writes files, but the in-process backend should swap in memory-backed stop/settings requests.
+- CLI stop files and runtime resolution control files now flow through `src/core/SessionRuntimeControl.*`; the process adapter still writes files, while the in-process backend can use the memory-backed control object directly.
 - `--share` is the sender preset, so it already enables system audio, adaptive bitrate, and adaptive resolution.
 - Share audio uses Windows' default output unless `--audio-device-id` is supplied. The UI should expose a sender-side output-device picker because virtual mixers can make the Windows default endpoint differ from the device that actually contains app audio.
 - `--watch` is the receiver preset, so it already enables preview, audio playback, and default A/V sync.

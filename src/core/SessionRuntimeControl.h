@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -31,6 +32,23 @@ class NullSessionRuntimeControl final : public ISessionRuntimeControl {
 public:
     bool StopRequested() override;
     std::optional<RuntimeResolutionRequest> TakeResolutionRequest() override;
+};
+
+class MemorySessionRuntimeControl final : public ISessionRuntimeControl {
+public:
+    bool StopRequested() override;
+    std::optional<RuntimeResolutionRequest> TakeResolutionRequest() override;
+
+    void RequestStop();
+    void ResetStop();
+    void RequestResolution(RuntimeResolutionRequest request);
+    void ClearResolutionRequest();
+    void Reset();
+
+private:
+    std::mutex mutex_;
+    bool stopRequested_ = false;
+    std::optional<RuntimeResolutionRequest> resolutionRequest_;
 };
 
 class FileSessionRuntimeControl final : public ISessionRuntimeControl {

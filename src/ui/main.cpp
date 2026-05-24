@@ -5772,6 +5772,22 @@ int main(int argc, char** argv)
                 runtimeResolution->width == 1920 &&
                 runtimeResolution->height == 1080 &&
                 !ignoredRuntimeResolution;
+            screenshare::MemorySessionRuntimeControl memoryControl;
+            screenshare::RuntimeResolutionRequest memoryResolution;
+            memoryResolution.mode = screenshare::RuntimeResolutionMode::Native;
+            memoryControl.RequestResolution(memoryResolution);
+            const auto memoryResolutionResult = memoryControl.TakeResolutionRequest();
+            const bool memoryResolutionOk =
+                memoryResolutionResult &&
+                memoryResolutionResult->mode == screenshare::RuntimeResolutionMode::Native &&
+                !memoryControl.TakeResolutionRequest();
+            const bool memoryStopInitiallyClear = !memoryControl.StopRequested();
+            memoryControl.RequestStop();
+            const bool memoryStopRequested = memoryControl.StopRequested();
+            memoryControl.Reset();
+            const bool memoryControlReset =
+                !memoryControl.StopRequested() &&
+                !memoryControl.TakeResolutionRequest();
             const bool selfTestOk = peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("ss1e:") &&
@@ -5812,7 +5828,11 @@ int main(int argc, char** argv)
                 parsedShortRoomKey.isEmpty() &&
                 shareRoomArgumentsOk &&
                 watchRoomArgumentsOk &&
-                runtimeResolutionOk;
+                runtimeResolutionOk &&
+                memoryResolutionOk &&
+                memoryStopInitiallyClear &&
+                memoryStopRequested &&
+                memoryControlReset;
             return selfTestOk ? 0 : 2;
         }
     }
