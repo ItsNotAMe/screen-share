@@ -948,6 +948,21 @@ public:
     }
 
 private:
+    struct ShareViewerStatus {
+        int group = -1;
+        QString endpoint;
+        QString engineState;
+        QString health;
+        QString session;
+        qulonglong feedbackPackets = 0;
+        qulonglong completedFrames = 0;
+        qulonglong resyncs = 0;
+        qulonglong pendingDatagrams = 0;
+        qulonglong queueMs = 0;
+        bool everFeedback = false;
+        qint64 lastActiveMs = -1;
+    };
+
     void buildUi()
     {
         auto* root = new QVBoxLayout(this);
@@ -1330,6 +1345,10 @@ private:
         shareInternetStatusLabel_ = makeLabel("", "StatusHint");
         shareInternetStatusLabel_->setWordWrap(true);
         connectionContent->addWidget(shareInternetStatusLabel_);
+        shareViewerStatusLabel_ = makeLabel("", "StatusHint");
+        shareViewerStatusLabel_->setWordWrap(true);
+        shareViewerStatusLabel_->setVisible(false);
+        connectionContent->addWidget(shareViewerStatusLabel_);
         connect(connectionGroup, &QButtonGroup::idClicked, this, [this](int id) {
             setShareConnectionMethod(static_cast<ShareConnectionMethod>(id));
         });
@@ -3763,6 +3782,7 @@ private:
                 shareConnectionStatusText() :
                 runtimeStatus);
         }
+        updateShareViewerStatusLabel();
         if (watchInternetStatusLabel_ != nullptr) {
             const QString runtimeStatus = runtimeInternetStatusText(false);
             watchInternetStatusLabel_->setText(runtimeStatus.isEmpty() ?
@@ -4126,6 +4146,7 @@ private:
         handleAccessCodeProblem(processOutputParseBuffer_);
         updateRuntimeNatStatus(processOutputParseBuffer_);
         handlePreviewClosedSignal(processOutputParseBuffer_);
+        updateShareViewerStatus(text);
         updateConnectionState(processOutputParseBuffer_);
     }
 
@@ -4223,6 +4244,10 @@ private:
         lastWatchPayloadBytes_ = 0;
         lastWatchDecodedFrames_ = 0;
         lastWatchAudioPackets_ = 0;
+        shareViewers_.clear();
+        shareViewerParseBuffer_.clear();
+        shareViewerClock_.restart();
+        updateShareViewerStatusLabel();
     }
 
     void markPeerActivity()
@@ -4238,6 +4263,9 @@ private:
 
     void checkPeerActivityTimeout()
     {
+        if (running_ && shareMode()) {
+            updateShareViewerStatusLabel();
+        }
         if (!running_ || !peerConnected_ || !peerActivitySeen_) {
             return;
         }
@@ -4247,6 +4275,199 @@ private:
             applyStatusBadge();
             updateInternetStatus();
         }
+    }
+
+    ShareViewerStatus& shareViewerForEndpoint(int group, const QString& endpoint)
+    {
+        for (ShareViewerStatus& viewer : shareViewers_) {
+            if (viewer.group == group && viewer.endpoint == endpoint) {
+                return viewer;
+            }
+        }
+
+        ShareViewerStatus viewer;
+        viewer.group = group;
+        viewer.endpoint = endpoint;
+        shareViewers_.append(viewer);
+        return shareViewers_.last();
+    }
+
+    void updateShareViewerStatus(const QString& text)
+    {
+        if (!shareMode()) {
+            return;
+        }
+        if (!shareViewerClock_.isValid()) {
+            shareViewerClock_.restart();
+        }
+
+        bool changed = false;
+        bool activeNow = false;
+        QSet<int> feedbackGroups;
+        const qint64 nowMs = shareViewerClock_.elapsed();
+        shareViewerParseBuffer_ += text;
+        constexpr qsizetype MaxViewerParseBuffer = 8192;
+        if (shareViewerParseBuffer_.size() > MaxViewerParseBuffer) {
+            shareViewerParseBuffer_.remove(0, shareViewerParseBuffer_.size() - MaxViewerParseBuffer);
+        }
+
+        const qsizetype lastLf = shareViewerParseBuffer_.lastIndexOf('\n');
+        const qsizetype lastCr = shareViewerParseBuffer_.lastIndexOf('\r');
+        const qsizetype lineEnd = std::max(lastLf, lastCr);
+        if (lineEnd < 0) {
+            return;
+        }
+
+        const QString completeText = shareViewerParseBuffer_.left(lineEnd + 1);
+        shareViewerParseBuffer_.remove(0, lineEnd + 1);
+        const QStringList lines = completeText.split(QRegularExpression(QStringLiteral("[\r\n]+")), Qt::SkipEmptyParts);
+        for (const QString& line : lines) {
+            if (!line.contains("viewer_target=")) {
+                continue;
+            }
+
+            const QString endpoint = lastLogFieldValue(line, "viewer_endpoint");
+            if (endpoint.isEmpty()) {
+                continue;
+            }
+
+            bool groupOk = false;
+            const int group = lastLogFieldValue(line, "viewer_group").toInt(&groupOk);
+            ShareViewerStatus& viewer = shareViewerForEndpoint(groupOk ? group : -1, endpoint);
+            viewer.engineState = lastLogFieldValue(line, "viewer_state");
+            viewer.health = lastLogFieldValue(line, "viewer_feedback_health");
+            viewer.session = lastLogFieldValue(line, "viewer_feedback_session");
+            viewer.pendingDatagrams = lastLogFieldValue(line, "viewer_pending").toULongLong();
+            viewer.queueMs = lastLogFieldValue(line, "viewer_queue_ms").toULongLong();
+            viewer.completedFrames = lastLogFieldValue(line, "viewer_feedback_completed_frames").toULongLong();
+            viewer.resyncs = lastLogFieldValue(line, "viewer_feedback_resyncs").toULongLong();
+
+            bool ok = false;
+            const qulonglong packets = lastLogFieldValue(line, "viewer_feedback_packets").toULongLong(&ok);
+            if (ok) {
+                const bool increased =
+                    packets > viewer.feedbackPackets ||
+                    (packets < viewer.feedbackPackets && packets > 0);
+                viewer.feedbackPackets = packets;
+                if (increased) {
+                    viewer.everFeedback = true;
+                    viewer.lastActiveMs = nowMs;
+                    activeNow = true;
+                } else if (packets > 0) {
+                    viewer.everFeedback = true;
+                }
+                if (viewer.everFeedback && viewer.group >= 0) {
+                    feedbackGroups.insert(viewer.group);
+                }
+            }
+            changed = true;
+        }
+
+        if (!feedbackGroups.isEmpty()) {
+            for (int index = shareViewers_.size() - 1; index >= 0; --index) {
+                const ShareViewerStatus& viewer = shareViewers_[index];
+                if (feedbackGroups.contains(viewer.group) && !viewer.everFeedback) {
+                    shareViewers_.removeAt(index);
+                    changed = true;
+                }
+            }
+        }
+
+        if (activeNow) {
+            markPeerActivity();
+        }
+        if (changed) {
+            updateInternetStatus();
+        }
+    }
+
+    QString shareViewerStateText(const ShareViewerStatus& viewer) const
+    {
+        if (viewer.engineState == "failed") {
+            return "Failed";
+        }
+        if (viewer.everFeedback &&
+            viewer.lastActiveMs >= 0 &&
+            shareViewerClock_.isValid() &&
+            shareViewerClock_.elapsed() - viewer.lastActiveMs <= kSharePeerActivityTimeoutMs) {
+            return "Live";
+        }
+        if (viewer.everFeedback) {
+            return "Disconnected";
+        }
+        return "Waiting";
+    }
+
+    void updateShareViewerStatusLabel()
+    {
+        if (shareViewerStatusLabel_ == nullptr) {
+            return;
+        }
+        const bool visible = shareMode() && (running_ || !shareViewers_.isEmpty());
+        shareViewerStatusLabel_->setVisible(visible);
+        if (!visible) {
+            shareViewerStatusLabel_->clear();
+            return;
+        }
+
+        if (shareViewers_.isEmpty()) {
+            shareViewerStatusLabel_->setText("Viewers: waiting for watchers.");
+            return;
+        }
+
+        int liveCount = 0;
+        int failedCount = 0;
+        QVector<int> displayedIndexes;
+        displayedIndexes.reserve(shareViewers_.size());
+        for (int index = 0; index < shareViewers_.size(); ++index) {
+            displayedIndexes.push_back(index);
+        }
+
+        QStringList rows;
+        constexpr int MaxRows = 4;
+        for (const int viewerIndex : displayedIndexes) {
+            const ShareViewerStatus& viewer = shareViewers_[viewerIndex];
+            const QString state = shareViewerStateText(viewer);
+            if (state == "Live") {
+                ++liveCount;
+            } else if (state == "Failed") {
+                ++failedCount;
+            }
+            if (rows.size() >= MaxRows) {
+                continue;
+            }
+
+            QStringList details;
+            if (!viewer.health.isEmpty() && viewer.health != "none" && viewer.health != "unknown") {
+                details.push_back(viewer.health);
+            }
+            if (!viewer.session.isEmpty() && viewer.session != "none") {
+                details.push_back("session " + viewer.session);
+            }
+            if (viewer.queueMs > 0) {
+                details.push_back(QString::number(viewer.queueMs) + " ms queue");
+            }
+            if (viewer.resyncs > 0) {
+                details.push_back(QString::number(viewer.resyncs) + " resyncs");
+            }
+
+            QString row = state + ": " + viewer.endpoint;
+            if (!details.isEmpty()) {
+                row += " (" + details.join(", ") + ")";
+            }
+            rows.push_back(row);
+        }
+
+        QString summary = QStringLiteral("Viewers: %1 live / %2 total")
+            .arg(liveCount)
+            .arg(displayedIndexes.size());
+        if (failedCount > 0) {
+            summary += QStringLiteral(", %1 failed").arg(failedCount);
+        }
+        if (displayedIndexes.size() > MaxRows) {
+            rows.push_back(QStringLiteral("+%1 more").arg(displayedIndexes.size() - MaxRows));
+        }
+        shareViewerStatusLabel_->setText(summary + "\n" + rows.join("\n"));
     }
 
     void updateRuntimeNatStatus(const QString& text)
@@ -4377,6 +4598,7 @@ private:
     QPushButton* removeSharePeerInviteButton_ = nullptr;
     QPushButton* clearSharePeerInviteButton_ = nullptr;
     QLabel* shareInternetStatusLabel_ = nullptr;
+    QLabel* shareViewerStatusLabel_ = nullptr;
     QSpinBox* sharePortSpin_ = nullptr;
     QPushButton* findLanButton_ = nullptr;
     QComboBox* displayCombo_ = nullptr;
@@ -4452,6 +4674,9 @@ private:
     QString runtimeNatStatus_;
     QString runtimeNatHint_;
     QString processOutputParseBuffer_;
+    QString shareViewerParseBuffer_;
+    QVector<ShareViewerStatus> shareViewers_;
+    QElapsedTimer shareViewerClock_;
     bool runtimeNatShareMode_ = true;
     bool accessCodeWarningShown_ = false;
     bool roomAlreadyOpenWarningShown_ = false;

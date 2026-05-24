@@ -256,6 +256,7 @@ void UdpSender::Open(const UdpSenderConfig& config)
         addressLength_ = static_cast<int>(resolved->ai_addrlen);
         additionalAddresses_ = std::move(additionalAddresses);
         natProbeAddresses_.clear();
+        feedbackPeers_.clear();
         config_ = config;
         stats_ = {};
         stats_.encryptionEnabled = crypto != nullptr;
@@ -299,6 +300,7 @@ void UdpSender::Close()
         address_.clear();
         additionalAddresses_.clear();
         natProbeAddresses_.clear();
+        feedbackPeers_.clear();
         addressLength_ = 0;
         crypto_.reset();
         videoNoncePrefix_ = 0;
@@ -546,6 +548,7 @@ UdpSenderStats UdpSender::stats() const
 {
     std::lock_guard lock(mutex_);
     UdpSenderStats snapshot = stats_;
+    snapshot.feedbackPeers = feedbackPeers_;
     snapshot.natProbeTargetCount = static_cast<uint64_t>(natProbeAddresses_.size());
     snapshot.pendingDatagrams =
         static_cast<uint64_t>(queue_.size()) + (datagramInFlight_ ? 1ULL : 0ULL);
@@ -662,9 +665,26 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
             continue;
         }
 
+        const std::string feedbackEndpoint = SocketAddressToString(&senderAddress, senderAddressLength);
         ++stats_.feedbackPacketsReceived;
         stats_.hasFeedback = true;
         stats_.latestFeedback = *feedback;
+        auto peer = std::find_if(
+            feedbackPeers_.begin(),
+            feedbackPeers_.end(),
+            [&](const UdpSenderStats::FeedbackPeer& candidate) {
+                return candidate.endpoint == feedbackEndpoint;
+            });
+        if (peer == feedbackPeers_.end()) {
+            feedbackPeers_.push_back(UdpSenderStats::FeedbackPeer{
+                feedbackEndpoint,
+                1,
+                *feedback,
+            });
+        } else {
+            ++peer->packetsReceived;
+            peer->latestFeedback = *feedback;
+        }
         return feedback;
     }
 
