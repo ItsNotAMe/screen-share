@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -148,10 +149,12 @@ struct Options {
     int adaptReduceCooldownSeconds = 3;
     bool adaptReduceCooldownProvided = false;
     bool adaptResolution = false;
+    bool adaptResolutionProvided = false;
     float adaptResolutionMinScale = 0.5f;
     bool adaptResolutionMinScaleProvided = false;
     int adaptResolutionCooldownSeconds = 5;
     bool adaptResolutionCooldownProvided = false;
+    bool noAdaptResolution = false;
     bool wgcBorderRequired = false;
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
@@ -233,6 +236,7 @@ struct Options {
     bool sessionIdProvided = false;
     bool sessionIdFromLocalInvite = false;
     std::string stopFilePath;
+    std::string controlFilePath;
     bool generateAccessCode = false;
     bool allowPlaintext = false;
     bool accessCodeProvided = false;
@@ -296,8 +300,9 @@ void PrintHelp()
         << "              [--audio-capture system|microphone] [--audio-device-id ID]\n"
         << "              [--audio-codec raw|opus]\n"
         << "              [--adapt-min-bitrate-mbps Mbps] [--adapt-reduce-cooldown S]\n"
-        << "              [--adapt-resolution] [--adapt-resolution-min-scale N]\n"
+        << "              [--adapt-resolution|--no-adapt-resolution] [--adapt-resolution-min-scale N]\n"
         << "              [--adapt-resolution-cooldown S]\n"
+        << "              [--control-file PATH]\n"
         << "              [--dump-capture-bmp PATH]\n"
         << "              [--capture-backend dxgi|wgc]\n"
         << "              [--bitrate-mbps Mbps] [--keyframe-interval S]\n"
@@ -3200,6 +3205,147 @@ bool StopRequested(const Options& options)
     return std::filesystem::exists(options.stopFilePath, error);
 }
 
+enum class RuntimeResolutionMode {
+    Auto,
+    Native,
+    Fixed,
+};
+
+struct RuntimeResolutionRequest {
+    RuntimeResolutionMode mode = RuntimeResolutionMode::Auto;
+    int width = 0;
+    int height = 0;
+};
+
+struct RuntimeControlFileState {
+    std::optional<std::filesystem::file_time_type> lastWriteTime;
+    std::string lastContent;
+};
+
+std::string TrimAscii(std::string_view value)
+{
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+        value.remove_suffix(1);
+    }
+    return std::string(value);
+}
+
+std::string LowerAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool ParsePositiveInt(std::string_view value, int& out)
+{
+    const std::string text = TrimAscii(value);
+    if (text.empty()) {
+        return false;
+    }
+    char* end = nullptr;
+    const long parsed = std::strtol(text.c_str(), &end, 10);
+    if (end == text.c_str() || *end != '\0' || parsed <= 0 || parsed > std::numeric_limits<int>::max()) {
+        return false;
+    }
+    out = static_cast<int>(parsed);
+    return true;
+}
+
+std::optional<RuntimeResolutionRequest> ParseRuntimeResolutionRequest(std::string_view content)
+{
+    std::optional<RuntimeResolutionRequest> request;
+    std::istringstream input{std::string(content)};
+    std::string line;
+    while (std::getline(input, line)) {
+        line = TrimAscii(line);
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+
+        const std::string lowerLine = LowerAscii(line);
+        if (lowerLine.rfind("resolution", 0) != 0) {
+            continue;
+        }
+        const size_t separator = line.find_first_of("= \t");
+        if (separator == std::string::npos) {
+            continue;
+        }
+        std::string value = TrimAscii(std::string_view(line).substr(separator + 1));
+        if (!value.empty() && value.front() == '=') {
+            value = TrimAscii(std::string_view(value).substr(1));
+        }
+
+        const std::string lowerValue = LowerAscii(value);
+        RuntimeResolutionRequest parsed;
+        if (lowerValue == "auto") {
+            parsed.mode = RuntimeResolutionMode::Auto;
+            request = parsed;
+            continue;
+        }
+        if (lowerValue == "native") {
+            parsed.mode = RuntimeResolutionMode::Native;
+            request = parsed;
+            continue;
+        }
+
+        const size_t x = lowerValue.find('x');
+        if (x == std::string::npos) {
+            continue;
+        }
+        int width = 0;
+        int height = 0;
+        if (!ParsePositiveInt(std::string_view(lowerValue).substr(0, x), width) ||
+            !ParsePositiveInt(std::string_view(lowerValue).substr(x + 1), height) ||
+            (width % 2) != 0 ||
+            (height % 2) != 0) {
+            continue;
+        }
+
+        parsed.mode = RuntimeResolutionMode::Fixed;
+        parsed.width = width;
+        parsed.height = height;
+        request = parsed;
+    }
+    return request;
+}
+
+std::optional<RuntimeResolutionRequest> ReadRuntimeResolutionRequest(
+    const Options& options,
+    RuntimeControlFileState& state)
+{
+    if (options.controlFilePath.empty()) {
+        return std::nullopt;
+    }
+
+    std::error_code error;
+    const auto writeTime = std::filesystem::last_write_time(options.controlFilePath, error);
+    if (error) {
+        return std::nullopt;
+    }
+    if (state.lastWriteTime && *state.lastWriteTime == writeTime) {
+        return std::nullopt;
+    }
+
+    std::ifstream file(options.controlFilePath, std::ios::binary);
+    if (!file) {
+        return std::nullopt;
+    }
+    std::ostringstream content;
+    content << file.rdbuf();
+    state.lastWriteTime = writeTime;
+    const std::string text = content.str();
+    if (text == state.lastContent) {
+        return std::nullopt;
+    }
+    state.lastContent = text;
+    return ParseRuntimeResolutionRequest(text);
+}
+
 bool HasUdpSession(const Options& options)
 {
     return options.shareRoom ||
@@ -3367,6 +3513,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.logPath = requireValue("--log");
         } else if (arg == "--stop-file") {
             options.stopFilePath = requireValue("--stop-file");
+        } else if (arg == "--control-file") {
+            options.controlFilePath = requireValue("--control-file");
         } else if (arg == "--session" || arg == "--session-id") {
             options.sessionId = ParseSessionId(requireValue(arg.c_str()));
             options.sessionIdProvided = true;
@@ -3541,7 +3689,10 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.adaptReduceCooldownProvided = true;
         } else if (arg == "--adapt-resolution") {
             options.adaptResolution = true;
+            options.adaptResolutionProvided = true;
             options.adaptBitrate = true;
+        } else if (arg == "--no-adapt-resolution") {
+            options.noAdaptResolution = true;
         } else if (arg == "--adapt-resolution-min-scale") {
             options.adaptResolutionMinScale = ParseFloat(requireValue("--adapt-resolution-min-scale"), "--adapt-resolution-min-scale");
             options.adaptResolutionMinScaleProvided = true;
@@ -3793,6 +3944,14 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         options.adaptResolution = true;
         options.adaptBitrate = true;
     }
+    if (options.noAdaptResolution) {
+        if (options.adaptResolutionProvided ||
+            options.adaptResolutionMinScaleProvided ||
+            options.adaptResolutionCooldownProvided) {
+            throw std::invalid_argument("--no-adapt-resolution cannot be combined with adaptive resolution options");
+        }
+        options.adaptResolution = false;
+    }
 
     if (options.generateAccessCode) {
         if (!options.logPath.empty() || !options.saveReportPath.empty()) {
@@ -3869,9 +4028,11 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.adaptMinBitrateProvided ||
             options.adaptReduceCooldownProvided ||
             options.adaptResolution ||
+            options.noAdaptResolution ||
             options.adaptResolutionMinScaleProvided ||
             options.adaptResolutionCooldownProvided ||
             options.inviteEndpointPreferenceProvided ||
+            !options.controlFilePath.empty() ||
             !options.localInvite.empty() ||
             !options.peerInvite.empty() ||
             secondsProvided ||
@@ -4148,12 +4309,18 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.udpLocalPortProvided && options.udpSendTarget.empty() && options.audioSendTarget.empty() && !options.shareRoom) {
         throw std::invalid_argument("--udp-local-port requires --udp-send, --share, --share-room, or --audio-send");
     }
+    if (!options.controlFilePath.empty() && options.udpSendTarget.empty() && !options.shareRoom) {
+        throw std::invalid_argument("--control-file requires --udp-send, --share, or --share-room");
+    }
     if (options.udpMaxQueueMs < 0 || options.udpMaxQueueMs > 5000) {
         throw std::invalid_argument("--udp-max-queue-ms must be between 0 and 5000");
     }
     if ((options.adaptResolution || options.adaptResolutionMinScaleProvided || options.adaptResolutionCooldownProvided) &&
         options.udpSendTarget.empty() && !options.shareRoom) {
         throw std::invalid_argument("--adapt-resolution, --adapt-resolution-min-scale, and --adapt-resolution-cooldown require --udp-send or --share-room");
+    }
+    if (options.noAdaptResolution && options.udpSendTarget.empty() && !options.shareRoom) {
+        throw std::invalid_argument("--no-adapt-resolution requires --udp-send, --share, or --share-room");
     }
     if (options.adaptBitrate && options.udpSendTarget.empty() && !options.shareRoom) {
         throw std::invalid_argument("--adapt-bitrate requires --udp-send or --share-room");
@@ -4205,8 +4372,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          options.udpLocalPortProvided || options.udpPacingOptionProvided || options.udpMaxQueueMsProvided ||
          options.adaptBitrate || options.adaptMinBitrateProvided ||
          options.adaptReduceCooldownProvided || options.adaptResolution || options.adaptResolutionMinScaleProvided ||
-         options.adaptResolutionCooldownProvided || options.keyframeIntervalProvided)) {
-        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --audio-send, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --udp-local-port, --no-udp-pacing, --udp-max-queue-ms, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, or --keyframe-interval");
+         options.adaptResolutionCooldownProvided || options.noAdaptResolution || !options.controlFilePath.empty() ||
+         options.keyframeIntervalProvided)) {
+        throw std::invalid_argument("--udp-recv cannot be combined with --list, --list-h264-encoders, --list-audio-devices, --audio-capture, --audio-device-id, --audio-send, --record, --dump-capture-bmp, --stream-encode, --stream-encoder, --udp-send, --udp-local-port, --no-udp-pacing, --udp-max-queue-ms, --adapt-bitrate, --adapt-min-bitrate-mbps, --adapt-reduce-cooldown, --adapt-resolution, --no-adapt-resolution, --adapt-resolution-min-scale, --adapt-resolution-cooldown, --control-file, or --keyframe-interval");
     }
     if (options.listH264Encoders &&
         (options.listDisplays || options.listAudioDevices || options.audioCapture || options.audioDeviceIdProvided ||
@@ -5002,12 +5170,13 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     AdaptiveBitrateAdvisor bitrateAdvisor;
     std::vector<ResolutionTier> adaptiveResolutionTiers;
     size_t adaptiveResolutionTierIndex = 0;
+    bool adaptiveResolutionEnabled = options.adaptResolution;
     uint64_t resolutionAdaptations = 0;
     uint64_t resolutionAdaptationFailures = 0;
     int resolutionCooldownRemaining = 0;
     uint32_t resolutionStableFeedbackReports = 0;
     uint32_t resolutionReductionPressureReports = 0;
-    const char* resolutionAdaptationStatus = options.adaptResolution ? "waiting" : "disabled";
+    const char* resolutionAdaptationStatus = adaptiveResolutionEnabled ? "waiting" : "disabled";
     const uint32_t streamKeyframeIntervalFrames =
         options.keyframeIntervalSeconds <= 0 ?
         0 :
@@ -5026,6 +5195,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
     std::unique_ptr<LiveSignalingRuntime> liveSignalingRuntime;
     std::vector<UdpSendTargetSpec> udpSendTargetSpecs = options.udpSendTargetSpecs;
     std::set<std::string> liveSignalingSendTargets;
+    RuntimeControlFileState runtimeControlFile;
     uint64_t audioPacingBitrate = 0;
     bool audioPacingApplied = false;
 
@@ -5286,33 +5456,35 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         }
     };
 
-    auto restartStreamAtResolution = [&](size_t tierIndex, const char* direction, const char* reason) {
-        if (tierIndex >= adaptiveResolutionTiers.size()) {
-            return;
-        }
-
-        const auto& tier = adaptiveResolutionTiers[tierIndex];
+    auto restartStreamOutput = [&](int width, int height, double scale, const char* direction, const char* reason) {
         try {
             if (streamEncoder) {
                 sendStreamPackets(streamEncoder->Drain());
                 streamEncoder.reset();
             }
 
-            config.targetWidth = tier.width;
-            config.targetHeight = tier.height;
+            config.targetWidth = width;
+            config.targetHeight = height;
             ConfigureCapturePayloads(config, options, streamEncoderPreference);
             capturer.Stop();
             capturer.Start(config);
             hasFrame = false;
-            adaptiveResolutionTierIndex = tierIndex;
             resolutionCooldownRemaining = options.adaptResolutionCooldownSeconds;
             resolutionStableFeedbackReports = 0;
             resolutionReductionPressureReports = 0;
             ++resolutionAdaptations;
-            resolutionAdaptationStatus = std::strcmp(direction, "increase") == 0 ? "applied_increase" : "applied_reduce";
+            if (std::strcmp(direction, "manual") == 0) {
+                resolutionAdaptationStatus = "manual";
+            } else if (std::strcmp(direction, "auto") == 0) {
+                resolutionAdaptationStatus = "waiting";
+            } else {
+                resolutionAdaptationStatus =
+                    std::strcmp(direction, "increase") == 0 ? "applied_increase" : "applied_reduce";
+            }
             std::cout
-                << "Adaptive resolution applied output=" << tier.width << "x" << tier.height
-                << " scale=" << tier.scale
+                << "Runtime resolution applied output="
+                << (width > 0 && height > 0 ? std::to_string(width) + "x" + std::to_string(height) : std::string("native"))
+                << " scale=" << scale
                 << " direction=" << direction
                 << " bitrate_mbps=" << Mbps(streamBitrate)
                 << " reason=" << reason
@@ -5325,8 +5497,18 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         }
     };
 
+    auto restartStreamAtResolution = [&](size_t tierIndex, const char* direction, const char* reason) {
+        if (tierIndex >= adaptiveResolutionTiers.size()) {
+            return;
+        }
+
+        const auto& tier = adaptiveResolutionTiers[tierIndex];
+        restartStreamOutput(tier.width, tier.height, tier.scale, direction, reason);
+        adaptiveResolutionTierIndex = tierIndex;
+    };
+
     auto applyAdaptiveResolution = [&](const screenshare::UdpSenderStats& udpStats) {
-        if (!options.adaptResolution || adaptiveResolutionTiers.size() < 2 || !streamEncoder || !bitrateAdvisor.configured()) {
+        if (!adaptiveResolutionEnabled || adaptiveResolutionTiers.size() < 2 || !streamEncoder || !bitrateAdvisor.configured()) {
             return;
         }
 
@@ -5426,6 +5608,51 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         resolutionAdaptationStatus = "holding";
     };
 
+    auto applyRuntimeResolutionControl = [&]() {
+        const auto request = ReadRuntimeResolutionRequest(options, runtimeControlFile);
+        if (!request) {
+            return;
+        }
+
+        switch (request->mode) {
+        case RuntimeResolutionMode::Auto:
+            if (adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
+                return;
+            }
+            adaptiveResolutionEnabled = true;
+            adaptiveResolutionTiers.clear();
+            adaptiveResolutionTierIndex = 0;
+            restartStreamOutput(0, 0, 1.0, "auto", "control_file");
+            std::cout << "runtime_resolution_mode=auto\n";
+            break;
+        case RuntimeResolutionMode::Native:
+            if (!adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
+                return;
+            }
+            adaptiveResolutionEnabled = false;
+            adaptiveResolutionTiers.clear();
+            adaptiveResolutionTierIndex = 0;
+            restartStreamOutput(0, 0, 1.0, "manual", "control_file_native");
+            std::cout << "runtime_resolution_mode=native\n";
+            break;
+        case RuntimeResolutionMode::Fixed:
+            if (!adaptiveResolutionEnabled &&
+                config.targetWidth == request->width &&
+                config.targetHeight == request->height) {
+                return;
+            }
+            adaptiveResolutionEnabled = false;
+            adaptiveResolutionTiers.clear();
+            adaptiveResolutionTierIndex = 0;
+            restartStreamOutput(request->width, request->height, 1.0, "manual", "control_file_fixed");
+            std::cout
+                << "runtime_resolution_mode=fixed"
+                << " runtime_resolution=" << request->width << "x" << request->height
+                << "\n";
+            break;
+        }
+    };
+
     const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
     auto nextFrameAt = Clock::now();
     auto keepRunning = [&]() {
@@ -5439,6 +5666,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
         std::this_thread::sleep_until(nextFrameAt);
         nextFrameAt += targetFrameTime;
         drainLiveSignalingSendTargets();
+        applyRuntimeResolutionControl();
 
         const auto captureStartedAt = Clock::now();
         const auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(0));
@@ -5463,7 +5691,7 @@ void RunCaptureStats(const Options& options, SavedReportContext& reportContext)
             lastNv12TextureAvailable = frame->nv12Texture != nullptr;
             lastFrame = std::move(*frame);
             hasFrame = true;
-            if (options.adaptResolution && adaptiveResolutionTiers.empty()) {
+            if (adaptiveResolutionEnabled && adaptiveResolutionTiers.empty()) {
                 adaptiveResolutionTiers = BuildResolutionTiers(
                     lastFrame.width,
                     lastFrame.height,

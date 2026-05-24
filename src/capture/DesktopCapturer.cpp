@@ -207,7 +207,11 @@ struct ScaleConstants {
     uint32_t colorConversionMode = 0;
     float hdrSdrWhiteNits = 203.0f;
     float hdrSdrBgraExposure = 0.88f;
-    float padding = 0.0f;
+    float sharpResize = 0.0f;
+    float sourceWidth = 1.0f;
+    float sourceHeight = 1.0f;
+    float outputWidth = 1.0f;
+    float outputHeight = 1.0f;
 };
 
 Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const char* source, const char* entryPoint, const char* target)
@@ -701,7 +705,11 @@ cbuffer ColorConversion : register(b0)
     uint colorConversionMode;
     float hdrSdrWhiteNits;
     float hdrSdrBgraExposure;
-    float padding;
+    float sharpResize;
+    float sourceWidth;
+    float sourceHeight;
+    float outputWidth;
+    float outputHeight;
 };
 
 float3 LinearToSrgb(float3 linearRgb)
@@ -776,9 +784,49 @@ float3 HdrDesktopBgraToSdr(float3 sdrRgb)
     return LinearToSrgb(saturate(linearRgb * exposure));
 }
 
+float CatmullRomWeight(float x)
+{
+    x = abs(x);
+    if (x <= 1.0) {
+        return ((1.5 * x - 2.5) * x * x) + 1.0;
+    }
+    if (x < 2.0) {
+        return (((-0.5 * x + 2.5) * x - 4.0) * x) + 2.0;
+    }
+    return 0.0;
+}
+
+float4 SampleSharpResize(float2 uv)
+{
+    float2 sourceSize = max(float2(sourceWidth, sourceHeight), float2(1.0, 1.0));
+    float2 sourcePosition = uv * sourceSize - 0.5;
+    float2 basePosition = floor(sourcePosition);
+    float2 fraction = sourcePosition - basePosition;
+    int2 maxCoord = int2(sourceSize) - int2(1, 1);
+
+    float4 color = 0.0;
+    float totalWeight = 0.0;
+    [unroll]
+    for (int y = -1; y <= 2; ++y) {
+        const float weightY = CatmullRomWeight(float(y) - fraction.y);
+        [unroll]
+        for (int x = -1; x <= 2; ++x) {
+            const float weightX = CatmullRomWeight(float(x) - fraction.x);
+            const float weight = weightX * weightY;
+            const int2 coord = clamp(int2(basePosition) + int2(x, y), int2(0, 0), maxCoord);
+            color += desktopTexture.Load(int3(coord, 0)) * weight;
+            totalWeight += weight;
+        }
+    }
+
+    return color / max(totalWeight, 0.000001);
+}
+
 float4 ps_main(VertexOut input) : SV_Target
 {
-    float4 color = desktopTexture.Sample(linearSampler, input.uv);
+    float4 color = sharpResize > 0.5
+        ? SampleSharpResize(input.uv)
+        : desktopTexture.Sample(linearSampler, input.uv);
     if (colorConversionMode == 1) {
         color.rgb = ScRgbToSdr(color.rgb);
     } else if (colorConversionMode == 2) {
@@ -1275,6 +1323,13 @@ ID3D11Texture2D* DesktopCapturer::ScaleFrameIfNeeded(ID3D11Texture2D* sourceText
     constants.colorConversionMode = colorConversionMode;
     constants.hdrSdrWhiteNits = std::clamp(config_.hdrSdrWhiteNits, 80.0f, 1000.0f);
     constants.hdrSdrBgraExposure = std::clamp(config_.hdrSdrBgraExposure, 0.25f, 2.0f);
+    constants.sharpResize =
+        outputWidth != static_cast<int>(sourceDesc.Width) ||
+        outputHeight != static_cast<int>(sourceDesc.Height) ? 1.0f : 0.0f;
+    constants.sourceWidth = static_cast<float>(sourceDesc.Width);
+    constants.sourceHeight = static_cast<float>(sourceDesc.Height);
+    constants.outputWidth = static_cast<float>(outputWidth);
+    constants.outputHeight = static_cast<float>(outputHeight);
     lastColorConversionMode_ = constants.colorConversionMode;
     context_->UpdateSubresource(scaleConstants_.Get(), 0, nullptr, &constants, 0, 0);
 
