@@ -54,6 +54,10 @@ struct ShareSessionConfig {
     std::string roomId;
     std::string roomName;
     std::string roomPassword;
+    std::string signalingStunServer;
+    std::string udpAccessCode;
+    bool allowPlaintext = false;
+    std::string reportPath;
     std::string audioDeviceId;
     bool captureSystemAudio = true;
     bool hostAudioMuted = false;
@@ -64,8 +68,14 @@ struct WatchSessionConfig {
     uint16_t listenPort = 0;
     std::string roomId;
     std::string roomPassword;
+    std::string signalingStunServer;
+    std::string udpAccessCode;
+    bool allowPlaintext = false;
+    std::string reportPath;
     bool playAudio = true;
     bool muted = false;
+    int previewLatencyMs = 100;
+    int audioPlaybackVolumePercent = 100;
 };
 
 struct SessionViewer {

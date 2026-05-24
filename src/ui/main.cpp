@@ -1,3 +1,4 @@
+#include "core/SessionCommand.h"
 #include "transport/UdpCrypto.h"
 #include "ui/ProcessSessionBackend.h"
 
@@ -66,6 +67,7 @@
 #include <cmath>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -79,6 +81,22 @@ constexpr const char* kDefaultSignalServer = "https://screenshare-signaling.bit-
 constexpr int kDisplaySizeRole = Qt::UserRole + 1;
 constexpr const char* kIconNameProperty = "screenShareIconName";
 constexpr const char* kIconSizeProperty = "screenShareIconSize";
+
+std::string toStdUtf8(const QString& text)
+{
+    const QByteArray utf8 = text.toUtf8();
+    return std::string(utf8.constData(), static_cast<size_t>(utf8.size()));
+}
+
+QStringList toQStringList(const std::vector<std::string>& values)
+{
+    QStringList result;
+    result.reserve(static_cast<qsizetype>(values.size()));
+    for (const std::string& value : values) {
+        result.push_back(QString::fromStdString(value));
+    }
+    return result;
+}
 
 QIcon appIcon()
 {
@@ -2884,8 +2902,83 @@ private:
         return "Auto";
     }
 
+    QString currentReportPath() const
+    {
+        if (reportCheck_ == nullptr ||
+            reportPathEdit_ == nullptr ||
+            !reportCheck_->isChecked()) {
+            return {};
+        }
+        return reportPathEdit_->text().trimmed();
+    }
+
+    screenshare::StreamSettings currentStreamSettings() const
+    {
+        screenshare::StreamSettings settings;
+        settings.fps = fpsSpin_ == nullptr ? 60 : fpsSpin_->value();
+        settings.adaptBitrate = true;
+        settings.adaptResolution = currentResolutionChoice() == "auto";
+
+        const QSize resolution = currentFixedResolution();
+        if (resolution.width() > 0 && resolution.height() > 0) {
+            settings.outputResolution = screenshare::SessionResolution{
+                resolution.width(),
+                resolution.height(),
+            };
+        }
+        return settings;
+    }
+
+    screenshare::ShareSessionConfig currentShareRoomConfig() const
+    {
+        screenshare::ShareSessionConfig config;
+        config.displayIndex = selectedDisplayIndex();
+        config.roomPort = static_cast<uint16_t>(shareInvitePortSpin_->value());
+        config.roomId = toStdUtf8(shareSignalRoom());
+        config.roomName = toStdUtf8(shareRoomName());
+        config.roomPassword = toStdUtf8(shareRoomPassword());
+        config.signalingStunServer = toStdUtf8(stunServer());
+        config.udpAccessCode = toStdUtf8(effectiveAccessCode());
+        config.allowPlaintext = allowPlaintextCheck_ != nullptr && allowPlaintextCheck_->isChecked();
+        config.reportPath = toStdUtf8(currentReportPath());
+        config.audioDeviceId = audioDeviceCombo_ == nullptr ?
+            std::string() :
+            toStdUtf8(audioDeviceCombo_->currentData().toString());
+        config.captureSystemAudio = true;
+        config.stream = currentStreamSettings();
+        return config;
+    }
+
+    screenshare::WatchSessionConfig currentWatchRoomConfig() const
+    {
+        screenshare::WatchSessionConfig config;
+        config.listenPort = static_cast<uint16_t>(watchPortSpin_->value());
+        config.roomId = toStdUtf8(watchSignalRoom());
+        config.roomPassword = watchRoomKey_.isEmpty() ? toStdUtf8(watchRoomPassword()) : std::string();
+        config.signalingStunServer = toStdUtf8(stunServer());
+        config.udpAccessCode = toStdUtf8(effectiveAccessCode());
+        config.allowPlaintext = allowPlaintextCheck_ != nullptr && allowPlaintextCheck_->isChecked();
+        config.reportPath = toStdUtf8(currentReportPath());
+        config.playAudio = true;
+        config.muted = mutedCheck_ != nullptr && mutedCheck_->isChecked();
+        config.previewLatencyMs = previewLatencySpin_ == nullptr ? 100 : previewLatencySpin_->value();
+        config.audioPlaybackVolumePercent = volumeSpin_ == nullptr ? 100 : volumeSpin_->value();
+        return config;
+    }
+
     QStringList currentArguments() const
     {
+        if (shareMode() &&
+            shareConnectionMethod() == ShareConnectionMethod::InternetInvite &&
+            !shareUsesLegacyInvite()) {
+            return toQStringList(screenshare::BuildShareRoomArguments(currentShareRoomConfig()));
+        }
+        if (!shareMode() &&
+            watchConnectionMethod() == WatchConnectionMethod::InternetInvite &&
+            !watchUsesLegacyInvite()) {
+            return toQStringList(screenshare::BuildWatchRoomArguments(currentWatchRoomConfig()));
+        }
+
         QStringList args;
         if (shareMode()) {
             if (shareConnectionMethod() == ShareConnectionMethod::InternetInvite) {
@@ -5619,7 +5712,56 @@ int main(int argc, char** argv)
                 &parsedShortRoom,
                 nullptr,
                 &parsedShortRoomKey);
-            return peers.size() == 1 &&
+            screenshare::ShareSessionConfig shareCommandConfig;
+            shareCommandConfig.displayIndex = 1;
+            shareCommandConfig.roomPort = 5001;
+            shareCommandConfig.roomId = "room-alpha";
+            shareCommandConfig.roomName = "Alpha Room";
+            shareCommandConfig.roomPassword = "pw";
+            shareCommandConfig.signalingStunServer = "stun.example:19302";
+            shareCommandConfig.reportPath = "sender-report.zip";
+            shareCommandConfig.audioDeviceId = "audio-device";
+            shareCommandConfig.stream.fps = 30;
+            shareCommandConfig.stream.adaptResolution = false;
+            shareCommandConfig.stream.outputResolution = screenshare::SessionResolution{1920, 1080};
+            const QStringList shareRoomArguments = toQStringList(
+                screenshare::BuildShareRoomArguments(shareCommandConfig));
+            const bool shareRoomArgumentsOk = shareRoomArguments == QStringList{
+                "--share-room", "5001",
+                "--signal-room", "room-alpha",
+                "--signal-room-name", "Alpha Room",
+                "--signal-room-password", "pw",
+                "--display", "1",
+                "--fps", "30",
+                "--no-adapt-resolution",
+                "--width", "1920",
+                "--height", "1080",
+                "--audio-device-id", "audio-device",
+                "--signal-stun", "stun.example:19302",
+                "--save-report", "sender-report.zip",
+            };
+            screenshare::WatchSessionConfig watchCommandConfig;
+            watchCommandConfig.listenPort = 5000;
+            watchCommandConfig.roomId = "room-alpha";
+            watchCommandConfig.signalingStunServer = "stun.example:19302";
+            watchCommandConfig.udpAccessCode = "room-key";
+            watchCommandConfig.reportPath = "receiver-report.zip";
+            watchCommandConfig.muted = true;
+            watchCommandConfig.previewLatencyMs = 125;
+            watchCommandConfig.audioPlaybackVolumePercent = 75;
+            const QStringList watchRoomArguments = toQStringList(
+                screenshare::BuildWatchRoomArguments(watchCommandConfig));
+            const bool watchRoomArgumentsOk = watchRoomArguments == QStringList{
+                "--watch", "5000",
+                "--signal-room", "room-alpha",
+                "--preview-latency-ms", "125",
+                "--audio-playback-volume", "75",
+                "--audio-playback-muted",
+                "--signal-stun", "stun.example:19302",
+                "--access-code", "room-key",
+                "--save-report", "receiver-report.zip",
+            };
+            const bool selfTestOk = peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
                 invite.startsWith("ss1e:") &&
                 commandInvite.startsWith("nat_invite=screenshare-invite-v1") &&
@@ -5656,7 +5798,10 @@ int main(int argc, char** argv)
                 parsedLegacyRoomPort == 5001 &&
                 parsedShortRoomLink &&
                 parsedShortRoom == "room-public" &&
-                parsedShortRoomKey.isEmpty() ? 0 : 2;
+                parsedShortRoomKey.isEmpty() &&
+                shareRoomArgumentsOk &&
+                watchRoomArgumentsOk;
+            return selfTestOk ? 0 : 2;
         }
     }
 
