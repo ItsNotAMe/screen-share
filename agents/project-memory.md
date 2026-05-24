@@ -6,6 +6,7 @@
 - No web app, no C#.
 - Use local `git` and `gh` for GitHub work; do not use the GitHub connector for this repo.
 - Keep PRs small. Self-review before opening or merging.
+- Prefer the cleanest simple design when it has no real product or maintenance downside, even if it takes more implementation effort.
 - Avoid branch, commit, PR, or tracked-file text that depends on one contributor's local tooling.
 - After each completed work step or PR merge, mention the next recommended step.
 - Durable repo memory lives under `agents/`; update it when project direction or implementation facts change.
@@ -15,7 +16,7 @@
 - `main` is synced to `origin/main` at PR #102, `264a8e7 Add joinable room list with room access keys (#102)`.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
 - Normal/default CMake builds now also create portable zip packages.
-- The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
+- The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets and Svg are available.
 - `scripts/install-dev-deps.ps1` bootstraps Windows dev dependencies: MSYS2 native packages, optional Qt/FFmpeg, Node.js LTS, and signaling Worker npm packages.
 - Current stable live run shape:
 
@@ -104,6 +105,9 @@ WGC capture by default
 - `agents/nat-traversal.md`: STUN/manual invite/hole-punching direction.
 - `agents/security.md`: local access-code and future encryption notes.
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
+- `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
+- `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
+  The Qt UI embeds the current mark/icons through `src/ui/resources.qrc` and links/packages QtSvg for SVG rendering.
 
 ## Current Direction
 
@@ -130,11 +134,12 @@ WGC capture by default
   - Audio: `--audio-playback-muted`, `--audio-playback-volume PERCENT`, M mute, + and - volume.
   - DXGI's default Alt+Enter handling is disabled so the app-owned fullscreen restore keeps the title bar.
 - Qt control UI is merged:
-  - optional `ScreenShareUi.exe` when Qt 6 Widgets is available.
+  - optional `ScreenShareUi.exe` when Qt 6 Widgets and Svg are available.
   - dark-mode default with theme toggle.
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
   - Stop now uses a hidden stop-file signal so the engine exits cleanly before force-kill fallback.
+  - Current UI still launches `ScreenShare.exe` as a child process. The next UI architecture step is to refactor the engine into a reusable backend/core API used directly by both CLI and UI. The UI should run the session backend off the UI thread and consume typed state/events plus media surfaces for active share/watch screens, keeping the process launcher only as a fallback/diagnostic path.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.
   - `--lan-discover` search mode.
@@ -190,6 +195,10 @@ WGC capture by default
   - The Qt UI exposes direct multi-target sharing through Nearby multi-select and Manual comma/space-separated target lists.
   - NAT multi-viewer direction is one shared sharer room invite plus an optional watcher response invite list. Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends outward to any pasted watcher response invite endpoints, and fans out the encoded stream through the same sender socket. Per-watcher sharer-local invite rows are intentionally not the main UI model.
   - Remaining multi-viewer work is per-viewer health and optional per-viewer bandwidth policy.
+- Live stream controls direction:
+  - User reports native/2K looks sharp, but 1080p stretched to a 2K preview is still blurry after sharper scaling. Do not assume bitrate is the cause; after the revamped UI, investigate whether live resolution changes accidentally alter bitrate, encoder quality, chroma/subsampling behavior, scaler path, or preview upscale behavior.
+  - After the revamped UI, add a live settings panel that can change parameters without restarting the room: Quality/Bitrate, FPS/adaptive FPS, resolution, encoder preference/preset, audio device, and audio mute.
+  - Adaptive FPS should share the same runtime-control model as bitrate/resolution and reduce frame rate only under sustained pressure.
 - Signaling direction:
   - First backend lives under `signaling-worker/`.
   - It is Cloudflare Worker + Durable Objects for live room membership, peer UDP candidates, heartbeat, cleanup, and the browseable active-room directory.

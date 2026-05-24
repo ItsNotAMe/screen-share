@@ -26,7 +26,8 @@ Requirements:
 - CMake 3.24+
 - Windows SDK with C++/WinRT headers for the Windows Graphics Capture backend
 - Opus development package for compressed audio (`mingw-w64-ucrt-x86_64-opus` on MSYS2 UCRT64)
-- Optional: Qt 6 Widgets (`mingw-w64-ucrt-x86_64-qt6-base` on MSYS2 UCRT64) for the desktop control UI
+- Optional: Qt 6 Widgets and Svg (`mingw-w64-ucrt-x86_64-qt6-base` and
+  `mingw-w64-ucrt-x86_64-qt6-svg` on MSYS2 UCRT64) for the desktop control UI
 - Optional: FFmpeg for inspecting generated MP4 files
 
 To bootstrap the common Windows/MSYS2 setup, run the install script from PowerShell:
@@ -71,9 +72,9 @@ cmake --build --preset release
 
 The zip is written beside the build output, for example
 `build\release\ScreenShare-release-windows-x64.zip`. It contains `ScreenShare.exe`, staged runtime
-DLLs, the dependency manifest, README, and license. When Qt 6 Widgets is available at configure
-time, the build also creates `ScreenShareUi.exe` and packages the Qt DLLs and plugin folders needed
-to run the desktop app on another Windows computer.
+DLLs, the dependency manifest, README, and license. When Qt 6 Widgets and Svg are available at
+configure time, the build also creates `ScreenShareUi.exe` and packages the Qt DLLs and plugin
+folders needed to run the desktop app on another Windows computer.
 
 This is attached to the default CMake `all` build, which is what the VS Code CMake Tools build
 button normally runs. If you changed the selected CMake target to `ScreenShare`, switch it back to

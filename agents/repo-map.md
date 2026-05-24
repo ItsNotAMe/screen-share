@@ -22,5 +22,5 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 
 - Debug preset output: `build/debug/ScreenShare.exe`.
 - Release preset output: `build/release/ScreenShare.exe`.
-- If Qt 6 Widgets is available at configure time, builds also output `ScreenShareUi.exe`.
+- If Qt 6 Widgets and Svg are available at configure time, builds also output `ScreenShareUi.exe`.
 - Normal default builds create portable zip packages; see `agents/packaging.md`.
