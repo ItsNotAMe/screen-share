@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ScreenShare mark">
+  <defs>
+    <linearGradient id="screenShareMarkGradient" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2ee6cf"/>
+      <stop offset="0.55" stop-color="#168f82"/>
+      <stop offset="1" stop-color="#0f4c5c"/>
+    </linearGradient>
+    <filter id="screenShareSoftShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#061014" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#101820"/>
+  <g filter="url(#screenShareSoftShadow)">
+    <rect x="14" y="17" width="36" height="25" rx="4" fill="none" stroke="url(#screenShareMarkGradient)" stroke-width="4"/>
+    <path d="M24 49h16" stroke="#e8f7f4" stroke-width="4" stroke-linecap="round"/>
+    <path d="M32 42v7" stroke="#e8f7f4" stroke-width="4" stroke-linecap="round"/>
+    <path d="M21 29h14" stroke="#e8f7f4" stroke-width="3" stroke-linecap="round"/>
+    <path d="M21 35h21" stroke="#e8f7f4" stroke-width="3" stroke-linecap="round"/>
+    <path d="M47 21c5 3 8 7 8 12s-3 9-8 12" fill="none" stroke="#2ee6cf" stroke-width="3" stroke-linecap="round"/>
+    <path d="M51 15c7 4 11 10 11 18s-4 14-11 18" fill="none" stroke="#7cf3e4" stroke-width="2.5" stroke-linecap="round" opacity="0.76"/>
+  </g>
+</svg>

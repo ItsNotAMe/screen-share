@@ -104,6 +104,8 @@ WGC capture by default
 - `agents/nat-traversal.md`: STUN/manual invite/hole-punching direction.
 - `agents/security.md`: local access-code and future encryption notes.
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
+- `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
+- `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
 
 ## Current Direction
 
@@ -190,6 +192,10 @@ WGC capture by default
   - The Qt UI exposes direct multi-target sharing through Nearby multi-select and Manual comma/space-separated target lists.
   - NAT multi-viewer direction is one shared sharer room invite plus an optional watcher response invite list. Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends outward to any pasted watcher response invite endpoints, and fans out the encoded stream through the same sender socket. Per-watcher sharer-local invite rows are intentionally not the main UI model.
   - Remaining multi-viewer work is per-viewer health and optional per-viewer bandwidth policy.
+- Live stream controls direction:
+  - User reports native/2K looks sharp, but 1080p stretched to a 2K preview is still blurry after sharper scaling. Do not assume bitrate is the cause; after the revamped UI, investigate whether live resolution changes accidentally alter bitrate, encoder quality, chroma/subsampling behavior, scaler path, or preview upscale behavior.
+  - After the revamped UI, add a live settings panel that can change parameters without restarting the room: Quality/Bitrate, FPS/adaptive FPS, resolution, encoder preference/preset, audio device, and audio mute.
+  - Adaptive FPS should share the same runtime-control model as bitrate/resolution and reduce frame rate only under sustained pressure.
 - Signaling direction:
   - First backend lives under `signaling-worker/`.
   - It is Cloudflare Worker + Durable Objects for live room membership, peer UDP candidates, heartbeat, cleanup, and the browseable active-room directory.

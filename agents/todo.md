@@ -11,9 +11,11 @@ Only you can fully validate these because they need real machines/networks.
 ## Build Work
 
 1. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: available rooms/devices list, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
-2. After the revamped UI, add application sharing: capture a selected application's video and matching audio instead of the whole display/system mix.
-3. After the revamped UI, add a host-side mute control so the sharer can mute outgoing audio during a live session.
-4. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
+2. After the revamped UI, investigate and fix lower-than-native resolution blur. Native/2K looks sharp, but 1080p stretched to 2K is still blurry; verify whether live resolution changes accidentally change bitrate, encoder quality, chroma/subsampling behavior, scaler path, or preview upscale behavior, then fix the actual cause.
+3. After the revamped UI, add a full live stream settings panel so the host can change stream parameters without restarting the room. Include Quality/Bitrate, FPS/adaptive FPS, resolution, encoder preference/preset, audio device, and audio mute. Auto modes should be able to adapt bitrate, resolution, and FPS under sustained pressure.
+4. After the revamped UI, add application sharing: capture a selected application's video and matching audio instead of the whole display/system mix.
+5. After the revamped UI, add a host-side mute control so the sharer can mute outgoing audio during a live session.
+6. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
 
 ## Completed Build Work
 
