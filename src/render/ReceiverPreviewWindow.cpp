@@ -20,6 +20,13 @@ namespace {
 
 constexpr const wchar_t* WindowClassName = L"ScreenShareReceiverPreviewWindow";
 
+struct PreviewConstants {
+    float lumaTexelWidth = 1.0f;
+    float lumaTexelHeight = 1.0f;
+    float sharpenAmount = 0.0f;
+    float padding = 0.0f;
+};
+
 std::string HResultMessageLocal(HRESULT hr)
 {
     char* buffer = nullptr;
@@ -566,7 +573,7 @@ void ReceiverPreviewWindow::EnsureRenderTarget()
 
 void ReceiverPreviewWindow::EnsurePipeline()
 {
-    if (vertexShader_ && pixelShader_ && sampler_) {
+    if (vertexShader_ && pixelShader_ && sampler_ && previewConstants_) {
         return;
     }
 
@@ -601,9 +608,34 @@ Texture2D lumaTexture : register(t0);
 Texture2D chromaTexture : register(t1);
 SamplerState linearSampler : register(s0);
 
+cbuffer PreviewConstants : register(b0)
+{
+    float lumaTexelWidth;
+    float lumaTexelHeight;
+    float sharpenAmount;
+    float padding;
+};
+
+float SharpenLuma(float2 uv, float y)
+{
+    if (sharpenAmount <= 0.0001) {
+        return y;
+    }
+
+    float2 texel = float2(lumaTexelWidth, lumaTexelHeight);
+    float neighbor =
+        lumaTexture.Sample(linearSampler, uv + float2(-texel.x, 0.0)).r +
+        lumaTexture.Sample(linearSampler, uv + float2( texel.x, 0.0)).r +
+        lumaTexture.Sample(linearSampler, uv + float2(0.0, -texel.y)).r +
+        lumaTexture.Sample(linearSampler, uv + float2(0.0,  texel.y)).r;
+    neighbor *= 0.25;
+    return saturate(y + (y - neighbor) * sharpenAmount);
+}
+
 float4 ps_main(VertexOut input) : SV_Target
 {
     float y = lumaTexture.Sample(linearSampler, input.uv).r;
+    y = SharpenLuma(input.uv, y);
     float2 uv = chromaTexture.Sample(linearSampler, input.uv).rg;
 
     float c = max(0.0, y - (16.0 / 255.0));
@@ -637,6 +669,12 @@ float4 ps_main(VertexOut input) : SV_Target
     samplerDesc.MinLOD = 0.0f;
     samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
     ThrowIfFailed(device_->CreateSamplerState(&samplerDesc, &sampler_), "ID3D11Device::CreateSamplerState(receiver preview)");
+
+    D3D11_BUFFER_DESC constantDesc{};
+    constantDesc.ByteWidth = sizeof(PreviewConstants);
+    constantDesc.Usage = D3D11_USAGE_DEFAULT;
+    constantDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    ThrowIfFailed(device_->CreateBuffer(&constantDesc, nullptr, &previewConstants_), "ID3D11Device::CreateBuffer(receiver preview constants)");
 }
 
 void ReceiverPreviewWindow::EnsureFrameTextures(int width, int height)
@@ -841,10 +879,21 @@ void ReceiverPreviewWindow::Render()
 
     EnsurePipeline();
     const D3D11_VIEWPORT viewport = ComputeViewport();
+    const float frameWidth = static_cast<float>(std::max(frameWidth_, 1));
+    const float frameHeight = static_cast<float>(std::max(frameHeight_, 1));
+    const float displayScale = viewport.Width / frameWidth;
+    PreviewConstants constants;
+    constants.lumaTexelWidth = 1.0f / frameWidth;
+    constants.lumaTexelHeight = 1.0f / frameHeight;
+    constants.sharpenAmount = displayScale > 1.01f
+        ? std::min(0.22f, 0.06f + (displayScale - 1.0f) * 0.35f)
+        : 0.0f;
+    context_->UpdateSubresource(previewConstants_.Get(), 0, nullptr, &constants, 0, 0);
 
     ID3D11RenderTargetView* renderTargets[] = {renderTarget_.Get()};
     ID3D11ShaderResourceView* shaderResources[] = {lumaView_.Get(), chromaView_.Get()};
     ID3D11SamplerState* samplers[] = {sampler_.Get()};
+    ID3D11Buffer* constantBuffers[] = {previewConstants_.Get()};
 
     context_->OMSetRenderTargets(1, renderTargets, nullptr);
     context_->RSSetViewports(1, &viewport);
@@ -854,11 +903,14 @@ void ReceiverPreviewWindow::Render()
     context_->PSSetShader(pixelShader_.Get(), nullptr, 0);
     context_->PSSetShaderResources(0, 2, shaderResources);
     context_->PSSetSamplers(0, 1, samplers);
+    context_->PSSetConstantBuffers(0, 1, constantBuffers);
     context_->Draw(3, 0);
 
     ID3D11ShaderResourceView* nullShaderResources[] = {nullptr, nullptr};
     ID3D11RenderTargetView* nullRenderTargets[] = {nullptr};
+    ID3D11Buffer* nullConstantBuffers[] = {nullptr};
     context_->PSSetShaderResources(0, 2, nullShaderResources);
+    context_->PSSetConstantBuffers(0, 1, nullConstantBuffers);
     context_->OMSetRenderTargets(1, nullRenderTargets, nullptr);
 
     ThrowIfFailed(swapChain_->Present(1, 0), "IDXGISwapChain::Present(receiver preview)");

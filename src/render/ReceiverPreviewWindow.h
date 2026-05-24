@@ -87,6 +87,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertexShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> pixelShader_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> previewConstants_;
     D3D11_TEXTURE2D_DESC lumaDesc_{};
     D3D11_TEXTURE2D_DESC chromaDesc_{};
 

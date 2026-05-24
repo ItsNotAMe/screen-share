@@ -6,18 +6,20 @@ Only you can fully validate these because they need real machines/networks.
 
 - Worker room validation already tested: open room across two LANs, and locked/password room locally.
 - Remaining Worker room validation: locked/password room across two LANs, watcher joins an idle room before Share resumes, sharer reconnect, and two or more watchers with WebSocket peer notifications plus HTTP fallback.
+- Mid-session stream settings validation: while sharing, switch Resolution between Auto, Native, and explicit tiers and confirm Watch keeps receiving after each restart.
 
 ## Build Work
 
-1. Allow stream settings to change mid-session, including resolution selection. Resolution should have an Auto mode that starts from native resolution and can step through explicit resolution tiers.
-2. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: available rooms/devices list, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
-3. After the revamped UI, add application sharing: capture a selected application's video and matching audio instead of the whole display/system mix.
-4. After the revamped UI, add a host-side mute control so the sharer can mute outgoing audio during a live session.
-5. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
+1. Build the stage-2 native UI after the core share/watch/session flow settles. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: available rooms/devices list, simple host/join flows, window/screen selection, audio window/source selection, and clearer in-session state.
+2. After the revamped UI, add application sharing: capture a selected application's video and matching audio instead of the whole display/system mix.
+3. After the revamped UI, add a host-side mute control so the sharer can mute outgoing audio during a live session.
+4. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
 
 ## Completed Build Work
 
 - Added per-viewer connection/health display for multi-viewer Share sessions.
+- Added mid-session Share resolution changes. Resolution now has Auto, Native, and explicit tiers; the UI sends runtime commands and the sender restarts capture/encoding without closing the room.
+- Added a 2560x1440 Share resolution tier plus sharper GPU capture resizing and light receiver-side upscale sharpening for desktop text.
 
 ## Report-Driven Follow-Ups
 

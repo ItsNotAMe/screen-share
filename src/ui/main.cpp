@@ -809,6 +809,8 @@ public:
         connect(process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
             Q_UNUSED(error);
             appendOutput("Process error: " + process_->errorString() + "\n");
+            cleanupStopFile();
+            cleanupControlFile();
             setRunning(false);
         });
         connect(process_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
@@ -825,6 +827,7 @@ public:
                 appendOutput("Process " + statusText + " with exit code " + QString::number(code) + "\n");
             }
             cleanupStopFile();
+            cleanupControlFile();
             stopRequested_ = false;
             forcedStop_ = false;
             setRunning(false);
@@ -1377,10 +1380,12 @@ private:
         fpsSpin_->setRange(15, 240);
         fpsSpin_->setValue(60);
         resolutionCombo_ = new NoWheelComboBox;
-        resolutionCombo_->addItem("Native", QSize(0, 0));
-        resolutionCombo_->addItem("1920 × 1080", QSize(1920, 1080));
-        resolutionCombo_->addItem("1600 × 900", QSize(1600, 900));
-        resolutionCombo_->addItem("1280 × 720", QSize(1280, 720));
+        resolutionCombo_->addItem("Auto", QStringLiteral("auto"));
+        resolutionCombo_->addItem("Native", QStringLiteral("native"));
+        resolutionCombo_->addItem("2560 × 1440", QStringLiteral("2560x1440"));
+        resolutionCombo_->addItem("1920 × 1080", QStringLiteral("1920x1080"));
+        resolutionCombo_->addItem("1600 × 900", QStringLiteral("1600x900"));
+        resolutionCombo_->addItem("1280 × 720", QStringLiteral("1280x720"));
         prepareInput(fpsSpin_);
         prepareInput(resolutionCombo_);
         addRow(videoContent, "Display", displayRow);
@@ -1805,7 +1810,10 @@ private:
             refreshCommand();
         });
         bindSpinBox(fpsSpin_);
-        connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
+        connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+            refreshCommand();
+            writeRuntimeResolutionCommand();
+        });
         connect(audioDeviceCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
         bindSpinBox(watchPortSpin_);
         connect(watchPortSpin_, qOverload<int>(&QSpinBox::valueChanged), this, [this] {
@@ -2611,6 +2619,53 @@ private:
         return invites;
     }
 
+    QString currentResolutionChoice() const
+    {
+        return resolutionCombo_ == nullptr ? QStringLiteral("auto") : resolutionCombo_->currentData().toString();
+    }
+
+    QSize currentFixedResolution() const
+    {
+        const QString choice = currentResolutionChoice();
+        const QRegularExpressionMatch match =
+            QRegularExpression(QStringLiteral(R"(^(\d+)x(\d+)$)")).match(choice);
+        if (!match.hasMatch()) {
+            return {};
+        }
+        return QSize(match.captured(1).toInt(), match.captured(2).toInt());
+    }
+
+    QString runtimeResolutionCommandText() const
+    {
+        const QString choice = currentResolutionChoice();
+        if (choice == "auto" || choice == "native") {
+            return "resolution=" + choice + "\n";
+        }
+        const QSize resolution = currentFixedResolution();
+        if (resolution.width() > 0 && resolution.height() > 0) {
+            return QStringLiteral("resolution=%1x%2\n")
+                .arg(resolution.width())
+                .arg(resolution.height());
+        }
+        return QStringLiteral("resolution=auto\n");
+    }
+
+    QString resolutionStatusText() const
+    {
+        const QString choice = currentResolutionChoice();
+        if (choice == "auto") {
+            return "Auto";
+        }
+        if (choice == "native") {
+            return "Native";
+        }
+        const QSize resolution = currentFixedResolution();
+        if (resolution.width() > 0 && resolution.height() > 0) {
+            return QStringLiteral("%1x%2").arg(resolution.width()).arg(resolution.height());
+        }
+        return "Auto";
+    }
+
     QStringList currentArguments() const
     {
         QStringList args;
@@ -2651,7 +2706,11 @@ private:
             args << "--display" << QString::number(selectedDisplayIndex());
             args << "--fps" << QString::number(fpsSpin_->value());
 
-            const QSize resolution = resolutionCombo_->currentData().toSize();
+            const QString resolutionChoice = currentResolutionChoice();
+            const QSize resolution = currentFixedResolution();
+            if (resolutionChoice != "auto") {
+                args << "--no-adapt-resolution";
+            }
             if (resolution.width() > 0 && resolution.height() > 0) {
                 args << "--width" << QString::number(resolution.width());
                 args << "--height" << QString::number(resolution.height());
@@ -2744,6 +2803,23 @@ private:
             return;
         }
         commandPreview_->setText(formatCommand(enginePath(), displayArguments()));
+    }
+
+    void writeRuntimeResolutionCommand()
+    {
+        if (!running_ || !shareMode() || controlFilePath_.isEmpty()) {
+            return;
+        }
+
+        QFile controlFile(controlFilePath_);
+        if (!controlFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            appendOutput("Could not write runtime resolution command\n");
+            return;
+        }
+        const QString command = runtimeResolutionCommandText();
+        controlFile.write(command.toUtf8());
+        controlFile.close();
+        appendOutput("Requested stream resolution: " + resolutionStatusText() + "\n");
     }
 
     void applyTheme(bool darkMode)
@@ -2893,6 +2969,7 @@ private:
         stopRequested_ = false;
         forcedStop_ = false;
         cleanupStopFile();
+        cleanupControlFile();
         stopFilePath_ = QDir::temp().filePath(
             "ScreenShare-stop-" +
             QString::number(QCoreApplication::applicationPid()) +
@@ -2900,10 +2977,22 @@ private:
             QString::number(++runSerial_) +
             ".signal");
         QFile::remove(stopFilePath_);
+        if (shareMode()) {
+            controlFilePath_ = QDir::temp().filePath(
+                "ScreenShare-control-" +
+                QString::number(QCoreApplication::applicationPid()) +
+                "-" +
+                QString::number(runSerial_) +
+                ".txt");
+            QFile::remove(controlFilePath_);
+        }
 
         const QStringList displayArgs = displayArguments();
         QStringList args = currentArguments();
         args << "--stop-file" << stopFilePath_;
+        if (!controlFilePath_.isEmpty()) {
+            args << "--control-file" << controlFilePath_;
+        }
         appendOutput("\n" + formatCommand(program, displayArgs) + "\n");
         process_->setProgram(program);
         process_->setArguments(args);
@@ -2951,6 +3040,14 @@ private:
         if (!stopFilePath_.isEmpty()) {
             QFile::remove(stopFilePath_);
             stopFilePath_.clear();
+        }
+    }
+
+    void cleanupControlFile()
+    {
+        if (!controlFilePath_.isEmpty()) {
+            QFile::remove(controlFilePath_);
+            controlFilePath_.clear();
         }
     }
 
@@ -4054,6 +4151,12 @@ private:
         if (refreshDisplaysButton_ != nullptr) {
             refreshDisplaysButton_->setEnabled(!running && displayProcess_->state() == QProcess::NotRunning);
         }
+        if (fpsSpin_ != nullptr) {
+            fpsSpin_->setEnabled(!running);
+        }
+        if (resolutionCombo_ != nullptr) {
+            resolutionCombo_->setEnabled(shareMode() || !running);
+        }
         if (audioDeviceCombo_ != nullptr) {
             audioDeviceCombo_->setEnabled(!running);
         }
@@ -4648,6 +4751,7 @@ private:
     bool forcedStop_ = false;
     quint64 runSerial_ = 0;
     QString stopFilePath_;
+    QString controlFilePath_;
     QString discoveryOutput_;
     QString tailscaleOutput_;
     QString displayOutput_;
