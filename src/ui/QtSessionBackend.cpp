@@ -160,6 +160,36 @@ void QtSessionBackend::applyStreamSettings(const screenshare::StreamSettings& se
     }
 }
 
+std::vector<screenshare::SessionDisplayInfo> QtSessionBackend::listDisplays(QString* errorMessage)
+{
+    if (errorMessage != nullptr) {
+        errorMessage->clear();
+    }
+    try {
+        return backend_.ListDisplays();
+    } catch (const std::exception& error) {
+        if (errorMessage != nullptr) {
+            *errorMessage = ToQString(error.what());
+        }
+        return {};
+    }
+}
+
+std::vector<screenshare::SessionAudioDeviceInfo> QtSessionBackend::listAudioDevices(QString* errorMessage)
+{
+    if (errorMessage != nullptr) {
+        errorMessage->clear();
+    }
+    try {
+        return backend_.ListAudioDevices();
+    } catch (const std::exception& error) {
+        if (errorMessage != nullptr) {
+            *errorMessage = ToQString(error.what());
+        }
+        return {};
+    }
+}
+
 void QtSessionBackend::OnSessionEvent(const screenshare::SessionEvent& event)
 {
     QMetaObject::invokeMethod(

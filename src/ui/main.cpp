@@ -579,6 +579,30 @@ QString displayChoiceText(const DisplayChoice& display, QScreen* primaryScreen)
     return parts.join(" - ");
 }
 
+DisplayChoice displayChoiceFromSessionDisplay(const screenshare::SessionDisplayInfo& info)
+{
+    DisplayChoice display;
+    display.index = info.index;
+    display.outputName = QString::fromStdString(info.outputName).trimmed();
+    display.width = info.width;
+    display.height = info.height;
+    display.left = info.left;
+    display.top = info.top;
+    display.adapterName = QString::fromStdString(info.adapterName).trimmed();
+    display.attached = info.attached;
+    return display;
+}
+
+QVector<DisplayChoice> displayChoicesFromSessionDisplays(const std::vector<screenshare::SessionDisplayInfo>& infos)
+{
+    QVector<DisplayChoice> displays;
+    displays.reserve(static_cast<qsizetype>(infos.size()));
+    for (const auto& info : infos) {
+        displays.push_back(displayChoiceFromSessionDisplay(info));
+    }
+    return displays;
+}
+
 bool validResolutionSize(const QSize& size)
 {
     return size.width() > 0 && size.height() > 0;
@@ -670,28 +694,6 @@ QVector<QSize> resolutionChoicesForDisplay(QSize displaySize)
     return choices;
 }
 
-QVector<DisplayChoice> parseDisplayChoices(const QString& output)
-{
-    QVector<DisplayChoice> displays;
-    const QRegularExpression displayPattern(QStringLiteral(
-        R"display(\[(\d+)\]\s+([^\s]+)\s+(\d+)x(\d+)\s+at\s+\((-?\d+),(-?\d+)\)\s+adapter="([^"]*)"\s+attached=(yes|no))display"));
-    auto matches = displayPattern.globalMatch(output);
-    while (matches.hasNext()) {
-        const auto match = matches.next();
-        DisplayChoice display;
-        display.index = match.captured(1).toInt();
-        display.outputName = match.captured(2).trimmed();
-        display.width = match.captured(3).toInt();
-        display.height = match.captured(4).toInt();
-        display.left = match.captured(5).toInt();
-        display.top = match.captured(6).toInt();
-        display.adapterName = match.captured(7).trimmed();
-        display.attached = match.captured(8) == "yes";
-        displays.push_back(std::move(display));
-    }
-    return displays;
-}
-
 QString lastLogFieldValue(const QString& output, const QString& field)
 {
     const QRegularExpression pattern(
@@ -777,6 +779,26 @@ struct AudioOutputDevice {
     QString id;
     bool isDefault = false;
 };
+
+QVector<AudioOutputDevice> audioOutputDevicesFromSessionDevices(
+    const std::vector<screenshare::SessionAudioDeviceInfo>& infos)
+{
+    QVector<AudioOutputDevice> devices;
+    devices.reserve(static_cast<qsizetype>(infos.size()));
+    for (const auto& info : infos) {
+        if (info.source != screenshare::SessionAudioDeviceSource::SystemOutput) {
+            continue;
+        }
+        AudioOutputDevice device;
+        device.name = QString::fromStdString(info.name).trimmed();
+        device.id = QString::fromStdString(info.id).trimmed();
+        device.isDefault = info.isDefault;
+        if (!device.id.isEmpty()) {
+            devices.push_back(std::move(device));
+        }
+    }
+    return devices;
+}
 
 QVector<ActiveRoom> parseActiveRooms(const QByteArray& payload)
 {
@@ -1105,35 +1127,6 @@ public:
         });
         connect(tailscaleProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
             finishTailscaleDiscovery(code, status);
-        });
-
-        displayProcess_ = new QProcess(this);
-        displayProcess_->setProcessChannelMode(QProcess::MergedChannels);
-        connect(displayProcess_, &QProcess::readyReadStandardOutput, this, [this] {
-            displayOutput_ += QString::fromLocal8Bit(displayProcess_->readAllStandardOutput());
-        });
-        connect(displayProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-            Q_UNUSED(error);
-            setDisplayRefreshing(false);
-        });
-        connect(displayProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
-            finishDisplayRefresh(code, status);
-        });
-
-        audioDeviceProcess_ = new QProcess(this);
-        audioDeviceProcess_->setProcessChannelMode(QProcess::MergedChannels);
-        connect(audioDeviceProcess_, &QProcess::readyReadStandardOutput, this, [this] {
-            audioDeviceOutput_ += QString::fromLocal8Bit(audioDeviceProcess_->readAllStandardOutput());
-        });
-        connect(audioDeviceProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-            Q_UNUSED(error);
-            if (audioDeviceLogOutput_) {
-                appendOutput("Audio device refresh error: " + audioDeviceProcess_->errorString() + "\n");
-            }
-            setAudioDeviceRefreshing(false);
-        });
-        connect(audioDeviceProcess_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus status) {
-            finishAudioDeviceRefresh(code, status);
         });
 
         inviteProcess_ = new QProcess(this);
@@ -3316,37 +3309,6 @@ private:
         return receivers;
     }
 
-    QVector<AudioOutputDevice> parseAudioOutputDevices(const QString& output) const
-    {
-        const QString header = "system audio devices";
-        const int start = output.indexOf(header, 0, Qt::CaseInsensitive);
-        if (start < 0) {
-            return {};
-        }
-
-        int end = output.indexOf("\nmicrophone audio devices", start, Qt::CaseInsensitive);
-        if (end < 0) {
-            end = output.size();
-        }
-        const QString section = output.mid(start, end - start);
-
-        QVector<AudioOutputDevice> devices;
-        const QRegularExpression devicePattern(QStringLiteral(
-            R"device(\[\d+\]\s+(default\s+)?"([^"]*)"\s*\r?\n\s*id=([^\r\n]+))device"));
-        auto matches = devicePattern.globalMatch(section);
-        while (matches.hasNext()) {
-            const auto match = matches.next();
-            AudioOutputDevice device;
-            device.isDefault = !match.captured(1).isEmpty();
-            device.name = match.captured(2).trimmed();
-            device.id = match.captured(3).trimmed();
-            if (!device.id.isEmpty()) {
-                devices.push_back(std::move(device));
-            }
-        }
-        return devices;
-    }
-
     QVector<DiscoveredReceiver> combinedReceivers() const
     {
         QVector<DiscoveredReceiver> receivers = lanReceivers_;
@@ -3685,80 +3647,54 @@ private:
 
     void refreshDisplays(bool automatic)
     {
-        if (displayProcess_->state() != QProcess::NotRunning) {
+        if (displayRefreshing_ || sessionRunning() || sessionBackend_ == nullptr) {
             return;
         }
 
-        const QString program = enginePath();
-        if (!QFileInfo::exists(program)) {
+        if (!automatic) {
+            appendOutput("\nRefreshing displays...\n");
+        }
+        setDisplayRefreshing(true);
+
+        QString errorMessage;
+        const auto displays = sessionBackend_->listDisplays(&errorMessage);
+        setDisplayRefreshing(false);
+        if (!errorMessage.isEmpty()) {
             if (!automatic) {
-                QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
+                appendOutput("Display refresh error: " + errorMessage + "\n");
+                QMessageBox::warning(this, "Display refresh failed", errorMessage);
             }
             return;
         }
 
-        displayOutput_.clear();
-        if (!automatic) {
-            appendOutput("\nRefreshing displays...\n");
-        }
-        displayProcess_->setProgram(program);
-        displayProcess_->setArguments({"--list"});
-        displayProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
-        setDisplayRefreshing(true);
-        displayProcess_->start();
-    }
-
-    void finishDisplayRefresh(int code, QProcess::ExitStatus status)
-    {
-        setDisplayRefreshing(false);
-        if (status != QProcess::NormalExit || code != 0) {
-            return;
-        }
-
-        const QVector<DisplayChoice> displays = parseDisplayChoices(displayOutput_);
-        updateDisplayList(displays);
+        updateDisplayList(displayChoicesFromSessionDisplays(displays));
         refreshCommand();
     }
 
     void refreshAudioDevices(bool automatic)
     {
-        if (audioDeviceProcess_->state() != QProcess::NotRunning) {
+        if (audioDeviceRefreshing_ || sessionRunning() || sessionBackend_ == nullptr) {
             return;
         }
 
-        const QString program = enginePath();
-        if (!QFileInfo::exists(program)) {
-            if (!automatic) {
-                QMessageBox::critical(this, "Missing engine", "ScreenShare.exe was not found beside the UI executable.");
-            }
-            return;
-        }
-
-        audioDeviceLogOutput_ = !automatic;
-        audioDeviceOutput_.clear();
         if (!automatic) {
             appendOutput("\nRefreshing audio devices...\n");
         }
-        audioDeviceProcess_->setProgram(program);
-        audioDeviceProcess_->setArguments({"--list-audio-devices"});
-        audioDeviceProcess_->setWorkingDirectory(QFileInfo(program).absolutePath());
         setAudioDeviceRefreshing(true);
-        audioDeviceProcess_->start();
-    }
 
-    void finishAudioDeviceRefresh(int code, QProcess::ExitStatus status)
-    {
+        QString errorMessage;
+        const auto devices = audioOutputDevicesFromSessionDevices(sessionBackend_->listAudioDevices(&errorMessage));
         setAudioDeviceRefreshing(false);
-        if (status != QProcess::NormalExit || code != 0) {
-            if (audioDeviceLogOutput_) {
-                appendOutput("Audio device refresh finished with exit code " + QString::number(code) + "\n");
+        if (!errorMessage.isEmpty()) {
+            if (!automatic) {
+                appendOutput("Audio device refresh error: " + errorMessage + "\n");
+                QMessageBox::warning(this, "Audio refresh failed", errorMessage);
             }
             return;
         }
 
-        const QVector<AudioOutputDevice> devices = parseAudioOutputDevices(audioDeviceOutput_);
         updateAudioDeviceList(devices);
-        if (audioDeviceLogOutput_) {
+        if (!automatic) {
             appendOutput("Found " + QString::number(devices.size()) + " output audio devices\n");
         }
     }
@@ -3962,6 +3898,7 @@ private:
 
     void setDisplayRefreshing(bool refreshing)
     {
+        displayRefreshing_ = refreshing;
         if (refreshDisplaysButton_ != nullptr) {
             refreshDisplaysButton_->setEnabled(!refreshing && !sessionRunning());
             refreshDisplaysButton_->setText(refreshing ? "Scanning..." : "Refresh");
@@ -3970,6 +3907,7 @@ private:
 
     void setAudioDeviceRefreshing(bool refreshing)
     {
+        audioDeviceRefreshing_ = refreshing;
         if (refreshAudioDevicesButton_ != nullptr) {
             refreshAudioDevicesButton_->setEnabled(!refreshing && !sessionRunning());
             refreshAudioDevicesButton_->setText(refreshing ? "Scanning..." : "Refresh");
@@ -4321,7 +4259,7 @@ private:
             displayCombo_->setEnabled(!running);
         }
         if (refreshDisplaysButton_ != nullptr) {
-            refreshDisplaysButton_->setEnabled(!running && displayProcess_->state() == QProcess::NotRunning);
+            refreshDisplaysButton_->setEnabled(!running && !displayRefreshing_);
         }
         if (fpsSpin_ != nullptr) {
             fpsSpin_->setEnabled(!running);
@@ -4333,7 +4271,7 @@ private:
             audioDeviceCombo_->setEnabled(!running);
         }
         if (refreshAudioDevicesButton_ != nullptr) {
-            refreshAudioDevicesButton_->setEnabled(!running && audioDeviceProcess_->state() == QProcess::NotRunning);
+            refreshAudioDevicesButton_->setEnabled(!running && !audioDeviceRefreshing_);
         }
         updateInviteButtons();
         if (!running && shouldRefreshRoomDirectory()) {
@@ -4798,8 +4736,6 @@ private:
     QElapsedTimer peerActivityTimer_;
     QProcess* discoveryProcess_ = nullptr;
     QProcess* tailscaleProcess_ = nullptr;
-    QProcess* displayProcess_ = nullptr;
-    QProcess* audioDeviceProcess_ = nullptr;
     QProcess* inviteProcess_ = nullptr;
     QNetworkAccessManager* roomDirectoryNetwork_ = nullptr;
     QNetworkReply* roomDirectoryReply_ = nullptr;
@@ -4879,8 +4815,6 @@ private:
     bool reportPathEdited_ = false;
     QString discoveryOutput_;
     QString tailscaleOutput_;
-    QString displayOutput_;
-    QString audioDeviceOutput_;
     QString inviteOutput_;
     InviteTarget inviteTarget_ = InviteTarget::None;
     QVector<DiscoveredReceiver> discoveredReceivers_;
@@ -4890,10 +4824,11 @@ private:
     bool discoverySelectFirst_ = false;
     bool discoveryLogOutput_ = false;
     bool tailscaleLogOutput_ = false;
+    bool displayRefreshing_ = false;
+    bool audioDeviceRefreshing_ = false;
     bool roomDirectoryRefreshing_ = false;
     bool roomDirectoryRefreshQuiet_ = false;
     bool receiverScanNotificationShown_ = false;
-    bool audioDeviceLogOutput_ = false;
     bool selectedReceiverKnown_ = false;
     bool selectedReceiverSecurityKnown_ = false;
     bool selectedReceiverEncrypted_ = false;
@@ -5468,9 +5403,12 @@ int main(int argc, char** argv)
                 QFileInfo::exists(QStringLiteral(":/screenshare/brand/screenshare-mark.svg")) &&
                 QFileInfo::exists(QStringLiteral(":/screenshare/ui/icons/share.svg")) &&
                 QFileInfo::exists(QStringLiteral(":/screenshare/ui/icons/watch.svg"));
-            const auto displays = parseDisplayChoices(QString::fromUtf8(
-                "[0] \\\\.\\DISPLAY1 2560x1440 at (0,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"
-                "[1] \\\\.\\DISPLAY2 1920x1080 at (-1920,0) adapter=\"NVIDIA GeForce RTX\" attached=yes\n"));
+            const auto displays = displayChoicesFromSessionDisplays({
+                screenshare::SessionDisplayInfo{
+                    0, "\\\\.\\DISPLAY1", 2560, 1440, 0, 0, "NVIDIA GeForce RTX", true},
+                screenshare::SessionDisplayInfo{
+                    1, "\\\\.\\DISPLAY2", 1920, 1080, -1920, 0, "NVIDIA GeForce RTX", true},
+            });
             const auto qhdResolutionChoices = resolutionChoicesForDisplay(QSize(2560, 1440));
             const auto fhdResolutionChoices = resolutionChoicesForDisplay(QSize(1920, 1080));
             const auto activeRooms = parseActiveRooms(QByteArrayLiteral(R"json({

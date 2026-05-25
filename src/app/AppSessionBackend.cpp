@@ -1,6 +1,8 @@
 #include "app/AppSessionBackend.h"
 
 #include "app/ScreenShareApp.h"
+#include "audio/WasapiCapture.h"
+#include "capture/DesktopCapturer.h"
 #include "core/SessionCommand.h"
 
 #include <algorithm>
@@ -90,6 +92,17 @@ std::string LowercaseCopy(std::string_view text)
 bool ContainsNoCase(std::string_view text, std::string_view needle)
 {
     return LowercaseCopy(text).find(LowercaseCopy(needle)) != std::string::npos;
+}
+
+SessionAudioDeviceSource ToSessionAudioDeviceSource(AudioCaptureSource source)
+{
+    switch (source) {
+    case AudioCaptureSource::SystemOutput:
+        return SessionAudioDeviceSource::SystemOutput;
+    case AudioCaptureSource::Microphone:
+        return SessionAudioDeviceSource::Microphone;
+    }
+    return SessionAudioDeviceSource::SystemOutput;
 }
 
 std::optional<uint64_t> ParseUint64(const std::string& text)
@@ -288,6 +301,45 @@ void AppSessionBackend::ApplyStreamSettings(const StreamSettings& settings)
         currentState = state_;
     }
     Notify(SessionEventType::SettingsChanged, currentState, "Stream settings queued");
+}
+
+std::vector<SessionDisplayInfo> AppSessionBackend::ListDisplays()
+{
+    const auto displays = DesktopCapturer::EnumerateDisplays();
+
+    std::vector<SessionDisplayInfo> result;
+    result.reserve(displays.size());
+    for (const auto& display : displays) {
+        SessionDisplayInfo info;
+        info.index = display.index;
+        info.outputName = Narrow(display.outputName);
+        info.width = static_cast<int>(display.right - display.left);
+        info.height = static_cast<int>(display.bottom - display.top);
+        info.left = static_cast<int>(display.left);
+        info.top = static_cast<int>(display.top);
+        info.adapterName = Narrow(display.adapterName);
+        info.attached = display.attachedToDesktop;
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
+std::vector<SessionAudioDeviceInfo> AppSessionBackend::ListAudioDevices()
+{
+    std::vector<SessionAudioDeviceInfo> result;
+    for (const AudioCaptureSource source : {AudioCaptureSource::SystemOutput, AudioCaptureSource::Microphone}) {
+        const auto devices = WasapiCapture::EnumerateDevices(source);
+        result.reserve(result.size() + devices.size());
+        for (const auto& device : devices) {
+            SessionAudioDeviceInfo info;
+            info.source = ToSessionAudioDeviceSource(device.source);
+            info.id = Narrow(device.id);
+            info.name = Narrow(device.name);
+            info.isDefault = device.isDefault;
+            result.push_back(std::move(info));
+        }
+    }
+    return result;
 }
 
 void AppSessionBackend::StartArguments(
