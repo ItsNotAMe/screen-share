@@ -114,6 +114,7 @@ WGC capture by default
 - `src/core/SessionRuntimeControl.*`: shared stop/runtime stream-settings control interface. CLI runs use the file-backed implementation; `ScreenShareSession` uses the memory-backed implementation for stop/settings requests. Resolution is the first implemented live setting.
 - `src/runtime/ScreenShareRuntimeInternal.h`: private runtime bridge used by the session runtime; not a UI-facing API.
 - `src/runtime/ScreenShareRunContext.h`: shared run context for runtime control and captured output callbacks.
+- `src/runtime/ScreenShareRuntimeOptions.h`: shared `Options` model, runtime constants, and small option enums/target specs used while CLI parsing and runtime execution are being split.
 - `src/runtime/ScreenShareSessionRunner.h`: typed Share/Watch runner entrypoints used by the concrete session API; this is separate from the CLI app header.
 - `src/runtime/ScreenShareSessionRunner.cpp`: runtime-backed typed Share/Watch runner entrypoint implementation. It owns the typed-run report/log wrapper, then calls private execution helpers in `ScreenShareCLI.cpp` while the larger sender/receiver runtime is still being extracted.
 - `src/runtime/ScreenShareRuntimeSupport.*`: shared session ID/fingerprint, stdout/stderr capture, saved-report zip, and argv support used by both CLI and typed runtime paths.
