@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/AppSessionBackend.h"
+#include "api/ScreenShareAPI.h"
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -52,7 +52,7 @@ private:
     void handleSessionEvent(const screenshare::SessionEvent& event);
     void finish(bool failed);
 
-    screenshare::AppSessionBackend backend_;
+    screenshare::ScreenShareSession session_;
     std::function<void(const QString&)> outputHandler_;
     std::function<void(const QString&)> messageHandler_;
     std::function<void()> startedHandler_;

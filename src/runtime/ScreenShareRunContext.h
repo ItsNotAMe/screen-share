@@ -5,7 +5,7 @@
 #include <functional>
 #include <string_view>
 
-struct ScreenShareAppRunContext {
+struct ScreenShareRunContext {
     screenshare::ISessionRuntimeControl* runtimeControl = nullptr;
     std::function<void(std::string_view)> outputHandler;
 };

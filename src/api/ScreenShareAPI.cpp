@@ -1,17 +1,24 @@
-#include "app/AppSessionBackend.h"
+#include "api/ScreenShareAPI.h"
 
-#include "app/ScreenShareSessionRunner.h"
+#include "runtime/ScreenShareSessionRunner.h"
 #include "audio/WasapiCapture.h"
 #include "capture/DesktopCapturer.h"
+#include "core/SessionRuntimeControl.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <exception>
+#include <functional>
 #include <iterator>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace screenshare {
 namespace {
@@ -226,17 +233,78 @@ SessionIssue DetectSessionIssue(const std::string& line)
 
 } // namespace
 
-AppSessionBackend::~AppSessionBackend()
+class ScreenShareSession::Impl final {
+public:
+    ~Impl();
+
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+
+    Impl() = default;
+
+    void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink);
+    void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink, std::string executablePath);
+    void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink);
+    void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink, std::string executablePath);
+    void Shutdown();
+    void Stop();
+    void ApplyStreamSettings(const StreamSettings& settings);
+    SessionStatus GetStatus() const;
+    std::vector<SessionDisplayInfo> ListDisplays();
+    std::vector<SessionAudioDeviceInfo> ListAudioDevices();
+
+private:
+    using SessionRunner = std::function<int(const ::ScreenShareRunContext&)>;
+
+    void StartRunner(SessionRole role, ISessionEventSink& eventSink, SessionRunner runner);
+    void DetachObserver();
+    void JoinWorker();
+    void JoinFinishedWorker();
+    void HandleOutput(std::string_view text);
+    void HandleLogLine(const std::string& line);
+    void HandleDiagnosticLogLine(const std::string& line);
+    void HandleStreamLogLine(const std::string& line);
+    void HandleAudioLogLine(const std::string& line);
+    void HandleShareLogLine(const std::string& line);
+    void HandleWatchLogLine(const std::string& line);
+    void EmitStatus(SessionEventType type, std::string message);
+    void EmitIssue(SessionIssue issue, std::string message);
+    void Notify(SessionEventType type, SessionState state, std::string message);
+    SessionStatus BuildStatusLocked() const;
+
+    mutable std::mutex mutex_;
+    std::thread worker_;
+    MemorySessionRuntimeControl runtimeControl_;
+    ISessionEventSink* observer_ = nullptr;
+    SessionRole role_ = SessionRole::Share;
+    SessionState state_ = SessionState::Idle;
+    std::string summary_;
+    std::string health_;
+    std::string logParseBuffer_;
+    SessionStreamStatus streamStatus_;
+    SessionAudioStatus audioStatus_;
+    std::vector<SessionViewer> viewers_;
+    uint64_t watchCompletedFrames_ = 0;
+    uint64_t watchPayloadBytes_ = 0;
+    uint64_t watchDecodedFrames_ = 0;
+    uint64_t watchAudioPackets_ = 0;
+    std::string natStatus_;
+    std::string natHint_;
+    bool previewClosedNotified_ = false;
+    bool stopRequested_ = false;
+};
+
+ScreenShareSession::Impl::~Impl()
 {
     Shutdown();
 }
 
-void AppSessionBackend::StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink)
+void ScreenShareSession::Impl::StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink)
 {
     StartShare(config, eventSink, "ScreenShare");
 }
 
-void AppSessionBackend::StartShare(
+void ScreenShareSession::Impl::StartShare(
     const ShareSessionConfig& config,
     ISessionEventSink& eventSink,
     std::string executablePath)
@@ -244,17 +312,17 @@ void AppSessionBackend::StartShare(
     StartRunner(
         SessionRole::Share,
         eventSink,
-        [config, executablePath = std::move(executablePath)](const ScreenShareAppRunContext& context) {
+        [config, executablePath = std::move(executablePath)](const ScreenShareRunContext& context) {
             return RunShareSession(config, context, executablePath);
         });
 }
 
-void AppSessionBackend::StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink)
+void ScreenShareSession::Impl::StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink)
 {
     StartWatch(config, eventSink, "ScreenShare");
 }
 
-void AppSessionBackend::StartWatch(
+void ScreenShareSession::Impl::StartWatch(
     const WatchSessionConfig& config,
     ISessionEventSink& eventSink,
     std::string executablePath)
@@ -262,12 +330,12 @@ void AppSessionBackend::StartWatch(
     StartRunner(
         SessionRole::Watch,
         eventSink,
-        [config, executablePath = std::move(executablePath)](const ScreenShareAppRunContext& context) {
+        [config, executablePath = std::move(executablePath)](const ScreenShareRunContext& context) {
             return RunWatchSession(config, context, executablePath);
         });
 }
 
-void AppSessionBackend::Stop()
+void ScreenShareSession::Impl::Stop()
 {
     bool shouldNotify = false;
     {
@@ -287,14 +355,14 @@ void AppSessionBackend::Stop()
     }
 }
 
-void AppSessionBackend::Shutdown()
+void ScreenShareSession::Impl::Shutdown()
 {
     DetachObserver();
     Stop();
     JoinWorker();
 }
 
-void AppSessionBackend::ApplyStreamSettings(const StreamSettings& settings)
+void ScreenShareSession::Impl::ApplyStreamSettings(const StreamSettings& settings)
 {
     runtimeControl_.RequestStreamSettings(BuildRuntimeStreamSettingsRequest(settings));
 
@@ -306,13 +374,13 @@ void AppSessionBackend::ApplyStreamSettings(const StreamSettings& settings)
     Notify(SessionEventType::SettingsChanged, currentState, "Stream settings queued");
 }
 
-SessionStatus AppSessionBackend::GetStatus() const
+SessionStatus ScreenShareSession::Impl::GetStatus() const
 {
     std::scoped_lock lock(mutex_);
     return BuildStatusLocked();
 }
 
-std::vector<SessionDisplayInfo> AppSessionBackend::ListDisplays()
+std::vector<SessionDisplayInfo> ScreenShareSession::Impl::ListDisplays()
 {
     const auto displays = DesktopCapturer::EnumerateDisplays();
 
@@ -333,7 +401,7 @@ std::vector<SessionDisplayInfo> AppSessionBackend::ListDisplays()
     return result;
 }
 
-std::vector<SessionAudioDeviceInfo> AppSessionBackend::ListAudioDevices()
+std::vector<SessionAudioDeviceInfo> ScreenShareSession::Impl::ListAudioDevices()
 {
     std::vector<SessionAudioDeviceInfo> result;
     for (const AudioCaptureSource source : {AudioCaptureSource::SystemOutput, AudioCaptureSource::Microphone}) {
@@ -351,7 +419,7 @@ std::vector<SessionAudioDeviceInfo> AppSessionBackend::ListAudioDevices()
     return result;
 }
 
-void AppSessionBackend::StartRunner(
+void ScreenShareSession::Impl::StartRunner(
     SessionRole role,
     ISessionEventSink& eventSink,
     SessionRunner runner)
@@ -397,7 +465,7 @@ void AppSessionBackend::StartRunner(
     worker_ = std::thread([this, runner = std::move(runner)]() mutable {
         Notify(SessionEventType::StateChanged, SessionState::Connecting, "Connecting session");
 
-        ScreenShareAppRunContext context;
+        ScreenShareRunContext context;
         context.runtimeControl = &runtimeControl_;
         context.outputHandler = [this](std::string_view text) {
             HandleOutput(text);
@@ -431,20 +499,20 @@ void AppSessionBackend::StartRunner(
     });
 }
 
-void AppSessionBackend::DetachObserver()
+void ScreenShareSession::Impl::DetachObserver()
 {
     std::scoped_lock lock(mutex_);
     observer_ = nullptr;
 }
 
-void AppSessionBackend::JoinWorker()
+void ScreenShareSession::Impl::JoinWorker()
 {
     if (worker_.joinable() && worker_.get_id() != std::this_thread::get_id()) {
         worker_.join();
     }
 }
 
-void AppSessionBackend::JoinFinishedWorker()
+void ScreenShareSession::Impl::JoinFinishedWorker()
 {
     bool shouldJoin = false;
     {
@@ -456,7 +524,7 @@ void AppSessionBackend::JoinFinishedWorker()
     }
 }
 
-void AppSessionBackend::HandleOutput(std::string_view text)
+void ScreenShareSession::Impl::HandleOutput(std::string_view text)
 {
     Notify(SessionEventType::LogLine, SessionState::Idle, std::string(text));
 
@@ -492,7 +560,7 @@ void AppSessionBackend::HandleOutput(std::string_view text)
     }
 }
 
-void AppSessionBackend::HandleLogLine(const std::string& line)
+void ScreenShareSession::Impl::HandleLogLine(const std::string& line)
 {
     HandleDiagnosticLogLine(line);
     HandleStreamLogLine(line);
@@ -510,7 +578,7 @@ void AppSessionBackend::HandleLogLine(const std::string& line)
     }
 }
 
-void AppSessionBackend::HandleStreamLogLine(const std::string& line)
+void ScreenShareSession::Impl::HandleStreamLogLine(const std::string& line)
 {
     const auto sourceResolution = ParseResolution(LogFieldValue(line, "source"));
     const auto outputResolution = ParseResolution(LogFieldValue(line, "output"));
@@ -604,7 +672,7 @@ void AppSessionBackend::HandleStreamLogLine(const std::string& line)
     EmitStatus(SessionEventType::StreamStatusChanged, "Stream status updated");
 }
 
-void AppSessionBackend::HandleAudioLogLine(const std::string& line)
+void ScreenShareSession::Impl::HandleAudioLogLine(const std::string& line)
 {
     const std::string codec = LogFieldValue(line, "audio_codec");
     const std::string format = LogFieldValue(line, "audio_format");
@@ -892,7 +960,7 @@ void AppSessionBackend::HandleAudioLogLine(const std::string& line)
     EmitStatus(SessionEventType::AudioStatusChanged, "Audio status updated");
 }
 
-void AppSessionBackend::HandleDiagnosticLogLine(const std::string& line)
+void ScreenShareSession::Impl::HandleDiagnosticLogLine(const std::string& line)
 {
     const std::string natStatus = LogFieldValue(line, "nat_status");
     if (!natStatus.empty()) {
@@ -934,7 +1002,7 @@ void AppSessionBackend::HandleDiagnosticLogLine(const std::string& line)
     }
 }
 
-void AppSessionBackend::HandleShareLogLine(const std::string& line)
+void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
 {
     if (line.find("viewer_target=") == std::string::npos) {
         return;
@@ -1005,7 +1073,7 @@ void AppSessionBackend::HandleShareLogLine(const std::string& line)
     EmitStatus(SessionEventType::ViewerListChanged, "Viewer status updated");
 }
 
-void AppSessionBackend::HandleWatchLogLine(const std::string& line)
+void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
 {
     bool activeNow = false;
     bool waitingForStream = false;
@@ -1055,7 +1123,7 @@ void AppSessionBackend::HandleWatchLogLine(const std::string& line)
     }
 }
 
-void AppSessionBackend::EmitStatus(SessionEventType type, std::string message)
+void ScreenShareSession::Impl::EmitStatus(SessionEventType type, std::string message)
 {
     ISessionEventSink* observer = nullptr;
     SessionEvent event;
@@ -1072,7 +1140,7 @@ void AppSessionBackend::EmitStatus(SessionEventType type, std::string message)
     }
 }
 
-void AppSessionBackend::EmitIssue(SessionIssue issue, std::string message)
+void ScreenShareSession::Impl::EmitIssue(SessionIssue issue, std::string message)
 {
     ISessionEventSink* observer = nullptr;
     SessionEvent event;
@@ -1090,7 +1158,7 @@ void AppSessionBackend::EmitIssue(SessionIssue issue, std::string message)
     }
 }
 
-void AppSessionBackend::Notify(SessionEventType type, SessionState state, std::string message)
+void ScreenShareSession::Impl::Notify(SessionEventType type, SessionState state, std::string message)
 {
     ISessionEventSink* observer = nullptr;
     SessionEvent event;
@@ -1111,7 +1179,7 @@ void AppSessionBackend::Notify(SessionEventType type, SessionState state, std::s
     }
 }
 
-SessionStatus AppSessionBackend::BuildStatusLocked() const
+SessionStatus ScreenShareSession::Impl::BuildStatusLocked() const
 {
     SessionStatus status;
     status.role = role_;
@@ -1129,6 +1197,69 @@ SessionStatus AppSessionBackend::BuildStatusLocked() const
     status.natStatus = natStatus_;
     status.natHint = natHint_;
     return status;
+}
+
+ScreenShareSession::ScreenShareSession()
+    : impl_(std::make_unique<Impl>())
+{
+}
+
+ScreenShareSession::~ScreenShareSession() = default;
+
+void ScreenShareSession::StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink)
+{
+    impl_->StartShare(config, eventSink);
+}
+
+void ScreenShareSession::StartShare(
+    const ShareSessionConfig& config,
+    ISessionEventSink& eventSink,
+    std::string executablePath)
+{
+    impl_->StartShare(config, eventSink, std::move(executablePath));
+}
+
+void ScreenShareSession::StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink)
+{
+    impl_->StartWatch(config, eventSink);
+}
+
+void ScreenShareSession::StartWatch(
+    const WatchSessionConfig& config,
+    ISessionEventSink& eventSink,
+    std::string executablePath)
+{
+    impl_->StartWatch(config, eventSink, std::move(executablePath));
+}
+
+void ScreenShareSession::Shutdown()
+{
+    impl_->Shutdown();
+}
+
+void ScreenShareSession::Stop()
+{
+    impl_->Stop();
+}
+
+void ScreenShareSession::ApplyStreamSettings(const StreamSettings& settings)
+{
+    impl_->ApplyStreamSettings(settings);
+}
+
+SessionStatus ScreenShareSession::GetStatus() const
+{
+    return impl_->GetStatus();
+}
+
+std::vector<SessionDisplayInfo> ScreenShareSession::ListDisplays()
+{
+    return impl_->ListDisplays();
+}
+
+std::vector<SessionAudioDeviceInfo> ScreenShareSession::ListAudioDevices()
+{
+    return impl_->ListAudioDevices();
 }
 
 } // namespace screenshare
