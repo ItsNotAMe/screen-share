@@ -25,10 +25,10 @@
 
 ## Implementation Notes
 
-- `ScreenShareUi.exe` lives beside `ScreenShare.exe`; live Share/Watch sessions use `src/ui/QtSessionBackend.*` over `src/app/AppSessionBackend.*`.
-- `ScreenShareUi.exe` links `ScreenShareSessionRuntime`, which includes the app-backed session runtime and app session backend. Short helper diagnostics can still invoke `ScreenShare.exe` when useful.
-- The UI-facing session API remains `src/core/ScreenShareSession.h`; `src/app/ScreenShareAppInternal.h` is private runtime plumbing while the CLI file is being split.
-- `AppSessionBackend` converts live engine telemetry into typed `SessionEvent` snapshots. The UI uses those events for Share viewer rows, the Live/Disconnected indicator, NAT hints, access-code/password failures, room-open conflicts, and preview-close stop handling instead of parsing those fields from stdout itself.
+- `ScreenShareUi.exe` lives beside `ScreenShare.exe`; live Share/Watch sessions use `src/ui/QtSessionBackend.*` over the concrete `screenshare::ScreenShareSession` API.
+- `ScreenShareUi.exe` links `ScreenShareSessionRuntime`, which includes the concrete session API and app-backed session runtime. Short helper diagnostics can still invoke `ScreenShare.exe` when useful.
+- The UI-facing session API is `src/api/ScreenShareAPI.h`; `src/app/ScreenShareAppInternal.h` is private runtime plumbing while the CLI file is being split.
+- `ScreenShareSession` converts live engine telemetry into typed `SessionEvent` snapshots. The UI uses those events for Share viewer rows, the Live/Disconnected indicator, NAT hints, access-code/password failures, room-open conflicts, and preview-close stop handling instead of parsing those fields from stdout itself.
 - `SessionStatus::stream` carries typed stream telemetry for the future Active Share/Watch Session screens: output resolution, source resolution when available, FPS, bitrate, adaptation state, stream queue/drops, and UDP queue delay.
 - `SessionStatus::audio` carries typed audio telemetry for future active-session panels: capture/receive counters, codec/format, UDP audio transport, playback queue/render state, mute/volume, and A/V sync status.
 - Live Share/Watch sessions build engine options directly from typed configs for Worker rooms, direct/Nearby targets, and manual invite fallback. `src/core/SessionCommand.*` remains only for command previews/self-tests while that UI surface still exists.

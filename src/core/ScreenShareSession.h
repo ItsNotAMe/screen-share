@@ -260,19 +260,6 @@ public:
     virtual void OnSessionEvent(const SessionEvent& event) = 0;
 };
 
-class IScreenShareSession {
-public:
-    virtual ~IScreenShareSession() = default;
-
-    virtual void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink) = 0;
-    virtual void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink) = 0;
-    virtual void Stop() = 0;
-    virtual void ApplyStreamSettings(const StreamSettings& settings) = 0;
-    virtual SessionStatus GetStatus() const = 0;
-    virtual std::vector<SessionDisplayInfo> ListDisplays() = 0;
-    virtual std::vector<SessionAudioDeviceInfo> ListAudioDevices() = 0;
-};
-
 const char* ToString(SessionState state);
 bool IsTerminalSessionState(SessionState state);
 

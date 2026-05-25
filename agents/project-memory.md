@@ -92,7 +92,7 @@ WGC capture by default
 - PR #99 `Secure Worker room signaling`: hidden app-generated room keys in secure room links, Durable Object live room state, static-candidate fanout fix, and clearer direct-UDP-blocked diagnostics.
 - PR #100 `Add active room directory`: KV-backed active room summaries plus safe `GET /rooms` and `GET /rooms/:roomId/summary`, with Durable Objects still verified as the live source of truth.
 - PR #102 `Add joinable room list with room access keys`: UI room list joins public Worker rooms without copied secret links; Durable Object keeps the hidden room access key.
-- Recent backend/UI integration: `AppSessionBackend` emits typed diagnostic events for stream/audio media status, NAT status, access-code/password failures, room-open conflicts, and preview-close handling, replacing the remaining live-session stdout parsing in `ScreenShareUi`. Live Share/Watch starts now flow through typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback. Runtime control is typed around stream settings, with live resolution changes as the first implemented field.
+- Recent backend/UI integration: `ScreenShareSession` emits typed diagnostic events for stream/audio media status, NAT status, access-code/password failures, room-open conflicts, and preview-close handling, replacing the remaining live-session stdout parsing in `ScreenShareUi`. Live Share/Watch starts now flow through typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback. Runtime control is typed around stream settings, with live resolution changes as the first implemented field.
 
 ## Active Memory Files
 
@@ -107,16 +107,17 @@ WGC capture by default
 - `agents/nat-traversal.md`: STUN/manual invite/hole-punching direction.
 - `agents/security.md`: local access-code and future encryption notes.
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
-- `src/core/ScreenShareSession.h`: shared typed session API surface for CLI/UI integration work, including event sinks, status snapshots, stream settings, display discovery, and audio-device discovery.
+- `src/api/ScreenShareAPI.h`: public concrete `screenshare::ScreenShareSession` API facade used by the UI and intended for the CLI path as it gets thinner.
+- `src/api/ScreenShareAPI.cpp`: `ScreenShareSession` implementation using memory runtime control, typed Share/Watch runner entrypoints, and typed event/status translation.
+- `src/core/ScreenShareSession.h`: shared session data types and helpers used by the API, CLI, and UI.
 - `src/core/SessionCommand.*`: typed Share/Watch session config to engine-argument bridge still used for UI command previews/self-tests, not normal live session execution.
-- `src/core/SessionRuntimeControl.*`: shared stop/runtime stream-settings control interface. CLI runs use the file-backed implementation; the app session backend uses the memory-backed implementation for stop/settings requests. Resolution is the first implemented live setting.
+- `src/core/SessionRuntimeControl.*`: shared stop/runtime stream-settings control interface. CLI runs use the file-backed implementation; `ScreenShareSession` uses the memory-backed implementation for stop/settings requests. Resolution is the first implemented live setting.
 - `src/app/ScreenShareAppInternal.h`: private runtime bridge used inside `src/app`; not a UI-facing API.
 - `src/app/ScreenShareRunContext.h`: shared run context for runtime control and captured output callbacks.
-- `src/app/ScreenShareSessionRunner.h`: typed Share/Watch runner entrypoints used by the app backend; this is separate from the CLI app header.
+- `src/app/ScreenShareSessionRunner.h`: typed Share/Watch runner entrypoints used by the concrete session API; this is separate from the CLI app header.
 - `src/app/ScreenShareSessionRunner.cpp`: app-backed typed Share/Watch runner entrypoint implementation. It calls private runtime helpers in `ScreenShareApp.cpp` while the runtime/reporting code is still being extracted.
 - `src/app/ScreenShareApp.*`: callable CLI app runner built into the `ScreenShareSessionRuntime` static library for now. Normal CLI Share/Watch presets parse into typed session configs and use the same typed execution path as the UI/backend path; diagnostic-only CLI modes still parse into internal options directly.
-- `src/app/AppSessionBackend.*`: pure C++ `IScreenShareSession` adapter that runs typed Share/Watch app runner entrypoints on a worker thread with `MemorySessionRuntimeControl` and exposes typed status, display discovery, and audio-device discovery.
-- `src/ui/QtSessionBackend.*`: Qt-thread bridge for the app session backend. Live Share/Watch and normal display/audio-device discovery in the desktop UI no longer launch `ScreenShare.exe` as a child process.
+- `src/ui/QtSessionBackend.*`: Qt-thread bridge over `screenshare::ScreenShareSession`. Live Share/Watch and normal display/audio-device discovery in the desktop UI no longer launch `ScreenShare.exe` as a child process.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
   The Qt UI embeds the current mark/icons through `src/ui/resources.qrc` and links/packages QtSvg for SVG rendering.
@@ -150,9 +151,9 @@ WGC capture by default
   - dark-mode default with theme toggle.
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
-  - Live Share/Watch runs now go through `src/ui/QtSessionBackend.*` and `src/app/AppSessionBackend.*`, so the UI calls the app runner on a worker thread instead of launching `ScreenShare.exe`.
+  - Live Share/Watch runs now go through `src/ui/QtSessionBackend.*` and `screenshare::ScreenShareSession`, so the UI calls the app runner on a worker thread instead of launching `ScreenShare.exe`.
   - Live Share/Watch now builds engine options directly from typed configs for Worker rooms, direct/Nearby targets, and manual invite fallback. Normal CLI Share/Watch presets produce the same typed configs; advanced diagnostic-only flags remain on the internal CLI options path until they become real app controls. Stop/runtime stream-settings controls route through `src/core/SessionRuntimeControl.*` with file-backed control for CLI runs and memory-backed control for UI runs.
-  - `AppSessionBackend` now translates live telemetry into typed `SessionEvent` snapshots: Share viewer rows use typed viewer status, Watch/Share live indicators use typed activity, and NAT hints, access-code/password failures, room-open conflicts, and preview-close handling flow through typed events instead of UI-side stdout parsing.
+  - `ScreenShareSession` now translates live telemetry into typed `SessionEvent` snapshots: Share viewer rows use typed viewer status, Watch/Share live indicators use typed activity, and NAT hints, access-code/password failures, room-open conflicts, and preview-close handling flow through typed events instead of UI-side stdout parsing.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.
   - `--lan-discover` search mode.

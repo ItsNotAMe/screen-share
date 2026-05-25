@@ -21,7 +21,7 @@ QtSessionBackend::QtSessionBackend(QObject* parent) : QObject(parent)
 
 QtSessionBackend::~QtSessionBackend()
 {
-    backend_.Shutdown();
+    session_.Shutdown();
 }
 
 bool QtSessionBackend::isRunning() const
@@ -105,7 +105,7 @@ bool QtSessionBackend::startShare(
     }
 
     try {
-        backend_.StartShare(
+        session_.StartShare(
             config,
             *this,
             executablePath.isEmpty() ?
@@ -129,7 +129,7 @@ bool QtSessionBackend::startWatch(
     }
 
     try {
-        backend_.StartWatch(
+        session_.StartWatch(
             config,
             *this,
             executablePath.isEmpty() ?
@@ -150,19 +150,19 @@ void QtSessionBackend::stop()
     }
 
     stopRequested_ = true;
-    backend_.Stop();
+    session_.Stop();
 }
 
 void QtSessionBackend::applyStreamSettings(const screenshare::StreamSettings& settings)
 {
     if (running_) {
-        backend_.ApplyStreamSettings(settings);
+        session_.ApplyStreamSettings(settings);
     }
 }
 
 screenshare::SessionStatus QtSessionBackend::currentStatus() const
 {
-    return backend_.GetStatus();
+    return session_.GetStatus();
 }
 
 std::vector<screenshare::SessionDisplayInfo> QtSessionBackend::listDisplays(QString* errorMessage)
@@ -171,7 +171,7 @@ std::vector<screenshare::SessionDisplayInfo> QtSessionBackend::listDisplays(QStr
         errorMessage->clear();
     }
     try {
-        return backend_.ListDisplays();
+        return session_.ListDisplays();
     } catch (const std::exception& error) {
         if (errorMessage != nullptr) {
             *errorMessage = ToQString(error.what());
@@ -186,7 +186,7 @@ std::vector<screenshare::SessionAudioDeviceInfo> QtSessionBackend::listAudioDevi
         errorMessage->clear();
     }
     try {
-        return backend_.ListAudioDevices();
+        return session_.ListAudioDevices();
     } catch (const std::exception& error) {
         if (errorMessage != nullptr) {
             *errorMessage = ToQString(error.what());

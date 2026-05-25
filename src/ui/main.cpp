@@ -5645,12 +5645,12 @@ int main(int argc, char** argv)
             AppSessionSelfTestObserver typedSessionSelfTestObserver;
             bool typedSessionValidationOk = false;
             {
-                screenshare::AppSessionBackend appSelfTestBackend;
+                screenshare::ScreenShareSession appSelfTestSession;
                 screenshare::ShareSessionConfig invalidDirectShareConfig;
                 invalidDirectShareConfig.connectionMode = screenshare::ShareConnectionMode::DirectTargets;
-                appSelfTestBackend.StartShare(invalidDirectShareConfig, typedSessionSelfTestObserver);
+                appSelfTestSession.StartShare(invalidDirectShareConfig, typedSessionSelfTestObserver);
                 const bool typedSessionFinished = typedSessionSelfTestObserver.wait();
-                const screenshare::SessionStatus typedSessionStatus = appSelfTestBackend.GetStatus();
+                const screenshare::SessionStatus typedSessionStatus = appSelfTestSession.GetStatus();
                 typedSessionValidationOk =
                     typedSessionFinished &&
                     typedSessionSelfTestObserver.failed() &&
