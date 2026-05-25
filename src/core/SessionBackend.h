@@ -45,6 +45,7 @@ enum class SessionEventType {
     NatStatusChanged,
     SettingsChanged,
     StreamStatusChanged,
+    AudioStatusChanged,
     Issue,
     Error,
 };
@@ -142,12 +143,66 @@ struct SessionStreamStatus {
     uint64_t bitrateAdaptations = 0;
 };
 
+struct SessionAudioStatus {
+    bool hasStats = false;
+    std::string codec;
+    std::string format;
+    std::string captureState;
+    uint64_t capturePackets = 0;
+    uint64_t captureFrames = 0;
+    uint64_t captureBytes = 0;
+    uint64_t captureEmptyPolls = 0;
+    uint64_t captureDiscontinuities = 0;
+    uint64_t captureTimestampErrors = 0;
+    double capturePacketsPerSecond = 0.0;
+    double captureFramesPerSecond = 0.0;
+    double payloadBitrateMbps = 0.0;
+    uint64_t packets = 0;
+    uint64_t frames = 0;
+    uint64_t bytes = 0;
+    uint64_t silentPackets = 0;
+    uint64_t discontinuities = 0;
+    uint64_t timestampErrors = 0;
+    uint64_t udpPackets = 0;
+    uint64_t udpFrames = 0;
+    uint64_t udpDatagrams = 0;
+    uint64_t udpPendingDatagrams = 0;
+    uint64_t udpDroppedPackets = 0;
+    uint64_t udpWireBytes = 0;
+    std::string playbackState;
+    bool playbackMuted = false;
+    int playbackVolumePercent = 100;
+    int playbackLatencyMs = 0;
+    uint64_t playbackQueuePackets = 0;
+    uint64_t playbackQueueMs = 0;
+    uint64_t playbackPackets = 0;
+    uint64_t playbackFrames = 0;
+    uint64_t playbackDrops = 0;
+    uint64_t playbackLatencyDrops = 0;
+    uint64_t playbackSyncDrops = 0;
+    uint64_t playbackSyncWaits = 0;
+    uint64_t playbackMissingPackets = 0;
+    uint64_t playbackBackpressure = 0;
+    uint64_t renderBufferFullEvents = 0;
+    uint64_t renderPaddingFrames = 0;
+    std::string avSyncState;
+    std::string avSyncCorrection;
+    int avAudioAheadMs = 0;
+    int avAudioElapsedMs = 0;
+    int avVideoElapsedMs = 0;
+    int avPlayoutAudioAheadMs = 0;
+    uint64_t avAudioPackets = 0;
+    uint64_t avIgnoredAudioPackets = 0;
+    uint64_t avVideoFrames = 0;
+};
+
 struct SessionStatus {
     SessionRole role = SessionRole::Share;
     SessionState state = SessionState::Idle;
     std::string summary;
     std::optional<SessionResolution> videoResolution;
     SessionStreamStatus stream;
+    SessionAudioStatus audio;
     std::vector<SessionViewer> viewers;
     std::string health;
     uint64_t completedFrames = 0;
