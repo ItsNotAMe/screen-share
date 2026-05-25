@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/SessionBackend.h"
+#include "core/ScreenShareSession.h"
 
 #include <string>
 #include <vector>

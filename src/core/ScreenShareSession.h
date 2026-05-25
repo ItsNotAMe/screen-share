@@ -243,20 +243,21 @@ struct SessionEvent {
     std::string message;
 };
 
-class ISessionObserver {
+class ISessionEventSink {
 public:
-    virtual ~ISessionObserver() = default;
+    virtual ~ISessionEventSink() = default;
     virtual void OnSessionEvent(const SessionEvent& event) = 0;
 };
 
-class ISessionBackend {
+class IScreenShareSession {
 public:
-    virtual ~ISessionBackend() = default;
+    virtual ~IScreenShareSession() = default;
 
-    virtual void StartShare(const ShareSessionConfig& config, ISessionObserver& observer) = 0;
-    virtual void StartWatch(const WatchSessionConfig& config, ISessionObserver& observer) = 0;
+    virtual void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink) = 0;
+    virtual void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink) = 0;
     virtual void Stop() = 0;
     virtual void ApplyStreamSettings(const StreamSettings& settings) = 0;
+    virtual SessionStatus GetStatus() const = 0;
     virtual std::vector<SessionDisplayInfo> ListDisplays() = 0;
     virtual std::vector<SessionAudioDeviceInfo> ListAudioDevices() = 0;
 };

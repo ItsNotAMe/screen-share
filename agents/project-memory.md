@@ -107,11 +107,11 @@ WGC capture by default
 - `agents/nat-traversal.md`: STUN/manual invite/hole-punching direction.
 - `agents/security.md`: local access-code and future encryption notes.
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
-- `src/core/SessionBackend.h`: shared session backend API shape for UI/backend integration work.
+- `src/core/ScreenShareSession.h`: shared typed session API surface for CLI/UI integration work, including event sinks, status snapshots, stream settings, display discovery, and audio-device discovery.
 - `src/core/SessionCommand.*`: typed Share/Watch session config to engine-argument bridge used by the UI and app session backend for Worker rooms, direct/Nearby targets, and manual invite fallback.
 - `src/core/SessionRuntimeControl.*`: shared stop/runtime stream-settings control interface. CLI runs use the file-backed implementation; the app session backend uses the memory-backed implementation for stop/settings requests. Resolution is the first implemented live setting.
 - `src/app/ScreenShareApp.*`: callable CLI app runner built as the `ScreenShareAppRunner` static library and used by both the tiny `src/app/ScreenShareMain.cpp` executable entry point and the app session backend.
-- `src/app/AppSessionBackend.*`: pure C++ `ISessionBackend` adapter that runs `ScreenShareAppRunner` on a worker thread with `MemorySessionRuntimeControl` and exposes typed display/audio-device discovery.
+- `src/app/AppSessionBackend.*`: pure C++ `IScreenShareSession` adapter that runs `ScreenShareAppRunner` on a worker thread with `MemorySessionRuntimeControl` and exposes typed status, display discovery, and audio-device discovery.
 - `src/ui/QtSessionBackend.*`: Qt-thread bridge for the app session backend. Live Share/Watch and normal display/audio-device discovery in the desktop UI no longer launch `ScreenShare.exe` as a child process.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.

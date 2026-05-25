@@ -1,4 +1,4 @@
-#include "core/SessionBackend.h"
+#include "core/ScreenShareSession.h"
 
 namespace screenshare {
 

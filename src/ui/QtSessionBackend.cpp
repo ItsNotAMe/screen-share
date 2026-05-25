@@ -160,6 +160,11 @@ void QtSessionBackend::applyStreamSettings(const screenshare::StreamSettings& se
     }
 }
 
+screenshare::SessionStatus QtSessionBackend::currentStatus() const
+{
+    return backend_.GetStatus();
+}
+
 std::vector<screenshare::SessionDisplayInfo> QtSessionBackend::listDisplays(QString* errorMessage)
 {
     if (errorMessage != nullptr) {

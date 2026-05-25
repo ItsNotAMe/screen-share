@@ -8,7 +8,7 @@
 #include <functional>
 #include <vector>
 
-class QtSessionBackend final : public QObject, private screenshare::ISessionObserver {
+class QtSessionBackend final : public QObject, private screenshare::ISessionEventSink {
 public:
     struct FinishInfo {
         int exitCode = 0;
@@ -40,6 +40,7 @@ public:
         QString* errorMessage = nullptr);
     void stop();
     void applyStreamSettings(const screenshare::StreamSettings& settings);
+    screenshare::SessionStatus currentStatus() const;
     std::vector<screenshare::SessionDisplayInfo> listDisplays(QString* errorMessage = nullptr);
     std::vector<screenshare::SessionAudioDeviceInfo> listAudioDevices(QString* errorMessage = nullptr);
 

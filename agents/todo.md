@@ -10,13 +10,21 @@ Only you can fully validate these because they need real machines/networks.
 
 ## Build Work
 
-1. Finish the reusable backend/core API for the UI.
+1. Finish one reusable typed session API for both CLI and UI.
    - [x] Run UI live Share/Watch sessions in-process on a worker thread.
    - [x] Use typed launch configs for Worker rooms, direct/Nearby targets, and manual invite fallback.
    - [x] Use typed runtime stream-settings control, with resolution as the first implemented live setting.
    - [x] Emit typed Share viewer status, Watch media activity, stream/audio media status, NAT hints, access-code/password failures, room-open conflicts, and preview-close handling.
    - [x] Move display listing behind a backend API instead of a helper CLI process.
    - [x] Move audio device listing behind a backend API instead of a helper CLI process.
+   - [x] Define the typed session API surface around Start Share, Start Watch, Stop, runtime settings, status snapshots, typed events, display discovery, and audio-device discovery.
+   - [ ] Move normal Share/Watch execution behind typed API methods instead of the current `RunScreenShareApp(argv)` bridge.
+   - [ ] Make `AppSessionBackend` call the typed API directly, without rebuilding CLI arguments internally.
+   - [ ] Make the CLI parse command-line options into the same typed configs and call the same API as the UI.
+   - [ ] Reshape CMake targets so `ScreenShareCore` owns the reusable session API, `ScreenShare.exe` is the thin CLI app, and `ScreenShareUi.exe` links the same API directly instead of a CLI runner bridge.
+   - [ ] Remove or shrink `ScreenShareAppRunner` once the runner code is CLI-only instead of shared UI plumbing.
+   - [ ] Shrink `ScreenShareApp.cpp` into CLI parsing, diagnostics, and command dispatch; move reusable Share/Watch runners into focused API/core files.
+   - [x] Rename `ISessionObserver` to `ISessionEventSink` so event delivery reads as a simple session event sink/callback, not a vague pattern name.
    - [ ] Keep short helper diagnostics only where they are genuinely diagnostic, not normal UI data paths.
    - [ ] Add any remaining typed setup/session state needed by the Active Share/Watch Session screens.
 2. Build the stage-2 native UI on top of the backend/core API.
