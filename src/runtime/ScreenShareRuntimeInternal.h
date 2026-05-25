@@ -1,6 +1,7 @@
 #pragma once
 
 #include "runtime/ScreenShareRunContext.h"
+#include "runtime/ScreenShareRuntimeOptions.h"
 #include "runtime/ScreenShareRuntimeSupport.h"
 #include "core/ScreenShareSession.h"
 
