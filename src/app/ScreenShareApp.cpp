@@ -9,7 +9,6 @@
 #include "codec/H264FileEncoder.h"
 #include "codec/H264StreamDecoder.h"
 #include "codec/H264StreamEncoder.h"
-#include "core/SessionCommand.h"
 #include "core/SessionRuntimeControl.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/LanDiscovery.h"
@@ -648,12 +647,6 @@ std::string FormatSessionFingerprint(uint64_t fingerprint)
     std::ostringstream text;
     text << std::uppercase << std::hex << std::setw(16) << std::setfill('0') << fingerprint;
     return text.str();
-}
-
-std::vector<std::string> AddExecutableName(std::vector<std::string> arguments, std::string executablePath)
-{
-    arguments.insert(arguments.begin(), std::move(executablePath));
-    return arguments;
 }
 
 uint64_t SessionFingerprint(std::string_view sessionId)
@@ -7905,6 +7898,464 @@ void RunUdpReceiverStats(
         << "\n";
 }
 
+void RequireSessionConfig(bool condition, const char* message)
+{
+    if (!condition) {
+        throw std::invalid_argument(message);
+    }
+}
+
+void ApplyTypedSessionSecurity(
+    Options& options,
+    const std::string& accessCode,
+    bool allowPlaintext,
+    const std::string& reportPath)
+{
+    if (!accessCode.empty() && allowPlaintext) {
+        throw std::invalid_argument("Access code cannot be combined with plaintext mode.");
+    }
+    if (!accessCode.empty()) {
+        const std::string parsedAccessCode = ParseAccessCode(accessCode.c_str());
+        options.accessCodeFingerprint = screenshare::UdpAccessCodeFingerprint(parsedAccessCode);
+        options.accessCodeKey = screenshare::DeriveUdpCryptoKey(parsedAccessCode);
+        options.accessCodeProvided = true;
+    } else if (allowPlaintext) {
+        options.allowPlaintext = true;
+    }
+    options.saveReportPath = reportPath;
+}
+
+void ApplyTypedSignalingConfig(
+    Options& options,
+    const std::string& roomId,
+    const std::string& roomPassword,
+    const std::string& signalingStunServer)
+{
+    RequireSessionConfig(!roomId.empty(), "Room ID is required.");
+    screenshare::ValidateSignalingRoomId(roomId);
+    if (!roomPassword.empty() && (options.accessCodeProvided || options.allowPlaintext)) {
+        throw std::invalid_argument("Room password cannot be combined with access code or plaintext mode.");
+    }
+
+    options.signalingLive = true;
+    options.signalingServerUrl = std::string(DefaultSignalingServerUrl);
+    options.signalingRoomId = roomId;
+    options.signalingPeerId = options.sessionId;
+    options.signalingRoomPassword = roomPassword;
+    if (!signalingStunServer.empty()) {
+        options.signalingStunServer = screenshare::ParseStunServerTarget(signalingStunServer.c_str());
+    }
+}
+
+void ApplyTypedStreamSettings(Options& options, const screenshare::StreamSettings& settings)
+{
+    options.fps = settings.fps;
+    options.bitrate = settings.bitrateBps;
+    options.adaptBitrate = settings.adaptBitrate || settings.adaptResolution;
+    options.adaptResolution = settings.adaptResolution;
+    if (settings.outputResolution &&
+        settings.outputResolution->width > 0 &&
+        settings.outputResolution->height > 0) {
+        options.width = settings.outputResolution->width;
+        options.height = settings.outputResolution->height;
+    }
+
+    if (options.fps <= 0 || options.fps > 240) {
+        throw std::invalid_argument("FPS must be between 1 and 240.");
+    }
+    if ((options.width == 0) != (options.height == 0)) {
+        throw std::invalid_argument("Output width and height must be provided together.");
+    }
+    if (options.width < 0 || options.height < 0) {
+        throw std::invalid_argument("Output width and height must be positive.");
+    }
+    if (options.width > 0 && ((options.width % 2) != 0 || (options.height % 2) != 0)) {
+        throw std::invalid_argument("Stream output width and height must be even.");
+    }
+}
+
+void ApplyTypedLocalInviteSession(
+    Options& options,
+    const screenshare::NatInvite& invite,
+    bool& sessionFromLocalInvite,
+    const char* optionName)
+{
+    if (invite.sessionId.empty()) {
+        return;
+    }
+    if (sessionFromLocalInvite) {
+        return;
+    }
+    if (options.sessionIdProvided && options.sessionId != invite.sessionId) {
+        throw std::invalid_argument(std::string(optionName) + " session does not match the current session");
+    }
+    options.sessionId = invite.sessionId;
+    options.sessionIdFromLocalInvite = true;
+    sessionFromLocalInvite = true;
+}
+
+UdpSendTargetSpec BuildTypedShareTargetSpec(
+    Options& options,
+    const ExtraShareTargetOption& targetOption,
+    bool primary,
+    bool& sessionFromLocalInvite)
+{
+    UdpSendTargetSpec spec;
+    if (LooksLikeNatInvite(targetOption.target)) {
+        const auto invite = screenshare::ParseNatInvite(targetOption.target, options.accessCodeKey);
+        const auto selectedEndpoint = SelectNatInviteEndpoint(invite, options.inviteEndpointPreference);
+        spec.target = FormatNatEndpoint(selectedEndpoint.endpoint);
+        spec.fromPeerInvite = true;
+        spec.inviteEndpoint = selectedEndpoint.name;
+
+        if (!targetOption.localInvite.empty()) {
+            const auto localInvite = ParseValidatedLocalInviteForShare(
+                options,
+                targetOption.localInvite,
+                primary ? "local invite" : "watcher local invite");
+            if (primary && options.udpLocalPortProvided && options.udpLocalPort != localInvite.localEndpoint.port) {
+                throw std::invalid_argument("UDP local port does not match the local invite port.");
+            }
+            spec.localPort = localInvite.localEndpoint.port;
+            spec.localPortFromLocalInvite = true;
+            spec.collectNatProbeTargets = true;
+            spec.preferNatProbeTargets = invite.sessionFingerprint == localInvite.sessionFingerprint;
+            spec.natProbeSessionFingerprint = localInvite.sessionFingerprint;
+            ApplyTypedLocalInviteSession(
+                options,
+                localInvite,
+                sessionFromLocalInvite,
+                primary ? "local invite" : "watcher local invite");
+        }
+    } else {
+        if (!targetOption.localInvite.empty()) {
+            throw std::invalid_argument("Watcher local invite can only be used with watcher invite targets.");
+        }
+        static_cast<void>(screenshare::ParseUdpSenderTarget(targetOption.target));
+        spec.target = targetOption.target;
+    }
+    return spec;
+}
+
+void AddTypedShareTarget(
+    Options& options,
+    const ExtraShareTargetOption& target,
+    bool primary,
+    bool& sessionFromLocalInvite,
+    std::set<uint16_t>& usedLocalPorts)
+{
+    auto spec = BuildTypedShareTargetSpec(options, target, primary, sessionFromLocalInvite);
+    if (primary && spec.localPort == 0 && options.udpLocalPortProvided) {
+        spec.localPort = options.udpLocalPort;
+    }
+    if (spec.localPort != 0 && !usedLocalPorts.insert(spec.localPort).second) {
+        throw std::invalid_argument("Each NAT share target local invite must use a unique local port.");
+    }
+
+    if (primary) {
+        options.udpSendTarget = spec.target;
+        options.udpSendTargetFromPeerInvite = spec.fromPeerInvite;
+        options.udpSendPeerInviteEndpoint = spec.inviteEndpoint;
+        options.udpLocalPort = spec.localPort;
+        if (options.udpLocalPort != 0) {
+            options.udpLocalPortProvided = true;
+        }
+        options.udpLocalPortFromLocalInvite = spec.localPortFromLocalInvite;
+    }
+
+    options.udpSendTargetSpecs.push_back(spec);
+    options.udpSendTargets.push_back(spec.target);
+}
+
+void ApplyTypedSharePreset(Options& options, const screenshare::ShareSessionConfig& config)
+{
+    options.displayIndex = config.displayIndex;
+    options.streamEncode = true;
+    options.sharePreset = true;
+    options.seconds = 0;
+    options.udpPacing = true;
+    options.udpMaxQueueMs = DefaultShareUdpMaxQueueMs;
+    options.streamEncoderPreference = StreamEncoderPreference::Software;
+    ApplyTypedStreamSettings(options, config.stream);
+
+    if (config.captureSystemAudio && !config.hostAudioMuted) {
+        options.audioCapture = true;
+        options.audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
+        if (!config.audioDeviceId.empty()) {
+            options.audioDeviceId = config.audioDeviceId;
+            options.audioDeviceIdProvided = true;
+        }
+    } else if (!config.audioDeviceId.empty()) {
+        throw std::invalid_argument("Audio device selection requires system audio capture.");
+    }
+}
+
+Options BuildShareSessionOptions(
+    const screenshare::ShareSessionConfig& config,
+    std::string defaultSessionId)
+{
+    Options options;
+    options.sessionId = std::move(defaultSessionId);
+    ApplyTypedSessionSecurity(options, config.udpAccessCode, config.allowPlaintext, config.reportPath);
+    ApplyTypedSharePreset(options, config);
+
+    if (config.connectionMode != screenshare::ShareConnectionMode::Room &&
+        !config.signalingStunServer.empty()) {
+        throw std::invalid_argument("Signaling STUN override requires a room Share session.");
+    }
+
+    bool sessionFromLocalInvite = false;
+    std::set<uint16_t> usedLocalPorts;
+    switch (config.connectionMode) {
+    case screenshare::ShareConnectionMode::Room:
+        RequireSessionConfig(config.roomPort > 0, "Share room port is required.");
+        options.shareRoom = true;
+        options.udpLocalPort = config.roomPort;
+        options.udpLocalPortProvided = true;
+        options.signalingRoomName = config.roomName;
+        ApplyTypedSignalingConfig(options, config.roomId, config.roomPassword, config.signalingStunServer);
+        break;
+    case screenshare::ShareConnectionMode::DirectTargets:
+        RequireSessionConfig(!config.targets.empty(), "At least one Share target is required.");
+        for (size_t index = 0; index < config.targets.size(); ++index) {
+            AddTypedShareTarget(
+                options,
+                ExtraShareTargetOption{config.targets[index], {}},
+                index == 0,
+                sessionFromLocalInvite,
+                usedLocalPorts);
+        }
+        break;
+    case screenshare::ShareConnectionMode::ManualInvite: {
+        const std::string firstTarget =
+            config.watcherInvites.empty() ? config.localInvite : config.watcherInvites.front();
+        RequireSessionConfig(!firstTarget.empty(), "A room invite or watcher invite is required.");
+        if (LooksLikeNatInvite(firstTarget)) {
+            options.peerInvite = firstTarget;
+        } else if (!config.localInvite.empty()) {
+            throw std::invalid_argument("Local invite requires an invite share target.");
+        }
+        AddTypedShareTarget(
+            options,
+            ExtraShareTargetOption{firstTarget, config.localInvite},
+            true,
+            sessionFromLocalInvite,
+            usedLocalPorts);
+        for (size_t index = 1; index < config.watcherInvites.size(); ++index) {
+            AddTypedShareTarget(
+                options,
+                ExtraShareTargetOption{config.watcherInvites[index], {}},
+                false,
+                sessionFromLocalInvite,
+                usedLocalPorts);
+        }
+        break;
+    }
+    }
+
+    if (options.accessCodeProvided && !HasUdpSession(options)) {
+        throw std::invalid_argument("Access code requires a UDP Share session.");
+    }
+    if (options.allowPlaintext && !HasUdpSession(options)) {
+        throw std::invalid_argument("Plaintext mode requires a UDP Share session.");
+    }
+    if (options.signalingLive && options.signalingRoomId.empty()) {
+        throw std::invalid_argument("Live signaling requires a room ID.");
+    }
+    options.sessionFingerprint = SessionFingerprint(options.sessionId);
+    return options;
+}
+
+Options BuildWatchSessionOptions(
+    const screenshare::WatchSessionConfig& config,
+    std::string defaultSessionId)
+{
+    Options options;
+    options.sessionId = std::move(defaultSessionId);
+    ApplyTypedSessionSecurity(options, config.udpAccessCode, config.allowPlaintext, config.reportPath);
+
+    if (config.connectionMode != screenshare::WatchConnectionMode::Room &&
+        !config.signalingStunServer.empty()) {
+        throw std::invalid_argument("Signaling STUN override requires a room Watch session.");
+    }
+
+    RequireSessionConfig(config.listenPort > 0, "Watch listen port is required.");
+    options.udpReceivePort = config.listenPort;
+    options.previewWindow = true;
+    options.decodeH264 = true;
+    options.audioPlayback = config.playAudio;
+    options.previewLatencyMs = config.previewLatencyMs;
+    options.previewLatencyProvided = true;
+    if (config.playAudio) {
+        options.audioPlaybackVolumePercent = static_cast<float>(config.audioPlaybackVolumePercent);
+        options.audioPlaybackVolumeProvided = true;
+        if (config.muted) {
+            options.audioPlaybackMuted = true;
+            options.audioPlaybackMutedProvided = true;
+        }
+    }
+
+    switch (config.connectionMode) {
+    case screenshare::WatchConnectionMode::Room:
+        ApplyTypedSignalingConfig(options, config.roomId, config.roomPassword, config.signalingStunServer);
+        break;
+    case screenshare::WatchConnectionMode::DirectListen:
+        options.lanAdvertise = config.lanAdvertise;
+        break;
+    case screenshare::WatchConnectionMode::ManualInvite:
+        options.peerInvite = config.peerInvite;
+        break;
+    }
+
+    if (!options.avSyncExplicit && !options.avSyncDisabled && options.previewWindow && options.audioPlayback) {
+        options.avSync = true;
+    }
+    if (options.avSync) {
+        options.audioPlaybackLatencyMs = std::max(options.audioPlaybackLatencyMs, options.previewLatencyMs);
+    }
+    if (options.previewLatencyMs < 0 || options.previewLatencyMs > 2000) {
+        throw std::invalid_argument("Preview latency must be between 0 and 2000 ms.");
+    }
+    if (options.audioPlaybackVolumePercent < 0.0f || options.audioPlaybackVolumePercent > 200.0f) {
+        throw std::invalid_argument("Audio playback volume must be between 0 and 200 percent.");
+    }
+    if (options.lanAdvertise && options.signalingLive) {
+        throw std::invalid_argument("LAN advertising cannot be combined with room watching.");
+    }
+    if (options.allowPlaintext && !HasUdpSession(options)) {
+        throw std::invalid_argument("Plaintext mode requires a UDP Watch session.");
+    }
+    options.seconds = 0;
+    options.sessionFingerprint = SessionFingerprint(options.sessionId);
+    return options;
+}
+
+int ExecuteScreenShareOptions(
+    Options& options,
+    SavedReportContext& reportContext,
+    const ScreenShareAppRunContext& context)
+{
+    PrepareLiveSignaling(options);
+    screenshare::FileSessionRuntimeControl fileRuntimeControl(
+        options.stopFilePath,
+        options.controlFilePath);
+    screenshare::ISessionRuntimeControl& runtimeControl =
+        context.runtimeControl != nullptr ? *context.runtimeControl : fileRuntimeControl;
+    reportContext.sessionId = options.sessionId;
+    reportContext.sessionFingerprint = options.sessionFingerprint;
+    reportContext.accessCodeRequired = options.accessCodeProvided;
+    reportContext.encryptionEnabled = options.accessCodeKey.has_value();
+
+    if (options.generateAccessCode) {
+        std::cout << screenshare::GenerateUdpAccessCode() << "\n";
+    } else if (options.makeInvite) {
+        RunMakeInvite(options);
+    } else if (options.natProbe) {
+        RunNatProbe(options);
+    } else if (HasSignalingCommand(options)) {
+        RunSignaling(options);
+    } else if (options.stunQuery) {
+        RunStunQuery(options);
+    } else if (options.lanDiscover) {
+        RunLanDiscovery(options);
+    } else if (options.listDisplays) {
+        PrintDisplays();
+    } else if (options.listH264Encoders) {
+        PrintH264Encoders(options);
+    } else if (options.listAudioDevices) {
+        PrintAudioDevices();
+    } else if (options.audioCapture && options.udpSendTarget.empty() && !options.shareRoom) {
+        RunAudioCaptureStats(options, reportContext, runtimeControl);
+    } else if (options.udpReceivePort != 0) {
+        RunUdpReceiverStats(options, runtimeControl);
+    } else {
+        RunCaptureStats(options, reportContext, runtimeControl);
+    }
+    return 0;
+}
+
+std::vector<char*> MutableArgv(std::vector<std::string>& arguments)
+{
+    if (arguments.empty()) {
+        arguments.emplace_back("ScreenShare");
+    }
+
+    std::vector<char*> argv;
+    argv.reserve(arguments.size());
+    for (std::string& argument : arguments) {
+        argv.push_back(argument.data());
+    }
+    return argv;
+}
+
+int RunTypedScreenShareSession(
+    std::function<Options(std::string)> buildOptions,
+    const ScreenShareAppRunContext& context,
+    std::string executablePath,
+    const char* syntheticCommand,
+    const std::string& reportPath)
+{
+    std::unique_ptr<ScopedCallbackLogRedirect> callbackLogRedirect;
+    if (context.outputHandler) {
+        callbackLogRedirect = std::make_unique<ScopedCallbackLogRedirect>(context.outputHandler);
+    }
+    std::unique_ptr<ScopedLogRedirect> logRedirect;
+    const std::optional<std::filesystem::path> saveReportPath =
+        reportPath.empty() ? std::optional<std::filesystem::path>{} : std::filesystem::path(reportPath);
+    std::optional<std::filesystem::path> capturedLogPath;
+    bool capturedLogIsTemporary = false;
+    SavedReportContext reportContext;
+    reportContext.sessionId = GenerateSessionId();
+    reportContext.sessionFingerprint = SessionFingerprint(reportContext.sessionId);
+    int exitCode = 0;
+
+    try {
+        if (saveReportPath) {
+            capturedLogPath = TemporaryReportLogPath(*saveReportPath);
+            capturedLogIsTemporary = true;
+            RemoveFileIfExists(*capturedLogPath);
+            logRedirect = std::make_unique<ScopedLogRedirect>(*capturedLogPath, false);
+            std::cout << "Saving run report to " << saveReportPath->string() << "\n";
+        }
+
+        Options options = buildOptions(reportContext.sessionId);
+        exitCode = ExecuteScreenShareOptions(options, reportContext, context);
+    } catch (const std::invalid_argument& error) {
+        std::cerr << "Error: " << error.what() << "\n";
+        exitCode = 1;
+    } catch (const std::exception& error) {
+        std::cerr << "Error: " << error.what() << "\n";
+        exitCode = 1;
+    }
+
+    logRedirect.reset();
+
+    if (saveReportPath) {
+        try {
+            std::vector<std::string> reportArguments{std::move(executablePath), syntheticCommand};
+            std::vector<char*> reportArgv = MutableArgv(reportArguments);
+            WriteSavedReport(
+                *saveReportPath,
+                capturedLogPath,
+                reportArgv.front(),
+                static_cast<int>(reportArgv.size()),
+                reportArgv.data(),
+                reportContext,
+                exitCode);
+            std::cout << "Run report saved to " << saveReportPath->string() << "\n";
+        } catch (const std::exception& error) {
+            std::cerr << "Failed to save run report: " << error.what() << "\n";
+            exitCode = 1;
+        }
+    }
+
+    if (capturedLogIsTemporary && capturedLogPath) {
+        RemoveFileIfExists(*capturedLogPath);
+    }
+
+    return exitCode;
+}
+
 } // namespace
 
 int RunScreenShareApp(int argc, char** argv)
@@ -7915,15 +8366,7 @@ int RunScreenShareApp(int argc, char** argv)
 int RunScreenShareApp(const std::vector<std::string>& arguments, const ScreenShareAppRunContext& context)
 {
     std::vector<std::string> normalizedArguments = arguments;
-    if (normalizedArguments.empty()) {
-        normalizedArguments.emplace_back("ScreenShare");
-    }
-
-    std::vector<char*> argv;
-    argv.reserve(normalizedArguments.size());
-    for (std::string& argument : normalizedArguments) {
-        argv.push_back(argument.data());
-    }
+    std::vector<char*> argv = MutableArgv(normalizedArguments);
 
     return RunScreenShareApp(static_cast<int>(argv.size()), argv.data(), context);
 }
@@ -7933,9 +8376,14 @@ int RunShareSession(
     const ScreenShareAppRunContext& context,
     std::string executablePath)
 {
-    return RunScreenShareApp(
-        AddExecutableName(screenshare::BuildShareArguments(config), std::move(executablePath)),
-        context);
+    return RunTypedScreenShareSession(
+        [config](std::string defaultSessionId) {
+            return BuildShareSessionOptions(config, std::move(defaultSessionId));
+        },
+        context,
+        std::move(executablePath),
+        "--typed-share-session",
+        config.reportPath);
 }
 
 int RunWatchSession(
@@ -7943,9 +8391,14 @@ int RunWatchSession(
     const ScreenShareAppRunContext& context,
     std::string executablePath)
 {
-    return RunScreenShareApp(
-        AddExecutableName(screenshare::BuildWatchArguments(config), std::move(executablePath)),
-        context);
+    return RunTypedScreenShareSession(
+        [config](std::string defaultSessionId) {
+            return BuildWatchSessionOptions(config, std::move(defaultSessionId));
+        },
+        context,
+        std::move(executablePath),
+        "--typed-watch-session",
+        config.reportPath);
 }
 
 int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& context)
@@ -7977,54 +8430,7 @@ int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& con
         }
 
         Options options = ParseOptions(argc, argv, reportContext.sessionId);
-        PrepareLiveSignaling(options);
-        screenshare::FileSessionRuntimeControl fileRuntimeControl(
-            options.stopFilePath,
-            options.controlFilePath);
-        screenshare::ISessionRuntimeControl& runtimeControl =
-            context.runtimeControl != nullptr ? *context.runtimeControl : fileRuntimeControl;
-        reportContext.sessionId = options.sessionId;
-        reportContext.sessionFingerprint = options.sessionFingerprint;
-        reportContext.accessCodeRequired = options.accessCodeProvided;
-        reportContext.encryptionEnabled = options.accessCodeKey.has_value();
-
-        if (options.generateAccessCode) {
-            std::cout << screenshare::GenerateUdpAccessCode() << "\n";
-            exitCode = 0;
-        } else if (options.makeInvite) {
-            RunMakeInvite(options);
-            exitCode = 0;
-        } else if (options.natProbe) {
-            RunNatProbe(options);
-            exitCode = 0;
-        } else if (HasSignalingCommand(options)) {
-            RunSignaling(options);
-            exitCode = 0;
-        } else if (options.stunQuery) {
-            RunStunQuery(options);
-            exitCode = 0;
-        } else if (options.lanDiscover) {
-            RunLanDiscovery(options);
-            exitCode = 0;
-        } else if (options.listDisplays) {
-            PrintDisplays();
-            exitCode = 0;
-        } else if (options.listH264Encoders) {
-            PrintH264Encoders(options);
-            exitCode = 0;
-        } else if (options.listAudioDevices) {
-            PrintAudioDevices();
-            exitCode = 0;
-        } else if (options.audioCapture && options.udpSendTarget.empty() && !options.shareRoom) {
-            RunAudioCaptureStats(options, reportContext, runtimeControl);
-            exitCode = 0;
-        } else if (options.udpReceivePort != 0) {
-            RunUdpReceiverStats(options, runtimeControl);
-            exitCode = 0;
-        } else {
-            RunCaptureStats(options, reportContext, runtimeControl);
-            exitCode = 0;
-        }
+        exitCode = ExecuteScreenShareOptions(options, reportContext, context);
     } catch (const std::invalid_argument& error) {
         std::cerr << "Error: " << error.what() << "\n\n";
         PrintHelp();

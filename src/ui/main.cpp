@@ -5641,6 +5641,12 @@ int main(int argc, char** argv)
                         !output_.empty();
                 }
 
+                bool failed() const
+                {
+                    std::scoped_lock lock(mutex_);
+                    return done_ && terminalState_ == screenshare::SessionState::Failed;
+                }
+
             private:
                 mutable std::mutex mutex_;
                 std::condition_variable condition_;
@@ -5663,6 +5669,20 @@ int main(int argc, char** argv)
                     appSessionSelfTestObserver.ok() &&
                     appSessionStatus.state == screenshare::SessionState::Stopped &&
                     !appSessionStatus.summary.empty();
+            }
+            AppSessionSelfTestObserver typedSessionSelfTestObserver;
+            bool typedSessionValidationOk = false;
+            {
+                screenshare::AppSessionBackend appSelfTestBackend;
+                screenshare::ShareSessionConfig invalidDirectShareConfig;
+                invalidDirectShareConfig.connectionMode = screenshare::ShareConnectionMode::DirectTargets;
+                appSelfTestBackend.StartShare(invalidDirectShareConfig, typedSessionSelfTestObserver);
+                const bool typedSessionFinished = typedSessionSelfTestObserver.wait();
+                const screenshare::SessionStatus typedSessionStatus = appSelfTestBackend.GetStatus();
+                typedSessionValidationOk =
+                    typedSessionFinished &&
+                    typedSessionSelfTestObserver.failed() &&
+                    typedSessionStatus.state == screenshare::SessionState::Failed;
             }
             const bool selfTestOk = peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&
@@ -5710,7 +5730,8 @@ int main(int argc, char** argv)
                 memoryStopInitiallyClear &&
                 memoryStopRequested &&
                 memoryControlReset &&
-                appSessionBackendOk;
+                appSessionBackendOk &&
+                typedSessionValidationOk;
             return selfTestOk ? 0 : 2;
         }
     }
