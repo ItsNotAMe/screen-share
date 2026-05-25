@@ -9,6 +9,7 @@
 #include "codec/H264FileEncoder.h"
 #include "codec/H264StreamDecoder.h"
 #include "codec/H264StreamEncoder.h"
+#include "core/SessionCommand.h"
 #include "core/SessionRuntimeControl.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/LanDiscovery.h"
@@ -647,6 +648,12 @@ std::string FormatSessionFingerprint(uint64_t fingerprint)
     std::ostringstream text;
     text << std::uppercase << std::hex << std::setw(16) << std::setfill('0') << fingerprint;
     return text.str();
+}
+
+std::vector<std::string> AddExecutableName(std::vector<std::string> arguments, std::string executablePath)
+{
+    arguments.insert(arguments.begin(), std::move(executablePath));
+    return arguments;
 }
 
 uint64_t SessionFingerprint(std::string_view sessionId)
@@ -7919,6 +7926,26 @@ int RunScreenShareApp(const std::vector<std::string>& arguments, const ScreenSha
     }
 
     return RunScreenShareApp(static_cast<int>(argv.size()), argv.data(), context);
+}
+
+int RunShareSession(
+    const screenshare::ShareSessionConfig& config,
+    const ScreenShareAppRunContext& context,
+    std::string executablePath)
+{
+    return RunScreenShareApp(
+        AddExecutableName(screenshare::BuildShareArguments(config), std::move(executablePath)),
+        context);
+}
+
+int RunWatchSession(
+    const screenshare::WatchSessionConfig& config,
+    const ScreenShareAppRunContext& context,
+    std::string executablePath)
+{
+    return RunScreenShareApp(
+        AddExecutableName(screenshare::BuildWatchArguments(config), std::move(executablePath)),
+        context);
 }
 
 int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& context)

@@ -3,7 +3,6 @@
 #include "app/ScreenShareApp.h"
 #include "audio/WasapiCapture.h"
 #include "capture/DesktopCapturer.h"
-#include "core/SessionCommand.h"
 
 #include <algorithm>
 #include <cctype>
@@ -248,7 +247,12 @@ void AppSessionBackend::StartShare(
     ISessionEventSink& eventSink,
     std::string executablePath)
 {
-    StartArguments(SessionRole::Share, BuildShareArguments(config), eventSink, std::move(executablePath));
+    StartRunner(
+        SessionRole::Share,
+        eventSink,
+        [config, executablePath = std::move(executablePath)](const ScreenShareAppRunContext& context) {
+            return RunShareSession(config, context, executablePath);
+        });
 }
 
 void AppSessionBackend::StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink)
@@ -261,7 +265,12 @@ void AppSessionBackend::StartWatch(
     ISessionEventSink& eventSink,
     std::string executablePath)
 {
-    StartArguments(SessionRole::Watch, BuildWatchArguments(config), eventSink, std::move(executablePath));
+    StartRunner(
+        SessionRole::Watch,
+        eventSink,
+        [config, executablePath = std::move(executablePath)](const ScreenShareAppRunContext& context) {
+            return RunWatchSession(config, context, executablePath);
+        });
 }
 
 void AppSessionBackend::Stop()
@@ -354,6 +363,20 @@ void AppSessionBackend::StartArguments(
     ISessionEventSink& eventSink,
     std::string executablePath)
 {
+    StartRunner(
+        role,
+        eventSink,
+        [arguments = AddExecutableName(std::move(arguments), std::move(executablePath))](
+            const ScreenShareAppRunContext& context) mutable {
+            return RunScreenShareApp(arguments, context);
+        });
+}
+
+void AppSessionBackend::StartRunner(
+    SessionRole role,
+    ISessionEventSink& eventSink,
+    SessionRunner runner)
+{
     JoinFinishedWorker();
 
     bool alreadyRunning = false;
@@ -392,7 +415,7 @@ void AppSessionBackend::StartArguments(
 
     Notify(SessionEventType::StateChanged, SessionState::Starting, "Starting session");
 
-    worker_ = std::thread([this, arguments = AddExecutableName(std::move(arguments), std::move(executablePath))]() mutable {
+    worker_ = std::thread([this, runner = std::move(runner)]() mutable {
         Notify(SessionEventType::StateChanged, SessionState::Connecting, "Connecting session");
 
         ScreenShareAppRunContext context;
@@ -403,7 +426,7 @@ void AppSessionBackend::StartArguments(
 
         int exitCode = 1;
         try {
-            exitCode = RunScreenShareApp(arguments, context);
+            exitCode = runner(context);
         } catch (const std::exception& error) {
             Notify(SessionEventType::Error, SessionState::Failed, error.what());
             return;

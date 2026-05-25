@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ScreenShareSession.h"
 #include "core/SessionRuntimeControl.h"
 
 #include <functional>
@@ -17,3 +18,12 @@ int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& con
 int RunScreenShareApp(
     const std::vector<std::string>& arguments,
     const ScreenShareAppRunContext& context = {});
+
+int RunShareSession(
+    const screenshare::ShareSessionConfig& config,
+    const ScreenShareAppRunContext& context = {},
+    std::string executablePath = "ScreenShare");
+int RunWatchSession(
+    const screenshare::WatchSessionConfig& config,
+    const ScreenShareAppRunContext& context = {},
+    std::string executablePath = "ScreenShare");

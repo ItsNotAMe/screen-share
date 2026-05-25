@@ -19,7 +19,8 @@ Only you can fully validate these because they need real machines/networks.
    - [x] Move audio device listing behind a backend API instead of a helper CLI process.
    - [x] Define the typed session API surface around Start Share, Start Watch, Stop, runtime settings, status snapshots, typed events, display discovery, and audio-device discovery.
    - [ ] Move normal Share/Watch execution behind typed API methods instead of the current `RunScreenShareApp(argv)` bridge.
-   - [ ] Make `AppSessionBackend` call the typed API directly, without rebuilding CLI arguments internally.
+   - [x] Make `AppSessionBackend` call typed Share/Watch runner entrypoints directly, without rebuilding CLI arguments internally.
+   - [ ] Replace the typed Share/Watch runner entrypoints' temporary internal argument bridge with direct options/session execution.
    - [ ] Make the CLI parse command-line options into the same typed configs and call the same API as the UI.
    - [ ] Reshape CMake targets so `ScreenShareCore` owns the reusable session API, `ScreenShare.exe` is the thin CLI app, and `ScreenShareUi.exe` links the same API directly instead of a CLI runner bridge.
    - [ ] Remove or shrink `ScreenShareAppRunner` once the runner code is CLI-only instead of shared UI plumbing.
