@@ -28,6 +28,7 @@
 - `ScreenShareUi.exe` lives beside `ScreenShare.exe`; live Share/Watch sessions use `src/ui/QtSessionBackend.*` over `src/app/AppSessionBackend.*`.
 - `ScreenShareUi.exe` links `ScreenShareAppRunner`, which includes the app runner and app session backend. Short helper diagnostics can still invoke `ScreenShare.exe` when useful.
 - `AppSessionBackend` converts live engine telemetry into typed `SessionEvent` snapshots. The UI uses those events for Share viewer rows, the Live/Disconnected indicator, NAT hints, access-code/password failures, room-open conflicts, and preview-close stop handling instead of parsing those fields from stdout itself.
+- `SessionStatus::stream` carries typed stream telemetry for the future Active Share/Watch Session screens: output resolution, source resolution when available, FPS, bitrate, adaptation state, stream queue/drops, and UDP queue delay.
 - Live Share/Watch launch arguments are built through `src/core/SessionCommand.*` from typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback. The UI should not own live-session argument assembly.
 - CLI stop/control files and UI memory controls now flow through `src/core/SessionRuntimeControl.*`; the runtime API is typed around stream settings, with resolution as the first implemented live setting.
 - `--share` is the sender preset, so it already enables system audio, adaptive bitrate, and adaptive resolution.

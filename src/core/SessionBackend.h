@@ -44,6 +44,7 @@ enum class SessionEventType {
     ViewerListChanged,
     NatStatusChanged,
     SettingsChanged,
+    StreamStatusChanged,
     Issue,
     Error,
 };
@@ -123,11 +124,30 @@ struct SessionViewer {
     bool activeNow = false;
 };
 
+struct SessionStreamStatus {
+    bool hasStats = false;
+    std::optional<SessionResolution> sourceResolution;
+    std::optional<SessionResolution> outputResolution;
+    double outputFps = 0.0;
+    double desktopUpdateFps = 0.0;
+    double bitrateMbps = 0.0;
+    double resolutionScale = 1.0;
+    uint64_t totalOutputFrames = 0;
+    uint64_t streamQueueDepth = 0;
+    uint64_t streamDroppedFrames = 0;
+    uint64_t udpQueueMs = 0;
+    std::string resolutionAdaptation;
+    uint64_t resolutionAdaptations = 0;
+    std::string bitrateAdaptation;
+    uint64_t bitrateAdaptations = 0;
+};
+
 struct SessionStatus {
     SessionRole role = SessionRole::Share;
     SessionState state = SessionState::Idle;
     std::string summary;
     std::optional<SessionResolution> videoResolution;
+    SessionStreamStatus stream;
     std::vector<SessionViewer> viewers;
     std::string health;
     uint64_t completedFrames = 0;

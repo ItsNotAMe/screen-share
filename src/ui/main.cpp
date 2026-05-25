@@ -4415,6 +4415,8 @@ private:
 
     void handleSessionStatus(const screenshare::SessionEvent& event)
     {
+        latestSessionStatus_ = event.status;
+
         if (event.type == screenshare::SessionEventType::ViewerListChanged) {
             updateShareViewerStatus(event.status.viewers);
         } else if (event.type == screenshare::SessionEventType::NatStatusChanged) {
@@ -4546,6 +4548,7 @@ private:
     {
         peerConnected_ = false;
         peerActivitySeen_ = false;
+        latestSessionStatus_ = screenshare::SessionStatus{};
         shareViewers_.clear();
         shareViewerClock_.restart();
         updateShareViewerStatusLabel();
@@ -4899,6 +4902,7 @@ private:
     QString selectedReceiverAccessFingerprint_;
     QString runtimeNatStatus_;
     QString runtimeNatHint_;
+    screenshare::SessionStatus latestSessionStatus_;
     QVector<ShareViewerStatus> shareViewers_;
     QElapsedTimer shareViewerClock_;
     bool runtimeNatShareMode_ = true;
