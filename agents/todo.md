@@ -21,7 +21,8 @@ Only you can fully validate these because they need real machines/networks.
    - [x] Move normal Share/Watch execution behind typed API methods instead of the current `RunScreenShareApp(argv)` bridge.
    - [x] Make `AppSessionBackend` call typed Share/Watch runner entrypoints directly, without rebuilding CLI arguments internally.
    - [x] Replace the typed Share/Watch runner entrypoints' temporary internal argument bridge with direct options/session execution.
-   - [ ] Make the CLI parse command-line options into the same typed configs and call the same API as the UI.
+   - [x] Make normal CLI Share/Watch presets parse into the same typed configs and execution path as the UI.
+   - [ ] Promote remaining advanced CLI-only Share/Watch diagnostic flags into typed configs only when they become normal app controls.
    - [ ] Reshape CMake targets so `ScreenShareCore` owns the reusable session API, `ScreenShare.exe` is the thin CLI app, and `ScreenShareUi.exe` links the same API directly instead of a CLI runner bridge.
    - [ ] Remove or shrink `ScreenShareAppRunner` once the runner code is CLI-only instead of shared UI plumbing.
    - [ ] Shrink `ScreenShareApp.cpp` into CLI parsing, diagnostics, and command dispatch; move reusable Share/Watch runners into focused API/core files.

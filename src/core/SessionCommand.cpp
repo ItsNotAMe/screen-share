@@ -45,11 +45,19 @@ std::string BitrateMbps(uint32_t bitrateBps)
 
 void AddCommonSessionArguments(
     std::vector<std::string>& args,
+    const std::string& sessionId,
+    const std::string& signalingServerUrl,
     const std::string& signalingStunServer,
     const std::string& udpAccessCode,
     bool allowPlaintext,
     const std::string& reportPath)
 {
+    if (!sessionId.empty()) {
+        AddOption(args, "--session", sessionId);
+    }
+    if (!signalingServerUrl.empty()) {
+        AddOption(args, "--signal-server", signalingServerUrl);
+    }
     if (!signalingStunServer.empty()) {
         AddOption(args, "--signal-stun", signalingStunServer);
     }
@@ -116,6 +124,12 @@ std::vector<std::string> BuildShareArguments(const ShareSessionConfig& config)
 
     AddOption(args, "--display", config.displayIndex);
     AddOption(args, "--fps", config.stream.fps);
+    if (config.seconds > 0) {
+        AddOption(args, "--seconds", config.seconds);
+    }
+    if (config.udpLocalPort > 0 && config.connectionMode != ShareConnectionMode::Room) {
+        AddOption(args, "--udp-local-port", static_cast<int>(config.udpLocalPort));
+    }
 
     if (!config.stream.adaptResolution) {
         args.emplace_back("--no-adapt-resolution");
@@ -136,6 +150,8 @@ std::vector<std::string> BuildShareArguments(const ShareSessionConfig& config)
 
     AddCommonSessionArguments(
         args,
+        config.sessionId,
+        config.signalingServerUrl,
         config.signalingStunServer,
         config.udpAccessCode,
         config.allowPlaintext,
@@ -175,6 +191,9 @@ std::vector<std::string> BuildWatchArguments(const WatchSessionConfig& config)
     }
 
     AddOption(args, "--preview-latency-ms", config.previewLatencyMs);
+    if (config.seconds > 0) {
+        AddOption(args, "--seconds", config.seconds);
+    }
     if (config.playAudio) {
         AddOption(args, "--audio-playback-volume", config.audioPlaybackVolumePercent);
         if (config.muted) {
@@ -184,6 +203,8 @@ std::vector<std::string> BuildWatchArguments(const WatchSessionConfig& config)
 
     AddCommonSessionArguments(
         args,
+        config.sessionId,
+        config.signalingServerUrl,
         config.signalingStunServer,
         config.udpAccessCode,
         config.allowPlaintext,
