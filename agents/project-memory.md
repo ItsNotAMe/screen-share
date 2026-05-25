@@ -115,7 +115,8 @@ WGC capture by default
 - `src/runtime/ScreenShareRuntimeInternal.h`: private runtime bridge used by the session runtime; not a UI-facing API.
 - `src/runtime/ScreenShareRunContext.h`: shared run context for runtime control and captured output callbacks.
 - `src/runtime/ScreenShareSessionRunner.h`: typed Share/Watch runner entrypoints used by the concrete session API; this is separate from the CLI app header.
-- `src/runtime/ScreenShareSessionRunner.cpp`: runtime-backed typed Share/Watch runner entrypoint implementation. It calls private runtime helpers in `ScreenShareCLI.cpp` while the runtime/reporting code is still being extracted.
+- `src/runtime/ScreenShareSessionRunner.cpp`: runtime-backed typed Share/Watch runner entrypoint implementation. It owns the typed-run report/log wrapper, then calls private execution helpers in `ScreenShareCLI.cpp` while the larger sender/receiver runtime is still being extracted.
+- `src/runtime/ScreenShareRuntimeSupport.*`: shared session ID/fingerprint, stdout/stderr capture, saved-report zip, and argv support used by both CLI and typed runtime paths.
 - `src/cli/ScreenShareCLI.*`: CLI runner built into the `ScreenShareSessionRuntime` static library for now. Normal CLI Share/Watch presets parse into typed session configs and use the same typed execution path as the UI/backend path; diagnostic-only CLI modes still parse into internal options directly.
 - `src/ui/QtSessionBackend.*`: Qt-thread bridge over `screenshare::ScreenShareSession`. Live Share/Watch and normal display/audio-device discovery in the desktop UI no longer launch `ScreenShare.exe` as a child process.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.

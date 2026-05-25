@@ -29,6 +29,7 @@ Only you can fully validate these because they need real machines/networks.
    - [x] Move CLI source into `src/cli` and private session runner plumbing into `src/runtime`, removing the vague `src/app` folder.
    - [ ] Promote remaining advanced CLI-only Share/Watch diagnostic flags into typed configs only when they become normal app controls.
    - [ ] Continue reshaping CMake targets so `ScreenShareCore` owns the reusable session API, `ScreenShare.exe` is the thin CLI app, and `ScreenShareUi.exe` links the same API directly instead of CLI parsing internals.
+   - [x] Move session IDs/fingerprints, report zip writing, stdout/stderr capture, and typed-run report wrapping into `src/runtime`.
    - [ ] Move remaining reusable Share/Watch runtime code out of `ScreenShareCLI.cpp` so `ScreenShareSessionRuntime` stops carrying CLI parsing internals.
    - [ ] Shrink `ScreenShareCLI.cpp` into CLI parsing, diagnostics, and command dispatch; move reusable Share/Watch runners into focused API/core files.
    - [x] Rename `ISessionObserver` to `ISessionEventSink` so event delivery reads as a simple session event sink/callback, not a vague pattern name.
