@@ -4,11 +4,14 @@
 #include "core/SessionRuntimeControl.h"
 
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
+
+struct ScreenShareAppRunContext;
 
 namespace screenshare {
 
@@ -37,6 +40,9 @@ public:
     std::vector<SessionAudioDeviceInfo> ListAudioDevices() override;
 
 private:
+    using SessionRunner = std::function<int(const ::ScreenShareAppRunContext&)>;
+
+    void StartRunner(SessionRole role, ISessionEventSink& eventSink, SessionRunner runner);
     void DetachObserver();
     void JoinWorker();
     void JoinFinishedWorker();
