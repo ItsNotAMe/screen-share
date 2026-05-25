@@ -37,9 +37,11 @@ private:
     void JoinFinishedWorker();
     void HandleOutput(std::string_view text);
     void HandleLogLine(const std::string& line);
+    void HandleDiagnosticLogLine(const std::string& line);
     void HandleShareLogLine(const std::string& line);
     void HandleWatchLogLine(const std::string& line);
     void EmitStatus(SessionEventType type, std::string message);
+    void EmitIssue(SessionIssue issue, std::string message);
     void Notify(SessionEventType type, SessionState state, std::string message);
     SessionStatus BuildStatusLocked() const;
 
@@ -57,6 +59,9 @@ private:
     uint64_t watchPayloadBytes_ = 0;
     uint64_t watchDecodedFrames_ = 0;
     uint64_t watchAudioPackets_ = 0;
+    std::string natStatus_;
+    std::string natHint_;
+    bool previewClosedNotified_ = false;
     bool stopRequested_ = false;
 };
 

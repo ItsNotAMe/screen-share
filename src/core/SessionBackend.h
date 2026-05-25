@@ -30,8 +30,18 @@ enum class SessionEventType {
     VideoFrameReady,
     AudioLevelChanged,
     ViewerListChanged,
+    NatStatusChanged,
     SettingsChanged,
+    Issue,
     Error,
+};
+
+enum class SessionIssue {
+    None,
+    AccessCodeRequired,
+    AccessCodeMismatch,
+    RoomAlreadyOpen,
+    PreviewClosed,
 };
 
 struct SessionResolution {
@@ -105,11 +115,14 @@ struct SessionStatus {
     uint64_t payloadBytes = 0;
     uint64_t decodedFrames = 0;
     uint64_t audioPackets = 0;
+    std::string natStatus;
+    std::string natHint;
 };
 
 struct SessionEvent {
     SessionEventType type = SessionEventType::StateChanged;
     SessionStatus status;
+    SessionIssue issue = SessionIssue::None;
     std::string message;
 };
 
