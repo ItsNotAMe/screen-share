@@ -28,7 +28,7 @@
 - `ScreenShareUi.exe` lives beside `ScreenShare.exe`; live Share/Watch sessions use `src/ui/QtSessionBackend.*` over `src/app/AppSessionBackend.*`.
 - `ScreenShareUi.exe` links `ScreenShareAppRunner`, which includes the app runner and app session backend. Short helper diagnostics can still invoke `ScreenShare.exe` when useful.
 - `AppSessionBackend` converts live engine telemetry into typed `SessionEvent` snapshots. The UI uses those events for Share viewer rows, the Live/Disconnected indicator, NAT hints, access-code/password failures, room-open conflicts, and preview-close stop handling instead of parsing those fields from stdout itself.
-- Room-based Share/Watch launch arguments are built through `src/core/SessionCommand.*` from typed session configs; manual/NAT fallback paths still use UI-local argument assembly until the revamped room model replaces them.
+- Live Share/Watch launch arguments are built through `src/core/SessionCommand.*` from typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback. The UI should not own live-session argument assembly.
 - CLI stop files and runtime resolution control files now flow through `src/core/SessionRuntimeControl.*`; UI live sessions use the memory-backed control object directly.
 - `--share` is the sender preset, so it already enables system audio, adaptive bitrate, and adaptive resolution.
 - Share audio uses Windows' default output unless `--audio-device-id` is supplied. The UI should expose a sender-side output-device picker because virtual mixers can make the Windows default endpoint differ from the device that actually contains app audio.

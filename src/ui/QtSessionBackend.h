@@ -4,18 +4,11 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
-#include <QtCore/QStringList>
 
 #include <functional>
 
 class QtSessionBackend final : public QObject, private screenshare::ISessionObserver {
 public:
-    struct StartRequest {
-        screenshare::SessionRole role = screenshare::SessionRole::Share;
-        QStringList arguments;
-        QString executablePath;
-    };
-
     struct FinishInfo {
         int exitCode = 0;
         QString remainingOutput;
@@ -36,11 +29,21 @@ public:
     void setFinishedHandler(std::function<void(const FinishInfo&)> handler);
     void setStatusHandler(std::function<void(const screenshare::SessionEvent&)> handler);
 
-    bool start(const StartRequest& request, QString* errorMessage = nullptr);
+    bool startShare(
+        const screenshare::ShareSessionConfig& config,
+        const QString& executablePath,
+        QString* errorMessage = nullptr);
+    bool startWatch(
+        const screenshare::WatchSessionConfig& config,
+        const QString& executablePath,
+        QString* errorMessage = nullptr);
     void stop();
     void applyStreamSettings(const screenshare::StreamSettings& settings);
 
 private:
+    bool prepareStart(QString* errorMessage);
+    bool finishStartWithError(const std::exception& error, QString* errorMessage);
+    void notifyStarted();
     void OnSessionEvent(const screenshare::SessionEvent& event) override;
     void handleSessionEvent(const screenshare::SessionEvent& event);
     void finish(bool failed);
