@@ -1,5 +1,7 @@
 #include "app/ScreenShareApp.h"
 
+#include "app/ScreenShareSessionRunner.h"
+
 #include "audio/OpusCodec.h"
 #include "audio/WasapiCapture.h"
 #include "audio/WasapiRenderer.h"
@@ -8561,6 +8563,11 @@ int RunTypedScreenShareSession(
 int RunScreenShareApp(int argc, char** argv)
 {
     return RunScreenShareApp(argc, argv, ScreenShareAppRunContext{});
+}
+
+int RunScreenShareApp(const std::vector<std::string>& arguments)
+{
+    return RunScreenShareApp(arguments, ScreenShareAppRunContext{});
 }
 
 int RunScreenShareApp(const std::vector<std::string>& arguments, const ScreenShareAppRunContext& context)

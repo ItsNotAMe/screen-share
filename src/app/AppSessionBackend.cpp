@@ -1,6 +1,6 @@
 #include "app/AppSessionBackend.h"
 
-#include "app/ScreenShareApp.h"
+#include "app/ScreenShareSessionRunner.h"
 #include "audio/WasapiCapture.h"
 #include "capture/DesktopCapturer.h"
 
@@ -15,12 +15,6 @@
 
 namespace screenshare {
 namespace {
-
-std::vector<std::string> AddExecutableName(std::vector<std::string> arguments, std::string executablePath)
-{
-    arguments.insert(arguments.begin(), std::move(executablePath));
-    return arguments;
-}
 
 RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSettings& settings)
 {
@@ -355,21 +349,6 @@ std::vector<SessionAudioDeviceInfo> AppSessionBackend::ListAudioDevices()
         }
     }
     return result;
-}
-
-void AppSessionBackend::StartArguments(
-    SessionRole role,
-    std::vector<std::string> arguments,
-    ISessionEventSink& eventSink,
-    std::string executablePath)
-{
-    StartRunner(
-        role,
-        eventSink,
-        [arguments = AddExecutableName(std::move(arguments), std::move(executablePath))](
-            const ScreenShareAppRunContext& context) mutable {
-            return RunScreenShareApp(arguments, context);
-        });
 }
 
 void AppSessionBackend::StartRunner(

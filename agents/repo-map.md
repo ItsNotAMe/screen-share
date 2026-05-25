@@ -4,7 +4,8 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 
 ## Source Layout
 
-- `src/app/ScreenShareApp.*`: callable app runner for command-line parsing, CLI/UI typed Share/Watch option construction, top-level sender/receiver loops, adaptation policy, stats printing, logging.
+- `src/app/ScreenShareApp.*`: callable app runner for command-line parsing, CLI typed Share/Watch option construction, top-level sender/receiver loops, adaptation policy, stats printing, logging.
+- `src/app/ScreenShareRunContext.h` and `src/app/ScreenShareSessionRunner.h`: typed app-backed Share/Watch session runner API used by the UI backend without including the CLI app header.
 - `src/app/AppSessionBackend.*`: pure C++ `IScreenShareSession` adapter around typed Share/Watch app runner entrypoints, using memory runtime control on a worker thread, translating key live telemetry into typed session events/status snapshots, and exposing typed display/audio-device discovery for the UI.
 - `src/app/ScreenShareMain.cpp`: tiny executable entry point that calls the app runner.
 - `src/core/`: shared typed session API, legacy typed Share/Watch command-preview builders, runtime-control interfaces, and native core-library entry points that are intended to be used by both the CLI and UI.
@@ -26,6 +27,6 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 - Debug preset output: `build/debug/ScreenShare.exe`.
 - Release preset output: `build/release/ScreenShare.exe`.
 - `ScreenShareCore` is a static library target containing the reusable native engine modules.
-- `ScreenShareAppRunner` is a static library target containing the app runner and app session backend adapter; `ScreenShare.exe` is a tiny main linked against it.
+- `ScreenShareSessionRuntime` is a static library target containing the app-backed session runtime and app session backend adapter; `ScreenShare.exe` is a tiny main linked against it.
 - If Qt 6 Widgets and Svg are available at configure time, builds also output `ScreenShareUi.exe`.
 - Normal default builds create portable zip packages; see `agents/packaging.md`.

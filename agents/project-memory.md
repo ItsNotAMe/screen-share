@@ -16,7 +16,7 @@
 
 - `main` is synced to `origin/main` after the backend API split and UI process-adapter merge.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
-- Reusable native engine modules now build through `ScreenShareCore`; `ScreenShare.exe` links the app runner, and `ScreenShareUi.exe` links `ScreenShareAppRunner` for app-backed live sessions.
+- Reusable native engine modules now build through `ScreenShareCore`; `ScreenShare.exe` and `ScreenShareUi.exe` link `ScreenShareSessionRuntime` for app-backed live sessions.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets and Svg are available.
 - `scripts/install-dev-deps.ps1` bootstraps Windows dev dependencies: MSYS2 native packages, optional Qt/FFmpeg, Node.js LTS, and signaling Worker npm packages.
@@ -110,7 +110,9 @@ WGC capture by default
 - `src/core/ScreenShareSession.h`: shared typed session API surface for CLI/UI integration work, including event sinks, status snapshots, stream settings, display discovery, and audio-device discovery.
 - `src/core/SessionCommand.*`: typed Share/Watch session config to engine-argument bridge still used for UI command previews/self-tests, not normal live session execution.
 - `src/core/SessionRuntimeControl.*`: shared stop/runtime stream-settings control interface. CLI runs use the file-backed implementation; the app session backend uses the memory-backed implementation for stop/settings requests. Resolution is the first implemented live setting.
-- `src/app/ScreenShareApp.*`: callable CLI app runner built as the `ScreenShareAppRunner` static library. Normal CLI Share/Watch presets parse into typed session configs and use the same typed execution helpers as the UI/backend path; diagnostic-only CLI modes still parse into internal options directly.
+- `src/app/ScreenShareRunContext.h`: shared run context for runtime control and captured output callbacks.
+- `src/app/ScreenShareSessionRunner.h`: typed Share/Watch runner entrypoints used by the app backend; this is separate from the CLI app header.
+- `src/app/ScreenShareApp.*`: callable CLI app runner built into the `ScreenShareSessionRuntime` static library for now. Normal CLI Share/Watch presets parse into typed session configs and use the same typed execution helpers as the UI/backend path; diagnostic-only CLI modes still parse into internal options directly.
 - `src/app/AppSessionBackend.*`: pure C++ `IScreenShareSession` adapter that runs typed Share/Watch app runner entrypoints on a worker thread with `MemorySessionRuntimeControl` and exposes typed status, display discovery, and audio-device discovery.
 - `src/ui/QtSessionBackend.*`: Qt-thread bridge for the app session backend. Live Share/Watch and normal display/audio-device discovery in the desktop UI no longer launch `ScreenShare.exe` as a child process.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
