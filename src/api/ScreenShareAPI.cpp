@@ -1,6 +1,6 @@
 #include "api/ScreenShareAPI.h"
 
-#include "app/ScreenShareSessionRunner.h"
+#include "runtime/ScreenShareSessionRunner.h"
 #include "audio/WasapiCapture.h"
 #include "capture/DesktopCapturer.h"
 #include "core/SessionRuntimeControl.h"
@@ -254,7 +254,7 @@ public:
     std::vector<SessionAudioDeviceInfo> ListAudioDevices();
 
 private:
-    using SessionRunner = std::function<int(const ::ScreenShareAppRunContext&)>;
+    using SessionRunner = std::function<int(const ::ScreenShareRunContext&)>;
 
     void StartRunner(SessionRole role, ISessionEventSink& eventSink, SessionRunner runner);
     void DetachObserver();
@@ -312,7 +312,7 @@ void ScreenShareSession::Impl::StartShare(
     StartRunner(
         SessionRole::Share,
         eventSink,
-        [config, executablePath = std::move(executablePath)](const ScreenShareAppRunContext& context) {
+        [config, executablePath = std::move(executablePath)](const ScreenShareRunContext& context) {
             return RunShareSession(config, context, executablePath);
         });
 }
@@ -330,7 +330,7 @@ void ScreenShareSession::Impl::StartWatch(
     StartRunner(
         SessionRole::Watch,
         eventSink,
-        [config, executablePath = std::move(executablePath)](const ScreenShareAppRunContext& context) {
+        [config, executablePath = std::move(executablePath)](const ScreenShareRunContext& context) {
             return RunWatchSession(config, context, executablePath);
         });
 }
@@ -465,7 +465,7 @@ void ScreenShareSession::Impl::StartRunner(
     worker_ = std::thread([this, runner = std::move(runner)]() mutable {
         Notify(SessionEventType::StateChanged, SessionState::Connecting, "Connecting session");
 
-        ScreenShareAppRunContext context;
+        ScreenShareRunContext context;
         context.runtimeControl = &runtimeControl_;
         context.outputHandler = [this](std::string_view text) {
             HandleOutput(text);

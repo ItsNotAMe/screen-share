@@ -18,7 +18,7 @@ Only you can fully validate these because they need real machines/networks.
    - [x] Move display listing behind a backend API instead of a helper CLI process.
    - [x] Move audio device listing behind a backend API instead of a helper CLI process.
    - [x] Define the typed session API surface around Start Share, Start Watch, Stop, runtime settings, status snapshots, typed events, display discovery, and audio-device discovery.
-   - [x] Move normal Share/Watch execution behind typed API methods instead of the current `RunScreenShareApp(argv)` bridge.
+   - [x] Move normal Share/Watch execution behind typed API methods instead of the current `RunScreenShareCli(argv)` bridge.
    - [x] Make the concrete session API call typed Share/Watch runner entrypoints directly, without rebuilding CLI arguments internally.
    - [x] Replace the typed Share/Watch runner entrypoints' temporary internal argument bridge with direct options/session execution.
    - [x] Make normal CLI Share/Watch presets parse into the same typed configs and execution path as the UI.
@@ -26,10 +26,11 @@ Only you can fully validate these because they need real machines/networks.
    - [x] Rename the shared app-runner CMake target to `ScreenShareSessionRuntime`.
    - [x] Move typed Share/Watch runner entrypoint implementation into `ScreenShareSessionRunner.cpp`.
    - [x] Replace the old `AppSessionBackend` interface adapter with a concrete `ScreenShareSession` API facade.
+   - [x] Move CLI source into `src/cli` and private session runner plumbing into `src/runtime`, removing the vague `src/app` folder.
    - [ ] Promote remaining advanced CLI-only Share/Watch diagnostic flags into typed configs only when they become normal app controls.
    - [ ] Continue reshaping CMake targets so `ScreenShareCore` owns the reusable session API, `ScreenShare.exe` is the thin CLI app, and `ScreenShareUi.exe` links the same API directly instead of CLI parsing internals.
-   - [ ] Move remaining reusable Share/Watch runtime code out of `ScreenShareApp.cpp` so `ScreenShareSessionRuntime` stops carrying CLI parsing internals.
-   - [ ] Shrink `ScreenShareApp.cpp` into CLI parsing, diagnostics, and command dispatch; move reusable Share/Watch runners into focused API/core files.
+   - [ ] Move remaining reusable Share/Watch runtime code out of `ScreenShareCLI.cpp` so `ScreenShareSessionRuntime` stops carrying CLI parsing internals.
+   - [ ] Shrink `ScreenShareCLI.cpp` into CLI parsing, diagnostics, and command dispatch; move reusable Share/Watch runners into focused API/core files.
    - [x] Rename `ISessionObserver` to `ISessionEventSink` so event delivery reads as a simple session event sink/callback, not a vague pattern name.
    - [ ] Keep short helper diagnostics only where they are genuinely diagnostic, not normal UI data paths.
    - [ ] Add any remaining typed setup/session state needed by the Active Share/Watch Session screens.

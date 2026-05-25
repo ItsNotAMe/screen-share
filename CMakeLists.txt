@@ -112,8 +112,8 @@ target_link_libraries(ScreenShareCore PUBLIC
 
 add_library(ScreenShareSessionRuntime STATIC
     src/api/ScreenShareAPI.cpp
-    src/app/ScreenShareApp.cpp
-    src/app/ScreenShareSessionRunner.cpp
+    src/cli/ScreenShareCLI.cpp
+    src/runtime/ScreenShareSessionRunner.cpp
 )
 
 target_compile_features(ScreenShareSessionRuntime PUBLIC cxx_std_20)
@@ -131,7 +131,7 @@ if(MSVC)
 endif()
 
 add_executable(ScreenShare
-    src/app/ScreenShareMain.cpp
+    src/cli/ScreenShareMain.cpp
 )
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)

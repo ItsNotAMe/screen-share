@@ -5,11 +5,11 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 ## Source Layout
 
 - `src/api/ScreenShareAPI.h` and `src/api/ScreenShareAPI.cpp`: concrete `screenshare::ScreenShareSession` API facade for Share/Watch start, stop, runtime settings, status snapshots, events, display discovery, and audio-device discovery.
-- `src/app/ScreenShareApp.*`: callable app runner for command-line parsing, CLI typed Share/Watch option construction, top-level sender/receiver loops, adaptation policy, stats printing, logging.
-- `src/app/ScreenShareRunContext.h`, `src/app/ScreenShareSessionRunner.h`, and `src/app/ScreenShareSessionRunner.cpp`: typed app-backed Share/Watch session runner plumbing used by the concrete API without including the CLI app header.
-- `src/app/ScreenShareAppInternal.h`: private declarations shared only inside the app runtime implementation; not a public UI/backend API surface.
+- `src/cli/ScreenShareCLI.*`: CLI runner for command-line parsing, CLI typed Share/Watch option construction, top-level sender/receiver loops, adaptation policy, stats printing, and logging.
+- `src/runtime/ScreenShareRunContext.h`, `src/runtime/ScreenShareSessionRunner.h`, and `src/runtime/ScreenShareSessionRunner.cpp`: typed runtime-backed Share/Watch session runner plumbing used by the concrete API without including the CLI header.
+- `src/runtime/ScreenShareRuntimeInternal.h`: private declarations shared only inside the session runtime implementation; not a public UI/backend API surface.
 - `src/core/ScreenShareSession.*`: shared session data types and helpers used by the API, CLI, and UI.
-- `src/app/ScreenShareMain.cpp`: tiny executable entry point that calls the app runner.
+- `src/cli/ScreenShareMain.cpp`: tiny executable entry point that calls the CLI runner.
 - `src/core/`: shared session data types, legacy typed Share/Watch command-preview builders, runtime-control interfaces, and native core-library entry points that are intended to be used by both the CLI and UI.
 - `src/capture/`: Windows Graphics Capture and DXGI Desktop Duplication capture path, HDR/scRGB handling, GPU scaling/NV12 generation.
 - `src/codec/`: H.264 file encoder, H.264 stream encoder/decoder, H.264 bitstream helpers, encoder probing.
@@ -29,6 +29,6 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 - Debug preset output: `build/debug/ScreenShare.exe`.
 - Release preset output: `build/release/ScreenShare.exe`.
 - `ScreenShareCore` is a static library target containing the reusable native engine modules.
-- `ScreenShareSessionRuntime` is a static library target containing the concrete session API and app-backed session runtime; `ScreenShare.exe` is a tiny main linked against it.
+- `ScreenShareSessionRuntime` is a static library target containing the concrete session API and runtime-backed Share/Watch execution; `ScreenShare.exe` is a tiny main linked against it.
 - If Qt 6 Widgets and Svg are available at configure time, builds also output `ScreenShareUi.exe`.
 - Normal default builds create portable zip packages; see `agents/packaging.md`.
