@@ -110,23 +110,23 @@ target_link_libraries(ScreenShareCore PUBLIC
     ws2_32
 )
 
-add_library(ScreenShareAppRunner STATIC
+add_library(ScreenShareSessionRuntime STATIC
     src/app/AppSessionBackend.cpp
     src/app/ScreenShareApp.cpp
 )
 
-target_compile_features(ScreenShareAppRunner PUBLIC cxx_std_20)
+target_compile_features(ScreenShareSessionRuntime PUBLIC cxx_std_20)
 
-target_include_directories(ScreenShareAppRunner PUBLIC
+target_include_directories(ScreenShareSessionRuntime PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(ScreenShareAppRunner PUBLIC
+target_link_libraries(ScreenShareSessionRuntime PUBLIC
     ScreenShareCore
 )
 
 if(MSVC)
-    target_compile_options(ScreenShareAppRunner PRIVATE /W4 /permissive- /EHsc)
+    target_compile_options(ScreenShareSessionRuntime PRIVATE /W4 /permissive- /EHsc)
 endif()
 
 add_executable(ScreenShare
@@ -138,7 +138,7 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_R
 endif()
 
 target_link_libraries(ScreenShare PRIVATE
-    ScreenShareAppRunner
+    ScreenShareSessionRuntime
 )
 
 if(SCREENSHARE_BUILD_QT_UI)
@@ -158,7 +158,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
         )
-        target_link_libraries(ScreenShareUi PRIVATE ScreenShareAppRunner Qt6::Network Qt6::Svg Qt6::Widgets shell32)
+        target_link_libraries(ScreenShareUi PRIVATE ScreenShareSessionRuntime Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX

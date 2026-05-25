@@ -5615,9 +5615,6 @@ int main(int argc, char** argv)
                 void OnSessionEvent(const screenshare::SessionEvent& event) override
                 {
                     std::scoped_lock lock(mutex_);
-                    if (event.type == screenshare::SessionEventType::LogLine) {
-                        output_ += event.message;
-                    }
                     if (screenshare::IsTerminalSessionState(event.status.state)) {
                         terminalState_ = event.status.state;
                         done_ = true;
@@ -5633,14 +5630,6 @@ int main(int argc, char** argv)
                     });
                 }
 
-                bool ok() const
-                {
-                    std::scoped_lock lock(mutex_);
-                    return done_ &&
-                        terminalState_ == screenshare::SessionState::Stopped &&
-                        !output_.empty();
-                }
-
                 bool failed() const
                 {
                     std::scoped_lock lock(mutex_);
@@ -5650,26 +5639,9 @@ int main(int argc, char** argv)
             private:
                 mutable std::mutex mutex_;
                 std::condition_variable condition_;
-                std::string output_;
                 screenshare::SessionState terminalState_ = screenshare::SessionState::Idle;
                 bool done_ = false;
             };
-            AppSessionSelfTestObserver appSessionSelfTestObserver;
-            bool appSessionBackendOk = false;
-            {
-                screenshare::AppSessionBackend appSelfTestBackend;
-                appSelfTestBackend.StartArguments(
-                    screenshare::SessionRole::Share,
-                    std::vector<std::string>{"--generate-access-code"},
-                    appSessionSelfTestObserver);
-                const bool appSessionFinished = appSessionSelfTestObserver.wait();
-                const screenshare::SessionStatus appSessionStatus = appSelfTestBackend.GetStatus();
-                appSessionBackendOk =
-                    appSessionFinished &&
-                    appSessionSelfTestObserver.ok() &&
-                    appSessionStatus.state == screenshare::SessionState::Stopped &&
-                    !appSessionStatus.summary.empty();
-            }
             AppSessionSelfTestObserver typedSessionSelfTestObserver;
             bool typedSessionValidationOk = false;
             {
@@ -5730,7 +5702,6 @@ int main(int argc, char** argv)
                 memoryStopInitiallyClear &&
                 memoryStopRequested &&
                 memoryControlReset &&
-                appSessionBackendOk &&
                 typedSessionValidationOk;
             return selfTestOk ? 0 : 2;
         }

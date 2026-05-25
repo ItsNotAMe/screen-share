@@ -27,11 +27,6 @@ public:
     void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink, std::string executablePath);
     void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink) override;
     void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink, std::string executablePath);
-    void StartArguments(
-        SessionRole role,
-        std::vector<std::string> arguments,
-        ISessionEventSink& eventSink,
-        std::string executablePath = "ScreenShare");
     void Shutdown();
     void Stop() override;
     void ApplyStreamSettings(const StreamSettings& settings) override;
