@@ -92,7 +92,7 @@ WGC capture by default
 - PR #99 `Secure Worker room signaling`: hidden app-generated room keys in secure room links, Durable Object live room state, static-candidate fanout fix, and clearer direct-UDP-blocked diagnostics.
 - PR #100 `Add active room directory`: KV-backed active room summaries plus safe `GET /rooms` and `GET /rooms/:roomId/summary`, with Durable Objects still verified as the live source of truth.
 - PR #102 `Add joinable room list with room access keys`: UI room list joins public Worker rooms without copied secret links; Durable Object keeps the hidden room access key.
-- Recent backend/UI integration: `AppSessionBackend` emits typed diagnostic events for stream status, NAT status, access-code/password failures, room-open conflicts, and preview-close handling, replacing the remaining live-session stdout parsing in `ScreenShareUi`. Live Share/Watch starts now flow through typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback. Runtime control is typed around stream settings, with live resolution changes as the first implemented field.
+- Recent backend/UI integration: `AppSessionBackend` emits typed diagnostic events for stream/audio media status, NAT status, access-code/password failures, room-open conflicts, and preview-close handling, replacing the remaining live-session stdout parsing in `ScreenShareUi`. Live Share/Watch starts now flow through typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback. Runtime control is typed around stream settings, with live resolution changes as the first implemented field.
 
 ## Active Memory Files
 

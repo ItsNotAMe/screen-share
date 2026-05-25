@@ -143,6 +143,17 @@ std::optional<double> ParseDouble(const std::string& text)
     }
 }
 
+std::optional<bool> ParseYesNo(const std::string& text)
+{
+    if (text == "yes") {
+        return true;
+    }
+    if (text == "no") {
+        return false;
+    }
+    return std::nullopt;
+}
+
 std::optional<SessionResolution> ParseResolution(const std::string& text)
 {
     const size_t separator = text.find('x');
@@ -302,6 +313,7 @@ void AppSessionBackend::StartArguments(
             health_.clear();
             logParseBuffer_.clear();
             streamStatus_ = SessionStreamStatus{};
+            audioStatus_ = SessionAudioStatus{};
             viewers_.clear();
             watchCompletedFrames_ = 0;
             watchPayloadBytes_ = 0;
@@ -424,6 +436,7 @@ void AppSessionBackend::HandleLogLine(const std::string& line)
 {
     HandleDiagnosticLogLine(line);
     HandleStreamLogLine(line);
+    HandleAudioLogLine(line);
 
     SessionRole role = SessionRole::Share;
     {
@@ -529,6 +542,294 @@ void AppSessionBackend::HandleStreamLogLine(const std::string& line)
     }
 
     EmitStatus(SessionEventType::StreamStatusChanged, "Stream status updated");
+}
+
+void AppSessionBackend::HandleAudioLogLine(const std::string& line)
+{
+    const std::string codec = LogFieldValue(line, "audio_codec");
+    const std::string format = LogFieldValue(line, "audio_format");
+    const std::string captureState = LogFieldValue(line, "audio_capture");
+    const auto capturePackets = ParseUint64(LogFieldValue(line, "audio_capture_packets"));
+    const auto captureFrames = ParseUint64(LogFieldValue(line, "audio_capture_frames"));
+    const auto captureBytes = ParseUint64(LogFieldValue(line, "audio_capture_bytes"));
+    const auto captureEmptyPolls = ParseUint64(LogFieldValue(line, "audio_capture_empty_polls"));
+    const auto captureDiscontinuities = ParseUint64(LogFieldValue(line, "audio_capture_discontinuities"));
+    const auto captureTimestampErrors = ParseUint64(LogFieldValue(line, "audio_capture_timestamp_errors"));
+    const auto capturePayloadBitrateMbps = ParseDouble(LogFieldValue(line, "audio_payload_bitrate_mbps"));
+    const auto standalonePackets = ParseUint64(LogFieldValue(line, "audio_packets"));
+    const auto standaloneFrames = ParseUint64(LogFieldValue(line, "audio_frames"));
+    const auto standaloneBytes = ParseUint64(LogFieldValue(line, "audio_bytes"));
+    const auto packetsPerSecond = ParseDouble(LogFieldValue(line, "audio_packets_per_second"));
+    const auto framesPerSecond = ParseDouble(LogFieldValue(line, "audio_frames_per_second"));
+    const auto silentPackets = ParseUint64(LogFieldValue(line, "audio_silent_packets"));
+    const auto standaloneSilentPackets = ParseUint64(LogFieldValue(line, "silent_packets"));
+    const auto discontinuities = ParseUint64(LogFieldValue(line, "audio_discontinuities"));
+    const auto standaloneDiscontinuities = ParseUint64(LogFieldValue(line, "discontinuities"));
+    const auto timestampErrors = ParseUint64(LogFieldValue(line, "audio_timestamp_errors"));
+    const auto standaloneTimestampErrors = ParseUint64(LogFieldValue(line, "timestamp_errors"));
+    const bool standaloneCaptureStats =
+        packetsPerSecond ||
+        framesPerSecond ||
+        !LogFieldValue(line, "peak").empty() ||
+        !LogFieldValue(line, "rms").empty();
+    const auto udpPackets = ParseUint64(LogFieldValue(line, "audio_udp_packets"));
+    const auto udpFrames = ParseUint64(LogFieldValue(line, "audio_udp_frames"));
+    const auto udpDatagrams = ParseUint64(LogFieldValue(line, "audio_udp_datagrams"));
+    const auto udpQueuedDatagrams = ParseUint64(LogFieldValue(line, "audio_udp_queued_datagrams"));
+    const auto udpPendingDatagrams = ParseUint64(LogFieldValue(line, "audio_udp_pending"));
+    const auto udpDroppedPackets = ParseUint64(LogFieldValue(line, "audio_udp_dropped_packets"));
+    const auto udpWireBytes = ParseUint64(LogFieldValue(line, "audio_udp_wire_bytes"));
+    const std::string playbackState = LogFieldValue(line, "audio_playback");
+    const auto playbackMuted = ParseYesNo(LogFieldValue(line, "audio_playback_muted"));
+    const auto playbackVolumePercent = ParseInt(LogFieldValue(line, "audio_playback_volume_percent"));
+    const auto playbackLatencyMs = ParseInt(LogFieldValue(line, "audio_playback_latency_ms"));
+    const auto playbackQueuePackets = ParseUint64(LogFieldValue(line, "audio_playback_queue"));
+    const auto playbackQueueMs = ParseUint64(LogFieldValue(line, "audio_playback_queue_ms"));
+    const auto playbackPackets = ParseUint64(LogFieldValue(line, "audio_playback_packets"));
+    const auto playbackFrames = ParseUint64(LogFieldValue(line, "audio_playback_frames"));
+    const auto playbackDrops = ParseUint64(LogFieldValue(line, "audio_playback_drops"));
+    const auto playbackLatencyDrops = ParseUint64(LogFieldValue(line, "audio_playback_latency_drops"));
+    const auto playbackSyncDrops = ParseUint64(LogFieldValue(line, "audio_playback_sync_drops"));
+    const auto playbackSyncWaits = ParseUint64(LogFieldValue(line, "audio_playback_sync_waits"));
+    const auto playbackMissingPackets = ParseUint64(LogFieldValue(line, "audio_playback_missing"));
+    const auto playbackBackpressure = ParseUint64(LogFieldValue(line, "audio_playback_backpressure"));
+    const auto renderBufferFullEvents = ParseUint64(LogFieldValue(line, "audio_render_buffer_full"));
+    const auto renderPaddingFrames = ParseUint64(LogFieldValue(line, "audio_render_padding"));
+    const std::string avSyncState = LogFieldValue(line, "av_sync");
+    const std::string avSyncCorrection = LogFieldValue(line, "av_sync_correction");
+    const auto avAudioAheadMs = ParseInt(LogFieldValue(line, "av_audio_ahead_ms"));
+    const auto avAudioElapsedMs = ParseInt(LogFieldValue(line, "av_audio_elapsed_ms"));
+    const auto avVideoElapsedMs = ParseInt(LogFieldValue(line, "av_video_elapsed_ms"));
+    const auto avPlayoutAudioAheadMs = ParseInt(LogFieldValue(line, "av_playout_audio_ahead_ms"));
+    const auto avAudioPackets = ParseUint64(LogFieldValue(line, "av_audio_packets"));
+    const auto avIgnoredAudioPackets = ParseUint64(LogFieldValue(line, "av_ignored_audio_packets"));
+    const auto avVideoFrames = ParseUint64(LogFieldValue(line, "av_video_frames"));
+
+    const bool hasAudioFields =
+        !codec.empty() ||
+        !format.empty() ||
+        !captureState.empty() ||
+        capturePackets ||
+        captureFrames ||
+        captureBytes ||
+        captureEmptyPolls ||
+        captureDiscontinuities ||
+        captureTimestampErrors ||
+        capturePayloadBitrateMbps ||
+        standalonePackets ||
+        standaloneFrames ||
+        standaloneBytes ||
+        packetsPerSecond ||
+        framesPerSecond ||
+        silentPackets ||
+        standaloneSilentPackets ||
+        discontinuities ||
+        standaloneDiscontinuities ||
+        timestampErrors ||
+        standaloneTimestampErrors ||
+        udpPackets ||
+        udpFrames ||
+        udpDatagrams ||
+        udpQueuedDatagrams ||
+        udpPendingDatagrams ||
+        udpDroppedPackets ||
+        udpWireBytes ||
+        !playbackState.empty() ||
+        playbackMuted ||
+        playbackVolumePercent ||
+        playbackLatencyMs ||
+        playbackQueuePackets ||
+        playbackQueueMs ||
+        playbackPackets ||
+        playbackFrames ||
+        playbackDrops ||
+        playbackLatencyDrops ||
+        playbackSyncDrops ||
+        playbackSyncWaits ||
+        playbackMissingPackets ||
+        playbackBackpressure ||
+        renderBufferFullEvents ||
+        renderPaddingFrames ||
+        !avSyncState.empty() ||
+        !avSyncCorrection.empty() ||
+        avAudioAheadMs ||
+        avAudioElapsedMs ||
+        avVideoElapsedMs ||
+        avPlayoutAudioAheadMs ||
+        avAudioPackets ||
+        avIgnoredAudioPackets ||
+        avVideoFrames;
+    if (!hasAudioFields) {
+        return;
+    }
+
+    {
+        std::scoped_lock lock(mutex_);
+        audioStatus_.hasStats = true;
+        if (!codec.empty()) {
+            audioStatus_.codec = codec;
+        }
+        if (!format.empty()) {
+            audioStatus_.format = format;
+        }
+        if (!captureState.empty()) {
+            audioStatus_.captureState = captureState;
+        }
+        if (capturePackets) {
+            audioStatus_.capturePackets = *capturePackets;
+        } else if (standaloneCaptureStats && standalonePackets) {
+            audioStatus_.capturePackets = *standalonePackets;
+        }
+        if (captureFrames) {
+            audioStatus_.captureFrames = *captureFrames;
+        } else if (standaloneCaptureStats && standaloneFrames) {
+            audioStatus_.captureFrames = *standaloneFrames;
+        }
+        if (captureBytes) {
+            audioStatus_.captureBytes = *captureBytes;
+        } else if (standaloneCaptureStats && standaloneBytes) {
+            audioStatus_.captureBytes = *standaloneBytes;
+        }
+        if (captureEmptyPolls) {
+            audioStatus_.captureEmptyPolls = *captureEmptyPolls;
+        }
+        if (captureDiscontinuities) {
+            audioStatus_.captureDiscontinuities = *captureDiscontinuities;
+        }
+        if (captureTimestampErrors) {
+            audioStatus_.captureTimestampErrors = *captureTimestampErrors;
+        }
+        if (packetsPerSecond) {
+            audioStatus_.capturePacketsPerSecond = *packetsPerSecond;
+        }
+        if (framesPerSecond) {
+            audioStatus_.captureFramesPerSecond = *framesPerSecond;
+        }
+        if (capturePayloadBitrateMbps) {
+            audioStatus_.payloadBitrateMbps = *capturePayloadBitrateMbps;
+        }
+        if (standalonePackets) {
+            audioStatus_.packets = *standalonePackets;
+        }
+        if (standaloneFrames) {
+            audioStatus_.frames = *standaloneFrames;
+        }
+        if (standaloneBytes) {
+            audioStatus_.bytes = *standaloneBytes;
+        }
+        if (silentPackets) {
+            audioStatus_.silentPackets = *silentPackets;
+        } else if (standaloneSilentPackets) {
+            audioStatus_.silentPackets = *standaloneSilentPackets;
+        }
+        if (discontinuities) {
+            audioStatus_.discontinuities = *discontinuities;
+        } else if (standaloneDiscontinuities) {
+            audioStatus_.discontinuities = *standaloneDiscontinuities;
+        }
+        if (timestampErrors) {
+            audioStatus_.timestampErrors = *timestampErrors;
+        } else if (standaloneTimestampErrors) {
+            audioStatus_.timestampErrors = *standaloneTimestampErrors;
+        }
+        if (udpPackets) {
+            audioStatus_.udpPackets = *udpPackets;
+        }
+        if (udpFrames) {
+            audioStatus_.udpFrames = *udpFrames;
+        }
+        if (udpDatagrams) {
+            audioStatus_.udpDatagrams = *udpDatagrams;
+        } else if (udpQueuedDatagrams) {
+            audioStatus_.udpDatagrams = *udpQueuedDatagrams;
+        }
+        if (udpPendingDatagrams) {
+            audioStatus_.udpPendingDatagrams = *udpPendingDatagrams;
+        }
+        if (udpDroppedPackets) {
+            audioStatus_.udpDroppedPackets = *udpDroppedPackets;
+        }
+        if (udpWireBytes) {
+            audioStatus_.udpWireBytes = *udpWireBytes;
+        }
+        if (!playbackState.empty()) {
+            audioStatus_.playbackState = playbackState;
+        }
+        if (playbackMuted) {
+            audioStatus_.playbackMuted = *playbackMuted;
+        }
+        if (playbackVolumePercent) {
+            audioStatus_.playbackVolumePercent = *playbackVolumePercent;
+        }
+        if (playbackLatencyMs) {
+            audioStatus_.playbackLatencyMs = *playbackLatencyMs;
+        }
+        if (playbackQueuePackets) {
+            audioStatus_.playbackQueuePackets = *playbackQueuePackets;
+        }
+        if (playbackQueueMs) {
+            audioStatus_.playbackQueueMs = *playbackQueueMs;
+        }
+        if (playbackPackets) {
+            audioStatus_.playbackPackets = *playbackPackets;
+        }
+        if (playbackFrames) {
+            audioStatus_.playbackFrames = *playbackFrames;
+        }
+        if (playbackDrops) {
+            audioStatus_.playbackDrops = *playbackDrops;
+        }
+        if (playbackLatencyDrops) {
+            audioStatus_.playbackLatencyDrops = *playbackLatencyDrops;
+        }
+        if (playbackSyncDrops) {
+            audioStatus_.playbackSyncDrops = *playbackSyncDrops;
+        }
+        if (playbackSyncWaits) {
+            audioStatus_.playbackSyncWaits = *playbackSyncWaits;
+        }
+        if (playbackMissingPackets) {
+            audioStatus_.playbackMissingPackets = *playbackMissingPackets;
+        }
+        if (playbackBackpressure) {
+            audioStatus_.playbackBackpressure = *playbackBackpressure;
+        }
+        if (renderBufferFullEvents) {
+            audioStatus_.renderBufferFullEvents = *renderBufferFullEvents;
+        }
+        if (renderPaddingFrames) {
+            audioStatus_.renderPaddingFrames = *renderPaddingFrames;
+        }
+        if (!avSyncState.empty()) {
+            audioStatus_.avSyncState = avSyncState;
+        }
+        if (!avSyncCorrection.empty()) {
+            audioStatus_.avSyncCorrection = avSyncCorrection;
+        }
+        if (avAudioAheadMs) {
+            audioStatus_.avAudioAheadMs = *avAudioAheadMs;
+        }
+        if (avAudioElapsedMs) {
+            audioStatus_.avAudioElapsedMs = *avAudioElapsedMs;
+        }
+        if (avVideoElapsedMs) {
+            audioStatus_.avVideoElapsedMs = *avVideoElapsedMs;
+        }
+        if (avPlayoutAudioAheadMs) {
+            audioStatus_.avPlayoutAudioAheadMs = *avPlayoutAudioAheadMs;
+        }
+        if (avAudioPackets) {
+            audioStatus_.avAudioPackets = *avAudioPackets;
+        }
+        if (avIgnoredAudioPackets) {
+            audioStatus_.avIgnoredAudioPackets = *avIgnoredAudioPackets;
+        }
+        if (avVideoFrames) {
+            audioStatus_.avVideoFrames = *avVideoFrames;
+        }
+    }
+
+    EmitStatus(SessionEventType::AudioStatusChanged, "Audio status updated");
 }
 
 void AppSessionBackend::HandleDiagnosticLogLine(const std::string& line)
@@ -757,6 +1058,7 @@ SessionStatus AppSessionBackend::BuildStatusLocked() const
     status.state = state_;
     status.summary = summary_;
     status.stream = streamStatus_;
+    status.audio = audioStatus_;
     status.videoResolution = streamStatus_.outputResolution;
     status.viewers = viewers_;
     status.health = health_;
