@@ -6,6 +6,7 @@
 #include <QtCore/QString>
 
 #include <functional>
+#include <vector>
 
 class QtSessionBackend final : public QObject, private screenshare::ISessionObserver {
 public:
@@ -39,6 +40,8 @@ public:
         QString* errorMessage = nullptr);
     void stop();
     void applyStreamSettings(const screenshare::StreamSettings& settings);
+    std::vector<screenshare::SessionDisplayInfo> listDisplays(QString* errorMessage = nullptr);
+    std::vector<screenshare::SessionAudioDeviceInfo> listAudioDevices(QString* errorMessage = nullptr);
 
 private:
     bool prepareStart(QString* errorMessage);

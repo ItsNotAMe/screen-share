@@ -63,6 +63,29 @@ struct SessionResolution {
     int height = 0;
 };
 
+struct SessionDisplayInfo {
+    int index = 0;
+    std::string outputName;
+    int width = 0;
+    int height = 0;
+    int left = 0;
+    int top = 0;
+    std::string adapterName;
+    bool attached = true;
+};
+
+enum class SessionAudioDeviceSource {
+    SystemOutput,
+    Microphone,
+};
+
+struct SessionAudioDeviceInfo {
+    SessionAudioDeviceSource source = SessionAudioDeviceSource::SystemOutput;
+    std::string id;
+    std::string name;
+    bool isDefault = false;
+};
+
 struct StreamSettings {
     std::optional<SessionResolution> outputResolution;
     int fps = 60;
@@ -234,6 +257,8 @@ public:
     virtual void StartWatch(const WatchSessionConfig& config, ISessionObserver& observer) = 0;
     virtual void Stop() = 0;
     virtual void ApplyStreamSettings(const StreamSettings& settings) = 0;
+    virtual std::vector<SessionDisplayInfo> ListDisplays() = 0;
+    virtual std::vector<SessionAudioDeviceInfo> ListAudioDevices() = 0;
 };
 
 const char* ToString(SessionState state);

@@ -32,6 +32,8 @@ public:
     void Shutdown();
     void Stop() override;
     void ApplyStreamSettings(const StreamSettings& settings) override;
+    std::vector<SessionDisplayInfo> ListDisplays() override;
+    std::vector<SessionAudioDeviceInfo> ListAudioDevices() override;
 
 private:
     void DetachObserver();

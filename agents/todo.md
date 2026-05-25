@@ -10,13 +10,48 @@ Only you can fully validate these because they need real machines/networks.
 
 ## Build Work
 
-1. Finish refactoring the native engine into a reusable backend/core API that both the CLI and revamped UI can call directly. The UI live session path should stay in-process on a worker thread. Typed launch configs now cover Worker rooms, direct/Nearby targets, and manual invite fallback; typed runtime stream-settings control exists with resolution as the first implemented live setting; typed stream/audio media status, Share viewer status, Watch media activity, NAT hints, access-code/password failures, room-open conflicts, and preview-close handling are in place. Next, move display/audio device discovery behind backend APIs, then build the Active Share/Watch Session screens on those typed snapshots.
-2. Build the stage-2 native UI on top of the backend/core API. Keep it modern, simple, dark-mode friendly, and integrated into the program itself rather than just a launcher shell. Favor a room model: available rooms/devices list, simple host/join flows, window/screen selection, audio window/source selection, active share/watch session screens, and clearer in-session state.
-3. After the revamped UI, investigate and fix lower-than-native resolution blur. Native/2K looks sharp, but 1080p stretched to 2K is still blurry; verify whether live resolution changes accidentally change bitrate, encoder quality, chroma/subsampling behavior, scaler path, or preview upscale behavior, then fix the actual cause.
-4. After the revamped UI, add a full live stream settings panel so the host can change stream parameters without restarting the room. Include Quality/Bitrate, FPS/adaptive FPS, resolution, encoder preference/preset, audio device, and audio mute. Auto modes should be able to adapt bitrate, resolution, and FPS under sustained pressure.
-5. After the revamped UI, add application sharing: capture a selected application's video and matching audio instead of the whole display/system mix.
-6. After the revamped UI, add a host-side mute control so the sharer can mute outgoing audio during a live session.
-7. Add better user-facing diagnostics for remaining common setup mistakes and sync/network states once reports show the need.
+1. Finish the reusable backend/core API for the UI.
+   - [x] Run UI live Share/Watch sessions in-process on a worker thread.
+   - [x] Use typed launch configs for Worker rooms, direct/Nearby targets, and manual invite fallback.
+   - [x] Use typed runtime stream-settings control, with resolution as the first implemented live setting.
+   - [x] Emit typed Share viewer status, Watch media activity, stream/audio media status, NAT hints, access-code/password failures, room-open conflicts, and preview-close handling.
+   - [x] Move display listing behind a backend API instead of a helper CLI process.
+   - [x] Move audio device listing behind a backend API instead of a helper CLI process.
+   - [ ] Keep short helper diagnostics only where they are genuinely diagnostic, not normal UI data paths.
+   - [ ] Add any remaining typed setup/session state needed by the Active Share/Watch Session screens.
+2. Build the stage-2 native UI on top of the backend/core API.
+   - [ ] Replace the launcher-style first screen with the saved room-flow draft.
+   - [ ] Simplify Create room around the Worker room model, with no default Nearby/Manual tabs.
+   - [ ] Simplify Join room around active rooms and pasted room links, with no default Nearby/Manual tabs.
+   - [ ] Add active Share Session screen using typed stream/audio/viewer/session status.
+   - [ ] Add active Watch Session screen using typed stream/audio/session status.
+   - [ ] Add room settings side panel or popup for advanced fields.
+   - [ ] Wire the saved SVG logo and button icons into the revamped UI surfaces.
+   - [ ] Keep reports enabled and easy to find from active sessions.
+3. After the revamped UI, investigate and fix lower-than-native resolution blur.
+   - [ ] Confirm whether changing to 1080p changes bitrate or encoder quality unexpectedly.
+   - [ ] Compare sender capture/scaler output against receiver decoded output.
+   - [ ] Check chroma/subsampling and H.264 padding behavior for downscaled tiers.
+   - [ ] Check preview upscale filtering from 1080p to 2K.
+   - [ ] Fix the actual blurry path without hurting native/2K sharpness.
+4. After the revamped UI, add live stream settings.
+   - [ ] Add host controls for Quality/Bitrate.
+   - [ ] Add host controls for FPS and adaptive FPS.
+   - [ ] Add host controls for Resolution, including Auto and explicit tiers at or below display size.
+   - [ ] Add host controls for encoder preference/preset.
+   - [ ] Add host controls for audio device.
+   - [ ] Add host-side outgoing audio mute.
+   - [ ] Extend runtime settings beyond resolution as each engine control becomes live-safe.
+   - [ ] Make Auto modes adapt bitrate, resolution, and FPS only under sustained pressure.
+5. After the revamped UI, add application sharing.
+   - [ ] Let the host choose a specific application/window video source.
+   - [ ] Capture matching application audio where Windows allows it.
+   - [ ] Make fallback behavior clear when per-app audio is unavailable.
+   - [ ] Keep whole-display/system-audio sharing as the simple default.
+6. Add better user-facing diagnostics when reports show the need.
+   - [ ] Surface common setup mistakes in the UI instead of only logs.
+   - [ ] Improve sync/network state wording on active session screens.
+   - [ ] Promote report-driven issues from the section below only after real reports justify them.
 
 ## Report-Driven Follow-Ups
 

@@ -5,7 +5,7 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 ## Source Layout
 
 - `src/app/ScreenShareApp.*`: callable app runner for command-line parsing, top-level sender/receiver loops, adaptation policy, stats printing, logging.
-- `src/app/AppSessionBackend.*`: pure C++ `ISessionBackend` adapter around the app runner, using memory runtime control on a worker thread and translating key live telemetry into typed session events.
+- `src/app/AppSessionBackend.*`: pure C++ `ISessionBackend` adapter around the app runner, using memory runtime control on a worker thread, translating key live telemetry into typed session events, and exposing typed display/audio-device discovery for the UI.
 - `src/app/ScreenShareMain.cpp`: tiny executable entry point that calls the app runner.
 - `src/core/`: shared backend/session API, typed Share/Watch command builders, runtime-control interfaces, and native core-library entry points that are intended to be used by both the CLI and UI.
 - `src/capture/`: Windows Graphics Capture and DXGI Desktop Duplication capture path, HDR/scRGB handling, GPU scaling/NV12 generation.
@@ -17,7 +17,7 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 - `src/transport/LanDiscovery.*`: opt-in LAN receiver discovery helper used by CLI and Qt UI.
 - `src/transport/StunClient.*`: standalone STUN Binding Request helper used by CLI NAT diagnostics.
 - `src/transport/SignalingClient.*`: WinHTTP client for the optional HTTP room server diagnostics.
-- `src/ui/`: optional Qt Widgets desktop control UI. Live sessions use the app session backend; helper diagnostics still use short-lived CLI commands where useful.
+- `src/ui/`: optional Qt Widgets desktop control UI. Live sessions and normal display/audio-device discovery use the app session backend; helper diagnostics still use short-lived CLI commands where useful.
 - `signaling-worker/`: optional Cloudflare Worker TypeScript project for room membership and UDP candidate exchange. It is signaling only; media remains direct native UDP.
 - `scripts/install-dev-deps.ps1`: Windows bootstrap script for MSYS2 native packages, optional Qt/FFmpeg, Node.js LTS, and signaling Worker npm dependencies.
 
