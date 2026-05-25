@@ -81,7 +81,17 @@ struct WatchSessionConfig {
 struct SessionViewer {
     std::string id;
     std::string endpoint;
+    int group = -1;
     SessionState state = SessionState::Idle;
+    std::string health;
+    std::string sessionFingerprint;
+    uint64_t feedbackPackets = 0;
+    uint64_t completedFrames = 0;
+    uint64_t decodeResyncs = 0;
+    uint64_t pendingDatagrams = 0;
+    uint64_t queueDelayMs = 0;
+    bool hasFeedback = false;
+    bool activeNow = false;
 };
 
 struct SessionStatus {
@@ -90,6 +100,11 @@ struct SessionStatus {
     std::string summary;
     std::optional<SessionResolution> videoResolution;
     std::vector<SessionViewer> viewers;
+    std::string health;
+    uint64_t completedFrames = 0;
+    uint64_t payloadBytes = 0;
+    uint64_t decodedFrames = 0;
+    uint64_t audioPackets = 0;
 };
 
 struct SessionEvent {

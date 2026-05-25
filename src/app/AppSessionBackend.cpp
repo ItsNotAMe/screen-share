@@ -3,7 +3,12 @@
 #include "app/ScreenShareApp.h"
 #include "core/SessionCommand.h"
 
+#include <algorithm>
+#include <cctype>
 #include <exception>
+#include <iterator>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -40,6 +45,84 @@ SessionEvent BuildErrorEvent(SessionRole role, SessionState state, std::string m
     event.status.summary = message;
     event.message = std::move(message);
     return event;
+}
+
+std::string LogFieldValue(std::string_view text, std::string_view field)
+{
+    std::string needle(field);
+    needle += '=';
+
+    size_t searchFrom = 0;
+    while (searchFrom < text.size()) {
+        const size_t position = text.find(needle, searchFrom);
+        if (position == std::string_view::npos) {
+            return {};
+        }
+        if (position == 0 || std::isspace(static_cast<unsigned char>(text[position - 1])) != 0) {
+            const size_t valueStart = position + needle.size();
+            size_t valueEnd = valueStart;
+            while (valueEnd < text.size() &&
+                std::isspace(static_cast<unsigned char>(text[valueEnd])) == 0) {
+                ++valueEnd;
+            }
+            return std::string(text.substr(valueStart, valueEnd - valueStart));
+        }
+        searchFrom = position + 1;
+    }
+    return {};
+}
+
+std::optional<uint64_t> ParseUint64(const std::string& text)
+{
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    try {
+        size_t parsed = 0;
+        const auto value = std::stoull(text, &parsed, 10);
+        if (parsed != text.size()) {
+            return std::nullopt;
+        }
+        return static_cast<uint64_t>(value);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::optional<int> ParseInt(const std::string& text)
+{
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    try {
+        size_t parsed = 0;
+        const int value = std::stoi(text, &parsed, 10);
+        if (parsed != text.size()) {
+            return std::nullopt;
+        }
+        return value;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+bool CounterAdvanced(uint64_t current, uint64_t previous)
+{
+    return current > previous || (current < previous && current > 0);
+}
+
+SessionState ViewerStateFromLog(const std::string& state, bool hasFeedback, bool activeNow)
+{
+    if (state == "failed") {
+        return SessionState::Failed;
+    }
+    if (activeNow) {
+        return SessionState::Live;
+    }
+    if (hasFeedback) {
+        return SessionState::Disconnected;
+    }
+    return SessionState::Connecting;
 }
 
 } // namespace
@@ -118,6 +201,13 @@ void AppSessionBackend::StartArguments(
             role_ = role;
             state_ = SessionState::Starting;
             summary_ = "Starting session";
+            health_.clear();
+            logParseBuffer_.clear();
+            viewers_.clear();
+            watchCompletedFrames_ = 0;
+            watchPayloadBytes_ = 0;
+            watchDecodedFrames_ = 0;
+            watchAudioPackets_ = 0;
             stopRequested_ = false;
             runtimeControl_.Reset();
         }
@@ -136,7 +226,7 @@ void AppSessionBackend::StartArguments(
         ScreenShareAppRunContext context;
         context.runtimeControl = &runtimeControl_;
         context.outputHandler = [this](std::string_view text) {
-            Notify(SessionEventType::LogLine, SessionState::Idle, std::string(text));
+            HandleOutput(text);
         };
 
         int exitCode = 1;
@@ -192,6 +282,194 @@ void AppSessionBackend::JoinFinishedWorker()
     }
 }
 
+void AppSessionBackend::HandleOutput(std::string_view text)
+{
+    Notify(SessionEventType::LogLine, SessionState::Idle, std::string(text));
+
+    std::vector<std::string> lines;
+    {
+        std::scoped_lock lock(mutex_);
+        logParseBuffer_.append(text.data(), text.size());
+        constexpr size_t MaxParseBuffer = 32768;
+        if (logParseBuffer_.size() > MaxParseBuffer) {
+            logParseBuffer_.erase(0, logParseBuffer_.size() - MaxParseBuffer);
+        }
+
+        size_t lineStart = 0;
+        while (lineStart < logParseBuffer_.size()) {
+            const size_t lineEnd = logParseBuffer_.find_first_of("\r\n", lineStart);
+            if (lineEnd == std::string::npos) {
+                break;
+            }
+            if (lineEnd > lineStart) {
+                lines.push_back(logParseBuffer_.substr(lineStart, lineEnd - lineStart));
+            }
+            lineStart = lineEnd + 1;
+            while (lineStart < logParseBuffer_.size() &&
+                (logParseBuffer_[lineStart] == '\r' || logParseBuffer_[lineStart] == '\n')) {
+                ++lineStart;
+            }
+        }
+        logParseBuffer_.erase(0, lineStart);
+    }
+
+    for (const std::string& line : lines) {
+        HandleLogLine(line);
+    }
+}
+
+void AppSessionBackend::HandleLogLine(const std::string& line)
+{
+    SessionRole role = SessionRole::Share;
+    {
+        std::scoped_lock lock(mutex_);
+        role = role_;
+    }
+    if (role == SessionRole::Share) {
+        HandleShareLogLine(line);
+    } else {
+        HandleWatchLogLine(line);
+    }
+}
+
+void AppSessionBackend::HandleShareLogLine(const std::string& line)
+{
+    if (line.find("viewer_target=") == std::string::npos) {
+        return;
+    }
+
+    const std::string endpoint = LogFieldValue(line, "viewer_endpoint");
+    if (endpoint.empty()) {
+        return;
+    }
+
+    const int group = ParseInt(LogFieldValue(line, "viewer_group")).value_or(-1);
+    const uint64_t feedbackPackets = ParseUint64(LogFieldValue(line, "viewer_feedback_packets")).value_or(0);
+    const bool hasFeedback = feedbackPackets > 0;
+    bool activeNow = false;
+
+    {
+        std::scoped_lock lock(mutex_);
+        if (!hasFeedback && group >= 0) {
+            const bool groupAlreadyConnected = std::any_of(
+                viewers_.begin(),
+                viewers_.end(),
+                [&](const SessionViewer& viewer) {
+                    return viewer.group == group && viewer.hasFeedback;
+                });
+            if (groupAlreadyConnected) {
+                return;
+            }
+        }
+
+        auto viewerIt = std::find_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
+            return viewer.group == group && viewer.endpoint == endpoint;
+        });
+        if (viewerIt == viewers_.end()) {
+            SessionViewer viewer;
+            viewer.group = group;
+            viewer.endpoint = endpoint;
+            viewer.id = std::to_string(group) + ":" + endpoint;
+            viewers_.push_back(std::move(viewer));
+            viewerIt = std::prev(viewers_.end());
+        }
+
+        activeNow = CounterAdvanced(feedbackPackets, viewerIt->feedbackPackets);
+        viewerIt->feedbackPackets = feedbackPackets;
+        viewerIt->hasFeedback = hasFeedback;
+        viewerIt->activeNow = activeNow;
+        viewerIt->health = LogFieldValue(line, "viewer_feedback_health");
+        viewerIt->sessionFingerprint = LogFieldValue(line, "viewer_feedback_session");
+        viewerIt->pendingDatagrams = ParseUint64(LogFieldValue(line, "viewer_pending")).value_or(0);
+        viewerIt->queueDelayMs = ParseUint64(LogFieldValue(line, "viewer_queue_ms")).value_or(0);
+        viewerIt->completedFrames = ParseUint64(LogFieldValue(line, "viewer_feedback_completed_frames")).value_or(0);
+        viewerIt->decodeResyncs = ParseUint64(LogFieldValue(line, "viewer_feedback_resyncs")).value_or(0);
+        viewerIt->state = ViewerStateFromLog(LogFieldValue(line, "viewer_state"), hasFeedback, activeNow);
+
+        if (hasFeedback && group >= 0) {
+            viewers_.erase(
+                std::remove_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
+                    return viewer.group == group && viewer.endpoint != endpoint && !viewer.hasFeedback;
+                }),
+                viewers_.end());
+        }
+
+        if (activeNow && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
+            state_ = SessionState::Live;
+            summary_ = "Viewer connected";
+        }
+    }
+
+    EmitStatus(SessionEventType::ViewerListChanged, "Viewer status updated");
+}
+
+void AppSessionBackend::HandleWatchLogLine(const std::string& line)
+{
+    bool activeNow = false;
+    bool waitingForStream = false;
+    const std::string receiverHealth = LogFieldValue(line, "receiver_health");
+    const auto completedFrames = ParseUint64(LogFieldValue(line, "completed_frames"));
+    const auto payloadBytes = ParseUint64(LogFieldValue(line, "payload_bytes"));
+    const auto decodedFrames = ParseUint64(LogFieldValue(line, "h264_decoded_frames"));
+    const auto audioPackets = ParseUint64(LogFieldValue(line, "audio_packets"));
+
+    {
+        std::scoped_lock lock(mutex_);
+        if (!receiverHealth.empty()) {
+            health_ = receiverHealth;
+        }
+        if (completedFrames) {
+            activeNow = CounterAdvanced(*completedFrames, watchCompletedFrames_) || activeNow;
+            watchCompletedFrames_ = *completedFrames;
+        }
+        if (payloadBytes) {
+            activeNow = CounterAdvanced(*payloadBytes, watchPayloadBytes_) || activeNow;
+            watchPayloadBytes_ = *payloadBytes;
+        }
+        if (decodedFrames) {
+            activeNow = CounterAdvanced(*decodedFrames, watchDecodedFrames_) || activeNow;
+            watchDecodedFrames_ = *decodedFrames;
+        }
+        if (audioPackets) {
+            activeNow = CounterAdvanced(*audioPackets, watchAudioPackets_) || activeNow;
+            watchAudioPackets_ = *audioPackets;
+        }
+
+        if (activeNow && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
+            state_ = SessionState::Live;
+            summary_ = "Receiving stream";
+        } else if (line.find("waiting_for_stream") != std::string::npos &&
+            state_ != SessionState::Live &&
+            !IsTerminalSessionState(state_) &&
+            state_ != SessionState::Stopping) {
+            state_ = SessionState::Connecting;
+            summary_ = "Waiting for stream";
+            waitingForStream = true;
+        }
+    }
+
+    if (activeNow || waitingForStream) {
+        EmitStatus(SessionEventType::StateChanged, activeNow ? "Receiving stream" : "Receiver status updated");
+    }
+}
+
+void AppSessionBackend::EmitStatus(SessionEventType type, std::string message)
+{
+    ISessionObserver* observer = nullptr;
+    SessionEvent event;
+    {
+        std::scoped_lock lock(mutex_);
+        observer = observer_;
+        event.type = type;
+        event.status = BuildStatusLocked();
+        event.message = std::move(message);
+    }
+
+    if (observer != nullptr) {
+        observer->OnSessionEvent(event);
+    }
+}
+
 void AppSessionBackend::Notify(SessionEventType type, SessionState state, std::string message)
 {
     ISessionObserver* observer = nullptr;
@@ -219,6 +497,12 @@ SessionStatus AppSessionBackend::BuildStatusLocked() const
     status.role = role_;
     status.state = state_;
     status.summary = summary_;
+    status.viewers = viewers_;
+    status.health = health_;
+    status.completedFrames = watchCompletedFrames_;
+    status.payloadBytes = watchPayloadBytes_;
+    status.decodedFrames = watchDecodedFrames_;
+    status.audioPackets = watchAudioPackets_;
     return status;
 }
 
