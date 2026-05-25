@@ -53,7 +53,7 @@ bool NullSessionRuntimeControl::StopRequested()
     return false;
 }
 
-std::optional<RuntimeResolutionRequest> NullSessionRuntimeControl::TakeResolutionRequest()
+std::optional<RuntimeStreamSettingsRequest> NullSessionRuntimeControl::TakeStreamSettingsRequest()
 {
     return std::nullopt;
 }
@@ -64,11 +64,11 @@ bool MemorySessionRuntimeControl::StopRequested()
     return stopRequested_;
 }
 
-std::optional<RuntimeResolutionRequest> MemorySessionRuntimeControl::TakeResolutionRequest()
+std::optional<RuntimeStreamSettingsRequest> MemorySessionRuntimeControl::TakeStreamSettingsRequest()
 {
     std::scoped_lock lock(mutex_);
-    auto request = resolutionRequest_;
-    resolutionRequest_.reset();
+    auto request = streamSettingsRequest_;
+    streamSettingsRequest_.reset();
     return request;
 }
 
@@ -84,23 +84,23 @@ void MemorySessionRuntimeControl::ResetStop()
     stopRequested_ = false;
 }
 
-void MemorySessionRuntimeControl::RequestResolution(RuntimeResolutionRequest request)
+void MemorySessionRuntimeControl::RequestStreamSettings(RuntimeStreamSettingsRequest request)
 {
     std::scoped_lock lock(mutex_);
-    resolutionRequest_ = request;
+    streamSettingsRequest_ = std::move(request);
 }
 
-void MemorySessionRuntimeControl::ClearResolutionRequest()
+void MemorySessionRuntimeControl::ClearStreamSettingsRequest()
 {
     std::scoped_lock lock(mutex_);
-    resolutionRequest_.reset();
+    streamSettingsRequest_.reset();
 }
 
 void MemorySessionRuntimeControl::Reset()
 {
     std::scoped_lock lock(mutex_);
     stopRequested_ = false;
-    resolutionRequest_.reset();
+    streamSettingsRequest_.reset();
 }
 
 FileSessionRuntimeControl::FileSessionRuntimeControl(std::string stopFilePath, std::string controlFilePath)
@@ -118,7 +118,7 @@ bool FileSessionRuntimeControl::StopRequested()
     return std::filesystem::exists(stopFilePath_, error);
 }
 
-std::optional<RuntimeResolutionRequest> FileSessionRuntimeControl::TakeResolutionRequest()
+std::optional<RuntimeStreamSettingsRequest> FileSessionRuntimeControl::TakeStreamSettingsRequest()
 {
     if (controlFilePath_.empty()) {
         return std::nullopt;
@@ -145,12 +145,12 @@ std::optional<RuntimeResolutionRequest> FileSessionRuntimeControl::TakeResolutio
         return std::nullopt;
     }
     lastControlContent_ = text;
-    return ParseRuntimeResolutionRequest(text);
+    return ParseRuntimeStreamSettingsRequest(text);
 }
 
-std::optional<RuntimeResolutionRequest> ParseRuntimeResolutionRequest(std::string_view content)
+std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(std::string_view content)
 {
-    std::optional<RuntimeResolutionRequest> request;
+    std::optional<RuntimeStreamSettingsRequest> request;
     std::istringstream input{std::string(content)};
     std::string line;
     while (std::getline(input, line)) {
@@ -176,12 +176,18 @@ std::optional<RuntimeResolutionRequest> ParseRuntimeResolutionRequest(std::strin
         RuntimeResolutionRequest parsed;
         if (lowerValue == "auto") {
             parsed.mode = RuntimeResolutionMode::Auto;
-            request = parsed;
+            if (!request) {
+                request.emplace();
+            }
+            request->resolution = parsed;
             continue;
         }
         if (lowerValue == "native") {
             parsed.mode = RuntimeResolutionMode::Native;
-            request = parsed;
+            if (!request) {
+                request.emplace();
+            }
+            request->resolution = parsed;
             continue;
         }
 
@@ -201,7 +207,10 @@ std::optional<RuntimeResolutionRequest> ParseRuntimeResolutionRequest(std::strin
         parsed.mode = RuntimeResolutionMode::Fixed;
         parsed.width = width;
         parsed.height = height;
-        request = parsed;
+        if (!request) {
+            request.emplace();
+        }
+        request->resolution = parsed;
     }
     return request;
 }

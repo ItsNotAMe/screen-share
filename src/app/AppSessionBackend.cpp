@@ -21,17 +21,23 @@ std::vector<std::string> AddExecutableName(std::vector<std::string> arguments, s
     return arguments;
 }
 
-RuntimeResolutionRequest BuildRuntimeResolutionRequest(const StreamSettings& settings)
+RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSettings& settings)
 {
-    RuntimeResolutionRequest request;
+    RuntimeStreamSettingsRequest request;
+    RuntimeResolutionRequest resolution;
     if (settings.outputResolution &&
         settings.outputResolution->width > 0 &&
         settings.outputResolution->height > 0) {
-        request.mode = RuntimeResolutionMode::Fixed;
-        request.width = settings.outputResolution->width;
-        request.height = settings.outputResolution->height;
+        resolution.mode = RuntimeResolutionMode::Fixed;
+        resolution.width = settings.outputResolution->width;
+        resolution.height = settings.outputResolution->height;
+        request.resolution = resolution;
     } else if (!settings.adaptResolution) {
-        request.mode = RuntimeResolutionMode::Native;
+        resolution.mode = RuntimeResolutionMode::Native;
+        request.resolution = resolution;
+    } else {
+        resolution.mode = RuntimeResolutionMode::Auto;
+        request.resolution = resolution;
     }
     return request;
 }
@@ -232,7 +238,7 @@ void AppSessionBackend::Shutdown()
 
 void AppSessionBackend::ApplyStreamSettings(const StreamSettings& settings)
 {
-    runtimeControl_.RequestResolution(BuildRuntimeResolutionRequest(settings));
+    runtimeControl_.RequestStreamSettings(BuildRuntimeStreamSettingsRequest(settings));
 
     SessionState currentState = SessionState::Idle;
     {
