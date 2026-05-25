@@ -20,35 +20,39 @@ struct RuntimeResolutionRequest {
     int height = 0;
 };
 
+struct RuntimeStreamSettingsRequest {
+    std::optional<RuntimeResolutionRequest> resolution;
+};
+
 class ISessionRuntimeControl {
 public:
     virtual ~ISessionRuntimeControl() = default;
 
     virtual bool StopRequested() = 0;
-    virtual std::optional<RuntimeResolutionRequest> TakeResolutionRequest() = 0;
+    virtual std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() = 0;
 };
 
 class NullSessionRuntimeControl final : public ISessionRuntimeControl {
 public:
     bool StopRequested() override;
-    std::optional<RuntimeResolutionRequest> TakeResolutionRequest() override;
+    std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
 };
 
 class MemorySessionRuntimeControl final : public ISessionRuntimeControl {
 public:
     bool StopRequested() override;
-    std::optional<RuntimeResolutionRequest> TakeResolutionRequest() override;
+    std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
 
     void RequestStop();
     void ResetStop();
-    void RequestResolution(RuntimeResolutionRequest request);
-    void ClearResolutionRequest();
+    void RequestStreamSettings(RuntimeStreamSettingsRequest request);
+    void ClearStreamSettingsRequest();
     void Reset();
 
 private:
     std::mutex mutex_;
     bool stopRequested_ = false;
-    std::optional<RuntimeResolutionRequest> resolutionRequest_;
+    std::optional<RuntimeStreamSettingsRequest> streamSettingsRequest_;
 };
 
 class FileSessionRuntimeControl final : public ISessionRuntimeControl {
@@ -56,7 +60,7 @@ public:
     FileSessionRuntimeControl(std::string stopFilePath, std::string controlFilePath);
 
     bool StopRequested() override;
-    std::optional<RuntimeResolutionRequest> TakeResolutionRequest() override;
+    std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
 
 private:
     std::filesystem::path stopFilePath_;
@@ -65,6 +69,6 @@ private:
     std::string lastControlContent_;
 };
 
-std::optional<RuntimeResolutionRequest> ParseRuntimeResolutionRequest(std::string_view content);
+std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(std::string_view content);
 
 } // namespace screenshare

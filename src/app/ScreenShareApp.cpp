@@ -5536,13 +5536,14 @@ void RunCaptureStats(
         resolutionAdaptationStatus = "holding";
     };
 
-    auto applyRuntimeResolutionControl = [&]() {
-        const auto request = runtimeControl.TakeResolutionRequest();
-        if (!request) {
+    auto applyRuntimeStreamSettingsControl = [&]() {
+        const auto request = runtimeControl.TakeStreamSettingsRequest();
+        if (!request || !request->resolution) {
             return;
         }
 
-        switch (request->mode) {
+        const auto& resolution = *request->resolution;
+        switch (resolution.mode) {
         case screenshare::RuntimeResolutionMode::Auto:
             if (adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
                 return;
@@ -5550,7 +5551,7 @@ void RunCaptureStats(
             adaptiveResolutionEnabled = true;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(0, 0, 1.0, "auto", "control_file");
+            restartStreamOutput(0, 0, 1.0, "auto", "runtime_control");
             std::cout << "runtime_resolution_mode=auto\n";
             break;
         case screenshare::RuntimeResolutionMode::Native:
@@ -5560,22 +5561,22 @@ void RunCaptureStats(
             adaptiveResolutionEnabled = false;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(0, 0, 1.0, "manual", "control_file_native");
+            restartStreamOutput(0, 0, 1.0, "manual", "runtime_control_native");
             std::cout << "runtime_resolution_mode=native\n";
             break;
         case screenshare::RuntimeResolutionMode::Fixed:
             if (!adaptiveResolutionEnabled &&
-                config.targetWidth == request->width &&
-                config.targetHeight == request->height) {
+                config.targetWidth == resolution.width &&
+                config.targetHeight == resolution.height) {
                 return;
             }
             adaptiveResolutionEnabled = false;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(request->width, request->height, 1.0, "manual", "control_file_fixed");
+            restartStreamOutput(resolution.width, resolution.height, 1.0, "manual", "runtime_control_fixed");
             std::cout
                 << "runtime_resolution_mode=fixed"
-                << " runtime_resolution=" << request->width << "x" << request->height
+                << " runtime_resolution=" << resolution.width << "x" << resolution.height
                 << "\n";
             break;
         }
@@ -5594,7 +5595,7 @@ void RunCaptureStats(
         std::this_thread::sleep_until(nextFrameAt);
         nextFrameAt += targetFrameTime;
         drainLiveSignalingSendTargets();
-        applyRuntimeResolutionControl();
+        applyRuntimeStreamSettingsControl();
 
         const auto captureStartedAt = Clock::now();
         const auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(0));

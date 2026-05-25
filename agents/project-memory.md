@@ -92,7 +92,7 @@ WGC capture by default
 - PR #99 `Secure Worker room signaling`: hidden app-generated room keys in secure room links, Durable Object live room state, static-candidate fanout fix, and clearer direct-UDP-blocked diagnostics.
 - PR #100 `Add active room directory`: KV-backed active room summaries plus safe `GET /rooms` and `GET /rooms/:roomId/summary`, with Durable Objects still verified as the live source of truth.
 - PR #102 `Add joinable room list with room access keys`: UI room list joins public Worker rooms without copied secret links; Durable Object keeps the hidden room access key.
-- Recent backend/UI integration: `AppSessionBackend` emits typed diagnostic events for NAT status, access-code/password failures, room-open conflicts, and preview-close handling, replacing the remaining live-session stdout parsing in `ScreenShareUi`. Live Share/Watch starts now flow through typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback.
+- Recent backend/UI integration: `AppSessionBackend` emits typed diagnostic events for NAT status, access-code/password failures, room-open conflicts, and preview-close handling, replacing the remaining live-session stdout parsing in `ScreenShareUi`. Live Share/Watch starts now flow through typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback. Runtime control is typed around stream settings, with live resolution changes as the first implemented field.
 
 ## Active Memory Files
 
@@ -109,7 +109,7 @@ WGC capture by default
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
 - `src/core/SessionBackend.h`: shared session backend API shape for UI/backend integration work.
 - `src/core/SessionCommand.*`: typed Share/Watch session config to engine-argument bridge used by the UI and app session backend for Worker rooms, direct/Nearby targets, and manual invite fallback.
-- `src/core/SessionRuntimeControl.*`: shared stop/runtime-settings control interface. CLI runs use the file-backed implementation; the app session backend uses the memory-backed implementation for stop/settings requests.
+- `src/core/SessionRuntimeControl.*`: shared stop/runtime stream-settings control interface. CLI runs use the file-backed implementation; the app session backend uses the memory-backed implementation for stop/settings requests. Resolution is the first implemented live setting.
 - `src/app/ScreenShareApp.*`: callable CLI app runner built as the `ScreenShareAppRunner` static library and used by both the tiny `src/app/ScreenShareMain.cpp` executable entry point and the app session backend.
 - `src/app/AppSessionBackend.*`: pure C++ `ISessionBackend` adapter that runs `ScreenShareAppRunner` on a worker thread with `MemorySessionRuntimeControl`.
 - `src/ui/QtSessionBackend.*`: Qt-thread bridge for the app session backend. Live Share/Watch in the desktop UI no longer launches `ScreenShare.exe` as a child process.
@@ -147,7 +147,7 @@ WGC capture by default
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
   - Live Share/Watch runs now go through `src/ui/QtSessionBackend.*` and `src/app/AppSessionBackend.*`, so the UI calls the app runner on a worker thread instead of launching `ScreenShare.exe`.
-  - Live Share/Watch arguments are built from typed configs through `src/core/SessionCommand.*` for Worker rooms, direct/Nearby targets, and manual invite fallback; stop/runtime resolution controls route through `src/core/SessionRuntimeControl.*` with file-backed control for CLI runs and memory-backed control for UI runs.
+  - Live Share/Watch arguments are built from typed configs through `src/core/SessionCommand.*` for Worker rooms, direct/Nearby targets, and manual invite fallback; stop/runtime stream-settings controls route through `src/core/SessionRuntimeControl.*` with file-backed control for CLI runs and memory-backed control for UI runs.
   - `AppSessionBackend` now translates live telemetry into typed `SessionEvent` snapshots: Share viewer rows use typed viewer status, Watch/Share live indicators use typed activity, and NAT hints, access-code/password failures, room-open conflicts, and preview-close handling flow through typed events instead of UI-side stdout parsing.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.
@@ -207,7 +207,7 @@ WGC capture by default
 - Live stream controls direction:
   - User reports native/2K looks sharp, but 1080p stretched to a 2K preview is still blurry after sharper scaling. Do not assume bitrate is the cause; after the revamped UI, investigate whether live resolution changes accidentally alter bitrate, encoder quality, chroma/subsampling behavior, scaler path, or preview upscale behavior.
   - After the revamped UI, add a live settings panel that can change parameters without restarting the room: Quality/Bitrate, FPS/adaptive FPS, resolution, encoder preference/preset, audio device, and audio mute.
-  - Adaptive FPS should share the same runtime-control model as bitrate/resolution and reduce frame rate only under sustained pressure.
+  - Adaptive FPS should share the same typed runtime stream-settings control model as bitrate/resolution and reduce frame rate only under sustained pressure.
 - Signaling direction:
   - First backend lives under `signaling-worker/`.
   - It is Cloudflare Worker + Durable Objects for live room membership, peer UDP candidates, heartbeat, cleanup, and the browseable active-room directory.

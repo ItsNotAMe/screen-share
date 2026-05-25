@@ -2024,7 +2024,7 @@ private:
         connect(resolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
             resolutionCombo_->setToolTip(resolutionCombo_->currentText());
             refreshCommand();
-            writeRuntimeResolutionCommand();
+            applyRuntimeStreamSettings();
         });
         connect(audioDeviceCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshCommand(); });
         bindSpinBox(watchPortSpin_);
@@ -3004,14 +3004,14 @@ private:
         commandPreview_->setText(formatCommand(enginePath(), displayArguments()));
     }
 
-    void writeRuntimeResolutionCommand()
+    void applyRuntimeStreamSettings()
     {
         if (!running_ || !shareMode() || sessionBackend_ == nullptr) {
             return;
         }
 
         sessionBackend_->applyStreamSettings(currentStreamSettings());
-        appendOutput("Requested stream resolution: " + resolutionStatusText() + "\n");
+        appendOutput("Requested stream settings: resolution " + resolutionStatusText() + "\n");
     }
 
     void applyTheme(bool darkMode)
@@ -5638,32 +5638,36 @@ int main(int argc, char** argv)
             } catch (const std::invalid_argument&) {
                 missingDirectShareRejected = true;
             }
-            const auto runtimeResolution =
-                screenshare::ParseRuntimeResolutionRequest("resolution = 1920x1080\n");
-            const auto ignoredRuntimeResolution =
-                screenshare::ParseRuntimeResolutionRequest("resolution = 1919x1080\n");
+            const auto runtimeSettings =
+                screenshare::ParseRuntimeStreamSettingsRequest("resolution = 1920x1080\n");
+            const auto ignoredRuntimeSettings =
+                screenshare::ParseRuntimeStreamSettingsRequest("resolution = 1919x1080\n");
             const bool runtimeResolutionOk =
-                runtimeResolution &&
-                runtimeResolution->mode == screenshare::RuntimeResolutionMode::Fixed &&
-                runtimeResolution->width == 1920 &&
-                runtimeResolution->height == 1080 &&
-                !ignoredRuntimeResolution;
+                runtimeSettings &&
+                runtimeSettings->resolution &&
+                runtimeSettings->resolution->mode == screenshare::RuntimeResolutionMode::Fixed &&
+                runtimeSettings->resolution->width == 1920 &&
+                runtimeSettings->resolution->height == 1080 &&
+                !ignoredRuntimeSettings;
             screenshare::MemorySessionRuntimeControl memoryControl;
             screenshare::RuntimeResolutionRequest memoryResolution;
             memoryResolution.mode = screenshare::RuntimeResolutionMode::Native;
-            memoryControl.RequestResolution(memoryResolution);
-            const auto memoryResolutionResult = memoryControl.TakeResolutionRequest();
+            screenshare::RuntimeStreamSettingsRequest memorySettings;
+            memorySettings.resolution = memoryResolution;
+            memoryControl.RequestStreamSettings(memorySettings);
+            const auto memorySettingsResult = memoryControl.TakeStreamSettingsRequest();
             const bool memoryResolutionOk =
-                memoryResolutionResult &&
-                memoryResolutionResult->mode == screenshare::RuntimeResolutionMode::Native &&
-                !memoryControl.TakeResolutionRequest();
+                memorySettingsResult &&
+                memorySettingsResult->resolution &&
+                memorySettingsResult->resolution->mode == screenshare::RuntimeResolutionMode::Native &&
+                !memoryControl.TakeStreamSettingsRequest();
             const bool memoryStopInitiallyClear = !memoryControl.StopRequested();
             memoryControl.RequestStop();
             const bool memoryStopRequested = memoryControl.StopRequested();
             memoryControl.Reset();
             const bool memoryControlReset =
                 !memoryControl.StopRequested() &&
-                !memoryControl.TakeResolutionRequest();
+                !memoryControl.TakeStreamSettingsRequest();
             class AppSessionSelfTestObserver final : public screenshare::ISessionObserver {
             public:
                 void OnSessionEvent(const screenshare::SessionEvent& event) override
