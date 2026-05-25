@@ -72,6 +72,20 @@ std::string LogFieldValue(std::string_view text, std::string_view field)
     return {};
 }
 
+std::string LowercaseCopy(std::string_view text)
+{
+    std::string result(text);
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return result;
+}
+
+bool ContainsNoCase(std::string_view text, std::string_view needle)
+{
+    return LowercaseCopy(text).find(LowercaseCopy(needle)) != std::string::npos;
+}
+
 std::optional<uint64_t> ParseUint64(const std::string& text)
 {
     if (text.empty()) {
@@ -123,6 +137,37 @@ SessionState ViewerStateFromLog(const std::string& state, bool hasFeedback, bool
         return SessionState::Disconnected;
     }
     return SessionState::Connecting;
+}
+
+bool LogFieldPositive(const std::string& line, std::string_view field)
+{
+    const auto value = ParseUint64(LogFieldValue(line, field));
+    return value && *value > 0;
+}
+
+SessionIssue DetectSessionIssue(const std::string& line)
+{
+    if (ContainsNoCase(line, "requires --access-code CODE") ||
+        ContainsNoCase(line, "requires an access code") ||
+        ContainsNoCase(line, "requires a password") ||
+        ContainsNoCase(line, "--access-code CODE or --allow-plaintext")) {
+        return SessionIssue::AccessCodeRequired;
+    }
+
+    if (ContainsNoCase(line, "could not be decrypted") ||
+        ContainsNoCase(line, "invalid_room_password") ||
+        ContainsNoCase(line, "room password is incorrect") ||
+        ContainsNoCase(line, "access code does not match") ||
+        ContainsNoCase(line, "does not match the peer invite fingerprint") ||
+        ContainsNoCase(line, "does not match the local invite fingerprint") ||
+        LogFieldPositive(line, "access_rejected_datagrams") ||
+        LogFieldPositive(line, "crypto_rejected_datagrams") ||
+        LogFieldPositive(line, "udp_feedback_access_rejected") ||
+        LogFieldPositive(line, "udp_feedback_crypto_rejected")) {
+        return SessionIssue::AccessCodeMismatch;
+    }
+
+    return SessionIssue::None;
 }
 
 } // namespace
@@ -208,6 +253,9 @@ void AppSessionBackend::StartArguments(
             watchPayloadBytes_ = 0;
             watchDecodedFrames_ = 0;
             watchAudioPackets_ = 0;
+            natStatus_.clear();
+            natHint_.clear();
+            previewClosedNotified_ = false;
             stopRequested_ = false;
             runtimeControl_.Reset();
         }
@@ -320,6 +368,8 @@ void AppSessionBackend::HandleOutput(std::string_view text)
 
 void AppSessionBackend::HandleLogLine(const std::string& line)
 {
+    HandleDiagnosticLogLine(line);
+
     SessionRole role = SessionRole::Share;
     {
         std::scoped_lock lock(mutex_);
@@ -329,6 +379,48 @@ void AppSessionBackend::HandleLogLine(const std::string& line)
         HandleShareLogLine(line);
     } else {
         HandleWatchLogLine(line);
+    }
+}
+
+void AppSessionBackend::HandleDiagnosticLogLine(const std::string& line)
+{
+    const std::string natStatus = LogFieldValue(line, "nat_status");
+    if (!natStatus.empty()) {
+        std::string natHint = LogFieldValue(line, "nat_hint");
+        bool changed = false;
+        {
+            std::scoped_lock lock(mutex_);
+            changed = natStatus_ != natStatus || (!natHint.empty() && natHint_ != natHint);
+            natStatus_ = natStatus;
+            if (!natHint.empty()) {
+                natHint_ = std::move(natHint);
+            }
+        }
+        if (changed) {
+            EmitStatus(SessionEventType::NatStatusChanged, "NAT status updated");
+        }
+    }
+
+    if (ContainsNoCase(line, "room_already_open")) {
+        EmitIssue(SessionIssue::RoomAlreadyOpen, "Room already open");
+    }
+
+    if (line.find("preview_closed=stop") != std::string::npos ||
+        line.find("watch_stop=preview_closed") != std::string::npos) {
+        bool shouldEmit = false;
+        {
+            std::scoped_lock lock(mutex_);
+            shouldEmit = !previewClosedNotified_;
+            previewClosedNotified_ = true;
+        }
+        if (shouldEmit) {
+            EmitIssue(SessionIssue::PreviewClosed, "Preview window closed");
+        }
+    }
+
+    const SessionIssue issue = DetectSessionIssue(line);
+    if (issue != SessionIssue::None) {
+        EmitIssue(issue, "Session security issue");
     }
 }
 
@@ -470,6 +562,24 @@ void AppSessionBackend::EmitStatus(SessionEventType type, std::string message)
     }
 }
 
+void AppSessionBackend::EmitIssue(SessionIssue issue, std::string message)
+{
+    ISessionObserver* observer = nullptr;
+    SessionEvent event;
+    {
+        std::scoped_lock lock(mutex_);
+        observer = observer_;
+        event.type = SessionEventType::Issue;
+        event.issue = issue;
+        event.status = BuildStatusLocked();
+        event.message = std::move(message);
+    }
+
+    if (observer != nullptr) {
+        observer->OnSessionEvent(event);
+    }
+}
+
 void AppSessionBackend::Notify(SessionEventType type, SessionState state, std::string message)
 {
     ISessionObserver* observer = nullptr;
@@ -503,6 +613,8 @@ SessionStatus AppSessionBackend::BuildStatusLocked() const
     status.payloadBytes = watchPayloadBytes_;
     status.decodedFrames = watchDecodedFrames_;
     status.audioPackets = watchAudioPackets_;
+    status.natStatus = natStatus_;
+    status.natHint = natHint_;
     return status;
 }
 

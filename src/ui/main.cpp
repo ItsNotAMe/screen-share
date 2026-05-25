@@ -692,47 +692,6 @@ QString lastLogFieldValue(const QString& output, const QString& field)
     return value;
 }
 
-enum class AccessCodeProblem {
-    None,
-    Required,
-    Mismatch,
-};
-
-bool logFieldPositive(const QString& output, const QString& field)
-{
-    const QString value = lastLogFieldValue(output, field);
-    if (value.isEmpty()) {
-        return false;
-    }
-    bool ok = false;
-    return value.toULongLong(&ok) > 0 && ok;
-}
-
-AccessCodeProblem detectAccessCodeProblem(const QString& output)
-{
-    if (output.contains("requires --access-code CODE", Qt::CaseInsensitive) ||
-        output.contains("requires an access code", Qt::CaseInsensitive) ||
-        output.contains("requires a password", Qt::CaseInsensitive) ||
-        output.contains("--access-code CODE or --allow-plaintext", Qt::CaseInsensitive)) {
-        return AccessCodeProblem::Required;
-    }
-
-    if (output.contains("could not be decrypted", Qt::CaseInsensitive) ||
-        output.contains("invalid_room_password", Qt::CaseInsensitive) ||
-        output.contains("room password is incorrect", Qt::CaseInsensitive) ||
-        output.contains("access code does not match", Qt::CaseInsensitive) ||
-        output.contains("does not match the peer invite fingerprint", Qt::CaseInsensitive) ||
-        output.contains("does not match the local invite fingerprint", Qt::CaseInsensitive) ||
-        logFieldPositive(output, "access_rejected_datagrams") ||
-        logFieldPositive(output, "crypto_rejected_datagrams") ||
-        logFieldPositive(output, "udp_feedback_access_rejected") ||
-        logFieldPositive(output, "udp_feedback_crypto_rejected")) {
-        return AccessCodeProblem::Mismatch;
-    }
-
-    return AccessCodeProblem::None;
-}
-
 QLabel* makeLabel(const QString& text, const QString& className = {})
 {
     auto* label = new QLabel(text);
@@ -3250,7 +3209,6 @@ private:
         }
         runtimeNatStatus_.clear();
         runtimeNatHint_.clear();
-        sessionOutputParseBuffer_.clear();
         accessCodeWarningShown_ = false;
         roomAlreadyOpenWarningShown_ = false;
         roomWatcherMismatchLogged_ = false;
@@ -4370,7 +4328,6 @@ private:
             resetPeerStatus();
             runtimeNatStatus_.clear();
             runtimeNatHint_.clear();
-            sessionOutputParseBuffer_.clear();
         }
         applyStatusBadge();
         repolish(actionButton_);
@@ -4516,23 +4473,16 @@ private:
     void handleSessionOutput(const QString& text)
     {
         appendOutput(text);
-        sessionOutputParseBuffer_ += text;
-        // NAT/access-code diagnostics still arrive as text until those paths
-        // grow typed backend events too. Keep enough complete lines for them.
-        constexpr qsizetype MaxParseBuffer = 32768;
-        if (sessionOutputParseBuffer_.size() > MaxParseBuffer) {
-            sessionOutputParseBuffer_.remove(0, sessionOutputParseBuffer_.size() - MaxParseBuffer);
-        }
-        handleRoomAlreadyOpenProblem(sessionOutputParseBuffer_);
-        handleAccessCodeProblem(sessionOutputParseBuffer_);
-        updateRuntimeNatStatus(sessionOutputParseBuffer_);
-        handlePreviewClosedSignal(sessionOutputParseBuffer_);
     }
 
     void handleSessionStatus(const screenshare::SessionEvent& event)
     {
         if (event.type == screenshare::SessionEventType::ViewerListChanged) {
             updateShareViewerStatus(event.status.viewers);
+        } else if (event.type == screenshare::SessionEventType::NatStatusChanged) {
+            updateRuntimeNatStatus(event.status);
+        } else if (event.type == screenshare::SessionEventType::Issue) {
+            handleSessionIssue(event);
         }
 
         if (!sessionRunning()) {
@@ -4554,10 +4504,27 @@ private:
         }
     }
 
-    void handleRoomAlreadyOpenProblem(const QString& text)
+    void handleSessionIssue(const screenshare::SessionEvent& event)
     {
-        if (roomAlreadyOpenWarningShown_ ||
-            !text.contains("room_already_open", Qt::CaseInsensitive)) {
+        switch (event.issue) {
+        case screenshare::SessionIssue::RoomAlreadyOpen:
+            handleRoomAlreadyOpenProblem();
+            return;
+        case screenshare::SessionIssue::PreviewClosed:
+            handlePreviewClosedSignal();
+            return;
+        case screenshare::SessionIssue::AccessCodeRequired:
+        case screenshare::SessionIssue::AccessCodeMismatch:
+            handleAccessCodeProblem(event.issue);
+            return;
+        case screenshare::SessionIssue::None:
+            return;
+        }
+    }
+
+    void handleRoomAlreadyOpenProblem()
+    {
+        if (roomAlreadyOpenWarningShown_) {
             return;
         }
 
@@ -4572,12 +4539,11 @@ private:
             "That room ID is already active as an open room, so it cannot be locked mid-session. Choose New room, or remove the password to join the open room.");
     }
 
-    void handlePreviewClosedSignal(const QString& text)
+    void handlePreviewClosedSignal()
     {
         if (shareMode() ||
             sessionStopRequested() ||
-            !sessionRunning() ||
-            !text.contains("preview_closed=stop")) {
+            !sessionRunning()) {
             return;
         }
 
@@ -4587,18 +4553,18 @@ private:
         updateInternetStatus();
     }
 
-    void handleAccessCodeProblem(const QString& text)
+    void handleAccessCodeProblem(screenshare::SessionIssue issue)
     {
         if (accessCodeWarningShown_) {
             return;
         }
 
-        const AccessCodeProblem problem = detectAccessCodeProblem(text);
-        if (problem == AccessCodeProblem::None) {
+        if (issue != screenshare::SessionIssue::AccessCodeRequired &&
+            issue != screenshare::SessionIssue::AccessCodeMismatch) {
             return;
         }
 
-        if (usingWorkerRoomFlow() && shareMode() && problem == AccessCodeProblem::Mismatch) {
+        if (usingWorkerRoomFlow() && shareMode() && issue == screenshare::SessionIssue::AccessCodeMismatch) {
             if (!roomWatcherMismatchLogged_) {
                 appendOutput("A watcher failed the room/password encryption check; keeping Share running.\n");
                 roomWatcherMismatchLogged_ = true;
@@ -4608,7 +4574,7 @@ private:
 
         accessCodeWarningShown_ = true;
         if (usingWorkerRoomFlow()) {
-            if (problem == AccessCodeProblem::Required) {
+            if (issue == screenshare::SessionIssue::AccessCodeRequired) {
                 stopSession();
                 clearRoomKeyForRetry(
                     "This room expects encrypted traffic. Choose the same room on both computers, then start again. If the room is locked, enter the room password.",
@@ -4625,7 +4591,7 @@ private:
             return;
         }
 
-        if (problem == AccessCodeProblem::Required) {
+        if (issue == screenshare::SessionIssue::AccessCodeRequired) {
             clearAccessCodeForRetry(
                 "This room or receiver needs an access code. Enter the same access code on both computers, or enable plaintext on both sides.",
                 "Access code required");
@@ -4839,26 +4805,26 @@ private:
         shareViewerStatusLabel_->setText(summary + "\n" + rows.join("\n"));
     }
 
-    void updateRuntimeNatStatus(const QString& text)
+    void updateRuntimeNatStatus(const screenshare::SessionStatus& status)
     {
-        const QString status = lastLogFieldValue(text, "nat_status");
-        if (status.isEmpty()) {
+        const QString natStatus = QString::fromStdString(status.natStatus);
+        if (natStatus.isEmpty()) {
             return;
         }
-        runtimeNatStatus_ = status;
-        const QString hint = lastLogFieldValue(text, "nat_hint");
+        runtimeNatStatus_ = natStatus;
+        const QString hint = QString::fromStdString(status.natHint);
         if (!hint.isEmpty()) {
             runtimeNatHint_ = hint;
         }
-        runtimeNatShareMode_ = shareMode();
+        runtimeNatShareMode_ = status.role == screenshare::SessionRole::Share;
         updateInternetStatus();
     }
 
     void appendOutput(const QString& text)
     {
         // The Output panel was removed from the UI. Engine stdout is still
-        // captured for NAT-status parsing and saved-report logs; mirror it
-        // to qDebug so developers can still tail it from a terminal build.
+        // captured for saved-report logs; mirror it to qDebug so developers
+        // can still tail it from a terminal build.
         if (outputEdit_ != nullptr) {
             outputEdit_->moveCursor(QTextCursor::End);
             outputEdit_->insertPlainText(text);
@@ -4995,7 +4961,6 @@ private:
     QString selectedReceiverAccessFingerprint_;
     QString runtimeNatStatus_;
     QString runtimeNatHint_;
-    QString sessionOutputParseBuffer_;
     QVector<ShareViewerStatus> shareViewers_;
     QElapsedTimer shareViewerClock_;
     bool runtimeNatShareMode_ = true;
@@ -5552,18 +5517,6 @@ int main(int argc, char** argv)
             const QString natStatus = lastLogFieldValue(QString::fromUtf8(
                 "nat_status=probing nat_hint=start_share\n"
                 "nat_status=receiving nat_hint=media_received\n"), "nat_status");
-            const bool missingAccessCodeDetected =
-                detectAccessCodeProblem("Encrypted compact NAT invite requires --access-code CODE") ==
-                AccessCodeProblem::Required;
-            const bool mismatchedAccessCodeDetected =
-                detectAccessCodeProblem("Encrypted compact NAT invite could not be decrypted; check the access code") ==
-                AccessCodeProblem::Mismatch;
-            const bool rejectedPacketsDetected =
-                detectAccessCodeProblem("access_rejected_datagrams=2 crypto_rejected_datagrams=0") ==
-                AccessCodeProblem::Mismatch;
-            const bool normalEncryptedTelemetryIgnored =
-                detectAccessCodeProblem("UDP sender pacing=enabled access_code=required udp_feedback_access=required") ==
-                AccessCodeProblem::None;
             const bool resourcesAvailable =
                 !appIcon().isNull() &&
                 !uiIcon("share").isNull() &&
@@ -5764,10 +5717,6 @@ int main(int argc, char** argv)
                 commandInvite.startsWith("nat_invite=screenshare-invite-v1") &&
                 compactCommandInvite.startsWith("ss1p:") &&
                 natStatus == "receiving" &&
-                missingAccessCodeDetected &&
-                mismatchedAccessCodeDetected &&
-                rejectedPacketsDetected &&
-                normalEncryptedTelemetryIgnored &&
                 resourcesAvailable &&
                 displays.size() == 2 &&
                 displays[1].index == 1 &&
