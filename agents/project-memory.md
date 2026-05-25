@@ -92,7 +92,7 @@ WGC capture by default
 - PR #99 `Secure Worker room signaling`: hidden app-generated room keys in secure room links, Durable Object live room state, static-candidate fanout fix, and clearer direct-UDP-blocked diagnostics.
 - PR #100 `Add active room directory`: KV-backed active room summaries plus safe `GET /rooms` and `GET /rooms/:roomId/summary`, with Durable Objects still verified as the live source of truth.
 - PR #102 `Add joinable room list with room access keys`: UI room list joins public Worker rooms without copied secret links; Durable Object keeps the hidden room access key.
-- Current local change: Worker room events add a WebSocket `GET /rooms/:roomId/events?peerId=...`; native live signaling uses it to wake peer refresh immediately and keeps a 30-second HTTP join as heartbeat/fallback.
+- Current local change: `AppSessionBackend` is gaining typed live status events for Share viewers and Watch media activity, so `ScreenShareUi` can stop parsing `viewer_*` and media-counter log fields for its viewer count and Live/Disconnected indicator.
 
 ## Active Memory Files
 
@@ -147,7 +147,8 @@ WGC capture by default
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
   - Live Share/Watch runs now go through `src/ui/QtSessionBackend.*` and `src/app/AppSessionBackend.*`, so the UI calls the app runner on a worker thread instead of launching `ScreenShare.exe`.
-  - Room-based Share/Watch arguments are built from typed configs through `src/core/SessionCommand.*`; stop/runtime resolution controls route through `src/core/SessionRuntimeControl.*` with file-backed control for CLI runs and memory-backed control for UI runs. The next UI architecture step is typed state/log parsing parity and eventually media surfaces for active share/watch screens.
+  - Room-based Share/Watch arguments are built from typed configs through `src/core/SessionCommand.*`; stop/runtime resolution controls route through `src/core/SessionRuntimeControl.*` with file-backed control for CLI runs and memory-backed control for UI runs.
+  - `AppSessionBackend` now translates the first live telemetry slice into typed `SessionEvent` snapshots: Share viewer rows use typed viewer status, and Watch/Share live indicators use typed activity instead of UI-side `viewer_*` / media-counter log parsing. Remaining UI parsing is still used for NAT hints, access-code failures, and preview-close handling until those get typed events too.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.
   - `--lan-discover` search mode.

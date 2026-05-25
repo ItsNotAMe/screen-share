@@ -34,6 +34,7 @@ public:
     void setStartedHandler(std::function<void()> handler);
     void setErrorHandler(std::function<void(const QString&)> handler);
     void setFinishedHandler(std::function<void(const FinishInfo&)> handler);
+    void setStatusHandler(std::function<void(const screenshare::SessionEvent&)> handler);
 
     bool start(const StartRequest& request, QString* errorMessage = nullptr);
     void stop();
@@ -50,6 +51,7 @@ private:
     std::function<void()> startedHandler_;
     std::function<void(const QString&)> errorHandler_;
     std::function<void(const FinishInfo&)> finishedHandler_;
+    std::function<void(const screenshare::SessionEvent&)> statusHandler_;
     bool running_ = false;
     bool stopRequested_ = false;
     bool finished_ = false;

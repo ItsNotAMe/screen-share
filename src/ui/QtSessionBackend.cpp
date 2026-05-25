@@ -70,6 +70,11 @@ void QtSessionBackend::setFinishedHandler(std::function<void(const FinishInfo&)>
     finishedHandler_ = std::move(handler);
 }
 
+void QtSessionBackend::setStatusHandler(std::function<void(const screenshare::SessionEvent&)> handler)
+{
+    statusHandler_ = std::move(handler);
+}
+
 bool QtSessionBackend::start(const StartRequest& request, QString* errorMessage)
 {
     if (running_) {
@@ -145,6 +150,10 @@ void QtSessionBackend::handleSessionEvent(const screenshare::SessionEvent& event
             outputHandler_(ToQString(event.message));
         }
         return;
+    }
+
+    if (statusHandler_) {
+        statusHandler_(event);
     }
 
     if (event.type == screenshare::SessionEventType::Error) {

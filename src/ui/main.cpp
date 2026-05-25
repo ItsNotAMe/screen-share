@@ -1094,6 +1094,9 @@ public:
             }
             setRunning(false);
         });
+        sessionBackend_->setStatusHandler([this](const screenshare::SessionEvent& event) {
+            handleSessionStatus(event);
+        });
 
         discoveryProcess_ = new QProcess(this);
         discoveryProcess_->setProcessChannelMode(QProcess::MergedChannels);
@@ -4514,8 +4517,8 @@ private:
     {
         appendOutput(text);
         sessionOutputParseBuffer_ += text;
-        // Each sender stat line is roughly 2 KB. Keep multiple full lines so
-        // the connection-state parser always has a complete tail to look at.
+        // NAT/access-code diagnostics still arrive as text until those paths
+        // grow typed backend events too. Keep enough complete lines for them.
         constexpr qsizetype MaxParseBuffer = 32768;
         if (sessionOutputParseBuffer_.size() > MaxParseBuffer) {
             sessionOutputParseBuffer_.remove(0, sessionOutputParseBuffer_.size() - MaxParseBuffer);
@@ -4524,8 +4527,31 @@ private:
         handleAccessCodeProblem(sessionOutputParseBuffer_);
         updateRuntimeNatStatus(sessionOutputParseBuffer_);
         handlePreviewClosedSignal(sessionOutputParseBuffer_);
-        updateShareViewerStatus(text);
-        updateConnectionState(sessionOutputParseBuffer_);
+    }
+
+    void handleSessionStatus(const screenshare::SessionEvent& event)
+    {
+        if (event.type == screenshare::SessionEventType::ViewerListChanged) {
+            updateShareViewerStatus(event.status.viewers);
+        }
+
+        if (!sessionRunning()) {
+            return;
+        }
+
+        if (event.status.state == screenshare::SessionState::Live) {
+            if (!shareMode()) {
+                markPeerActivity();
+            }
+            applyStatusBadge();
+            updateInternetStatus();
+        } else if (event.status.state == screenshare::SessionState::Connecting ||
+            event.status.state == screenshare::SessionState::Disconnected ||
+            event.status.state == screenshare::SessionState::Recovering) {
+            checkPeerActivityTimeout();
+            applyStatusBadge();
+            updateInternetStatus();
+        }
     }
 
     void handleRoomAlreadyOpenProblem(const QString& text)
@@ -4616,13 +4642,7 @@ private:
     {
         peerConnected_ = false;
         peerActivitySeen_ = false;
-        lastShareFeedbackPackets_ = 0;
-        lastWatchCompletedFrames_ = 0;
-        lastWatchPayloadBytes_ = 0;
-        lastWatchDecodedFrames_ = 0;
-        lastWatchAudioPackets_ = 0;
         shareViewers_.clear();
-        shareViewerParseBuffer_.clear();
         shareViewerClock_.restart();
         updateShareViewerStatusLabel();
     }
@@ -4654,6 +4674,11 @@ private:
         }
     }
 
+    static QString sessionStateName(screenshare::SessionState state)
+    {
+        return QString::fromLatin1(screenshare::ToString(state));
+    }
+
     ShareViewerStatus& shareViewerForEndpoint(int group, const QString& endpoint)
     {
         for (ShareViewerStatus& viewer : shareViewers_) {
@@ -4669,7 +4694,18 @@ private:
         return shareViewers_.last();
     }
 
-    void updateShareViewerStatus(const QString& text)
+    void removeViewersNotIn(const QSet<QString>& visibleViewerKeys)
+    {
+        for (int index = shareViewers_.size() - 1; index >= 0; --index) {
+            const ShareViewerStatus& viewer = shareViewers_[index];
+            const QString key = QString::number(viewer.group) + "|" + viewer.endpoint;
+            if (!visibleViewerKeys.contains(key)) {
+                shareViewers_.removeAt(index);
+            }
+        }
+    }
+
+    void updateShareViewerStatus(const std::vector<screenshare::SessionViewer>& viewers)
     {
         if (!shareMode()) {
             return;
@@ -4678,84 +4714,40 @@ private:
             shareViewerClock_.restart();
         }
 
-        bool changed = false;
         bool activeNow = false;
-        QSet<int> feedbackGroups;
+        QSet<QString> visibleViewerKeys;
         const qint64 nowMs = shareViewerClock_.elapsed();
-        shareViewerParseBuffer_ += text;
-        constexpr qsizetype MaxViewerParseBuffer = 8192;
-        if (shareViewerParseBuffer_.size() > MaxViewerParseBuffer) {
-            shareViewerParseBuffer_.remove(0, shareViewerParseBuffer_.size() - MaxViewerParseBuffer);
-        }
-
-        const qsizetype lastLf = shareViewerParseBuffer_.lastIndexOf('\n');
-        const qsizetype lastCr = shareViewerParseBuffer_.lastIndexOf('\r');
-        const qsizetype lineEnd = std::max(lastLf, lastCr);
-        if (lineEnd < 0) {
-            return;
-        }
-
-        const QString completeText = shareViewerParseBuffer_.left(lineEnd + 1);
-        shareViewerParseBuffer_.remove(0, lineEnd + 1);
-        const QStringList lines = completeText.split(QRegularExpression(QStringLiteral("[\r\n]+")), Qt::SkipEmptyParts);
-        for (const QString& line : lines) {
-            if (!line.contains("viewer_target=")) {
-                continue;
-            }
-
-            const QString endpoint = lastLogFieldValue(line, "viewer_endpoint");
+        for (const screenshare::SessionViewer& sessionViewer : viewers) {
+            const QString endpoint = QString::fromStdString(sessionViewer.endpoint);
             if (endpoint.isEmpty()) {
                 continue;
             }
+            visibleViewerKeys.insert(QString::number(sessionViewer.group) + "|" + endpoint);
 
-            bool groupOk = false;
-            const int group = lastLogFieldValue(line, "viewer_group").toInt(&groupOk);
-            ShareViewerStatus& viewer = shareViewerForEndpoint(groupOk ? group : -1, endpoint);
-            viewer.engineState = lastLogFieldValue(line, "viewer_state");
-            viewer.health = lastLogFieldValue(line, "viewer_feedback_health");
-            viewer.session = lastLogFieldValue(line, "viewer_feedback_session");
-            viewer.pendingDatagrams = lastLogFieldValue(line, "viewer_pending").toULongLong();
-            viewer.queueMs = lastLogFieldValue(line, "viewer_queue_ms").toULongLong();
-            viewer.completedFrames = lastLogFieldValue(line, "viewer_feedback_completed_frames").toULongLong();
-            viewer.resyncs = lastLogFieldValue(line, "viewer_feedback_resyncs").toULongLong();
-
-            bool ok = false;
-            const qulonglong packets = lastLogFieldValue(line, "viewer_feedback_packets").toULongLong(&ok);
-            if (ok) {
-                const bool increased =
-                    packets > viewer.feedbackPackets ||
-                    (packets < viewer.feedbackPackets && packets > 0);
-                viewer.feedbackPackets = packets;
-                if (increased) {
-                    viewer.everFeedback = true;
-                    viewer.lastActiveMs = nowMs;
-                    activeNow = true;
-                } else if (packets > 0) {
-                    viewer.everFeedback = true;
-                }
-                if (viewer.everFeedback && viewer.group >= 0) {
-                    feedbackGroups.insert(viewer.group);
-                }
+            ShareViewerStatus& viewer = shareViewerForEndpoint(sessionViewer.group, endpoint);
+            viewer.engineState = sessionStateName(sessionViewer.state);
+            viewer.health = QString::fromStdString(sessionViewer.health);
+            viewer.session = QString::fromStdString(sessionViewer.sessionFingerprint);
+            viewer.pendingDatagrams = sessionViewer.pendingDatagrams;
+            viewer.queueMs = sessionViewer.queueDelayMs;
+            viewer.completedFrames = sessionViewer.completedFrames;
+            viewer.resyncs = sessionViewer.decodeResyncs;
+            viewer.feedbackPackets = sessionViewer.feedbackPackets;
+            if (sessionViewer.hasFeedback) {
+                viewer.everFeedback = true;
             }
-            changed = true;
-        }
-
-        if (!feedbackGroups.isEmpty()) {
-            for (int index = shareViewers_.size() - 1; index >= 0; --index) {
-                const ShareViewerStatus& viewer = shareViewers_[index];
-                if (feedbackGroups.contains(viewer.group) && !viewer.everFeedback) {
-                    shareViewers_.removeAt(index);
-                    changed = true;
-                }
+            if (sessionViewer.activeNow) {
+                viewer.everFeedback = true;
+                viewer.lastActiveMs = nowMs;
+                activeNow = true;
             }
         }
 
+        removeViewersNotIn(visibleViewerKeys);
         if (activeNow) {
             markPeerActivity();
         }
-        if (changed) {
-            updateInternetStatus();
-        }
+        updateInternetStatus();
     }
 
     QString shareViewerStateText(const ShareViewerStatus& viewer) const
@@ -4862,44 +4854,6 @@ private:
         updateInternetStatus();
     }
 
-    void updateConnectionState(const QString& text)
-    {
-        if (!sessionRunning()) {
-            return;
-        }
-        bool activeNow = false;
-        if (shareMode()) {
-            activeNow = counterIncreased(text, "udp_feedback_packets", lastShareFeedbackPackets_);
-        } else {
-            const bool framesActive = counterIncreased(text, "completed_frames", lastWatchCompletedFrames_);
-            const bool payloadActive = counterIncreased(text, "payload_bytes", lastWatchPayloadBytes_);
-            const bool decodedActive = counterIncreased(text, "h264_decoded_frames", lastWatchDecodedFrames_);
-            const bool audioActive = counterIncreased(text, "audio_packets", lastWatchAudioPackets_);
-            activeNow = framesActive || payloadActive || decodedActive || audioActive;
-        }
-        if (activeNow) {
-            markPeerActivity();
-        } else {
-            checkPeerActivityTimeout();
-        }
-    }
-
-    static bool counterIncreased(const QString& text, const QString& field, qulonglong& previous)
-    {
-        const QString value = lastLogFieldValue(text, field);
-        if (value.isEmpty()) {
-            return false;
-        }
-        bool ok = false;
-        const qulonglong current = value.toULongLong(&ok);
-        if (!ok) {
-            return false;
-        }
-        const bool increased = current > previous || (current < previous && current > 0);
-        previous = current;
-        return increased;
-    }
-
     void appendOutput(const QString& text)
     {
         // The Output panel was removed from the UI. Engine stdout is still
@@ -4935,11 +4889,6 @@ private:
     bool peerConnected_ = false;
     bool peerActivitySeen_ = false;
     QElapsedTimer peerActivityTimer_;
-    qulonglong lastShareFeedbackPackets_ = 0;
-    qulonglong lastWatchCompletedFrames_ = 0;
-    qulonglong lastWatchPayloadBytes_ = 0;
-    qulonglong lastWatchDecodedFrames_ = 0;
-    qulonglong lastWatchAudioPackets_ = 0;
     QProcess* discoveryProcess_ = nullptr;
     QProcess* tailscaleProcess_ = nullptr;
     QProcess* displayProcess_ = nullptr;
@@ -5047,7 +4996,6 @@ private:
     QString runtimeNatStatus_;
     QString runtimeNatHint_;
     QString sessionOutputParseBuffer_;
-    QString shareViewerParseBuffer_;
     QVector<ShareViewerStatus> shareViewers_;
     QElapsedTimer shareViewerClock_;
     bool runtimeNatShareMode_ = true;
