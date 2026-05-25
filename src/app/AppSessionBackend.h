@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/SessionBackend.h"
+#include "core/ScreenShareSession.h"
 #include "core/SessionRuntimeControl.h"
 
 #include <cstdint>
@@ -12,7 +12,7 @@
 
 namespace screenshare {
 
-class AppSessionBackend final : public ISessionBackend {
+class AppSessionBackend final : public IScreenShareSession {
 public:
     AppSessionBackend() = default;
     ~AppSessionBackend() override;
@@ -20,18 +20,19 @@ public:
     AppSessionBackend(const AppSessionBackend&) = delete;
     AppSessionBackend& operator=(const AppSessionBackend&) = delete;
 
-    void StartShare(const ShareSessionConfig& config, ISessionObserver& observer) override;
-    void StartShare(const ShareSessionConfig& config, ISessionObserver& observer, std::string executablePath);
-    void StartWatch(const WatchSessionConfig& config, ISessionObserver& observer) override;
-    void StartWatch(const WatchSessionConfig& config, ISessionObserver& observer, std::string executablePath);
+    void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink) override;
+    void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink, std::string executablePath);
+    void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink) override;
+    void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink, std::string executablePath);
     void StartArguments(
         SessionRole role,
         std::vector<std::string> arguments,
-        ISessionObserver& observer,
+        ISessionEventSink& eventSink,
         std::string executablePath = "ScreenShare");
     void Shutdown();
     void Stop() override;
     void ApplyStreamSettings(const StreamSettings& settings) override;
+    SessionStatus GetStatus() const override;
     std::vector<SessionDisplayInfo> ListDisplays() override;
     std::vector<SessionAudioDeviceInfo> ListAudioDevices() override;
 
@@ -51,10 +52,10 @@ private:
     void Notify(SessionEventType type, SessionState state, std::string message);
     SessionStatus BuildStatusLocked() const;
 
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::thread worker_;
     MemorySessionRuntimeControl runtimeControl_;
-    ISessionObserver* observer_ = nullptr;
+    ISessionEventSink* observer_ = nullptr;
     SessionRole role_ = SessionRole::Share;
     SessionState state_ = SessionState::Idle;
     std::string summary_;

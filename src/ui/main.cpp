@@ -5610,7 +5610,7 @@ int main(int argc, char** argv)
             const bool memoryControlReset =
                 !memoryControl.StopRequested() &&
                 !memoryControl.TakeStreamSettingsRequest();
-            class AppSessionSelfTestObserver final : public screenshare::ISessionObserver {
+            class AppSessionSelfTestObserver final : public screenshare::ISessionEventSink {
             public:
                 void OnSessionEvent(const screenshare::SessionEvent& event) override
                 {
@@ -5656,9 +5656,13 @@ int main(int argc, char** argv)
                     screenshare::SessionRole::Share,
                     std::vector<std::string>{"--generate-access-code"},
                     appSessionSelfTestObserver);
+                const bool appSessionFinished = appSessionSelfTestObserver.wait();
+                const screenshare::SessionStatus appSessionStatus = appSelfTestBackend.GetStatus();
                 appSessionBackendOk =
-                    appSessionSelfTestObserver.wait() &&
-                    appSessionSelfTestObserver.ok();
+                    appSessionFinished &&
+                    appSessionSelfTestObserver.ok() &&
+                    appSessionStatus.state == screenshare::SessionState::Stopped &&
+                    !appSessionStatus.summary.empty();
             }
             const bool selfTestOk = peers.size() == 1 &&
                 peers.front().host == "100.64.0.2" &&

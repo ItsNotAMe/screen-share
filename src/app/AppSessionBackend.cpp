@@ -238,30 +238,30 @@ AppSessionBackend::~AppSessionBackend()
     Shutdown();
 }
 
-void AppSessionBackend::StartShare(const ShareSessionConfig& config, ISessionObserver& observer)
+void AppSessionBackend::StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink)
 {
-    StartShare(config, observer, "ScreenShare");
+    StartShare(config, eventSink, "ScreenShare");
 }
 
 void AppSessionBackend::StartShare(
     const ShareSessionConfig& config,
-    ISessionObserver& observer,
+    ISessionEventSink& eventSink,
     std::string executablePath)
 {
-    StartArguments(SessionRole::Share, BuildShareArguments(config), observer, std::move(executablePath));
+    StartArguments(SessionRole::Share, BuildShareArguments(config), eventSink, std::move(executablePath));
 }
 
-void AppSessionBackend::StartWatch(const WatchSessionConfig& config, ISessionObserver& observer)
+void AppSessionBackend::StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink)
 {
-    StartWatch(config, observer, "ScreenShare");
+    StartWatch(config, eventSink, "ScreenShare");
 }
 
 void AppSessionBackend::StartWatch(
     const WatchSessionConfig& config,
-    ISessionObserver& observer,
+    ISessionEventSink& eventSink,
     std::string executablePath)
 {
-    StartArguments(SessionRole::Watch, BuildWatchArguments(config), observer, std::move(executablePath));
+    StartArguments(SessionRole::Watch, BuildWatchArguments(config), eventSink, std::move(executablePath));
 }
 
 void AppSessionBackend::Stop()
@@ -301,6 +301,12 @@ void AppSessionBackend::ApplyStreamSettings(const StreamSettings& settings)
         currentState = state_;
     }
     Notify(SessionEventType::SettingsChanged, currentState, "Stream settings queued");
+}
+
+SessionStatus AppSessionBackend::GetStatus() const
+{
+    std::scoped_lock lock(mutex_);
+    return BuildStatusLocked();
 }
 
 std::vector<SessionDisplayInfo> AppSessionBackend::ListDisplays()
@@ -345,7 +351,7 @@ std::vector<SessionAudioDeviceInfo> AppSessionBackend::ListAudioDevices()
 void AppSessionBackend::StartArguments(
     SessionRole role,
     std::vector<std::string> arguments,
-    ISessionObserver& observer,
+    ISessionEventSink& eventSink,
     std::string executablePath)
 {
     JoinFinishedWorker();
@@ -358,7 +364,7 @@ void AppSessionBackend::StartArguments(
             alreadyRunning = true;
             currentState = state_;
         } else {
-            observer_ = &observer;
+            observer_ = &eventSink;
             role_ = role;
             state_ = SessionState::Starting;
             summary_ = "Starting session";
@@ -380,7 +386,7 @@ void AppSessionBackend::StartArguments(
     }
 
     if (alreadyRunning) {
-        observer.OnSessionEvent(BuildErrorEvent(role, currentState, "A session is already running."));
+        eventSink.OnSessionEvent(BuildErrorEvent(role, currentState, "A session is already running."));
         return;
     }
 
@@ -1049,7 +1055,7 @@ void AppSessionBackend::HandleWatchLogLine(const std::string& line)
 
 void AppSessionBackend::EmitStatus(SessionEventType type, std::string message)
 {
-    ISessionObserver* observer = nullptr;
+    ISessionEventSink* observer = nullptr;
     SessionEvent event;
     {
         std::scoped_lock lock(mutex_);
@@ -1066,7 +1072,7 @@ void AppSessionBackend::EmitStatus(SessionEventType type, std::string message)
 
 void AppSessionBackend::EmitIssue(SessionIssue issue, std::string message)
 {
-    ISessionObserver* observer = nullptr;
+    ISessionEventSink* observer = nullptr;
     SessionEvent event;
     {
         std::scoped_lock lock(mutex_);
@@ -1084,7 +1090,7 @@ void AppSessionBackend::EmitIssue(SessionIssue issue, std::string message)
 
 void AppSessionBackend::Notify(SessionEventType type, SessionState state, std::string message)
 {
-    ISessionObserver* observer = nullptr;
+    ISessionEventSink* observer = nullptr;
     SessionEvent event;
     {
         std::scoped_lock lock(mutex_);
