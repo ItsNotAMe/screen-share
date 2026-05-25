@@ -97,12 +97,18 @@ struct StreamSettings {
 
 struct ShareSessionConfig {
     ShareConnectionMode connectionMode = ShareConnectionMode::Room;
+    std::string sessionId;
     int displayIndex = 0;
+    int seconds = 0;
     uint16_t roomPort = 0;
+    uint16_t udpLocalPort = 0;
     std::string roomId;
     std::string roomName;
     std::string roomPassword;
+    std::string signalingServerUrl;
     std::string signalingStunServer;
+    int signalingTimeoutMs = 5000;
+    int signalingSetupSeconds = 5;
     std::string udpAccessCode;
     bool allowPlaintext = false;
     std::string reportPath;
@@ -117,10 +123,15 @@ struct ShareSessionConfig {
 
 struct WatchSessionConfig {
     WatchConnectionMode connectionMode = WatchConnectionMode::Room;
+    std::string sessionId;
+    int seconds = 0;
     uint16_t listenPort = 0;
     std::string roomId;
     std::string roomPassword;
+    std::string signalingServerUrl;
     std::string signalingStunServer;
+    int signalingTimeoutMs = 5000;
+    int signalingSetupSeconds = 5;
     std::string udpAccessCode;
     bool allowPlaintext = false;
     std::string reportPath;
