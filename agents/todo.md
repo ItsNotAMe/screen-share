@@ -24,6 +24,7 @@ Only you can fully validate these because they need real machines/networks.
    - [x] Make normal CLI Share/Watch presets parse into the same typed configs and execution path as the UI.
    - [x] Split typed Share/Watch session runner declarations away from the CLI app header.
    - [x] Rename the shared app-runner CMake target to `ScreenShareSessionRuntime`.
+   - [x] Move typed Share/Watch runner entrypoint implementation into `ScreenShareSessionRunner.cpp`.
    - [ ] Promote remaining advanced CLI-only Share/Watch diagnostic flags into typed configs only when they become normal app controls.
    - [ ] Continue reshaping CMake targets so `ScreenShareCore` owns the reusable session API, `ScreenShare.exe` is the thin CLI app, and `ScreenShareUi.exe` links the same API directly instead of CLI parsing internals.
    - [ ] Move remaining reusable Share/Watch runtime code out of `ScreenShareApp.cpp` so `ScreenShareSessionRuntime` stops carrying CLI parsing internals.
