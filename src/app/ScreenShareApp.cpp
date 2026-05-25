@@ -1,6 +1,6 @@
 #include "app/ScreenShareApp.h"
 
-#include "app/ScreenShareSessionRunner.h"
+#include "app/ScreenShareAppInternal.h"
 
 #include "audio/OpusCodec.h"
 #include "audio/WasapiCapture.h"
@@ -254,13 +254,7 @@ struct Options {
     bool udpLocalPortFromLocalInvite = false;
 };
 
-struct SavedReportContext {
-    std::string sessionId;
-    uint64_t sessionFingerprint = 0;
-    bool accessCodeRequired = false;
-    bool encryptionEnabled = false;
-    std::optional<screenshare::udp_protocol::FeedbackSnapshot> latestReceiverFeedback;
-};
+using screenshare_app_internal::SavedReportContext;
 
 void PrintHelp()
 {
@@ -8409,6 +8403,10 @@ Options BuildWatchSessionOptions(
     return options;
 }
 
+} // namespace
+
+namespace screenshare_app_internal {
+
 int ExecuteScreenShareOptions(
     Options& options,
     SavedReportContext& reportContext,
@@ -8491,7 +8489,7 @@ std::vector<char*> MutableArgv(std::vector<std::string>& arguments)
 }
 
 int RunTypedScreenShareSession(
-    std::function<Options(std::string)> buildOptions,
+    std::function<int(SavedReportContext&, const ScreenShareAppRunContext&)> executeSession,
     const ScreenShareAppRunContext& context,
     std::string executablePath,
     const char* syntheticCommand,
@@ -8520,8 +8518,7 @@ int RunTypedScreenShareSession(
             std::cout << "Saving run report to " << saveReportPath->string() << "\n";
         }
 
-        Options options = buildOptions(reportContext.sessionId);
-        exitCode = ExecuteScreenShareOptions(options, reportContext, context);
+        exitCode = executeSession(reportContext, context);
     } catch (const std::invalid_argument& error) {
         std::cerr << "Error: " << error.what() << "\n";
         exitCode = 1;
@@ -8558,7 +8555,7 @@ int RunTypedScreenShareSession(
     return exitCode;
 }
 
-} // namespace
+} // namespace screenshare_app_internal
 
 int RunScreenShareApp(int argc, char** argv)
 {
@@ -8573,39 +8570,9 @@ int RunScreenShareApp(const std::vector<std::string>& arguments)
 int RunScreenShareApp(const std::vector<std::string>& arguments, const ScreenShareAppRunContext& context)
 {
     std::vector<std::string> normalizedArguments = arguments;
-    std::vector<char*> argv = MutableArgv(normalizedArguments);
+    std::vector<char*> argv = screenshare_app_internal::MutableArgv(normalizedArguments);
 
     return RunScreenShareApp(static_cast<int>(argv.size()), argv.data(), context);
-}
-
-int RunShareSession(
-    const screenshare::ShareSessionConfig& config,
-    const ScreenShareAppRunContext& context,
-    std::string executablePath)
-{
-    return RunTypedScreenShareSession(
-        [config](std::string defaultSessionId) {
-            return BuildShareSessionOptions(config, std::move(defaultSessionId));
-        },
-        context,
-        std::move(executablePath),
-        "--typed-share-session",
-        config.reportPath);
-}
-
-int RunWatchSession(
-    const screenshare::WatchSessionConfig& config,
-    const ScreenShareAppRunContext& context,
-    std::string executablePath)
-{
-    return RunTypedScreenShareSession(
-        [config](std::string defaultSessionId) {
-            return BuildWatchSessionOptions(config, std::move(defaultSessionId));
-        },
-        context,
-        std::move(executablePath),
-        "--typed-watch-session",
-        config.reportPath);
 }
 
 int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& context)
@@ -8619,7 +8586,7 @@ int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& con
     const auto explicitLogPath = FindPathArgument(argc, argv, "--log");
     std::optional<std::filesystem::path> capturedLogPath;
     bool capturedLogIsTemporary = false;
-    SavedReportContext reportContext;
+    screenshare_app_internal::SavedReportContext reportContext;
     reportContext.sessionId = GenerateSessionId();
     reportContext.sessionFingerprint = SessionFingerprint(reportContext.sessionId);
     int exitCode = 0;
@@ -8638,11 +8605,17 @@ int RunScreenShareApp(int argc, char** argv, const ScreenShareAppRunContext& con
 
         Options options = ParseOptions(argc, argv, reportContext.sessionId);
         if (options.cliShareSession) {
-            exitCode = ExecuteShareSessionConfig(*options.cliShareSession, reportContext, context);
+            exitCode = screenshare_app_internal::ExecuteShareSessionConfig(
+                *options.cliShareSession,
+                reportContext,
+                context);
         } else if (options.cliWatchSession) {
-            exitCode = ExecuteWatchSessionConfig(*options.cliWatchSession, reportContext, context);
+            exitCode = screenshare_app_internal::ExecuteWatchSessionConfig(
+                *options.cliWatchSession,
+                reportContext,
+                context);
         } else {
-            exitCode = ExecuteScreenShareOptions(options, reportContext, context);
+            exitCode = screenshare_app_internal::ExecuteScreenShareOptions(options, reportContext, context);
         }
     } catch (const std::invalid_argument& error) {
         std::cerr << "Error: " << error.what() << "\n\n";

@@ -113,6 +113,7 @@ target_link_libraries(ScreenShareCore PUBLIC
 add_library(ScreenShareSessionRuntime STATIC
     src/app/AppSessionBackend.cpp
     src/app/ScreenShareApp.cpp
+    src/app/ScreenShareSessionRunner.cpp
 )
 
 target_compile_features(ScreenShareSessionRuntime PUBLIC cxx_std_20)

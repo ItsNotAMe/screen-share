@@ -5,7 +5,8 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 ## Source Layout
 
 - `src/app/ScreenShareApp.*`: callable app runner for command-line parsing, CLI typed Share/Watch option construction, top-level sender/receiver loops, adaptation policy, stats printing, logging.
-- `src/app/ScreenShareRunContext.h` and `src/app/ScreenShareSessionRunner.h`: typed app-backed Share/Watch session runner API used by the UI backend without including the CLI app header.
+- `src/app/ScreenShareRunContext.h`, `src/app/ScreenShareSessionRunner.h`, and `src/app/ScreenShareSessionRunner.cpp`: typed app-backed Share/Watch session runner plumbing used by the UI backend without including the CLI app header.
+- `src/app/ScreenShareAppInternal.h`: private declarations shared only inside the app runtime implementation; not a public UI/backend API surface.
 - `src/app/AppSessionBackend.*`: pure C++ `IScreenShareSession` adapter around typed Share/Watch app runner entrypoints, using memory runtime control on a worker thread, translating key live telemetry into typed session events/status snapshots, and exposing typed display/audio-device discovery for the UI.
 - `src/app/ScreenShareMain.cpp`: tiny executable entry point that calls the app runner.
 - `src/core/`: shared typed session API, legacy typed Share/Watch command-preview builders, runtime-control interfaces, and native core-library entry points that are intended to be used by both the CLI and UI.
