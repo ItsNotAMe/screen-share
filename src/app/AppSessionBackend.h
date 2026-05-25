@@ -40,6 +40,7 @@ private:
     void HandleOutput(std::string_view text);
     void HandleLogLine(const std::string& line);
     void HandleDiagnosticLogLine(const std::string& line);
+    void HandleStreamLogLine(const std::string& line);
     void HandleShareLogLine(const std::string& line);
     void HandleWatchLogLine(const std::string& line);
     void EmitStatus(SessionEventType type, std::string message);
@@ -56,6 +57,7 @@ private:
     std::string summary_;
     std::string health_;
     std::string logParseBuffer_;
+    SessionStreamStatus streamStatus_;
     std::vector<SessionViewer> viewers_;
     uint64_t watchCompletedFrames_ = 0;
     uint64_t watchPayloadBytes_ = 0;

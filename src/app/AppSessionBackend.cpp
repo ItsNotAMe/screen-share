@@ -126,6 +126,37 @@ std::optional<int> ParseInt(const std::string& text)
     }
 }
 
+std::optional<double> ParseDouble(const std::string& text)
+{
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    try {
+        size_t parsed = 0;
+        const double value = std::stod(text, &parsed);
+        if (parsed != text.size()) {
+            return std::nullopt;
+        }
+        return value;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::optional<SessionResolution> ParseResolution(const std::string& text)
+{
+    const size_t separator = text.find('x');
+    if (separator == std::string::npos) {
+        return std::nullopt;
+    }
+    const auto width = ParseInt(text.substr(0, separator));
+    const auto height = ParseInt(text.substr(separator + 1));
+    if (!width || !height || *width <= 0 || *height <= 0) {
+        return std::nullopt;
+    }
+    return SessionResolution{*width, *height};
+}
+
 bool CounterAdvanced(uint64_t current, uint64_t previous)
 {
     return current > previous || (current < previous && current > 0);
@@ -270,6 +301,7 @@ void AppSessionBackend::StartArguments(
             summary_ = "Starting session";
             health_.clear();
             logParseBuffer_.clear();
+            streamStatus_ = SessionStreamStatus{};
             viewers_.clear();
             watchCompletedFrames_ = 0;
             watchPayloadBytes_ = 0;
@@ -391,6 +423,7 @@ void AppSessionBackend::HandleOutput(std::string_view text)
 void AppSessionBackend::HandleLogLine(const std::string& line)
 {
     HandleDiagnosticLogLine(line);
+    HandleStreamLogLine(line);
 
     SessionRole role = SessionRole::Share;
     {
@@ -402,6 +435,100 @@ void AppSessionBackend::HandleLogLine(const std::string& line)
     } else {
         HandleWatchLogLine(line);
     }
+}
+
+void AppSessionBackend::HandleStreamLogLine(const std::string& line)
+{
+    const auto sourceResolution = ParseResolution(LogFieldValue(line, "source"));
+    const auto outputResolution = ParseResolution(LogFieldValue(line, "output"));
+    const auto decodedOutputResolution = ParseResolution(LogFieldValue(line, "h264_decoded_output"));
+    const auto outputFps = ParseDouble(LogFieldValue(line, "output_fps"));
+    const auto completedFps = ParseDouble(LogFieldValue(line, "completed_fps"));
+    const auto desktopUpdateFps = ParseDouble(LogFieldValue(line, "desktop_update_fps"));
+    const auto bitrateMbps = ParseDouble(LogFieldValue(line, "stream_bitrate_mbps"));
+    const auto resolutionScale = ParseDouble(LogFieldValue(line, "resolution_scale"));
+    const auto totalOutputFrames = ParseUint64(LogFieldValue(line, "total_output_frames"));
+    const auto streamQueueDepth = ParseUint64(LogFieldValue(line, "stream_queue"));
+    const auto streamDroppedFrames = ParseUint64(LogFieldValue(line, "stream_dropped"));
+    const auto udpQueueMs = ParseUint64(LogFieldValue(line, "udp_queue_ms"));
+    const std::string resolutionAdaptation = LogFieldValue(line, "resolution_adaptation");
+    const auto resolutionAdaptations = ParseUint64(LogFieldValue(line, "resolution_adaptations"));
+    const std::string bitrateAdaptation = LogFieldValue(line, "bitrate_adaptation");
+    const auto bitrateAdaptations = ParseUint64(LogFieldValue(line, "bitrate_adaptations"));
+
+    const bool hasStreamFields =
+        sourceResolution ||
+        outputResolution ||
+        decodedOutputResolution ||
+        outputFps ||
+        completedFps ||
+        desktopUpdateFps ||
+        bitrateMbps ||
+        resolutionScale ||
+        totalOutputFrames ||
+        streamQueueDepth ||
+        streamDroppedFrames ||
+        udpQueueMs ||
+        !resolutionAdaptation.empty() ||
+        resolutionAdaptations ||
+        !bitrateAdaptation.empty() ||
+        bitrateAdaptations;
+    if (!hasStreamFields) {
+        return;
+    }
+
+    {
+        std::scoped_lock lock(mutex_);
+        streamStatus_.hasStats = true;
+        if (sourceResolution) {
+            streamStatus_.sourceResolution = *sourceResolution;
+        }
+        if (outputResolution) {
+            streamStatus_.outputResolution = *outputResolution;
+        } else if (decodedOutputResolution) {
+            streamStatus_.outputResolution = *decodedOutputResolution;
+        }
+        if (outputFps) {
+            streamStatus_.outputFps = *outputFps;
+        } else if (completedFps) {
+            streamStatus_.outputFps = *completedFps;
+        }
+        if (desktopUpdateFps) {
+            streamStatus_.desktopUpdateFps = *desktopUpdateFps;
+        }
+        if (bitrateMbps) {
+            streamStatus_.bitrateMbps = *bitrateMbps;
+        }
+        if (resolutionScale) {
+            streamStatus_.resolutionScale = *resolutionScale;
+        }
+        if (totalOutputFrames) {
+            streamStatus_.totalOutputFrames = *totalOutputFrames;
+        }
+        if (streamQueueDepth) {
+            streamStatus_.streamQueueDepth = *streamQueueDepth;
+        }
+        if (streamDroppedFrames) {
+            streamStatus_.streamDroppedFrames = *streamDroppedFrames;
+        }
+        if (udpQueueMs) {
+            streamStatus_.udpQueueMs = *udpQueueMs;
+        }
+        if (!resolutionAdaptation.empty()) {
+            streamStatus_.resolutionAdaptation = resolutionAdaptation;
+        }
+        if (resolutionAdaptations) {
+            streamStatus_.resolutionAdaptations = *resolutionAdaptations;
+        }
+        if (!bitrateAdaptation.empty()) {
+            streamStatus_.bitrateAdaptation = bitrateAdaptation;
+        }
+        if (bitrateAdaptations) {
+            streamStatus_.bitrateAdaptations = *bitrateAdaptations;
+        }
+    }
+
+    EmitStatus(SessionEventType::StreamStatusChanged, "Stream status updated");
 }
 
 void AppSessionBackend::HandleDiagnosticLogLine(const std::string& line)
@@ -629,6 +756,8 @@ SessionStatus AppSessionBackend::BuildStatusLocked() const
     status.role = role_;
     status.state = state_;
     status.summary = summary_;
+    status.stream = streamStatus_;
+    status.videoResolution = streamStatus_.outputResolution;
     status.viewers = viewers_;
     status.health = health_;
     status.completedFrames = watchCompletedFrames_;
