@@ -21,7 +21,9 @@ public:
     AppSessionBackend& operator=(const AppSessionBackend&) = delete;
 
     void StartShare(const ShareSessionConfig& config, ISessionObserver& observer) override;
+    void StartShare(const ShareSessionConfig& config, ISessionObserver& observer, std::string executablePath);
     void StartWatch(const WatchSessionConfig& config, ISessionObserver& observer) override;
+    void StartWatch(const WatchSessionConfig& config, ISessionObserver& observer, std::string executablePath);
     void StartArguments(
         SessionRole role,
         std::vector<std::string> arguments,

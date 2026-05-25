@@ -1,6 +1,8 @@
 #include "core/SessionCommand.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -41,7 +43,7 @@ std::string BitrateMbps(uint32_t bitrateBps)
     return std::to_string(whole) + "." + fraction;
 }
 
-void AddCommonRoomArguments(
+void AddCommonSessionArguments(
     std::vector<std::string>& args,
     const std::string& signalingStunServer,
     const std::string& udpAccessCode,
@@ -61,18 +63,55 @@ void AddCommonRoomArguments(
     }
 }
 
+void Require(bool condition, const char* message)
+{
+    if (!condition) {
+        throw std::invalid_argument(message);
+    }
+}
+
 } // namespace
 
-std::vector<std::string> BuildShareRoomArguments(const ShareSessionConfig& config)
+std::vector<std::string> BuildShareArguments(const ShareSessionConfig& config)
 {
     std::vector<std::string> args;
-    AddOption(args, "--share-room", static_cast<int>(config.roomPort));
-    AddOption(args, "--signal-room", config.roomId);
-    if (!config.roomName.empty()) {
-        AddOption(args, "--signal-room-name", config.roomName);
+    switch (config.connectionMode) {
+    case ShareConnectionMode::Room:
+        Require(config.roomPort > 0, "Share room port is required.");
+        Require(!config.roomId.empty(), "Share room ID is required.");
+        AddOption(args, "--share-room", static_cast<int>(config.roomPort));
+        AddOption(args, "--signal-room", config.roomId);
+        if (!config.roomName.empty()) {
+            AddOption(args, "--signal-room-name", config.roomName);
+        }
+        if (!config.roomPassword.empty()) {
+            AddOption(args, "--signal-room-password", config.roomPassword);
+        }
+        break;
+    case ShareConnectionMode::DirectTargets:
+        Require(!config.targets.empty(), "At least one Share target is required.");
+        if (!config.targets.empty()) {
+            AddOption(args, "--share", config.targets.front());
+            for (size_t index = 1; index < config.targets.size(); ++index) {
+                AddOption(args, "--share-target", config.targets[index]);
+            }
+        }
+        break;
+    case ShareConnectionMode::ManualInvite: {
+        const std::string firstTarget =
+            config.watcherInvites.empty() ? config.localInvite : config.watcherInvites.front();
+        Require(!firstTarget.empty(), "A room invite or watcher invite is required.");
+        if (!firstTarget.empty()) {
+            AddOption(args, "--share", firstTarget);
+        }
+        if (!config.localInvite.empty()) {
+            AddOption(args, "--local-invite", config.localInvite);
+        }
+        for (size_t index = 1; index < config.watcherInvites.size(); ++index) {
+            AddOption(args, "--share-target", config.watcherInvites[index]);
+        }
+        break;
     }
-    if (!config.roomPassword.empty()) {
-        AddOption(args, "--signal-room-password", config.roomPassword);
     }
 
     AddOption(args, "--display", config.displayIndex);
@@ -95,7 +134,7 @@ std::vector<std::string> BuildShareRoomArguments(const ShareSessionConfig& confi
         AddOption(args, "--audio-device-id", config.audioDeviceId);
     }
 
-    AddCommonRoomArguments(
+    AddCommonSessionArguments(
         args,
         config.signalingStunServer,
         config.udpAccessCode,
@@ -104,19 +143,37 @@ std::vector<std::string> BuildShareRoomArguments(const ShareSessionConfig& confi
     return args;
 }
 
-std::vector<std::string> BuildWatchRoomArguments(const WatchSessionConfig& config)
+std::vector<std::string> BuildWatchArguments(const WatchSessionConfig& config)
 {
     std::vector<std::string> args;
+    Require(config.listenPort > 0, "Watch listen port is required.");
     if (config.playAudio) {
         AddOption(args, "--watch", static_cast<int>(config.listenPort));
     } else {
         AddOption(args, "--udp-recv", static_cast<int>(config.listenPort));
         args.emplace_back("--preview");
     }
-    AddOption(args, "--signal-room", config.roomId);
-    if (!config.roomPassword.empty()) {
-        AddOption(args, "--signal-room-password", config.roomPassword);
+
+    switch (config.connectionMode) {
+    case WatchConnectionMode::Room:
+        Require(!config.roomId.empty(), "Watch room ID is required.");
+        AddOption(args, "--signal-room", config.roomId);
+        if (!config.roomPassword.empty()) {
+            AddOption(args, "--signal-room-password", config.roomPassword);
+        }
+        break;
+    case WatchConnectionMode::DirectListen:
+        if (config.lanAdvertise) {
+            args.emplace_back("--lan-advertise");
+        }
+        break;
+    case WatchConnectionMode::ManualInvite:
+        if (!config.peerInvite.empty()) {
+            AddOption(args, "--peer-invite", config.peerInvite);
+        }
+        break;
     }
+
     AddOption(args, "--preview-latency-ms", config.previewLatencyMs);
     if (config.playAudio) {
         AddOption(args, "--audio-playback-volume", config.audioPlaybackVolumePercent);
@@ -125,7 +182,7 @@ std::vector<std::string> BuildWatchRoomArguments(const WatchSessionConfig& confi
         }
     }
 
-    AddCommonRoomArguments(
+    AddCommonSessionArguments(
         args,
         config.signalingStunServer,
         config.udpAccessCode,

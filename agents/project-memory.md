@@ -5,7 +5,7 @@
 - Build a native Windows C++ screen-sharing app for friends.
 - No web app, no C#.
 - Use local `git` and `gh` for GitHub work; do not use the GitHub connector for this repo.
-- Keep PRs cohesive and reviewable; slightly bigger PRs are fine when they advance one clear step. Self-review before opening or merging.
+- Keep PRs cohesive and reviewable; bigger PRs are fine when they advance one clear step. Self-review before opening or merging.
 - Prefer the cleanest simple design when it has no real product or maintenance downside, even if it takes more implementation effort.
 - Do not keep compatibility/fallback code for a feature that is being replaced unless there is a concrete product or diagnostic reason.
 - Avoid branch, commit, PR, or tracked-file text that depends on one contributor's local tooling.
@@ -92,7 +92,7 @@ WGC capture by default
 - PR #99 `Secure Worker room signaling`: hidden app-generated room keys in secure room links, Durable Object live room state, static-candidate fanout fix, and clearer direct-UDP-blocked diagnostics.
 - PR #100 `Add active room directory`: KV-backed active room summaries plus safe `GET /rooms` and `GET /rooms/:roomId/summary`, with Durable Objects still verified as the live source of truth.
 - PR #102 `Add joinable room list with room access keys`: UI room list joins public Worker rooms without copied secret links; Durable Object keeps the hidden room access key.
-- Recent backend/UI integration: `AppSessionBackend` emits typed diagnostic events for NAT status, access-code/password failures, room-open conflicts, and preview-close handling, replacing the remaining live-session stdout parsing in `ScreenShareUi`.
+- Recent backend/UI integration: `AppSessionBackend` emits typed diagnostic events for NAT status, access-code/password failures, room-open conflicts, and preview-close handling, replacing the remaining live-session stdout parsing in `ScreenShareUi`. Live Share/Watch starts now flow through typed session configs for Worker rooms, direct/Nearby targets, and manual invite fallback.
 
 ## Active Memory Files
 
@@ -108,7 +108,7 @@ WGC capture by default
 - `agents/security.md`: local access-code and future encryption notes.
 - `agents/signaling.md`: signaling backend direction and room-flow constraints.
 - `src/core/SessionBackend.h`: shared session backend API shape for UI/backend integration work.
-- `src/core/SessionCommand.*`: typed room Share/Watch config to engine-argument bridge used by the UI and app session backend.
+- `src/core/SessionCommand.*`: typed Share/Watch session config to engine-argument bridge used by the UI and app session backend for Worker rooms, direct/Nearby targets, and manual invite fallback.
 - `src/core/SessionRuntimeControl.*`: shared stop/runtime-settings control interface. CLI runs use the file-backed implementation; the app session backend uses the memory-backed implementation for stop/settings requests.
 - `src/app/ScreenShareApp.*`: callable CLI app runner built as the `ScreenShareAppRunner` static library and used by both the tiny `src/app/ScreenShareMain.cpp` executable entry point and the app session backend.
 - `src/app/AppSessionBackend.*`: pure C++ `ISessionBackend` adapter that runs `ScreenShareAppRunner` on a worker thread with `MemorySessionRuntimeControl`.
@@ -147,7 +147,7 @@ WGC capture by default
   - Share/Watch presets, Start/Stop, command preview, live output, session/report controls.
   - portable zip includes Qt plugin folders and transitive runtime dependencies.
   - Live Share/Watch runs now go through `src/ui/QtSessionBackend.*` and `src/app/AppSessionBackend.*`, so the UI calls the app runner on a worker thread instead of launching `ScreenShare.exe`.
-  - Room-based Share/Watch arguments are built from typed configs through `src/core/SessionCommand.*`; stop/runtime resolution controls route through `src/core/SessionRuntimeControl.*` with file-backed control for CLI runs and memory-backed control for UI runs.
+  - Live Share/Watch arguments are built from typed configs through `src/core/SessionCommand.*` for Worker rooms, direct/Nearby targets, and manual invite fallback; stop/runtime resolution controls route through `src/core/SessionRuntimeControl.*` with file-backed control for CLI runs and memory-backed control for UI runs.
   - `AppSessionBackend` now translates live telemetry into typed `SessionEvent` snapshots: Share viewer rows use typed viewer status, Watch/Share live indicators use typed activity, and NAT hints, access-code/password failures, room-open conflicts, and preview-close handling flow through typed events instead of UI-side stdout parsing.
 - LAN discovery is merged:
   - `--lan-advertise` on watch/receive mode.

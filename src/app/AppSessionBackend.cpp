@@ -179,12 +179,28 @@ AppSessionBackend::~AppSessionBackend()
 
 void AppSessionBackend::StartShare(const ShareSessionConfig& config, ISessionObserver& observer)
 {
-    StartArguments(SessionRole::Share, BuildShareRoomArguments(config), observer);
+    StartShare(config, observer, "ScreenShare");
+}
+
+void AppSessionBackend::StartShare(
+    const ShareSessionConfig& config,
+    ISessionObserver& observer,
+    std::string executablePath)
+{
+    StartArguments(SessionRole::Share, BuildShareArguments(config), observer, std::move(executablePath));
 }
 
 void AppSessionBackend::StartWatch(const WatchSessionConfig& config, ISessionObserver& observer)
 {
-    StartArguments(SessionRole::Watch, BuildWatchRoomArguments(config), observer);
+    StartWatch(config, observer, "ScreenShare");
+}
+
+void AppSessionBackend::StartWatch(
+    const WatchSessionConfig& config,
+    ISessionObserver& observer,
+    std::string executablePath)
+{
+    StartArguments(SessionRole::Watch, BuildWatchArguments(config), observer, std::move(executablePath));
 }
 
 void AppSessionBackend::Stop()

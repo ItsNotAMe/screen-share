@@ -24,6 +24,18 @@ enum class SessionState {
     Failed,
 };
 
+enum class ShareConnectionMode {
+    Room,
+    DirectTargets,
+    ManualInvite,
+};
+
+enum class WatchConnectionMode {
+    Room,
+    DirectListen,
+    ManualInvite,
+};
+
 enum class SessionEventType {
     StateChanged,
     LogLine,
@@ -59,6 +71,7 @@ struct StreamSettings {
 };
 
 struct ShareSessionConfig {
+    ShareConnectionMode connectionMode = ShareConnectionMode::Room;
     int displayIndex = 0;
     uint16_t roomPort = 0;
     std::string roomId;
@@ -69,12 +82,16 @@ struct ShareSessionConfig {
     bool allowPlaintext = false;
     std::string reportPath;
     std::string audioDeviceId;
+    std::vector<std::string> targets;
+    std::string localInvite;
+    std::vector<std::string> watcherInvites;
     bool captureSystemAudio = true;
     bool hostAudioMuted = false;
     StreamSettings stream;
 };
 
 struct WatchSessionConfig {
+    WatchConnectionMode connectionMode = WatchConnectionMode::Room;
     uint16_t listenPort = 0;
     std::string roomId;
     std::string roomPassword;
@@ -84,6 +101,8 @@ struct WatchSessionConfig {
     std::string reportPath;
     bool playAudio = true;
     bool muted = false;
+    bool lanAdvertise = false;
+    std::string peerInvite;
     int previewLatencyMs = 100;
     int audioPlaybackVolumePercent = 100;
 };

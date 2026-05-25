@@ -68,7 +68,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <exception>
 #include <mutex>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -98,6 +100,16 @@ QStringList toQStringList(const std::vector<std::string>& values)
     result.reserve(static_cast<qsizetype>(values.size()));
     for (const std::string& value : values) {
         result.push_back(QString::fromStdString(value));
+    }
+    return result;
+}
+
+std::vector<std::string> toStdStringVector(const QStringList& values)
+{
+    std::vector<std::string> result;
+    result.reserve(static_cast<size_t>(values.size()));
+    for (const QString& value : values) {
+        result.push_back(toStdUtf8(value));
     }
     return result;
 }
@@ -2878,9 +2890,16 @@ private:
         return settings;
     }
 
-    screenshare::ShareSessionConfig currentShareRoomConfig() const
+    screenshare::ShareSessionConfig currentShareSessionConfig() const
     {
         screenshare::ShareSessionConfig config;
+        if (shareConnectionMethod() == ShareConnectionMethod::InternetInvite && !shareUsesLegacyInvite()) {
+            config.connectionMode = screenshare::ShareConnectionMode::Room;
+        } else if (shareConnectionMethod() == ShareConnectionMethod::InternetInvite) {
+            config.connectionMode = screenshare::ShareConnectionMode::ManualInvite;
+        } else {
+            config.connectionMode = screenshare::ShareConnectionMode::DirectTargets;
+        }
         config.displayIndex = selectedDisplayIndex();
         config.roomPort = static_cast<uint16_t>(shareInvitePortSpin_->value());
         config.roomId = toStdUtf8(shareSignalRoom());
@@ -2893,14 +2912,26 @@ private:
         config.audioDeviceId = audioDeviceCombo_ == nullptr ?
             std::string() :
             toStdUtf8(audioDeviceCombo_->currentData().toString());
+        config.targets = toStdStringVector(currentDirectShareTargets());
+        config.localInvite = shareLocalInviteEdit_ == nullptr ?
+            std::string() :
+            toStdUtf8(shareLocalInviteEdit_->text().trimmed());
+        config.watcherInvites = toStdStringVector(currentWatcherResponseInvites());
         config.captureSystemAudio = true;
         config.stream = currentStreamSettings();
         return config;
     }
 
-    screenshare::WatchSessionConfig currentWatchRoomConfig() const
+    screenshare::WatchSessionConfig currentWatchSessionConfig() const
     {
         screenshare::WatchSessionConfig config;
+        if (watchConnectionMethod() == WatchConnectionMethod::InternetInvite && !watchUsesLegacyInvite()) {
+            config.connectionMode = screenshare::WatchConnectionMode::Room;
+        } else if (watchConnectionMethod() == WatchConnectionMethod::InternetInvite) {
+            config.connectionMode = screenshare::WatchConnectionMode::ManualInvite;
+        } else {
+            config.connectionMode = screenshare::WatchConnectionMode::DirectListen;
+        }
         config.listenPort = static_cast<uint16_t>(watchPortSpin_->value());
         config.roomId = toStdUtf8(watchSignalRoom());
         config.roomPassword = watchRoomKey_.isEmpty() ? toStdUtf8(watchRoomPassword()) : std::string();
@@ -2910,6 +2941,10 @@ private:
         config.reportPath = toStdUtf8(currentReportPath());
         config.playAudio = true;
         config.muted = mutedCheck_ != nullptr && mutedCheck_->isChecked();
+        config.lanAdvertise = lanDiscoverableCheck_ != nullptr && lanDiscoverableCheck_->isChecked();
+        config.peerInvite = watchPeerInviteEdit_ == nullptr ?
+            std::string() :
+            toStdUtf8(watchPeerInviteEdit_->text().trimmed());
         config.previewLatencyMs = previewLatencySpin_ == nullptr ? 100 : previewLatencySpin_->value();
         config.audioPlaybackVolumePercent = volumeSpin_ == nullptr ? 100 : volumeSpin_->value();
         return config;
@@ -2917,116 +2952,20 @@ private:
 
     QStringList currentArguments() const
     {
-        if (shareMode() &&
-            shareConnectionMethod() == ShareConnectionMethod::InternetInvite &&
-            !shareUsesLegacyInvite()) {
-            return toQStringList(screenshare::BuildShareRoomArguments(currentShareRoomConfig()));
-        }
-        if (!shareMode() &&
-            watchConnectionMethod() == WatchConnectionMethod::InternetInvite &&
-            !watchUsesLegacyInvite()) {
-            return toQStringList(screenshare::BuildWatchRoomArguments(currentWatchRoomConfig()));
-        }
-
-        QStringList args;
         if (shareMode()) {
-            if (shareConnectionMethod() == ShareConnectionMethod::InternetInvite) {
-                if (shareUsesLegacyInvite()) {
-                    const QString localInvite = shareLocalInviteEdit_->text().trimmed();
-                    const QStringList watcherInvites = currentWatcherResponseInvites();
-                    args << "--share" << (watcherInvites.isEmpty() ? localInvite : watcherInvites.front());
-                    if (!localInvite.isEmpty()) {
-                        args << "--local-invite" << localInvite;
-                    }
-                    for (int index = 1; index < watcherInvites.size(); ++index) {
-                        args << "--share-target" << watcherInvites[index];
-                    }
-                } else {
-                    args << "--share-room" << QString::number(shareInvitePortSpin_->value())
-                         << "--signal-room" << shareSignalRoom();
-                    if (!shareRoomName().isEmpty()) {
-                        args << "--signal-room-name" << shareRoomName();
-                    }
-                    if (!shareRoomPassword().isEmpty()) {
-                        args << "--signal-room-password" << shareRoomPassword();
-                    }
-                    if (!stunServer().isEmpty()) {
-                        args << "--signal-stun" << stunServer();
-                    }
-                }
-            } else {
-                const QStringList targets = currentDirectShareTargets();
-                if (!targets.isEmpty()) {
-                    args << "--share" << targets.front();
-                    for (int index = 1; index < targets.size(); ++index) {
-                        args << "--share-target" << targets[index];
-                    }
-                }
-            }
-            args << "--display" << QString::number(selectedDisplayIndex());
-            args << "--fps" << QString::number(fpsSpin_->value());
-
-            const QString resolutionChoice = currentResolutionChoice();
-            const QSize resolution = currentFixedResolution();
-            if (resolutionChoice != "auto") {
-                args << "--no-adapt-resolution";
-            }
-            if (resolution.width() > 0 && resolution.height() > 0) {
-                args << "--width" << QString::number(resolution.width());
-                args << "--height" << QString::number(resolution.height());
-            }
-
-            const QString audioDeviceId = audioDeviceCombo_->currentData().toString();
-            if (!audioDeviceId.isEmpty()) {
-                args << "--audio-device-id" << audioDeviceId;
-            }
-        } else {
-            args << "--watch" << QString::number(watchPortSpin_->value());
-            const WatchConnectionMethod watchMethod = watchConnectionMethod();
-            if (watchMethod == WatchConnectionMethod::Nearby) {
-                if (lanDiscoverableCheck_->isChecked()) {
-                    args << "--lan-advertise";
-                }
-            } else {
-                if (watchUsesLegacyInvite()) {
-                    const QString peerInvite = watchPeerInviteEdit_->text().trimmed();
-                    if (!peerInvite.isEmpty()) {
-                        args << "--peer-invite" << peerInvite;
-                    }
-                } else {
-                    args << "--signal-room" << watchSignalRoom();
-                    if (!watchRoomPassword().isEmpty() && watchRoomKey_.isEmpty()) {
-                        args << "--signal-room-password" << watchRoomPassword();
-                    }
-                    if (!stunServer().isEmpty()) {
-                        args << "--signal-stun" << stunServer();
-                    }
-                }
-            }
-            args << "--preview-latency-ms" << QString::number(previewLatencySpin_->value());
-            args << "--audio-playback-volume" << QString::number(volumeSpin_->value());
-            if (mutedCheck_->isChecked()) {
-                args << "--audio-playback-muted";
-            }
+            return toQStringList(screenshare::BuildShareArguments(currentShareSessionConfig()));
         }
-
-        const QString accessCode = effectiveAccessCode();
-        if (!accessCode.isEmpty()) {
-            args << "--access-code" << accessCode;
-        } else if (allowPlaintextCheck_->isChecked()) {
-            args << "--allow-plaintext";
-        }
-
-        if (reportCheck_->isChecked() && !reportPathEdit_->text().trimmed().isEmpty()) {
-            args << "--save-report" << reportPathEdit_->text().trimmed();
-        }
-
-        return args;
+        return toQStringList(screenshare::BuildWatchArguments(currentWatchSessionConfig()));
     }
 
     QStringList displayArguments() const
     {
-        QStringList args = currentArguments();
+        QStringList args;
+        try {
+            args = currentArguments();
+        } catch (const std::exception&) {
+            return {};
+        }
         for (int index = 0; index + 1 < args.size(); ++index) {
             if (args[index] == "--access-code") {
                 args[index + 1] = "<redacted>";
@@ -3232,12 +3171,11 @@ private:
         }
         const QStringList displayArgs = displayArguments();
         appendOutput("\n" + formatCommand(enginePath(), displayArgs) + "\n");
-        QtSessionBackend::StartRequest request;
-        request.role = shareMode() ? screenshare::SessionRole::Share : screenshare::SessionRole::Watch;
-        request.arguments = currentArguments();
-        request.executablePath = enginePath();
         QString errorMessage;
-        if (!sessionBackend_->start(request, &errorMessage) && !errorMessage.isEmpty()) {
+        const bool started = shareMode() ?
+            sessionBackend_->startShare(currentShareSessionConfig(), enginePath(), &errorMessage) :
+            sessionBackend_->startWatch(currentWatchSessionConfig(), enginePath(), &errorMessage);
+        if (!started && !errorMessage.isEmpty()) {
             appendOutput("Session error: " + errorMessage + "\n");
         }
     }
@@ -5599,7 +5537,7 @@ int main(int argc, char** argv)
             shareCommandConfig.stream.adaptResolution = false;
             shareCommandConfig.stream.outputResolution = screenshare::SessionResolution{1920, 1080};
             const QStringList shareRoomArguments = toQStringList(
-                screenshare::BuildShareRoomArguments(shareCommandConfig));
+                screenshare::BuildShareArguments(shareCommandConfig));
             const bool shareRoomArgumentsOk = shareRoomArguments == QStringList{
                 "--share-room", "5001",
                 "--signal-room", "room-alpha",
@@ -5624,7 +5562,7 @@ int main(int argc, char** argv)
             watchCommandConfig.previewLatencyMs = 125;
             watchCommandConfig.audioPlaybackVolumePercent = 75;
             const QStringList watchRoomArguments = toQStringList(
-                screenshare::BuildWatchRoomArguments(watchCommandConfig));
+                screenshare::BuildWatchArguments(watchCommandConfig));
             const bool watchRoomArgumentsOk = watchRoomArguments == QStringList{
                 "--watch", "5000",
                 "--signal-room", "room-alpha",
@@ -5635,6 +5573,71 @@ int main(int argc, char** argv)
                 "--access-code", "room-key",
                 "--save-report", "receiver-report.zip",
             };
+            screenshare::ShareSessionConfig directShareConfig;
+            directShareConfig.connectionMode = screenshare::ShareConnectionMode::DirectTargets;
+            directShareConfig.displayIndex = 2;
+            directShareConfig.targets = {"10.0.0.2:5000", "10.0.0.3:5000"};
+            directShareConfig.stream.fps = 45;
+            directShareConfig.stream.adaptResolution = true;
+            directShareConfig.allowPlaintext = true;
+            const QStringList directShareArguments = toQStringList(
+                screenshare::BuildShareArguments(directShareConfig));
+            const bool directShareArgumentsOk = directShareArguments == QStringList{
+                "--share", "10.0.0.2:5000",
+                "--share-target", "10.0.0.3:5000",
+                "--display", "2",
+                "--fps", "45",
+                "--allow-plaintext",
+            };
+            screenshare::ShareSessionConfig inviteShareConfig;
+            inviteShareConfig.connectionMode = screenshare::ShareConnectionMode::ManualInvite;
+            inviteShareConfig.displayIndex = 0;
+            inviteShareConfig.localInvite = "ss1e:room";
+            inviteShareConfig.watcherInvites = {"ss1e:watcher-a", "ss1e:watcher-b"};
+            inviteShareConfig.stream.fps = 60;
+            const QStringList inviteShareArguments = toQStringList(
+                screenshare::BuildShareArguments(inviteShareConfig));
+            const bool inviteShareArgumentsOk = inviteShareArguments == QStringList{
+                "--share", "ss1e:watcher-a",
+                "--local-invite", "ss1e:room",
+                "--share-target", "ss1e:watcher-b",
+                "--display", "0",
+                "--fps", "60",
+            };
+            screenshare::WatchSessionConfig nearbyWatchConfig;
+            nearbyWatchConfig.connectionMode = screenshare::WatchConnectionMode::DirectListen;
+            nearbyWatchConfig.listenPort = 5000;
+            nearbyWatchConfig.lanAdvertise = true;
+            nearbyWatchConfig.muted = true;
+            const QStringList nearbyWatchArguments = toQStringList(
+                screenshare::BuildWatchArguments(nearbyWatchConfig));
+            const bool nearbyWatchArgumentsOk = nearbyWatchArguments == QStringList{
+                "--watch", "5000",
+                "--lan-advertise",
+                "--preview-latency-ms", "100",
+                "--audio-playback-volume", "100",
+                "--audio-playback-muted",
+            };
+            screenshare::WatchSessionConfig inviteWatchConfig;
+            inviteWatchConfig.connectionMode = screenshare::WatchConnectionMode::ManualInvite;
+            inviteWatchConfig.listenPort = 5001;
+            inviteWatchConfig.peerInvite = "ss1e:sender";
+            const QStringList inviteWatchArguments = toQStringList(
+                screenshare::BuildWatchArguments(inviteWatchConfig));
+            const bool inviteWatchArgumentsOk = inviteWatchArguments == QStringList{
+                "--watch", "5001",
+                "--peer-invite", "ss1e:sender",
+                "--preview-latency-ms", "100",
+                "--audio-playback-volume", "100",
+            };
+            bool missingDirectShareRejected = false;
+            try {
+                screenshare::ShareSessionConfig invalidDirectShareConfig;
+                invalidDirectShareConfig.connectionMode = screenshare::ShareConnectionMode::DirectTargets;
+                static_cast<void>(screenshare::BuildShareArguments(invalidDirectShareConfig));
+            } catch (const std::invalid_argument&) {
+                missingDirectShareRejected = true;
+            }
             const auto runtimeResolution =
                 screenshare::ParseRuntimeResolutionRequest("resolution = 1920x1080\n");
             const auto ignoredRuntimeResolution =
@@ -5718,6 +5721,11 @@ int main(int argc, char** argv)
                 compactCommandInvite.startsWith("ss1p:") &&
                 natStatus == "receiving" &&
                 resourcesAvailable &&
+                directShareArgumentsOk &&
+                inviteShareArgumentsOk &&
+                nearbyWatchArgumentsOk &&
+                inviteWatchArgumentsOk &&
+                missingDirectShareRejected &&
                 displays.size() == 2 &&
                 displays[1].index == 1 &&
                 displays[1].width == 1920 &&

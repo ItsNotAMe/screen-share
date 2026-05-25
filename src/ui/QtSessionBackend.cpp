@@ -5,19 +5,8 @@
 #include <exception>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace {
-
-std::vector<std::string> ToStdArguments(const QStringList& arguments)
-{
-    std::vector<std::string> result;
-    result.reserve(static_cast<size_t>(arguments.size()));
-    for (const QString& argument : arguments) {
-        result.push_back(argument.toStdString());
-    }
-    return result;
-}
 
 QString ToQString(const std::string& text)
 {
@@ -75,7 +64,7 @@ void QtSessionBackend::setStatusHandler(std::function<void(const screenshare::Se
     statusHandler_ = std::move(handler);
 }
 
-bool QtSessionBackend::start(const StartRequest& request, QString* errorMessage)
+bool QtSessionBackend::prepareStart(QString* errorMessage)
 {
     if (running_) {
         if (errorMessage != nullptr) {
@@ -83,36 +72,74 @@ bool QtSessionBackend::start(const StartRequest& request, QString* errorMessage)
         }
         return false;
     }
-    if (request.arguments.isEmpty()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("The session command is empty.");
-        }
-        return false;
-    }
 
     running_ = true;
     stopRequested_ = false;
     finished_ = false;
+    return true;
+}
 
-    try {
-        backend_.StartArguments(
-            request.role,
-            ToStdArguments(request.arguments),
-            *this,
-            request.executablePath.isEmpty() ?
-                std::string("ScreenShare") :
-                request.executablePath.toStdString());
-    } catch (const std::exception& error) {
-        running_ = false;
-        if (errorMessage != nullptr) {
-            *errorMessage = ToQString(error.what());
-        }
-        return false;
+bool QtSessionBackend::finishStartWithError(const std::exception& error, QString* errorMessage)
+{
+    running_ = false;
+    if (errorMessage != nullptr) {
+        *errorMessage = ToQString(error.what());
     }
+    return false;
+}
 
+void QtSessionBackend::notifyStarted()
+{
     if (startedHandler_) {
         startedHandler_();
     }
+}
+
+bool QtSessionBackend::startShare(
+    const screenshare::ShareSessionConfig& config,
+    const QString& executablePath,
+    QString* errorMessage)
+{
+    if (!prepareStart(errorMessage)) {
+        return false;
+    }
+
+    try {
+        backend_.StartShare(
+            config,
+            *this,
+            executablePath.isEmpty() ?
+                std::string("ScreenShare") :
+                executablePath.toStdString());
+    } catch (const std::exception& error) {
+        return finishStartWithError(error, errorMessage);
+    }
+
+    notifyStarted();
+    return true;
+}
+
+bool QtSessionBackend::startWatch(
+    const screenshare::WatchSessionConfig& config,
+    const QString& executablePath,
+    QString* errorMessage)
+{
+    if (!prepareStart(errorMessage)) {
+        return false;
+    }
+
+    try {
+        backend_.StartWatch(
+            config,
+            *this,
+            executablePath.isEmpty() ?
+                std::string("ScreenShare") :
+                executablePath.toStdString());
+    } catch (const std::exception& error) {
+        return finishStartWithError(error, errorMessage);
+    }
+
+    notifyStarted();
     return true;
 }
 
