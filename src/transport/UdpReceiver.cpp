@@ -8,6 +8,7 @@
 #include <ws2tcpip.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -76,6 +77,26 @@ void DisableUdpConnReset(SOCKET socket)
         &bytesReturned,
         nullptr,
         nullptr));
+}
+
+std::string SocketAddressToString(const void* address, int addressLength)
+{
+    if (address == nullptr || addressLength < static_cast<int>(sizeof(sockaddr))) {
+        return {};
+    }
+
+    const auto* socketAddress = static_cast<const sockaddr*>(address);
+    if (socketAddress->sa_family != AF_INET || addressLength < static_cast<int>(sizeof(sockaddr_in))) {
+        return {};
+    }
+
+    const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(address);
+    std::array<char, INET_ADDRSTRLEN> host{};
+    if (inet_ntop(AF_INET, &ipv4->sin_addr, host.data(), static_cast<socklen_t>(host.size())) == nullptr) {
+        return {};
+    }
+
+    return std::string(host.data()) + ":" + std::to_string(ntohs(ipv4->sin_port));
 }
 
 } // namespace
@@ -417,6 +438,7 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveDatagram()
     feedbackAddress_.resize(static_cast<size_t>(senderAddressLength));
     std::memcpy(feedbackAddress_.data(), &senderAddress, static_cast<size_t>(senderAddressLength));
     feedbackAddressLength_ = senderAddressLength;
+    currentDatagramEndpoint_ = SocketAddressToString(&senderAddress, senderAddressLength);
 
     ++stats_.datagramsReceived;
     if (ShouldSimulateLoss()) {
@@ -637,6 +659,9 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     }
 
     ++stats_.datagramsAccepted;
+    if (!currentDatagramEndpoint_.empty()) {
+        stats_.latestMediaEndpoint = currentDatagramEndpoint_;
+    }
     stats_.payloadBytesReceived += payloadBytes;
 
     std::memcpy(pending.bytes.data() + fragmentOffset, payloadData, payloadBytes);
@@ -833,6 +858,9 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     }
 
     ++stats_.audioDatagramsAccepted;
+    if (!currentDatagramEndpoint_.empty()) {
+        stats_.latestMediaEndpoint = currentDatagramEndpoint_;
+    }
     stats_.audioPayloadBytesReceived += payloadBytes;
 
     std::memcpy(pending.bytes.data() + fragmentOffset, payloadData, payloadBytes);

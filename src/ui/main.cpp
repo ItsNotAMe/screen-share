@@ -4413,6 +4413,9 @@ private:
         case screenshare::SessionIssue::PreviewClosed:
             handlePreviewClosedSignal();
             return;
+        case screenshare::SessionIssue::HostLeft:
+            appendOutput("Host left the room.\n");
+            return;
         case screenshare::SessionIssue::AccessCodeRequired:
         case screenshare::SessionIssue::AccessCodeMismatch:
             handleAccessCodeProblem(event.issue);

@@ -78,6 +78,15 @@ void VideoFrameWidget::setVideoFrame(const screenshare::SessionEvent::VideoFrame
     update();
 }
 
+void VideoFrameWidget::setSmoothScaling(bool enabled)
+{
+    if (smoothScaling_ == enabled) {
+        return;
+    }
+    smoothScaling_ = enabled;
+    update();
+}
+
 void VideoFrameWidget::clearFrame()
 {
     image_ = {};
@@ -98,7 +107,7 @@ void VideoFrameWidget::paintEvent(QPaintEvent* event)
             (height() - scaled.height()) / 2,
             scaled.width(),
             scaled.height());
-        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, smoothScaling_);
         painter.drawImage(target, image_);
         return;
     }

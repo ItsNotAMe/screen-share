@@ -101,6 +101,7 @@ struct UdpReceiverStats {
     uint64_t latestAudioPacketId = 0;
     uint64_t latestAudioDevicePosition = 0;
     uint64_t latestAudioQpcPosition = 0;
+    std::string latestMediaEndpoint;
     uint32_t audioSampleRate = 0;
     uint16_t audioChannels = 0;
     uint16_t audioBitsPerSample = 0;
@@ -222,6 +223,7 @@ private:
     std::vector<std::byte> datagramBuffer_;
     std::vector<std::byte> feedbackAddress_;
     int feedbackAddressLength_ = 0;
+    std::string currentDatagramEndpoint_;
     std::deque<DelayedDatagram> delayedDatagrams_;
     std::vector<NatProbeTargetAddress> natProbeTargets_;
     std::deque<UdpCompletedAudioPacket> completedAudioPackets_;

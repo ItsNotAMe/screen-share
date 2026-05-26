@@ -3957,14 +3957,63 @@ void RunUdpReceiverStats(
         liveSignalingRuntime = std::make_unique<LiveSignalingRuntime>();
         liveSignalingRuntime->Start(options);
     }
+    std::map<std::string, std::string> signalingPeerByEndpoint;
+    std::string activeMediaPeerId;
+    bool hostLeftNotified = false;
 
     auto drainLiveSignalingProbeTargets = [&]() {
         if (!liveSignalingRuntime) {
             return 0;
         }
 
+        const auto updateActiveMediaPeer = [&]() {
+            if (!activeMediaPeerId.empty()) {
+                return;
+            }
+            const std::string latestMediaEndpoint = receiver.stats().latestMediaEndpoint;
+            if (latestMediaEndpoint.empty()) {
+                return;
+            }
+            const auto peer = signalingPeerByEndpoint.find(latestMediaEndpoint);
+            if (peer != signalingPeerByEndpoint.end()) {
+                activeMediaPeerId = peer->second;
+            }
+        };
+
+        updateActiveMediaPeer();
+        for (const auto& peer : liveSignalingRuntime->DrainRemovedPeers()) {
+            const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
+            const std::string latestMediaEndpoint = receiver.stats().latestMediaEndpoint;
+            const bool activeMediaEndpoint = !latestMediaEndpoint.empty() && endpoint == latestMediaEndpoint;
+            const bool activeMediaPeer = !activeMediaPeerId.empty() && peer.peerId == activeMediaPeerId;
+            if (activeMediaEndpoint && activeMediaPeerId.empty()) {
+                activeMediaPeerId = peer.peerId;
+            }
+            signalingPeerByEndpoint.erase(endpoint);
+
+            std::cout
+                << "signaling_live_receiver_peer=removed"
+                << " room=" << options.signalingRoomId
+                << " peer_id=" << peer.peerId
+                << " endpoint=" << endpoint
+                << " active_media=" << (activeMediaEndpoint || activeMediaPeer ? "yes" : "no")
+                << "\n";
+
+            if (!hostLeftNotified && (activeMediaEndpoint || activeMediaPeer)) {
+                hostLeftNotified = true;
+                std::cout
+                    << "watch_host_left=peer_left"
+                    << " room=" << options.signalingRoomId
+                    << " peer_id=" << peer.peerId
+                    << " endpoint=" << endpoint
+                    << "\n";
+            }
+        }
+
         int added = 0;
         for (const auto& peer : liveSignalingRuntime->DrainDiscoveredPeers()) {
+            const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
+            signalingPeerByEndpoint[endpoint] = peer.peerId;
             const screenshare::UdpNatProbeTarget target{
                 peer.candidate.ip,
                 peer.candidate.port,
@@ -3977,9 +4026,10 @@ void RunUdpReceiverStats(
                 << "signaling_live_receiver_peer=added"
                 << " room=" << options.signalingRoomId
                 << " peer_id=" << peer.peerId
-                << " endpoint=" << SignalingCandidateEndpoint(peer.candidate)
+                << " endpoint=" << endpoint
                 << "\n";
         }
+        updateActiveMediaPeer();
         return added;
     };
 

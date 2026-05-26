@@ -56,6 +56,7 @@ enum class SessionIssue {
     AccessCodeMismatch,
     RoomAlreadyOpen,
     PreviewClosed,
+    HostLeft,
 };
 
 struct SessionResolution {

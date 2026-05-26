@@ -183,6 +183,8 @@ void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
     audioVolumePercent_ = 100;
     audioControlsInitialized_ = false;
     audioControlsTouched_ = false;
+    hostLeft_ = false;
+    leaveRequested_ = false;
     videoFrameWidget_->clearFrame();
     setPreviewStatusText("Connecting...");
     startWatch();
@@ -409,12 +411,20 @@ void ActiveWatchWindow::installBackendHandlers()
     });
     backend_->setStatusHandler([this](const screenshare::SessionEvent& event) {
         updateStatus(event.status);
+        if (event.type == screenshare::SessionEventType::Issue &&
+            event.issue == screenshare::SessionIssue::HostLeft) {
+            handleHostLeft();
+        }
     });
     backend_->setVideoFrameHandler([this](const screenshare::SessionEvent::VideoFrame& frame) {
+        if (hostLeft_) {
+            return;
+        }
         latestVideoFrame_ = frame;
-        videoFrameWidget_->setVideoFrame(frame);
         if (fullscreenVideoWidget_ != nullptr) {
             fullscreenVideoWidget_->setVideoFrame(frame);
+        } else {
+            videoFrameWidget_->setVideoFrame(frame);
         }
     });
 }
@@ -458,11 +468,29 @@ void ActiveWatchWindow::updateElapsed()
 
 void ActiveWatchWindow::updateStatus(const screenshare::SessionStatus& status)
 {
+    if (hostLeft_ && status.state != screenshare::SessionState::Stopping && status.state != screenshare::SessionState::Failed) {
+        stateLabel_->setText("● Host left");
+        stateLabel_->setObjectName("ActiveTopError");
+        stateLabel_->style()->unpolish(stateLabel_);
+        stateLabel_->style()->polish(stateLabel_);
+        setPreviewStatusText("Host left the room");
+        connectionLabel_->setText("Host left");
+        return;
+    }
+
     stateLabel_->setText(stateText(status));
-    stateLabel_->setObjectName(status.state == screenshare::SessionState::Failed ? "ActiveTopError" : "ActiveTopLive");
+    stateLabel_->setObjectName(
+        (status.state == screenshare::SessionState::Failed ||
+         (status.state == screenshare::SessionState::Disconnected && status.summary == "Host left the room"))
+            ? "ActiveTopError"
+            : "ActiveTopLive");
     stateLabel_->style()->unpolish(stateLabel_);
     stateLabel_->style()->polish(stateLabel_);
-    setPreviewStatusText(status.state == screenshare::SessionState::Live ? "Receiving stream" : "Waiting for stream");
+    if (status.state == screenshare::SessionState::Disconnected && !status.summary.empty()) {
+        setPreviewStatusText(QString::fromStdString(status.summary));
+    } else {
+        setPreviewStatusText(status.state == screenshare::SessionState::Live ? "Receiving stream" : "Waiting for stream");
+    }
     connectionLabel_->setText(connectionText(status));
     avSyncLabel_->setText(status.audio.hasStats ? QStringLiteral("%1 ms").arg(status.audio.avAudioAheadMs) : QStringLiteral("-"));
     qualityLabel_->setText(status.stream.hasStats ? QStringLiteral("High") : QStringLiteral("-"));
@@ -551,6 +579,7 @@ void ActiveWatchWindow::toggleFullscreen()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     fullscreenVideoWidget_ = new VideoFrameWidget;
+    fullscreenVideoWidget_->setSmoothScaling(false);
     fullscreenVideoWidget_->setStatusText(previewStatusText_);
     if (latestVideoFrame_) {
         fullscreenVideoWidget_->setVideoFrame(*latestVideoFrame_);
@@ -575,6 +604,9 @@ void ActiveWatchWindow::closeStreamFullscreen()
     if (fullscreenButton_ != nullptr) {
         fullscreenButton_->setText("Fullscreen");
     }
+    if (!hostLeft_ && latestVideoFrame_ && videoFrameWidget_ != nullptr) {
+        videoFrameWidget_->setVideoFrame(*latestVideoFrame_);
+    }
 }
 
 void ActiveWatchWindow::setPreviewStatusText(const QString& text)
@@ -588,8 +620,33 @@ void ActiveWatchWindow::setPreviewStatusText(const QString& text)
     }
 }
 
+void ActiveWatchWindow::handleHostLeft()
+{
+    hostLeft_ = true;
+    latestVideoFrame_.reset();
+    closeStreamFullscreen();
+    if (videoFrameWidget_ != nullptr) {
+        videoFrameWidget_->clearFrame();
+    }
+    setPreviewStatusText("Host left the room");
+    if (stateLabel_ != nullptr) {
+        stateLabel_->setText("● Host left");
+        stateLabel_->setObjectName("ActiveTopError");
+        stateLabel_->style()->unpolish(stateLabel_);
+        stateLabel_->style()->polish(stateLabel_);
+    }
+    if (connectionLabel_ != nullptr) {
+        connectionLabel_->setText("Host left");
+    }
+    if (leaveButton_ != nullptr) {
+        leaveButton_->setEnabled(true);
+        leaveButton_->setText("Leave Room");
+    }
+}
+
 void ActiveWatchWindow::leaveRoom()
 {
+    leaveRequested_ = true;
     if (backend_ == nullptr || !backend_->isRunning()) {
         if (actions_.sessionStopped) {
             actions_.sessionStopped();
@@ -607,6 +664,10 @@ void ActiveWatchWindow::handleFinished(const QtSessionBackend::FinishInfo& info)
     elapsedTimer_->stop();
     leaveButton_->setEnabled(true);
     leaveButton_->setText("Leave Room");
+    if (hostLeft_ && !leaveRequested_) {
+        handleHostLeft();
+        return;
+    }
     setPreviewStatusText(info.failed ? "Watching failed" : "Room left");
     if (actions_.sessionStopped) {
         QTimer::singleShot(info.failed ? 900 : 300, this, [this] {
@@ -620,6 +681,11 @@ QString ActiveWatchWindow::stateText(const screenshare::SessionStatus& status) c
     switch (status.state) {
     case screenshare::SessionState::Live:
         return QStringLiteral("● Watching");
+    case screenshare::SessionState::Disconnected:
+        if (status.summary == "Host left the room") {
+            return QStringLiteral("● Host left");
+        }
+        return QStringLiteral("● Disconnected");
     case screenshare::SessionState::Stopping:
         return QStringLiteral("● Leaving");
     case screenshare::SessionState::Failed:

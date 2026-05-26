@@ -48,6 +48,7 @@ private:
     void toggleFullscreen();
     void closeStreamFullscreen();
     void setPreviewStatusText(const QString& text);
+    void handleHostLeft();
     void leaveRoom();
     void handleFinished(const QtSessionBackend::FinishInfo& info);
     QString stateText(const screenshare::SessionStatus& status) const;
@@ -80,6 +81,8 @@ private:
     int audioVolumePercent_ = 100;
     bool audioControlsInitialized_ = false;
     bool audioControlsTouched_ = false;
+    bool hostLeft_ = false;
+    bool leaveRequested_ = false;
     QWidget* fullscreenVideoWindow_ = nullptr;
     VideoFrameWidget* fullscreenVideoWidget_ = nullptr;
     QString previewStatusText_;

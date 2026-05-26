@@ -11,6 +11,7 @@ public:
 
     void setStatusText(const QString& text);
     void setVideoFrame(const screenshare::SessionEvent::VideoFrame& frame);
+    void setSmoothScaling(bool enabled);
     void clearFrame();
 
 protected:
@@ -19,4 +20,5 @@ protected:
 private:
     QImage image_;
     QString statusText_;
+    bool smoothScaling_ = true;
 };

@@ -9,7 +9,7 @@
       <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#061014" flood-opacity="0.28"/>
     </filter>
   </defs>
-  <rect width="64" height="64" rx="14" fill="#101820"/>
+  <rect width="64" height="64" rx="14" fill="none"/>
   <g filter="url(#screenShareSoftShadow)">
     <rect x="14" y="17" width="36" height="25" rx="4" fill="none" stroke="url(#screenShareMarkGradient)" stroke-width="4"/>
     <path d="M24 49h16" stroke="#e8f7f4" stroke-width="4" stroke-linecap="round"/>

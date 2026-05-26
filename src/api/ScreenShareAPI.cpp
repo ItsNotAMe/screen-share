@@ -301,6 +301,7 @@ private:
     std::string natStatus_;
     std::string natHint_;
     bool previewClosedNotified_ = false;
+    bool hostLeftNotified_ = false;
     bool stopRequested_ = false;
 };
 
@@ -456,6 +457,7 @@ void ScreenShareSession::Impl::StartRunner(
             natStatus_.clear();
             natHint_.clear();
             previewClosedNotified_ = false;
+            hostLeftNotified_ = false;
             stopRequested_ = false;
             runtimeControl_.Reset();
         }
@@ -1022,6 +1024,23 @@ void ScreenShareSession::Impl::HandleDiagnosticLogLine(const std::string& line)
         }
     }
 
+    if (line.find("watch_host_left=peer_left") != std::string::npos) {
+        bool shouldEmit = false;
+        {
+            std::scoped_lock lock(mutex_);
+            if (!hostLeftNotified_ && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
+                hostLeftNotified_ = true;
+                state_ = SessionState::Disconnected;
+                summary_ = "Host left the room";
+                health_ = "host-left";
+                shouldEmit = true;
+            }
+        }
+        if (shouldEmit) {
+            EmitIssue(SessionIssue::HostLeft, "Host left the room");
+        }
+    }
+
     const SessionIssue issue = DetectSessionIssue(line);
     if (issue != SessionIssue::None) {
         EmitIssue(issue, "Session security issue");
@@ -1131,6 +1150,7 @@ void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
 {
     bool activeNow = false;
     bool waitingForStream = false;
+    bool hostLeft = false;
     const std::string receiverHealth = LogFieldValue(line, "receiver_health");
     const auto completedFrames = ParseUint64(LogFieldValue(line, "completed_frames"));
     const auto payloadBytes = ParseUint64(LogFieldValue(line, "payload_bytes"));
@@ -1139,7 +1159,8 @@ void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
 
     {
         std::scoped_lock lock(mutex_);
-        if (!receiverHealth.empty()) {
+        hostLeft = hostLeftNotified_;
+        if (!hostLeft && !receiverHealth.empty()) {
             health_ = receiverHealth;
         }
         if (completedFrames) {
@@ -1159,10 +1180,11 @@ void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
             watchAudioPackets_ = *audioPackets;
         }
 
-        if (activeNow && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
+        if (!hostLeft && activeNow && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
             state_ = SessionState::Live;
             summary_ = "Receiving stream";
-        } else if (line.find("waiting_for_stream") != std::string::npos &&
+        } else if (!hostLeft &&
+            line.find("waiting_for_stream") != std::string::npos &&
             state_ != SessionState::Live &&
             !IsTerminalSessionState(state_) &&
             state_ != SessionState::Stopping) {
@@ -1172,7 +1194,7 @@ void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
         }
     }
 
-    if (activeNow || waitingForStream) {
+    if (!hostLeft && (activeNow || waitingForStream)) {
         EmitStatus(SessionEventType::StateChanged, activeNow ? "Receiving stream" : "Receiver status updated");
     }
 }
