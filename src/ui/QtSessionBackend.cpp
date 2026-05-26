@@ -97,7 +97,6 @@ void QtSessionBackend::notifyStarted()
 
 bool QtSessionBackend::startShare(
     const screenshare::ShareSessionConfig& config,
-    const QString& executablePath,
     QString* errorMessage)
 {
     if (!prepareStart(errorMessage)) {
@@ -105,12 +104,7 @@ bool QtSessionBackend::startShare(
     }
 
     try {
-        session_.StartShare(
-            config,
-            *this,
-            executablePath.isEmpty() ?
-                std::string("ScreenShare") :
-                executablePath.toStdString());
+        session_.StartShare(config, *this);
     } catch (const std::exception& error) {
         return finishStartWithError(error, errorMessage);
     }
@@ -121,7 +115,6 @@ bool QtSessionBackend::startShare(
 
 bool QtSessionBackend::startWatch(
     const screenshare::WatchSessionConfig& config,
-    const QString& executablePath,
     QString* errorMessage)
 {
     if (!prepareStart(errorMessage)) {
@@ -129,12 +122,7 @@ bool QtSessionBackend::startWatch(
     }
 
     try {
-        session_.StartWatch(
-            config,
-            *this,
-            executablePath.isEmpty() ?
-                std::string("ScreenShare") :
-                executablePath.toStdString());
+        session_.StartWatch(config, *this);
     } catch (const std::exception& error) {
         return finishStartWithError(error, errorMessage);
     }

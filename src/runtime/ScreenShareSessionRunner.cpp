@@ -11,17 +11,69 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace {
+
+#ifdef _WIN32
+std::string WideToUtf8(const std::wstring& text)
+{
+    if (text.empty()) {
+        return {};
+    }
+
+    const int size = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        text.data(),
+        static_cast<int>(text.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (size <= 0) {
+        return {};
+    }
+
+    std::string result(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        text.data(),
+        static_cast<int>(text.size()),
+        result.data(),
+        size,
+        nullptr,
+        nullptr);
+    return result;
+}
+#endif
+
+std::string CurrentExecutablePath()
+{
+#ifdef _WIN32
+    std::wstring path(32768, L'\0');
+    const DWORD size = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (size > 0 && size < path.size()) {
+        path.resize(size);
+        const std::string utf8Path = WideToUtf8(path);
+        if (!utf8Path.empty()) {
+            return utf8Path;
+        }
+    }
+#endif
+    return "ScreenShare";
+}
 
 int RunTypedScreenShareSession(
     std::function<int(
         screenshare_runtime_internal::SavedReportContext&,
         const ScreenShareRunContext&)> executeSession,
     const ScreenShareRunContext& context,
-    std::string executablePath,
     const char* syntheticCommand,
     const std::string& reportPath)
 {
@@ -63,7 +115,7 @@ int RunTypedScreenShareSession(
 
     if (saveReportPath) {
         try {
-            std::vector<std::string> reportArguments{std::move(executablePath), syntheticCommand};
+            std::vector<std::string> reportArguments{CurrentExecutablePath(), syntheticCommand};
             std::vector<char*> reportArgv = MutableArgv(reportArguments);
             WriteSavedReport(
                 *saveReportPath,
@@ -91,8 +143,7 @@ int RunTypedScreenShareSession(
 
 int RunShareSession(
     const screenshare::ShareSessionConfig& config,
-    const ScreenShareRunContext& context,
-    std::string executablePath)
+    const ScreenShareRunContext& context)
 {
     return RunTypedScreenShareSession(
         [config](
@@ -101,15 +152,13 @@ int RunShareSession(
             return screenshare_runtime_internal::ExecuteShareSessionConfig(config, reportContext, runContext);
         },
         context,
-        std::move(executablePath),
         "--typed-share-session",
         config.reportPath);
 }
 
 int RunWatchSession(
     const screenshare::WatchSessionConfig& config,
-    const ScreenShareRunContext& context,
-    std::string executablePath)
+    const ScreenShareRunContext& context)
 {
     return RunTypedScreenShareSession(
         [config](
@@ -118,7 +167,6 @@ int RunWatchSession(
             return screenshare_runtime_internal::ExecuteWatchSessionConfig(config, reportContext, runContext);
         },
         context,
-        std::move(executablePath),
         "--typed-watch-session",
         config.reportPath);
 }

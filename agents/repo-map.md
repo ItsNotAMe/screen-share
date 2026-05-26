@@ -33,6 +33,8 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 - Debug preset output: `build/debug/ScreenShare.exe`.
 - Release preset output: `build/release/ScreenShare.exe`.
 - `ScreenShareCore` is a static library target containing the reusable native engine modules.
-- `ScreenShareSessionRuntime` is a static library target containing the concrete session API and runtime-backed Share/Watch execution; `ScreenShare.exe` is a tiny main linked against it.
+- `ScreenShareAPI` is a static library target containing the concrete session API and runtime-backed Share/Watch execution without CLI parsing.
+- `ScreenShare.exe` compiles the CLI parser/entrypoint and links `ScreenShareAPI`.
+- `ScreenShareUi.exe` links `ScreenShareAPI` directly when Qt 6 Widgets and Svg are available.
 - If Qt 6 Widgets and Svg are available at configure time, builds also output `ScreenShareUi.exe`.
 - Normal default builds create portable zip packages; see `agents/packaging.md`.

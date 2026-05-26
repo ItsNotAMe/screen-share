@@ -3,13 +3,9 @@
 #include "runtime/ScreenShareRunContext.h"
 #include "core/ScreenShareSession.h"
 
-#include <string>
-
 int RunShareSession(
     const screenshare::ShareSessionConfig& config,
-    const ScreenShareRunContext& context = {},
-    std::string executablePath = "ScreenShare");
+    const ScreenShareRunContext& context = {});
 int RunWatchSession(
     const screenshare::WatchSessionConfig& config,
-    const ScreenShareRunContext& context = {},
-    std::string executablePath = "ScreenShare");
+    const ScreenShareRunContext& context = {});

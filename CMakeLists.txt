@@ -110,40 +110,46 @@ target_link_libraries(ScreenShareCore PUBLIC
     ws2_32
 )
 
-add_library(ScreenShareSessionRuntime STATIC
+add_library(ScreenShareAPI STATIC
     src/api/ScreenShareAPI.cpp
-    src/cli/ScreenShareCLI.cpp
     src/runtime/ScreenShareRuntimeExecution.cpp
     src/runtime/ScreenShareRuntimeSupport.cpp
     src/runtime/ScreenShareSessionOptions.cpp
     src/runtime/ScreenShareSessionRunner.cpp
 )
 
-target_compile_features(ScreenShareSessionRuntime PUBLIC cxx_std_20)
+target_compile_features(ScreenShareAPI PUBLIC cxx_std_20)
 
-target_include_directories(ScreenShareSessionRuntime PUBLIC
+target_include_directories(ScreenShareAPI PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(ScreenShareSessionRuntime PUBLIC
+target_link_libraries(ScreenShareAPI PUBLIC
     ScreenShareCore
 )
 
 if(MSVC)
-    target_compile_options(ScreenShareSessionRuntime PRIVATE /W4 /permissive- /EHsc)
+    target_compile_options(ScreenShareAPI PRIVATE /W4 /permissive- /EHsc)
 endif()
 
 add_executable(ScreenShare
     src/cli/ScreenShareMain.cpp
+    src/cli/ScreenShareCLI.cpp
 )
+
+target_compile_features(ScreenShare PRIVATE cxx_std_20)
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
     target_link_options(ScreenShare PRIVATE -static)
 endif()
 
 target_link_libraries(ScreenShare PRIVATE
-    ScreenShareSessionRuntime
+    ScreenShareAPI
 )
+
+if(MSVC)
+    target_compile_options(ScreenShare PRIVATE /W4 /permissive- /EHsc)
+endif()
 
 if(SCREENSHARE_BUILD_QT_UI)
     if(WIN32 AND EXISTS "C:/msys64/ucrt64/lib/cmake/Qt6")
@@ -162,7 +168,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
         )
-        target_link_libraries(ScreenShareUi PRIVATE ScreenShareSessionRuntime Qt6::Network Qt6::Svg Qt6::Widgets shell32)
+        target_link_libraries(ScreenShareUi PRIVATE ScreenShareAPI Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX

@@ -243,9 +243,7 @@ public:
     Impl() = default;
 
     void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink);
-    void StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink, std::string executablePath);
     void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink);
-    void StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink, std::string executablePath);
     void Shutdown();
     void Stop();
     void ApplyStreamSettings(const StreamSettings& settings);
@@ -301,37 +299,21 @@ ScreenShareSession::Impl::~Impl()
 
 void ScreenShareSession::Impl::StartShare(const ShareSessionConfig& config, ISessionEventSink& eventSink)
 {
-    StartShare(config, eventSink, "ScreenShare");
-}
-
-void ScreenShareSession::Impl::StartShare(
-    const ShareSessionConfig& config,
-    ISessionEventSink& eventSink,
-    std::string executablePath)
-{
     StartRunner(
         SessionRole::Share,
         eventSink,
-        [config, executablePath = std::move(executablePath)](const ScreenShareRunContext& context) {
-            return RunShareSession(config, context, executablePath);
+        [config](const ScreenShareRunContext& context) {
+            return RunShareSession(config, context);
         });
 }
 
 void ScreenShareSession::Impl::StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink)
 {
-    StartWatch(config, eventSink, "ScreenShare");
-}
-
-void ScreenShareSession::Impl::StartWatch(
-    const WatchSessionConfig& config,
-    ISessionEventSink& eventSink,
-    std::string executablePath)
-{
     StartRunner(
         SessionRole::Watch,
         eventSink,
-        [config, executablePath = std::move(executablePath)](const ScreenShareRunContext& context) {
-            return RunWatchSession(config, context, executablePath);
+        [config](const ScreenShareRunContext& context) {
+            return RunWatchSession(config, context);
         });
 }
 
@@ -1211,25 +1193,9 @@ void ScreenShareSession::StartShare(const ShareSessionConfig& config, ISessionEv
     impl_->StartShare(config, eventSink);
 }
 
-void ScreenShareSession::StartShare(
-    const ShareSessionConfig& config,
-    ISessionEventSink& eventSink,
-    std::string executablePath)
-{
-    impl_->StartShare(config, eventSink, std::move(executablePath));
-}
-
 void ScreenShareSession::StartWatch(const WatchSessionConfig& config, ISessionEventSink& eventSink)
 {
     impl_->StartWatch(config, eventSink);
-}
-
-void ScreenShareSession::StartWatch(
-    const WatchSessionConfig& config,
-    ISessionEventSink& eventSink,
-    std::string executablePath)
-{
-    impl_->StartWatch(config, eventSink, std::move(executablePath));
 }
 
 void ScreenShareSession::Shutdown()
