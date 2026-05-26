@@ -643,5 +643,93 @@ QCheckBox#ActiveSettingsCheck::indicator:checked {
 QCheckBox#ActiveSettingsCheck:disabled {
     color: #7b8783;
 }
+QWidget#JoinRoomWindow,
+QWidget#JoinRoomContent,
+QWidget#JoinTransparentBlock {
+    background: #171a19;
+    color: #eef3f1;
+    font-family: "Segoe UI", "Inter", Arial, sans-serif;
+    font-size: 10pt;
+}
+QLabel#JoinSectionTitle {
+    background: transparent;
+    color: #f4fbf9;
+    font-size: 10.5pt;
+    font-weight: 720;
+}
+QFrame#JoinRoomList,
+QFrame#JoinAdvancedPanel {
+    background: #202625;
+    border: 1px solid #303938;
+    border-radius: 8px;
+}
+QFrame#JoinRoomRow {
+    background: transparent;
+    border-bottom: 1px solid #2a3331;
+}
+QFrame#JoinRoomRow:hover {
+    background: #242b29;
+}
+QLabel#JoinRoomName {
+    background: transparent;
+    color: #f4fbf9;
+    font-size: 11.5pt;
+    font-weight: 740;
+}
+QLabel#JoinRoomMeta {
+    background: transparent;
+    color: #a9b5b1;
+    font-size: 9pt;
+    font-weight: 600;
+}
+QLabel#JoinPublicStatus {
+    background: transparent;
+    color: #84e188;
+    font-size: 9pt;
+    font-weight: 730;
+}
+QLabel#JoinLockedStatus {
+    background: transparent;
+    color: #ffd56a;
+    font-size: 9pt;
+    font-weight: 730;
+}
+QPushButton#JoinRoomButton {
+    background: #1c2221;
+    color: #edf5f2;
+    border: 1px solid #168f82;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-weight: 760;
+}
+QPushButton#JoinRoomButton:hover {
+    background: #203331;
+    border: 1px solid #31c6b8;
+}
+QPushButton#JoinRoomButton:disabled {
+    color: #67736f;
+    border: 1px solid #28302f;
+}
+QLabel#JoinStatusIdle,
+QLabel#JoinStatusConnecting,
+QLabel#JoinStatusLive,
+QLabel#JoinStatusError {
+    background: transparent;
+    border: 0;
+    font-size: 9.5pt;
+    font-weight: 680;
+}
+QLabel#JoinStatusIdle {
+    color: #8dde7b;
+}
+QLabel#JoinStatusConnecting {
+    color: #ffd56a;
+}
+QLabel#JoinStatusLive {
+    color: #84e188;
+}
+QLabel#JoinStatusError {
+    color: #ff9b94;
+}
 )");
 }

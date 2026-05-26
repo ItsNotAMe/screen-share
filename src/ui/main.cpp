@@ -5,6 +5,7 @@
 #include "ui/AppShellWindow.h"
 #include "ui/CreateRoomWindow.h"
 #include "ui/HomeWindow.h"
+#include "ui/JoinRoomWindow.h"
 #include "ui/QtSessionBackend.h"
 
 #include <QtCore/QCoreApplication>
@@ -5747,29 +5748,22 @@ int main(int argc, char** argv)
         return app.exec();
     }
 
-    MainWindow* controlsWindow = nullptr;
-    auto showControls = [&controlsWindow](bool createRoom) {
-        if (controlsWindow == nullptr) {
-            controlsWindow = new MainWindow;
-        }
-        if (createRoom) {
-            controlsWindow->showCreateRoom();
-        } else {
-            controlsWindow->showJoinRoom();
-        }
-    };
-
     AppShellWindow window;
 
     auto* sessionBackend = new QtSessionBackend(&window);
     HomeWindow* homeWindow = nullptr;
     CreateRoomWindow* createRoomWindow = nullptr;
+    JoinRoomWindow* joinRoomWindow = nullptr;
     ActiveShareWindow* activeShareWindow = nullptr;
     auto showHome = [&window, &homeWindow] {
         window.setCurrentWidget(homeWindow);
     };
     auto showCreateRoom = [&window, &createRoomWindow] {
         window.setCurrentWidget(createRoomWindow);
+    };
+    auto showJoinRoom = [&window, &joinRoomWindow] {
+        joinRoomWindow->refreshRooms();
+        window.setCurrentWidget(joinRoomWindow);
     };
     auto showActiveShare = [&window, &activeShareWindow](const ShareSessionUiState& session) {
         if (!window.isMaximized()) {
@@ -5781,7 +5775,7 @@ int main(int argc, char** argv)
 
     homeWindow = new HomeWindow(HomeWindow::Actions{
         [&showCreateRoom] { showCreateRoom(); },
-        [&showControls] { showControls(false); },
+        [&showJoinRoom] { showJoinRoom(); },
     });
     createRoomWindow = new CreateRoomWindow(sessionBackend, CreateRoomWindow::Actions{
         [&showHome] { showHome(); },
@@ -5798,14 +5792,16 @@ int main(int argc, char** argv)
             }
         },
     });
+    joinRoomWindow = new JoinRoomWindow(sessionBackend, JoinRoomWindow::Actions{
+        [&showHome] { showHome(); },
+    });
 
     window.addPage(homeWindow);
     window.addPage(createRoomWindow);
+    window.addPage(joinRoomWindow);
     window.addPage(activeShareWindow);
     window.resize(820, 640);
     window.setMinimumSize(740, 600);
     window.show();
-    const int exitCode = app.exec();
-    delete controlsWindow;
-    return exitCode;
+    return app.exec();
 }

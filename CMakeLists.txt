@@ -165,6 +165,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/AppShellWindow.cpp
             src/ui/CreateRoomWindow.cpp
             src/ui/HomeWindow.cpp
+            src/ui/JoinRoomWindow.cpp
             src/ui/UiStyle.cpp
             src/ui/resources.qrc
         )
