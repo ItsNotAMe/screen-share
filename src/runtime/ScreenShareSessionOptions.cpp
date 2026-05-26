@@ -8,6 +8,8 @@
 #include "transport/UdpSender.h"
 
 #include <algorithm>
+#include <ctime>
+#include <iostream>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -173,6 +175,37 @@ screenshare::NatInvite ParseValidatedLocalInviteForShare(
     } else if (!options.allowPlaintext) {
         throw std::invalid_argument(label + " is plaintext; rerun with --allow-plaintext");
     }
+    return invite;
+}
+
+screenshare::NatInvite ParseValidatedPeerInvite(const Options& options)
+{
+    const auto invite = screenshare::ParseNatInvite(options.peerInvite, options.accessCodeKey);
+    const std::time_t now = std::time(nullptr);
+    if (invite.expiresUnix > 0 && invite.expiresUnix < static_cast<int64_t>(now)) {
+        std::cerr
+            << "Warning: peer invite expired at Unix time " << invite.expiresUnix
+            << "; probing anyway because clocks can differ.\n";
+    }
+
+    if (invite.encrypted) {
+        if (!options.accessCodeProvided) {
+            throw std::invalid_argument("Peer invite requires --access-code CODE");
+        }
+        if (options.accessCodeFingerprint != invite.accessCodeFingerprint) {
+            throw std::invalid_argument("Access code does not match the peer invite fingerprint");
+        }
+    } else if (!options.allowPlaintext) {
+        throw std::invalid_argument("Peer invite is plaintext; rerun with --allow-plaintext");
+    }
+
+    if (options.sessionIdProvided && options.sessionFingerprint != invite.sessionFingerprint) {
+        std::cerr
+            << "Warning: --session fingerprint " << FormatSessionFingerprint(options.sessionFingerprint)
+            << " does not match peer invite session fingerprint "
+            << FormatSessionFingerprint(invite.sessionFingerprint) << ".\n";
+    }
+
     return invite;
 }
 
