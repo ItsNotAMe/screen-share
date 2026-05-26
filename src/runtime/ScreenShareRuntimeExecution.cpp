@@ -1869,9 +1869,6 @@ private:
             state->stopRequested = true;
         }
         state->wake.notify_all();
-        if (eventsWorker.joinable()) {
-            eventsWorker.join();
-        }
 
         try {
             client.Leave(state->roomId, state->peer.peerId);
@@ -1887,6 +1884,13 @@ private:
                 << " peer_id=" << state->peer.peerId
                 << " error=\"" << error.what() << "\""
                 << "\n";
+        }
+
+        if (eventsWorker.joinable()) {
+            // WinHTTP WebSocket receives can remain blocked during shutdown. The
+            // event worker owns only shared shutdown state, so do not let it
+            // delay leaving the room or completing Stop().
+            eventsWorker.detach();
         }
     }
 
@@ -3591,8 +3595,13 @@ void RunCaptureStats(
     }
 
     const auto captureFinishedAt = Clock::now();
+    const bool stopWasRequested = runtimeControl.StopRequested();
 
-    if (streamEncoder) {
+    if (stopWasRequested && liveSignalingRuntime) {
+        liveSignalingRuntime->Stop();
+    }
+
+    if (streamEncoder && !stopWasRequested) {
         const auto drainedPackets = streamEncoder->Drain();
         sendStreamPackets(drainedPackets);
     }
@@ -3602,7 +3611,7 @@ void RunCaptureStats(
         audioCaptureWorker->ThrowIfFailed();
     }
 
-    if (udpSender) {
+    if (udpSender && !stopWasRequested) {
         udpSender->Flush();
         RecordLatestReceiverFeedback(
             reportContext,
