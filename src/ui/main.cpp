@@ -1,6 +1,9 @@
 #include "core/SessionCommand.h"
 #include "core/SessionRuntimeControl.h"
 #include "transport/UdpCrypto.h"
+#include "ui/AppShellWindow.h"
+#include "ui/CreateRoomWindow.h"
+#include "ui/HomeWindow.h"
 #include "ui/QtSessionBackend.h"
 
 #include <QtCore/QCoreApplication>
@@ -1177,6 +1180,22 @@ public:
         QTimer::singleShot(500, this, [this] { startRoomDirectoryRefresh(true); });
         QTimer::singleShot(550, this, [this] { refreshDisplays(true); });
         QTimer::singleShot(700, this, [this] { refreshAudioDevices(true); });
+    }
+
+    void showCreateRoom()
+    {
+        setMode(0);
+        show();
+        raise();
+        activateWindow();
+    }
+
+    void showJoinRoom()
+    {
+        setMode(1);
+        show();
+        raise();
+        activateWindow();
     }
 
 private:
@@ -5359,11 +5378,16 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 int main(int argc, char** argv)
 {
     bool guiSmokeTest = false;
+    bool classicUi = false;
     const QStringList arguments = startupArguments(argc, argv);
     for (int index = 1; index < arguments.size(); ++index) {
         const QString arg = arguments[index];
         if (arg == "--gui-smoke-test") {
             guiSmokeTest = true;
+            continue;
+        }
+        if (arg == "--classic-ui") {
+            classicUi = true;
             continue;
         }
         if (arg == "--self-test") {
@@ -5716,7 +5740,49 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    MainWindow window;
+    if (classicUi) {
+        MainWindow window;
+        window.show();
+        return app.exec();
+    }
+
+    MainWindow* controlsWindow = nullptr;
+    auto showControls = [&controlsWindow](bool createRoom) {
+        if (controlsWindow == nullptr) {
+            controlsWindow = new MainWindow;
+        }
+        if (createRoom) {
+            controlsWindow->showCreateRoom();
+        } else {
+            controlsWindow->showJoinRoom();
+        }
+    };
+
+    AppShellWindow window;
+
+    HomeWindow* homeWindow = nullptr;
+    CreateRoomWindow* createRoomWindow = nullptr;
+    auto showHome = [&window, &homeWindow] {
+        window.setCurrentWidget(homeWindow);
+    };
+    auto showCreateRoom = [&window, &createRoomWindow] {
+        window.setCurrentWidget(createRoomWindow);
+    };
+
+    homeWindow = new HomeWindow(HomeWindow::Actions{
+        [&showCreateRoom] { showCreateRoom(); },
+        [&showControls] { showControls(false); },
+    });
+    createRoomWindow = new CreateRoomWindow(CreateRoomWindow::Actions{
+        [&showHome] { showHome(); },
+    });
+
+    window.addPage(homeWindow);
+    window.addPage(createRoomWindow);
+    window.resize(820, 640);
+    window.setMinimumSize(740, 600);
     window.show();
-    return app.exec();
+    const int exitCode = app.exec();
+    delete controlsWindow;
+    return exitCode;
 }

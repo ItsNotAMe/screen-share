@@ -3,6 +3,8 @@
     <file alias="brand/screenshare-mark.svg">../../assets/brand/screenshare-mark.svg</file>
     <file alias="brand/screenshare-logo.svg">../../assets/brand/screenshare-logo.svg</file>
     <file alias="ui/icons/audio.svg">../../assets/ui/icons/audio.svg</file>
+    <file alias="ui/icons/back.svg">../../assets/ui/icons/back.svg</file>
+    <file alias="ui/icons/chevron-down.svg">../../assets/ui/icons/chevron-down.svg</file>
     <file alias="ui/icons/copy.svg">../../assets/ui/icons/copy.svg</file>
     <file alias="ui/icons/display.svg">../../assets/ui/icons/display.svg</file>
     <file alias="ui/icons/fps.svg">../../assets/ui/icons/fps.svg</file>
@@ -18,8 +20,14 @@
     <file alias="ui/icons/settings.svg">../../assets/ui/icons/settings.svg</file>
     <file alias="ui/icons/share.svg">../../assets/ui/icons/share.svg</file>
     <file alias="ui/icons/stop.svg">../../assets/ui/icons/stop.svg</file>
+    <file alias="ui/icons/toggle-off.svg">../../assets/ui/icons/toggle-off.svg</file>
+    <file alias="ui/icons/toggle-on.svg">../../assets/ui/icons/toggle-on.svg</file>
     <file alias="ui/icons/viewers.svg">../../assets/ui/icons/viewers.svg</file>
     <file alias="ui/icons/volume.svg">../../assets/ui/icons/volume.svg</file>
     <file alias="ui/icons/watch.svg">../../assets/ui/icons/watch.svg</file>
+    <file alias="ui/icons/window-close.svg">../../assets/ui/icons/window-close.svg</file>
+    <file alias="ui/icons/window-maximize.svg">../../assets/ui/icons/window-maximize.svg</file>
+    <file alias="ui/icons/window-minimize.svg">../../assets/ui/icons/window-minimize.svg</file>
+    <file alias="ui/icons/window-restore.svg">../../assets/ui/icons/window-restore.svg</file>
   </qresource>
 </RCC>

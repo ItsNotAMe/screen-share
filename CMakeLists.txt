@@ -161,6 +161,10 @@ if(SCREENSHARE_BUILD_QT_UI)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
             src/ui/QtSessionBackend.cpp
+            src/ui/AppShellWindow.cpp
+            src/ui/CreateRoomWindow.cpp
+            src/ui/HomeWindow.cpp
+            src/ui/UiStyle.cpp
             src/ui/resources.qrc
         )
         set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)
