@@ -11,10 +11,10 @@ Only you can fully validate these because they need real machines/networks.
 ## Build Work
 
 1. Remove the old classic UI now that the revamped room flow is active.
-   - [ ] Remove the `--classic-ui` path and legacy `MainWindow` from `src/ui/main.cpp`.
-   - [ ] Keep or relocate any useful smoke-test/self-test helpers that are still valuable.
-   - [ ] Make `src/ui/main.cpp` a small app bootstrap that wires `AppShellWindow` and the new screens.
-   - [ ] Delete unused legacy-only helpers, styles, widgets, and includes after the new bootstrap builds.
+   - [x] Remove the `--classic-ui` path and legacy `MainWindow` from `src/ui/main.cpp`.
+   - [x] Keep or relocate any useful smoke-test/self-test helpers that are still valuable.
+   - [x] Make `src/ui/main.cpp` a small app bootstrap that wires `AppShellWindow` and the new screens.
+   - [x] Delete unused legacy-only helpers, styles, widgets, and includes after the new bootstrap builds.
 2. Finish Active Share room settings functionality.
    - [ ] Make all share-session settings controls apply real runtime changes where the engine supports them.
    - [ ] Add display switching during a share session.
