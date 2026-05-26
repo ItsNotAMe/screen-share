@@ -731,5 +731,75 @@ QLabel#JoinStatusLive {
 QLabel#JoinStatusError {
     color: #ff9b94;
 }
+QWidget#ActiveWatchWindow,
+QWidget#ActiveWatchContent {
+    background: #171a19;
+    color: #eef3f1;
+    font-family: "Segoe UI", "Inter", Arial, sans-serif;
+    font-size: 10pt;
+}
+QFrame#WatchPreviewPanel,
+QFrame#WatchStatsPanel {
+    background: #202625;
+    border: 1px solid #303938;
+    border-radius: 8px;
+}
+QFrame#WatchVolumePanel {
+    background: transparent;
+    border: 1px solid #303938;
+    border-radius: 8px;
+}
+QFrame#WatchPreviewPanel {
+    background: #111514;
+}
+QWidget#VideoFrameWidget {
+    background: transparent;
+    color: #a9b5b1;
+}
+QLabel#WatchPreviewStatus {
+    background: transparent;
+    color: #a9b5b1;
+    font-size: 12pt;
+    font-weight: 650;
+}
+QWidget#WatchStatRow {
+    background: transparent;
+    border-bottom: 1px solid #2a3331;
+}
+QLabel#WatchStatValue {
+    background: transparent;
+    color: #f1f7f5;
+    font-size: 10.5pt;
+    font-weight: 740;
+}
+QPushButton#WatchInlineButton {
+    background: transparent;
+    color: #edf5f2;
+    border: 1px solid #33403d;
+    border-radius: 7px;
+    padding: 7px 10px;
+    font-weight: 720;
+}
+QPushButton#WatchInlineButton:hover {
+    background: #26302d;
+    border: 1px solid #4a5b58;
+}
+QPushButton#WatchLeaveButton {
+    background: #9f2727;
+    color: #ffffff;
+    border: 1px solid #d04f45;
+    border-radius: 8px;
+    padding: 0 16px;
+    font-size: 10.5pt;
+    font-weight: 770;
+}
+QPushButton#WatchLeaveButton:hover {
+    background: #b33231;
+}
+QPushButton#WatchLeaveButton:disabled {
+    background: #4a2524;
+    color: #b49896;
+    border: 1px solid #6c3835;
+}
 )");
 }

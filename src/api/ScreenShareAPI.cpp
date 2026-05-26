@@ -44,6 +44,16 @@ RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSetti
     return request;
 }
 
+RuntimeAudioPlaybackSettingsRequest BuildRuntimeAudioPlaybackSettingsRequest(const AudioPlaybackSettings& settings)
+{
+    RuntimeAudioPlaybackSettingsRequest request;
+    request.muted = settings.muted;
+    if (settings.volumePercent) {
+        request.volumePercent = std::clamp(*settings.volumePercent, 0, 200);
+    }
+    return request;
+}
+
 SessionEvent BuildErrorEvent(SessionRole role, SessionState state, std::string message)
 {
     SessionEvent event;
@@ -247,6 +257,7 @@ public:
     void Shutdown();
     void Stop();
     void ApplyStreamSettings(const StreamSettings& settings);
+    void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
     std::vector<SessionAudioDeviceInfo> ListAudioDevices();
@@ -259,6 +270,7 @@ private:
     void JoinWorker();
     void JoinFinishedWorker();
     void HandleOutput(std::string_view text);
+    void HandleVideoFrame(SessionEvent::VideoFrame frame);
     void HandleLogLine(const std::string& line);
     void HandleDiagnosticLogLine(const std::string& line);
     void HandleStreamLogLine(const std::string& line);
@@ -354,6 +366,18 @@ void ScreenShareSession::Impl::ApplyStreamSettings(const StreamSettings& setting
         currentState = state_;
     }
     Notify(SessionEventType::SettingsChanged, currentState, "Stream settings queued");
+}
+
+void ScreenShareSession::Impl::ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings)
+{
+    runtimeControl_.RequestAudioPlaybackSettings(BuildRuntimeAudioPlaybackSettingsRequest(settings));
+
+    SessionState currentState = SessionState::Idle;
+    {
+        std::scoped_lock lock(mutex_);
+        currentState = state_;
+    }
+    Notify(SessionEventType::AudioStatusChanged, currentState, "Audio playback settings queued");
 }
 
 SessionStatus ScreenShareSession::Impl::GetStatus() const
@@ -452,6 +476,9 @@ void ScreenShareSession::Impl::StartRunner(
         context.outputHandler = [this](std::string_view text) {
             HandleOutput(text);
         };
+        context.videoFrameHandler = [this](SessionEvent::VideoFrame frame) {
+            HandleVideoFrame(std::move(frame));
+        };
 
         int exitCode = 1;
         try {
@@ -539,6 +566,23 @@ void ScreenShareSession::Impl::HandleOutput(std::string_view text)
 
     for (const std::string& line : lines) {
         HandleLogLine(line);
+    }
+}
+
+void ScreenShareSession::Impl::HandleVideoFrame(SessionEvent::VideoFrame frame)
+{
+    ISessionEventSink* observer = nullptr;
+    SessionEvent event;
+    {
+        std::scoped_lock lock(mutex_);
+        observer = observer_;
+        event.type = SessionEventType::VideoFrameReady;
+        event.status = BuildStatusLocked();
+        event.videoFrame = std::move(frame);
+    }
+
+    if (observer != nullptr) {
+        observer->OnSessionEvent(event);
     }
 }
 
@@ -986,6 +1030,34 @@ void ScreenShareSession::Impl::HandleDiagnosticLogLine(const std::string& line)
 
 void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
 {
+    if (line.find("signaling_live_sender_peer=removed") != std::string::npos) {
+        const std::string endpoint = LogFieldValue(line, "endpoint");
+        if (endpoint.empty()) {
+            return;
+        }
+
+        bool removed = false;
+        {
+            std::scoped_lock lock(mutex_);
+            const auto oldSize = viewers_.size();
+            viewers_.erase(
+                std::remove_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
+                    return viewer.endpoint == endpoint;
+                }),
+                viewers_.end());
+            removed = viewers_.size() != oldSize;
+            if (removed && viewers_.empty() && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
+                state_ = SessionState::Connecting;
+                summary_ = "Waiting for viewers";
+            }
+        }
+
+        if (removed) {
+            EmitStatus(SessionEventType::ViewerListChanged, "Viewer left");
+        }
+        return;
+    }
+
     if (line.find("viewer_target=") == std::string::npos) {
         return;
     }
@@ -1211,6 +1283,11 @@ void ScreenShareSession::Stop()
 void ScreenShareSession::ApplyStreamSettings(const StreamSettings& settings)
 {
     impl_->ApplyStreamSettings(settings);
+}
+
+void ScreenShareSession::ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings)
+{
+    impl_->ApplyAudioPlaybackSettings(settings);
 }
 
 SessionStatus ScreenShareSession::GetStatus() const

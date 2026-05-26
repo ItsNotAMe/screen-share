@@ -58,6 +58,11 @@ std::optional<RuntimeStreamSettingsRequest> NullSessionRuntimeControl::TakeStrea
     return std::nullopt;
 }
 
+std::optional<RuntimeAudioPlaybackSettingsRequest> NullSessionRuntimeControl::TakeAudioPlaybackSettingsRequest()
+{
+    return std::nullopt;
+}
+
 bool MemorySessionRuntimeControl::StopRequested()
 {
     std::scoped_lock lock(mutex_);
@@ -69,6 +74,14 @@ std::optional<RuntimeStreamSettingsRequest> MemorySessionRuntimeControl::TakeStr
     std::scoped_lock lock(mutex_);
     auto request = streamSettingsRequest_;
     streamSettingsRequest_.reset();
+    return request;
+}
+
+std::optional<RuntimeAudioPlaybackSettingsRequest> MemorySessionRuntimeControl::TakeAudioPlaybackSettingsRequest()
+{
+    std::scoped_lock lock(mutex_);
+    auto request = audioPlaybackSettingsRequest_;
+    audioPlaybackSettingsRequest_.reset();
     return request;
 }
 
@@ -90,6 +103,12 @@ void MemorySessionRuntimeControl::RequestStreamSettings(RuntimeStreamSettingsReq
     streamSettingsRequest_ = std::move(request);
 }
 
+void MemorySessionRuntimeControl::RequestAudioPlaybackSettings(RuntimeAudioPlaybackSettingsRequest request)
+{
+    std::scoped_lock lock(mutex_);
+    audioPlaybackSettingsRequest_ = std::move(request);
+}
+
 void MemorySessionRuntimeControl::ClearStreamSettingsRequest()
 {
     std::scoped_lock lock(mutex_);
@@ -101,6 +120,7 @@ void MemorySessionRuntimeControl::Reset()
     std::scoped_lock lock(mutex_);
     stopRequested_ = false;
     streamSettingsRequest_.reset();
+    audioPlaybackSettingsRequest_.reset();
 }
 
 FileSessionRuntimeControl::FileSessionRuntimeControl(std::string stopFilePath, std::string controlFilePath)
@@ -146,6 +166,11 @@ std::optional<RuntimeStreamSettingsRequest> FileSessionRuntimeControl::TakeStrea
     }
     lastControlContent_ = text;
     return ParseRuntimeStreamSettingsRequest(text);
+}
+
+std::optional<RuntimeAudioPlaybackSettingsRequest> FileSessionRuntimeControl::TakeAudioPlaybackSettingsRequest()
+{
+    return std::nullopt;
 }
 
 std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(std::string_view content)

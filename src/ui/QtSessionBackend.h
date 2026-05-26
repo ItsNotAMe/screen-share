@@ -29,11 +29,13 @@ public:
     void setErrorHandler(std::function<void(const QString&)> handler);
     void setFinishedHandler(std::function<void(const FinishInfo&)> handler);
     void setStatusHandler(std::function<void(const screenshare::SessionEvent&)> handler);
+    void setVideoFrameHandler(std::function<void(const screenshare::SessionEvent::VideoFrame&)> handler);
 
     bool startShare(const screenshare::ShareSessionConfig& config, QString* errorMessage = nullptr);
     bool startWatch(const screenshare::WatchSessionConfig& config, QString* errorMessage = nullptr);
     void stop();
     void applyStreamSettings(const screenshare::StreamSettings& settings);
+    void applyAudioPlaybackSettings(const screenshare::AudioPlaybackSettings& settings);
     screenshare::SessionStatus currentStatus() const;
     std::vector<screenshare::SessionDisplayInfo> listDisplays(QString* errorMessage = nullptr);
     std::vector<screenshare::SessionAudioDeviceInfo> listAudioDevices(QString* errorMessage = nullptr);
@@ -53,6 +55,7 @@ private:
     std::function<void(const QString&)> errorHandler_;
     std::function<void(const FinishInfo&)> finishedHandler_;
     std::function<void(const screenshare::SessionEvent&)> statusHandler_;
+    std::function<void(const screenshare::SessionEvent::VideoFrame&)> videoFrameHandler_;
     bool running_ = false;
     bool stopRequested_ = false;
     bool finished_ = false;

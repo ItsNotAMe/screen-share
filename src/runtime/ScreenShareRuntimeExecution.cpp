@@ -1274,17 +1274,29 @@ public:
 
     bool AddAdditionalTarget(const screenshare::UdpSenderEndpoint& endpoint)
     {
+        const std::string endpointText = UdpEndpointText(endpoint.host, endpoint.port);
+        suppressedEndpoints_.erase(endpointText);
         for (auto& target : targets_) {
             if (target.failed || target.sender == nullptr || !target.sender->isOpen()) {
                 continue;
             }
             const bool added = target.sender->AddAdditionalTarget(endpoint);
             if (added) {
-                target.additionalEndpoints.push_back(UdpEndpointText(endpoint.host, endpoint.port));
+                target.additionalEndpoints.push_back(endpointText);
             }
             return added;
         }
         throw std::runtime_error("No active UDP sender target is available for live signaling");
+    }
+
+    void SuppressEndpoint(const std::string& endpoint)
+    {
+        suppressedEndpoints_.insert(endpoint);
+    }
+
+    void UnsuppressEndpoint(const std::string& endpoint)
+    {
+        suppressedEndpoints_.erase(endpoint);
     }
 
     [[nodiscard]] size_t targetCount() const noexcept
@@ -1454,12 +1466,18 @@ public:
             };
 
             if (stats.feedbackPeers.empty()) {
+                if (suppressedEndpoints_.find(target.endpoint) != suppressedEndpoints_.end()) {
+                    continue;
+                }
                 snapshots.push_back(buildSnapshot(target.endpoint));
                 continue;
             }
 
             std::set<std::string> emittedEndpoints;
             for (const auto& peer : stats.feedbackPeers) {
+                if (suppressedEndpoints_.find(peer.endpoint) != suppressedEndpoints_.end()) {
+                    continue;
+                }
                 if (!emittedEndpoints.insert(peer.endpoint).second) {
                     continue;
                 }
@@ -1505,6 +1523,7 @@ private:
     }
 
     std::vector<Target> targets_;
+    std::set<std::string> suppressedEndpoints_;
 };
 
 template <typename UdpSenderLike>
@@ -1714,6 +1733,18 @@ public:
         return peers;
     }
 
+    std::vector<LiveSignalingPeerCandidate> DrainRemovedPeers()
+    {
+        if (!state_) {
+            return {};
+        }
+
+        std::lock_guard lock(state_->mutex);
+        std::vector<LiveSignalingPeerCandidate> peers;
+        peers.swap(state_->removedPeers);
+        return peers;
+    }
+
 private:
     static constexpr std::chrono::milliseconds FallbackRefreshInterval{30000};
     static constexpr std::chrono::milliseconds EventReconnectDelay{5000};
@@ -1724,8 +1755,9 @@ private:
         std::condition_variable wake;
         std::string roomId;
         screenshare::SignalingPeerState peer;
-        std::set<std::string> seenCandidates;
+        std::map<std::string, LiveSignalingPeerCandidate> seenCandidates;
         std::vector<LiveSignalingPeerCandidate> discoveredPeers;
+        std::vector<LiveSignalingPeerCandidate> removedPeers;
         bool refreshRequested = false;
         bool stopRequested = false;
     };
@@ -1744,18 +1776,27 @@ private:
         }
 
         std::lock_guard lock(state->mutex);
+        std::map<std::string, LiveSignalingPeerCandidate> latestCandidates;
         for (const auto& peer : response.peers) {
             if (peer.peerId == state->peer.peerId) {
                 continue;
             }
             for (const auto& candidate : peer.candidates) {
                 const std::string key = CandidateKey(peer.peerId, candidate);
-                if (!state->seenCandidates.insert(key).second) {
-                    continue;
+                LiveSignalingPeerCandidate record{peer.peerId, candidate};
+                latestCandidates.emplace(key, record);
+                if (state->seenCandidates.find(key) == state->seenCandidates.end()) {
+                    state->discoveredPeers.push_back(std::move(record));
                 }
-                state->discoveredPeers.push_back(LiveSignalingPeerCandidate{peer.peerId, candidate});
             }
         }
+
+        for (const auto& [key, candidate] : state->seenCandidates) {
+            if (latestCandidates.find(key) == latestCandidates.end()) {
+                state->removedPeers.push_back(candidate);
+            }
+        }
+        state->seenCandidates = std::move(latestCandidates);
     }
 
     static void RequestRefresh(const std::shared_ptr<State>& state)
@@ -1810,7 +1851,8 @@ private:
                         const bool shouldRefresh =
                             message.find("\"type\":\"hello\"") != std::string::npos ||
                             message.find("\"type\":\"peer_joined\"") != std::string::npos ||
-                            message.find("\"type\":\"peer_updated\"") != std::string::npos;
+                            message.find("\"type\":\"peer_updated\"") != std::string::npos ||
+                            message.find("\"type\":\"peer_left\"") != std::string::npos;
                         std::cout
                             << "signaling_live_event=received"
                             << " room=" << state->roomId
@@ -2975,11 +3017,38 @@ void RunCaptureStats(
             return;
         }
 
+        for (const auto& peer : liveSignalingRuntime->DrainRemovedPeers()) {
+            const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
+            const bool known = liveSignalingSendTargets.erase(endpoint) > 0;
+            udpSendTargetSpecs.erase(
+                std::remove_if(
+                    udpSendTargetSpecs.begin(),
+                    udpSendTargetSpecs.end(),
+                    [&](const UdpSendTargetSpec& target) {
+                        return target.target == endpoint;
+                    }),
+                udpSendTargetSpecs.end());
+            if (udpSender) {
+                udpSender->SuppressEndpoint(endpoint);
+            }
+
+            std::cout
+                << "signaling_live_sender_peer=removed"
+                << " room=" << options.signalingRoomId
+                << " peer_id=" << peer.peerId
+                << " endpoint=" << endpoint
+                << " active=" << (known ? "suppressed" : "unknown")
+                << "\n";
+        }
+
         const uint64_t probeSession = NatProbeSessionFingerprint(options);
         for (const auto& peer : liveSignalingRuntime->DrainDiscoveredPeers()) {
             const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
             if (!liveSignalingSendTargets.insert(endpoint).second) {
                 continue;
+            }
+            if (udpSender) {
+                udpSender->UnsuppressEndpoint(endpoint);
             }
 
             UdpSendTargetSpec target = SignalingSendTargetSpec(
@@ -3843,6 +3912,7 @@ void PrepareLiveSignaling(Options& options)
 
 void RunUdpReceiverStats(
     const Options& options,
+    const ScreenShareRunContext& context,
     screenshare::ISessionRuntimeControl& runtimeControl)
 {
     std::optional<screenshare::NatInvite> peerInvite;
@@ -4147,6 +4217,25 @@ void RunUdpReceiverStats(
             2.0f);
         if (audioPlaybackVolume > 0.0f) {
             audioPlaybackMuted = false;
+        }
+        applyAudioControls();
+        updatePreviewTitle();
+        printAudioControls();
+    };
+
+    auto applyAudioPlaybackSettingsRequest = [&]() {
+        auto request = runtimeControl.TakeAudioPlaybackSettingsRequest();
+        if (!request || !options.audioPlayback) {
+            return;
+        }
+        if (request->muted) {
+            audioPlaybackMuted = *request->muted;
+        }
+        if (request->volumePercent) {
+            audioPlaybackVolume = std::clamp(static_cast<float>(*request->volumePercent) / 100.0f, 0.0f, 2.0f);
+            if (audioPlaybackVolume > 0.0f && request->muted == std::nullopt) {
+                audioPlaybackMuted = false;
+            }
         }
         applyAudioControls();
         updatePreviewTitle();
@@ -4529,6 +4618,25 @@ void RunUdpReceiverStats(
         }
     };
 
+    auto emitDecodedVideoFrame = [&](const screenshare::DecodedFrameInfo& decodedFrame) {
+        if (!options.emitVideoFrames || !context.videoFrameHandler) {
+            return;
+        }
+
+        screenshare::SessionEvent::VideoFrame frame;
+        frame.width = decodedFrame.width;
+        frame.height = decodedFrame.height;
+        frame.codedWidth = decodedFrame.codedWidth;
+        frame.codedHeight = decodedFrame.codedHeight;
+        frame.timestamp100ns = decodedFrame.timestamp100ns;
+        frame.duration100ns = decodedFrame.duration100ns;
+        frame.nv12.resize(decodedFrame.data.size());
+        if (!frame.nv12.empty()) {
+            std::memcpy(frame.nv12.data(), decodedFrame.data.data(), frame.nv12.size());
+        }
+        context.videoFrameHandler(std::move(frame));
+    };
+
     auto countDecodedFrames = [&](std::vector<screenshare::DecodedFrameInfo> decodedFrames, bool presentReady = true) {
         h264DecodedFrames += decodedFrames.size();
         for (auto& decodedFrame : decodedFrames) {
@@ -4549,6 +4657,7 @@ void RunUdpReceiverStats(
             h264DecodedWidth = decodedFrame.width;
             h264DecodedHeight = decodedFrame.height;
             latestDecodedFrame = decodedFrame;
+            emitDecodedVideoFrame(decodedFrame);
             if (options.previewWindow) {
                 ensurePreviewWindow();
             }
@@ -4788,13 +4897,14 @@ void RunUdpReceiverStats(
         if (runtimeControl.StopRequested()) {
             return false;
         }
-        if (options.previewWindow && options.seconds == 0) {
+        if ((options.previewWindow || options.emitVideoFrames) && options.seconds == 0) {
             return true;
         }
         return Clock::now() - startedAt < std::chrono::seconds(options.seconds);
     };
 
     while (shouldContinue()) {
+        applyAudioPlaybackSettingsRequest();
         if (drainLiveSignalingProbeTargets() > 0) {
             hasNatProbeSetup = true;
         }
@@ -5296,7 +5406,7 @@ int ExecuteSessionRuntimeOptions(
     if (options.audioCapture && options.udpSendTarget.empty() && !options.shareRoom) {
         RunAudioCaptureStats(options, reportContext, runtimeControl);
     } else if (options.udpReceivePort != 0) {
-        RunUdpReceiverStats(options, runtimeControl);
+        RunUdpReceiverStats(options, context, runtimeControl);
     } else {
         RunCaptureStats(options, reportContext, runtimeControl);
     }

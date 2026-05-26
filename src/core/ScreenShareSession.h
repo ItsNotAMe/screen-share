@@ -95,6 +95,11 @@ struct StreamSettings {
     bool adaptFps = false;
 };
 
+struct AudioPlaybackSettings {
+    std::optional<bool> muted;
+    std::optional<int> volumePercent;
+};
+
 struct ShareSessionConfig {
     ShareConnectionMode connectionMode = ShareConnectionMode::Room;
     std::string sessionId;
@@ -140,6 +145,7 @@ struct WatchSessionConfig {
     bool lanAdvertise = false;
     std::string peerInvite;
     int previewLatencyMs = 100;
+    bool emitVideoFrames = false;
     int audioPlaybackVolumePercent = 100;
 };
 
@@ -252,6 +258,15 @@ struct SessionEvent {
     SessionStatus status;
     SessionIssue issue = SessionIssue::None;
     std::string message;
+    struct VideoFrame {
+        int width = 0;
+        int height = 0;
+        int codedWidth = 0;
+        int codedHeight = 0;
+        int64_t timestamp100ns = 0;
+        int64_t duration100ns = 0;
+        std::vector<std::uint8_t> nv12;
+    } videoFrame;
 };
 
 class ISessionEventSink {

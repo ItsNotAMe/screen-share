@@ -64,6 +64,11 @@ void QtSessionBackend::setStatusHandler(std::function<void(const screenshare::Se
     statusHandler_ = std::move(handler);
 }
 
+void QtSessionBackend::setVideoFrameHandler(std::function<void(const screenshare::SessionEvent::VideoFrame&)> handler)
+{
+    videoFrameHandler_ = std::move(handler);
+}
+
 bool QtSessionBackend::prepareStart(QString* errorMessage)
 {
     if (running_) {
@@ -148,6 +153,13 @@ void QtSessionBackend::applyStreamSettings(const screenshare::StreamSettings& se
     }
 }
 
+void QtSessionBackend::applyAudioPlaybackSettings(const screenshare::AudioPlaybackSettings& settings)
+{
+    if (running_) {
+        session_.ApplyAudioPlaybackSettings(settings);
+    }
+}
+
 screenshare::SessionStatus QtSessionBackend::currentStatus() const
 {
     return session_.GetStatus();
@@ -198,6 +210,13 @@ void QtSessionBackend::handleSessionEvent(const screenshare::SessionEvent& event
     if (event.type == screenshare::SessionEventType::LogLine) {
         if (outputHandler_) {
             outputHandler_(ToQString(event.message));
+        }
+        return;
+    }
+
+    if (event.type == screenshare::SessionEventType::VideoFrameReady) {
+        if (videoFrameHandler_) {
+            videoFrameHandler_(event.videoFrame);
         }
         return;
     }

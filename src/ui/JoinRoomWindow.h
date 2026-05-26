@@ -2,6 +2,7 @@
 
 #include "core/ScreenShareSession.h"
 #include "ui/QtSessionBackend.h"
+#include "ui/WatchSessionUiState.h"
 
 #include <QtCore/QString>
 #include <QtCore/QVector>
@@ -28,6 +29,7 @@ class JoinRoomWindow final : public QWidget {
 public:
     struct Actions {
         std::function<void()> back;
+        std::function<void(const WatchSessionUiState&)> watchStarted;
     };
 
     explicit JoinRoomWindow(QtSessionBackend* backend, Actions actions, QWidget* parent = nullptr);
@@ -50,10 +52,15 @@ private:
     void pasteRoomLink();
     void joinRoom(const JoinRoomInfo& room);
     void joinRoomLink();
-    void startWatch(const QString& roomId, const QString& password);
+    void startWatch(const QString& roomId, const QString& roomName, bool passwordProtected, const QString& password);
     QString promptPassword(const QString& roomName, bool* accepted);
     void installBackendHandlers();
     screenshare::WatchSessionConfig currentConfig(const QString& roomId, const QString& password) const;
+    WatchSessionUiState currentWatchUiState(
+        const QString& roomId,
+        const QString& roomName,
+        bool passwordProtected,
+        const QString& password) const;
     void setStatus(const QString& text, const QString& objectName);
 
     QtSessionBackend* backend_ = nullptr;

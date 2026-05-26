@@ -21,6 +21,7 @@ public:
     void Shutdown();
     void Stop();
     void ApplyStreamSettings(const StreamSettings& settings);
+    void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
     std::vector<SessionAudioDeviceInfo> ListAudioDevices();

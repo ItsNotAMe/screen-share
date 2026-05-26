@@ -19,17 +19,29 @@
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QInputDialog>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <string>
 #include <utility>
 
 namespace {
 
 constexpr const char* kDefaultSignalServer = "https://screenshare-signaling.bit-yeet.workers.dev";
+constexpr const char* kDefaultStunServer = "stun.l.google.com:19302";
+
+std::string toStdUtf8(const QString& value)
+{
+    const QByteArray bytes = value.toUtf8();
+    return std::string(bytes.constData(), static_cast<size_t>(bytes.size()));
+}
 
 QPixmap renderSvgResource(const QString& path, const QSize& size, const QString& color = QString())
 {
@@ -338,10 +350,40 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
 
     auto* join = actionButton("Join", "HomeTinyButton", "watch");
     join->setMinimumWidth(64);
-    QObject::connect(join, &QPushButton::clicked, this, [this] {
-        if (actions_.joinRoom) {
-            actions_.joinRoom();
+    QObject::connect(join, &QPushButton::clicked, this, [this, room] {
+        if (!actions_.quickJoinRoom) {
+            return;
         }
+
+        QString password;
+        if (room.passwordProtected) {
+            bool ok = false;
+            password = QInputDialog::getText(
+                this,
+                "Room password",
+                QStringLiteral("Enter password for %1").arg(room.name),
+                QLineEdit::Password,
+                QString(),
+                &ok);
+            if (!ok) {
+                return;
+            }
+        }
+
+        WatchSessionUiState state;
+        state.config.connectionMode = screenshare::WatchConnectionMode::Room;
+        state.config.listenPort = 5000;
+        state.config.roomId = toStdUtf8(room.roomId);
+        state.config.roomPassword = toStdUtf8(password);
+        state.config.signalingStunServer = kDefaultStunServer;
+        state.config.reportPath = "receiver-report.zip";
+        state.config.playAudio = true;
+        state.config.previewLatencyMs = 100;
+        state.config.audioPlaybackVolumePercent = 100;
+        state.roomId = room.roomId;
+        state.roomName = room.name;
+        state.passwordProtected = room.passwordProtected;
+        actions_.quickJoinRoom(state);
     });
     layout->addWidget(join, 0, Qt::AlignVCenter);
     return row;

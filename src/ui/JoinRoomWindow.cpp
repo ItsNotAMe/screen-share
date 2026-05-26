@@ -458,7 +458,7 @@ void JoinRoomWindow::joinRoom(const JoinRoomInfo& room)
     if (!accepted) {
         return;
     }
-    startWatch(room.roomId, password);
+    startWatch(room.roomId, room.name, room.passwordProtected, password);
 }
 
 void JoinRoomWindow::joinRoomLink()
@@ -469,20 +469,27 @@ void JoinRoomWindow::joinRoomLink()
         roomLinkEdit_->setFocus();
         return;
     }
-    startWatch(roomId, QString());
+    startWatch(roomId, roomId, false, QString());
 }
 
-void JoinRoomWindow::startWatch(const QString& roomId, const QString& password)
+void JoinRoomWindow::startWatch(
+    const QString& roomId,
+    const QString& roomName,
+    bool passwordProtected,
+    const QString& password)
 {
     if (backend_ == nullptr) {
         setStatus("Session backend unavailable", "JoinStatusError");
         return;
     }
-    installBackendHandlers();
-    setStatus("Joining room...", "JoinStatusConnecting");
-    QString error;
-    if (!backend_->startWatch(currentConfig(roomId, password), &error)) {
-        setStatus(error.isEmpty() ? QStringLiteral("Could not join room") : error, "JoinStatusError");
+    if (backend_->isRunning()) {
+        setStatus("A session is already running.", "JoinStatusError");
+        return;
+    }
+
+    const WatchSessionUiState state = currentWatchUiState(roomId, roomName, passwordProtected, password);
+    if (actions_.watchStarted) {
+        actions_.watchStarted(state);
     }
 }
 
@@ -565,6 +572,20 @@ screenshare::WatchSessionConfig JoinRoomWindow::currentConfig(const QString& roo
     config.previewLatencyMs = 100;
     config.audioPlaybackVolumePercent = 100;
     return config;
+}
+
+WatchSessionUiState JoinRoomWindow::currentWatchUiState(
+    const QString& roomId,
+    const QString& roomName,
+    bool passwordProtected,
+    const QString& password) const
+{
+    WatchSessionUiState state;
+    state.config = currentConfig(roomId, password);
+    state.roomId = roomId;
+    state.roomName = roomName;
+    state.passwordProtected = passwordProtected;
+    return state;
 }
 
 void JoinRoomWindow::setStatus(const QString& text, const QString& objectName)

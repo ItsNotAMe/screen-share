@@ -2,6 +2,7 @@
 #include "core/SessionRuntimeControl.h"
 #include "transport/UdpCrypto.h"
 #include "ui/ActiveShareWindow.h"
+#include "ui/ActiveWatchWindow.h"
 #include "ui/AppShellWindow.h"
 #include "ui/CreateRoomWindow.h"
 #include "ui/HomeWindow.h"
@@ -5755,6 +5756,7 @@ int main(int argc, char** argv)
     CreateRoomWindow* createRoomWindow = nullptr;
     JoinRoomWindow* joinRoomWindow = nullptr;
     ActiveShareWindow* activeShareWindow = nullptr;
+    ActiveWatchWindow* activeWatchWindow = nullptr;
     auto showHome = [&window, &homeWindow] {
         window.setCurrentWidget(homeWindow);
     };
@@ -5772,10 +5774,18 @@ int main(int argc, char** argv)
         activeShareWindow->setSession(session);
         window.setCurrentWidget(activeShareWindow);
     };
+    auto showActiveWatch = [&window, &activeWatchWindow](const WatchSessionUiState& session) {
+        if (!window.isMaximized()) {
+            window.resize(std::max(window.width(), 940), std::max(window.height(), 690));
+        }
+        window.setCurrentWidget(activeWatchWindow);
+        activeWatchWindow->setSession(session);
+    };
 
     homeWindow = new HomeWindow(HomeWindow::Actions{
         [&showCreateRoom] { showCreateRoom(); },
         [&showJoinRoom] { showJoinRoom(); },
+        [&showActiveWatch](const WatchSessionUiState& session) { showActiveWatch(session); },
     });
     createRoomWindow = new CreateRoomWindow(sessionBackend, CreateRoomWindow::Actions{
         [&showHome] { showHome(); },
@@ -5794,12 +5804,22 @@ int main(int argc, char** argv)
     });
     joinRoomWindow = new JoinRoomWindow(sessionBackend, JoinRoomWindow::Actions{
         [&showHome] { showHome(); },
+        [&showActiveWatch](const WatchSessionUiState& session) { showActiveWatch(session); },
+    });
+    activeWatchWindow = new ActiveWatchWindow(sessionBackend, ActiveWatchWindow::Actions{
+        [&window, &homeWindow] {
+            window.setCurrentWidget(homeWindow);
+            if (!window.isMaximized()) {
+                window.resize(820, 640);
+            }
+        },
     });
 
     window.addPage(homeWindow);
     window.addPage(createRoomWindow);
     window.addPage(joinRoomWindow);
     window.addPage(activeShareWindow);
+    window.addPage(activeWatchWindow);
     window.resize(820, 640);
     window.setMinimumSize(740, 600);
     window.show();

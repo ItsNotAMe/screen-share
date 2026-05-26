@@ -130,6 +130,7 @@ struct Options {
     bool decodeH264 = false;
     std::string decodedBmpPath;
     bool previewWindow = false;
+    bool emitVideoFrames = false;
     int previewLatencyMs = DefaultPreviewLatencyMs;
     bool previewLatencyProvided = false;
     int previewMaxLateMs = DefaultPreviewMaxLateMs;

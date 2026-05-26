@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/WatchSessionUiState.h"
+
 #include <QtCore/QString>
 #include <QtCore/QVector>
 #include <QtWidgets/QWidget>
@@ -24,6 +26,7 @@ public:
     struct Actions {
         std::function<void()> createRoom;
         std::function<void()> joinRoom;
+        std::function<void(const WatchSessionUiState&)> quickJoinRoom;
     };
 
     explicit HomeWindow(Actions actions, QWidget* parent = nullptr);

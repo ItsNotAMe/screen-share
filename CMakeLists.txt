@@ -162,11 +162,13 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/main.cpp
             src/ui/QtSessionBackend.cpp
             src/ui/ActiveShareWindow.cpp
+            src/ui/ActiveWatchWindow.cpp
             src/ui/AppShellWindow.cpp
             src/ui/CreateRoomWindow.cpp
             src/ui/HomeWindow.cpp
             src/ui/JoinRoomWindow.cpp
             src/ui/UiStyle.cpp
+            src/ui/VideoFrameWidget.cpp
             src/ui/resources.qrc
         )
         set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)
