@@ -2,6 +2,7 @@
 
 #include "runtime/ScreenShareRunContext.h"
 #include "runtime/ScreenShareRuntimeOptions.h"
+#include "runtime/ScreenShareSessionOptions.h"
 #include "runtime/ScreenShareRuntimeSupport.h"
 #include "core/ScreenShareSession.h"
 
