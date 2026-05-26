@@ -1,6 +1,7 @@
 #include "core/SessionCommand.h"
 #include "core/SessionRuntimeControl.h"
 #include "transport/UdpCrypto.h"
+#include "ui/ActiveShareWindow.h"
 #include "ui/AppShellWindow.h"
 #include "ui/CreateRoomWindow.h"
 #include "ui/HomeWindow.h"
@@ -5760,25 +5761,47 @@ int main(int argc, char** argv)
 
     AppShellWindow window;
 
+    auto* sessionBackend = new QtSessionBackend(&window);
     HomeWindow* homeWindow = nullptr;
     CreateRoomWindow* createRoomWindow = nullptr;
+    ActiveShareWindow* activeShareWindow = nullptr;
     auto showHome = [&window, &homeWindow] {
         window.setCurrentWidget(homeWindow);
     };
     auto showCreateRoom = [&window, &createRoomWindow] {
         window.setCurrentWidget(createRoomWindow);
     };
+    auto showActiveShare = [&window, &activeShareWindow](const ShareSessionUiState& session) {
+        if (!window.isMaximized()) {
+            window.resize(std::max(window.width(), 940), std::max(window.height(), 690));
+        }
+        activeShareWindow->setSession(session);
+        window.setCurrentWidget(activeShareWindow);
+    };
 
     homeWindow = new HomeWindow(HomeWindow::Actions{
         [&showCreateRoom] { showCreateRoom(); },
         [&showControls] { showControls(false); },
     });
-    createRoomWindow = new CreateRoomWindow(CreateRoomWindow::Actions{
+    createRoomWindow = new CreateRoomWindow(sessionBackend, CreateRoomWindow::Actions{
         [&showHome] { showHome(); },
+        [&showActiveShare](const ShareSessionUiState& session) { showActiveShare(session); },
+    });
+    activeShareWindow = new ActiveShareWindow(sessionBackend, ActiveShareWindow::Actions{
+        [&window, &homeWindow, &createRoomWindow] {
+            if (createRoomWindow != nullptr) {
+                createRoomWindow->resetForNextRoom();
+            }
+            window.setCurrentWidget(homeWindow);
+            if (!window.isMaximized()) {
+                window.resize(820, 640);
+            }
+        },
     });
 
     window.addPage(homeWindow);
     window.addPage(createRoomWindow);
+    window.addPage(activeShareWindow);
     window.resize(820, 640);
     window.setMinimumSize(740, 600);
     window.show();

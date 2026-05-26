@@ -161,6 +161,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
             src/ui/QtSessionBackend.cpp
+            src/ui/ActiveShareWindow.cpp
             src/ui/AppShellWindow.cpp
             src/ui/CreateRoomWindow.cpp
             src/ui/HomeWindow.cpp

@@ -30,6 +30,7 @@ Only you can fully validate these because they need real machines/networks.
    - [ ] Check preview upscale filtering from 1080p to 2K.
    - [ ] Fix the actual blurry path without hurting native/2K sharpness.
 3. After the revamped UI, add live stream settings.
+   - [ ] Wire the disabled Active Share room-settings controls after the remaining screens are in place.
    - [ ] Add host controls for Quality/Bitrate.
    - [ ] Add host controls for FPS and adaptive FPS.
    - [ ] Add host controls for Resolution, including Auto and explicit tiers at or below display size.

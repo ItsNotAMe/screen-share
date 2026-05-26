@@ -2,6 +2,7 @@
 
 #include "core/ScreenShareSession.h"
 #include "ui/QtSessionBackend.h"
+#include "ui/ShareSessionUiState.h"
 
 #include <QtCore/QSize>
 #include <QtCore/QString>
@@ -21,9 +22,12 @@ class CreateRoomWindow final : public QWidget {
 public:
     struct Actions {
         std::function<void()> back;
+        std::function<void(const ShareSessionUiState&)> shareStarted;
     };
 
-    explicit CreateRoomWindow(Actions actions, QWidget* parent = nullptr);
+    explicit CreateRoomWindow(QtSessionBackend* backend, Actions actions, QWidget* parent = nullptr);
+
+    void resetForNextRoom();
 
 private:
     QWidget* buildShell();
@@ -45,11 +49,13 @@ private:
     void populateResolutionChoices();
     void refreshRoomLink();
     void generatePassword();
+    void installBackendHandlers();
     void startOrStop();
     void startShare();
     void stopShare();
     screenshare::ShareSessionConfig currentConfig() const;
     screenshare::StreamSettings currentStreamSettings() const;
+    ShareSessionUiState currentShareUiState() const;
     bool validateFields();
     QString roomName() const;
     QString roomPassword() const;

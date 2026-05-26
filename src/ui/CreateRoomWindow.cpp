@@ -324,8 +324,8 @@ QScrollBar::sub-page:vertical {
 
 } // namespace
 
-CreateRoomWindow::CreateRoomWindow(Actions actions, QWidget* parent)
-    : QWidget(parent), actions_(std::move(actions)), roomId_(generatedRoomId())
+CreateRoomWindow::CreateRoomWindow(QtSessionBackend* backend, Actions actions, QWidget* parent)
+    : QWidget(parent), actions_(std::move(actions)), backend_(backend), roomId_(generatedRoomId())
 {
     setObjectName("RoomWindow");
     setWindowTitle("Create Room - ScreenShare");
@@ -334,27 +334,10 @@ CreateRoomWindow::CreateRoomWindow(Actions actions, QWidget* parent)
     resize(760, 630);
     setMinimumSize(720, 600);
 
-    backend_ = new QtSessionBackend(this);
-    backend_->setStartedHandler([this] {
-        updateRunningState(true);
-        setStatus("Opening room...", "RoomInlineStatusConnecting");
-    });
-    backend_->setErrorHandler([this](const QString& message) {
-        setStatus(message.isEmpty() ? QStringLiteral("Session failed") : message, "RoomStatusError");
-    });
-    backend_->setFinishedHandler([this](const QtSessionBackend::FinishInfo& info) {
-        updateRunningState(false);
-        if (info.stopRequested) {
-            setStatus("Sharing stopped", "RoomStatusIdle");
-        } else if (info.failed) {
-            setStatus("Sharing failed", "RoomStatusError");
-        } else {
-            setStatus("Sharing finished", "RoomStatusIdle");
-        }
-    });
-    backend_->setStatusHandler([this](const screenshare::SessionEvent& event) {
-        handleStatusEvent(event);
-    });
+    if (backend_ == nullptr) {
+        backend_ = new QtSessionBackend(this);
+    }
+    installBackendHandlers();
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -365,6 +348,14 @@ CreateRoomWindow::CreateRoomWindow(Actions actions, QWidget* parent)
     refreshAudioDevices();
     refreshRoomLink();
     updateRunningState(false);
+}
+
+void CreateRoomWindow::resetForNextRoom()
+{
+    roomId_ = generatedRoomId();
+    refreshRoomLink();
+    updateRunningState(false);
+    setStatus("", "RoomInlineStatus");
 }
 
 QWidget* CreateRoomWindow::buildShell()
@@ -725,6 +716,34 @@ void CreateRoomWindow::generatePassword()
     }
 }
 
+void CreateRoomWindow::installBackendHandlers()
+{
+    if (backend_ == nullptr) {
+        return;
+    }
+
+    backend_->setStartedHandler([this] {
+        updateRunningState(true);
+        setStatus("Opening room...", "RoomInlineStatusConnecting");
+    });
+    backend_->setErrorHandler([this](const QString& message) {
+        setStatus(message.isEmpty() ? QStringLiteral("Session failed") : message, "RoomInlineStatusError");
+    });
+    backend_->setFinishedHandler([this](const QtSessionBackend::FinishInfo& info) {
+        updateRunningState(false);
+        if (info.stopRequested) {
+            setStatus("Sharing stopped", "RoomInlineStatus");
+        } else if (info.failed) {
+            setStatus("Sharing failed", "RoomInlineStatusError");
+        } else {
+            setStatus("Sharing finished", "RoomInlineStatus");
+        }
+    });
+    backend_->setStatusHandler([this](const screenshare::SessionEvent& event) {
+        handleStatusEvent(event);
+    });
+}
+
 void CreateRoomWindow::startOrStop()
 {
     if (backend_->isRunning()) {
@@ -739,11 +758,16 @@ void CreateRoomWindow::startShare()
     if (!validateFields()) {
         return;
     }
+    installBackendHandlers();
     setStatus("Starting room...", "RoomInlineStatusConnecting");
     QString error;
     if (!backend_->startShare(currentConfig(), &error)) {
         setStatus(error.isEmpty() ? QStringLiteral("Could not start sharing") : error, "RoomInlineStatusError");
         updateRunningState(false);
+        return;
+    }
+    if (actions_.shareStarted) {
+        actions_.shareStarted(currentShareUiState());
     }
 }
 
@@ -785,6 +809,32 @@ screenshare::StreamSettings CreateRoomWindow::currentStreamSettings() const
         settings.outputResolution = screenshare::SessionResolution{resolution.width(), resolution.height()};
     }
     return settings;
+}
+
+ShareSessionUiState CreateRoomWindow::currentShareUiState() const
+{
+    ShareSessionUiState state;
+    state.config = currentConfig();
+    state.roomId = roomId_;
+    state.roomName = roomName();
+    state.roomLink = roomLink();
+    state.displayText = displayCombo_ != nullptr ? displayCombo_->currentText() : QStringLiteral("Display");
+    state.resolutionText = resolutionCombo_ != nullptr ? resolutionCombo_->currentText() : QStringLiteral("Auto");
+    state.resolutionValue = resolutionCombo_ != nullptr ? resolutionCombo_->currentData().toString() : QStringLiteral("auto");
+    if (resolutionCombo_ != nullptr) {
+        for (int index = 0; index < resolutionCombo_->count(); ++index) {
+            state.resolutionChoices.push_back(ShareResolutionChoice{
+                resolutionCombo_->itemText(index),
+                resolutionCombo_->itemData(index).toString(),
+            });
+        }
+    }
+    state.fpsText = fpsSpin_ != nullptr ? QStringLiteral("%1 FPS").arg(fpsSpin_->value()) : QStringLiteral("60 FPS");
+    state.audioText = captureAudioCheck_ != nullptr && captureAudioCheck_->isChecked() ?
+        (audioDeviceCombo_ != nullptr ? audioDeviceCombo_->currentText() : QStringLiteral("System Audio")) :
+        QStringLiteral("Audio off");
+    state.passwordProtected = !roomPassword().isEmpty();
+    return state;
 }
 
 bool CreateRoomWindow::validateFields()

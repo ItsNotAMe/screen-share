@@ -426,5 +426,222 @@ QPushButton#RoomBackButton:hover {
     background: #2c3331;
     border: 1px solid #4a5b58;
 }
+QWidget#ActiveShareWindow,
+QWidget#ActiveContent,
+QWidget#ActiveContentPage,
+QWidget#ActiveTransparentBlock {
+    background: #171a19;
+    color: #eef3f1;
+    font-family: "Segoe UI", "Inter", Arial, sans-serif;
+    font-size: 10pt;
+}
+QFrame#ActiveSettingsOverlay {
+    background: rgba(4, 8, 9, 150);
+    border: 0;
+}
+QFrame#ActiveCard,
+QFrame#ActiveSettingsPanel {
+    background: #202625;
+    border: 1px solid #303938;
+    border-radius: 8px;
+}
+QFrame#ActiveSettingsPanel {
+    background: #1d2322;
+    border-radius: 0;
+}
+QWidget#ActiveFooter {
+    background: transparent;
+    border-top: 1px solid #2a3331;
+}
+QLabel#ActiveTopTitle {
+    background: transparent;
+    color: #eef3f1;
+    font-size: 10.5pt;
+    font-weight: 680;
+}
+QLabel#ActiveTopMuted {
+    background: transparent;
+    color: #9daaa6;
+    font-size: 10pt;
+    font-weight: 620;
+}
+QLabel#ActiveTopSharing,
+QLabel#ActiveTopLive,
+QLabel#ActiveTopIdle,
+QLabel#ActiveTopError {
+    background: transparent;
+    font-size: 10pt;
+    font-weight: 760;
+}
+QLabel#ActiveTopLive {
+    color: #8dde7b;
+}
+QLabel#ActiveTopSharing,
+QLabel#ActiveTopIdle {
+    color: #ffd56a;
+}
+QLabel#ActiveTopError {
+    color: #ff9b94;
+}
+QLabel#ActiveHeroTitle {
+    background: transparent;
+    color: #f4fbf9;
+    font-size: 16pt;
+    font-weight: 760;
+}
+QLabel#ActiveSectionTitle {
+    background: transparent;
+    color: #f4fbf9;
+    font-size: 12pt;
+    font-weight: 740;
+    padding: 0;
+    margin: 0;
+}
+QLabel#ActiveMuted {
+    background: transparent;
+    color: #a9b5b1;
+    font-size: 10pt;
+    font-weight: 600;
+}
+QLabel#ActiveMetricValue {
+    background: transparent;
+    color: #f1f7f5;
+    font-size: 10.5pt;
+    font-weight: 730;
+}
+QLabel#ActiveGoodText,
+QLabel#ActiveHealthGood,
+QLabel#ActiveViewerDot {
+    background: transparent;
+    color: #8dde7b;
+    font-size: 10.5pt;
+    font-weight: 760;
+}
+QLabel#ActiveHealthWaiting {
+    background: transparent;
+    color: #ffd56a;
+    font-size: 10.5pt;
+    font-weight: 760;
+}
+QLabel#ActiveHealthError {
+    background: transparent;
+    color: #ff9b94;
+    font-size: 10.5pt;
+    font-weight: 760;
+}
+QLabel#ActiveViewerName {
+    background: transparent;
+    color: #eef3f1;
+    font-size: 10pt;
+    font-weight: 700;
+}
+QLabel#ActiveSettingsHeading {
+    background: transparent;
+    color: #f4fbf9;
+    font-size: 10.5pt;
+    font-weight: 760;
+    margin-top: 8px;
+}
+QLabel#ActiveSettingsLabel {
+    background: transparent;
+    color: #a9b5b1;
+    font-size: 9pt;
+    font-weight: 650;
+    margin-top: 2px;
+}
+QFrame#ActiveDivider {
+    background: #2a3331;
+    border: 0;
+}
+QWidget#ActiveMetricRow {
+    background: transparent;
+    border-top: 1px solid #2a3331;
+}
+QWidget#ActiveViewerArea {
+    background: transparent;
+}
+QFrame#ActiveStatsTable {
+    background: transparent;
+    border: 0;
+}
+QFrame#ActiveMetricTile {
+    background: #1b211f;
+    border: 1px solid #2b3432;
+    border-radius: 7px;
+}
+QWidget#ActiveMetricCell {
+    background: transparent;
+    border: 0;
+}
+QFrame#ActiveVerticalDivider {
+    background: #2a3331;
+    border: 0;
+}
+QWidget#ActiveViewerRow {
+    background: transparent;
+}
+QPushButton#ActiveSecondaryButton,
+QPushButton#ActiveFooterButton,
+QPushButton#ActiveSquareButton {
+    background: #1c2221;
+    color: #edf5f2;
+    border: 1px solid #33403d;
+    border-radius: 7px;
+    padding: 10px 14px;
+    font-weight: 720;
+}
+QPushButton#ActiveSecondaryButton:hover,
+QPushButton#ActiveFooterButton:hover,
+QPushButton#ActiveSquareButton:hover {
+    background: #26302d;
+    border: 1px solid #4a5b58;
+}
+QPushButton#ActiveSecondaryButton:disabled {
+    background: #1a1f1e;
+    color: #67736f;
+    border: 1px solid #28302f;
+}
+QPushButton#ActiveFooterButton {
+    min-width: 170px;
+    min-height: 44px;
+}
+QPushButton#ActiveStopButton {
+    background: #8f2424;
+    color: #ffffff;
+    border: 1px solid #d04f45;
+    border-radius: 8px;
+    padding: 12px 22px;
+    min-width: 300px;
+    min-height: 46px;
+    font-size: 11pt;
+    font-weight: 770;
+}
+QPushButton#ActiveStopButton:hover {
+    background: #a9302f;
+}
+QPushButton#ActiveStopButton:disabled {
+    background: #4a2524;
+    color: #b49896;
+    border: 1px solid #6c3835;
+}
+QCheckBox#ActiveSettingsCheck {
+    background: transparent;
+    color: #c8d2cf;
+    spacing: 10px;
+    font-weight: 650;
+}
+QCheckBox#ActiveSettingsCheck::indicator {
+    background: transparent;
+    border: 0;
+    width: 44px;
+    height: 24px;
+    image: url(:/screenshare/ui/icons/toggle-off.svg);
+}
+QCheckBox#ActiveSettingsCheck::indicator:checked {
+    image: url(:/screenshare/ui/icons/toggle-on.svg);
+}
+QCheckBox#ActiveSettingsCheck:disabled {
+    color: #7b8783;
+}
 )");
 }
