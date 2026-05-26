@@ -10,41 +10,38 @@ Only you can fully validate these because they need real machines/networks.
 
 ## Build Work
 
-1. Build the revamped native UI on top of the backend/core API.
-   - [ ] Split new UI code into logical files instead of growing `src/ui/main.cpp`: app shell/navigation, shared widgets/styles, room flow screens, active session screens, and small data/adapters where useful.
-   - [ ] Keep the implementation simple and direct; add abstractions only when they remove real duplication or keep screens readable.
-   - [ ] When each new screen first runs, stop and ask for a screenshot so the visual design can be validated before continuing to the next screen.
-   - [x] Replace the launcher-style first screen with the saved room-flow draft.
-   - [ ] Simplify Create room around the Worker room model, with no default Nearby/Manual tabs.
-   - [ ] Simplify Join room around active rooms and pasted room links, with no default Nearby/Manual tabs.
-   - [ ] Add active Share Session screen using typed stream/audio/viewer/session status.
-   - [ ] Add active Watch Session screen using typed stream/audio/session status.
-   - [ ] Extend typed setup/session state only when an active session screen actually needs data that the API does not expose yet.
-   - [ ] Add room settings side panel or popup for advanced fields.
-   - [ ] Wire the saved SVG logo and button icons into the revamped UI surfaces.
-   - [ ] Keep reports enabled and easy to find from active sessions.
-2. After the revamped UI, investigate and fix lower-than-native resolution blur.
+1. Remove the old classic UI now that the revamped room flow is active.
+   - [ ] Remove the `--classic-ui` path and legacy `MainWindow` from `src/ui/main.cpp`.
+   - [ ] Keep or relocate any useful smoke-test/self-test helpers that are still valuable.
+   - [ ] Make `src/ui/main.cpp` a small app bootstrap that wires `AppShellWindow` and the new screens.
+   - [ ] Delete unused legacy-only helpers, styles, widgets, and includes after the new bootstrap builds.
+2. Finish Active Share room settings functionality.
+   - [ ] Make all share-session settings controls apply real runtime changes where the engine supports them.
+   - [ ] Add display switching during a share session.
+   - [ ] Add Resolution controls, including Auto and explicit tiers at or below display size.
+   - [ ] Add FPS controls and adaptive FPS.
+   - [ ] Add Bitrate/Quality controls and adaptive bitrate on/off.
+   - [ ] Add adaptive resolution on/off.
+   - [ ] Add encoder preference/preset controls if they can be switched safely.
+   - [ ] Add audio device switching and host-side outgoing audio mute.
+   - [ ] Keep Apply disabled until settings differ from the active session.
+3. Check and improve assets.
+   - [ ] Audit brand/logo/icon SVGs for unwanted backgrounds, inconsistent colors, and bad scaling.
+   - [ ] Make icon stroke weights and colors consistent across light/dark states.
+   - [ ] Check app/window icon rendering at small sizes.
+   - [ ] Remove unused asset drafts or move them under a clearly named design/archive folder.
+4. Investigate and fix lower-than-native resolution blur.
    - [ ] Confirm whether changing to 1080p changes bitrate or encoder quality unexpectedly.
    - [ ] Compare sender capture/scaler output against receiver decoded output.
    - [ ] Check chroma/subsampling and H.264 padding behavior for downscaled tiers.
    - [ ] Check preview upscale filtering from 1080p to 2K.
    - [ ] Fix the actual blurry path without hurting native/2K sharpness.
-3. After the revamped UI, add live stream settings.
-   - [ ] Wire the disabled Active Share room-settings controls after the remaining screens are in place.
-   - [ ] Add host controls for Quality/Bitrate.
-   - [ ] Add host controls for FPS and adaptive FPS.
-   - [ ] Add host controls for Resolution, including Auto and explicit tiers at or below display size.
-   - [ ] Add host controls for encoder preference/preset.
-   - [ ] Add host controls for audio device.
-   - [ ] Add host-side outgoing audio mute.
-   - [ ] Extend runtime settings beyond resolution as each engine control becomes live-safe.
-   - [ ] Make Auto modes adapt bitrate, resolution, and FPS only under sustained pressure.
-4. After the revamped UI, add application sharing.
+5. Add application sharing.
    - [ ] Let the host choose a specific application/window video source.
    - [ ] Capture matching application audio where Windows allows it.
    - [ ] Make fallback behavior clear when per-app audio is unavailable.
    - [ ] Keep whole-display/system-audio sharing as the simple default.
-5. Add better user-facing diagnostics when reports show the need.
+6. Add better user-facing diagnostics when reports show the need.
    - [ ] Surface common setup mistakes in the UI instead of only logs.
    - [ ] Improve sync/network state wording on active session screens.
    - [ ] Promote report-driven issues from the section below only after real reports justify them.
