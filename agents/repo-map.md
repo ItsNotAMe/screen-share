@@ -5,10 +5,11 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 ## Source Layout
 
 - `src/api/ScreenShareAPI.h` and `src/api/ScreenShareAPI.cpp`: concrete `screenshare::ScreenShareSession` API facade for Share/Watch start, stop, runtime settings, status snapshots, events, display discovery, and audio-device discovery.
-- `src/cli/ScreenShareCLI.*`: CLI runner for command-line parsing, diagnostic command dispatch, top-level sender/receiver loops, adaptation policy, stats printing, and logging while the remaining reusable runtime is being extracted.
+- `src/cli/ScreenShareCLI.*`: CLI runner for command-line parsing, help text, diagnostic command dispatch, report wrapping, and calls into shared runtime execution.
 - `src/runtime/ScreenShareRunContext.h`, `src/runtime/ScreenShareSessionRunner.h`, and `src/runtime/ScreenShareSessionRunner.cpp`: typed runtime-backed Share/Watch session runner plumbing used by the concrete API without including the CLI header.
 - `src/runtime/ScreenShareRuntimeOptions.h`: shared runtime option model and runtime constants used while CLI parsing and reusable session execution are being separated.
 - `src/runtime/ScreenShareSessionOptions.*`: shared typed Share/Watch config-to-runtime-options conversion, session/access-code validation helpers, and NAT target helpers used by both CLI presets and the concrete session API path.
+- `src/runtime/ScreenShareRuntimeExecution.cpp`: shared normal runtime execution for capture/send, receive/preview/audio playback, standalone audio capture, live signaling setup, adaptation policy, and typed Share/Watch execution entrypoints.
 - `src/runtime/ScreenShareRuntimeSupport.*`: shared session IDs/fingerprints, stdout/stderr capture, saved-report zip writing, and argv helpers used by both the CLI runner and typed session runner.
 - `src/runtime/ScreenShareRuntimeInternal.h`: private declarations shared only inside the session runtime implementation; not a public UI/backend API surface.
 - `src/core/ScreenShareSession.*`: shared session data types and helpers used by the API, CLI, and UI.

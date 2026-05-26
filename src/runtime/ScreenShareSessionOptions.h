@@ -33,6 +33,7 @@ screenshare::NatInvite ParseValidatedLocalInviteForShare(
     const Options& options,
     const std::string& inviteText,
     const char* optionName);
+screenshare::NatInvite ParseValidatedPeerInvite(const Options& options);
 
 Options BuildShareSessionOptions(
     const screenshare::ShareSessionConfig& config,

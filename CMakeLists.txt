@@ -113,6 +113,7 @@ target_link_libraries(ScreenShareCore PUBLIC
 add_library(ScreenShareSessionRuntime STATIC
     src/api/ScreenShareAPI.cpp
     src/cli/ScreenShareCLI.cpp
+    src/runtime/ScreenShareRuntimeExecution.cpp
     src/runtime/ScreenShareRuntimeSupport.cpp
     src/runtime/ScreenShareSessionOptions.cpp
     src/runtime/ScreenShareSessionRunner.cpp

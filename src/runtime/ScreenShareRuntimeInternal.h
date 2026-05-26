@@ -16,5 +16,9 @@ int ExecuteWatchSessionConfig(
     const screenshare::WatchSessionConfig& config,
     SavedReportContext& reportContext,
     const ScreenShareRunContext& context);
+int ExecuteSessionRuntimeOptions(
+    Options& options,
+    SavedReportContext& reportContext,
+    const ScreenShareRunContext& context);
 
 } // namespace screenshare_runtime_internal
