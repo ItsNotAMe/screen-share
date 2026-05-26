@@ -3166,8 +3166,8 @@ private:
         appendOutput("\n" + formatCommand(enginePath(), displayArgs) + "\n");
         QString errorMessage;
         const bool started = shareMode() ?
-            sessionBackend_->startShare(currentShareSessionConfig(), enginePath(), &errorMessage) :
-            sessionBackend_->startWatch(currentWatchSessionConfig(), enginePath(), &errorMessage);
+            sessionBackend_->startShare(currentShareSessionConfig(), &errorMessage) :
+            sessionBackend_->startWatch(currentWatchSessionConfig(), &errorMessage);
         if (!started && !errorMessage.isEmpty()) {
             appendOutput("Session error: " + errorMessage + "\n");
         }

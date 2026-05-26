@@ -23,12 +23,12 @@ Only you can fully validate these because they need real machines/networks.
    - [x] Replace the typed Share/Watch runner entrypoints' temporary internal argument bridge with direct options/session execution.
    - [x] Make normal CLI Share/Watch presets parse into the same typed configs and execution path as the UI.
    - [x] Split typed Share/Watch session runner declarations away from the CLI app header.
-   - [x] Rename the shared app-runner CMake target to `ScreenShareSessionRuntime`.
+   - [x] Replace the shared app-runner CMake target with `ScreenShareAPI` for reusable runtime/API code.
    - [x] Move typed Share/Watch runner entrypoint implementation into `ScreenShareSessionRunner.cpp`.
    - [x] Replace the old `AppSessionBackend` interface adapter with a concrete `ScreenShareSession` API facade.
    - [x] Move CLI source into `src/cli` and private session runner plumbing into `src/runtime`, removing the vague `src/app` folder.
    - [ ] Promote remaining advanced CLI-only Share/Watch diagnostic flags into typed configs only when they become normal app controls.
-   - [ ] Continue reshaping CMake targets so `ScreenShareCore` owns the reusable session API, `ScreenShare.exe` is the thin CLI app, and `ScreenShareUi.exe` links the same API directly instead of CLI parsing internals.
+   - [x] Split CMake targets so reusable session execution lives in `ScreenShareAPI`, `ScreenShare.exe` compiles the CLI parser, and `ScreenShareUi.exe` links the API without CLI parsing internals.
    - [x] Move session IDs/fingerprints, report zip writing, stdout/stderr capture, and typed-run report wrapping into `src/runtime`.
    - [x] Move the shared runtime `Options` model, option enums, target specs, and runtime constants into `src/runtime`.
    - [x] Move typed Share/Watch config-to-runtime-options conversion and shared NAT/session validation helpers into `src/runtime`.

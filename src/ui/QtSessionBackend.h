@@ -30,14 +30,8 @@ public:
     void setFinishedHandler(std::function<void(const FinishInfo&)> handler);
     void setStatusHandler(std::function<void(const screenshare::SessionEvent&)> handler);
 
-    bool startShare(
-        const screenshare::ShareSessionConfig& config,
-        const QString& executablePath,
-        QString* errorMessage = nullptr);
-    bool startWatch(
-        const screenshare::WatchSessionConfig& config,
-        const QString& executablePath,
-        QString* errorMessage = nullptr);
+    bool startShare(const screenshare::ShareSessionConfig& config, QString* errorMessage = nullptr);
+    bool startWatch(const screenshare::WatchSessionConfig& config, QString* errorMessage = nullptr);
     void stop();
     void applyStreamSettings(const screenshare::StreamSettings& settings);
     screenshare::SessionStatus currentStatus() const;

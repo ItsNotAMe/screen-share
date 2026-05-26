@@ -16,7 +16,7 @@
 
 - `main` is synced to `origin/main` after the backend API split and UI process-adapter merge.
 - The app builds with CMake debug/release presets and produces `ScreenShare.exe`.
-- Reusable native engine modules now build through `ScreenShareCore`; `ScreenShare.exe` and `ScreenShareUi.exe` link `ScreenShareSessionRuntime` for runtime-backed live sessions.
+- Reusable native engine modules now build through `ScreenShareCore`; runtime-backed Share/Watch execution and the concrete session facade build through `ScreenShareAPI`. `ScreenShare.exe` compiles CLI parsing and links that API, while `ScreenShareUi.exe` links the API directly.
 - Normal/default CMake builds now also create portable zip packages.
 - The app can also build optional `ScreenShareUi.exe` when Qt 6 Widgets and Svg are available.
 - `scripts/install-dev-deps.ps1` bootstraps Windows dev dependencies: MSYS2 native packages, optional Qt/FFmpeg, Node.js LTS, and signaling Worker npm packages.
@@ -120,7 +120,7 @@ WGC capture by default
 - `src/runtime/ScreenShareSessionRunner.cpp`: runtime-backed typed Share/Watch runner entrypoint implementation. It owns the typed-run report/log wrapper, then calls shared runtime execution directly.
 - `src/runtime/ScreenShareRuntimeExecution.cpp`: shared normal runtime execution for capture/send, receive/preview/audio playback, standalone audio capture, live signaling setup, adaptation policy, and typed Share/Watch execution entrypoints.
 - `src/runtime/ScreenShareRuntimeSupport.*`: shared session ID/fingerprint, stdout/stderr capture, saved-report zip, and argv support used by both CLI and typed runtime paths.
-- `src/cli/ScreenShareCLI.*`: CLI parser/report wrapper built into the `ScreenShareSessionRuntime` static library for now. Normal CLI Share/Watch presets parse into typed session configs and use the same typed execution path as the UI/backend path; diagnostic-only CLI modes still parse into internal options directly and route through CLI-owned command dispatch.
+- `src/cli/ScreenShareCLI.*`: CLI parser/report wrapper compiled only into `ScreenShare.exe`. Normal CLI Share/Watch presets parse into typed session configs and use the same typed execution path as the UI/backend path; diagnostic-only CLI modes still parse into internal options directly and route through CLI-owned command dispatch.
 - `src/ui/QtSessionBackend.*`: Qt-thread bridge over `screenshare::ScreenShareSession`. Live Share/Watch and normal display/audio-device discovery in the desktop UI no longer launch `ScreenShare.exe` as a child process.
 - `assets/design/revamped-ui-draft-2026-05-25.png`: current stage-2 UI visual draft.
 - `assets/brand/` and `assets/ui/icons/`: first-pass logo and button icon SVG sources for the revamped UI.
