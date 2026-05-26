@@ -114,6 +114,7 @@ add_library(ScreenShareSessionRuntime STATIC
     src/api/ScreenShareAPI.cpp
     src/cli/ScreenShareCLI.cpp
     src/runtime/ScreenShareRuntimeSupport.cpp
+    src/runtime/ScreenShareSessionOptions.cpp
     src/runtime/ScreenShareSessionRunner.cpp
 )
 
