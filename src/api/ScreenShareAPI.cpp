@@ -23,9 +23,10 @@
 namespace screenshare {
 namespace {
 
-RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSettings& settings)
+void ApplyStreamSettingsToRuntimeRequest(
+    RuntimeStreamSettingsRequest& request,
+    const StreamSettings& settings)
 {
-    RuntimeStreamSettingsRequest request;
     RuntimeResolutionRequest resolution;
     if (settings.outputResolution &&
         settings.outputResolution->width > 0 &&
@@ -41,8 +42,44 @@ RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSetti
         resolution.mode = RuntimeResolutionMode::Auto;
         request.resolution = resolution;
     }
+    if (settings.fps > 0) {
+        request.fps = settings.fps;
+    }
+    if (settings.bitrateBps > 0) {
+        request.bitrateBps = settings.bitrateBps;
+    }
     request.adaptBitrate = settings.adaptBitrate;
     request.adaptResolution = settings.adaptResolution;
+    request.adaptFps = settings.adaptFps;
+}
+
+RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSettings& settings)
+{
+    RuntimeStreamSettingsRequest request;
+    ApplyStreamSettingsToRuntimeRequest(request, settings);
+    return request;
+}
+
+RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const ShareSessionSettings& settings)
+{
+    RuntimeStreamSettingsRequest request;
+    if (settings.roomName) {
+        request.roomName = *settings.roomName;
+    }
+    if (settings.displayIndex && *settings.displayIndex >= 0) {
+        request.displayIndex = *settings.displayIndex;
+    }
+    if (settings.captureSystemAudio) {
+        request.captureSystemAudio = *settings.captureSystemAudio;
+    }
+    if (settings.hostAudioMuted) {
+        request.hostAudioMuted = *settings.hostAudioMuted;
+    }
+    if (settings.audioDeviceId) {
+        request.audioDeviceId = *settings.audioDeviceId;
+    }
+    ApplyStreamSettingsToRuntimeRequest(request, settings.stream);
+    request.bitrateBps = settings.stream.bitrateBps;
     return request;
 }
 
@@ -259,6 +296,7 @@ public:
     void Shutdown();
     void Stop();
     void ApplyStreamSettings(const StreamSettings& settings);
+    void ApplyShareSettings(const ShareSessionSettings& settings);
     void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
@@ -369,6 +407,18 @@ void ScreenShareSession::Impl::ApplyStreamSettings(const StreamSettings& setting
         currentState = state_;
     }
     Notify(SessionEventType::SettingsChanged, currentState, "Stream settings queued");
+}
+
+void ScreenShareSession::Impl::ApplyShareSettings(const ShareSessionSettings& settings)
+{
+    runtimeControl_.RequestStreamSettings(BuildRuntimeStreamSettingsRequest(settings));
+
+    SessionState currentState = SessionState::Idle;
+    {
+        std::scoped_lock lock(mutex_);
+        currentState = state_;
+    }
+    Notify(SessionEventType::SettingsChanged, currentState, "Share settings queued");
 }
 
 void ScreenShareSession::Impl::ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings)
@@ -1307,6 +1357,11 @@ void ScreenShareSession::Stop()
 void ScreenShareSession::ApplyStreamSettings(const StreamSettings& settings)
 {
     impl_->ApplyStreamSettings(settings);
+}
+
+void ScreenShareSession::ApplyShareSettings(const ShareSessionSettings& settings)
+{
+    impl_->ApplyShareSettings(settings);
 }
 
 void ScreenShareSession::ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings)

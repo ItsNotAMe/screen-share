@@ -10,38 +10,34 @@ Only you can fully validate these because they need real machines/networks.
 
 ## Build Work
 
-1. Remove the old classic UI now that the revamped room flow is active.
-   - [x] Remove the `--classic-ui` path and legacy `MainWindow` from `src/ui/main.cpp`.
-   - [x] Keep or relocate any useful smoke-test/self-test helpers that are still valuable.
-   - [x] Make `src/ui/main.cpp` a small app bootstrap that wires `AppShellWindow` and the new screens.
-   - [x] Delete unused legacy-only helpers, styles, widgets, and includes after the new bootstrap builds.
-2. Finish Active Share room settings functionality.
+1. Finish Active Share room settings functionality.
    - [x] Make all share-session settings controls apply real runtime changes where the engine supports them.
-   - [ ] Add display switching during a share session.
+   - [x] Add display switching during a share session.
    - [x] Add Resolution controls, including Auto and explicit tiers at or below display size.
-   - [ ] Add FPS controls and adaptive FPS.
-   - [x] Add Bitrate/Quality controls and adaptive bitrate on/off.
-   - [x] Add adaptive resolution on/off.
+   - [x] Add FPS controls.
+   - [x] Add Auto/manual bitrate controls, where Auto enables adaptive bitrate and explicit Mbps values are fixed.
+   - [x] Make the active room name editable from room settings.
+   - [x] Use Resolution Auto instead of a separate adaptive-resolution toggle.
+   - [x] Add audio device switching and host-side outgoing audio mute/off.
+   - [x] Keep Apply disabled until settings differ from the active session.
    - [ ] Add encoder preference/preset controls if they can be switched safely.
-   - [ ] Add audio device switching and host-side outgoing audio mute.
-   - [ ] Keep Apply disabled until settings differ from the active session.
-3. Check and improve assets.
+2. Check and improve assets.
    - [ ] Audit brand/logo/icon SVGs for unwanted backgrounds, inconsistent colors, and bad scaling.
    - [ ] Make icon stroke weights and colors consistent across light/dark states.
    - [ ] Check app/window icon rendering at small sizes.
    - [ ] Remove unused asset drafts or move them under a clearly named design/archive folder.
-4. Investigate and fix lower-than-native resolution blur.
+3. Investigate and fix lower-than-native resolution blur.
    - [ ] Confirm whether changing to 1080p changes bitrate or encoder quality unexpectedly.
    - [ ] Compare sender capture/scaler output against receiver decoded output.
    - [ ] Check chroma/subsampling and H.264 padding behavior for downscaled tiers.
    - [ ] Check preview upscale filtering from 1080p to 2K.
    - [ ] Fix the actual blurry path without hurting native/2K sharpness.
-5. Add application sharing.
+4. Add application sharing.
    - [ ] Let the host choose a specific application/window video source.
    - [ ] Capture matching application audio where Windows allows it.
    - [ ] Make fallback behavior clear when per-app audio is unavailable.
    - [ ] Keep whole-display/system-audio sharing as the simple default.
-6. Add better user-facing diagnostics when reports show the need.
+5. Add better user-facing diagnostics when reports show the need.
    - [ ] Surface common setup mistakes in the UI instead of only logs.
    - [ ] Improve sync/network state wording on active session screens.
    - [ ] Promote report-driven issues from the section below only after real reports justify them.
@@ -51,6 +47,8 @@ Only you can fully validate these because they need real machines/networks.
 - Promote advanced CLI-only Share/Watch diagnostic flags into typed configs only if they become normal app controls.
 - Split diagnostic-only commands out of `ScreenShareCLI.cpp` only if they start crowding the parser again.
 - Keep helper CLI diagnostics only where they are genuinely diagnostic, not normal UI data paths.
+- Add adaptive FPS only after there is a real runtime policy for when to raise/lower FPS.
+- Add encoder preference/preset switching only after the runtime can change encoders safely mid-session.
 
 ## Report-Driven Follow-Ups
 

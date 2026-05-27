@@ -21,6 +21,7 @@ public:
     void Shutdown();
     void Stop();
     void ApplyStreamSettings(const StreamSettings& settings);
+    void ApplyShareSettings(const ShareSessionSettings& settings);
     void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();

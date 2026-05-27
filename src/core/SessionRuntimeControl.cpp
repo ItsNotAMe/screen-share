@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -56,6 +57,24 @@ std::optional<bool> ParseBool(std::string_view value)
         return false;
     }
     return std::nullopt;
+}
+
+std::optional<uint32_t> ParseBitrateBps(std::string_view value, bool valueIsMbps)
+{
+    const std::string text = TrimAscii(value);
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    char* end = nullptr;
+    const double parsed = std::strtod(text.c_str(), &end);
+    if (end == text.c_str() || *end != '\0' || parsed <= 0.0) {
+        return std::nullopt;
+    }
+    const double bps = valueIsMbps ? parsed * 1'000'000.0 : parsed;
+    if (bps <= 0.0 || bps > static_cast<double>(std::numeric_limits<uint32_t>::max())) {
+        return std::nullopt;
+    }
+    return static_cast<uint32_t>(bps + 0.5);
 }
 
 } // namespace
@@ -207,6 +226,65 @@ std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(st
             value = TrimAscii(std::string_view(value).substr(1));
         }
 
+        if (key == "room_name" || key == "room") {
+            if (!request) {
+                request.emplace();
+            }
+            request->roomName = value;
+            continue;
+        }
+        if (key == "display" || key == "display_index") {
+            int parsed = 0;
+            if (ParsePositiveInt(value, parsed) || LowerAscii(TrimAscii(value)) == "0") {
+                if (!request) {
+                    request.emplace();
+                }
+                request->displayIndex = parsed;
+            }
+            continue;
+        }
+        if (key == "fps") {
+            int parsed = 0;
+            if (ParsePositiveInt(value, parsed) && parsed <= 240) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->fps = parsed;
+            }
+            continue;
+        }
+        if (key == "bitrate" || key == "bitrate_bps") {
+            if (LowerAscii(TrimAscii(value)) == "auto") {
+                if (!request) {
+                    request.emplace();
+                }
+                request->bitrateBps = 0;
+                continue;
+            }
+            if (const auto parsed = ParseBitrateBps(value, false)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->bitrateBps = *parsed;
+            }
+            continue;
+        }
+        if (key == "bitrate_mbps") {
+            if (LowerAscii(TrimAscii(value)) == "auto") {
+                if (!request) {
+                    request.emplace();
+                }
+                request->bitrateBps = 0;
+                continue;
+            }
+            if (const auto parsed = ParseBitrateBps(value, true)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->bitrateBps = *parsed;
+            }
+            continue;
+        }
         if (key == "adapt_bitrate" || key == "adaptive_bitrate") {
             if (const auto parsed = ParseBool(value)) {
                 if (!request) {
@@ -222,6 +300,42 @@ std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(st
                     request.emplace();
                 }
                 request->adaptResolution = *parsed;
+            }
+            continue;
+        }
+        if (key == "adapt_fps" || key == "adaptive_fps") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->adaptFps = *parsed;
+            }
+            continue;
+        }
+        if (key == "capture_system_audio" || key == "system_audio") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->captureSystemAudio = *parsed;
+            }
+            continue;
+        }
+        if (key == "host_audio_muted") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->hostAudioMuted = *parsed;
+            }
+            continue;
+        }
+        if (key == "audio_device_id") {
+            if (!value.empty()) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->audioDeviceId = value;
             }
             continue;
         }

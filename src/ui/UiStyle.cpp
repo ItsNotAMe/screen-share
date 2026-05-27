@@ -283,12 +283,12 @@ QLineEdit#RoomLargeInput {
     font-size: 10pt;
 }
 QComboBox#RoomSettingsInput {
-    padding: 2px 34px 2px 10px;
+    padding: 2px 42px 2px 10px;
 }
 QComboBox#RoomSettingsInput::drop-down {
-    subcontrol-origin: padding;
+    subcontrol-origin: border;
     subcontrol-position: top right;
-    width: 30px;
+    width: 36px;
     background: #252b2a;
     border-left: 1px solid #313c3a;
     border-top-right-radius: 6px;
@@ -448,6 +448,32 @@ QFrame#ActiveSettingsPanel {
 QFrame#ActiveSettingsPanel {
     background: #1d2322;
     border-radius: 0;
+}
+QScrollArea#ActiveSettingsScroll,
+QWidget#ActiveSettingsForm,
+QScrollArea#ActiveSettingsScroll > QWidget,
+QScrollArea#ActiveSettingsScroll > QWidget > QWidget {
+    background: transparent;
+    border: 0;
+}
+QScrollArea#ActiveSettingsScroll QScrollBar:vertical {
+    background: transparent;
+    border: 0;
+    width: 8px;
+    margin: 0;
+}
+QScrollArea#ActiveSettingsScroll QScrollBar::handle:vertical {
+    background: #3c4946;
+    border-radius: 4px;
+    min-height: 24px;
+}
+QScrollArea#ActiveSettingsScroll QScrollBar::add-line:vertical,
+QScrollArea#ActiveSettingsScroll QScrollBar::sub-line:vertical,
+QScrollArea#ActiveSettingsScroll QScrollBar::add-page:vertical,
+QScrollArea#ActiveSettingsScroll QScrollBar::sub-page:vertical {
+    background: transparent;
+    border: 0;
+    height: 0;
 }
 QWidget#ActiveFooter {
     background: transparent;

@@ -3,6 +3,7 @@
 #include "ui/UiStyle.h"
 
 #include <QtCore/QByteArray>
+#include <QtCore/QEvent>
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>
 #include <QtCore/QPointF>
@@ -12,11 +13,16 @@
 #include <QtCore/QStringList>
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
+#include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
+#include <QtGui/QPaintEvent>
 #include <QtGui/QPainter>
+#include <QtGui/QPen>
 #include <QtGui/QPixmap>
+#include <QtGui/QWheelEvent>
 #include <QtSvg/QSvgRenderer>
+#include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFrame>
@@ -26,15 +32,48 @@
 #include <QtWidgets/QLayoutItem>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QScrollArea>
+#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 
 namespace {
+
+constexpr int kSettingsFieldMaxWidth = 286;
+
+class SettingsComboBox final : public QComboBox {
+public:
+    using QComboBox::QComboBox;
+
+protected:
+    void paintEvent(QPaintEvent* event) override
+    {
+        QComboBox::paintEvent(event);
+
+        constexpr int arrowWidth = 36;
+        const QRect arrowRect(width() - arrowWidth - 1, 1, arrowWidth, height() - 2);
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.fillRect(arrowRect.adjusted(1, 0, 0, 0), QColor("#252b2a"));
+        painter.setPen(QPen(QColor("#313c3a"), 1));
+        painter.drawLine(arrowRect.left(), arrowRect.top() + 1, arrowRect.left(), arrowRect.bottom() - 1);
+
+        const QPointF center = arrowRect.center();
+        QPen chevronPen(isEnabled() ? QColor("#d8e4e0") : QColor("#77837f"), 1.8);
+        chevronPen.setCapStyle(Qt::RoundCap);
+        chevronPen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(chevronPen);
+        painter.drawLine(QPointF(center.x() - 4.0, center.y() - 2.0), QPointF(center.x(), center.y() + 2.0));
+        painter.drawLine(QPointF(center.x(), center.y() + 2.0), QPointF(center.x() + 4.0, center.y() - 2.0));
+    }
+};
 
 QPixmap renderSvgResource(const QString& path, const QSize& size, const QString& color = QString())
 {
@@ -104,6 +143,27 @@ std::optional<screenshare::SessionResolution> parseResolutionValue(const QString
     return screenshare::SessionResolution{width, height};
 }
 
+uint32_t mbpsToBps(int mbps)
+{
+    return static_cast<uint32_t>(mbps) * 1'000'000U;
+}
+
+uint32_t comboBitrateBps(const QComboBox* combo)
+{
+    if (combo == nullptr) {
+        return 0;
+    }
+    bool ok = false;
+    const uint parsed = combo->currentData().toUInt(&ok);
+    return ok ? static_cast<uint32_t>(parsed) : 0;
+}
+
+std::string toStdUtf8(const QString& value)
+{
+    const QByteArray bytes = value.toUtf8();
+    return std::string(bytes.constData(), static_cast<size_t>(bytes.size()));
+}
+
 QString viewerListSignature(const screenshare::SessionStatus& status)
 {
     QStringList parts;
@@ -154,6 +214,24 @@ void ActiveShareWindow::setSession(const ShareSessionUiState& session)
     updateShareSummary();
     updateStatus(backend_ != nullptr ? backend_->currentStatus() : screenshare::SessionStatus{});
     showSettingsPanel(false);
+}
+
+bool ActiveShareWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event != nullptr && event->type() == QEvent::Wheel) {
+        if (auto* combo = qobject_cast<QComboBox*>(watched)) {
+            if (combo->view() == nullptr || !combo->view()->isVisible()) {
+                auto* wheel = static_cast<QWheelEvent*>(event);
+                if (settingsScrollArea_ != nullptr && settingsScrollArea_->verticalScrollBar() != nullptr) {
+                    QScrollBar* scrollBar = settingsScrollArea_->verticalScrollBar();
+                    scrollBar->setValue(scrollBar->value() - wheel->angleDelta().y());
+                }
+                event->accept();
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 QWidget* ActiveShareWindow::buildShell()
@@ -403,67 +481,113 @@ QWidget* ActiveShareWindow::buildSettingsPanel()
     header->addStretch(1);
     layout->addLayout(header);
 
-    layout->addWidget(textLabel("General", "ActiveSettingsHeading"));
-    layout->addWidget(textLabel("Room Name", "ActiveSettingsLabel"));
+    auto* form = new QWidget;
+    form->setObjectName("ActiveSettingsForm");
+    auto* formLayout = new QVBoxLayout(form);
+    formLayout->setContentsMargins(0, 0, 14, 0);
+    formLayout->setSpacing(8);
+    settingsScrollArea_ = new QScrollArea;
+    settingsScrollArea_->setObjectName("ActiveSettingsScroll");
+    settingsScrollArea_->setWidgetResizable(true);
+    settingsScrollArea_->setFrameShape(QFrame::NoFrame);
+    settingsScrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    settingsScrollArea_->setWidget(form);
+    layout->addWidget(settingsScrollArea_, 1);
+
+    formLayout->addWidget(textLabel("General", "ActiveSettingsHeading"));
+    formLayout->addWidget(textLabel("Room Name", "ActiveSettingsLabel"));
     settingsRoomNameEdit_ = new QLineEdit;
     settingsRoomNameEdit_->setObjectName("RoomSettingsInput");
-    settingsRoomNameEdit_->setEnabled(false);
-    layout->addWidget(settingsRoomNameEdit_);
-    layout->addWidget(textLabel("Room Link", "ActiveSettingsLabel"));
-    settingsRoomLinkEdit_ = new QLineEdit;
-    settingsRoomLinkEdit_->setObjectName("RoomSettingsInput");
-    settingsRoomLinkEdit_->setReadOnly(true);
-    layout->addWidget(settingsRoomLinkEdit_);
-
-    layout->addWidget(textLabel("Stream Controls", "ActiveSettingsHeading"));
-    layout->addWidget(textLabel("Resolution", "ActiveSettingsLabel"));
-    settingsResolutionCombo_ = new QComboBox;
-    settingsResolutionCombo_->setObjectName("RoomSettingsInput");
-    settingsResolutionCombo_->setEnabled(true);
-    connect(settingsResolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+    settingsRoomNameEdit_->setMaxLength(80);
+    settingsRoomNameEdit_->setMaximumWidth(kSettingsFieldMaxWidth);
+    connect(settingsRoomNameEdit_, &QLineEdit::textChanged, this, [this] {
         if (!updatingSettingsUi_) {
-            syncAdaptiveResolutionControl();
             updateSettingsApplyState();
         }
     });
-    layout->addWidget(settingsResolutionCombo_);
-    layout->addWidget(textLabel("Quality Preset", "ActiveSettingsLabel"));
-    qualityCombo_ = new QComboBox;
-    qualityCombo_->setObjectName("RoomSettingsInput");
-    qualityCombo_->addItem("High (Recommended)");
-    qualityCombo_->addItem("Balanced");
-    qualityCombo_->addItem("Low bandwidth");
-    qualityCombo_->setEnabled(false);
-    layout->addWidget(qualityCombo_);
-    adaptiveBitrateCheck_ = new QCheckBox("Adaptive Bitrate");
-    adaptiveResolutionCheck_ = new QCheckBox("Adaptive Resolution");
-    adaptiveFpsCheck_ = new QCheckBox("Adaptive FPS");
-    for (QCheckBox* check : {adaptiveBitrateCheck_, adaptiveResolutionCheck_}) {
-        check->setObjectName("ActiveSettingsCheck");
-        check->setEnabled(true);
-        connect(check, &QCheckBox::toggled, this, [this] {
-            if (!updatingSettingsUi_) {
-                if (sender() == adaptiveResolutionCheck_ && settingsResolutionCombo_ != nullptr) {
-                    if (adaptiveResolutionCheck_->isChecked()) {
-                        const int autoIndex = settingsResolutionCombo_->findData(QStringLiteral("auto"));
-                        if (autoIndex >= 0) {
-                            settingsResolutionCombo_->setCurrentIndex(autoIndex);
-                        }
-                    } else if (settingsResolutionCombo_->currentData().toString() == QStringLiteral("auto") &&
-                        settingsResolutionCombo_->count() > 1) {
-                        settingsResolutionCombo_->setCurrentIndex(1);
-                    }
-                }
-                updateSettingsApplyState();
-            }
-        });
-        layout->addWidget(check);
+    formLayout->addWidget(settingsRoomNameEdit_);
+    formLayout->addWidget(textLabel("Room Link", "ActiveSettingsLabel"));
+    settingsRoomLinkEdit_ = new QLineEdit;
+    settingsRoomLinkEdit_->setObjectName("RoomSettingsInput");
+    settingsRoomLinkEdit_->setReadOnly(true);
+    settingsRoomLinkEdit_->setMaximumWidth(kSettingsFieldMaxWidth);
+    formLayout->addWidget(settingsRoomLinkEdit_);
+
+    formLayout->addWidget(textLabel("Stream Controls", "ActiveSettingsHeading"));
+    formLayout->addWidget(textLabel("Max Bitrate", "ActiveSettingsLabel"));
+    bitrateCombo_ = new SettingsComboBox;
+    configureSettingsChoice(bitrateCombo_);
+    bitrateCombo_->addItem("Auto (Recommended)", QString::number(0));
+    for (const int mbps : {4, 8, 12, 16, 24, 35, 50, 80}) {
+        bitrateCombo_->addItem(QStringLiteral("%1 Mbps").arg(mbps), QString::number(mbpsToBps(mbps)));
     }
-    adaptiveFpsCheck_->setObjectName("ActiveSettingsCheck");
-    adaptiveFpsCheck_->setEnabled(false);
-    adaptiveFpsCheck_->setToolTip("Adaptive FPS needs a runtime engine hook before it can be changed mid-session.");
-    layout->addWidget(adaptiveFpsCheck_);
-    layout->addStretch(1);
+    connect(bitrateCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+        if (!updatingSettingsUi_) {
+            updateSettingsApplyState();
+        }
+    });
+    formLayout->addWidget(bitrateCombo_);
+
+    formLayout->addWidget(textLabel("Display", "ActiveSettingsLabel"));
+    settingsDisplayCombo_ = new SettingsComboBox;
+    configureSettingsChoice(settingsDisplayCombo_);
+    settingsDisplayCombo_->setEnabled(true);
+    connect(settingsDisplayCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+        if (!updatingSettingsUi_) {
+            updateSettingsApplyState();
+        }
+    });
+    formLayout->addWidget(settingsDisplayCombo_);
+
+    formLayout->addWidget(textLabel("Resolution", "ActiveSettingsLabel"));
+    settingsResolutionCombo_ = new SettingsComboBox;
+    configureSettingsChoice(settingsResolutionCombo_);
+    settingsResolutionCombo_->setEnabled(true);
+    connect(settingsResolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+        if (!updatingSettingsUi_) {
+            updateSettingsApplyState();
+        }
+    });
+    formLayout->addWidget(settingsResolutionCombo_);
+
+    formLayout->addWidget(textLabel("FPS", "ActiveSettingsLabel"));
+    settingsFpsCombo_ = new SettingsComboBox;
+    configureSettingsChoice(settingsFpsCombo_);
+    for (const int fps : {60, 30, 24, 15}) {
+        settingsFpsCombo_->addItem(QStringLiteral("%1 FPS").arg(fps), fps);
+    }
+    settingsFpsCombo_->setEnabled(true);
+    connect(settingsFpsCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+        if (!updatingSettingsUi_) {
+            updateSettingsApplyState();
+        }
+    });
+    formLayout->addWidget(settingsFpsCombo_);
+
+    formLayout->addWidget(textLabel("Audio", "ActiveSettingsHeading"));
+    captureAudioCheck_ = new QCheckBox("Share system audio");
+    captureAudioCheck_->setObjectName("ActiveSettingsCheck");
+    captureAudioCheck_->setEnabled(true);
+    connect(captureAudioCheck_, &QCheckBox::toggled, this, [this](bool checked) {
+        if (settingsAudioCombo_ != nullptr) {
+            settingsAudioCombo_->setEnabled(checked);
+        }
+        if (!updatingSettingsUi_) {
+            updateSettingsApplyState();
+        }
+    });
+    formLayout->addWidget(captureAudioCheck_);
+    formLayout->addWidget(textLabel("Audio Output", "ActiveSettingsLabel"));
+    settingsAudioCombo_ = new SettingsComboBox;
+    configureSettingsChoice(settingsAudioCombo_);
+    connect(settingsAudioCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+        if (!updatingSettingsUi_) {
+            updateSettingsApplyState();
+        }
+    });
+    formLayout->addWidget(settingsAudioCombo_);
+
+    formLayout->addStretch(1);
     auto* buttons = new QHBoxLayout;
     auto* closeButton = iconButton("Close", "ActiveSecondaryButton", nullptr);
     connect(closeButton, &QPushButton::clicked, this, [this] {
@@ -584,6 +708,17 @@ QLabel* ActiveShareWindow::iconLabel(const char* iconName, int size, const QStri
     return label;
 }
 
+void ActiveShareWindow::configureSettingsChoice(QComboBox* combo)
+{
+    if (combo == nullptr) {
+        return;
+    }
+    combo->setObjectName("RoomSettingsInput");
+    combo->setFocusPolicy(Qt::ClickFocus);
+    combo->setMaximumWidth(kSettingsFieldMaxWidth);
+    combo->installEventFilter(this);
+}
+
 void ActiveShareWindow::installBackendHandlers()
 {
     if (backend_ == nullptr) {
@@ -696,10 +831,32 @@ void ActiveShareWindow::updateShareSummary()
     shareDisplayLabel_->setText(QStringLiteral("%1 @ %2").arg(session_.displayText, session_.fpsText));
     shareAudioLabel_->setText(session_.audioText);
     if (settingsRoomNameEdit_ != nullptr) {
+        updatingSettingsUi_ = true;
         settingsRoomNameEdit_->setText(session_.roomName);
+        appliedRoomName_ = settingsRoomNameEdit_->text().trimmed();
+        updatingSettingsUi_ = false;
     }
     if (settingsRoomLinkEdit_ != nullptr) {
         settingsRoomLinkEdit_->setText(session_.roomLink);
+    }
+    if (settingsDisplayCombo_ != nullptr) {
+        updatingSettingsUi_ = true;
+        const bool blocked = settingsDisplayCombo_->blockSignals(true);
+        settingsDisplayCombo_->clear();
+        if (session_.displayChoices.isEmpty()) {
+            settingsDisplayCombo_->addItem(
+                session_.displayText.isEmpty() ? QStringLiteral("Display 0") : session_.displayText,
+                session_.displayValue);
+        } else {
+            for (const ShareDisplayChoice& choice : session_.displayChoices) {
+                settingsDisplayCombo_->addItem(choice.text, choice.value);
+            }
+        }
+        const int index = settingsDisplayCombo_->findData(session_.displayValue);
+        settingsDisplayCombo_->setCurrentIndex(index >= 0 ? index : 0);
+        settingsDisplayCombo_->blockSignals(blocked);
+        appliedDisplayValue_ = settingsDisplayCombo_->currentData().toInt();
+        updatingSettingsUi_ = false;
     }
     if (settingsResolutionCombo_ != nullptr) {
         updatingSettingsUi_ = true;
@@ -720,16 +877,58 @@ void ActiveShareWindow::updateShareSummary()
         appliedResolutionValue_ = settingsResolutionCombo_->currentData().toString();
         updatingSettingsUi_ = false;
     }
-    if (adaptiveBitrateCheck_ != nullptr) {
+    if (settingsFpsCombo_ != nullptr) {
         updatingSettingsUi_ = true;
-        adaptiveBitrateCheck_->setChecked(session_.config.stream.adaptBitrate);
-        adaptiveResolutionCheck_->setChecked(session_.config.stream.adaptResolution);
-        adaptiveFpsCheck_->setChecked(session_.config.stream.adaptFps);
-        appliedAdaptiveBitrate_ = adaptiveBitrateCheck_->isChecked();
-        appliedAdaptiveResolution_ = adaptiveResolutionCheck_->isChecked();
-        appliedAdaptiveFps_ = adaptiveFpsCheck_->isChecked();
+        const bool blocked = settingsFpsCombo_->blockSignals(true);
+        const int index = settingsFpsCombo_->findData(session_.fpsValue);
+        if (index < 0) {
+            settingsFpsCombo_->addItem(QStringLiteral("%1 FPS").arg(session_.fpsValue), session_.fpsValue);
+        }
+        settingsFpsCombo_->setCurrentIndex(settingsFpsCombo_->findData(session_.fpsValue));
+        settingsFpsCombo_->blockSignals(blocked);
+        appliedFpsValue_ = settingsFpsCombo_->currentData().toInt();
         updatingSettingsUi_ = false;
-        syncAdaptiveResolutionControl();
+    }
+    if (bitrateCombo_ != nullptr) {
+        updatingSettingsUi_ = true;
+        const bool bitrateBlocked = bitrateCombo_->blockSignals(true);
+        uint32_t bitrate = session_.config.stream.bitrateBps;
+        int bitrateIndex = bitrateCombo_->findData(QString::number(bitrate));
+        if (bitrateIndex < 0) {
+            bitrateCombo_->addItem(QStringLiteral("%1 Mbps").arg(static_cast<double>(bitrate) / 1'000'000.0, 0, 'f', 1),
+                QString::number(bitrate));
+            bitrateIndex = bitrateCombo_->count() - 1;
+        }
+        bitrateCombo_->setCurrentIndex(bitrateIndex);
+        bitrateCombo_->blockSignals(bitrateBlocked);
+        appliedBitrateBps_ = comboBitrateBps(bitrateCombo_);
+        updatingSettingsUi_ = false;
+    }
+    if (captureAudioCheck_ != nullptr) {
+        updatingSettingsUi_ = true;
+        captureAudioCheck_->setChecked(session_.captureSystemAudio);
+        appliedCaptureAudio_ = captureAudioCheck_->isChecked();
+        updatingSettingsUi_ = false;
+    }
+    if (settingsAudioCombo_ != nullptr) {
+        updatingSettingsUi_ = true;
+        const bool blocked = settingsAudioCombo_->blockSignals(true);
+        settingsAudioCombo_->clear();
+        if (session_.audioChoices.isEmpty()) {
+            settingsAudioCombo_->addItem(
+                session_.audioText.isEmpty() ? QStringLiteral("System Audio (default)") : session_.audioText,
+                session_.audioDeviceValue);
+        } else {
+            for (const ShareAudioChoice& choice : session_.audioChoices) {
+                settingsAudioCombo_->addItem(choice.text, choice.value);
+            }
+        }
+        const int index = settingsAudioCombo_->findData(session_.audioDeviceValue);
+        settingsAudioCombo_->setCurrentIndex(index >= 0 ? index : 0);
+        settingsAudioCombo_->setEnabled(captureAudioCheck_ == nullptr || captureAudioCheck_->isChecked());
+        settingsAudioCombo_->blockSignals(blocked);
+        appliedAudioDeviceValue_ = settingsAudioCombo_->currentData().toString();
+        updatingSettingsUi_ = false;
     }
     updateSettingsApplyState();
 }
@@ -749,30 +948,44 @@ void ActiveShareWindow::copyInvite()
     QGuiApplication::clipboard()->setText(session_.roomLink);
 }
 
-screenshare::StreamSettings ActiveShareWindow::selectedStreamSettings() const
+screenshare::ShareSessionSettings ActiveShareWindow::selectedShareSettings() const
 {
-    screenshare::StreamSettings settings = session_.config.stream;
+    screenshare::ShareSessionSettings settings;
+    const QString roomName = settingsRoomNameEdit_ == nullptr ?
+        session_.roomName :
+        settingsRoomNameEdit_->text().trimmed();
+    if (roomName != appliedRoomName_) {
+        settings.roomName = toStdUtf8(roomName);
+    }
+    settings.displayIndex = settingsDisplayCombo_ == nullptr ?
+        session_.displayValue :
+        settingsDisplayCombo_->currentData().toInt();
+    settings.captureSystemAudio = captureAudioCheck_ == nullptr ?
+        session_.captureSystemAudio :
+        captureAudioCheck_->isChecked();
+    settings.audioDeviceId = settingsAudioCombo_ == nullptr ?
+        toStdUtf8(session_.audioDeviceValue) :
+        toStdUtf8(settingsAudioCombo_->currentData().toString());
+    settings.stream = session_.config.stream;
     const QString value = settingsResolutionCombo_ == nullptr ?
         session_.resolutionValue :
         settingsResolutionCombo_->currentData().toString();
-    settings.adaptBitrate = adaptiveBitrateCheck_ == nullptr ?
-        settings.adaptBitrate :
-        adaptiveBitrateCheck_->isChecked();
-    settings.adaptResolution = adaptiveResolutionCheck_ == nullptr ?
-        settings.adaptResolution :
-        adaptiveResolutionCheck_->isChecked();
-    settings.adaptFps = adaptiveFpsCheck_ == nullptr ?
-        settings.adaptFps :
-        adaptiveFpsCheck_->isChecked();
+    settings.stream.fps = settingsFpsCombo_ == nullptr ?
+        session_.fpsValue :
+        settingsFpsCombo_->currentData().toInt();
+    settings.stream.bitrateBps = comboBitrateBps(bitrateCombo_);
+    settings.stream.adaptBitrate = settings.stream.bitrateBps == 0;
+    settings.stream.adaptFps = false;
     if (value == "auto" || value.isEmpty()) {
-        settings.outputResolution.reset();
+        settings.stream.outputResolution.reset();
+        settings.stream.adaptResolution = true;
         return settings;
     }
 
     const auto resolution = parseResolutionValue(value);
     if (resolution) {
-        settings.outputResolution = *resolution;
-        settings.adaptResolution = false;
+        settings.stream.outputResolution = *resolution;
+        settings.stream.adaptResolution = false;
     }
     return settings;
 }
@@ -783,22 +996,44 @@ void ActiveShareWindow::applySettings()
         return;
     }
 
-    screenshare::StreamSettings settings = selectedStreamSettings();
-    session_.config.stream = settings;
+    screenshare::ShareSessionSettings settings = selectedShareSettings();
+    if (settings.roomName) {
+        session_.roomName = QString::fromStdString(*settings.roomName);
+        session_.config.roomName = *settings.roomName;
+    }
+    session_.config.displayIndex = settings.displayIndex.value_or(session_.config.displayIndex);
+    session_.config.captureSystemAudio = settings.captureSystemAudio.value_or(session_.config.captureSystemAudio);
+    session_.config.audioDeviceId = settings.audioDeviceId.value_or(session_.config.audioDeviceId);
+    session_.config.stream = settings.stream;
+    session_.displayValue = session_.config.displayIndex;
+    if (settingsDisplayCombo_ != nullptr) {
+        session_.displayText = settingsDisplayCombo_->currentText();
+    }
     session_.resolutionValue = settingsResolutionCombo_->currentData().toString();
     session_.resolutionText = settingsResolutionCombo_->currentText();
+    session_.fpsValue = settings.stream.fps;
+    session_.fpsText = QStringLiteral("%1 FPS").arg(settings.stream.fps);
+    session_.captureSystemAudio = session_.config.captureSystemAudio;
+    session_.audioDeviceValue = QString::fromStdString(session_.config.audioDeviceId);
+    session_.audioText = session_.captureSystemAudio && settingsAudioCombo_ != nullptr ?
+        settingsAudioCombo_->currentText() :
+        QStringLiteral("Audio off");
+    appliedDisplayValue_ = session_.displayValue;
+    appliedRoomName_ = session_.roomName;
     appliedResolutionValue_ = session_.resolutionValue;
-    appliedAdaptiveBitrate_ = settings.adaptBitrate;
-    appliedAdaptiveResolution_ = settings.adaptResolution;
-    appliedAdaptiveFps_ = settings.adaptFps;
+    appliedFpsValue_ = settings.stream.fps;
+    appliedBitrateBps_ = settings.stream.bitrateBps;
+    appliedCaptureAudio_ = session_.captureSystemAudio;
+    appliedAudioDeviceValue_ = session_.audioDeviceValue;
     settingsApplyButton_->setEnabled(false);
     resolutionLabel_->setText(session_.resolutionText);
+    updateShareSummary();
     if (adaptiveLabel_ != nullptr) {
         adaptiveLabel_->setText(QStringLiteral("Adaptive: %1").arg(
-            settings.adaptBitrate || settings.adaptResolution || settings.adaptFps ? "On" : "Off"));
+            settings.stream.adaptBitrate || settings.stream.adaptResolution || settings.stream.adaptFps ? "On" : "Off"));
     }
     if (backend_->isRunning()) {
-        backend_->applyStreamSettings(settings);
+        backend_->applyShareSettings(settings);
     }
 }
 
@@ -810,25 +1045,31 @@ void ActiveShareWindow::updateSettingsApplyState()
     const QString resolutionValue = settingsResolutionCombo_ == nullptr ?
         appliedResolutionValue_ :
         settingsResolutionCombo_->currentData().toString();
+    const int displayValue = settingsDisplayCombo_ == nullptr ?
+        appliedDisplayValue_ :
+        settingsDisplayCombo_->currentData().toInt();
+    const int fpsValue = settingsFpsCombo_ == nullptr ?
+        appliedFpsValue_ :
+        settingsFpsCombo_->currentData().toInt();
+    const uint32_t bitrateBps = comboBitrateBps(bitrateCombo_);
+    const QString roomName = settingsRoomNameEdit_ == nullptr ?
+        appliedRoomName_ :
+        settingsRoomNameEdit_->text().trimmed();
+    const bool captureAudio = captureAudioCheck_ == nullptr ?
+        appliedCaptureAudio_ :
+        captureAudioCheck_->isChecked();
+    const QString audioDevice = settingsAudioCombo_ == nullptr ?
+        appliedAudioDeviceValue_ :
+        settingsAudioCombo_->currentData().toString();
     const bool changed =
+        roomName != appliedRoomName_ ||
+        displayValue != appliedDisplayValue_ ||
         resolutionValue != appliedResolutionValue_ ||
-        (adaptiveBitrateCheck_ != nullptr && adaptiveBitrateCheck_->isChecked() != appliedAdaptiveBitrate_) ||
-        (adaptiveResolutionCheck_ != nullptr && adaptiveResolutionCheck_->isChecked() != appliedAdaptiveResolution_) ||
-        (adaptiveFpsCheck_ != nullptr && adaptiveFpsCheck_->isChecked() != appliedAdaptiveFps_);
+        fpsValue != appliedFpsValue_ ||
+        bitrateBps != appliedBitrateBps_ ||
+        captureAudio != appliedCaptureAudio_ ||
+        audioDevice != appliedAudioDeviceValue_;
     settingsApplyButton_->setEnabled(changed);
-}
-
-void ActiveShareWindow::syncAdaptiveResolutionControl()
-{
-    if (settingsResolutionCombo_ == nullptr || adaptiveResolutionCheck_ == nullptr) {
-        return;
-    }
-    const bool autoResolution = settingsResolutionCombo_->currentData().toString() == QStringLiteral("auto");
-    const QSignalBlocker blocker(adaptiveResolutionCheck_);
-    if (!autoResolution) {
-        adaptiveResolutionCheck_->setChecked(false);
-    }
-    adaptiveResolutionCheck_->setEnabled(autoResolution);
 }
 
 void ActiveShareWindow::showSettingsPanel(bool visible)

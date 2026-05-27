@@ -96,6 +96,15 @@ struct StreamSettings {
     bool adaptFps = false;
 };
 
+struct ShareSessionSettings {
+    std::optional<std::string> roomName;
+    std::optional<int> displayIndex;
+    std::optional<bool> captureSystemAudio;
+    std::optional<bool> hostAudioMuted;
+    std::optional<std::string> audioDeviceId;
+    StreamSettings stream;
+};
+
 struct AudioPlaybackSettings {
     std::optional<bool> muted;
     std::optional<int> volumePercent;

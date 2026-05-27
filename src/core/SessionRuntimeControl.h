@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <mutex>
 #include <optional>
@@ -21,9 +22,17 @@ struct RuntimeResolutionRequest {
 };
 
 struct RuntimeStreamSettingsRequest {
+    std::optional<std::string> roomName;
+    std::optional<int> displayIndex;
     std::optional<RuntimeResolutionRequest> resolution;
+    std::optional<int> fps;
+    std::optional<uint32_t> bitrateBps;
     std::optional<bool> adaptBitrate;
     std::optional<bool> adaptResolution;
+    std::optional<bool> adaptFps;
+    std::optional<bool> captureSystemAudio;
+    std::optional<bool> hostAudioMuted;
+    std::optional<std::string> audioDeviceId;
 };
 
 struct RuntimeAudioPlaybackSettingsRequest {

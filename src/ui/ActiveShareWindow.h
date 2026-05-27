@@ -8,14 +8,18 @@
 #include <QtCore/QString>
 #include <QtWidgets/QWidget>
 
+#include <cstdint>
 #include <functional>
 
 class QCheckBox;
 class QComboBox;
+class QEvent;
 class QFrame;
 class QLabel;
 class QLineEdit;
+class QObject;
 class QPushButton;
+class QScrollArea;
 class QTimer;
 class QVBoxLayout;
 class QWidget;
@@ -31,6 +35,8 @@ public:
     void setSession(const ShareSessionUiState& session);
 
 private:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
     QWidget* buildShell();
     QWidget* buildTopStatus();
     QWidget* buildShareCard();
@@ -46,6 +52,7 @@ private:
     QPushButton* iconButton(const QString& text, const QString& objectName, const char* iconName);
     QLabel* textLabel(const QString& text, const char* objectName);
     QLabel* iconLabel(const char* iconName, int size, const QString& color = QStringLiteral("#eaf5f2"));
+    void configureSettingsChoice(QComboBox* combo);
 
     void installBackendHandlers();
     void updateElapsed();
@@ -56,9 +63,8 @@ private:
     void stopSharing();
     void copyInvite();
     void applySettings();
-    screenshare::StreamSettings selectedStreamSettings() const;
+    screenshare::ShareSessionSettings selectedShareSettings() const;
     void updateSettingsApplyState();
-    void syncAdaptiveResolutionControl();
     void showSettingsPanel(bool visible);
     void handleFinished(const QtSessionBackend::FinishInfo& info);
     QString stateText(const screenshare::SessionStatus& status) const;
@@ -90,17 +96,22 @@ private:
     QPushButton* settingsApplyButton_ = nullptr;
     QFrame* settingsOverlay_ = nullptr;
     QFrame* settingsPanel_ = nullptr;
+    QScrollArea* settingsScrollArea_ = nullptr;
     QLineEdit* settingsRoomNameEdit_ = nullptr;
     QLineEdit* settingsRoomLinkEdit_ = nullptr;
+    QComboBox* settingsDisplayCombo_ = nullptr;
     QComboBox* settingsResolutionCombo_ = nullptr;
-    QComboBox* qualityCombo_ = nullptr;
-    QCheckBox* adaptiveBitrateCheck_ = nullptr;
-    QCheckBox* adaptiveResolutionCheck_ = nullptr;
-    QCheckBox* adaptiveFpsCheck_ = nullptr;
+    QComboBox* settingsFpsCombo_ = nullptr;
+    QComboBox* bitrateCombo_ = nullptr;
+    QComboBox* settingsAudioCombo_ = nullptr;
+    QCheckBox* captureAudioCheck_ = nullptr;
     QString lastViewerSignature_;
     bool updatingSettingsUi_ = false;
+    QString appliedRoomName_;
+    int appliedDisplayValue_ = 0;
     QString appliedResolutionValue_;
-    bool appliedAdaptiveBitrate_ = true;
-    bool appliedAdaptiveResolution_ = true;
-    bool appliedAdaptiveFps_ = false;
+    int appliedFpsValue_ = 60;
+    uint32_t appliedBitrateBps_ = 0;
+    bool appliedCaptureAudio_ = true;
+    QString appliedAudioDeviceValue_;
 };

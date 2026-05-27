@@ -153,6 +153,13 @@ void QtSessionBackend::applyStreamSettings(const screenshare::StreamSettings& se
     }
 }
 
+void QtSessionBackend::applyShareSettings(const screenshare::ShareSessionSettings& settings)
+{
+    if (running_) {
+        session_.ApplyShareSettings(settings);
+    }
+}
+
 void QtSessionBackend::applyAudioPlaybackSettings(const screenshare::AudioPlaybackSettings& settings)
 {
     if (running_) {

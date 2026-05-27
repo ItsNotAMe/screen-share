@@ -495,13 +495,14 @@ QWidget* CreateRoomWindow::buildSettingsPanel()
     resolutionCombo_->setFixedHeight(40);
     layout->addWidget(buildSettingRow("quality", "Resolution", resolutionCombo_));
 
-    fpsSpin_ = new QSpinBox;
-    fpsSpin_->setObjectName("RoomSettingsInput");
-    fpsSpin_->setFixedHeight(40);
-    fpsSpin_->setRange(1, 240);
-    fpsSpin_->setValue(60);
-    fpsSpin_->setSuffix(" FPS");
-    layout->addWidget(buildSettingRow("fps", "FPS", fpsSpin_));
+    fpsCombo_ = new QComboBox;
+    fpsCombo_->setObjectName("RoomSettingsInput");
+    fpsCombo_->setFixedHeight(40);
+    for (const int fps : {60, 30, 24, 15}) {
+        fpsCombo_->addItem(QStringLiteral("%1 FPS").arg(fps), fps);
+    }
+    tuneComboPopup(fpsCombo_);
+    layout->addWidget(buildSettingRow("fps", "FPS", fpsCombo_));
 
     audioDeviceCombo_ = new QComboBox;
     audioDeviceCombo_->setObjectName("RoomSettingsInput");
@@ -801,7 +802,7 @@ screenshare::ShareSessionConfig CreateRoomWindow::currentConfig() const
 screenshare::StreamSettings CreateRoomWindow::currentStreamSettings() const
 {
     screenshare::StreamSettings settings;
-    settings.fps = fpsSpin_->value();
+    settings.fps = fpsCombo_ != nullptr ? fpsCombo_->currentData().toInt() : 60;
     settings.adaptBitrate = true;
     settings.adaptResolution = resolutionCombo_->currentData().toString() == "auto";
     const QSize resolution = selectedResolution();
@@ -819,6 +820,15 @@ ShareSessionUiState CreateRoomWindow::currentShareUiState() const
     state.roomName = roomName();
     state.roomLink = roomLink();
     state.displayText = displayCombo_ != nullptr ? displayCombo_->currentText() : QStringLiteral("Display");
+    state.displayValue = displayCombo_ != nullptr ? displayCombo_->currentData().toInt() : 0;
+    if (displayCombo_ != nullptr) {
+        for (int index = 0; index < displayCombo_->count(); ++index) {
+            state.displayChoices.push_back(ShareDisplayChoice{
+                displayCombo_->itemText(index),
+                displayCombo_->itemData(index).toInt(),
+            });
+        }
+    }
     state.resolutionText = resolutionCombo_ != nullptr ? resolutionCombo_->currentText() : QStringLiteral("Auto");
     state.resolutionValue = resolutionCombo_ != nullptr ? resolutionCombo_->currentData().toString() : QStringLiteral("auto");
     if (resolutionCombo_ != nullptr) {
@@ -829,8 +839,19 @@ ShareSessionUiState CreateRoomWindow::currentShareUiState() const
             });
         }
     }
-    state.fpsText = fpsSpin_ != nullptr ? QStringLiteral("%1 FPS").arg(fpsSpin_->value()) : QStringLiteral("60 FPS");
-    state.audioText = captureAudioCheck_ != nullptr && captureAudioCheck_->isChecked() ?
+    state.fpsValue = fpsCombo_ != nullptr ? fpsCombo_->currentData().toInt() : 60;
+    state.fpsText = QStringLiteral("%1 FPS").arg(state.fpsValue);
+    state.captureSystemAudio = captureAudioCheck_ != nullptr && captureAudioCheck_->isChecked();
+    state.audioDeviceValue = audioDeviceCombo_ != nullptr ? audioDeviceCombo_->currentData().toString() : QString();
+    if (audioDeviceCombo_ != nullptr) {
+        for (int index = 0; index < audioDeviceCombo_->count(); ++index) {
+            state.audioChoices.push_back(ShareAudioChoice{
+                audioDeviceCombo_->itemText(index),
+                audioDeviceCombo_->itemData(index).toString(),
+            });
+        }
+    }
+    state.audioText = state.captureSystemAudio ?
         (audioDeviceCombo_ != nullptr ? audioDeviceCombo_->currentText() : QStringLiteral("System Audio")) :
         QStringLiteral("Audio off");
     state.passwordProtected = !roomPassword().isEmpty();

@@ -35,6 +35,7 @@ public:
     bool startWatch(const screenshare::WatchSessionConfig& config, QString* errorMessage = nullptr);
     void stop();
     void applyStreamSettings(const screenshare::StreamSettings& settings);
+    void applyShareSettings(const screenshare::ShareSessionSettings& settings);
     void applyAudioPlaybackSettings(const screenshare::AudioPlaybackSettings& settings);
     screenshare::SessionStatus currentStatus() const;
     std::vector<screenshare::SessionDisplayInfo> listDisplays(QString* errorMessage = nullptr);

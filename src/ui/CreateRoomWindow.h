@@ -78,7 +78,7 @@ private:
     QSpinBox* roomPortSpin_ = nullptr;
     QComboBox* displayCombo_ = nullptr;
     QComboBox* resolutionCombo_ = nullptr;
-    QSpinBox* fpsSpin_ = nullptr;
+    QComboBox* fpsCombo_ = nullptr;
     QComboBox* audioDeviceCombo_ = nullptr;
     QCheckBox* captureAudioCheck_ = nullptr;
     QCheckBox* reportCheck_ = nullptr;
