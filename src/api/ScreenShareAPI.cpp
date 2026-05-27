@@ -41,6 +41,8 @@ RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSetti
         resolution.mode = RuntimeResolutionMode::Auto;
         request.resolution = resolution;
     }
+    request.adaptBitrate = settings.adaptBitrate;
+    request.adaptResolution = settings.adaptResolution;
     return request;
 }
 

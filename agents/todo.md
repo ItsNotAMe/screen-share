@@ -16,12 +16,12 @@ Only you can fully validate these because they need real machines/networks.
    - [x] Make `src/ui/main.cpp` a small app bootstrap that wires `AppShellWindow` and the new screens.
    - [x] Delete unused legacy-only helpers, styles, widgets, and includes after the new bootstrap builds.
 2. Finish Active Share room settings functionality.
-   - [ ] Make all share-session settings controls apply real runtime changes where the engine supports them.
+   - [x] Make all share-session settings controls apply real runtime changes where the engine supports them.
    - [ ] Add display switching during a share session.
-   - [ ] Add Resolution controls, including Auto and explicit tiers at or below display size.
+   - [x] Add Resolution controls, including Auto and explicit tiers at or below display size.
    - [ ] Add FPS controls and adaptive FPS.
-   - [ ] Add Bitrate/Quality controls and adaptive bitrate on/off.
-   - [ ] Add adaptive resolution on/off.
+   - [x] Add Bitrate/Quality controls and adaptive bitrate on/off.
+   - [x] Add adaptive resolution on/off.
    - [ ] Add encoder preference/preset controls if they can be switched safely.
    - [ ] Add audio device switching and host-side outgoing audio mute.
    - [ ] Keep Apply disabled until settings differ from the active session.

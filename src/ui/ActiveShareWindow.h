@@ -57,6 +57,8 @@ private:
     void copyInvite();
     void applySettings();
     screenshare::StreamSettings selectedStreamSettings() const;
+    void updateSettingsApplyState();
+    void syncAdaptiveResolutionControl();
     void showSettingsPanel(bool visible);
     void handleFinished(const QtSessionBackend::FinishInfo& info);
     QString stateText(const screenshare::SessionStatus& status) const;
@@ -98,4 +100,7 @@ private:
     QString lastViewerSignature_;
     bool updatingSettingsUi_ = false;
     QString appliedResolutionValue_;
+    bool appliedAdaptiveBitrate_ = true;
+    bool appliedAdaptiveResolution_ = true;
+    bool appliedAdaptiveFps_ = false;
 };

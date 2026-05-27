@@ -22,6 +22,8 @@ struct RuntimeResolutionRequest {
 
 struct RuntimeStreamSettingsRequest {
     std::optional<RuntimeResolutionRequest> resolution;
+    std::optional<bool> adaptBitrate;
+    std::optional<bool> adaptResolution;
 };
 
 struct RuntimeAudioPlaybackSettingsRequest {

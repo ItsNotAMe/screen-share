@@ -2802,7 +2802,8 @@ void RunCaptureStats(
     uint64_t bitrateAdaptations = 0;
     uint64_t bitrateAdaptationFailures = 0;
     uint32_t lastBitrateAdaptationAttempt = 0;
-    const char* bitrateAdaptationStatus = options.adaptBitrate ? "waiting" : "disabled";
+    bool adaptiveBitrateEnabled = options.adaptBitrate;
+    const char* bitrateAdaptationStatus = adaptiveBitrateEnabled ? "waiting" : "disabled";
     AdaptiveBitrateAdvisor bitrateAdvisor;
     std::vector<ResolutionTier> adaptiveResolutionTiers;
     size_t adaptiveResolutionTierIndex = 0;
@@ -2980,7 +2981,7 @@ void RunCaptureStats(
             << (udpConfigs.front().localPort == 0 ? std::string("auto") : std::to_string(udpConfigs.front().localPort))
             << " local_port_source=" << (anyLocalInvitePort ? "local_invite" : "option_or_auto")
             << " max_queue_ms=" << udpConfigs.front().maxQueueDelay.count()
-            << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
+            << " adaptive_bitrate=" << (adaptiveBitrateEnabled ? "enabled" : "advice-only")
             << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
             << " adapt_reduce_cooldown_s=" << options.adaptReduceCooldownSeconds
             << " max_queued_datagrams=" << udpConfigs.front().maxQueuedDatagrams
@@ -3074,7 +3075,7 @@ void RunCaptureStats(
     };
 
     auto applyAdaptiveBitrate = [&]() {
-        if (!options.adaptBitrate || !udpSender || !streamEncoder || !bitrateAdvisor.configured()) {
+        if (!adaptiveBitrateEnabled || !udpSender || !streamEncoder || !bitrateAdvisor.configured()) {
             return;
         }
 
@@ -3272,47 +3273,81 @@ void RunCaptureStats(
 
     auto applyRuntimeStreamSettingsControl = [&]() {
         const auto request = runtimeControl.TakeStreamSettingsRequest();
-        if (!request || !request->resolution) {
+        if (!request) {
             return;
         }
 
-        const auto& resolution = *request->resolution;
-        switch (resolution.mode) {
-        case screenshare::RuntimeResolutionMode::Auto:
-            if (adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
-                return;
-            }
-            adaptiveResolutionEnabled = true;
-            adaptiveResolutionTiers.clear();
-            adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(0, 0, 1.0, "auto", "runtime_control");
-            std::cout << "runtime_resolution_mode=auto\n";
-            break;
-        case screenshare::RuntimeResolutionMode::Native:
-            if (!adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
-                return;
-            }
-            adaptiveResolutionEnabled = false;
-            adaptiveResolutionTiers.clear();
-            adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(0, 0, 1.0, "manual", "runtime_control_native");
-            std::cout << "runtime_resolution_mode=native\n";
-            break;
-        case screenshare::RuntimeResolutionMode::Fixed:
-            if (!adaptiveResolutionEnabled &&
-                config.targetWidth == resolution.width &&
-                config.targetHeight == resolution.height) {
-                return;
-            }
-            adaptiveResolutionEnabled = false;
-            adaptiveResolutionTiers.clear();
-            adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(resolution.width, resolution.height, 1.0, "manual", "runtime_control_fixed");
+        if (request->adaptBitrate) {
+            adaptiveBitrateEnabled = *request->adaptBitrate;
+            bitrateAdaptationStatus = adaptiveBitrateEnabled ? "waiting" : "disabled";
             std::cout
-                << "runtime_resolution_mode=fixed"
-                << " runtime_resolution=" << resolution.width << "x" << resolution.height
+                << "runtime_adaptive_bitrate="
+                << (adaptiveBitrateEnabled ? "enabled" : "disabled")
                 << "\n";
-            break;
+        }
+        if (request->adaptResolution && !request->resolution) {
+            adaptiveResolutionEnabled = *request->adaptResolution;
+            if (!adaptiveResolutionEnabled) {
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                resolutionAdaptationStatus = "disabled";
+            } else {
+                resolutionAdaptationStatus = "waiting";
+            }
+            std::cout
+                << "runtime_adaptive_resolution="
+                << (adaptiveResolutionEnabled ? "enabled" : "disabled")
+                << "\n";
+        }
+        if (request->resolution) {
+            const auto& resolution = *request->resolution;
+            switch (resolution.mode) {
+            case screenshare::RuntimeResolutionMode::Auto:
+                {
+                const bool requestedAdaptiveResolution = request->adaptResolution.value_or(true);
+                if (adaptiveResolutionEnabled == requestedAdaptiveResolution &&
+                    config.targetWidth == 0 &&
+                    config.targetHeight == 0) {
+                    return;
+                }
+                adaptiveResolutionEnabled = requestedAdaptiveResolution;
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                restartStreamOutput(0, 0, 1.0, adaptiveResolutionEnabled ? "auto" : "manual", "runtime_control");
+                if (!adaptiveResolutionEnabled) {
+                    resolutionAdaptationStatus = "disabled";
+                }
+                std::cout
+                    << "runtime_resolution_mode=" << (adaptiveResolutionEnabled ? "auto" : "native")
+                    << "\n";
+                break;
+                }
+            case screenshare::RuntimeResolutionMode::Native:
+                if (!adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
+                    return;
+                }
+                adaptiveResolutionEnabled = false;
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                restartStreamOutput(0, 0, 1.0, "manual", "runtime_control_native");
+                std::cout << "runtime_resolution_mode=native\n";
+                break;
+            case screenshare::RuntimeResolutionMode::Fixed:
+                if (!adaptiveResolutionEnabled &&
+                    config.targetWidth == resolution.width &&
+                    config.targetHeight == resolution.height) {
+                    return;
+                }
+                adaptiveResolutionEnabled = false;
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                restartStreamOutput(resolution.width, resolution.height, 1.0, "manual", "runtime_control_fixed");
+                std::cout
+                    << "runtime_resolution_mode=fixed"
+                    << " runtime_resolution=" << resolution.width << "x" << resolution.height
+                    << "\n";
+                break;
+            }
         }
     };
 

@@ -46,6 +46,18 @@ bool ParsePositiveInt(std::string_view value, int& out)
     return true;
 }
 
+std::optional<bool> ParseBool(std::string_view value)
+{
+    const std::string text = LowerAscii(TrimAscii(value));
+    if (text == "1" || text == "true" || text == "yes" || text == "on" || text == "enabled") {
+        return true;
+    }
+    if (text == "0" || text == "false" || text == "no" || text == "off" || text == "disabled") {
+        return false;
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 bool NullSessionRuntimeControl::StopRequested()
@@ -185,16 +197,36 @@ std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(st
         }
 
         const std::string lowerLine = LowerAscii(line);
-        if (lowerLine.rfind("resolution", 0) != 0) {
-            continue;
-        }
         const size_t separator = line.find_first_of("= \t");
         if (separator == std::string::npos) {
             continue;
         }
+        const std::string key = LowerAscii(TrimAscii(std::string_view(line).substr(0, separator)));
         std::string value = TrimAscii(std::string_view(line).substr(separator + 1));
         if (!value.empty() && value.front() == '=') {
             value = TrimAscii(std::string_view(value).substr(1));
+        }
+
+        if (key == "adapt_bitrate" || key == "adaptive_bitrate") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->adaptBitrate = *parsed;
+            }
+            continue;
+        }
+        if (key == "adapt_resolution" || key == "adaptive_resolution") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->adaptResolution = *parsed;
+            }
+            continue;
+        }
+        if (key != "resolution") {
+            continue;
         }
 
         const std::string lowerValue = LowerAscii(value);

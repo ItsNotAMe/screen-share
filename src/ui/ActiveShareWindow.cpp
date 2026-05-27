@@ -8,6 +8,7 @@
 #include <QtCore/QPointF>
 #include <QtCore/QRectF>
 #include <QtCore/QSizeF>
+#include <QtCore/QSignalBlocker>
 #include <QtCore/QStringList>
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
@@ -420,8 +421,9 @@ QWidget* ActiveShareWindow::buildSettingsPanel()
     settingsResolutionCombo_->setObjectName("RoomSettingsInput");
     settingsResolutionCombo_->setEnabled(true);
     connect(settingsResolutionCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
-        if (settingsApplyButton_ != nullptr && !updatingSettingsUi_) {
-            settingsApplyButton_->setEnabled(settingsResolutionCombo_->currentData().toString() != appliedResolutionValue_);
+        if (!updatingSettingsUi_) {
+            syncAdaptiveResolutionControl();
+            updateSettingsApplyState();
         }
     });
     layout->addWidget(settingsResolutionCombo_);
@@ -436,11 +438,31 @@ QWidget* ActiveShareWindow::buildSettingsPanel()
     adaptiveBitrateCheck_ = new QCheckBox("Adaptive Bitrate");
     adaptiveResolutionCheck_ = new QCheckBox("Adaptive Resolution");
     adaptiveFpsCheck_ = new QCheckBox("Adaptive FPS");
-    for (QCheckBox* check : {adaptiveBitrateCheck_, adaptiveResolutionCheck_, adaptiveFpsCheck_}) {
+    for (QCheckBox* check : {adaptiveBitrateCheck_, adaptiveResolutionCheck_}) {
         check->setObjectName("ActiveSettingsCheck");
-        check->setEnabled(false);
+        check->setEnabled(true);
+        connect(check, &QCheckBox::toggled, this, [this] {
+            if (!updatingSettingsUi_) {
+                if (sender() == adaptiveResolutionCheck_ && settingsResolutionCombo_ != nullptr) {
+                    if (adaptiveResolutionCheck_->isChecked()) {
+                        const int autoIndex = settingsResolutionCombo_->findData(QStringLiteral("auto"));
+                        if (autoIndex >= 0) {
+                            settingsResolutionCombo_->setCurrentIndex(autoIndex);
+                        }
+                    } else if (settingsResolutionCombo_->currentData().toString() == QStringLiteral("auto") &&
+                        settingsResolutionCombo_->count() > 1) {
+                        settingsResolutionCombo_->setCurrentIndex(1);
+                    }
+                }
+                updateSettingsApplyState();
+            }
+        });
         layout->addWidget(check);
     }
+    adaptiveFpsCheck_->setObjectName("ActiveSettingsCheck");
+    adaptiveFpsCheck_->setEnabled(false);
+    adaptiveFpsCheck_->setToolTip("Adaptive FPS needs a runtime engine hook before it can be changed mid-session.");
+    layout->addWidget(adaptiveFpsCheck_);
     layout->addStretch(1);
     auto* buttons = new QHBoxLayout;
     auto* closeButton = iconButton("Close", "ActiveSecondaryButton", nullptr);
@@ -696,16 +718,20 @@ void ActiveShareWindow::updateShareSummary()
         }
         settingsResolutionCombo_->blockSignals(blocked);
         appliedResolutionValue_ = settingsResolutionCombo_->currentData().toString();
-        if (settingsApplyButton_ != nullptr) {
-            settingsApplyButton_->setEnabled(false);
-        }
         updatingSettingsUi_ = false;
     }
     if (adaptiveBitrateCheck_ != nullptr) {
+        updatingSettingsUi_ = true;
         adaptiveBitrateCheck_->setChecked(session_.config.stream.adaptBitrate);
         adaptiveResolutionCheck_->setChecked(session_.config.stream.adaptResolution);
         adaptiveFpsCheck_->setChecked(session_.config.stream.adaptFps);
+        appliedAdaptiveBitrate_ = adaptiveBitrateCheck_->isChecked();
+        appliedAdaptiveResolution_ = adaptiveResolutionCheck_->isChecked();
+        appliedAdaptiveFps_ = adaptiveFpsCheck_->isChecked();
+        updatingSettingsUi_ = false;
+        syncAdaptiveResolutionControl();
     }
+    updateSettingsApplyState();
 }
 
 void ActiveShareWindow::stopSharing()
@@ -729,9 +755,17 @@ screenshare::StreamSettings ActiveShareWindow::selectedStreamSettings() const
     const QString value = settingsResolutionCombo_ == nullptr ?
         session_.resolutionValue :
         settingsResolutionCombo_->currentData().toString();
+    settings.adaptBitrate = adaptiveBitrateCheck_ == nullptr ?
+        settings.adaptBitrate :
+        adaptiveBitrateCheck_->isChecked();
+    settings.adaptResolution = adaptiveResolutionCheck_ == nullptr ?
+        settings.adaptResolution :
+        adaptiveResolutionCheck_->isChecked();
+    settings.adaptFps = adaptiveFpsCheck_ == nullptr ?
+        settings.adaptFps :
+        adaptiveFpsCheck_->isChecked();
     if (value == "auto" || value.isEmpty()) {
         settings.outputResolution.reset();
-        settings.adaptResolution = true;
         return settings;
     }
 
@@ -754,11 +788,47 @@ void ActiveShareWindow::applySettings()
     session_.resolutionValue = settingsResolutionCombo_->currentData().toString();
     session_.resolutionText = settingsResolutionCombo_->currentText();
     appliedResolutionValue_ = session_.resolutionValue;
+    appliedAdaptiveBitrate_ = settings.adaptBitrate;
+    appliedAdaptiveResolution_ = settings.adaptResolution;
+    appliedAdaptiveFps_ = settings.adaptFps;
     settingsApplyButton_->setEnabled(false);
     resolutionLabel_->setText(session_.resolutionText);
+    if (adaptiveLabel_ != nullptr) {
+        adaptiveLabel_->setText(QStringLiteral("Adaptive: %1").arg(
+            settings.adaptBitrate || settings.adaptResolution || settings.adaptFps ? "On" : "Off"));
+    }
     if (backend_->isRunning()) {
         backend_->applyStreamSettings(settings);
     }
+}
+
+void ActiveShareWindow::updateSettingsApplyState()
+{
+    if (settingsApplyButton_ == nullptr || updatingSettingsUi_) {
+        return;
+    }
+    const QString resolutionValue = settingsResolutionCombo_ == nullptr ?
+        appliedResolutionValue_ :
+        settingsResolutionCombo_->currentData().toString();
+    const bool changed =
+        resolutionValue != appliedResolutionValue_ ||
+        (adaptiveBitrateCheck_ != nullptr && adaptiveBitrateCheck_->isChecked() != appliedAdaptiveBitrate_) ||
+        (adaptiveResolutionCheck_ != nullptr && adaptiveResolutionCheck_->isChecked() != appliedAdaptiveResolution_) ||
+        (adaptiveFpsCheck_ != nullptr && adaptiveFpsCheck_->isChecked() != appliedAdaptiveFps_);
+    settingsApplyButton_->setEnabled(changed);
+}
+
+void ActiveShareWindow::syncAdaptiveResolutionControl()
+{
+    if (settingsResolutionCombo_ == nullptr || adaptiveResolutionCheck_ == nullptr) {
+        return;
+    }
+    const bool autoResolution = settingsResolutionCombo_->currentData().toString() == QStringLiteral("auto");
+    const QSignalBlocker blocker(adaptiveResolutionCheck_);
+    if (!autoResolution) {
+        adaptiveResolutionCheck_->setChecked(false);
+    }
+    adaptiveResolutionCheck_->setEnabled(autoResolution);
 }
 
 void ActiveShareWindow::showSettingsPanel(bool visible)
