@@ -1274,17 +1274,29 @@ public:
 
     bool AddAdditionalTarget(const screenshare::UdpSenderEndpoint& endpoint)
     {
+        const std::string endpointText = UdpEndpointText(endpoint.host, endpoint.port);
+        suppressedEndpoints_.erase(endpointText);
         for (auto& target : targets_) {
             if (target.failed || target.sender == nullptr || !target.sender->isOpen()) {
                 continue;
             }
             const bool added = target.sender->AddAdditionalTarget(endpoint);
             if (added) {
-                target.additionalEndpoints.push_back(UdpEndpointText(endpoint.host, endpoint.port));
+                target.additionalEndpoints.push_back(endpointText);
             }
             return added;
         }
         throw std::runtime_error("No active UDP sender target is available for live signaling");
+    }
+
+    void SuppressEndpoint(const std::string& endpoint)
+    {
+        suppressedEndpoints_.insert(endpoint);
+    }
+
+    void UnsuppressEndpoint(const std::string& endpoint)
+    {
+        suppressedEndpoints_.erase(endpoint);
     }
 
     [[nodiscard]] size_t targetCount() const noexcept
@@ -1454,12 +1466,18 @@ public:
             };
 
             if (stats.feedbackPeers.empty()) {
+                if (suppressedEndpoints_.find(target.endpoint) != suppressedEndpoints_.end()) {
+                    continue;
+                }
                 snapshots.push_back(buildSnapshot(target.endpoint));
                 continue;
             }
 
             std::set<std::string> emittedEndpoints;
             for (const auto& peer : stats.feedbackPeers) {
+                if (suppressedEndpoints_.find(peer.endpoint) != suppressedEndpoints_.end()) {
+                    continue;
+                }
                 if (!emittedEndpoints.insert(peer.endpoint).second) {
                     continue;
                 }
@@ -1505,6 +1523,7 @@ private:
     }
 
     std::vector<Target> targets_;
+    std::set<std::string> suppressedEndpoints_;
 };
 
 template <typename UdpSenderLike>
@@ -1608,8 +1627,10 @@ void ApplySignalingRoomAccessKey(Options& options, const screenshare::SignalingR
         throw std::runtime_error("Signaling room requires a password");
     }
 
+    const bool mixRoomPassword =
+        response.passwordProtected || !options.signalingRoomPassword.empty();
     std::string keyMaterial = response.roomAccessKey;
-    if (response.passwordProtected) {
+    if (mixRoomPassword) {
         keyMaterial += "\npassword:";
         keyMaterial += options.signalingRoomPassword;
     }
@@ -1619,7 +1640,7 @@ void ApplySignalingRoomAccessKey(Options& options, const screenshare::SignalingR
     std::cout
         << "signaling_room_encryption=ready"
         << " room=" << options.signalingRoomId
-        << " password=" << (response.passwordProtected ? "yes" : "no")
+        << " password=" << (mixRoomPassword ? "yes" : "no")
         << " source=server\n";
 }
 
@@ -1714,8 +1735,37 @@ public:
         return peers;
     }
 
+    std::vector<LiveSignalingPeerCandidate> DrainRemovedPeers()
+    {
+        if (!state_) {
+            return {};
+        }
+
+        std::lock_guard lock(state_->mutex);
+        std::vector<LiveSignalingPeerCandidate> peers;
+        peers.swap(state_->removedPeers);
+        return peers;
+    }
+
+    void UpdateRoomName(std::string roomName)
+    {
+        if (!state_) {
+            return;
+        }
+
+        {
+            std::lock_guard lock(state_->mutex);
+            if (state_->peer.roomName == roomName) {
+                return;
+            }
+            state_->peer.roomName = std::move(roomName);
+            state_->refreshRequested = true;
+        }
+        state_->wake.notify_all();
+    }
+
 private:
-    static constexpr std::chrono::milliseconds FallbackRefreshInterval{30000};
+    static constexpr std::chrono::milliseconds FallbackRefreshInterval{2000};
     static constexpr std::chrono::milliseconds EventReconnectDelay{5000};
     static constexpr std::chrono::milliseconds BackgroundRequestTimeout{250};
 
@@ -1724,8 +1774,9 @@ private:
         std::condition_variable wake;
         std::string roomId;
         screenshare::SignalingPeerState peer;
-        std::set<std::string> seenCandidates;
+        std::map<std::string, LiveSignalingPeerCandidate> seenCandidates;
         std::vector<LiveSignalingPeerCandidate> discoveredPeers;
+        std::vector<LiveSignalingPeerCandidate> removedPeers;
         bool refreshRequested = false;
         bool stopRequested = false;
     };
@@ -1744,18 +1795,27 @@ private:
         }
 
         std::lock_guard lock(state->mutex);
+        std::map<std::string, LiveSignalingPeerCandidate> latestCandidates;
         for (const auto& peer : response.peers) {
             if (peer.peerId == state->peer.peerId) {
                 continue;
             }
             for (const auto& candidate : peer.candidates) {
                 const std::string key = CandidateKey(peer.peerId, candidate);
-                if (!state->seenCandidates.insert(key).second) {
-                    continue;
+                LiveSignalingPeerCandidate record{peer.peerId, candidate};
+                latestCandidates.emplace(key, record);
+                if (state->seenCandidates.find(key) == state->seenCandidates.end()) {
+                    state->discoveredPeers.push_back(std::move(record));
                 }
-                state->discoveredPeers.push_back(LiveSignalingPeerCandidate{peer.peerId, candidate});
             }
         }
+
+        for (const auto& [key, candidate] : state->seenCandidates) {
+            if (latestCandidates.find(key) == latestCandidates.end()) {
+                state->removedPeers.push_back(candidate);
+            }
+        }
+        state->seenCandidates = std::move(latestCandidates);
     }
 
     static void RequestRefresh(const std::shared_ptr<State>& state)
@@ -1797,6 +1857,12 @@ private:
         return state->stopRequested;
     }
 
+    [[nodiscard]] static screenshare::SignalingPeerState SnapshotPeer(const std::shared_ptr<State>& state)
+    {
+        std::lock_guard lock(state->mutex);
+        return state->peer;
+    }
+
     static void RunEvents(std::shared_ptr<State> state, screenshare::SignalingClientConfig clientConfig)
     {
         while (!stopRequested(state)) {
@@ -1810,7 +1876,8 @@ private:
                         const bool shouldRefresh =
                             message.find("\"type\":\"hello\"") != std::string::npos ||
                             message.find("\"type\":\"peer_joined\"") != std::string::npos ||
-                            message.find("\"type\":\"peer_updated\"") != std::string::npos;
+                            message.find("\"type\":\"peer_updated\"") != std::string::npos ||
+                            message.find("\"type\":\"peer_left\"") != std::string::npos;
                         std::cout
                             << "signaling_live_event=received"
                             << " room=" << state->roomId
@@ -1849,7 +1916,7 @@ private:
 
         while (!stopRequested(state)) {
             try {
-                RecordPeers(state, client.Join(state->roomId, state->peer));
+                RecordPeers(state, client.Join(state->roomId, SnapshotPeer(state)));
             } catch (const std::exception& error) {
                 std::cerr
                     << "signaling_live_refresh=error"
@@ -1864,29 +1931,34 @@ private:
             }
         }
 
+        const std::string peerId = SnapshotPeer(state).peerId;
         {
             std::lock_guard lock(state->mutex);
             state->stopRequested = true;
         }
         state->wake.notify_all();
-        if (eventsWorker.joinable()) {
-            eventsWorker.join();
-        }
 
         try {
-            client.Leave(state->roomId, state->peer.peerId);
+            client.Leave(state->roomId, peerId);
             std::cout
                 << "signaling_live_leave=ok"
                 << " room=" << state->roomId
-                << " peer_id=" << state->peer.peerId
+                << " peer_id=" << peerId
                 << "\n" << std::flush;
         } catch (const std::exception& error) {
             std::cerr
                 << "signaling_live_leave=error"
                 << " room=" << state->roomId
-                << " peer_id=" << state->peer.peerId
+                << " peer_id=" << peerId
                 << " error=\"" << error.what() << "\""
                 << "\n";
+        }
+
+        if (eventsWorker.joinable()) {
+            // WinHTTP WebSocket receives can remain blocked during shutdown. The
+            // event worker owns only shared shutdown state, so do not let it
+            // delay leaving the room or completing Stop().
+            eventsWorker.detach();
         }
     }
 
@@ -2753,10 +2825,12 @@ void RunCaptureStats(
     uint64_t streamBytes = 0;
     uint32_t streamBitrate = 0;
     uint32_t streamTargetBitrate = 0;
+    bool autoBitrateEnabled = options.bitrate == 0;
     uint64_t bitrateAdaptations = 0;
     uint64_t bitrateAdaptationFailures = 0;
     uint32_t lastBitrateAdaptationAttempt = 0;
-    const char* bitrateAdaptationStatus = options.adaptBitrate ? "waiting" : "disabled";
+    bool adaptiveBitrateEnabled = options.adaptBitrate;
+    const char* bitrateAdaptationStatus = adaptiveBitrateEnabled ? "waiting" : "disabled";
     AdaptiveBitrateAdvisor bitrateAdvisor;
     std::vector<ResolutionTier> adaptiveResolutionTiers;
     size_t adaptiveResolutionTierIndex = 0;
@@ -2767,10 +2841,11 @@ void RunCaptureStats(
     uint32_t resolutionStableFeedbackReports = 0;
     uint32_t resolutionReductionPressureReports = 0;
     const char* resolutionAdaptationStatus = adaptiveResolutionEnabled ? "waiting" : "disabled";
-    const uint32_t streamKeyframeIntervalFrames =
+    int runtimeFps = options.fps;
+    uint32_t streamKeyframeIntervalFrames =
         options.keyframeIntervalSeconds <= 0 ?
         0 :
-        static_cast<uint32_t>(options.keyframeIntervalSeconds * options.fps);
+        static_cast<uint32_t>(options.keyframeIntervalSeconds * runtimeFps);
     double intervalCaptureMs = 0.0;
     uint64_t intervalCaptureCalls = 0;
     double intervalStreamEncodeMs = 0.0;
@@ -2787,6 +2862,9 @@ void RunCaptureStats(
     std::set<std::string> liveSignalingSendTargets;
     uint64_t audioPacingBitrate = 0;
     bool audioPacingApplied = false;
+    bool runtimeVideoPaused = options.videoPaused;
+    bool runtimeAudioCaptureEnabled = options.audioCapture;
+    std::string runtimeAudioDeviceId = options.audioDeviceId;
 
     for (const auto& target : udpSendTargetSpecs) {
         liveSignalingSendTargets.insert(target.target);
@@ -2806,7 +2884,7 @@ void RunCaptureStats(
     auto combinedUdpPacingBitrate = [&]() -> uint32_t {
         const uint64_t combined =
             streamUdpPacingBitrate() +
-            (options.audioCapture ? audioPacingBitrate : 0ULL);
+            (runtimeAudioCaptureEnabled ? audioPacingBitrate : 0ULL);
         return static_cast<uint32_t>(std::min<uint64_t>(
             combined,
             std::numeric_limits<uint32_t>::max()));
@@ -2816,6 +2894,38 @@ void RunCaptureStats(
         if (udpSender) {
             udpSender->SetPacingBitrate(combinedUdpPacingBitrate());
         }
+    };
+
+    auto stopAudioCaptureWorker = [&]() {
+        if (audioCaptureWorker) {
+            audioCaptureWorker->Stop();
+            audioCaptureWorker.reset();
+        }
+    };
+
+    auto startAudioCaptureWorker = [&]() {
+        if (!udpSender || !runtimeAudioCaptureEnabled) {
+            return;
+        }
+        audioCaptureWorker = std::make_unique<AudioUdpCaptureWorker>();
+        audioCaptureWorker->Start(
+            [udpSender = udpSender.get()](const screenshare::UdpAudioPacket& packet) {
+                udpSender->SendAudioPacket(packet);
+            },
+            options.audioCaptureSource,
+            runtimeAudioDeviceId,
+            options.audioCodec);
+        std::cout
+            << "Audio capture worker started source="
+            << screenshare::AudioCaptureSourceName(options.audioCaptureSource)
+            << (runtimeAudioDeviceId.empty() ? "" : " device=selected")
+            << "\n";
+    };
+
+    auto restartAudioCaptureWorker = [&]() {
+        stopAudioCaptureWorker();
+        startAudioCaptureWorker();
+        updateUdpPacingBitrate();
     };
 
     auto ensureUdpSenderForTargets = [&]() {
@@ -2873,7 +2983,7 @@ void RunCaptureStats(
                 target.natProbeSessionFingerprint != 0 ?
                     target.natProbeSessionFingerprint :
                     NatProbeSessionFingerprint(options);
-            if (options.audioCapture) {
+            if (runtimeAudioCaptureEnabled) {
                 udpConfig.maxQueuedDatagrams = 16'384;
             }
             udpConfigs.push_back(std::move(udpConfig));
@@ -2934,26 +3044,13 @@ void RunCaptureStats(
             << (udpConfigs.front().localPort == 0 ? std::string("auto") : std::to_string(udpConfigs.front().localPort))
             << " local_port_source=" << (anyLocalInvitePort ? "local_invite" : "option_or_auto")
             << " max_queue_ms=" << udpConfigs.front().maxQueueDelay.count()
-            << " adaptive_bitrate=" << (options.adaptBitrate ? "enabled" : "advice-only")
+            << " adaptive_bitrate=" << (adaptiveBitrateEnabled ? "enabled" : "advice-only")
             << " adapt_min_bitrate_mbps=" << Mbps(bitrateAdvisor.minBitrate())
             << " adapt_reduce_cooldown_s=" << options.adaptReduceCooldownSeconds
             << " max_queued_datagrams=" << udpConfigs.front().maxQueuedDatagrams
             << " access_code=" << (options.accessCodeProvided ? "required" : "none")
             << "\n";
-        if (options.audioCapture) {
-            audioCaptureWorker = std::make_unique<AudioUdpCaptureWorker>();
-            audioCaptureWorker->Start(
-                [udpSender = udpSender.get()](const screenshare::UdpAudioPacket& packet) {
-                    udpSender->SendAudioPacket(packet);
-                },
-                options.audioCaptureSource,
-                options.audioDeviceId,
-                options.audioCodec);
-            std::cout
-                << "Audio capture worker started source="
-                << screenshare::AudioCaptureSourceName(options.audioCaptureSource)
-                << "\n";
-        }
+        startAudioCaptureWorker();
     };
 
     auto sendStreamPackets = [&](const std::vector<screenshare::EncodedPacket>& packets) {
@@ -2971,11 +3068,38 @@ void RunCaptureStats(
             return;
         }
 
+        for (const auto& peer : liveSignalingRuntime->DrainRemovedPeers()) {
+            const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
+            const bool known = liveSignalingSendTargets.erase(endpoint) > 0;
+            udpSendTargetSpecs.erase(
+                std::remove_if(
+                    udpSendTargetSpecs.begin(),
+                    udpSendTargetSpecs.end(),
+                    [&](const UdpSendTargetSpec& target) {
+                        return target.target == endpoint;
+                    }),
+                udpSendTargetSpecs.end());
+            if (udpSender) {
+                udpSender->SuppressEndpoint(endpoint);
+            }
+
+            std::cout
+                << "signaling_live_sender_peer=removed"
+                << " room=" << options.signalingRoomId
+                << " peer_id=" << peer.peerId
+                << " endpoint=" << endpoint
+                << " active=" << (known ? "suppressed" : "unknown")
+                << "\n";
+        }
+
         const uint64_t probeSession = NatProbeSessionFingerprint(options);
         for (const auto& peer : liveSignalingRuntime->DrainDiscoveredPeers()) {
             const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
             if (!liveSignalingSendTargets.insert(endpoint).second) {
                 continue;
+            }
+            if (udpSender) {
+                udpSender->UnsuppressEndpoint(endpoint);
             }
 
             UdpSendTargetSpec target = SignalingSendTargetSpec(
@@ -3001,7 +3125,7 @@ void RunCaptureStats(
     };
 
     auto applyAdaptiveBitrate = [&]() {
-        if (!options.adaptBitrate || !udpSender || !streamEncoder || !bitrateAdvisor.configured()) {
+        if (!adaptiveBitrateEnabled || !udpSender || !streamEncoder || !bitrateAdvisor.configured()) {
             return;
         }
 
@@ -3045,19 +3169,38 @@ void RunCaptureStats(
         }
     };
 
-    auto restartStreamOutput = [&](int width, int height, double scale, const char* direction, const char* reason) {
+    auto restartCapturePipeline = [&](const char* reason) {
         try {
             if (streamEncoder) {
                 sendStreamPackets(streamEncoder->Drain());
                 streamEncoder.reset();
             }
 
-            config.targetWidth = width;
-            config.targetHeight = height;
             ConfigureCapturePayloads(config, options, streamEncoderPreference);
             capturer.Stop();
             capturer.Start(config);
             hasFrame = false;
+            std::cout
+                << "Runtime capture restarted"
+                << " display=" << config.displayIndex
+                << " output="
+                << (config.targetWidth > 0 && config.targetHeight > 0 ?
+                    std::to_string(config.targetWidth) + "x" + std::to_string(config.targetHeight) :
+                    std::string("native"))
+                << " fps=" << runtimeFps
+                << " reason=" << reason
+                << "\n";
+        } catch (const std::exception& error) {
+            std::cerr << "Runtime capture restart failed: " << error.what() << "\n";
+            throw;
+        }
+    };
+
+    auto restartStreamOutput = [&](int width, int height, double scale, const char* direction, const char* reason) {
+        try {
+            config.targetWidth = width;
+            config.targetHeight = height;
+            restartCapturePipeline(reason);
             resolutionCooldownRemaining = options.adaptResolutionCooldownSeconds;
             resolutionStableFeedbackReports = 0;
             resolutionReductionPressureReports = 0;
@@ -3197,54 +3340,202 @@ void RunCaptureStats(
         resolutionAdaptationStatus = "holding";
     };
 
+    auto targetFrameTime = std::chrono::microseconds(1'000'000 / runtimeFps);
+    auto nextFrameAt = Clock::now();
+
     auto applyRuntimeStreamSettingsControl = [&]() {
         const auto request = runtimeControl.TakeStreamSettingsRequest();
-        if (!request || !request->resolution) {
+        if (!request) {
             return;
         }
 
-        const auto& resolution = *request->resolution;
-        switch (resolution.mode) {
-        case screenshare::RuntimeResolutionMode::Auto:
-            if (adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
-                return;
+        bool restartCapture = false;
+        if (request->roomName) {
+            if (liveSignalingRuntime) {
+                liveSignalingRuntime->UpdateRoomName(*request->roomName);
             }
-            adaptiveResolutionEnabled = true;
+            std::cout << "runtime_room_name=updated\n";
+        }
+        if (request->displayIndex && *request->displayIndex >= 0 && config.displayIndex != *request->displayIndex) {
+            config.displayIndex = *request->displayIndex;
+            restartCapture = true;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(0, 0, 1.0, "auto", "runtime_control");
-            std::cout << "runtime_resolution_mode=auto\n";
-            break;
-        case screenshare::RuntimeResolutionMode::Native:
-            if (!adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
-                return;
+            std::cout << "runtime_display=" << config.displayIndex << "\n";
+        }
+        if (request->fps && *request->fps > 0 && *request->fps <= 240 && runtimeFps != *request->fps) {
+            runtimeFps = *request->fps;
+            config.targetFps = runtimeFps;
+            targetFrameTime = std::chrono::microseconds(1'000'000 / runtimeFps);
+            streamKeyframeIntervalFrames =
+                options.keyframeIntervalSeconds <= 0 ?
+                0 :
+                static_cast<uint32_t>(options.keyframeIntervalSeconds * runtimeFps);
+            nextFrameAt = Clock::now();
+            restartCapture = true;
+            std::cout << "runtime_fps=" << runtimeFps << "\n";
+        }
+        if (request->bitrateBps) {
+            const bool requestedAutoBitrate = *request->bitrateBps == 0;
+            uint32_t requestedBitrate = *request->bitrateBps;
+            if (requestedAutoBitrate) {
+                requestedBitrate = hasFrame ?
+                    SelectBitrate(options, lastFrame.width, lastFrame.height) :
+                    SelectBitrate(options, config.targetWidth, config.targetHeight);
             }
-            adaptiveResolutionEnabled = false;
-            adaptiveResolutionTiers.clear();
-            adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(0, 0, 1.0, "manual", "runtime_control_native");
-            std::cout << "runtime_resolution_mode=native\n";
-            break;
-        case screenshare::RuntimeResolutionMode::Fixed:
-            if (!adaptiveResolutionEnabled &&
-                config.targetWidth == resolution.width &&
-                config.targetHeight == resolution.height) {
-                return;
+            if (requestedBitrate == 0) {
+                requestedBitrate = streamTargetBitrate;
             }
-            adaptiveResolutionEnabled = false;
-            adaptiveResolutionTiers.clear();
-            adaptiveResolutionTierIndex = 0;
-            restartStreamOutput(resolution.width, resolution.height, 1.0, "manual", "runtime_control_fixed");
+            if (requestedBitrate == 0) {
+                std::cout << "runtime_bitrate_mode=auto pending=true\n";
+            } else if (autoBitrateEnabled != requestedAutoBitrate || streamTargetBitrate != requestedBitrate) {
+                autoBitrateEnabled = requestedAutoBitrate;
+                streamTargetBitrate = requestedBitrate;
+                lastBitrateAdaptationAttempt = 0;
+                bitrateAdvisor.Configure(
+                    streamTargetBitrate,
+                    SelectAdaptiveMinBitrate(options, streamTargetBitrate, adaptiveResolutionTiers),
+                    static_cast<uint32_t>(options.adaptReduceCooldownSeconds));
+                if (streamEncoder && streamBitrate != streamTargetBitrate) {
+                    if (streamEncoder->TryUpdateBitrate(streamTargetBitrate)) {
+                        streamBitrate = streamTargetBitrate;
+                        updateUdpPacingBitrate();
+                        ++bitrateAdaptations;
+                        bitrateAdaptationStatus = autoBitrateEnabled ? "auto" : "manual";
+                        std::cout
+                            << "runtime_bitrate_mbps=" << Mbps(streamBitrate)
+                            << " runtime_bitrate_mode=" << (autoBitrateEnabled ? "auto" : "manual")
+                            << "\n";
+                    } else {
+                        ++bitrateAdaptationFailures;
+                        bitrateAdaptationStatus = "unsupported";
+                        std::cerr
+                            << "Runtime bitrate update unsupported by active encoder; keeping bitrate_mbps="
+                            << Mbps(streamBitrate)
+                            << "\n";
+                    }
+                } else {
+                    std::cout
+                        << "runtime_bitrate_target_mbps=" << Mbps(streamTargetBitrate)
+                        << " runtime_bitrate_mode=" << (autoBitrateEnabled ? "auto" : "manual")
+                        << "\n";
+                }
+            }
+        }
+        if (request->adaptBitrate) {
+            adaptiveBitrateEnabled = *request->adaptBitrate;
+            bitrateAdaptationStatus = adaptiveBitrateEnabled ? "waiting" : "disabled";
             std::cout
-                << "runtime_resolution_mode=fixed"
-                << " runtime_resolution=" << resolution.width << "x" << resolution.height
+                << "runtime_adaptive_bitrate="
+                << (adaptiveBitrateEnabled ? "enabled" : "disabled")
                 << "\n";
-            break;
+        }
+        if (request->adaptFps) {
+            std::cout
+                << "runtime_adaptive_fps="
+                << (*request->adaptFps ? "requested" : "disabled")
+                << " status=unsupported\n";
+        }
+        if (request->videoPaused && runtimeVideoPaused != *request->videoPaused) {
+            runtimeVideoPaused = *request->videoPaused;
+            nextFrameAt = Clock::now();
+            std::cout
+                << "runtime_video=" << (runtimeVideoPaused ? "paused" : "running")
+                << "\n";
+        }
+        if (request->captureSystemAudio || request->hostAudioMuted || request->audioDeviceId) {
+            bool nextAudioCapture = runtimeAudioCaptureEnabled;
+            if (request->captureSystemAudio) {
+                nextAudioCapture = *request->captureSystemAudio;
+            }
+            if (request->hostAudioMuted && *request->hostAudioMuted) {
+                nextAudioCapture = false;
+            }
+            std::string nextAudioDeviceId = runtimeAudioDeviceId;
+            if (request->audioDeviceId) {
+                nextAudioDeviceId = *request->audioDeviceId;
+            }
+            if (nextAudioCapture != runtimeAudioCaptureEnabled || nextAudioDeviceId != runtimeAudioDeviceId) {
+                runtimeAudioCaptureEnabled = nextAudioCapture;
+                runtimeAudioDeviceId = std::move(nextAudioDeviceId);
+                restartAudioCaptureWorker();
+                std::cout
+                    << "runtime_system_audio=" << (runtimeAudioCaptureEnabled ? "enabled" : "disabled")
+                    << (runtimeAudioDeviceId.empty() ? "" : " runtime_audio_device=selected")
+                    << "\n";
+            }
+        }
+        if (request->adaptResolution && !request->resolution) {
+            adaptiveResolutionEnabled = *request->adaptResolution;
+            if (!adaptiveResolutionEnabled) {
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                resolutionAdaptationStatus = "disabled";
+            } else {
+                resolutionAdaptationStatus = "waiting";
+            }
+            std::cout
+                << "runtime_adaptive_resolution="
+                << (adaptiveResolutionEnabled ? "enabled" : "disabled")
+                << "\n";
+        }
+        if (request->resolution) {
+            const auto& resolution = *request->resolution;
+            switch (resolution.mode) {
+            case screenshare::RuntimeResolutionMode::Auto:
+                {
+                const bool requestedAdaptiveResolution = request->adaptResolution.value_or(true);
+                if (!restartCapture &&
+                    adaptiveResolutionEnabled == requestedAdaptiveResolution &&
+                    config.targetWidth == 0 &&
+                    config.targetHeight == 0) {
+                    return;
+                }
+                adaptiveResolutionEnabled = requestedAdaptiveResolution;
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                restartStreamOutput(0, 0, 1.0, adaptiveResolutionEnabled ? "auto" : "manual", "runtime_control");
+                if (!adaptiveResolutionEnabled) {
+                    resolutionAdaptationStatus = "disabled";
+                }
+                std::cout
+                    << "runtime_resolution_mode=" << (adaptiveResolutionEnabled ? "auto" : "native")
+                    << "\n";
+                break;
+                }
+            case screenshare::RuntimeResolutionMode::Native:
+                if (!restartCapture && !adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
+                    return;
+                }
+                adaptiveResolutionEnabled = false;
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                restartStreamOutput(0, 0, 1.0, "manual", "runtime_control_native");
+                std::cout << "runtime_resolution_mode=native\n";
+                break;
+            case screenshare::RuntimeResolutionMode::Fixed:
+                if (!restartCapture &&
+                    !adaptiveResolutionEnabled &&
+                    config.targetWidth == resolution.width &&
+                    config.targetHeight == resolution.height) {
+                    return;
+                }
+                adaptiveResolutionEnabled = false;
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                restartStreamOutput(resolution.width, resolution.height, 1.0, "manual", "runtime_control_fixed");
+                std::cout
+                    << "runtime_resolution_mode=fixed"
+                    << " runtime_resolution=" << resolution.width << "x" << resolution.height
+                    << "\n";
+                break;
+            }
+        }
+        if (restartCapture && !request->resolution) {
+            restartCapturePipeline("runtime_control");
         }
     };
 
-    const auto targetFrameTime = std::chrono::microseconds(1'000'000 / options.fps);
-    auto nextFrameAt = Clock::now();
     auto keepRunning = [&]() {
         if (runtimeControl.StopRequested()) {
             return false;
@@ -3258,13 +3549,16 @@ void RunCaptureStats(
         drainLiveSignalingSendTargets();
         applyRuntimeStreamSettingsControl();
 
-        const auto captureStartedAt = Clock::now();
-        const auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(0));
-        const double captureMs = std::chrono::duration<double, std::milli>(Clock::now() - captureStartedAt).count();
-        intervalCaptureMs += captureMs;
-        ++intervalCaptureCalls;
-        totalCaptureMs += captureMs;
-        ++totalCaptureCalls;
+        std::optional<screenshare::CapturedFrame> frame;
+        if (!runtimeVideoPaused) {
+            const auto captureStartedAt = Clock::now();
+            frame = capturer.TryCaptureFrame(std::chrono::milliseconds(0));
+            const double captureMs = std::chrono::duration<double, std::milli>(Clock::now() - captureStartedAt).count();
+            intervalCaptureMs += captureMs;
+            ++intervalCaptureCalls;
+            totalCaptureMs += captureMs;
+            ++totalCaptureCalls;
+        }
         if (frame) {
             ++totalDesktopUpdates;
             ++intervalDesktopUpdates;
@@ -3295,7 +3589,7 @@ void RunCaptureStats(
             }
         }
 
-        if (hasFrame) {
+        if (!runtimeVideoPaused && hasFrame) {
             ++totalOutputFrames;
             ++intervalOutputFrames;
 
@@ -3310,7 +3604,7 @@ void RunCaptureStats(
                     encoderConfig.outputPath = screenshare::Widen(options.recordPath);
                     encoderConfig.width = lastFrame.width;
                     encoderConfig.height = lastFrame.height;
-                    encoderConfig.fps = options.fps;
+                    encoderConfig.fps = runtimeFps;
                     encoderConfig.bitrate = SelectBitrate(options, lastFrame.width, lastFrame.height);
 
                     const std::filesystem::path recordPath(options.recordPath);
@@ -3349,7 +3643,7 @@ void RunCaptureStats(
                         screenshare::H264StreamEncoderConfig encoderConfig;
                         encoderConfig.width = lastFrame.width;
                         encoderConfig.height = lastFrame.height;
-                        encoderConfig.fps = options.fps;
+                        encoderConfig.fps = runtimeFps;
                         encoderConfig.bitrate = encoderStartBitrate;
                         encoderConfig.keyframeIntervalFrames = streamKeyframeIntervalFrames;
                         encoderConfig.startFrameIndex = static_cast<int64_t>(streamEncodedFrames);
@@ -3501,6 +3795,7 @@ void RunCaptureStats(
                 << " resolution_reduce_required=" << ResolutionPressureReportsBeforeReduce
                 << " nv12=" << (lastNv12TextureAvailable ? "gpu_texture" : (lastNv12GeneratedOnGpu ? "gpu_readback" : "cpu_or_none"))
                 << " stream_input=" << (streamEncoder ? screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode()) : "none")
+                << " video_paused=" << (runtimeVideoPaused ? "yes" : "no")
                 << " stream_bitrate_mbps=" << Mbps(streamBitrate)
                 << " stream_queue=" << (streamEncoder ? streamEncoder->queuedInputCount() : 0)
                 << " stream_dropped=" << (streamEncoder ? streamEncoder->droppedInputFrames() : 0)
@@ -3526,7 +3821,7 @@ void RunCaptureStats(
                 << " udp_peak_queue_ms=" << udpStatsNow.peakQueueDelayMs
                 << " udp_dropped_frames=" << udpStatsNow.framesDropped
                 << " udp_wire_bytes=" << udpStatsNow.wireBytesSent
-                << " audio_capture=" << (options.audioCapture ? (audioCaptureStatsNow.started ? "running" : "starting") : "disabled")
+                << " audio_capture=" << (runtimeAudioCaptureEnabled ? (audioCaptureStatsNow.started ? "running" : "starting") : "disabled")
                 << " audio_capture_packets=" << audioCaptureStatsNow.packets
                 << " audio_capture_frames=" << audioCaptureStatsNow.frames
                 << " audio_capture_bytes=" << audioCaptureStatsNow.bytes
@@ -3591,8 +3886,13 @@ void RunCaptureStats(
     }
 
     const auto captureFinishedAt = Clock::now();
+    const bool stopWasRequested = runtimeControl.StopRequested();
 
-    if (streamEncoder) {
+    if (stopWasRequested && liveSignalingRuntime) {
+        liveSignalingRuntime->Stop();
+    }
+
+    if (streamEncoder && !stopWasRequested) {
         const auto drainedPackets = streamEncoder->Drain();
         sendStreamPackets(drainedPackets);
     }
@@ -3602,7 +3902,7 @@ void RunCaptureStats(
         audioCaptureWorker->ThrowIfFailed();
     }
 
-    if (udpSender) {
+    if (udpSender && !stopWasRequested) {
         udpSender->Flush();
         RecordLatestReceiverFeedback(
             reportContext,
@@ -3663,7 +3963,7 @@ void RunCaptureStats(
         << ", UDP dropped frames: " << udpStats.framesDropped
         << ", UDP dropped datagrams: " << udpStats.datagramsDropped
         << ", UDP wire bytes: " << udpStats.wireBytesSent
-        << ", audio capture: " << (options.audioCapture ? (finalAudioCaptureStats.started ? "done" : "not-started") : "disabled")
+        << ", audio capture: " << (runtimeAudioCaptureEnabled ? (finalAudioCaptureStats.started ? "done" : "not-started") : "disabled")
         << ", audio capture packets: " << finalAudioCaptureStats.packets
         << ", audio capture frames: " << finalAudioCaptureStats.frames
         << ", audio capture bytes: " << finalAudioCaptureStats.bytes
@@ -3834,6 +4134,7 @@ void PrepareLiveSignaling(Options& options)
 
 void RunUdpReceiverStats(
     const Options& options,
+    const ScreenShareRunContext& context,
     screenshare::ISessionRuntimeControl& runtimeControl)
 {
     std::optional<screenshare::NatInvite> peerInvite;
@@ -3878,14 +4179,63 @@ void RunUdpReceiverStats(
         liveSignalingRuntime = std::make_unique<LiveSignalingRuntime>();
         liveSignalingRuntime->Start(options);
     }
+    std::map<std::string, std::string> signalingPeerByEndpoint;
+    std::string activeMediaPeerId;
+    bool hostLeftNotified = false;
 
     auto drainLiveSignalingProbeTargets = [&]() {
         if (!liveSignalingRuntime) {
             return 0;
         }
 
+        const auto updateActiveMediaPeer = [&]() {
+            if (!activeMediaPeerId.empty()) {
+                return;
+            }
+            const std::string latestMediaEndpoint = receiver.stats().latestMediaEndpoint;
+            if (latestMediaEndpoint.empty()) {
+                return;
+            }
+            const auto peer = signalingPeerByEndpoint.find(latestMediaEndpoint);
+            if (peer != signalingPeerByEndpoint.end()) {
+                activeMediaPeerId = peer->second;
+            }
+        };
+
+        updateActiveMediaPeer();
+        for (const auto& peer : liveSignalingRuntime->DrainRemovedPeers()) {
+            const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
+            const std::string latestMediaEndpoint = receiver.stats().latestMediaEndpoint;
+            const bool activeMediaEndpoint = !latestMediaEndpoint.empty() && endpoint == latestMediaEndpoint;
+            const bool activeMediaPeer = !activeMediaPeerId.empty() && peer.peerId == activeMediaPeerId;
+            if (activeMediaEndpoint && activeMediaPeerId.empty()) {
+                activeMediaPeerId = peer.peerId;
+            }
+            signalingPeerByEndpoint.erase(endpoint);
+
+            std::cout
+                << "signaling_live_receiver_peer=removed"
+                << " room=" << options.signalingRoomId
+                << " peer_id=" << peer.peerId
+                << " endpoint=" << endpoint
+                << " active_media=" << (activeMediaEndpoint || activeMediaPeer ? "yes" : "no")
+                << "\n";
+
+            if (!hostLeftNotified && (activeMediaEndpoint || activeMediaPeer)) {
+                hostLeftNotified = true;
+                std::cout
+                    << "watch_host_left=peer_left"
+                    << " room=" << options.signalingRoomId
+                    << " peer_id=" << peer.peerId
+                    << " endpoint=" << endpoint
+                    << "\n";
+            }
+        }
+
         int added = 0;
         for (const auto& peer : liveSignalingRuntime->DrainDiscoveredPeers()) {
+            const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
+            signalingPeerByEndpoint[endpoint] = peer.peerId;
             const screenshare::UdpNatProbeTarget target{
                 peer.candidate.ip,
                 peer.candidate.port,
@@ -3898,9 +4248,10 @@ void RunUdpReceiverStats(
                 << "signaling_live_receiver_peer=added"
                 << " room=" << options.signalingRoomId
                 << " peer_id=" << peer.peerId
-                << " endpoint=" << SignalingCandidateEndpoint(peer.candidate)
+                << " endpoint=" << endpoint
                 << "\n";
         }
+        updateActiveMediaPeer();
         return added;
     };
 
@@ -4138,6 +4489,25 @@ void RunUdpReceiverStats(
             2.0f);
         if (audioPlaybackVolume > 0.0f) {
             audioPlaybackMuted = false;
+        }
+        applyAudioControls();
+        updatePreviewTitle();
+        printAudioControls();
+    };
+
+    auto applyAudioPlaybackSettingsRequest = [&]() {
+        auto request = runtimeControl.TakeAudioPlaybackSettingsRequest();
+        if (!request || !options.audioPlayback) {
+            return;
+        }
+        if (request->muted) {
+            audioPlaybackMuted = *request->muted;
+        }
+        if (request->volumePercent) {
+            audioPlaybackVolume = std::clamp(static_cast<float>(*request->volumePercent) / 100.0f, 0.0f, 2.0f);
+            if (audioPlaybackVolume > 0.0f && request->muted == std::nullopt) {
+                audioPlaybackMuted = false;
+            }
         }
         applyAudioControls();
         updatePreviewTitle();
@@ -4520,6 +4890,25 @@ void RunUdpReceiverStats(
         }
     };
 
+    auto emitDecodedVideoFrame = [&](const screenshare::DecodedFrameInfo& decodedFrame) {
+        if (!options.emitVideoFrames || !context.videoFrameHandler) {
+            return;
+        }
+
+        screenshare::SessionEvent::VideoFrame frame;
+        frame.width = decodedFrame.width;
+        frame.height = decodedFrame.height;
+        frame.codedWidth = decodedFrame.codedWidth;
+        frame.codedHeight = decodedFrame.codedHeight;
+        frame.timestamp100ns = decodedFrame.timestamp100ns;
+        frame.duration100ns = decodedFrame.duration100ns;
+        frame.nv12.resize(decodedFrame.data.size());
+        if (!frame.nv12.empty()) {
+            std::memcpy(frame.nv12.data(), decodedFrame.data.data(), frame.nv12.size());
+        }
+        context.videoFrameHandler(std::move(frame));
+    };
+
     auto countDecodedFrames = [&](std::vector<screenshare::DecodedFrameInfo> decodedFrames, bool presentReady = true) {
         h264DecodedFrames += decodedFrames.size();
         for (auto& decodedFrame : decodedFrames) {
@@ -4539,7 +4928,10 @@ void RunUdpReceiverStats(
             h264DecodedBytes += decodedFrame.bytes;
             h264DecodedWidth = decodedFrame.width;
             h264DecodedHeight = decodedFrame.height;
-            latestDecodedFrame = decodedFrame;
+            if (!options.decodedBmpPath.empty()) {
+                latestDecodedFrame = decodedFrame;
+            }
+            emitDecodedVideoFrame(decodedFrame);
             if (options.previewWindow) {
                 ensurePreviewWindow();
             }
@@ -4779,13 +5171,14 @@ void RunUdpReceiverStats(
         if (runtimeControl.StopRequested()) {
             return false;
         }
-        if (options.previewWindow && options.seconds == 0) {
+        if ((options.previewWindow || options.emitVideoFrames) && options.seconds == 0) {
             return true;
         }
         return Clock::now() - startedAt < std::chrono::seconds(options.seconds);
     };
 
     while (shouldContinue()) {
+        applyAudioPlaybackSettingsRequest();
         if (drainLiveSignalingProbeTargets() > 0) {
             hasNatProbeSetup = true;
         }
@@ -5287,7 +5680,7 @@ int ExecuteSessionRuntimeOptions(
     if (options.audioCapture && options.udpSendTarget.empty() && !options.shareRoom) {
         RunAudioCaptureStats(options, reportContext, runtimeControl);
     } else if (options.udpReceivePort != 0) {
-        RunUdpReceiverStats(options, runtimeControl);
+        RunUdpReceiverStats(options, context, runtimeControl);
     } else {
         RunCaptureStats(options, reportContext, runtimeControl);
     }

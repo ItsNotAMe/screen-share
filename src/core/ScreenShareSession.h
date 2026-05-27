@@ -56,6 +56,7 @@ enum class SessionIssue {
     AccessCodeMismatch,
     RoomAlreadyOpen,
     PreviewClosed,
+    HostLeft,
 };
 
 struct SessionResolution {
@@ -95,6 +96,21 @@ struct StreamSettings {
     bool adaptFps = false;
 };
 
+struct ShareSessionSettings {
+    std::optional<std::string> roomName;
+    std::optional<int> displayIndex;
+    std::optional<bool> captureSystemAudio;
+    std::optional<bool> hostAudioMuted;
+    std::optional<bool> hostVideoPaused;
+    std::optional<std::string> audioDeviceId;
+    StreamSettings stream;
+};
+
+struct AudioPlaybackSettings {
+    std::optional<bool> muted;
+    std::optional<int> volumePercent;
+};
+
 struct ShareSessionConfig {
     ShareConnectionMode connectionMode = ShareConnectionMode::Room;
     std::string sessionId;
@@ -118,6 +134,7 @@ struct ShareSessionConfig {
     std::vector<std::string> watcherInvites;
     bool captureSystemAudio = true;
     bool hostAudioMuted = false;
+    bool hostVideoPaused = false;
     StreamSettings stream;
 };
 
@@ -140,6 +157,7 @@ struct WatchSessionConfig {
     bool lanAdvertise = false;
     std::string peerInvite;
     int previewLatencyMs = 100;
+    bool emitVideoFrames = false;
     int audioPlaybackVolumePercent = 100;
 };
 
@@ -252,6 +270,15 @@ struct SessionEvent {
     SessionStatus status;
     SessionIssue issue = SessionIssue::None;
     std::string message;
+    struct VideoFrame {
+        int width = 0;
+        int height = 0;
+        int codedWidth = 0;
+        int codedHeight = 0;
+        int64_t timestamp100ns = 0;
+        int64_t duration100ns = 0;
+        std::vector<std::uint8_t> nv12;
+    } videoFrame;
 };
 
 class ISessionEventSink {

@@ -22,6 +22,9 @@
 - Mode switching uses a small `PageStack` (plain `QWidget` + `QVBoxLayout` + show/hide), not `QStackedWidget`. `QStackedLayout::minimumSize()` returns the max across all pages, which leaks past any sizeHint override and forces the column to allocate the tallest page's height to every page — that was the source of the empty gap between the option stack and the Security panel.
 - Security UX direction: normal public room sharing should be encrypted by default with an automatic random room access key from signaling. Do not expose "access code" as the default user chore; room password is an optional extra lock for Worker rooms.
 - UI session IDs are automatic; keep manual `--session` as a CLI/reporting diagnostic escape hatch, not a normal UI field.
+- Stage-2 UI code should not grow as one huge file. Split it into logical units: app shell/navigation, shared widgets/styles, room flow screens, active session screens, and small data/adapters where useful.
+- Keep UI code simple and direct. Add abstractions only when they remove real duplication or make screens easier to read.
+- When each new screen first runs, pause and ask the user for a screenshot so the screen can be visually validated before moving to the next screen.
 
 ## Implementation Notes
 

@@ -130,6 +130,7 @@ struct Options {
     bool decodeH264 = false;
     std::string decodedBmpPath;
     bool previewWindow = false;
+    bool emitVideoFrames = false;
     int previewLatencyMs = DefaultPreviewLatencyMs;
     bool previewLatencyProvided = false;
     int previewMaxLateMs = DefaultPreviewMaxLateMs;
@@ -139,6 +140,7 @@ struct Options {
     int simulateJitterMs = 0;
     bool simulateJitterProvided = false;
     bool audioCapture = false;
+    bool videoPaused = false;
     screenshare::AudioCaptureSource audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
     std::string audioDeviceId;
     bool audioDeviceIdProvided = false;

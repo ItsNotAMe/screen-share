@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -46,6 +47,36 @@ bool ParsePositiveInt(std::string_view value, int& out)
     return true;
 }
 
+std::optional<bool> ParseBool(std::string_view value)
+{
+    const std::string text = LowerAscii(TrimAscii(value));
+    if (text == "1" || text == "true" || text == "yes" || text == "on" || text == "enabled") {
+        return true;
+    }
+    if (text == "0" || text == "false" || text == "no" || text == "off" || text == "disabled") {
+        return false;
+    }
+    return std::nullopt;
+}
+
+std::optional<uint32_t> ParseBitrateBps(std::string_view value, bool valueIsMbps)
+{
+    const std::string text = TrimAscii(value);
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    char* end = nullptr;
+    const double parsed = std::strtod(text.c_str(), &end);
+    if (end == text.c_str() || *end != '\0' || parsed <= 0.0) {
+        return std::nullopt;
+    }
+    const double bps = valueIsMbps ? parsed * 1'000'000.0 : parsed;
+    if (bps <= 0.0 || bps > static_cast<double>(std::numeric_limits<uint32_t>::max())) {
+        return std::nullopt;
+    }
+    return static_cast<uint32_t>(bps + 0.5);
+}
+
 } // namespace
 
 bool NullSessionRuntimeControl::StopRequested()
@@ -54,6 +85,11 @@ bool NullSessionRuntimeControl::StopRequested()
 }
 
 std::optional<RuntimeStreamSettingsRequest> NullSessionRuntimeControl::TakeStreamSettingsRequest()
+{
+    return std::nullopt;
+}
+
+std::optional<RuntimeAudioPlaybackSettingsRequest> NullSessionRuntimeControl::TakeAudioPlaybackSettingsRequest()
 {
     return std::nullopt;
 }
@@ -69,6 +105,14 @@ std::optional<RuntimeStreamSettingsRequest> MemorySessionRuntimeControl::TakeStr
     std::scoped_lock lock(mutex_);
     auto request = streamSettingsRequest_;
     streamSettingsRequest_.reset();
+    return request;
+}
+
+std::optional<RuntimeAudioPlaybackSettingsRequest> MemorySessionRuntimeControl::TakeAudioPlaybackSettingsRequest()
+{
+    std::scoped_lock lock(mutex_);
+    auto request = audioPlaybackSettingsRequest_;
+    audioPlaybackSettingsRequest_.reset();
     return request;
 }
 
@@ -90,6 +134,12 @@ void MemorySessionRuntimeControl::RequestStreamSettings(RuntimeStreamSettingsReq
     streamSettingsRequest_ = std::move(request);
 }
 
+void MemorySessionRuntimeControl::RequestAudioPlaybackSettings(RuntimeAudioPlaybackSettingsRequest request)
+{
+    std::scoped_lock lock(mutex_);
+    audioPlaybackSettingsRequest_ = std::move(request);
+}
+
 void MemorySessionRuntimeControl::ClearStreamSettingsRequest()
 {
     std::scoped_lock lock(mutex_);
@@ -101,6 +151,7 @@ void MemorySessionRuntimeControl::Reset()
     std::scoped_lock lock(mutex_);
     stopRequested_ = false;
     streamSettingsRequest_.reset();
+    audioPlaybackSettingsRequest_.reset();
 }
 
 FileSessionRuntimeControl::FileSessionRuntimeControl(std::string stopFilePath, std::string controlFilePath)
@@ -148,6 +199,11 @@ std::optional<RuntimeStreamSettingsRequest> FileSessionRuntimeControl::TakeStrea
     return ParseRuntimeStreamSettingsRequest(text);
 }
 
+std::optional<RuntimeAudioPlaybackSettingsRequest> FileSessionRuntimeControl::TakeAudioPlaybackSettingsRequest()
+{
+    return std::nullopt;
+}
+
 std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(std::string_view content)
 {
     std::optional<RuntimeStreamSettingsRequest> request;
@@ -160,16 +216,140 @@ std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(st
         }
 
         const std::string lowerLine = LowerAscii(line);
-        if (lowerLine.rfind("resolution", 0) != 0) {
-            continue;
-        }
         const size_t separator = line.find_first_of("= \t");
         if (separator == std::string::npos) {
             continue;
         }
+        const std::string key = LowerAscii(TrimAscii(std::string_view(line).substr(0, separator)));
         std::string value = TrimAscii(std::string_view(line).substr(separator + 1));
         if (!value.empty() && value.front() == '=') {
             value = TrimAscii(std::string_view(value).substr(1));
+        }
+
+        if (key == "room_name" || key == "room") {
+            if (!request) {
+                request.emplace();
+            }
+            request->roomName = value;
+            continue;
+        }
+        if (key == "display" || key == "display_index") {
+            int parsed = 0;
+            if (ParsePositiveInt(value, parsed) || LowerAscii(TrimAscii(value)) == "0") {
+                if (!request) {
+                    request.emplace();
+                }
+                request->displayIndex = parsed;
+            }
+            continue;
+        }
+        if (key == "fps") {
+            int parsed = 0;
+            if (ParsePositiveInt(value, parsed) && parsed <= 240) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->fps = parsed;
+            }
+            continue;
+        }
+        if (key == "bitrate" || key == "bitrate_bps") {
+            if (LowerAscii(TrimAscii(value)) == "auto") {
+                if (!request) {
+                    request.emplace();
+                }
+                request->bitrateBps = 0;
+                continue;
+            }
+            if (const auto parsed = ParseBitrateBps(value, false)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->bitrateBps = *parsed;
+            }
+            continue;
+        }
+        if (key == "bitrate_mbps") {
+            if (LowerAscii(TrimAscii(value)) == "auto") {
+                if (!request) {
+                    request.emplace();
+                }
+                request->bitrateBps = 0;
+                continue;
+            }
+            if (const auto parsed = ParseBitrateBps(value, true)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->bitrateBps = *parsed;
+            }
+            continue;
+        }
+        if (key == "adapt_bitrate" || key == "adaptive_bitrate") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->adaptBitrate = *parsed;
+            }
+            continue;
+        }
+        if (key == "adapt_resolution" || key == "adaptive_resolution") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->adaptResolution = *parsed;
+            }
+            continue;
+        }
+        if (key == "adapt_fps" || key == "adaptive_fps") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->adaptFps = *parsed;
+            }
+            continue;
+        }
+        if (key == "capture_system_audio" || key == "system_audio") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->captureSystemAudio = *parsed;
+            }
+            continue;
+        }
+        if (key == "host_audio_muted") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->hostAudioMuted = *parsed;
+            }
+            continue;
+        }
+        if (key == "host_video_paused" || key == "video_paused") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->videoPaused = *parsed;
+            }
+            continue;
+        }
+        if (key == "audio_device_id") {
+            if (!value.empty()) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->audioDeviceId = value;
+            }
+            continue;
+        }
+        if (key != "resolution") {
+            continue;
         }
 
         const std::string lowerValue = LowerAscii(value);

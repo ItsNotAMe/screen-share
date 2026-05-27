@@ -23,9 +23,10 @@
 namespace screenshare {
 namespace {
 
-RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSettings& settings)
+void ApplyStreamSettingsToRuntimeRequest(
+    RuntimeStreamSettingsRequest& request,
+    const StreamSettings& settings)
 {
-    RuntimeStreamSettingsRequest request;
     RuntimeResolutionRequest resolution;
     if (settings.outputResolution &&
         settings.outputResolution->width > 0 &&
@@ -40,6 +41,57 @@ RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSetti
     } else {
         resolution.mode = RuntimeResolutionMode::Auto;
         request.resolution = resolution;
+    }
+    if (settings.fps > 0) {
+        request.fps = settings.fps;
+    }
+    if (settings.bitrateBps > 0) {
+        request.bitrateBps = settings.bitrateBps;
+    }
+    request.adaptBitrate = settings.adaptBitrate;
+    request.adaptResolution = settings.adaptResolution;
+    request.adaptFps = settings.adaptFps;
+}
+
+RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSettings& settings)
+{
+    RuntimeStreamSettingsRequest request;
+    ApplyStreamSettingsToRuntimeRequest(request, settings);
+    return request;
+}
+
+RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const ShareSessionSettings& settings)
+{
+    RuntimeStreamSettingsRequest request;
+    if (settings.roomName) {
+        request.roomName = *settings.roomName;
+    }
+    if (settings.displayIndex && *settings.displayIndex >= 0) {
+        request.displayIndex = *settings.displayIndex;
+    }
+    if (settings.captureSystemAudio) {
+        request.captureSystemAudio = *settings.captureSystemAudio;
+    }
+    if (settings.hostAudioMuted) {
+        request.hostAudioMuted = *settings.hostAudioMuted;
+    }
+    if (settings.hostVideoPaused) {
+        request.videoPaused = *settings.hostVideoPaused;
+    }
+    if (settings.audioDeviceId) {
+        request.audioDeviceId = *settings.audioDeviceId;
+    }
+    ApplyStreamSettingsToRuntimeRequest(request, settings.stream);
+    request.bitrateBps = settings.stream.bitrateBps;
+    return request;
+}
+
+RuntimeAudioPlaybackSettingsRequest BuildRuntimeAudioPlaybackSettingsRequest(const AudioPlaybackSettings& settings)
+{
+    RuntimeAudioPlaybackSettingsRequest request;
+    request.muted = settings.muted;
+    if (settings.volumePercent) {
+        request.volumePercent = std::clamp(*settings.volumePercent, 0, 200);
     }
     return request;
 }
@@ -247,6 +299,8 @@ public:
     void Shutdown();
     void Stop();
     void ApplyStreamSettings(const StreamSettings& settings);
+    void ApplyShareSettings(const ShareSessionSettings& settings);
+    void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
     std::vector<SessionAudioDeviceInfo> ListAudioDevices();
@@ -259,6 +313,7 @@ private:
     void JoinWorker();
     void JoinFinishedWorker();
     void HandleOutput(std::string_view text);
+    void HandleVideoFrame(SessionEvent::VideoFrame frame);
     void HandleLogLine(const std::string& line);
     void HandleDiagnosticLogLine(const std::string& line);
     void HandleStreamLogLine(const std::string& line);
@@ -289,6 +344,7 @@ private:
     std::string natStatus_;
     std::string natHint_;
     bool previewClosedNotified_ = false;
+    bool hostLeftNotified_ = false;
     bool stopRequested_ = false;
 };
 
@@ -354,6 +410,30 @@ void ScreenShareSession::Impl::ApplyStreamSettings(const StreamSettings& setting
         currentState = state_;
     }
     Notify(SessionEventType::SettingsChanged, currentState, "Stream settings queued");
+}
+
+void ScreenShareSession::Impl::ApplyShareSettings(const ShareSessionSettings& settings)
+{
+    runtimeControl_.RequestStreamSettings(BuildRuntimeStreamSettingsRequest(settings));
+
+    SessionState currentState = SessionState::Idle;
+    {
+        std::scoped_lock lock(mutex_);
+        currentState = state_;
+    }
+    Notify(SessionEventType::SettingsChanged, currentState, "Share settings queued");
+}
+
+void ScreenShareSession::Impl::ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings)
+{
+    runtimeControl_.RequestAudioPlaybackSettings(BuildRuntimeAudioPlaybackSettingsRequest(settings));
+
+    SessionState currentState = SessionState::Idle;
+    {
+        std::scoped_lock lock(mutex_);
+        currentState = state_;
+    }
+    Notify(SessionEventType::AudioStatusChanged, currentState, "Audio playback settings queued");
 }
 
 SessionStatus ScreenShareSession::Impl::GetStatus() const
@@ -432,6 +512,7 @@ void ScreenShareSession::Impl::StartRunner(
             natStatus_.clear();
             natHint_.clear();
             previewClosedNotified_ = false;
+            hostLeftNotified_ = false;
             stopRequested_ = false;
             runtimeControl_.Reset();
         }
@@ -451,6 +532,9 @@ void ScreenShareSession::Impl::StartRunner(
         context.runtimeControl = &runtimeControl_;
         context.outputHandler = [this](std::string_view text) {
             HandleOutput(text);
+        };
+        context.videoFrameHandler = [this](SessionEvent::VideoFrame frame) {
+            HandleVideoFrame(std::move(frame));
         };
 
         int exitCode = 1;
@@ -539,6 +623,23 @@ void ScreenShareSession::Impl::HandleOutput(std::string_view text)
 
     for (const std::string& line : lines) {
         HandleLogLine(line);
+    }
+}
+
+void ScreenShareSession::Impl::HandleVideoFrame(SessionEvent::VideoFrame frame)
+{
+    ISessionEventSink* observer = nullptr;
+    SessionEvent event;
+    {
+        std::scoped_lock lock(mutex_);
+        observer = observer_;
+        event.type = SessionEventType::VideoFrameReady;
+        event.status = BuildStatusLocked();
+        event.videoFrame = std::move(frame);
+    }
+
+    if (observer != nullptr) {
+        observer->OnSessionEvent(event);
     }
 }
 
@@ -978,6 +1079,23 @@ void ScreenShareSession::Impl::HandleDiagnosticLogLine(const std::string& line)
         }
     }
 
+    if (line.find("watch_host_left=peer_left") != std::string::npos) {
+        bool shouldEmit = false;
+        {
+            std::scoped_lock lock(mutex_);
+            if (!hostLeftNotified_ && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
+                hostLeftNotified_ = true;
+                state_ = SessionState::Disconnected;
+                summary_ = "Host left the room";
+                health_ = "host-left";
+                shouldEmit = true;
+            }
+        }
+        if (shouldEmit) {
+            EmitIssue(SessionIssue::HostLeft, "Host left the room");
+        }
+    }
+
     const SessionIssue issue = DetectSessionIssue(line);
     if (issue != SessionIssue::None) {
         EmitIssue(issue, "Session security issue");
@@ -986,6 +1104,34 @@ void ScreenShareSession::Impl::HandleDiagnosticLogLine(const std::string& line)
 
 void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
 {
+    if (line.find("signaling_live_sender_peer=removed") != std::string::npos) {
+        const std::string endpoint = LogFieldValue(line, "endpoint");
+        if (endpoint.empty()) {
+            return;
+        }
+
+        bool removed = false;
+        {
+            std::scoped_lock lock(mutex_);
+            const auto oldSize = viewers_.size();
+            viewers_.erase(
+                std::remove_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
+                    return viewer.endpoint == endpoint;
+                }),
+                viewers_.end());
+            removed = viewers_.size() != oldSize;
+            if (removed && viewers_.empty() && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
+                state_ = SessionState::Connecting;
+                summary_ = "Waiting for viewers";
+            }
+        }
+
+        if (removed) {
+            EmitStatus(SessionEventType::ViewerListChanged, "Viewer left");
+        }
+        return;
+    }
+
     if (line.find("viewer_target=") == std::string::npos) {
         return;
     }
@@ -1059,6 +1205,7 @@ void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
 {
     bool activeNow = false;
     bool waitingForStream = false;
+    bool hostLeft = false;
     const std::string receiverHealth = LogFieldValue(line, "receiver_health");
     const auto completedFrames = ParseUint64(LogFieldValue(line, "completed_frames"));
     const auto payloadBytes = ParseUint64(LogFieldValue(line, "payload_bytes"));
@@ -1067,7 +1214,8 @@ void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
 
     {
         std::scoped_lock lock(mutex_);
-        if (!receiverHealth.empty()) {
+        hostLeft = hostLeftNotified_;
+        if (!hostLeft && !receiverHealth.empty()) {
             health_ = receiverHealth;
         }
         if (completedFrames) {
@@ -1087,10 +1235,11 @@ void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
             watchAudioPackets_ = *audioPackets;
         }
 
-        if (activeNow && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
+        if (!hostLeft && activeNow && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
             state_ = SessionState::Live;
             summary_ = "Receiving stream";
-        } else if (line.find("waiting_for_stream") != std::string::npos &&
+        } else if (!hostLeft &&
+            line.find("waiting_for_stream") != std::string::npos &&
             state_ != SessionState::Live &&
             !IsTerminalSessionState(state_) &&
             state_ != SessionState::Stopping) {
@@ -1100,7 +1249,7 @@ void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
         }
     }
 
-    if (activeNow || waitingForStream) {
+    if (!hostLeft && (activeNow || waitingForStream)) {
         EmitStatus(SessionEventType::StateChanged, activeNow ? "Receiving stream" : "Receiver status updated");
     }
 }
@@ -1211,6 +1360,16 @@ void ScreenShareSession::Stop()
 void ScreenShareSession::ApplyStreamSettings(const StreamSettings& settings)
 {
     impl_->ApplyStreamSettings(settings);
+}
+
+void ScreenShareSession::ApplyShareSettings(const ShareSessionSettings& settings)
+{
+    impl_->ApplyShareSettings(settings);
+}
+
+void ScreenShareSession::ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings)
+{
+    impl_->ApplyAudioPlaybackSettings(settings);
 }
 
 SessionStatus ScreenShareSession::GetStatus() const

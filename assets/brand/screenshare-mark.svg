@@ -1,22 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ScreenShare mark">
   <defs>
-    <linearGradient id="screenShareMarkGradient" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2ee6cf"/>
-      <stop offset="0.55" stop-color="#168f82"/>
-      <stop offset="1" stop-color="#0f4c5c"/>
+    <linearGradient id="screenShareRearStroke" x1="7" y1="17" x2="46" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2ff0dc"/>
+      <stop offset="0.58" stop-color="#1bb9ad"/>
+      <stop offset="1" stop-color="#0d7883"/>
     </linearGradient>
-    <filter id="screenShareSoftShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#061014" flood-opacity="0.28"/>
+    <linearGradient id="screenShareFrontStroke" x1="25" y1="31" x2="62" y2="29" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e8f7f4"/>
+      <stop offset="0.34" stop-color="#89eee4"/>
+      <stop offset="1" stop-color="#27d2c3"/>
+    </linearGradient>
+    <linearGradient id="screenShareGlass" x1="25" y1="28" x2="61" y2="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e8f7f4" stop-opacity="0.14"/>
+      <stop offset="0.42" stop-color="#1f7770" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#104743" stop-opacity="0.58"/>
+    </linearGradient>
+    <filter id="screenShareSoftShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="3" flood-color="#061014" flood-opacity="0.34"/>
     </filter>
   </defs>
-  <rect width="64" height="64" rx="14" fill="#101820"/>
+  <rect width="64" height="64" rx="14" fill="none"/>
   <g filter="url(#screenShareSoftShadow)">
-    <rect x="14" y="17" width="36" height="25" rx="4" fill="none" stroke="url(#screenShareMarkGradient)" stroke-width="4"/>
-    <path d="M24 49h16" stroke="#e8f7f4" stroke-width="4" stroke-linecap="round"/>
-    <path d="M32 42v7" stroke="#e8f7f4" stroke-width="4" stroke-linecap="round"/>
-    <path d="M21 29h14" stroke="#e8f7f4" stroke-width="3" stroke-linecap="round"/>
-    <path d="M21 35h21" stroke="#e8f7f4" stroke-width="3" stroke-linecap="round"/>
-    <path d="M47 21c5 3 8 7 8 12s-3 9-8 12" fill="none" stroke="#2ee6cf" stroke-width="3" stroke-linecap="round"/>
-    <path d="M51 15c7 4 11 10 11 18s-4 14-11 18" fill="none" stroke="#7cf3e4" stroke-width="2.5" stroke-linecap="round" opacity="0.76"/>
+    <path d="M23.2 39.6L31 38.3L31 49.4L36.2 48.6Q38.7 48.2 40 50Q41.2 51.7 38.9 52.9L19.1 56.1Q16.6 56.5 15.2 54.7Q14 53 16.4 51.7L23.2 50.6Z" fill="url(#screenShareRearStroke)"/>
+    <path d="M7.5 23.4Q7.5 19.5 11.3 18.9L41.5 14.2Q45.5 13.6 45.5 17.7V34.8Q45.5 38.2 42.1 38.8L11.2 43.9Q7.5 44.5 7.5 40.6Z" fill="#0b1514" stroke="url(#screenShareRearStroke)" stroke-width="4.2" stroke-linejoin="round"/>
+    <path d="M27.1 27.6Q27.1 23.6 31 22.9L56.7 18.4Q60.3 17.8 60.3 21.4V38.8Q60.3 42.2 56.9 42.9L31 47.5Q27.1 48.2 27.1 44.3Z" fill="url(#screenShareGlass)" stroke="url(#screenShareFrontStroke)" stroke-width="1.45" stroke-linejoin="round"/>
   </g>
 </svg>

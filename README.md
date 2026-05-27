@@ -118,7 +118,7 @@ the list or paste the copied room link while keeping its own local listen port. 
 only exchanges UDP candidates and safe room metadata; video and audio still go directly between
 computers. Rooms use a random automatic UDP encryption key from the room service without showing an
 access-code field. If a room password is set, the Worker stores a salted password verifier, rejects
-wrong passwords before joining, and the native app still mixes the password into the UDP key.
+wrong passwords before joining, and the native app mixes the password into the UDP key.
 
 Create room supports target lists for direct paths. Nearby can select multiple watchers from the
 list, Manual accepts multiple comma/space-separated `HOST:PORT` targets in the Targets field, and

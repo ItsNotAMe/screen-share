@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <mutex>
 #include <optional>
@@ -21,7 +22,23 @@ struct RuntimeResolutionRequest {
 };
 
 struct RuntimeStreamSettingsRequest {
+    std::optional<std::string> roomName;
+    std::optional<int> displayIndex;
     std::optional<RuntimeResolutionRequest> resolution;
+    std::optional<int> fps;
+    std::optional<uint32_t> bitrateBps;
+    std::optional<bool> adaptBitrate;
+    std::optional<bool> adaptResolution;
+    std::optional<bool> adaptFps;
+    std::optional<bool> captureSystemAudio;
+    std::optional<bool> hostAudioMuted;
+    std::optional<bool> videoPaused;
+    std::optional<std::string> audioDeviceId;
+};
+
+struct RuntimeAudioPlaybackSettingsRequest {
+    std::optional<bool> muted;
+    std::optional<int> volumePercent;
 };
 
 class ISessionRuntimeControl {
@@ -30,22 +47,26 @@ public:
 
     virtual bool StopRequested() = 0;
     virtual std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() = 0;
+    virtual std::optional<RuntimeAudioPlaybackSettingsRequest> TakeAudioPlaybackSettingsRequest() = 0;
 };
 
 class NullSessionRuntimeControl final : public ISessionRuntimeControl {
 public:
     bool StopRequested() override;
     std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
+    std::optional<RuntimeAudioPlaybackSettingsRequest> TakeAudioPlaybackSettingsRequest() override;
 };
 
 class MemorySessionRuntimeControl final : public ISessionRuntimeControl {
 public:
     bool StopRequested() override;
     std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
+    std::optional<RuntimeAudioPlaybackSettingsRequest> TakeAudioPlaybackSettingsRequest() override;
 
     void RequestStop();
     void ResetStop();
     void RequestStreamSettings(RuntimeStreamSettingsRequest request);
+    void RequestAudioPlaybackSettings(RuntimeAudioPlaybackSettingsRequest request);
     void ClearStreamSettingsRequest();
     void Reset();
 
@@ -53,6 +74,7 @@ private:
     std::mutex mutex_;
     bool stopRequested_ = false;
     std::optional<RuntimeStreamSettingsRequest> streamSettingsRequest_;
+    std::optional<RuntimeAudioPlaybackSettingsRequest> audioPlaybackSettingsRequest_;
 };
 
 class FileSessionRuntimeControl final : public ISessionRuntimeControl {
@@ -61,6 +83,7 @@ public:
 
     bool StopRequested() override;
     std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
+    std::optional<RuntimeAudioPlaybackSettingsRequest> TakeAudioPlaybackSettingsRequest() override;
 
 private:
     std::filesystem::path stopFilePath_;

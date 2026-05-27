@@ -669,7 +669,9 @@ SignalingRoomResponse ParseRoomResponse(const std::string& text)
     response.ok = ok != nullptr && ok->type == JsonType::Bool && ok->boolValue;
     response.roomAccessKey = JsonStringOrEmpty(root.Find("roomAccessKey"));
     response.roomName = JsonStringOrEmpty(root.Find("roomName"));
-    response.passwordProtected = JsonBoolOrFalse(root.Find("passwordProtected"));
+    response.passwordProtected =
+        JsonBoolOrFalse(root.Find("passwordProtected")) ||
+        JsonBoolOrFalse(root.Find("requiresRoomKey"));
     if (response.roomName.size() > 80) {
         throw std::runtime_error("Signaling response room name is invalid");
     }

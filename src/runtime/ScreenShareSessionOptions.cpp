@@ -410,6 +410,7 @@ void ApplyTypedSharePreset(Options& options, const screenshare::ShareSessionConf
         options.udpLocalPortProvided = true;
     }
     options.streamEncoderPreference = StreamEncoderPreference::Software;
+    options.videoPaused = config.hostVideoPaused;
     ApplyTypedStreamSettings(options, config.stream);
 
     if (options.seconds < 0) {
@@ -531,7 +532,8 @@ Options BuildWatchSessionOptions(
 
     RequireSessionConfig(config.listenPort > 0, "Watch listen port is required.");
     options.udpReceivePort = config.listenPort;
-    options.previewWindow = true;
+    options.previewWindow = !config.emitVideoFrames;
+    options.emitVideoFrames = config.emitVideoFrames;
     options.decodeH264 = true;
     options.audioPlayback = config.playAudio;
     options.seconds = config.seconds;
