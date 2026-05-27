@@ -48,6 +48,7 @@ add_library(ScreenShareCore STATIC
     src/core/ScreenShareSession.cpp
     src/core/SessionCommand.cpp
     src/core/SessionRuntimeControl.cpp
+    src/render/Nv12D3D11Presenter.cpp
     src/render/ReceiverPreviewWindow.cpp
     src/transport/NatTraversal.cpp
     src/transport/SignalingClient.cpp

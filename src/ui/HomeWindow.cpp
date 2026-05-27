@@ -136,7 +136,9 @@ QVector<HomeActiveRoom> parseRooms(const QByteArray& payload)
             room.name = room.roomId;
         }
         room.peerCount = std::max(0, object.value(QStringLiteral("peerCount")).toInt(0));
-        room.passwordProtected = object.value(QStringLiteral("passwordProtected")).toBool(false);
+        room.passwordProtected =
+            object.value(QStringLiteral("passwordProtected")).toBool(
+                object.value(QStringLiteral("requiresRoomKey")).toBool(false));
         room.updatedAt = static_cast<qint64>(object.value(QStringLiteral("updatedAt")).toDouble(0));
         result.push_back(std::move(room));
     }

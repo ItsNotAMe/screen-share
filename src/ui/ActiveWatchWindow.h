@@ -8,7 +8,6 @@
 #include <QtWidgets/QWidget>
 
 #include <functional>
-#include <optional>
 
 class QLabel;
 class QPushButton;
@@ -81,10 +80,10 @@ private:
     int audioVolumePercent_ = 100;
     bool audioControlsInitialized_ = false;
     bool audioControlsTouched_ = false;
+    bool receivedVideoFrame_ = false;
     bool hostLeft_ = false;
     bool leaveRequested_ = false;
     QWidget* fullscreenVideoWindow_ = nullptr;
     VideoFrameWidget* fullscreenVideoWidget_ = nullptr;
     QString previewStatusText_;
-    std::optional<screenshare::SessionEvent::VideoFrame> latestVideoFrame_;
 };

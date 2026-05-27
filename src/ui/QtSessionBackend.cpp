@@ -81,6 +81,11 @@ bool QtSessionBackend::prepareStart(QString* errorMessage)
     running_ = true;
     stopRequested_ = false;
     finished_ = false;
+    {
+        std::scoped_lock lock(videoFrameMutex_);
+        pendingVideoFrame_.reset();
+        videoFrameDeliveryQueued_ = false;
+    }
     return true;
 }
 
@@ -204,12 +209,74 @@ std::vector<screenshare::SessionAudioDeviceInfo> QtSessionBackend::listAudioDevi
 
 void QtSessionBackend::OnSessionEvent(const screenshare::SessionEvent& event)
 {
+    if (event.type == screenshare::SessionEventType::VideoFrameReady) {
+        queueVideoFrame(event.videoFrame);
+        return;
+    }
+
     QMetaObject::invokeMethod(
         this,
         [this, event] {
             handleSessionEvent(event);
         },
         Qt::QueuedConnection);
+}
+
+void QtSessionBackend::queueVideoFrame(screenshare::SessionEvent::VideoFrame frame)
+{
+    bool shouldSchedule = false;
+    {
+        std::scoped_lock lock(videoFrameMutex_);
+        pendingVideoFrame_ = std::move(frame);
+        if (!videoFrameDeliveryQueued_) {
+            videoFrameDeliveryQueued_ = true;
+            shouldSchedule = true;
+        }
+    }
+
+    if (!shouldSchedule) {
+        return;
+    }
+
+    QMetaObject::invokeMethod(
+        this,
+        [this] {
+            deliverPendingVideoFrame();
+        },
+        Qt::QueuedConnection);
+}
+
+void QtSessionBackend::deliverPendingVideoFrame()
+{
+    std::optional<screenshare::SessionEvent::VideoFrame> frame;
+    {
+        std::scoped_lock lock(videoFrameMutex_);
+        frame = std::move(pendingVideoFrame_);
+        pendingVideoFrame_.reset();
+    }
+
+    if (frame && videoFrameHandler_) {
+        videoFrameHandler_(*frame);
+    }
+
+    bool shouldScheduleNext = false;
+    {
+        std::scoped_lock lock(videoFrameMutex_);
+        if (pendingVideoFrame_) {
+            shouldScheduleNext = true;
+        } else {
+            videoFrameDeliveryQueued_ = false;
+        }
+    }
+
+    if (shouldScheduleNext) {
+        QMetaObject::invokeMethod(
+            this,
+            [this] {
+                deliverPendingVideoFrame();
+            },
+            Qt::QueuedConnection);
+    }
 }
 
 void QtSessionBackend::handleSessionEvent(const screenshare::SessionEvent& event)
@@ -258,6 +325,12 @@ void QtSessionBackend::finish(bool failed)
 {
     if (finished_) {
         return;
+    }
+
+    {
+        std::scoped_lock lock(videoFrameMutex_);
+        pendingVideoFrame_.reset();
+        videoFrameDeliveryQueued_ = false;
     }
 
     FinishInfo info;

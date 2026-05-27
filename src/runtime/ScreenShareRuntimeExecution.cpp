@@ -1627,8 +1627,10 @@ void ApplySignalingRoomAccessKey(Options& options, const screenshare::SignalingR
         throw std::runtime_error("Signaling room requires a password");
     }
 
+    const bool mixRoomPassword =
+        response.passwordProtected || !options.signalingRoomPassword.empty();
     std::string keyMaterial = response.roomAccessKey;
-    if (response.passwordProtected) {
+    if (mixRoomPassword) {
         keyMaterial += "\npassword:";
         keyMaterial += options.signalingRoomPassword;
     }
@@ -1638,7 +1640,7 @@ void ApplySignalingRoomAccessKey(Options& options, const screenshare::SignalingR
     std::cout
         << "signaling_room_encryption=ready"
         << " room=" << options.signalingRoomId
-        << " password=" << (response.passwordProtected ? "yes" : "no")
+        << " password=" << (mixRoomPassword ? "yes" : "no")
         << " source=server\n";
 }
 
@@ -1763,7 +1765,7 @@ public:
     }
 
 private:
-    static constexpr std::chrono::milliseconds FallbackRefreshInterval{30000};
+    static constexpr std::chrono::milliseconds FallbackRefreshInterval{2000};
     static constexpr std::chrono::milliseconds EventReconnectDelay{5000};
     static constexpr std::chrono::milliseconds BackgroundRequestTimeout{250};
 
@@ -4914,7 +4916,9 @@ void RunUdpReceiverStats(
             h264DecodedBytes += decodedFrame.bytes;
             h264DecodedWidth = decodedFrame.width;
             h264DecodedHeight = decodedFrame.height;
-            latestDecodedFrame = decodedFrame;
+            if (!options.decodedBmpPath.empty()) {
+                latestDecodedFrame = decodedFrame;
+            }
             emitDecodedVideoFrame(decodedFrame);
             if (options.previewWindow) {
                 ensurePreviewWindow();

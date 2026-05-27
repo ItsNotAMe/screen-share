@@ -178,11 +178,11 @@ void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
     updateElapsed();
     roomLabel_->setText(QStringLiteral("Room: %1").arg(session_.roomName.isEmpty() ? session_.roomId : session_.roomName));
     hostLabel_->setText(session_.roomName.isEmpty() ? QStringLiteral("-") : session_.roomName);
-    latestVideoFrame_.reset();
     audioMuted_ = false;
     audioVolumePercent_ = 100;
     audioControlsInitialized_ = false;
     audioControlsTouched_ = false;
+    receivedVideoFrame_ = false;
     hostLeft_ = false;
     leaveRequested_ = false;
     videoFrameWidget_->clearFrame();
@@ -411,16 +411,40 @@ void ActiveWatchWindow::installBackendHandlers()
     });
     backend_->setStatusHandler([this](const screenshare::SessionEvent& event) {
         updateStatus(event.status);
-        if (event.type == screenshare::SessionEventType::Issue &&
-            event.issue == screenshare::SessionIssue::HostLeft) {
-            handleHostLeft();
+        if (event.type == screenshare::SessionEventType::Issue) {
+            if (event.issue == screenshare::SessionIssue::HostLeft) {
+                handleHostLeft();
+            } else if (
+                event.issue == screenshare::SessionIssue::AccessCodeRequired ||
+                event.issue == screenshare::SessionIssue::AccessCodeMismatch) {
+                if (session_.config.connectionMode == screenshare::WatchConnectionMode::Room) {
+                    if (!receivedVideoFrame_) {
+                        setPreviewStatusText("Waiting for encrypted stream");
+                        connectionLabel_->setText("Connecting");
+                        stateLabel_->setText("● Connecting");
+                        stateLabel_->setObjectName("ActiveTopIdle");
+                        stateLabel_->style()->unpolish(stateLabel_);
+                        stateLabel_->style()->polish(stateLabel_);
+                    }
+                    return;
+                }
+                setPreviewStatusText("Room password or encryption key mismatch");
+                connectionLabel_->setText("Security issue");
+                stateLabel_->setText("● Security issue");
+                stateLabel_->setObjectName("ActiveTopError");
+                stateLabel_->style()->unpolish(stateLabel_);
+                stateLabel_->style()->polish(stateLabel_);
+            }
         }
     });
     backend_->setVideoFrameHandler([this](const screenshare::SessionEvent::VideoFrame& frame) {
         if (hostLeft_) {
             return;
         }
-        latestVideoFrame_ = frame;
+        receivedVideoFrame_ = true;
+        if (previewStatusText_ == QStringLiteral("Waiting for encrypted stream")) {
+            setPreviewStatusText("Receiving stream");
+        }
         if (fullscreenVideoWidget_ != nullptr) {
             fullscreenVideoWidget_->setVideoFrame(frame);
         } else {
@@ -579,11 +603,7 @@ void ActiveWatchWindow::toggleFullscreen()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     fullscreenVideoWidget_ = new VideoFrameWidget;
-    fullscreenVideoWidget_->setSmoothScaling(false);
     fullscreenVideoWidget_->setStatusText(previewStatusText_);
-    if (latestVideoFrame_) {
-        fullscreenVideoWidget_->setVideoFrame(*latestVideoFrame_);
-    }
     layout->addWidget(fullscreenVideoWidget_, 1);
     fullscreenVideoWindow_->showFullScreen();
     if (fullscreenButton_ != nullptr) {
@@ -604,9 +624,6 @@ void ActiveWatchWindow::closeStreamFullscreen()
     if (fullscreenButton_ != nullptr) {
         fullscreenButton_->setText("Fullscreen");
     }
-    if (!hostLeft_ && latestVideoFrame_ && videoFrameWidget_ != nullptr) {
-        videoFrameWidget_->setVideoFrame(*latestVideoFrame_);
-    }
 }
 
 void ActiveWatchWindow::setPreviewStatusText(const QString& text)
@@ -623,7 +640,6 @@ void ActiveWatchWindow::setPreviewStatusText(const QString& text)
 void ActiveWatchWindow::handleHostLeft()
 {
     hostLeft_ = true;
-    latestVideoFrame_.reset();
     closeStreamFullscreen();
     if (videoFrameWidget_ != nullptr) {
         videoFrameWidget_->clearFrame();
