@@ -32,6 +32,7 @@ struct RuntimeStreamSettingsRequest {
     std::optional<bool> adaptFps;
     std::optional<bool> captureSystemAudio;
     std::optional<bool> hostAudioMuted;
+    std::optional<bool> videoPaused;
     std::optional<std::string> audioDeviceId;
 };
 

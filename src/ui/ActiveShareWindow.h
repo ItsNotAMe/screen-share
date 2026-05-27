@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <functional>
 
-class QCheckBox;
 class QComboBox;
 class QEvent;
 class QFrame;
@@ -61,6 +60,9 @@ private:
     void updateHealth(const screenshare::SessionStatus& status);
     void updateShareSummary();
     void stopSharing();
+    void toggleHostAudio();
+    void toggleVideoPause();
+    void updateHostControlButtons();
     void copyInvite();
     void applySettings();
     screenshare::ShareSessionSettings selectedShareSettings() const;
@@ -92,6 +94,8 @@ private:
     QLabel* latencyLabel_ = nullptr;
     QLabel* viewerMetricLabel_ = nullptr;
     QLabel* adaptiveLabel_ = nullptr;
+    QPushButton* muteAudioButton_ = nullptr;
+    QPushButton* pauseVideoButton_ = nullptr;
     QPushButton* stopButton_ = nullptr;
     QPushButton* settingsApplyButton_ = nullptr;
     QFrame* settingsOverlay_ = nullptr;
@@ -104,14 +108,14 @@ private:
     QComboBox* settingsFpsCombo_ = nullptr;
     QComboBox* bitrateCombo_ = nullptr;
     QComboBox* settingsAudioCombo_ = nullptr;
-    QCheckBox* captureAudioCheck_ = nullptr;
     QString lastViewerSignature_;
     bool updatingSettingsUi_ = false;
+    bool hostAudioMuted_ = false;
+    bool videoPaused_ = false;
     QString appliedRoomName_;
     int appliedDisplayValue_ = 0;
     QString appliedResolutionValue_;
     int appliedFpsValue_ = 60;
     uint32_t appliedBitrateBps_ = 0;
-    bool appliedCaptureAudio_ = true;
     QString appliedAudioDeviceValue_;
 };

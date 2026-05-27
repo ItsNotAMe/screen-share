@@ -140,6 +140,7 @@ struct Options {
     int simulateJitterMs = 0;
     bool simulateJitterProvided = false;
     bool audioCapture = false;
+    bool videoPaused = false;
     screenshare::AudioCaptureSource audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
     std::string audioDeviceId;
     bool audioDeviceIdProvided = false;

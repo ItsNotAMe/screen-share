@@ -23,7 +23,6 @@
 #include <QtGui/QWheelEvent>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QAbstractItemView>
-#include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QGridLayout>
@@ -210,8 +209,11 @@ void ActiveShareWindow::setSession(const ShareSessionUiState& session)
     elapsed_.restart();
     elapsedTimer_->start();
     lastViewerSignature_.clear();
+    hostAudioMuted_ = session_.config.hostAudioMuted || !session_.config.captureSystemAudio;
+    videoPaused_ = session_.config.hostVideoPaused;
     updateElapsed();
     updateShareSummary();
+    updateHostControlButtons();
     updateStatus(backend_ != nullptr ? backend_->currentStatus() : screenshare::SessionStatus{});
     showSettingsPanel(false);
 }
@@ -325,14 +327,16 @@ QWidget* ActiveShareWindow::buildShareCard()
     auto* controls = new QHBoxLayout;
     controls->setContentsMargins(0, 0, 0, 0);
     controls->setSpacing(12);
-    auto* mute = iconButton("Mute Audio", "ActiveSecondaryButton", "mute");
-    mute->setEnabled(false);
-    mute->setToolTip("Host audio mute will be wired into runtime controls next.");
-    controls->addWidget(mute);
-    auto* pause = iconButton("Pause Video", "ActiveSecondaryButton", "stop");
-    pause->setEnabled(false);
-    pause->setToolTip("Pause video will be wired into runtime controls next.");
-    controls->addWidget(pause);
+    muteAudioButton_ = iconButton("Mute Audio", "ActiveSecondaryButton", "mute");
+    connect(muteAudioButton_, &QPushButton::clicked, this, [this] {
+        toggleHostAudio();
+    });
+    controls->addWidget(muteAudioButton_);
+    pauseVideoButton_ = iconButton("Pause Video", "ActiveSecondaryButton", "stop");
+    connect(pauseVideoButton_, &QPushButton::clicked, this, [this] {
+        toggleVideoPause();
+    });
+    controls->addWidget(pauseVideoButton_);
     layout->addLayout(controls);
     return card;
 }
@@ -565,18 +569,6 @@ QWidget* ActiveShareWindow::buildSettingsPanel()
     formLayout->addWidget(settingsFpsCombo_);
 
     formLayout->addWidget(textLabel("Audio", "ActiveSettingsHeading"));
-    captureAudioCheck_ = new QCheckBox("Share system audio");
-    captureAudioCheck_->setObjectName("ActiveSettingsCheck");
-    captureAudioCheck_->setEnabled(true);
-    connect(captureAudioCheck_, &QCheckBox::toggled, this, [this](bool checked) {
-        if (settingsAudioCombo_ != nullptr) {
-            settingsAudioCombo_->setEnabled(checked);
-        }
-        if (!updatingSettingsUi_) {
-            updateSettingsApplyState();
-        }
-    });
-    formLayout->addWidget(captureAudioCheck_);
     formLayout->addWidget(textLabel("Audio Output", "ActiveSettingsLabel"));
     settingsAudioCombo_ = new SettingsComboBox;
     configureSettingsChoice(settingsAudioCombo_);
@@ -904,12 +896,6 @@ void ActiveShareWindow::updateShareSummary()
         appliedBitrateBps_ = comboBitrateBps(bitrateCombo_);
         updatingSettingsUi_ = false;
     }
-    if (captureAudioCheck_ != nullptr) {
-        updatingSettingsUi_ = true;
-        captureAudioCheck_->setChecked(session_.captureSystemAudio);
-        appliedCaptureAudio_ = captureAudioCheck_->isChecked();
-        updatingSettingsUi_ = false;
-    }
     if (settingsAudioCombo_ != nullptr) {
         updatingSettingsUi_ = true;
         const bool blocked = settingsAudioCombo_->blockSignals(true);
@@ -925,11 +911,11 @@ void ActiveShareWindow::updateShareSummary()
         }
         const int index = settingsAudioCombo_->findData(session_.audioDeviceValue);
         settingsAudioCombo_->setCurrentIndex(index >= 0 ? index : 0);
-        settingsAudioCombo_->setEnabled(captureAudioCheck_ == nullptr || captureAudioCheck_->isChecked());
         settingsAudioCombo_->blockSignals(blocked);
         appliedAudioDeviceValue_ = settingsAudioCombo_->currentData().toString();
         updatingSettingsUi_ = false;
     }
+    updateHostControlButtons();
     updateSettingsApplyState();
 }
 
@@ -941,6 +927,57 @@ void ActiveShareWindow::stopSharing()
     stopButton_->setEnabled(false);
     stopButton_->setText("Stopping...");
     backend_->stop();
+}
+
+void ActiveShareWindow::toggleHostAudio()
+{
+    hostAudioMuted_ = !hostAudioMuted_;
+    session_.config.hostAudioMuted = hostAudioMuted_;
+    session_.config.captureSystemAudio = !hostAudioMuted_;
+    session_.captureSystemAudio = !hostAudioMuted_;
+    session_.audioText = hostAudioMuted_ ?
+        QStringLiteral("System Audio muted") :
+        (settingsAudioCombo_ != nullptr ? settingsAudioCombo_->currentText() : QStringLiteral("System Audio (default)"));
+    updateShareSummary();
+    updateHostControlButtons();
+
+    if (backend_ != nullptr && backend_->isRunning()) {
+        screenshare::ShareSessionSettings settings;
+        settings.captureSystemAudio = !hostAudioMuted_;
+        settings.hostAudioMuted = hostAudioMuted_;
+        if (!session_.audioDeviceValue.isEmpty()) {
+            settings.audioDeviceId = toStdUtf8(session_.audioDeviceValue);
+        }
+        settings.stream = session_.config.stream;
+        backend_->applyShareSettings(settings);
+    }
+}
+
+void ActiveShareWindow::toggleVideoPause()
+{
+    videoPaused_ = !videoPaused_;
+    session_.config.hostVideoPaused = videoPaused_;
+    updateHostControlButtons();
+
+    if (backend_ != nullptr && backend_->isRunning()) {
+        screenshare::ShareSessionSettings settings;
+        settings.hostVideoPaused = videoPaused_;
+        settings.stream = session_.config.stream;
+        backend_->applyShareSettings(settings);
+    }
+}
+
+void ActiveShareWindow::updateHostControlButtons()
+{
+    if (muteAudioButton_ != nullptr) {
+        muteAudioButton_->setText(hostAudioMuted_ ? QStringLiteral("Unmute Audio") : QStringLiteral("Mute Audio"));
+    }
+    if (pauseVideoButton_ != nullptr) {
+        pauseVideoButton_->setText(videoPaused_ ? QStringLiteral("Resume Video") : QStringLiteral("Pause Video"));
+    }
+    if (shareTitleLabel_ != nullptr) {
+        shareTitleLabel_->setText(videoPaused_ ? QStringLiteral("Video paused") : QStringLiteral("You are sharing"));
+    }
 }
 
 void ActiveShareWindow::copyInvite()
@@ -960,9 +997,6 @@ screenshare::ShareSessionSettings ActiveShareWindow::selectedShareSettings() con
     settings.displayIndex = settingsDisplayCombo_ == nullptr ?
         session_.displayValue :
         settingsDisplayCombo_->currentData().toInt();
-    settings.captureSystemAudio = captureAudioCheck_ == nullptr ?
-        session_.captureSystemAudio :
-        captureAudioCheck_->isChecked();
     settings.audioDeviceId = settingsAudioCombo_ == nullptr ?
         toStdUtf8(session_.audioDeviceValue) :
         toStdUtf8(settingsAudioCombo_->currentData().toString());
@@ -1002,7 +1036,6 @@ void ActiveShareWindow::applySettings()
         session_.config.roomName = *settings.roomName;
     }
     session_.config.displayIndex = settings.displayIndex.value_or(session_.config.displayIndex);
-    session_.config.captureSystemAudio = settings.captureSystemAudio.value_or(session_.config.captureSystemAudio);
     session_.config.audioDeviceId = settings.audioDeviceId.value_or(session_.config.audioDeviceId);
     session_.config.stream = settings.stream;
     session_.displayValue = session_.config.displayIndex;
@@ -1013,17 +1046,15 @@ void ActiveShareWindow::applySettings()
     session_.resolutionText = settingsResolutionCombo_->currentText();
     session_.fpsValue = settings.stream.fps;
     session_.fpsText = QStringLiteral("%1 FPS").arg(settings.stream.fps);
-    session_.captureSystemAudio = session_.config.captureSystemAudio;
     session_.audioDeviceValue = QString::fromStdString(session_.config.audioDeviceId);
-    session_.audioText = session_.captureSystemAudio && settingsAudioCombo_ != nullptr ?
-        settingsAudioCombo_->currentText() :
-        QStringLiteral("Audio off");
+    session_.audioText = hostAudioMuted_ ?
+        QStringLiteral("System Audio muted") :
+        (settingsAudioCombo_ != nullptr ? settingsAudioCombo_->currentText() : QStringLiteral("System Audio (default)"));
     appliedDisplayValue_ = session_.displayValue;
     appliedRoomName_ = session_.roomName;
     appliedResolutionValue_ = session_.resolutionValue;
     appliedFpsValue_ = settings.stream.fps;
     appliedBitrateBps_ = settings.stream.bitrateBps;
-    appliedCaptureAudio_ = session_.captureSystemAudio;
     appliedAudioDeviceValue_ = session_.audioDeviceValue;
     settingsApplyButton_->setEnabled(false);
     resolutionLabel_->setText(session_.resolutionText);
@@ -1055,9 +1086,6 @@ void ActiveShareWindow::updateSettingsApplyState()
     const QString roomName = settingsRoomNameEdit_ == nullptr ?
         appliedRoomName_ :
         settingsRoomNameEdit_->text().trimmed();
-    const bool captureAudio = captureAudioCheck_ == nullptr ?
-        appliedCaptureAudio_ :
-        captureAudioCheck_->isChecked();
     const QString audioDevice = settingsAudioCombo_ == nullptr ?
         appliedAudioDeviceValue_ :
         settingsAudioCombo_->currentData().toString();
@@ -1067,7 +1095,6 @@ void ActiveShareWindow::updateSettingsApplyState()
         resolutionValue != appliedResolutionValue_ ||
         fpsValue != appliedFpsValue_ ||
         bitrateBps != appliedBitrateBps_ ||
-        captureAudio != appliedCaptureAudio_ ||
         audioDevice != appliedAudioDeviceValue_;
     settingsApplyButton_->setEnabled(changed);
 }

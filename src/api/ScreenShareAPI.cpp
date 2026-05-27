@@ -75,6 +75,9 @@ RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const ShareSessio
     if (settings.hostAudioMuted) {
         request.hostAudioMuted = *settings.hostAudioMuted;
     }
+    if (settings.hostVideoPaused) {
+        request.videoPaused = *settings.hostVideoPaused;
+    }
     if (settings.audioDeviceId) {
         request.audioDeviceId = *settings.audioDeviceId;
     }

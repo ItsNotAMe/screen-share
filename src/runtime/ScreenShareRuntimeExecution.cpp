@@ -2862,6 +2862,7 @@ void RunCaptureStats(
     std::set<std::string> liveSignalingSendTargets;
     uint64_t audioPacingBitrate = 0;
     bool audioPacingApplied = false;
+    bool runtimeVideoPaused = options.videoPaused;
     bool runtimeAudioCaptureEnabled = options.audioCapture;
     std::string runtimeAudioDeviceId = options.audioDeviceId;
 
@@ -3435,6 +3436,13 @@ void RunCaptureStats(
                 << (*request->adaptFps ? "requested" : "disabled")
                 << " status=unsupported\n";
         }
+        if (request->videoPaused && runtimeVideoPaused != *request->videoPaused) {
+            runtimeVideoPaused = *request->videoPaused;
+            nextFrameAt = Clock::now();
+            std::cout
+                << "runtime_video=" << (runtimeVideoPaused ? "paused" : "running")
+                << "\n";
+        }
         if (request->captureSystemAudio || request->hostAudioMuted || request->audioDeviceId) {
             bool nextAudioCapture = runtimeAudioCaptureEnabled;
             if (request->captureSystemAudio) {
@@ -3541,13 +3549,16 @@ void RunCaptureStats(
         drainLiveSignalingSendTargets();
         applyRuntimeStreamSettingsControl();
 
-        const auto captureStartedAt = Clock::now();
-        const auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(0));
-        const double captureMs = std::chrono::duration<double, std::milli>(Clock::now() - captureStartedAt).count();
-        intervalCaptureMs += captureMs;
-        ++intervalCaptureCalls;
-        totalCaptureMs += captureMs;
-        ++totalCaptureCalls;
+        std::optional<screenshare::CapturedFrame> frame;
+        if (!runtimeVideoPaused) {
+            const auto captureStartedAt = Clock::now();
+            frame = capturer.TryCaptureFrame(std::chrono::milliseconds(0));
+            const double captureMs = std::chrono::duration<double, std::milli>(Clock::now() - captureStartedAt).count();
+            intervalCaptureMs += captureMs;
+            ++intervalCaptureCalls;
+            totalCaptureMs += captureMs;
+            ++totalCaptureCalls;
+        }
         if (frame) {
             ++totalDesktopUpdates;
             ++intervalDesktopUpdates;
@@ -3578,7 +3589,7 @@ void RunCaptureStats(
             }
         }
 
-        if (hasFrame) {
+        if (!runtimeVideoPaused && hasFrame) {
             ++totalOutputFrames;
             ++intervalOutputFrames;
 
@@ -3784,6 +3795,7 @@ void RunCaptureStats(
                 << " resolution_reduce_required=" << ResolutionPressureReportsBeforeReduce
                 << " nv12=" << (lastNv12TextureAvailable ? "gpu_texture" : (lastNv12GeneratedOnGpu ? "gpu_readback" : "cpu_or_none"))
                 << " stream_input=" << (streamEncoder ? screenshare::H264StreamEncoderInputModeName(streamEncoder->lastInputMode()) : "none")
+                << " video_paused=" << (runtimeVideoPaused ? "yes" : "no")
                 << " stream_bitrate_mbps=" << Mbps(streamBitrate)
                 << " stream_queue=" << (streamEncoder ? streamEncoder->queuedInputCount() : 0)
                 << " stream_dropped=" << (streamEncoder ? streamEncoder->droppedInputFrames() : 0)

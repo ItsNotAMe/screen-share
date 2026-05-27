@@ -330,6 +330,15 @@ std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(st
             }
             continue;
         }
+        if (key == "host_video_paused" || key == "video_paused") {
+            if (const auto parsed = ParseBool(value)) {
+                if (!request) {
+                    request.emplace();
+                }
+                request->videoPaused = *parsed;
+            }
+            continue;
+        }
         if (key == "audio_device_id") {
             if (!value.empty()) {
                 if (!request) {

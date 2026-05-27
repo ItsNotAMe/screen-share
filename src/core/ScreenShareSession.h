@@ -101,6 +101,7 @@ struct ShareSessionSettings {
     std::optional<int> displayIndex;
     std::optional<bool> captureSystemAudio;
     std::optional<bool> hostAudioMuted;
+    std::optional<bool> hostVideoPaused;
     std::optional<std::string> audioDeviceId;
     StreamSettings stream;
 };
@@ -133,6 +134,7 @@ struct ShareSessionConfig {
     std::vector<std::string> watcherInvites;
     bool captureSystemAudio = true;
     bool hostAudioMuted = false;
+    bool hostVideoPaused = false;
     StreamSettings stream;
 };
 

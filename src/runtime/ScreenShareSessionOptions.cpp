@@ -410,6 +410,7 @@ void ApplyTypedSharePreset(Options& options, const screenshare::ShareSessionConf
         options.udpLocalPortProvided = true;
     }
     options.streamEncoderPreference = StreamEncoderPreference::Software;
+    options.videoPaused = config.hostVideoPaused;
     ApplyTypedStreamSettings(options, config.stream);
 
     if (options.seconds < 0) {

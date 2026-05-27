@@ -837,7 +837,7 @@ int main(int argc, char** argv)
                 missingDirectShareRejected = true;
             }
             const auto runtimeSettings =
-                screenshare::ParseRuntimeStreamSettingsRequest("resolution = 1920x1080\n");
+                screenshare::ParseRuntimeStreamSettingsRequest("resolution = 1920x1080\nhost_video_paused = true\n");
             const auto ignoredRuntimeSettings =
                 screenshare::ParseRuntimeStreamSettingsRequest("resolution = 1919x1080\n");
             const bool runtimeResolutionOk =
@@ -846,6 +846,8 @@ int main(int argc, char** argv)
                 runtimeSettings->resolution->mode == screenshare::RuntimeResolutionMode::Fixed &&
                 runtimeSettings->resolution->width == 1920 &&
                 runtimeSettings->resolution->height == 1080 &&
+                runtimeSettings->videoPaused &&
+                *runtimeSettings->videoPaused &&
                 !ignoredRuntimeSettings;
             screenshare::MemorySessionRuntimeControl memoryControl;
             screenshare::RuntimeResolutionRequest memoryResolution;
