@@ -323,7 +323,7 @@ QWidget* ActiveWatchWindow::buildFooter()
     volumePercentLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     volumeLayout->addWidget(volumePercentLabel_);
 
-    muteButton_ = iconButton("Mute", "WatchInlineButton", "mute");
+    muteButton_ = iconButton("Mute", "WatchInlineButton", "volume");
     muteButton_->setFixedWidth(92);
     connect(muteButton_, &QPushButton::clicked, this, [this] {
         toggleMute();
@@ -541,7 +541,7 @@ void ActiveWatchWindow::updateAudioControls(const screenshare::SessionAudioStatu
         volumeSlider_->setValue(audioVolumePercent_);
     }
     volumePercentLabel_->setText(QStringLiteral("%1%").arg(audioVolumePercent_));
-    muteButton_->setText(audioMuted_ ? QStringLiteral("Unmute") : QStringLiteral("Mute"));
+    refreshMuteButton();
 }
 
 void ActiveWatchWindow::applyVolume(int volumePercent)
@@ -562,9 +562,7 @@ void ActiveWatchWindow::applyVolume(int volumePercent)
     if (volumePercent > 0 && audioMuted_) {
         audioMuted_ = false;
         settings.muted = false;
-        if (muteButton_ != nullptr) {
-            muteButton_->setText("Mute");
-        }
+        refreshMuteButton();
     }
     backend_->applyAudioPlaybackSettings(settings);
 }
@@ -574,9 +572,7 @@ void ActiveWatchWindow::toggleMute()
     audioControlsInitialized_ = true;
     audioControlsTouched_ = true;
     audioMuted_ = !audioMuted_;
-    if (muteButton_ != nullptr) {
-        muteButton_->setText(audioMuted_ ? QStringLiteral("Unmute") : QStringLiteral("Mute"));
-    }
+    refreshMuteButton();
     if (backend_ == nullptr || !backend_->isRunning()) {
         return;
     }
@@ -584,6 +580,21 @@ void ActiveWatchWindow::toggleMute()
     screenshare::AudioPlaybackSettings settings;
     settings.muted = audioMuted_;
     backend_->applyAudioPlaybackSettings(settings);
+}
+
+void ActiveWatchWindow::refreshMuteButton()
+{
+    if (muteButton_ == nullptr) {
+        return;
+    }
+    muteButton_->setText(audioMuted_ ? QStringLiteral("Unmute") : QStringLiteral("Mute"));
+    const QPixmap pixmap = renderSvgResource(
+        QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(audioMuted_ ? QStringLiteral("mute") : QStringLiteral("volume")),
+        QSize(18, 18),
+        QStringLiteral("#ffffff"));
+    if (!pixmap.isNull()) {
+        muteButton_->setIcon(QIcon(pixmap));
+    }
 }
 
 void ActiveWatchWindow::toggleFullscreen()

@@ -1,8 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-label="Settings" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M4 7h16"/>
-  <path d="M4 12h16"/>
-  <path d="M4 17h16"/>
-  <circle cx="9" cy="7" r="2"/>
-  <circle cx="15" cy="12" r="2"/>
-  <circle cx="11" cy="17" r="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-label="Settings" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M10.15 2.68 A9.5 9.5 0 0 1 13.85 2.68 L13.33 5.33 A6.8 6.8 0 0 1 15.78 6.35 L17.28 4.10 A9.5 9.5 0 0 1 19.90 6.72 L17.65 8.22 A6.8 6.8 0 0 1 18.67 10.67 L21.32 10.15 A9.5 9.5 0 0 1 21.32 13.85 L18.67 13.33 A6.8 6.8 0 0 1 17.65 15.78 L19.90 17.28 A9.5 9.5 0 0 1 17.28 19.90 L15.78 17.65 A6.8 6.8 0 0 1 13.33 18.67 L13.85 21.32 A9.5 9.5 0 0 1 10.15 21.32 L10.67 18.67 A6.8 6.8 0 0 1 8.22 17.65 L6.72 19.90 A9.5 9.5 0 0 1 4.10 17.28 L6.35 15.78 A6.8 6.8 0 0 1 5.33 13.33 L2.68 13.85 A9.5 9.5 0 0 1 2.68 10.15 L5.33 10.67 A6.8 6.8 0 0 1 6.35 8.22 L4.10 6.72 A9.5 9.5 0 0 1 6.72 4.10 L8.22 6.35 A6.8 6.8 0 0 1 10.67 5.33 Z"/>
+  <circle cx="12" cy="12" r="2.8"/>
 </svg>

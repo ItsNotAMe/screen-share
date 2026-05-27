@@ -969,11 +969,25 @@ void ActiveShareWindow::toggleVideoPause()
 
 void ActiveShareWindow::updateHostControlButtons()
 {
+    const auto setButtonIcon = [](QPushButton* button, const QString& iconName) {
+        if (button == nullptr) {
+            return;
+        }
+        const QPixmap pixmap = renderSvgResource(
+            QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(iconName),
+            QSize(18, 18),
+            QStringLiteral("#ffffff"));
+        if (!pixmap.isNull()) {
+            button->setIcon(QIcon(pixmap));
+        }
+    };
     if (muteAudioButton_ != nullptr) {
         muteAudioButton_->setText(hostAudioMuted_ ? QStringLiteral("Unmute Audio") : QStringLiteral("Mute Audio"));
+        setButtonIcon(muteAudioButton_, hostAudioMuted_ ? QStringLiteral("mute") : QStringLiteral("volume"));
     }
     if (pauseVideoButton_ != nullptr) {
         pauseVideoButton_->setText(videoPaused_ ? QStringLiteral("Resume Video") : QStringLiteral("Pause Video"));
+        setButtonIcon(pauseVideoButton_, videoPaused_ ? QStringLiteral("play") : QStringLiteral("pause"));
     }
     if (shareTitleLabel_ != nullptr) {
         shareTitleLabel_->setText(videoPaused_ ? QStringLiteral("Video paused") : QStringLiteral("You are sharing"));

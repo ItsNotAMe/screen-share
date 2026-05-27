@@ -10,23 +10,18 @@ Only you can fully validate these because they need real machines/networks.
 
 ## Build Work
 
-1. Check and improve assets.
-   - [ ] Audit brand/logo/icon SVGs for unwanted backgrounds, inconsistent colors, and bad scaling.
-   - [ ] Make icon stroke weights and colors consistent across light/dark states.
-   - [ ] Check app/window icon rendering at small sizes.
-   - [ ] Remove unused asset drafts or move them under a clearly named design/archive folder.
-2. Investigate and fix lower-than-native resolution blur.
+1. Investigate and fix lower-than-native resolution blur.
    - [ ] Confirm whether changing to 1080p changes bitrate or encoder quality unexpectedly.
    - [ ] Compare sender capture/scaler output against receiver decoded output.
    - [ ] Check chroma/subsampling and H.264 padding behavior for downscaled tiers.
    - [ ] Check preview upscale filtering from 1080p to 2K.
    - [ ] Fix the actual blurry path without hurting native/2K sharpness.
-3. Add application sharing.
+2. Add application sharing.
    - [ ] Let the host choose a specific application/window video source.
    - [ ] Capture matching application audio where Windows allows it.
    - [ ] Make fallback behavior clear when per-app audio is unavailable.
    - [ ] Keep whole-display/system-audio sharing as the simple default.
-4. Add better user-facing diagnostics when reports show the need.
+3. Add better user-facing diagnostics when reports show the need.
    - [ ] Surface common setup mistakes in the UI instead of only logs.
    - [ ] Improve sync/network state wording on active session screens.
    - [ ] Promote report-driven issues from the section below only after real reports justify them.

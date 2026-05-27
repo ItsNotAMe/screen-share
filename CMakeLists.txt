@@ -159,6 +159,49 @@ if(SCREENSHARE_BUILD_QT_UI)
 
     find_package(Qt6 QUIET COMPONENTS Network Svg Widgets)
     if(Qt6_FOUND)
+        set(SCREENSHARE_UI_ICON_RC)
+        if(WIN32)
+            set(SCREENSHARE_UI_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/assets/brand/screenshare.ico")
+            set(SCREENSHARE_UI_ICON_RC "${CMAKE_CURRENT_BINARY_DIR}/ScreenShareUiIcon.rc")
+            configure_file(
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ScreenShareUiIcon.rc.in"
+                "${SCREENSHARE_UI_ICON_RC}"
+                @ONLY
+            )
+            if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+                find_program(SCREENSHARE_WINDRES_EXECUTABLE
+                    NAMES windres windres.exe
+                    HINTS
+                        "C:/msys64/ucrt64/bin"
+                        "C:/msys64/usr/bin"
+                )
+                if(NOT SCREENSHARE_WINDRES_EXECUTABLE)
+                    message(FATAL_ERROR "windres is required to embed the ScreenShareUi Windows icon with MinGW")
+                endif()
+
+                set(SCREENSHARE_UI_ICON_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/ScreenShareUiIcon.res.obj")
+                add_custom_command(
+                    OUTPUT "${SCREENSHARE_UI_ICON_OBJECT}"
+                    COMMAND "${SCREENSHARE_WINDRES_EXECUTABLE}"
+                        -O coff
+                        -i "${SCREENSHARE_UI_ICON_RC}"
+                        -o "${SCREENSHARE_UI_ICON_OBJECT}"
+                    DEPENDS
+                        "${SCREENSHARE_UI_ICON_RC}"
+                        "${SCREENSHARE_UI_ICON_FILE}"
+                    COMMENT "Compiling ScreenShareUi Windows icon resource"
+                    VERBATIM
+                )
+                set_source_files_properties("${SCREENSHARE_UI_ICON_OBJECT}" PROPERTIES
+                    EXTERNAL_OBJECT TRUE
+                    GENERATED TRUE
+                )
+                set(SCREENSHARE_UI_ICON_RC "${SCREENSHARE_UI_ICON_OBJECT}")
+            else()
+                enable_language(RC)
+            endif()
+        endif()
+
         add_executable(ScreenShareUi WIN32
             src/ui/main.cpp
             src/ui/QtSessionBackend.cpp
@@ -171,6 +214,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/UiStyle.cpp
             src/ui/VideoFrameWidget.cpp
             src/ui/resources.qrc
+            ${SCREENSHARE_UI_ICON_RC}
         )
         set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)
         target_compile_features(ScreenShareUi PRIVATE cxx_std_20)

@@ -12,6 +12,8 @@
     <file alias="ui/icons/lock.svg">../../assets/ui/icons/lock.svg</file>
     <file alias="ui/icons/mute.svg">../../assets/ui/icons/mute.svg</file>
     <file alias="ui/icons/paste.svg">../../assets/ui/icons/paste.svg</file>
+    <file alias="ui/icons/pause.svg">../../assets/ui/icons/pause.svg</file>
+    <file alias="ui/icons/play.svg">../../assets/ui/icons/play.svg</file>
     <file alias="ui/icons/quality.svg">../../assets/ui/icons/quality.svg</file>
     <file alias="ui/icons/refresh.svg">../../assets/ui/icons/refresh.svg</file>
     <file alias="ui/icons/remove.svg">../../assets/ui/icons/remove.svg</file>

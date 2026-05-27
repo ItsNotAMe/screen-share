@@ -44,6 +44,7 @@ private:
     void updateAudioControls(const screenshare::SessionAudioStatus& audio);
     void applyVolume(int volumePercent);
     void toggleMute();
+    void refreshMuteButton();
     void toggleFullscreen();
     void closeStreamFullscreen();
     void setPreviewStatusText(const QString& text);
