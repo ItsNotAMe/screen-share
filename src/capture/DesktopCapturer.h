@@ -108,6 +108,7 @@ private:
     void CreateWindowsGraphicsCaptureForDisplay(int displayIndex);
     void CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandle);
     void DetectOutputColorSpace(IDXGIOutput* output);
+    void DetectOutputColorSpaceForMonitor(HMONITOR monitor);
     void InitializeWinRt();
     void EnsureSourceTexture(const D3D11_TEXTURE2D_DESC& sourceDesc);
     void EnsureScalePipeline();

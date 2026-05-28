@@ -163,7 +163,9 @@ private:
     HANDLE handle_ = nullptr;
 };
 
-class AudioInterfaceActivationHandler final : public IActivateAudioInterfaceCompletionHandler {
+class AudioInterfaceActivationHandler final :
+    public IActivateAudioInterfaceCompletionHandler,
+    public IAgileObject {
 public:
     explicit AudioInterfaceActivationHandler(HANDLE completedEvent) noexcept
         : completedEvent_(completedEvent)
@@ -178,6 +180,11 @@ public:
         *object = nullptr;
         if (iid == __uuidof(IUnknown) || iid == __uuidof(IActivateAudioInterfaceCompletionHandler)) {
             *object = static_cast<IActivateAudioInterfaceCompletionHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        if (iid == __uuidof(IAgileObject)) {
+            *object = static_cast<IAgileObject*>(this);
             AddRef();
             return S_OK;
         }
@@ -515,22 +522,37 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
             "IMMDevice::Activate(IAudioClient)");
     }
 
-    WAVEFORMATEX* rawMixFormat = nullptr;
-    ThrowIfFailed(audioClient_->GetMixFormat(&rawMixFormat), "IAudioClient::GetMixFormat");
-    if (rawMixFormat == nullptr) {
-        throw std::runtime_error("IAudioClient::GetMixFormat returned no format");
-    }
-
     struct MixFormatDeleter {
         void operator()(WAVEFORMATEX* value) const noexcept { CoTaskMemFree(value); }
     };
-    std::unique_ptr<WAVEFORMATEX, MixFormatDeleter> mixFormat(rawMixFormat);
+    std::unique_ptr<WAVEFORMATEX, MixFormatDeleter> mixFormat;
+    WAVEFORMATEX processLoopbackFormat{};
+    WAVEFORMATEX* activeFormat = nullptr;
+    if (config.source == AudioCaptureSource::ProcessOutput) {
+        processLoopbackFormat.wFormatTag = WAVE_FORMAT_PCM;
+        processLoopbackFormat.nChannels = 2;
+        processLoopbackFormat.nSamplesPerSec = 48'000;
+        processLoopbackFormat.wBitsPerSample = 16;
+        processLoopbackFormat.nBlockAlign =
+            processLoopbackFormat.nChannels * processLoopbackFormat.wBitsPerSample / 8;
+        processLoopbackFormat.nAvgBytesPerSec =
+            processLoopbackFormat.nSamplesPerSec * processLoopbackFormat.nBlockAlign;
+        activeFormat = &processLoopbackFormat;
+    } else {
+        WAVEFORMATEX* rawMixFormat = nullptr;
+        ThrowIfFailed(audioClient_->GetMixFormat(&rawMixFormat), "IAudioClient::GetMixFormat");
+        if (rawMixFormat == nullptr) {
+            throw std::runtime_error("IAudioClient::GetMixFormat returned no format");
+        }
+        mixFormat.reset(rawMixFormat);
+        activeFormat = mixFormat.get();
+    }
 
-    sampleKind_ = DetermineSampleKind(*mixFormat);
-    format_.sampleRate = mixFormat->nSamplesPerSec;
-    format_.channels = mixFormat->nChannels;
-    format_.bitsPerSample = mixFormat->wBitsPerSample;
-    format_.blockAlign = mixFormat->nBlockAlign;
+    sampleKind_ = DetermineSampleKind(*activeFormat);
+    format_.sampleRate = activeFormat->nSamplesPerSec;
+    format_.channels = activeFormat->nChannels;
+    format_.bitsPerSample = activeFormat->wBitsPerSample;
+    format_.blockAlign = activeFormat->nBlockAlign;
     format_.sampleFormat = SampleKindName(sampleKind_);
 
     const REFERENCE_TIME bufferDuration =
@@ -540,6 +562,9 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
         config.source == AudioCaptureSource::ProcessOutput) {
         streamFlags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
+    if (config.source == AudioCaptureSource::ProcessOutput) {
+        streamFlags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+    }
 
     ThrowIfFailed(
         audioClient_->Initialize(
@@ -547,7 +572,7 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
             streamFlags,
             bufferDuration,
             0,
-            mixFormat.get(),
+            activeFormat,
             nullptr),
         "IAudioClient::Initialize");
     ThrowIfFailed(audioClient_->GetBufferSize(&bufferFrames_), "IAudioClient::GetBufferSize");

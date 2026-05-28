@@ -769,8 +769,7 @@ void DesktopCapturer::CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandl
     }
 
     CreateDevice(nullptr);
-    outputColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-    outputHdrActive_ = false;
+    DetectOutputColorSpaceForMonitor(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
 
     Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
     ThrowIfFailed(device_.As(&dxgiDevice), "ID3D11Device::QueryInterface(IDXGIDevice)");
@@ -803,13 +802,60 @@ void DesktopCapturer::CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandl
     state->size = captureSize;
     state->framePool = capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
         d3dDevice,
-        directx::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        outputHdrActive_ && config_.hdrToSdr
+            ? directx::DirectXPixelFormat::R16G16B16A16Float
+            : directx::DirectXPixelFormat::B8G8R8A8UIntNormalized,
         2,
         captureSize);
     state->session = state->framePool.CreateCaptureSession(item);
     ConfigureWindowsGraphicsCaptureBorder(state->session, config_.wgcBorderRequired);
     state->session.StartCapture();
     wgc_ = std::move(state);
+}
+
+void DesktopCapturer::DetectOutputColorSpaceForMonitor(HMONITOR monitor)
+{
+    outputColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    outputHdrActive_ = false;
+    if (monitor == nullptr) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+        return;
+    }
+
+    for (UINT adapterIndex = 0;; ++adapterIndex) {
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        HRESULT adapterResult = factory->EnumAdapters1(adapterIndex, &adapter);
+        if (adapterResult == DXGI_ERROR_NOT_FOUND) {
+            break;
+        }
+        if (FAILED(adapterResult)) {
+            continue;
+        }
+
+        for (UINT outputIndex = 0;; ++outputIndex) {
+            Microsoft::WRL::ComPtr<IDXGIOutput> output;
+            HRESULT outputResult = adapter->EnumOutputs(outputIndex, &output);
+            if (outputResult == DXGI_ERROR_NOT_FOUND) {
+                break;
+            }
+            if (FAILED(outputResult)) {
+                continue;
+            }
+
+            DXGI_OUTPUT_DESC outputDesc{};
+            if (FAILED(output->GetDesc(&outputDesc))) {
+                continue;
+            }
+            if (outputDesc.Monitor == monitor) {
+                DetectOutputColorSpace(output.Get());
+                return;
+            }
+        }
+    }
 }
 
 void DesktopCapturer::DetectOutputColorSpace(IDXGIOutput* output)

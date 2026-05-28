@@ -782,7 +782,8 @@ struct AudioCaptureWorkerStats {
     bool started = false;
     std::string deviceName;
     screenshare::AudioCaptureSource source = screenshare::AudioCaptureSource::SystemOutput;
-    bool fallbackToSystemOutput = false;
+    bool unavailable = false;
+    std::string unavailableReason;
 };
 
 class AudioUdpCaptureWorker {
@@ -812,6 +813,7 @@ public:
             std::lock_guard lock(mutex_);
             stats_ = {};
             stats_.codec = codec;
+            stats_.source = source;
             error_.clear();
         }
 
@@ -858,7 +860,6 @@ private:
             if (!deviceId.empty()) {
                 config.deviceId = screenshare::Widen(deviceId);
             }
-            bool fallbackToSystemOutput = false;
             try {
                 capture.Start(config);
             } catch (const std::exception& error) {
@@ -866,15 +867,14 @@ private:
                     throw;
                 }
                 std::cout
-                    << "audio_capture_fallback=system reason=process_loopback_failed detail=\""
+                    << "audio_capture_unavailable=process reason=process_loopback_failed detail=\""
                     << error.what()
                     << "\"\n";
-                screenshare::AudioCaptureConfig fallbackConfig;
-                fallbackConfig.source = screenshare::AudioCaptureSource::SystemOutput;
-                fallbackConfig.bufferDuration = config.bufferDuration;
-                capture.Start(fallbackConfig);
-                source = screenshare::AudioCaptureSource::SystemOutput;
-                fallbackToSystemOutput = true;
+                std::lock_guard lock(mutex_);
+                stats_.source = source;
+                stats_.unavailable = true;
+                stats_.unavailableReason = error.what();
+                return;
             }
 
             const auto format = capture.format();
@@ -893,7 +893,6 @@ private:
                 stats_.started = true;
                 stats_.deviceName = screenshare::Narrow(capture.deviceName());
                 stats_.source = source;
-                stats_.fallbackToSystemOutput = fallbackToSystemOutput;
                 stats_.sampleRate = format.sampleRate;
                 stats_.channels = format.channels;
                 stats_.bitsPerSample = format.bitsPerSample;
@@ -3966,9 +3965,14 @@ void RunCaptureStats(
                 << " udp_peak_queue_ms=" << udpStatsNow.peakQueueDelayMs
                 << " udp_dropped_frames=" << udpStatsNow.framesDropped
                 << " udp_wire_bytes=" << udpStatsNow.wireBytesSent
-                << " audio_capture=" << (runtimeAudioCaptureEnabled ? (audioCaptureStatsNow.started ? "running" : "starting") : "disabled")
+                << " audio_capture="
+                << (runtimeAudioCaptureEnabled ?
+                    (audioCaptureStatsNow.unavailable ?
+                        "unavailable" :
+                        (audioCaptureStatsNow.started ? "running" : "starting")) :
+                    "disabled")
                 << " audio_capture_source=" << screenshare::AudioCaptureSourceName(audioCaptureStatsNow.source)
-                << " audio_capture_fallback=" << (audioCaptureStatsNow.fallbackToSystemOutput ? "system" : "none")
+                << " audio_capture_unavailable=" << (audioCaptureStatsNow.unavailable ? "yes" : "no")
                 << " audio_capture_packets=" << audioCaptureStatsNow.packets
                 << " audio_capture_frames=" << audioCaptureStatsNow.frames
                 << " audio_capture_bytes=" << audioCaptureStatsNow.bytes
