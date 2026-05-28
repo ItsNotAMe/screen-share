@@ -83,6 +83,8 @@ struct Options {
     bool listH264Encoders = false;
     bool listAudioDevices = false;
     int displayIndex = 0;
+    screenshare::CaptureSourceType captureSourceType = screenshare::CaptureSourceType::Display;
+    uint64_t windowHandle = 0;
     int width = 0;
     int height = 0;
     int fps = 60;

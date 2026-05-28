@@ -25,15 +25,33 @@ struct DisplayInfo {
     bool attachedToDesktop = false;
 };
 
+struct WindowCaptureInfo {
+    uint64_t handle = 0;
+    uint32_t processId = 0;
+    std::wstring title;
+    std::wstring processName;
+    long left = 0;
+    long top = 0;
+    long right = 0;
+    long bottom = 0;
+};
+
 enum class CaptureBackend {
     DesktopDuplication,
     WindowsGraphicsCapture,
 };
 
+enum class CaptureSourceType {
+    Display,
+    Window,
+};
+
 struct WindowsGraphicsCaptureState;
 
 struct CaptureConfig {
+    CaptureSourceType sourceType = CaptureSourceType::Display;
     int displayIndex = 0;
+    uint64_t windowHandle = 0;
     int targetWidth = 0;
     int targetHeight = 0;
     int targetFps = 60;
@@ -76,6 +94,7 @@ public:
     DesktopCapturer& operator=(const DesktopCapturer&) = delete;
 
     static std::vector<DisplayInfo> EnumerateDisplays();
+    static std::vector<WindowCaptureInfo> EnumerateWindows();
 
     void Start(const CaptureConfig& config);
     void Stop();
@@ -87,6 +106,7 @@ private:
     void CreateDevice(IDXGIAdapter* adapter);
     void CreateDuplicationForDisplay(int displayIndex);
     void CreateWindowsGraphicsCaptureForDisplay(int displayIndex);
+    void CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandle);
     void DetectOutputColorSpace(IDXGIOutput* output);
     void InitializeWinRt();
     void EnsureSourceTexture(const D3D11_TEXTURE2D_DESC& sourceDesc);

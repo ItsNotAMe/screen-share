@@ -42,10 +42,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace {
 
 constexpr int kSettingsFieldMaxWidth = 286;
+constexpr int kSourceRefreshIntervalMs = 2000;
 
 class SettingsComboBox final : public QComboBox {
 public:
@@ -104,6 +106,41 @@ QString resolutionText(const std::optional<screenshare::SessionResolution>& reso
         return QStringLiteral("-");
     }
     return QStringLiteral("%1 x %2").arg(resolution->width).arg(resolution->height);
+}
+
+QString displaySourceValue(int displayIndex)
+{
+    return QStringLiteral("display:%1").arg(displayIndex);
+}
+
+QString windowSourceValue(uint64_t handle)
+{
+    return QStringLiteral("window:%1").arg(handle);
+}
+
+bool sourceValueIsWindow(const QString& value)
+{
+    return value.startsWith(QStringLiteral("window:"));
+}
+
+int displayIndexFromSourceValue(const QString& value)
+{
+    if (!value.startsWith(QStringLiteral("display:"))) {
+        return 0;
+    }
+    bool ok = false;
+    const int displayIndex = value.mid(8).toInt(&ok);
+    return ok && displayIndex >= 0 ? displayIndex : 0;
+}
+
+uint64_t windowHandleFromSourceValue(const QString& value)
+{
+    if (!sourceValueIsWindow(value)) {
+        return 0;
+    }
+    bool ok = false;
+    const qulonglong handle = value.mid(7).toULongLong(&ok);
+    return ok ? static_cast<uint64_t>(handle) : 0;
 }
 
 QString viewerHealthText(const screenshare::SessionViewer& viewer)
@@ -182,6 +219,41 @@ QString viewerListSignature(const screenshare::SessionStatus& status)
     return parts.join(';');
 }
 
+QVector<ShareDisplayChoice> sourceChoicesFromBackend(
+    const std::vector<screenshare::SessionDisplayInfo>& displays,
+    const std::vector<screenshare::SessionWindowInfo>& windows)
+{
+    QVector<ShareDisplayChoice> choices;
+    for (const auto& display : displays) {
+        QStringList parts;
+        parts << QStringLiteral("Display %1").arg(display.index);
+        if (!display.outputName.empty()) {
+            parts << QString::fromStdString(display.outputName);
+        }
+        if (display.width > 0 && display.height > 0) {
+            parts << QStringLiteral("%1 x %2").arg(display.width).arg(display.height);
+        }
+        choices.push_back(ShareDisplayChoice{
+            parts.join(" - "),
+            displaySourceValue(display.index),
+        });
+    }
+
+    for (const auto& window : windows) {
+        const QString title = QString::fromStdString(window.title);
+        const QString process = QString::fromStdString(window.processName);
+        QString text = process.isEmpty() ? title : QStringLiteral("%1 - %2").arg(process, title);
+        if (window.width > 0 && window.height > 0) {
+            text += QStringLiteral(" - %1 x %2").arg(window.width).arg(window.height);
+        }
+        choices.push_back(ShareDisplayChoice{
+            text,
+            windowSourceValue(window.handle),
+        });
+    }
+    return choices;
+}
+
 } // namespace
 
 ActiveShareWindow::ActiveShareWindow(QtSessionBackend* backend, Actions actions, QWidget* parent)
@@ -194,6 +266,11 @@ ActiveShareWindow::ActiveShareWindow(QtSessionBackend* backend, Actions actions,
     elapsedTimer_->setInterval(1000);
     connect(elapsedTimer_, &QTimer::timeout, this, [this] {
         updateElapsed();
+    });
+    sourceRefreshTimer_ = new QTimer(this);
+    sourceRefreshTimer_->setInterval(kSourceRefreshIntervalMs);
+    connect(sourceRefreshTimer_, &QTimer::timeout, this, [this] {
+        refreshSourceChoices(true, true);
     });
 
     auto* root = new QVBoxLayout(this);
@@ -208,6 +285,7 @@ void ActiveShareWindow::setSession(const ShareSessionUiState& session)
     installBackendHandlers();
     elapsed_.restart();
     elapsedTimer_->start();
+    sourceRefreshTimer_->start();
     lastViewerSignature_.clear();
     hostAudioMuted_ = session_.config.hostAudioMuted || !session_.config.captureSystemAudio;
     videoPaused_ = session_.config.hostVideoPaused;
@@ -532,7 +610,7 @@ QWidget* ActiveShareWindow::buildSettingsPanel()
     });
     formLayout->addWidget(bitrateCombo_);
 
-    formLayout->addWidget(textLabel("Display", "ActiveSettingsLabel"));
+    formLayout->addWidget(textLabel("Source", "ActiveSettingsLabel"));
     settingsDisplayCombo_ = new SettingsComboBox;
     configureSettingsChoice(settingsDisplayCombo_);
     settingsDisplayCombo_->setEnabled(true);
@@ -832,23 +910,11 @@ void ActiveShareWindow::updateShareSummary()
         settingsRoomLinkEdit_->setText(session_.roomLink);
     }
     if (settingsDisplayCombo_ != nullptr) {
-        updatingSettingsUi_ = true;
-        const bool blocked = settingsDisplayCombo_->blockSignals(true);
-        settingsDisplayCombo_->clear();
-        if (session_.displayChoices.isEmpty()) {
-            settingsDisplayCombo_->addItem(
-                session_.displayText.isEmpty() ? QStringLiteral("Display 0") : session_.displayText,
-                session_.displayValue);
-        } else {
-            for (const ShareDisplayChoice& choice : session_.displayChoices) {
-                settingsDisplayCombo_->addItem(choice.text, choice.value);
-            }
+        if (session_.displaySourceValue.isEmpty()) {
+            session_.displaySourceValue = displaySourceValue(session_.displayValue);
         }
-        const int index = settingsDisplayCombo_->findData(session_.displayValue);
-        settingsDisplayCombo_->setCurrentIndex(index >= 0 ? index : 0);
-        settingsDisplayCombo_->blockSignals(blocked);
-        appliedDisplayValue_ = settingsDisplayCombo_->currentData().toInt();
-        updatingSettingsUi_ = false;
+        populateSettingsSourceChoices(session_.displaySourceValue, true);
+        appliedDisplaySourceValue_ = settingsDisplayCombo_->currentData().toString();
     }
     if (settingsResolutionCombo_ != nullptr) {
         updatingSettingsUi_ = true;
@@ -999,6 +1065,62 @@ void ActiveShareWindow::copyInvite()
     QGuiApplication::clipboard()->setText(session_.roomLink);
 }
 
+void ActiveShareWindow::refreshSourceChoices(bool preserveSelection, bool skipOpenPopup)
+{
+    if (backend_ == nullptr || settingsDisplayCombo_ == nullptr) {
+        return;
+    }
+    if (skipOpenPopup && settingsDisplayCombo_->view() != nullptr && settingsDisplayCombo_->view()->isVisible()) {
+        return;
+    }
+
+    QString displayError;
+    QString windowError;
+    const auto displays = backend_->listDisplays(&displayError);
+    const auto windows = backend_->listWindows(&windowError);
+    const QString previousSource = preserveSelection ?
+        settingsDisplayCombo_->currentData().toString() :
+        session_.displaySourceValue;
+    session_.displayChoices = sourceChoicesFromBackend(displays, windows);
+    populateSettingsSourceChoices(previousSource, true);
+    updateSettingsApplyState();
+}
+
+void ActiveShareWindow::populateSettingsSourceChoices(const QString& preferredSourceValue, bool keepMissingSelection)
+{
+    if (settingsDisplayCombo_ == nullptr) {
+        return;
+    }
+
+    updatingSettingsUi_ = true;
+    const bool blocked = settingsDisplayCombo_->blockSignals(true);
+    const QString previousText = settingsDisplayCombo_->currentText().isEmpty() ?
+        (session_.displayText.isEmpty() ? QStringLiteral("Display 0") : session_.displayText) :
+        settingsDisplayCombo_->currentText();
+
+    settingsDisplayCombo_->clear();
+    if (session_.displayChoices.isEmpty()) {
+        settingsDisplayCombo_->addItem(
+            session_.displayText.isEmpty() ? QStringLiteral("Display 0") : session_.displayText,
+            session_.displaySourceValue.isEmpty() ? displaySourceValue(session_.displayValue) : session_.displaySourceValue);
+    } else {
+        for (const ShareDisplayChoice& choice : session_.displayChoices) {
+            settingsDisplayCombo_->addItem(choice.text, choice.value);
+        }
+    }
+
+    const int preferredIndex = preferredSourceValue.isEmpty() ? -1 : settingsDisplayCombo_->findData(preferredSourceValue);
+    if (preferredIndex >= 0) {
+        settingsDisplayCombo_->setCurrentIndex(preferredIndex);
+    } else if (keepMissingSelection && !preferredSourceValue.isEmpty()) {
+        settingsDisplayCombo_->addItem(QStringLiteral("%1 (unavailable)").arg(previousText), preferredSourceValue);
+        settingsDisplayCombo_->setCurrentIndex(settingsDisplayCombo_->count() - 1);
+    }
+
+    settingsDisplayCombo_->blockSignals(blocked);
+    updatingSettingsUi_ = false;
+}
+
 screenshare::ShareSessionSettings ActiveShareWindow::selectedShareSettings() const
 {
     screenshare::ShareSessionSettings settings;
@@ -1008,9 +1130,16 @@ screenshare::ShareSessionSettings ActiveShareWindow::selectedShareSettings() con
     if (roomName != appliedRoomName_) {
         settings.roomName = toStdUtf8(roomName);
     }
-    settings.displayIndex = settingsDisplayCombo_ == nullptr ?
-        session_.displayValue :
-        settingsDisplayCombo_->currentData().toInt();
+    const QString sourceValue = settingsDisplayCombo_ == nullptr ?
+        session_.displaySourceValue :
+        settingsDisplayCombo_->currentData().toString();
+    if (sourceValueIsWindow(sourceValue)) {
+        settings.captureSourceType = screenshare::SessionCaptureSourceType::Window;
+        settings.windowHandle = windowHandleFromSourceValue(sourceValue);
+    } else {
+        settings.captureSourceType = screenshare::SessionCaptureSourceType::Display;
+        settings.displayIndex = displayIndexFromSourceValue(sourceValue);
+    }
     settings.audioDeviceId = settingsAudioCombo_ == nullptr ?
         toStdUtf8(session_.audioDeviceValue) :
         toStdUtf8(settingsAudioCombo_->currentData().toString());
@@ -1049,12 +1178,18 @@ void ActiveShareWindow::applySettings()
         session_.roomName = QString::fromStdString(*settings.roomName);
         session_.config.roomName = *settings.roomName;
     }
+    if (settings.captureSourceType) {
+        session_.config.captureSourceType = *settings.captureSourceType;
+    }
     session_.config.displayIndex = settings.displayIndex.value_or(session_.config.displayIndex);
+    session_.config.windowHandle = settings.windowHandle.value_or(session_.config.windowHandle);
     session_.config.audioDeviceId = settings.audioDeviceId.value_or(session_.config.audioDeviceId);
     session_.config.stream = settings.stream;
     session_.displayValue = session_.config.displayIndex;
+    session_.windowHandle = session_.config.windowHandle;
     if (settingsDisplayCombo_ != nullptr) {
         session_.displayText = settingsDisplayCombo_->currentText();
+        session_.displaySourceValue = settingsDisplayCombo_->currentData().toString();
     }
     session_.resolutionValue = settingsResolutionCombo_->currentData().toString();
     session_.resolutionText = settingsResolutionCombo_->currentText();
@@ -1064,7 +1199,7 @@ void ActiveShareWindow::applySettings()
     session_.audioText = hostAudioMuted_ ?
         QStringLiteral("System Audio muted") :
         (settingsAudioCombo_ != nullptr ? settingsAudioCombo_->currentText() : QStringLiteral("System Audio (default)"));
-    appliedDisplayValue_ = session_.displayValue;
+    appliedDisplaySourceValue_ = session_.displaySourceValue;
     appliedRoomName_ = session_.roomName;
     appliedResolutionValue_ = session_.resolutionValue;
     appliedFpsValue_ = settings.stream.fps;
@@ -1090,9 +1225,9 @@ void ActiveShareWindow::updateSettingsApplyState()
     const QString resolutionValue = settingsResolutionCombo_ == nullptr ?
         appliedResolutionValue_ :
         settingsResolutionCombo_->currentData().toString();
-    const int displayValue = settingsDisplayCombo_ == nullptr ?
-        appliedDisplayValue_ :
-        settingsDisplayCombo_->currentData().toInt();
+    const QString selectedDisplaySourceValue = settingsDisplayCombo_ == nullptr ?
+        appliedDisplaySourceValue_ :
+        settingsDisplayCombo_->currentData().toString();
     const int fpsValue = settingsFpsCombo_ == nullptr ?
         appliedFpsValue_ :
         settingsFpsCombo_->currentData().toInt();
@@ -1105,7 +1240,7 @@ void ActiveShareWindow::updateSettingsApplyState()
         settingsAudioCombo_->currentData().toString();
     const bool changed =
         roomName != appliedRoomName_ ||
-        displayValue != appliedDisplayValue_ ||
+        selectedDisplaySourceValue != appliedDisplaySourceValue_ ||
         resolutionValue != appliedResolutionValue_ ||
         fpsValue != appliedFpsValue_ ||
         bitrateBps != appliedBitrateBps_ ||
@@ -1126,6 +1261,9 @@ void ActiveShareWindow::showSettingsPanel(bool visible)
 void ActiveShareWindow::handleFinished(const QtSessionBackend::FinishInfo& info)
 {
     elapsedTimer_->stop();
+    if (sourceRefreshTimer_ != nullptr) {
+        sourceRefreshTimer_->stop();
+    }
     stopButton_->setEnabled(true);
     stopButton_->setText("Stop Sharing");
     healthStateLabel_->setText(info.failed ? "Failed" : "Stopped");

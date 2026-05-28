@@ -64,6 +64,8 @@ private:
     void toggleVideoPause();
     void updateHostControlButtons();
     void copyInvite();
+    void refreshSourceChoices(bool preserveSelection = true, bool skipOpenPopup = false);
+    void populateSettingsSourceChoices(const QString& preferredSourceValue = QString(), bool keepMissingSelection = false);
     void applySettings();
     screenshare::ShareSessionSettings selectedShareSettings() const;
     void updateSettingsApplyState();
@@ -77,6 +79,7 @@ private:
     ShareSessionUiState session_;
     QElapsedTimer elapsed_;
     QTimer* elapsedTimer_ = nullptr;
+    QTimer* sourceRefreshTimer_ = nullptr;
 
     QLabel* stateLabel_ = nullptr;
     QLabel* elapsedLabel_ = nullptr;
@@ -113,7 +116,7 @@ private:
     bool hostAudioMuted_ = false;
     bool videoPaused_ = false;
     QString appliedRoomName_;
-    int appliedDisplayValue_ = 0;
+    QString appliedDisplaySourceValue_;
     QString appliedResolutionValue_;
     int appliedFpsValue_ = 60;
     uint32_t appliedBitrateBps_ = 0;

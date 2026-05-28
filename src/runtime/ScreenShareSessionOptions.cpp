@@ -399,7 +399,14 @@ void ApplyTypedSharePreset(Options& options, const screenshare::ShareSessionConf
         options.sessionId = ParseSessionId(config.sessionId.c_str());
         options.sessionIdProvided = true;
     }
+    options.captureSourceType = config.captureSourceType == screenshare::SessionCaptureSourceType::Window
+        ? screenshare::CaptureSourceType::Window
+        : screenshare::CaptureSourceType::Display;
     options.displayIndex = config.displayIndex;
+    options.windowHandle = config.windowHandle;
+    if (options.captureSourceType == screenshare::CaptureSourceType::Window && options.windowHandle == 0) {
+        throw std::invalid_argument("Window Share source requires a selected application window.");
+    }
     options.streamEncode = true;
     options.sharePreset = true;
     options.seconds = config.seconds;

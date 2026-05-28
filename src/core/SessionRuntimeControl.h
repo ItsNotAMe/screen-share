@@ -15,6 +15,11 @@ enum class RuntimeResolutionMode {
     Fixed,
 };
 
+enum class RuntimeCaptureSourceType {
+    Display,
+    Window,
+};
+
 struct RuntimeResolutionRequest {
     RuntimeResolutionMode mode = RuntimeResolutionMode::Auto;
     int width = 0;
@@ -23,7 +28,9 @@ struct RuntimeResolutionRequest {
 
 struct RuntimeStreamSettingsRequest {
     std::optional<std::string> roomName;
+    std::optional<RuntimeCaptureSourceType> captureSourceType;
     std::optional<int> displayIndex;
+    std::optional<uint64_t> windowHandle;
     std::optional<RuntimeResolutionRequest> resolution;
     std::optional<int> fps;
     std::optional<uint32_t> bitrateBps;

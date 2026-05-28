@@ -17,6 +17,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QSpinBox;
+class QTimer;
 
 class CreateRoomWindow final : public QWidget {
 public:
@@ -42,9 +43,12 @@ private:
     QLabel* textLabel(const QString& text, const char* objectName);
     QLabel* iconLabel(const char* iconName, int size, const QString& color = QStringLiteral("#eaf5f2"));
 
-    void refreshDisplays();
+    void refreshDisplays(bool preserveSelection = true, bool skipOpenPopup = false);
     void refreshAudioDevices();
-    void populateDisplays(const std::vector<screenshare::SessionDisplayInfo>& displays);
+    void populateCaptureSources(
+        const std::vector<screenshare::SessionDisplayInfo>& displays,
+        const std::vector<screenshare::SessionWindowInfo>& windows,
+        const QString& preferredSourceValue = QString());
     void populateAudioDevices(const std::vector<screenshare::SessionAudioDeviceInfo>& devices);
     void populateResolutionChoices();
     void refreshRoomLink();
@@ -85,4 +89,5 @@ private:
     QLineEdit* reportPathEdit_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     QPushButton* startButton_ = nullptr;
+    QTimer* sourceRefreshTimer_ = nullptr;
 };

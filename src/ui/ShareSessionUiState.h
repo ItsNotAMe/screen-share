@@ -5,6 +5,8 @@
 #include <QtCore/QString>
 #include <QtCore/QVector>
 
+#include <cstdint>
+
 struct ShareResolutionChoice {
     QString text;
     QString value;
@@ -12,7 +14,7 @@ struct ShareResolutionChoice {
 
 struct ShareDisplayChoice {
     QString text;
-    int value = 0;
+    QString value;
 };
 
 struct ShareAudioChoice {
@@ -26,7 +28,9 @@ struct ShareSessionUiState {
     QString roomName;
     QString roomLink;
     QString displayText;
+    QString displaySourceValue;
     int displayValue = 0;
+    uint64_t windowHandle = 0;
     QVector<ShareDisplayChoice> displayChoices;
     QString resolutionText;
     QString resolutionValue;

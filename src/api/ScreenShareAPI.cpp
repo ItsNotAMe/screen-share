@@ -66,8 +66,16 @@ RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const ShareSessio
     if (settings.roomName) {
         request.roomName = *settings.roomName;
     }
+    if (settings.captureSourceType) {
+        request.captureSourceType = *settings.captureSourceType == SessionCaptureSourceType::Window
+            ? RuntimeCaptureSourceType::Window
+            : RuntimeCaptureSourceType::Display;
+    }
     if (settings.displayIndex && *settings.displayIndex >= 0) {
         request.displayIndex = *settings.displayIndex;
+    }
+    if (settings.windowHandle && *settings.windowHandle != 0) {
+        request.windowHandle = *settings.windowHandle;
     }
     if (settings.captureSystemAudio) {
         request.captureSystemAudio = *settings.captureSystemAudio;
@@ -303,6 +311,7 @@ public:
     void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
+    std::vector<SessionWindowInfo> ListWindows();
     std::vector<SessionAudioDeviceInfo> ListAudioDevices();
 
 private:
@@ -458,6 +467,27 @@ std::vector<SessionDisplayInfo> ScreenShareSession::Impl::ListDisplays()
         info.top = static_cast<int>(display.top);
         info.adapterName = Narrow(display.adapterName);
         info.attached = display.attachedToDesktop;
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
+std::vector<SessionWindowInfo> ScreenShareSession::Impl::ListWindows()
+{
+    const auto windows = DesktopCapturer::EnumerateWindows();
+
+    std::vector<SessionWindowInfo> result;
+    result.reserve(windows.size());
+    for (const auto& window : windows) {
+        SessionWindowInfo info;
+        info.handle = window.handle;
+        info.processId = window.processId;
+        info.title = Narrow(window.title);
+        info.processName = Narrow(window.processName);
+        info.width = static_cast<int>(window.right - window.left);
+        info.height = static_cast<int>(window.bottom - window.top);
+        info.left = static_cast<int>(window.left);
+        info.top = static_cast<int>(window.top);
         result.push_back(std::move(info));
     }
     return result;
@@ -1380,6 +1410,11 @@ SessionStatus ScreenShareSession::GetStatus() const
 std::vector<SessionDisplayInfo> ScreenShareSession::ListDisplays()
 {
     return impl_->ListDisplays();
+}
+
+std::vector<SessionWindowInfo> ScreenShareSession::ListWindows()
+{
+    return impl_->ListWindows();
 }
 
 std::vector<SessionAudioDeviceInfo> ScreenShareSession::ListAudioDevices()

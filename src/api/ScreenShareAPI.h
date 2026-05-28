@@ -25,6 +25,7 @@ public:
     void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
+    std::vector<SessionWindowInfo> ListWindows();
     std::vector<SessionAudioDeviceInfo> ListAudioDevices();
 
 private:

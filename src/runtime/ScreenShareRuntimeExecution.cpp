@@ -2681,7 +2681,9 @@ void RunCaptureStats(
     StreamEncoderPreference streamEncoderPreference = options.streamEncoderPreference;
 
     screenshare::CaptureConfig config;
+    config.sourceType = options.captureSourceType;
     config.displayIndex = options.displayIndex;
+    config.windowHandle = options.windowHandle;
     config.targetWidth = options.width;
     config.targetHeight = options.height;
     config.targetFps = options.fps;
@@ -2697,8 +2699,12 @@ void RunCaptureStats(
 
     WarnIfPlaintextUdpSession(options);
 
-    std::cout << "Capturing display " << options.displayIndex
-              << " at target " << options.fps << " FPS";
+    if (options.captureSourceType == screenshare::CaptureSourceType::Window) {
+        std::cout << "Capturing window 0x" << std::hex << options.windowHandle << std::dec;
+    } else {
+        std::cout << "Capturing display " << options.displayIndex;
+    }
+    std::cout << " at target " << options.fps << " FPS";
 
     if (options.width > 0 && options.height > 0) {
         std::cout << ", requested output " << options.width << "x" << options.height;
@@ -2825,6 +2831,8 @@ void RunCaptureStats(
     uint64_t streamBytes = 0;
     uint32_t streamBitrate = 0;
     uint32_t streamTargetBitrate = 0;
+    int streamEncoderWidth = 0;
+    int streamEncoderHeight = 0;
     bool autoBitrateEnabled = options.bitrate == 0;
     uint64_t bitrateAdaptations = 0;
     uint64_t bitrateAdaptationFailures = 0;
@@ -3063,6 +3071,12 @@ void RunCaptureStats(
         }
     };
 
+    auto resetStreamEncoder = [&]() {
+        streamEncoder.reset();
+        streamEncoderWidth = 0;
+        streamEncoderHeight = 0;
+    };
+
     auto drainLiveSignalingSendTargets = [&]() {
         if (!liveSignalingRuntime) {
             return;
@@ -3173,7 +3187,7 @@ void RunCaptureStats(
         try {
             if (streamEncoder) {
                 sendStreamPackets(streamEncoder->Drain());
-                streamEncoder.reset();
+                resetStreamEncoder();
             }
 
             ConfigureCapturePayloads(config, options, streamEncoderPreference);
@@ -3182,7 +3196,9 @@ void RunCaptureStats(
             hasFrame = false;
             std::cout
                 << "Runtime capture restarted"
+                << " source=" << (config.sourceType == screenshare::CaptureSourceType::Window ? "window" : "display")
                 << " display=" << config.displayIndex
+                << " window=0x" << std::hex << config.windowHandle << std::dec
                 << " output="
                 << (config.targetWidth > 0 && config.targetHeight > 0 ?
                     std::to_string(config.targetWidth) + "x" + std::to_string(config.targetHeight) :
@@ -3356,12 +3372,33 @@ void RunCaptureStats(
             }
             std::cout << "runtime_room_name=updated\n";
         }
+        if (request->captureSourceType) {
+            const auto requestedSource = *request->captureSourceType == screenshare::RuntimeCaptureSourceType::Window
+                ? screenshare::CaptureSourceType::Window
+                : screenshare::CaptureSourceType::Display;
+            if (config.sourceType != requestedSource) {
+                config.sourceType = requestedSource;
+                restartCapture = true;
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                std::cout << "runtime_capture_source="
+                          << (config.sourceType == screenshare::CaptureSourceType::Window ? "window" : "display")
+                          << "\n";
+            }
+        }
         if (request->displayIndex && *request->displayIndex >= 0 && config.displayIndex != *request->displayIndex) {
             config.displayIndex = *request->displayIndex;
             restartCapture = true;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
             std::cout << "runtime_display=" << config.displayIndex << "\n";
+        }
+        if (request->windowHandle && *request->windowHandle != 0 && config.windowHandle != *request->windowHandle) {
+            config.windowHandle = *request->windowHandle;
+            restartCapture = true;
+            adaptiveResolutionTiers.clear();
+            adaptiveResolutionTierIndex = 0;
+            std::cout << "runtime_window=0x" << std::hex << config.windowHandle << std::dec << "\n";
         }
         if (request->fps && *request->fps > 0 && *request->fps <= 240 && runtimeFps != *request->fps) {
             runtimeFps = *request->fps;
@@ -3562,6 +3599,33 @@ void RunCaptureStats(
         if (frame) {
             ++totalDesktopUpdates;
             ++intervalDesktopUpdates;
+            const bool outputSizeChanged =
+                hasFrame &&
+                (lastFrame.width != frame->width || lastFrame.height != frame->height);
+            if (outputSizeChanged) {
+                if (streamEncoder) {
+                    resetStreamEncoder();
+                }
+                if (adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
+                    adaptiveResolutionTiers.clear();
+                    adaptiveResolutionTierIndex = 0;
+                    resolutionAdaptationStatus = "waiting";
+                }
+                if (autoBitrateEnabled) {
+                    streamTargetBitrate = SelectBitrate(options, frame->width, frame->height);
+                    streamBitrate = 0;
+                    bitrateAdvisor.Configure(
+                        streamTargetBitrate,
+                        SelectAdaptiveMinBitrate(options, streamTargetBitrate, adaptiveResolutionTiers),
+                        static_cast<uint32_t>(options.adaptReduceCooldownSeconds));
+                }
+                std::cout
+                    << "capture_output_resized"
+                    << " old=" << lastFrame.width << "x" << lastFrame.height
+                    << " new=" << frame->width << "x" << frame->height
+                    << " stream_encoder=restarting"
+                    << "\n";
+            }
             lastSourceWidth = frame->sourceWidth;
             lastSourceHeight = frame->sourceHeight;
             lastOutputWidth = frame->width;
@@ -3665,6 +3729,8 @@ void RunCaptureStats(
 
                         auto encoder = std::make_unique<screenshare::H264StreamEncoder>();
                         encoder->Start(encoderConfig);
+                        streamEncoderWidth = encoderConfig.width;
+                        streamEncoderHeight = encoderConfig.height;
 
                         std::cout
                             << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
@@ -3700,6 +3766,7 @@ void RunCaptureStats(
                                 capturer.Stop();
                                 capturer.Start(config);
                                 hasFrame = false;
+                                resetStreamEncoder();
                                 std::cerr << "Restarted capture with CPU-visible NV12 for software stream encoding.\n";
                                 continue;
                             }
@@ -3711,6 +3778,12 @@ void RunCaptureStats(
                 }
 
                 ensureUdpSenderForTargets();
+
+                if (streamEncoder &&
+                    (streamEncoderWidth != lastFrame.width || streamEncoderHeight != lastFrame.height)) {
+                    resetStreamEncoder();
+                    continue;
+                }
 
                 const auto streamEncodeStartedAt = Clock::now();
                 const auto packets = streamEncoder->EncodeFrame(lastFrame);
