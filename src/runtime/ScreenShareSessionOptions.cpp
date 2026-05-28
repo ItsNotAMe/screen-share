@@ -404,6 +404,7 @@ void ApplyTypedSharePreset(Options& options, const screenshare::ShareSessionConf
         : screenshare::CaptureSourceType::Display;
     options.displayIndex = config.displayIndex;
     options.windowHandle = config.windowHandle;
+    options.windowProcessId = config.windowProcessId;
     if (options.captureSourceType == screenshare::CaptureSourceType::Window && options.windowHandle == 0) {
         throw std::invalid_argument("Window Share source requires a selected application window.");
     }
@@ -425,7 +426,13 @@ void ApplyTypedSharePreset(Options& options, const screenshare::ShareSessionConf
     }
     if (config.captureSystemAudio && !config.hostAudioMuted) {
         options.audioCapture = true;
-        options.audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
+        options.audioCaptureSource =
+            options.captureSourceType == screenshare::CaptureSourceType::Window &&
+                config.windowProcessId != 0 &&
+                config.audioDeviceId.empty() ?
+            screenshare::AudioCaptureSource::ProcessOutput :
+            screenshare::AudioCaptureSource::SystemOutput;
+        options.audioProcessId = config.windowProcessId;
         if (!config.audioDeviceId.empty()) {
             options.audioDeviceId = config.audioDeviceId;
             options.audioDeviceIdProvided = true;

@@ -31,6 +31,7 @@ struct RuntimeStreamSettingsRequest {
     std::optional<RuntimeCaptureSourceType> captureSourceType;
     std::optional<int> displayIndex;
     std::optional<uint64_t> windowHandle;
+    std::optional<uint32_t> windowProcessId;
     std::optional<RuntimeResolutionRequest> resolution;
     std::optional<int> fps;
     std::optional<uint32_t> bitrateBps;

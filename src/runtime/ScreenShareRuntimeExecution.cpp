@@ -781,6 +781,8 @@ struct AudioCaptureWorkerStats {
     screenshare::udp_protocol::AudioCodec codec = screenshare::udp_protocol::AudioCodec::Raw;
     bool started = false;
     std::string deviceName;
+    screenshare::AudioCaptureSource source = screenshare::AudioCaptureSource::SystemOutput;
+    bool fallbackToSystemOutput = false;
 };
 
 class AudioUdpCaptureWorker {
@@ -801,6 +803,7 @@ public:
         SendAudioPacketFn sendAudioPacket,
         screenshare::AudioCaptureSource source,
         const std::string& deviceId,
+        uint32_t processId,
         screenshare::udp_protocol::AudioCodec codec)
     {
         Stop();
@@ -812,8 +815,8 @@ public:
             error_.clear();
         }
 
-        thread_ = std::thread([this, sendAudioPacket = std::move(sendAudioPacket), source, deviceId, codec] {
-            Run(sendAudioPacket, source, deviceId, codec);
+        thread_ = std::thread([this, sendAudioPacket = std::move(sendAudioPacket), source, deviceId, processId, codec] {
+            Run(sendAudioPacket, source, deviceId, processId, codec);
         });
     }
 
@@ -844,16 +847,35 @@ private:
         const SendAudioPacketFn& sendAudioPacket,
         screenshare::AudioCaptureSource source,
         const std::string& deviceId,
+        uint32_t processId,
         screenshare::udp_protocol::AudioCodec codec)
     {
         try {
             screenshare::WasapiCapture capture;
             screenshare::AudioCaptureConfig config;
             config.source = source;
+            config.processId = processId;
             if (!deviceId.empty()) {
                 config.deviceId = screenshare::Widen(deviceId);
             }
-            capture.Start(config);
+            bool fallbackToSystemOutput = false;
+            try {
+                capture.Start(config);
+            } catch (const std::exception& error) {
+                if (source != screenshare::AudioCaptureSource::ProcessOutput) {
+                    throw;
+                }
+                std::cout
+                    << "audio_capture_fallback=system reason=process_loopback_failed detail=\""
+                    << error.what()
+                    << "\"\n";
+                screenshare::AudioCaptureConfig fallbackConfig;
+                fallbackConfig.source = screenshare::AudioCaptureSource::SystemOutput;
+                fallbackConfig.bufferDuration = config.bufferDuration;
+                capture.Start(fallbackConfig);
+                source = screenshare::AudioCaptureSource::SystemOutput;
+                fallbackToSystemOutput = true;
+            }
 
             const auto format = capture.format();
             const auto udpSampleFormat = ToUdpAudioSampleFormat(format);
@@ -870,6 +892,8 @@ private:
                 std::lock_guard lock(mutex_);
                 stats_.started = true;
                 stats_.deviceName = screenshare::Narrow(capture.deviceName());
+                stats_.source = source;
+                stats_.fallbackToSystemOutput = fallbackToSystemOutput;
                 stats_.sampleRate = format.sampleRate;
                 stats_.channels = format.channels;
                 stats_.bitsPerSample = format.bitsPerSample;
@@ -2434,6 +2458,7 @@ void RunAudioCaptureStats(
     screenshare::WasapiCapture capture;
     screenshare::AudioCaptureConfig config;
     config.source = options.audioCaptureSource;
+    config.processId = options.audioProcessId;
     if (!options.audioDeviceId.empty()) {
         config.deviceId = screenshare::Widen(options.audioDeviceId);
     }
@@ -2787,6 +2812,9 @@ void RunCaptureStats(
         if (!options.audioDeviceId.empty()) {
             std::cout << ", selected audio device id";
         }
+        if (options.audioCaptureSource == screenshare::AudioCaptureSource::ProcessOutput && options.audioProcessId != 0) {
+            std::cout << ", process " << options.audioProcessId;
+        }
         std::cout << ", audio codec " << screenshare::udp_protocol::AudioCodecName(options.audioCodec);
     }
     if (options.captureBackend == screenshare::CaptureBackend::WindowsGraphicsCapture) {
@@ -2873,6 +2901,23 @@ void RunCaptureStats(
     bool runtimeVideoPaused = options.videoPaused;
     bool runtimeAudioCaptureEnabled = options.audioCapture;
     std::string runtimeAudioDeviceId = options.audioDeviceId;
+    uint32_t runtimeAudioProcessId =
+        options.audioProcessId != 0 ? options.audioProcessId : options.windowProcessId;
+    auto selectRuntimeAudioSource = [&]() {
+        if (options.audioCaptureSource == screenshare::AudioCaptureSource::Microphone) {
+            return screenshare::AudioCaptureSource::Microphone;
+        }
+        if (!runtimeAudioDeviceId.empty()) {
+            return screenshare::AudioCaptureSource::SystemOutput;
+        }
+        if (config.sourceType == screenshare::CaptureSourceType::Window && runtimeAudioProcessId != 0) {
+            return screenshare::AudioCaptureSource::ProcessOutput;
+        }
+        return options.audioCaptureSource == screenshare::AudioCaptureSource::ProcessOutput ?
+            screenshare::AudioCaptureSource::ProcessOutput :
+            screenshare::AudioCaptureSource::SystemOutput;
+    };
+    screenshare::AudioCaptureSource runtimeAudioSource = selectRuntimeAudioSource();
 
     for (const auto& target : udpSendTargetSpecs) {
         liveSignalingSendTargets.insert(target.target);
@@ -2920,13 +2965,17 @@ void RunCaptureStats(
             [udpSender = udpSender.get()](const screenshare::UdpAudioPacket& packet) {
                 udpSender->SendAudioPacket(packet);
             },
-            options.audioCaptureSource,
+            runtimeAudioSource,
             runtimeAudioDeviceId,
+            runtimeAudioProcessId,
             options.audioCodec);
         std::cout
             << "Audio capture worker started source="
-            << screenshare::AudioCaptureSourceName(options.audioCaptureSource)
+            << screenshare::AudioCaptureSourceName(runtimeAudioSource)
             << (runtimeAudioDeviceId.empty() ? "" : " device=selected")
+            << (runtimeAudioSource == screenshare::AudioCaptureSource::ProcessOutput ?
+                std::string(" process=") + std::to_string(runtimeAudioProcessId) :
+                std::string())
             << "\n";
     };
 
@@ -3400,6 +3449,12 @@ void RunCaptureStats(
             adaptiveResolutionTierIndex = 0;
             std::cout << "runtime_window=0x" << std::hex << config.windowHandle << std::dec << "\n";
         }
+        bool audioProcessChanged = false;
+        if (request->windowProcessId && runtimeAudioProcessId != *request->windowProcessId) {
+            runtimeAudioProcessId = *request->windowProcessId;
+            audioProcessChanged = true;
+            std::cout << "runtime_window_process=" << runtimeAudioProcessId << "\n";
+        }
         if (request->fps && *request->fps > 0 && *request->fps <= 240 && runtimeFps != *request->fps) {
             runtimeFps = *request->fps;
             config.targetFps = runtimeFps;
@@ -3480,7 +3535,11 @@ void RunCaptureStats(
                 << "runtime_video=" << (runtimeVideoPaused ? "paused" : "running")
                 << "\n";
         }
-        if (request->captureSystemAudio || request->hostAudioMuted || request->audioDeviceId) {
+        if (request->captureSystemAudio ||
+            request->hostAudioMuted ||
+            request->audioDeviceId ||
+            request->captureSourceType ||
+            request->windowProcessId) {
             bool nextAudioCapture = runtimeAudioCaptureEnabled;
             if (request->captureSystemAudio) {
                 nextAudioCapture = *request->captureSystemAudio;
@@ -3492,13 +3551,26 @@ void RunCaptureStats(
             if (request->audioDeviceId) {
                 nextAudioDeviceId = *request->audioDeviceId;
             }
-            if (nextAudioCapture != runtimeAudioCaptureEnabled || nextAudioDeviceId != runtimeAudioDeviceId) {
-                runtimeAudioCaptureEnabled = nextAudioCapture;
+            const auto previousAudioSource = runtimeAudioSource;
+            bool audioDeviceChanged = false;
+            if (nextAudioDeviceId != runtimeAudioDeviceId) {
                 runtimeAudioDeviceId = std::move(nextAudioDeviceId);
+                audioDeviceChanged = true;
+            }
+            runtimeAudioSource = selectRuntimeAudioSource();
+            if (nextAudioCapture != runtimeAudioCaptureEnabled ||
+                runtimeAudioSource != previousAudioSource ||
+                audioProcessChanged ||
+                audioDeviceChanged) {
+                runtimeAudioCaptureEnabled = nextAudioCapture;
                 restartAudioCaptureWorker();
                 std::cout
                     << "runtime_system_audio=" << (runtimeAudioCaptureEnabled ? "enabled" : "disabled")
+                    << " runtime_audio_source=" << screenshare::AudioCaptureSourceName(runtimeAudioSource)
                     << (runtimeAudioDeviceId.empty() ? "" : " runtime_audio_device=selected")
+                    << (runtimeAudioSource == screenshare::AudioCaptureSource::ProcessOutput ?
+                        std::string(" runtime_audio_process=") + std::to_string(runtimeAudioProcessId) :
+                        std::string())
                     << "\n";
             }
         }
@@ -3895,6 +3967,8 @@ void RunCaptureStats(
                 << " udp_dropped_frames=" << udpStatsNow.framesDropped
                 << " udp_wire_bytes=" << udpStatsNow.wireBytesSent
                 << " audio_capture=" << (runtimeAudioCaptureEnabled ? (audioCaptureStatsNow.started ? "running" : "starting") : "disabled")
+                << " audio_capture_source=" << screenshare::AudioCaptureSourceName(audioCaptureStatsNow.source)
+                << " audio_capture_fallback=" << (audioCaptureStatsNow.fallbackToSystemOutput ? "system" : "none")
                 << " audio_capture_packets=" << audioCaptureStatsNow.packets
                 << " audio_capture_frames=" << audioCaptureStatsNow.frames
                 << " audio_capture_bytes=" << audioCaptureStatsNow.bytes

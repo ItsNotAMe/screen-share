@@ -51,6 +51,7 @@ private:
         const QString& preferredSourceValue = QString());
     void populateAudioDevices(const std::vector<screenshare::SessionAudioDeviceInfo>& devices);
     void populateResolutionChoices();
+    void updateDefaultAudioChoiceText();
     void refreshRoomLink();
     void generatePassword();
     void installBackendHandlers();

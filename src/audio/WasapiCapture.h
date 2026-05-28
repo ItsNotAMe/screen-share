@@ -16,6 +16,7 @@ namespace screenshare {
 enum class AudioCaptureSource {
     SystemOutput,
     Microphone,
+    ProcessOutput,
 };
 
 struct AudioDeviceInfo {
@@ -28,6 +29,7 @@ struct AudioDeviceInfo {
 struct AudioCaptureConfig {
     AudioCaptureSource source = AudioCaptureSource::SystemOutput;
     std::wstring deviceId;
+    uint32_t processId = 0;
     std::chrono::milliseconds bufferDuration{100};
 };
 

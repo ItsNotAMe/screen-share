@@ -77,6 +77,9 @@ RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const ShareSessio
     if (settings.windowHandle && *settings.windowHandle != 0) {
         request.windowHandle = *settings.windowHandle;
     }
+    if (settings.windowProcessId && *settings.windowProcessId != 0) {
+        request.windowProcessId = *settings.windowProcessId;
+    }
     if (settings.captureSystemAudio) {
         request.captureSystemAudio = *settings.captureSystemAudio;
     }
@@ -158,6 +161,7 @@ SessionAudioDeviceSource ToSessionAudioDeviceSource(AudioCaptureSource source)
 {
     switch (source) {
     case AudioCaptureSource::SystemOutput:
+    case AudioCaptureSource::ProcessOutput:
         return SessionAudioDeviceSource::SystemOutput;
     case AudioCaptureSource::Microphone:
         return SessionAudioDeviceSource::Microphone;

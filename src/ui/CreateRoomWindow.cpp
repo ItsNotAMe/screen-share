@@ -531,6 +531,7 @@ QWidget* CreateRoomWindow::buildSettingsPanel()
     displayCombo_->setFixedHeight(40);
     connect(displayCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
         populateResolutionChoices();
+        updateDefaultAudioChoiceText();
     });
     layout->addWidget(buildSettingRow("display", "Source", displayCombo_));
 
@@ -709,6 +710,7 @@ void CreateRoomWindow::populateCaptureSources(
             }
             displayCombo_->addItem(parts.join(" - "), displaySourceValue(display.index));
             displayCombo_->setItemData(displayCombo_->count() - 1, QSize(display.width, display.height), Qt::UserRole + 1);
+            displayCombo_->setItemData(displayCombo_->count() - 1, 0U, Qt::UserRole + 2);
         }
     } else {
         const QList<QScreen*> screens = QApplication::screens();
@@ -718,9 +720,11 @@ void CreateRoomWindow::populateCaptureSources(
                 QStringLiteral("Display %1 - %2 x %3").arg(i).arg(geometry.width()).arg(geometry.height()),
                 displaySourceValue(i));
             displayCombo_->setItemData(displayCombo_->count() - 1, geometry.size(), Qt::UserRole + 1);
+            displayCombo_->setItemData(displayCombo_->count() - 1, 0U, Qt::UserRole + 2);
         }
         if (displayCombo_->count() == 0) {
             displayCombo_->addItem("Display 0", displaySourceValue(0));
+            displayCombo_->setItemData(displayCombo_->count() - 1, 0U, Qt::UserRole + 2);
         }
     }
     if (!windows.empty()) {
@@ -739,6 +743,7 @@ void CreateRoomWindow::populateCaptureSources(
             }
             displayCombo_->addItem(text, windowSourceValue(window.handle));
             displayCombo_->setItemData(displayCombo_->count() - 1, QSize(window.width, window.height), Qt::UserRole + 1);
+            displayCombo_->setItemData(displayCombo_->count() - 1, window.processId, Qt::UserRole + 2);
         }
     }
     if (!preferredSourceValue.isEmpty()) {
@@ -749,6 +754,7 @@ void CreateRoomWindow::populateCaptureSources(
     }
     displayCombo_->blockSignals(blocked);
     populateResolutionChoices();
+    updateDefaultAudioChoiceText();
     tuneComboPopup(displayCombo_);
 }
 
@@ -766,7 +772,21 @@ void CreateRoomWindow::populateAudioDevices(const std::vector<screenshare::Sessi
         }
         audioDeviceCombo_->addItem(name, QString::fromStdString(device.id));
     }
+    updateDefaultAudioChoiceText();
     tuneComboPopup(audioDeviceCombo_);
+}
+
+void CreateRoomWindow::updateDefaultAudioChoiceText()
+{
+    if (audioDeviceCombo_ == nullptr || audioDeviceCombo_->count() == 0) {
+        return;
+    }
+    const QString sourceValue = displayCombo_ == nullptr ? QString() : displayCombo_->currentData().toString();
+    audioDeviceCombo_->setItemText(
+        0,
+        sourceValueIsWindow(sourceValue) ?
+            QStringLiteral("Application Audio (selected window)") :
+            QStringLiteral("System Audio (default)"));
 }
 
 void CreateRoomWindow::populateResolutionChoices()
@@ -875,6 +895,9 @@ screenshare::ShareSessionConfig CreateRoomWindow::currentConfig() const
     if (sourceValueIsWindow(sourceValue)) {
         config.captureSourceType = screenshare::SessionCaptureSourceType::Window;
         config.windowHandle = windowHandleFromSourceValue(sourceValue);
+        config.windowProcessId = displayCombo_ != nullptr ?
+            displayCombo_->currentData(Qt::UserRole + 2).toUInt() :
+            0U;
     } else {
         config.captureSourceType = screenshare::SessionCaptureSourceType::Display;
         config.displayIndex = displayIndexFromSourceValue(sourceValue);
@@ -915,6 +938,7 @@ ShareSessionUiState CreateRoomWindow::currentShareUiState() const
     state.displaySourceValue = displayCombo_ != nullptr ? displayCombo_->currentData().toString() : displaySourceValue(0);
     state.displayValue = state.config.displayIndex;
     state.windowHandle = state.config.windowHandle;
+    state.windowProcessId = state.config.windowProcessId;
     if (displayCombo_ != nullptr) {
         for (int index = 0; index < displayCombo_->count(); ++index) {
             const QString value = displayCombo_->itemData(index).toString();
@@ -924,6 +948,7 @@ ShareSessionUiState CreateRoomWindow::currentShareUiState() const
             state.displayChoices.push_back(ShareDisplayChoice{
                 displayCombo_->itemText(index),
                 value,
+                displayCombo_->itemData(index, Qt::UserRole + 2).toUInt(),
             });
         }
     }

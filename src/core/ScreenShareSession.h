@@ -117,6 +117,7 @@ struct ShareSessionSettings {
     std::optional<SessionCaptureSourceType> captureSourceType;
     std::optional<int> displayIndex;
     std::optional<uint64_t> windowHandle;
+    std::optional<uint32_t> windowProcessId;
     std::optional<bool> captureSystemAudio;
     std::optional<bool> hostAudioMuted;
     std::optional<bool> hostVideoPaused;
@@ -135,6 +136,7 @@ struct ShareSessionConfig {
     SessionCaptureSourceType captureSourceType = SessionCaptureSourceType::Display;
     int displayIndex = 0;
     uint64_t windowHandle = 0;
+    uint32_t windowProcessId = 0;
     int seconds = 0;
     uint16_t roomPort = 0;
     uint16_t udpLocalPort = 0;

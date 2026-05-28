@@ -9,15 +9,11 @@ Only you can fully validate these because they need real machines/networks.
 - Mid-session stream settings validation: while sharing, switch Resolution between Auto and explicit tiers at or below the display size and confirm Watch keeps receiving after each restart.
 - Downscaled preview validation: share at 1920 x 1080 from the 2K display and compare the embedded Watch preview against native/Auto for text sharpness.
 - Application sharing validation: choose an application window in Create Room's Source field and confirm Watch receives only that window.
+- Application audio validation: with an application window selected and default audio enabled, confirm Watch receives that app's audio; if process audio is unavailable on that Windows install, confirm it falls back to system audio.
 
 ## Build Work
 
-1. Add application sharing.
-   - [x] Let the host choose a specific application/window video source.
-   - [ ] Capture matching application audio where Windows allows it.
-   - [ ] Make fallback behavior clear when per-app audio is unavailable.
-   - [ ] Keep whole-display/system-audio sharing as the simple default.
-2. Add better user-facing diagnostics when reports show the need.
+1. Add better user-facing diagnostics when reports show the need.
    - [ ] Surface common setup mistakes in the UI instead of only logs.
    - [ ] Improve sync/network state wording on active session screens.
    - [ ] Promote report-driven issues from the section below only after real reports justify them.

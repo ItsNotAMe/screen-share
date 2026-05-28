@@ -236,6 +236,7 @@ QVector<ShareDisplayChoice> sourceChoicesFromBackend(
         choices.push_back(ShareDisplayChoice{
             parts.join(" - "),
             displaySourceValue(display.index),
+            0,
         });
     }
 
@@ -249,6 +250,7 @@ QVector<ShareDisplayChoice> sourceChoicesFromBackend(
         choices.push_back(ShareDisplayChoice{
             text,
             windowSourceValue(window.handle),
+            window.processId,
         });
     }
     return choices;
@@ -616,6 +618,7 @@ QWidget* ActiveShareWindow::buildSettingsPanel()
     settingsDisplayCombo_->setEnabled(true);
     connect(settingsDisplayCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
         if (!updatingSettingsUi_) {
+            updateSettingsDefaultAudioChoiceText();
             updateSettingsApplyState();
         }
     });
@@ -975,6 +978,7 @@ void ActiveShareWindow::updateShareSummary()
                 settingsAudioCombo_->addItem(choice.text, choice.value);
             }
         }
+        updateSettingsDefaultAudioChoiceText();
         const int index = settingsAudioCombo_->findData(session_.audioDeviceValue);
         settingsAudioCombo_->setCurrentIndex(index >= 0 ? index : 0);
         settingsAudioCombo_->blockSignals(blocked);
@@ -1103,9 +1107,11 @@ void ActiveShareWindow::populateSettingsSourceChoices(const QString& preferredSo
         settingsDisplayCombo_->addItem(
             session_.displayText.isEmpty() ? QStringLiteral("Display 0") : session_.displayText,
             session_.displaySourceValue.isEmpty() ? displaySourceValue(session_.displayValue) : session_.displaySourceValue);
+        settingsDisplayCombo_->setItemData(settingsDisplayCombo_->count() - 1, session_.windowProcessId, Qt::UserRole + 2);
     } else {
         for (const ShareDisplayChoice& choice : session_.displayChoices) {
             settingsDisplayCombo_->addItem(choice.text, choice.value);
+            settingsDisplayCombo_->setItemData(settingsDisplayCombo_->count() - 1, choice.processId, Qt::UserRole + 2);
         }
     }
 
@@ -1114,11 +1120,31 @@ void ActiveShareWindow::populateSettingsSourceChoices(const QString& preferredSo
         settingsDisplayCombo_->setCurrentIndex(preferredIndex);
     } else if (keepMissingSelection && !preferredSourceValue.isEmpty()) {
         settingsDisplayCombo_->addItem(QStringLiteral("%1 (unavailable)").arg(previousText), preferredSourceValue);
+        settingsDisplayCombo_->setItemData(settingsDisplayCombo_->count() - 1, session_.windowProcessId, Qt::UserRole + 2);
         settingsDisplayCombo_->setCurrentIndex(settingsDisplayCombo_->count() - 1);
     }
 
     settingsDisplayCombo_->blockSignals(blocked);
     updatingSettingsUi_ = false;
+    updateSettingsDefaultAudioChoiceText();
+}
+
+void ActiveShareWindow::updateSettingsDefaultAudioChoiceText()
+{
+    if (settingsAudioCombo_ == nullptr || settingsAudioCombo_->count() == 0) {
+        return;
+    }
+    if (!settingsAudioCombo_->itemData(0).toString().isEmpty()) {
+        return;
+    }
+    const QString sourceValue = settingsDisplayCombo_ == nullptr ?
+        session_.displaySourceValue :
+        settingsDisplayCombo_->currentData().toString();
+    settingsAudioCombo_->setItemText(
+        0,
+        sourceValueIsWindow(sourceValue) ?
+            QStringLiteral("Application Audio (selected window)") :
+            QStringLiteral("System Audio (default)"));
 }
 
 screenshare::ShareSessionSettings ActiveShareWindow::selectedShareSettings() const
@@ -1136,6 +1162,9 @@ screenshare::ShareSessionSettings ActiveShareWindow::selectedShareSettings() con
     if (sourceValueIsWindow(sourceValue)) {
         settings.captureSourceType = screenshare::SessionCaptureSourceType::Window;
         settings.windowHandle = windowHandleFromSourceValue(sourceValue);
+        settings.windowProcessId = settingsDisplayCombo_ == nullptr ?
+            session_.windowProcessId :
+            settingsDisplayCombo_->currentData(Qt::UserRole + 2).toUInt();
     } else {
         settings.captureSourceType = screenshare::SessionCaptureSourceType::Display;
         settings.displayIndex = displayIndexFromSourceValue(sourceValue);
@@ -1183,10 +1212,12 @@ void ActiveShareWindow::applySettings()
     }
     session_.config.displayIndex = settings.displayIndex.value_or(session_.config.displayIndex);
     session_.config.windowHandle = settings.windowHandle.value_or(session_.config.windowHandle);
+    session_.config.windowProcessId = settings.windowProcessId.value_or(session_.config.windowProcessId);
     session_.config.audioDeviceId = settings.audioDeviceId.value_or(session_.config.audioDeviceId);
     session_.config.stream = settings.stream;
     session_.displayValue = session_.config.displayIndex;
     session_.windowHandle = session_.config.windowHandle;
+    session_.windowProcessId = session_.config.windowProcessId;
     if (settingsDisplayCombo_ != nullptr) {
         session_.displayText = settingsDisplayCombo_->currentText();
         session_.displaySourceValue = settingsDisplayCombo_->currentData().toString();

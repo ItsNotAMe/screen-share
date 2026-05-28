@@ -15,6 +15,7 @@ struct ShareResolutionChoice {
 struct ShareDisplayChoice {
     QString text;
     QString value;
+    uint32_t processId = 0;
 };
 
 struct ShareAudioChoice {
@@ -31,6 +32,7 @@ struct ShareSessionUiState {
     QString displaySourceValue;
     int displayValue = 0;
     uint64_t windowHandle = 0;
+    uint32_t windowProcessId = 0;
     QVector<ShareDisplayChoice> displayChoices;
     QString resolutionText;
     QString resolutionValue;

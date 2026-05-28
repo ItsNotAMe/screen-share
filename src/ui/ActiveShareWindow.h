@@ -66,6 +66,7 @@ private:
     void copyInvite();
     void refreshSourceChoices(bool preserveSelection = true, bool skipOpenPopup = false);
     void populateSettingsSourceChoices(const QString& preferredSourceValue = QString(), bool keepMissingSelection = false);
+    void updateSettingsDefaultAudioChoiceText();
     void applySettings();
     screenshare::ShareSessionSettings selectedShareSettings() const;
     void updateSettingsApplyState();
