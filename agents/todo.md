@@ -2,20 +2,13 @@
 
 ## Your Validation
 
-Only you can fully validate these because they need real machines/networks.
+Only you can fully validate this because it needs real machines/networks.
 
-- Worker room validation already tested: open room across two LANs, and locked/password room locally.
-- Remaining Worker room validation: locked/password room across two LANs, watcher joins an idle room before Share resumes, sharer reconnect, and two or more watchers with WebSocket peer notifications plus HTTP fallback.
-- Mid-session stream settings validation: while sharing, switch Resolution between Auto and explicit tiers at or below the display size and confirm Watch keeps receiving after each restart.
-- Downscaled preview validation: share at 1920 x 1080 from the 2K display and compare the embedded Watch preview against native/Auto for text sharpness.
-- Application sharing validation: choose an application window in Create Room's Source field and confirm Watch receives only that window.
-- Application audio validation: with an application window selected and default audio enabled, confirm Watch receives only that app's audio; if process audio is unavailable on that Windows install, confirm no unrelated system audio is sent and the sender reports app audio unavailable.
+- Two-viewer Worker room validation: host one room and confirm two different viewers from two different NATs can join and stay live together.
 
 ## Build Work
 
-1. Change Watch fullscreen to reuse the embedded preview surface instead of opening a separate fullscreen window.
-
-2. Add better user-facing diagnostics when reports show the need.
+1. Add better user-facing diagnostics when reports show the need.
    - [ ] Surface common setup mistakes in the UI instead of only logs.
    - [ ] Improve sync/network state wording on active session screens.
    - [ ] Promote report-driven issues from the section below only after real reports justify them.

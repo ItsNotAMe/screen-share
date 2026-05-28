@@ -1,5 +1,6 @@
 #include "ui/ActiveWatchWindow.h"
 
+#include "ui/AppShellWindow.h"
 #include "ui/UiStyle.h"
 #include "ui/VideoFrameWidget.h"
 
@@ -24,6 +25,7 @@
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QStyle>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
@@ -171,6 +173,7 @@ ActiveWatchWindow::ActiveWatchWindow(QtSessionBackend* backend, Actions actions,
 
 void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
 {
+    closeStreamFullscreen();
     session_ = session;
     installBackendHandlers();
     elapsed_.restart();
@@ -192,21 +195,16 @@ void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
 
 bool ActiveWatchWindow::eventFilter(QObject* watched, QEvent* event)
 {
-    if (watched == fullscreenVideoWindow_) {
-        if (event->type() == QEvent::Close) {
-            fullscreenVideoWindow_ = nullptr;
-            fullscreenVideoWidget_ = nullptr;
-            if (fullscreenButton_ != nullptr) {
-                fullscreenButton_->setText("Fullscreen");
-            }
-            return false;
-        }
+    if (streamFullscreen_) {
         if (event->type() == QEvent::KeyPress) {
             const auto* keyEvent = static_cast<QKeyEvent*>(event);
             if (keyEvent->key() == Qt::Key_Escape || keyEvent->key() == Qt::Key_F11) {
                 closeStreamFullscreen();
                 return true;
             }
+        }
+        if (watched == window() && event->type() == QEvent::WindowStateChange && !window()->isFullScreen()) {
+            setStreamFullscreen(false);
         }
     }
     return QWidget::eventFilter(watched, event);
@@ -217,17 +215,23 @@ QWidget* ActiveWatchWindow::buildShell()
     auto* host = new QWidget;
     host->setObjectName("ActiveWatchContent");
     auto* root = new QVBoxLayout(host);
+    rootLayout_ = root;
     root->setContentsMargins(20, 14, 20, 20);
     root->setSpacing(14);
-    root->addWidget(buildTopStatus());
+    topStatusWidget_ = buildTopStatus();
+    root->addWidget(topStatusWidget_);
 
     auto* body = new QHBoxLayout;
+    bodyLayout_ = body;
     body->setContentsMargins(0, 0, 0, 0);
     body->setSpacing(14);
-    body->addWidget(buildPreviewPanel(), 1);
-    body->addWidget(buildSideStats(), 0);
+    previewPanel_ = buildPreviewPanel();
+    sideStatsPanel_ = buildSideStats();
+    body->addWidget(previewPanel_, 1);
+    body->addWidget(sideStatsPanel_, 0);
     root->addLayout(body, 1);
-    root->addWidget(buildFooter());
+    footerWidget_ = buildFooter();
+    root->addWidget(footerWidget_);
     return host;
 }
 
@@ -262,6 +266,7 @@ QWidget* ActiveWatchWindow::buildPreviewPanel()
     layout->setSpacing(0);
     videoFrameWidget_ = new VideoFrameWidget;
     videoFrameWidget_->setStatusText("Waiting for stream");
+    videoFrameWidget_->setFocusPolicy(Qt::StrongFocus);
     layout->addWidget(videoFrameWidget_, 1);
     return panel;
 }
@@ -445,11 +450,7 @@ void ActiveWatchWindow::installBackendHandlers()
         if (previewStatusText_ == QStringLiteral("Waiting for encrypted stream")) {
             setPreviewStatusText("Receiving stream");
         }
-        if (fullscreenVideoWidget_ != nullptr) {
-            fullscreenVideoWidget_->setVideoFrame(frame);
-        } else {
-            videoFrameWidget_->setVideoFrame(frame);
-        }
+        videoFrameWidget_->setVideoFrame(frame);
     });
 }
 
@@ -599,42 +600,107 @@ void ActiveWatchWindow::refreshMuteButton()
 
 void ActiveWatchWindow::toggleFullscreen()
 {
-    if (fullscreenVideoWindow_ != nullptr) {
+    if (streamFullscreen_) {
         closeStreamFullscreen();
         return;
     }
 
-    fullscreenVideoWindow_ = new QWidget(nullptr, Qt::Window | Qt::FramelessWindowHint);
-    fullscreenVideoWindow_->setObjectName("WatchStreamFullscreenWindow");
-    fullscreenVideoWindow_->setAttribute(Qt::WA_DeleteOnClose, true);
-    fullscreenVideoWindow_->setStyleSheet("QWidget#WatchStreamFullscreenWindow { background: #000000; }");
-    fullscreenVideoWindow_->installEventFilter(this);
-
-    auto* layout = new QVBoxLayout(fullscreenVideoWindow_);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-    fullscreenVideoWidget_ = new VideoFrameWidget;
-    fullscreenVideoWidget_->setStatusText(previewStatusText_);
-    layout->addWidget(fullscreenVideoWidget_, 1);
-    fullscreenVideoWindow_->showFullScreen();
-    if (fullscreenButton_ != nullptr) {
-        fullscreenButton_->setText("Exit Fullscreen");
-    }
+    setStreamFullscreen(true);
 }
 
 void ActiveWatchWindow::closeStreamFullscreen()
 {
-    if (fullscreenVideoWindow_ == nullptr) {
+    if (!streamFullscreen_) {
         return;
     }
-    QWidget* window = fullscreenVideoWindow_;
-    fullscreenVideoWindow_ = nullptr;
-    fullscreenVideoWidget_ = nullptr;
-    window->removeEventFilter(this);
-    window->close();
-    if (fullscreenButton_ != nullptr) {
-        fullscreenButton_->setText("Fullscreen");
+    setStreamFullscreen(false);
+}
+
+void ActiveWatchWindow::setStreamFullscreen(bool enabled)
+{
+    if (streamFullscreen_ == enabled) {
+        return;
     }
+
+    QWidget* topLevel = window();
+    auto* shell = dynamic_cast<AppShellWindow*>(topLevel);
+    if (enabled) {
+        preFullscreenGeometry_ = topLevel != nullptr ? topLevel->geometry() : QRect();
+        preFullscreenState_ = topLevel != nullptr ? topLevel->windowState() : Qt::WindowNoState;
+    }
+
+    streamFullscreen_ = enabled;
+    installFullscreenEventFilter(enabled);
+
+    if (topStatusWidget_ != nullptr) {
+        topStatusWidget_->setVisible(!enabled);
+    }
+    if (sideStatsPanel_ != nullptr) {
+        sideStatsPanel_->setVisible(!enabled);
+    }
+    if (footerWidget_ != nullptr) {
+        footerWidget_->setVisible(!enabled);
+    }
+    if (rootLayout_ != nullptr) {
+        rootLayout_->setContentsMargins(enabled ? 0 : 20, enabled ? 0 : 14, enabled ? 0 : 20, enabled ? 0 : 20);
+        rootLayout_->setSpacing(enabled ? 0 : 14);
+    }
+    if (bodyLayout_ != nullptr) {
+        bodyLayout_->setSpacing(enabled ? 0 : 14);
+    }
+    if (previewPanel_ != nullptr) {
+        previewPanel_->setProperty("streamFullscreen", enabled);
+        previewPanel_->style()->unpolish(previewPanel_);
+        previewPanel_->style()->polish(previewPanel_);
+    }
+    if (shell != nullptr) {
+        shell->setChromeVisible(!enabled);
+    }
+    if (fullscreenButton_ != nullptr) {
+        fullscreenButton_->setText(enabled ? QStringLiteral("Exit Fullscreen") : QStringLiteral("Fullscreen"));
+    }
+
+    if (topLevel != nullptr) {
+        if (enabled) {
+            topLevel->showFullScreen();
+            setFocus(Qt::OtherFocusReason);
+            if (videoFrameWidget_ != nullptr) {
+                videoFrameWidget_->setFocus(Qt::OtherFocusReason);
+            }
+        } else {
+            const bool wasMaximized = (preFullscreenState_ & Qt::WindowMaximized) != 0;
+            if (wasMaximized) {
+                topLevel->showMaximized();
+            } else {
+                topLevel->showNormal();
+                if (!preFullscreenGeometry_.isNull()) {
+                    topLevel->setGeometry(preFullscreenGeometry_);
+                }
+            }
+        }
+    }
+}
+
+void ActiveWatchWindow::installFullscreenEventFilter(bool installed)
+{
+    if (fullscreenEventFilterInstalled_ == installed) {
+        return;
+    }
+    if (QApplication* app = qobject_cast<QApplication*>(QApplication::instance())) {
+        if (installed) {
+            app->installEventFilter(this);
+        } else {
+            app->removeEventFilter(this);
+        }
+    }
+    if (window() != nullptr) {
+        if (installed) {
+            window()->installEventFilter(this);
+        } else {
+            window()->removeEventFilter(this);
+        }
+    }
+    fullscreenEventFilterInstalled_ = installed;
 }
 
 void ActiveWatchWindow::setPreviewStatusText(const QString& text)
@@ -642,9 +708,6 @@ void ActiveWatchWindow::setPreviewStatusText(const QString& text)
     previewStatusText_ = text;
     if (videoFrameWidget_ != nullptr) {
         videoFrameWidget_->setStatusText(text);
-    }
-    if (fullscreenVideoWidget_ != nullptr) {
-        fullscreenVideoWidget_->setStatusText(text);
     }
 }
 

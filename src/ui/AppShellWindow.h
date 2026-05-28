@@ -13,6 +13,7 @@ public:
 
     int addPage(QWidget* page);
     void setCurrentWidget(QWidget* page);
+    void setChromeVisible(bool visible);
 
 protected:
     void changeEvent(QEvent* event) override;

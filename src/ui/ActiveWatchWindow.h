@@ -5,6 +5,8 @@
 #include "ui/WatchSessionUiState.h"
 
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QRect>
+#include <QtCore/Qt>
 #include <QtWidgets/QWidget>
 
 #include <functional>
@@ -13,6 +15,8 @@ class QLabel;
 class QPushButton;
 class QSlider;
 class QTimer;
+class QHBoxLayout;
+class QVBoxLayout;
 class VideoFrameWidget;
 
 class ActiveWatchWindow final : public QWidget {
@@ -47,6 +51,8 @@ private:
     void refreshMuteButton();
     void toggleFullscreen();
     void closeStreamFullscreen();
+    void setStreamFullscreen(bool enabled);
+    void installFullscreenEventFilter(bool installed);
     void setPreviewStatusText(const QString& text);
     void handleHostLeft();
     void leaveRoom();
@@ -64,6 +70,12 @@ private:
     QLabel* stateLabel_ = nullptr;
     QLabel* elapsedLabel_ = nullptr;
     QLabel* roomLabel_ = nullptr;
+    QVBoxLayout* rootLayout_ = nullptr;
+    QHBoxLayout* bodyLayout_ = nullptr;
+    QWidget* topStatusWidget_ = nullptr;
+    QWidget* previewPanel_ = nullptr;
+    QWidget* sideStatsPanel_ = nullptr;
+    QWidget* footerWidget_ = nullptr;
     VideoFrameWidget* videoFrameWidget_ = nullptr;
     QLabel* hostLabel_ = nullptr;
     QLabel* connectionLabel_ = nullptr;
@@ -84,7 +96,9 @@ private:
     bool receivedVideoFrame_ = false;
     bool hostLeft_ = false;
     bool leaveRequested_ = false;
-    QWidget* fullscreenVideoWindow_ = nullptr;
-    VideoFrameWidget* fullscreenVideoWidget_ = nullptr;
+    bool streamFullscreen_ = false;
+    bool fullscreenEventFilterInstalled_ = false;
+    QRect preFullscreenGeometry_;
+    Qt::WindowStates preFullscreenState_{};
     QString previewStatusText_;
 };
