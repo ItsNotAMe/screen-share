@@ -7,21 +7,16 @@ Only you can fully validate these because they need real machines/networks.
 - Worker room validation already tested: open room across two LANs, and locked/password room locally.
 - Remaining Worker room validation: locked/password room across two LANs, watcher joins an idle room before Share resumes, sharer reconnect, and two or more watchers with WebSocket peer notifications plus HTTP fallback.
 - Mid-session stream settings validation: while sharing, switch Resolution between Auto and explicit tiers at or below the display size and confirm Watch keeps receiving after each restart.
+- Downscaled preview validation: share at 1920 x 1080 from the 2K display and compare the embedded Watch preview against native/Auto for text sharpness.
 
 ## Build Work
 
-1. Investigate and fix lower-than-native resolution blur.
-   - [ ] Confirm whether changing to 1080p changes bitrate or encoder quality unexpectedly.
-   - [ ] Compare sender capture/scaler output against receiver decoded output.
-   - [ ] Check chroma/subsampling and H.264 padding behavior for downscaled tiers.
-   - [ ] Check preview upscale filtering from 1080p to 2K.
-   - [ ] Fix the actual blurry path without hurting native/2K sharpness.
-2. Add application sharing.
+1. Add application sharing.
    - [ ] Let the host choose a specific application/window video source.
    - [ ] Capture matching application audio where Windows allows it.
    - [ ] Make fallback behavior clear when per-app audio is unavailable.
    - [ ] Keep whole-display/system-audio sharing as the simple default.
-3. Add better user-facing diagnostics when reports show the need.
+2. Add better user-facing diagnostics when reports show the need.
    - [ ] Surface common setup mistakes in the UI instead of only logs.
    - [ ] Improve sync/network state wording on active session screens.
    - [ ] Promote report-driven issues from the section below only after real reports justify them.

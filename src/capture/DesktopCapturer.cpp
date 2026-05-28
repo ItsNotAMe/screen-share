@@ -212,7 +212,13 @@ struct ScaleConstants {
     float sourceHeight = 1.0f;
     float outputWidth = 1.0f;
     float outputHeight = 1.0f;
+    float resizeSharpness = 0.0f;
+    float padding0 = 0.0f;
+    float padding1 = 0.0f;
+    float padding2 = 0.0f;
 };
+
+static_assert((sizeof(ScaleConstants) % 16) == 0, "D3D constant buffers must be 16-byte aligned");
 
 Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const char* source, const char* entryPoint, const char* target)
 {
@@ -710,6 +716,10 @@ cbuffer ColorConversion : register(b0)
     float sourceHeight;
     float outputWidth;
     float outputHeight;
+    float resizeSharpness;
+    float padding0;
+    float padding1;
+    float padding2;
 };
 
 float3 LinearToSrgb(float3 linearRgb)
@@ -787,11 +797,12 @@ float3 HdrDesktopBgraToSdr(float3 sdrRgb)
 float CatmullRomWeight(float x)
 {
     x = abs(x);
+    float a = lerp(-0.5, -0.9, saturate(resizeSharpness));
     if (x <= 1.0) {
-        return ((1.5 * x - 2.5) * x * x) + 1.0;
+        return ((a + 2.0) * x * x * x) - ((a + 3.0) * x * x) + 1.0;
     }
     if (x < 2.0) {
-        return (((-0.5 * x + 2.5) * x - 4.0) * x) + 2.0;
+        return (a * x * x * x) - (5.0 * a * x * x) + (8.0 * a * x) - (4.0 * a);
     }
     return 0.0;
 }
@@ -1323,13 +1334,23 @@ ID3D11Texture2D* DesktopCapturer::ScaleFrameIfNeeded(ID3D11Texture2D* sourceText
     constants.colorConversionMode = colorConversionMode;
     constants.hdrSdrWhiteNits = std::clamp(config_.hdrSdrWhiteNits, 80.0f, 1000.0f);
     constants.hdrSdrBgraExposure = std::clamp(config_.hdrSdrBgraExposure, 0.25f, 2.0f);
-    constants.sharpResize =
+    const bool resized =
         outputWidth != static_cast<int>(sourceDesc.Width) ||
-        outputHeight != static_cast<int>(sourceDesc.Height) ? 1.0f : 0.0f;
+        outputHeight != static_cast<int>(sourceDesc.Height);
+    const bool downscaled =
+        outputWidth < static_cast<int>(sourceDesc.Width) ||
+        outputHeight < static_cast<int>(sourceDesc.Height);
+    constants.sharpResize = resized ? 1.0f : 0.0f;
     constants.sourceWidth = static_cast<float>(sourceDesc.Width);
     constants.sourceHeight = static_cast<float>(sourceDesc.Height);
     constants.outputWidth = static_cast<float>(outputWidth);
     constants.outputHeight = static_cast<float>(outputHeight);
+    if (downscaled) {
+        const float widthScale = constants.outputWidth / std::max(constants.sourceWidth, 1.0f);
+        const float heightScale = constants.outputHeight / std::max(constants.sourceHeight, 1.0f);
+        const float scale = std::min(widthScale, heightScale);
+        constants.resizeSharpness = std::clamp(0.35f + (1.0f - scale) * 1.0f, 0.35f, 0.75f);
+    }
     lastColorConversionMode_ = constants.colorConversionMode;
     context_->UpdateSubresource(scaleConstants_.Get(), 0, nullptr, &constants, 0, 0);
 
