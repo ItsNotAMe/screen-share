@@ -781,6 +781,9 @@ struct AudioCaptureWorkerStats {
     screenshare::udp_protocol::AudioCodec codec = screenshare::udp_protocol::AudioCodec::Raw;
     bool started = false;
     std::string deviceName;
+    screenshare::AudioCaptureSource source = screenshare::AudioCaptureSource::SystemOutput;
+    bool unavailable = false;
+    std::string unavailableReason;
 };
 
 class AudioUdpCaptureWorker {
@@ -801,6 +804,7 @@ public:
         SendAudioPacketFn sendAudioPacket,
         screenshare::AudioCaptureSource source,
         const std::string& deviceId,
+        uint32_t processId,
         screenshare::udp_protocol::AudioCodec codec)
     {
         Stop();
@@ -809,11 +813,12 @@ public:
             std::lock_guard lock(mutex_);
             stats_ = {};
             stats_.codec = codec;
+            stats_.source = source;
             error_.clear();
         }
 
-        thread_ = std::thread([this, sendAudioPacket = std::move(sendAudioPacket), source, deviceId, codec] {
-            Run(sendAudioPacket, source, deviceId, codec);
+        thread_ = std::thread([this, sendAudioPacket = std::move(sendAudioPacket), source, deviceId, processId, codec] {
+            Run(sendAudioPacket, source, deviceId, processId, codec);
         });
     }
 
@@ -844,16 +849,33 @@ private:
         const SendAudioPacketFn& sendAudioPacket,
         screenshare::AudioCaptureSource source,
         const std::string& deviceId,
+        uint32_t processId,
         screenshare::udp_protocol::AudioCodec codec)
     {
         try {
             screenshare::WasapiCapture capture;
             screenshare::AudioCaptureConfig config;
             config.source = source;
+            config.processId = processId;
             if (!deviceId.empty()) {
                 config.deviceId = screenshare::Widen(deviceId);
             }
-            capture.Start(config);
+            try {
+                capture.Start(config);
+            } catch (const std::exception& error) {
+                if (source != screenshare::AudioCaptureSource::ProcessOutput) {
+                    throw;
+                }
+                std::cout
+                    << "audio_capture_unavailable=process reason=process_loopback_failed detail=\""
+                    << error.what()
+                    << "\"\n";
+                std::lock_guard lock(mutex_);
+                stats_.source = source;
+                stats_.unavailable = true;
+                stats_.unavailableReason = error.what();
+                return;
+            }
 
             const auto format = capture.format();
             const auto udpSampleFormat = ToUdpAudioSampleFormat(format);
@@ -870,6 +892,7 @@ private:
                 std::lock_guard lock(mutex_);
                 stats_.started = true;
                 stats_.deviceName = screenshare::Narrow(capture.deviceName());
+                stats_.source = source;
                 stats_.sampleRate = format.sampleRate;
                 stats_.channels = format.channels;
                 stats_.bitsPerSample = format.bitsPerSample;
@@ -2434,6 +2457,7 @@ void RunAudioCaptureStats(
     screenshare::WasapiCapture capture;
     screenshare::AudioCaptureConfig config;
     config.source = options.audioCaptureSource;
+    config.processId = options.audioProcessId;
     if (!options.audioDeviceId.empty()) {
         config.deviceId = screenshare::Widen(options.audioDeviceId);
     }
@@ -2681,7 +2705,9 @@ void RunCaptureStats(
     StreamEncoderPreference streamEncoderPreference = options.streamEncoderPreference;
 
     screenshare::CaptureConfig config;
+    config.sourceType = options.captureSourceType;
     config.displayIndex = options.displayIndex;
+    config.windowHandle = options.windowHandle;
     config.targetWidth = options.width;
     config.targetHeight = options.height;
     config.targetFps = options.fps;
@@ -2697,8 +2723,12 @@ void RunCaptureStats(
 
     WarnIfPlaintextUdpSession(options);
 
-    std::cout << "Capturing display " << options.displayIndex
-              << " at target " << options.fps << " FPS";
+    if (options.captureSourceType == screenshare::CaptureSourceType::Window) {
+        std::cout << "Capturing window 0x" << std::hex << options.windowHandle << std::dec;
+    } else {
+        std::cout << "Capturing display " << options.displayIndex;
+    }
+    std::cout << " at target " << options.fps << " FPS";
 
     if (options.width > 0 && options.height > 0) {
         std::cout << ", requested output " << options.width << "x" << options.height;
@@ -2781,6 +2811,9 @@ void RunCaptureStats(
         if (!options.audioDeviceId.empty()) {
             std::cout << ", selected audio device id";
         }
+        if (options.audioCaptureSource == screenshare::AudioCaptureSource::ProcessOutput && options.audioProcessId != 0) {
+            std::cout << ", process " << options.audioProcessId;
+        }
         std::cout << ", audio codec " << screenshare::udp_protocol::AudioCodecName(options.audioCodec);
     }
     if (options.captureBackend == screenshare::CaptureBackend::WindowsGraphicsCapture) {
@@ -2825,6 +2858,8 @@ void RunCaptureStats(
     uint64_t streamBytes = 0;
     uint32_t streamBitrate = 0;
     uint32_t streamTargetBitrate = 0;
+    int streamEncoderWidth = 0;
+    int streamEncoderHeight = 0;
     bool autoBitrateEnabled = options.bitrate == 0;
     uint64_t bitrateAdaptations = 0;
     uint64_t bitrateAdaptationFailures = 0;
@@ -2865,6 +2900,23 @@ void RunCaptureStats(
     bool runtimeVideoPaused = options.videoPaused;
     bool runtimeAudioCaptureEnabled = options.audioCapture;
     std::string runtimeAudioDeviceId = options.audioDeviceId;
+    uint32_t runtimeAudioProcessId =
+        options.audioProcessId != 0 ? options.audioProcessId : options.windowProcessId;
+    auto selectRuntimeAudioSource = [&]() {
+        if (options.audioCaptureSource == screenshare::AudioCaptureSource::Microphone) {
+            return screenshare::AudioCaptureSource::Microphone;
+        }
+        if (!runtimeAudioDeviceId.empty()) {
+            return screenshare::AudioCaptureSource::SystemOutput;
+        }
+        if (config.sourceType == screenshare::CaptureSourceType::Window && runtimeAudioProcessId != 0) {
+            return screenshare::AudioCaptureSource::ProcessOutput;
+        }
+        return options.audioCaptureSource == screenshare::AudioCaptureSource::ProcessOutput ?
+            screenshare::AudioCaptureSource::ProcessOutput :
+            screenshare::AudioCaptureSource::SystemOutput;
+    };
+    screenshare::AudioCaptureSource runtimeAudioSource = selectRuntimeAudioSource();
 
     for (const auto& target : udpSendTargetSpecs) {
         liveSignalingSendTargets.insert(target.target);
@@ -2912,13 +2964,17 @@ void RunCaptureStats(
             [udpSender = udpSender.get()](const screenshare::UdpAudioPacket& packet) {
                 udpSender->SendAudioPacket(packet);
             },
-            options.audioCaptureSource,
+            runtimeAudioSource,
             runtimeAudioDeviceId,
+            runtimeAudioProcessId,
             options.audioCodec);
         std::cout
             << "Audio capture worker started source="
-            << screenshare::AudioCaptureSourceName(options.audioCaptureSource)
+            << screenshare::AudioCaptureSourceName(runtimeAudioSource)
             << (runtimeAudioDeviceId.empty() ? "" : " device=selected")
+            << (runtimeAudioSource == screenshare::AudioCaptureSource::ProcessOutput ?
+                std::string(" process=") + std::to_string(runtimeAudioProcessId) :
+                std::string())
             << "\n";
     };
 
@@ -3063,6 +3119,12 @@ void RunCaptureStats(
         }
     };
 
+    auto resetStreamEncoder = [&]() {
+        streamEncoder.reset();
+        streamEncoderWidth = 0;
+        streamEncoderHeight = 0;
+    };
+
     auto drainLiveSignalingSendTargets = [&]() {
         if (!liveSignalingRuntime) {
             return;
@@ -3173,7 +3235,7 @@ void RunCaptureStats(
         try {
             if (streamEncoder) {
                 sendStreamPackets(streamEncoder->Drain());
-                streamEncoder.reset();
+                resetStreamEncoder();
             }
 
             ConfigureCapturePayloads(config, options, streamEncoderPreference);
@@ -3182,7 +3244,9 @@ void RunCaptureStats(
             hasFrame = false;
             std::cout
                 << "Runtime capture restarted"
+                << " source=" << (config.sourceType == screenshare::CaptureSourceType::Window ? "window" : "display")
                 << " display=" << config.displayIndex
+                << " window=0x" << std::hex << config.windowHandle << std::dec
                 << " output="
                 << (config.targetWidth > 0 && config.targetHeight > 0 ?
                     std::to_string(config.targetWidth) + "x" + std::to_string(config.targetHeight) :
@@ -3356,12 +3420,39 @@ void RunCaptureStats(
             }
             std::cout << "runtime_room_name=updated\n";
         }
+        if (request->captureSourceType) {
+            const auto requestedSource = *request->captureSourceType == screenshare::RuntimeCaptureSourceType::Window
+                ? screenshare::CaptureSourceType::Window
+                : screenshare::CaptureSourceType::Display;
+            if (config.sourceType != requestedSource) {
+                config.sourceType = requestedSource;
+                restartCapture = true;
+                adaptiveResolutionTiers.clear();
+                adaptiveResolutionTierIndex = 0;
+                std::cout << "runtime_capture_source="
+                          << (config.sourceType == screenshare::CaptureSourceType::Window ? "window" : "display")
+                          << "\n";
+            }
+        }
         if (request->displayIndex && *request->displayIndex >= 0 && config.displayIndex != *request->displayIndex) {
             config.displayIndex = *request->displayIndex;
             restartCapture = true;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
             std::cout << "runtime_display=" << config.displayIndex << "\n";
+        }
+        if (request->windowHandle && *request->windowHandle != 0 && config.windowHandle != *request->windowHandle) {
+            config.windowHandle = *request->windowHandle;
+            restartCapture = true;
+            adaptiveResolutionTiers.clear();
+            adaptiveResolutionTierIndex = 0;
+            std::cout << "runtime_window=0x" << std::hex << config.windowHandle << std::dec << "\n";
+        }
+        bool audioProcessChanged = false;
+        if (request->windowProcessId && runtimeAudioProcessId != *request->windowProcessId) {
+            runtimeAudioProcessId = *request->windowProcessId;
+            audioProcessChanged = true;
+            std::cout << "runtime_window_process=" << runtimeAudioProcessId << "\n";
         }
         if (request->fps && *request->fps > 0 && *request->fps <= 240 && runtimeFps != *request->fps) {
             runtimeFps = *request->fps;
@@ -3443,7 +3534,11 @@ void RunCaptureStats(
                 << "runtime_video=" << (runtimeVideoPaused ? "paused" : "running")
                 << "\n";
         }
-        if (request->captureSystemAudio || request->hostAudioMuted || request->audioDeviceId) {
+        if (request->captureSystemAudio ||
+            request->hostAudioMuted ||
+            request->audioDeviceId ||
+            request->captureSourceType ||
+            request->windowProcessId) {
             bool nextAudioCapture = runtimeAudioCaptureEnabled;
             if (request->captureSystemAudio) {
                 nextAudioCapture = *request->captureSystemAudio;
@@ -3455,13 +3550,26 @@ void RunCaptureStats(
             if (request->audioDeviceId) {
                 nextAudioDeviceId = *request->audioDeviceId;
             }
-            if (nextAudioCapture != runtimeAudioCaptureEnabled || nextAudioDeviceId != runtimeAudioDeviceId) {
-                runtimeAudioCaptureEnabled = nextAudioCapture;
+            const auto previousAudioSource = runtimeAudioSource;
+            bool audioDeviceChanged = false;
+            if (nextAudioDeviceId != runtimeAudioDeviceId) {
                 runtimeAudioDeviceId = std::move(nextAudioDeviceId);
+                audioDeviceChanged = true;
+            }
+            runtimeAudioSource = selectRuntimeAudioSource();
+            if (nextAudioCapture != runtimeAudioCaptureEnabled ||
+                runtimeAudioSource != previousAudioSource ||
+                audioProcessChanged ||
+                audioDeviceChanged) {
+                runtimeAudioCaptureEnabled = nextAudioCapture;
                 restartAudioCaptureWorker();
                 std::cout
                     << "runtime_system_audio=" << (runtimeAudioCaptureEnabled ? "enabled" : "disabled")
+                    << " runtime_audio_source=" << screenshare::AudioCaptureSourceName(runtimeAudioSource)
                     << (runtimeAudioDeviceId.empty() ? "" : " runtime_audio_device=selected")
+                    << (runtimeAudioSource == screenshare::AudioCaptureSource::ProcessOutput ?
+                        std::string(" runtime_audio_process=") + std::to_string(runtimeAudioProcessId) :
+                        std::string())
                     << "\n";
             }
         }
@@ -3562,6 +3670,33 @@ void RunCaptureStats(
         if (frame) {
             ++totalDesktopUpdates;
             ++intervalDesktopUpdates;
+            const bool outputSizeChanged =
+                hasFrame &&
+                (lastFrame.width != frame->width || lastFrame.height != frame->height);
+            if (outputSizeChanged) {
+                if (streamEncoder) {
+                    resetStreamEncoder();
+                }
+                if (adaptiveResolutionEnabled && config.targetWidth == 0 && config.targetHeight == 0) {
+                    adaptiveResolutionTiers.clear();
+                    adaptiveResolutionTierIndex = 0;
+                    resolutionAdaptationStatus = "waiting";
+                }
+                if (autoBitrateEnabled) {
+                    streamTargetBitrate = SelectBitrate(options, frame->width, frame->height);
+                    streamBitrate = 0;
+                    bitrateAdvisor.Configure(
+                        streamTargetBitrate,
+                        SelectAdaptiveMinBitrate(options, streamTargetBitrate, adaptiveResolutionTiers),
+                        static_cast<uint32_t>(options.adaptReduceCooldownSeconds));
+                }
+                std::cout
+                    << "capture_output_resized"
+                    << " old=" << lastFrame.width << "x" << lastFrame.height
+                    << " new=" << frame->width << "x" << frame->height
+                    << " stream_encoder=restarting"
+                    << "\n";
+            }
             lastSourceWidth = frame->sourceWidth;
             lastSourceHeight = frame->sourceHeight;
             lastOutputWidth = frame->width;
@@ -3665,6 +3800,8 @@ void RunCaptureStats(
 
                         auto encoder = std::make_unique<screenshare::H264StreamEncoder>();
                         encoder->Start(encoderConfig);
+                        streamEncoderWidth = encoderConfig.width;
+                        streamEncoderHeight = encoderConfig.height;
 
                         std::cout
                             << "Stream encoder output=" << encoderConfig.width << "x" << encoderConfig.height
@@ -3700,6 +3837,7 @@ void RunCaptureStats(
                                 capturer.Stop();
                                 capturer.Start(config);
                                 hasFrame = false;
+                                resetStreamEncoder();
                                 std::cerr << "Restarted capture with CPU-visible NV12 for software stream encoding.\n";
                                 continue;
                             }
@@ -3711,6 +3849,12 @@ void RunCaptureStats(
                 }
 
                 ensureUdpSenderForTargets();
+
+                if (streamEncoder &&
+                    (streamEncoderWidth != lastFrame.width || streamEncoderHeight != lastFrame.height)) {
+                    resetStreamEncoder();
+                    continue;
+                }
 
                 const auto streamEncodeStartedAt = Clock::now();
                 const auto packets = streamEncoder->EncodeFrame(lastFrame);
@@ -3821,7 +3965,14 @@ void RunCaptureStats(
                 << " udp_peak_queue_ms=" << udpStatsNow.peakQueueDelayMs
                 << " udp_dropped_frames=" << udpStatsNow.framesDropped
                 << " udp_wire_bytes=" << udpStatsNow.wireBytesSent
-                << " audio_capture=" << (runtimeAudioCaptureEnabled ? (audioCaptureStatsNow.started ? "running" : "starting") : "disabled")
+                << " audio_capture="
+                << (runtimeAudioCaptureEnabled ?
+                    (audioCaptureStatsNow.unavailable ?
+                        "unavailable" :
+                        (audioCaptureStatsNow.started ? "running" : "starting")) :
+                    "disabled")
+                << " audio_capture_source=" << screenshare::AudioCaptureSourceName(audioCaptureStatsNow.source)
+                << " audio_capture_unavailable=" << (audioCaptureStatsNow.unavailable ? "yes" : "no")
                 << " audio_capture_packets=" << audioCaptureStatsNow.packets
                 << " audio_capture_frames=" << audioCaptureStatsNow.frames
                 << " audio_capture_bytes=" << audioCaptureStatsNow.bytes

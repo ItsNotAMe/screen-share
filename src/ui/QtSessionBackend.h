@@ -41,6 +41,7 @@ public:
     void applyAudioPlaybackSettings(const screenshare::AudioPlaybackSettings& settings);
     screenshare::SessionStatus currentStatus() const;
     std::vector<screenshare::SessionDisplayInfo> listDisplays(QString* errorMessage = nullptr);
+    std::vector<screenshare::SessionWindowInfo> listWindows(QString* errorMessage = nullptr);
     std::vector<screenshare::SessionAudioDeviceInfo> listAudioDevices(QString* errorMessage = nullptr);
 
 private:

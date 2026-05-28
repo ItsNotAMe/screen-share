@@ -75,6 +75,22 @@ struct SessionDisplayInfo {
     bool attached = true;
 };
 
+struct SessionWindowInfo {
+    uint64_t handle = 0;
+    uint32_t processId = 0;
+    std::string title;
+    std::string processName;
+    int width = 0;
+    int height = 0;
+    int left = 0;
+    int top = 0;
+};
+
+enum class SessionCaptureSourceType {
+    Display,
+    Window,
+};
+
 enum class SessionAudioDeviceSource {
     SystemOutput,
     Microphone,
@@ -98,7 +114,10 @@ struct StreamSettings {
 
 struct ShareSessionSettings {
     std::optional<std::string> roomName;
+    std::optional<SessionCaptureSourceType> captureSourceType;
     std::optional<int> displayIndex;
+    std::optional<uint64_t> windowHandle;
+    std::optional<uint32_t> windowProcessId;
     std::optional<bool> captureSystemAudio;
     std::optional<bool> hostAudioMuted;
     std::optional<bool> hostVideoPaused;
@@ -114,7 +133,10 @@ struct AudioPlaybackSettings {
 struct ShareSessionConfig {
     ShareConnectionMode connectionMode = ShareConnectionMode::Room;
     std::string sessionId;
+    SessionCaptureSourceType captureSourceType = SessionCaptureSourceType::Display;
     int displayIndex = 0;
+    uint64_t windowHandle = 0;
+    uint32_t windowProcessId = 0;
     int seconds = 0;
     uint16_t roomPort = 0;
     uint16_t udpLocalPort = 0;

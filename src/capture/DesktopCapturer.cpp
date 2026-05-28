@@ -20,6 +20,7 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 extern "C" HRESULT WINAPI CreateDirect3D11DeviceFromDXGIDevice(
     IDXGIDevice* dxgiDevice,
@@ -110,6 +111,11 @@ bool IsScRgbFormat(DXGI_FORMAT format)
         format == DXGI_FORMAT_R11G11B10_FLOAT;
 }
 
+int PositiveEvenDimension(int value)
+{
+    return std::max(2, value & ~1);
+}
+
 bool IsHdrColorSpace(DXGI_COLOR_SPACE_TYPE colorSpace)
 {
     return
@@ -141,6 +147,88 @@ const char* AppCapabilityAccessStatusName(appcap::AppCapabilityAccessStatus stat
     default:
         return "Unknown";
     }
+}
+
+std::wstring WindowTitle(HWND hwnd)
+{
+    const int length = GetWindowTextLengthW(hwnd);
+    if (length <= 0) {
+        return {};
+    }
+
+    std::wstring title(static_cast<size_t>(length), L'\0');
+    const int copied = GetWindowTextW(hwnd, title.data(), length + 1);
+    if (copied <= 0) {
+        return {};
+    }
+    title.resize(static_cast<size_t>(copied));
+    return title;
+}
+
+std::wstring ProcessNameForWindow(HWND hwnd)
+{
+    DWORD processId = 0;
+    GetWindowThreadProcessId(hwnd, &processId);
+    if (processId == 0) {
+        return {};
+    }
+
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (process == nullptr) {
+        return {};
+    }
+
+    std::wstring path(32768, L'\0');
+    DWORD size = static_cast<DWORD>(path.size());
+    std::wstring processName;
+    if (QueryFullProcessImageNameW(process, 0, path.data(), &size) != 0 && size > 0) {
+        path.resize(size);
+        const size_t slash = path.find_last_of(L"\\/");
+        processName = slash == std::wstring::npos ? path : path.substr(slash + 1);
+    }
+
+    CloseHandle(process);
+    return processName;
+}
+
+bool IsWindowCaptureCandidate(HWND hwnd)
+{
+    if (hwnd == nullptr || IsWindow(hwnd) == 0 || IsWindowVisible(hwnd) == 0) {
+        return false;
+    }
+    if (GetAncestor(hwnd, GA_ROOT) != hwnd) {
+        return false;
+    }
+
+    DWORD processId = 0;
+    GetWindowThreadProcessId(hwnd, &processId);
+    if (processId == GetCurrentProcessId()) {
+        return false;
+    }
+
+    const LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if ((exStyle & WS_EX_TOOLWINDOW) != 0) {
+        return false;
+    }
+
+    RECT rect{};
+    if (GetWindowRect(hwnd, &rect) == 0 || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return false;
+    }
+
+    return !WindowTitle(hwnd).empty();
+}
+
+int CompareOrdinalIgnoreCase(const std::wstring& lhs, const std::wstring& rhs)
+{
+    const int result = CompareStringOrdinal(lhs.c_str(), -1, rhs.c_str(), -1, TRUE);
+    if (result == CSTR_LESS_THAN) {
+        return -1;
+    }
+    if (result == CSTR_GREATER_THAN) {
+        return 1;
+    }
+    return 0;
 }
 
 void ConfigureWindowsGraphicsCaptureBorder(capture::GraphicsCaptureSession const& session, bool borderRequired)
@@ -310,11 +398,62 @@ std::vector<DisplayInfo> DesktopCapturer::EnumerateDisplays()
     return displays;
 }
 
+std::vector<WindowCaptureInfo> DesktopCapturer::EnumerateWindows()
+{
+    std::vector<WindowCaptureInfo> windows;
+
+    EnumWindows(
+        [](HWND hwnd, LPARAM parameter) -> BOOL {
+            auto* result = reinterpret_cast<std::vector<WindowCaptureInfo>*>(parameter);
+            if (result == nullptr || !IsWindowCaptureCandidate(hwnd)) {
+                return TRUE;
+            }
+
+            RECT rect{};
+            if (GetWindowRect(hwnd, &rect) == 0) {
+                return TRUE;
+            }
+
+            DWORD processId = 0;
+            GetWindowThreadProcessId(hwnd, &processId);
+
+            WindowCaptureInfo info;
+            info.handle = reinterpret_cast<uint64_t>(hwnd);
+            info.processId = processId;
+            info.title = WindowTitle(hwnd);
+            info.processName = ProcessNameForWindow(hwnd);
+            info.left = rect.left;
+            info.top = rect.top;
+            info.right = rect.right;
+            info.bottom = rect.bottom;
+            result->push_back(std::move(info));
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&windows));
+
+    std::sort(windows.begin(), windows.end(), [](const WindowCaptureInfo& lhs, const WindowCaptureInfo& rhs) {
+        const std::wstring lhsGroup = lhs.processName.empty() ? lhs.title : lhs.processName;
+        const std::wstring rhsGroup = rhs.processName.empty() ? rhs.title : rhs.processName;
+        const int groupCompare = CompareOrdinalIgnoreCase(lhsGroup, rhsGroup);
+        if (groupCompare != 0) {
+            return groupCompare < 0;
+        }
+        return CompareOrdinalIgnoreCase(lhs.title, rhs.title) < 0;
+    });
+
+    return windows;
+}
+
 void DesktopCapturer::Start(const CaptureConfig& config)
 {
     Stop();
     config_ = config;
-    if (config.backend == CaptureBackend::WindowsGraphicsCapture) {
+    if (config.sourceType == CaptureSourceType::Window) {
+        if (config.backend != CaptureBackend::WindowsGraphicsCapture) {
+            throw std::invalid_argument("Window capture requires the Windows Graphics Capture backend");
+        }
+        CreateWindowsGraphicsCaptureForWindow(config.windowHandle);
+    } else if (config.backend == CaptureBackend::WindowsGraphicsCapture) {
         CreateWindowsGraphicsCaptureForDisplay(config.displayIndex);
     } else {
         CreateDuplicationForDisplay(config.displayIndex);
@@ -618,6 +757,105 @@ void DesktopCapturer::CreateWindowsGraphicsCaptureForDisplay(int displayIndex)
     }
 
     throw std::out_of_range("Display index was not found");
+}
+
+void DesktopCapturer::CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandle)
+{
+    InitializeWinRt();
+
+    HWND hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(windowHandle));
+    if (hwnd == nullptr || IsWindow(hwnd) == 0) {
+        throw std::invalid_argument("Window capture source is no longer available");
+    }
+
+    CreateDevice(nullptr);
+    DetectOutputColorSpaceForMonitor(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
+
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+    ThrowIfFailed(device_.As(&dxgiDevice), "ID3D11Device::QueryInterface(IDXGIDevice)");
+
+    winrt::com_ptr<IInspectable> inspectableDevice;
+    ThrowIfFailed(
+        CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.Get(), inspectableDevice.put()),
+        "CreateDirect3D11DeviceFromDXGIDevice");
+
+    const auto d3dDevice = inspectableDevice.as<direct3d11::IDirect3DDevice>();
+    auto itemFactory = winrt::get_activation_factory<capture::GraphicsCaptureItem>();
+    const auto itemInterop = itemFactory.as<IGraphicsCaptureItemInterop>();
+
+    capture::GraphicsCaptureItem item{nullptr};
+    ThrowIfFailed(
+        itemInterop->CreateForWindow(
+            hwnd,
+            winrt::guid_of<capture::IGraphicsCaptureItem>(),
+            winrt::put_abi(item)),
+        "IGraphicsCaptureItemInterop::CreateForWindow");
+
+    const graphics::SizeInt32 captureSize = item.Size();
+    if (captureSize.Width <= 0 || captureSize.Height <= 0) {
+        throw std::runtime_error("Window capture source has no capturable area");
+    }
+
+    auto state = std::make_unique<WindowsGraphicsCaptureState>();
+    state->item = item;
+    state->device = d3dDevice;
+    state->size = captureSize;
+    state->framePool = capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
+        d3dDevice,
+        outputHdrActive_ && config_.hdrToSdr
+            ? directx::DirectXPixelFormat::R16G16B16A16Float
+            : directx::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        2,
+        captureSize);
+    state->session = state->framePool.CreateCaptureSession(item);
+    ConfigureWindowsGraphicsCaptureBorder(state->session, config_.wgcBorderRequired);
+    state->session.StartCapture();
+    wgc_ = std::move(state);
+}
+
+void DesktopCapturer::DetectOutputColorSpaceForMonitor(HMONITOR monitor)
+{
+    outputColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    outputHdrActive_ = false;
+    if (monitor == nullptr) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+        return;
+    }
+
+    for (UINT adapterIndex = 0;; ++adapterIndex) {
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        HRESULT adapterResult = factory->EnumAdapters1(adapterIndex, &adapter);
+        if (adapterResult == DXGI_ERROR_NOT_FOUND) {
+            break;
+        }
+        if (FAILED(adapterResult)) {
+            continue;
+        }
+
+        for (UINT outputIndex = 0;; ++outputIndex) {
+            Microsoft::WRL::ComPtr<IDXGIOutput> output;
+            HRESULT outputResult = adapter->EnumOutputs(outputIndex, &output);
+            if (outputResult == DXGI_ERROR_NOT_FOUND) {
+                break;
+            }
+            if (FAILED(outputResult)) {
+                continue;
+            }
+
+            DXGI_OUTPUT_DESC outputDesc{};
+            if (FAILED(output->GetDesc(&outputDesc))) {
+                continue;
+            }
+            if (outputDesc.Monitor == monitor) {
+                DetectOutputColorSpace(output.Get());
+                return;
+            }
+        }
+    }
 }
 
 void DesktopCapturer::DetectOutputColorSpace(IDXGIOutput* output)
@@ -1255,6 +1493,9 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
 
         if (captureFrame) {
             const graphics::SizeInt32 contentSize = captureFrame.ContentSize();
+            if (contentSize.Width <= 0 || contentSize.Height <= 0) {
+                return std::nullopt;
+            }
             if (contentSize.Width != wgc_->size.Width || contentSize.Height != wgc_->size.Height) {
                 wgc_->size = contentSize;
                 wgc_->framePool.Recreate(
@@ -1297,8 +1538,12 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
 ID3D11Texture2D* DesktopCapturer::ScaleFrameIfNeeded(ID3D11Texture2D* sourceTexture, const D3D11_TEXTURE2D_DESC& sourceDesc)
 {
     lastColorConversionMode_ = 0;
-    const int outputWidth = config_.targetWidth > 0 ? config_.targetWidth : static_cast<int>(sourceDesc.Width);
-    const int outputHeight = config_.targetHeight > 0 ? config_.targetHeight : static_cast<int>(sourceDesc.Height);
+    int outputWidth = config_.targetWidth > 0 ? config_.targetWidth : static_cast<int>(sourceDesc.Width);
+    int outputHeight = config_.targetHeight > 0 ? config_.targetHeight : static_cast<int>(sourceDesc.Height);
+    if (config_.includeNv12) {
+        outputWidth = PositiveEvenDimension(outputWidth);
+        outputHeight = PositiveEvenDimension(outputHeight);
+    }
     const uint32_t colorConversionMode = ColorConversionMode(sourceDesc.Format, outputColorSpace_, config_.hdrToSdr, outputHdrActive_);
     const bool needsColorTransform = colorConversionMode != 0;
     const bool needsTransform =

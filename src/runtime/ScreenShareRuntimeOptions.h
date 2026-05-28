@@ -83,6 +83,9 @@ struct Options {
     bool listH264Encoders = false;
     bool listAudioDevices = false;
     int displayIndex = 0;
+    screenshare::CaptureSourceType captureSourceType = screenshare::CaptureSourceType::Display;
+    uint64_t windowHandle = 0;
+    uint32_t windowProcessId = 0;
     int width = 0;
     int height = 0;
     int fps = 60;
@@ -143,6 +146,7 @@ struct Options {
     bool videoPaused = false;
     screenshare::AudioCaptureSource audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;
     std::string audioDeviceId;
+    uint32_t audioProcessId = 0;
     bool audioDeviceIdProvided = false;
     std::string audioSendTarget;
     screenshare::udp_protocol::AudioCodec audioCodec = screenshare::udp_protocol::AudioCodec::Opus;

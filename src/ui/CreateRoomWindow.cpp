@@ -13,6 +13,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtCore/QSizeF>
+#include <QtCore/QTimer>
 #include <QtCore/QUuid>
 #include <QtCore/QVector>
 #include <QtGui/QClipboard>
@@ -52,6 +53,7 @@ namespace {
 constexpr const char* kRoomLinkPrefix = "screenshare-room-v1;";
 constexpr const char* kDefaultStunServer = "stun.l.google.com:19302";
 constexpr int kComboPopupItemHeight = 30;
+constexpr int kSourceRefreshIntervalMs = 2000;
 
 class ComboItemDelegate final : public QStyledItemDelegate {
 public:
@@ -192,6 +194,41 @@ QString resolutionChoiceValue(const QSize& size)
 QString resolutionChoiceText(const QSize& size)
 {
     return QStringLiteral("%1 x %2").arg(size.width()).arg(size.height());
+}
+
+QString displaySourceValue(int displayIndex)
+{
+    return QStringLiteral("display:%1").arg(displayIndex);
+}
+
+QString windowSourceValue(uint64_t handle)
+{
+    return QStringLiteral("window:%1").arg(handle);
+}
+
+bool sourceValueIsWindow(const QString& value)
+{
+    return value.startsWith(QStringLiteral("window:"));
+}
+
+int displayIndexFromSourceValue(const QString& value)
+{
+    if (!value.startsWith(QStringLiteral("display:"))) {
+        return 0;
+    }
+    bool ok = false;
+    const int displayIndex = value.mid(8).toInt(&ok);
+    return ok && displayIndex >= 0 ? displayIndex : 0;
+}
+
+uint64_t windowHandleFromSourceValue(const QString& value)
+{
+    if (!sourceValueIsWindow(value)) {
+        return 0;
+    }
+    bool ok = false;
+    const qulonglong handle = value.mid(7).toULongLong(&ok);
+    return ok ? static_cast<uint64_t>(handle) : 0;
 }
 
 QVector<QSize> resolutionChoicesForDisplay(QSize displaySize)
@@ -344,7 +381,14 @@ CreateRoomWindow::CreateRoomWindow(QtSessionBackend* backend, Actions actions, Q
     root->setSpacing(0);
     root->addWidget(buildShell(), 1);
 
-    refreshDisplays();
+    sourceRefreshTimer_ = new QTimer(this);
+    sourceRefreshTimer_->setInterval(kSourceRefreshIntervalMs);
+    connect(sourceRefreshTimer_, &QTimer::timeout, this, [this] {
+        refreshDisplays(true, true);
+    });
+    sourceRefreshTimer_->start();
+
+    refreshDisplays(false);
     refreshAudioDevices();
     refreshRoomLink();
     updateRunningState(false);
@@ -487,8 +531,9 @@ QWidget* CreateRoomWindow::buildSettingsPanel()
     displayCombo_->setFixedHeight(40);
     connect(displayCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
         populateResolutionChoices();
+        updateDefaultAudioChoiceText();
     });
-    layout->addWidget(buildSettingRow("display", "Display", displayCombo_));
+    layout->addWidget(buildSettingRow("display", "Source", displayCombo_));
 
     resolutionCombo_ = new QComboBox;
     resolutionCombo_->setObjectName("RoomSettingsInput");
@@ -614,13 +659,25 @@ QLabel* CreateRoomWindow::iconLabel(const char* iconName, int size, const QStrin
     return label;
 }
 
-void CreateRoomWindow::refreshDisplays()
+void CreateRoomWindow::refreshDisplays(bool preserveSelection, bool skipOpenPopup)
 {
-    QString error;
-    const auto displays = backend_->listDisplays(&error);
-    populateDisplays(displays);
-    if (!error.isEmpty()) {
-        setStatus("Using Qt display fallback: " + error, "RoomInlineStatus");
+    if (displayCombo_ == nullptr || backend_ == nullptr || backend_->isRunning()) {
+        return;
+    }
+    if (skipOpenPopup && displayCombo_->view() != nullptr && displayCombo_->view()->isVisible()) {
+        return;
+    }
+
+    const QString previousSource = preserveSelection ? displayCombo_->currentData().toString() : QString();
+    QString displayError;
+    QString windowError;
+    const auto displays = backend_->listDisplays(&displayError);
+    const auto windows = backend_->listWindows(&windowError);
+    populateCaptureSources(displays, windows, previousSource);
+    if (!displayError.isEmpty()) {
+        setStatus("Using Qt display fallback: " + displayError, "RoomInlineStatus");
+    } else if (!windowError.isEmpty()) {
+        setStatus("Application list unavailable: " + windowError, "RoomInlineStatus");
     }
 }
 
@@ -634,8 +691,12 @@ void CreateRoomWindow::refreshAudioDevices()
     }
 }
 
-void CreateRoomWindow::populateDisplays(const std::vector<screenshare::SessionDisplayInfo>& displays)
+void CreateRoomWindow::populateCaptureSources(
+    const std::vector<screenshare::SessionDisplayInfo>& displays,
+    const std::vector<screenshare::SessionWindowInfo>& windows,
+    const QString& preferredSourceValue)
 {
+    const bool blocked = displayCombo_->blockSignals(true);
     displayCombo_->clear();
     if (!displays.empty()) {
         for (const auto& display : displays) {
@@ -647,8 +708,9 @@ void CreateRoomWindow::populateDisplays(const std::vector<screenshare::SessionDi
             if (display.width > 0 && display.height > 0) {
                 parts << QStringLiteral("%1 x %2").arg(display.width).arg(display.height);
             }
-            displayCombo_->addItem(parts.join(" - "), display.index);
+            displayCombo_->addItem(parts.join(" - "), displaySourceValue(display.index));
             displayCombo_->setItemData(displayCombo_->count() - 1, QSize(display.width, display.height), Qt::UserRole + 1);
+            displayCombo_->setItemData(displayCombo_->count() - 1, 0U, Qt::UserRole + 2);
         }
     } else {
         const QList<QScreen*> screens = QApplication::screens();
@@ -656,14 +718,43 @@ void CreateRoomWindow::populateDisplays(const std::vector<screenshare::SessionDi
             const QRect geometry = screens[i]->geometry();
             displayCombo_->addItem(
                 QStringLiteral("Display %1 - %2 x %3").arg(i).arg(geometry.width()).arg(geometry.height()),
-                i);
+                displaySourceValue(i));
             displayCombo_->setItemData(displayCombo_->count() - 1, geometry.size(), Qt::UserRole + 1);
+            displayCombo_->setItemData(displayCombo_->count() - 1, 0U, Qt::UserRole + 2);
         }
         if (displayCombo_->count() == 0) {
-            displayCombo_->addItem("Display 0", 0);
+            displayCombo_->addItem("Display 0", displaySourceValue(0));
+            displayCombo_->setItemData(displayCombo_->count() - 1, 0U, Qt::UserRole + 2);
         }
     }
+    if (!windows.empty()) {
+        displayCombo_->insertSeparator(displayCombo_->count());
+        for (const auto& window : windows) {
+            QString text;
+            const QString title = QString::fromStdString(window.title);
+            const QString process = QString::fromStdString(window.processName);
+            if (!process.isEmpty()) {
+                text = QStringLiteral("%1 - %2").arg(process, title);
+            } else {
+                text = title;
+            }
+            if (window.width > 0 && window.height > 0) {
+                text += QStringLiteral(" - %1 x %2").arg(window.width).arg(window.height);
+            }
+            displayCombo_->addItem(text, windowSourceValue(window.handle));
+            displayCombo_->setItemData(displayCombo_->count() - 1, QSize(window.width, window.height), Qt::UserRole + 1);
+            displayCombo_->setItemData(displayCombo_->count() - 1, window.processId, Qt::UserRole + 2);
+        }
+    }
+    if (!preferredSourceValue.isEmpty()) {
+        const int index = displayCombo_->findData(preferredSourceValue);
+        if (index >= 0) {
+            displayCombo_->setCurrentIndex(index);
+        }
+    }
+    displayCombo_->blockSignals(blocked);
     populateResolutionChoices();
+    updateDefaultAudioChoiceText();
     tuneComboPopup(displayCombo_);
 }
 
@@ -681,7 +772,21 @@ void CreateRoomWindow::populateAudioDevices(const std::vector<screenshare::Sessi
         }
         audioDeviceCombo_->addItem(name, QString::fromStdString(device.id));
     }
+    updateDefaultAudioChoiceText();
     tuneComboPopup(audioDeviceCombo_);
+}
+
+void CreateRoomWindow::updateDefaultAudioChoiceText()
+{
+    if (audioDeviceCombo_ == nullptr || audioDeviceCombo_->count() == 0) {
+        return;
+    }
+    const QString sourceValue = displayCombo_ == nullptr ? QString() : displayCombo_->currentData().toString();
+    audioDeviceCombo_->setItemText(
+        0,
+        sourceValueIsWindow(sourceValue) ?
+            QStringLiteral("Application Audio (selected window)") :
+            QStringLiteral("System Audio (default)"));
 }
 
 void CreateRoomWindow::populateResolutionChoices()
@@ -786,7 +891,17 @@ screenshare::ShareSessionConfig CreateRoomWindow::currentConfig() const
 {
     screenshare::ShareSessionConfig config;
     config.connectionMode = screenshare::ShareConnectionMode::Room;
-    config.displayIndex = displayCombo_->currentData().toInt();
+    const QString sourceValue = displayCombo_ != nullptr ? displayCombo_->currentData().toString() : displaySourceValue(0);
+    if (sourceValueIsWindow(sourceValue)) {
+        config.captureSourceType = screenshare::SessionCaptureSourceType::Window;
+        config.windowHandle = windowHandleFromSourceValue(sourceValue);
+        config.windowProcessId = displayCombo_ != nullptr ?
+            displayCombo_->currentData(Qt::UserRole + 2).toUInt() :
+            0U;
+    } else {
+        config.captureSourceType = screenshare::SessionCaptureSourceType::Display;
+        config.displayIndex = displayIndexFromSourceValue(sourceValue);
+    }
     config.roomPort = static_cast<uint16_t>(roomPortSpin_->value());
     config.roomId = toStdUtf8(roomId_);
     config.roomName = toStdUtf8(roomName());
@@ -820,12 +935,20 @@ ShareSessionUiState CreateRoomWindow::currentShareUiState() const
     state.roomName = roomName();
     state.roomLink = roomLink();
     state.displayText = displayCombo_ != nullptr ? displayCombo_->currentText() : QStringLiteral("Display");
-    state.displayValue = displayCombo_ != nullptr ? displayCombo_->currentData().toInt() : 0;
+    state.displaySourceValue = displayCombo_ != nullptr ? displayCombo_->currentData().toString() : displaySourceValue(0);
+    state.displayValue = state.config.displayIndex;
+    state.windowHandle = state.config.windowHandle;
+    state.windowProcessId = state.config.windowProcessId;
     if (displayCombo_ != nullptr) {
         for (int index = 0; index < displayCombo_->count(); ++index) {
+            const QString value = displayCombo_->itemData(index).toString();
+            if (value.isEmpty()) {
+                continue;
+            }
             state.displayChoices.push_back(ShareDisplayChoice{
                 displayCombo_->itemText(index),
-                displayCombo_->itemData(index).toInt(),
+                value,
+                displayCombo_->itemData(index, Qt::UserRole + 2).toUInt(),
             });
         }
     }
@@ -872,6 +995,12 @@ bool CreateRoomWindow::validateFields()
     if (!validOptionalRoomText(roomPassword(), 128)) {
         QMessageBox::warning(this, "Room password", "Room passwords must be 128 characters or fewer.");
         roomPasswordEdit_->setFocus();
+        return false;
+    }
+    const QString sourceValue = displayCombo_ != nullptr ? displayCombo_->currentData().toString() : QString();
+    if (sourceValueIsWindow(sourceValue) && windowHandleFromSourceValue(sourceValue) == 0) {
+        QMessageBox::warning(this, "Source", "Choose a valid application window.");
+        displayCombo_->setFocus();
         return false;
     }
     return true;

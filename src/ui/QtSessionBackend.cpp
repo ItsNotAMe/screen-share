@@ -192,6 +192,21 @@ std::vector<screenshare::SessionDisplayInfo> QtSessionBackend::listDisplays(QStr
     }
 }
 
+std::vector<screenshare::SessionWindowInfo> QtSessionBackend::listWindows(QString* errorMessage)
+{
+    if (errorMessage != nullptr) {
+        errorMessage->clear();
+    }
+    try {
+        return session_.ListWindows();
+    } catch (const std::exception& error) {
+        if (errorMessage != nullptr) {
+            *errorMessage = ToQString(error.what());
+        }
+        return {};
+    }
+}
+
 std::vector<screenshare::SessionAudioDeviceInfo> QtSessionBackend::listAudioDevices(QString* errorMessage)
 {
     if (errorMessage != nullptr) {

@@ -1,18 +1,55 @@
 #include "audio/WasapiCapture.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
 
+#if defined(__has_include)
+#if __has_include(<audioclientactivationparams.h>)
+#include <audioclientactivationparams.h>
+#else
+#define SCREENSHARE_DEFINE_AUDIOCLIENT_ACTIVATION_PARAMS 1
+#endif
+#else
+#define SCREENSHARE_DEFINE_AUDIOCLIENT_ACTIVATION_PARAMS 1
+#endif
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <propidl.h>
 #include <propsys.h>
 #include <windows.h>
+
+#if defined(SCREENSHARE_DEFINE_AUDIOCLIENT_ACTIVATION_PARAMS)
+#define VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK L"VAD\\Process_Loopback"
+
+enum PROCESS_LOOPBACK_MODE {
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE = 0,
+    PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE = 1,
+};
+
+struct AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
+    DWORD TargetProcessId;
+    PROCESS_LOOPBACK_MODE ProcessLoopbackMode;
+};
+
+enum AUDIOCLIENT_ACTIVATION_TYPE {
+    AUDIOCLIENT_ACTIVATION_TYPE_DEFAULT = 0,
+    AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK = 1,
+};
+
+struct AUDIOCLIENT_ACTIVATION_PARAMS {
+    AUDIOCLIENT_ACTIVATION_TYPE ActivationType;
+    union {
+        AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS ProcessLoopbackParams;
+    };
+};
+#endif
 
 namespace screenshare {
 namespace {
@@ -61,7 +98,7 @@ std::wstring DeviceFriendlyName(IMMDevice* device)
 
 EDataFlow DataFlowForSource(AudioCaptureSource source)
 {
-    return source == AudioCaptureSource::SystemOutput ? eRender : eCapture;
+    return source == AudioCaptureSource::Microphone ? eCapture : eRender;
 }
 
 class ScopedComInitialization {
@@ -103,6 +140,157 @@ Microsoft::WRL::ComPtr<IMMDeviceEnumerator> CreateDeviceEnumerator()
             IID_PPV_ARGS(&enumerator)),
         "CoCreateInstance(MMDeviceEnumerator)");
     return enumerator;
+}
+
+class ScopedHandle {
+public:
+    explicit ScopedHandle(HANDLE handle = nullptr) noexcept : handle_(handle) {}
+
+    ~ScopedHandle()
+    {
+        if (handle_ != nullptr) {
+            CloseHandle(handle_);
+        }
+    }
+
+    ScopedHandle(const ScopedHandle&) = delete;
+    ScopedHandle& operator=(const ScopedHandle&) = delete;
+
+    [[nodiscard]] HANDLE get() const noexcept { return handle_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return handle_ != nullptr; }
+
+private:
+    HANDLE handle_ = nullptr;
+};
+
+class AudioInterfaceActivationHandler final :
+    public IActivateAudioInterfaceCompletionHandler,
+    public IAgileObject {
+public:
+    explicit AudioInterfaceActivationHandler(HANDLE completedEvent) noexcept
+        : completedEvent_(completedEvent)
+    {
+    }
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override
+    {
+        if (object == nullptr) {
+            return E_POINTER;
+        }
+        *object = nullptr;
+        if (iid == __uuidof(IUnknown) || iid == __uuidof(IActivateAudioInterfaceCompletionHandler)) {
+            *object = static_cast<IActivateAudioInterfaceCompletionHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        if (iid == __uuidof(IAgileObject)) {
+            *object = static_cast<IAgileObject*>(this);
+            AddRef();
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override
+    {
+        return ++refCount_;
+    }
+
+    ULONG STDMETHODCALLTYPE Release() override
+    {
+        const ULONG refCount = --refCount_;
+        if (refCount == 0) {
+            delete this;
+        }
+        return refCount;
+    }
+
+    HRESULT STDMETHODCALLTYPE ActivateCompleted(IActivateAudioInterfaceAsyncOperation* operation) override
+    {
+        HRESULT activateResult = E_FAIL;
+        IUnknown* activated = nullptr;
+        HRESULT result = E_POINTER;
+        if (operation != nullptr) {
+            result = operation->GetActivateResult(&activateResult, &activated);
+        }
+
+        {
+            std::lock_guard lock(mutex_);
+            result_ = SUCCEEDED(result) ? activateResult : result;
+            activated_.Attach(activated);
+        }
+        SetEvent(completedEvent_);
+        return S_OK;
+    }
+
+    Microsoft::WRL::ComPtr<IAudioClient> TakeAudioClient()
+    {
+        std::lock_guard lock(mutex_);
+        ThrowIfFailed(result_, "ActivateAudioInterfaceAsync completion");
+        Microsoft::WRL::ComPtr<IAudioClient> audioClient;
+        ThrowIfFailed(activated_.As(&audioClient), "Activated interface QueryInterface(IAudioClient)");
+        activated_.Reset();
+        return audioClient;
+    }
+
+private:
+    std::atomic<ULONG> refCount_{1};
+    HANDLE completedEvent_ = nullptr;
+    std::mutex mutex_;
+    HRESULT result_ = E_PENDING;
+    Microsoft::WRL::ComPtr<IUnknown> activated_;
+};
+
+Microsoft::WRL::ComPtr<IAudioClient> ActivateProcessLoopbackAudioClient(uint32_t processId)
+{
+    if (processId == 0) {
+        throw std::runtime_error("Application audio capture requires a process id");
+    }
+
+    ScopedHandle completedEvent(CreateEventW(nullptr, FALSE, FALSE, nullptr));
+    if (!completedEvent) {
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "CreateEventW");
+    }
+
+    AUDIOCLIENT_ACTIVATION_PARAMS activationParams{};
+    activationParams.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
+    activationParams.ProcessLoopbackParams.TargetProcessId = static_cast<DWORD>(processId);
+    activationParams.ProcessLoopbackParams.ProcessLoopbackMode =
+        PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+
+    PROPVARIANT activateProperties;
+    PropVariantInit(&activateProperties);
+    activateProperties.vt = VT_BLOB;
+    activateProperties.blob.cbSize = sizeof(activationParams);
+    activateProperties.blob.pBlobData = reinterpret_cast<BYTE*>(&activationParams);
+
+    auto* handler = new AudioInterfaceActivationHandler(completedEvent.get());
+    Microsoft::WRL::ComPtr<IActivateAudioInterfaceCompletionHandler> handlerGuard;
+    handlerGuard.Attach(handler);
+
+    Microsoft::WRL::ComPtr<IActivateAudioInterfaceAsyncOperation> operation;
+    const HRESULT activateResult = ActivateAudioInterfaceAsync(
+        VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+        __uuidof(IAudioClient),
+        &activateProperties,
+        handler,
+        &operation);
+    if (FAILED(activateResult)) {
+        ThrowIfFailed(activateResult, "ActivateAudioInterfaceAsync(process loopback)");
+    }
+
+    const DWORD waitResult = WaitForSingleObject(completedEvent.get(), 10'000);
+    if (waitResult != WAIT_OBJECT_0) {
+        // The async activation API owns callback timing. If it never signals, avoid
+        // deleting a handler that Windows could still call later.
+        handlerGuard.Detach();
+        if (waitResult == WAIT_TIMEOUT) {
+            throw std::runtime_error("ActivateAudioInterfaceAsync(process loopback) timed out");
+        }
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "WaitForSingleObject(process loopback activation)");
+    }
+
+    return handler->TakeAudioClient();
 }
 
 bool SameAudioSubFormat(const GUID& lhs, const GUID& rhs)
@@ -305,52 +493,77 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
     InitializeCom();
     config_ = config;
 
-    auto enumerator = CreateDeviceEnumerator();
-    Microsoft::WRL::ComPtr<IMMDevice> device;
-    if (!config.deviceId.empty()) {
-        ThrowIfFailed(
-            enumerator->GetDevice(config.deviceId.c_str(), &device),
-            "IMMDeviceEnumerator::GetDevice");
+    if (config.source == AudioCaptureSource::ProcessOutput) {
+        audioClient_ = ActivateProcessLoopbackAudioClient(config.processId);
+        deviceId_ = L"process:" + std::to_wstring(config.processId);
+        deviceName_ = L"Application audio";
     } else {
+        auto enumerator = CreateDeviceEnumerator();
+        Microsoft::WRL::ComPtr<IMMDevice> device;
+        if (!config.deviceId.empty()) {
+            ThrowIfFailed(
+                enumerator->GetDevice(config.deviceId.c_str(), &device),
+                "IMMDeviceEnumerator::GetDevice");
+        } else {
+            ThrowIfFailed(
+                enumerator->GetDefaultAudioEndpoint(DataFlowForSource(config.source), eConsole, &device),
+                "IMMDeviceEnumerator::GetDefaultAudioEndpoint");
+        }
+
+        deviceId_ = DeviceId(device.Get());
+        deviceName_ = DeviceFriendlyName(device.Get());
+
         ThrowIfFailed(
-            enumerator->GetDefaultAudioEndpoint(DataFlowForSource(config.source), eConsole, &device),
-            "IMMDeviceEnumerator::GetDefaultAudioEndpoint");
-    }
-
-    deviceId_ = DeviceId(device.Get());
-    deviceName_ = DeviceFriendlyName(device.Get());
-
-    ThrowIfFailed(
-        device->Activate(
-            __uuidof(IAudioClient),
-            CLSCTX_ALL,
-            nullptr,
-            reinterpret_cast<void**>(audioClient_.ReleaseAndGetAddressOf())),
-        "IMMDevice::Activate(IAudioClient)");
-
-    WAVEFORMATEX* rawMixFormat = nullptr;
-    ThrowIfFailed(audioClient_->GetMixFormat(&rawMixFormat), "IAudioClient::GetMixFormat");
-    if (rawMixFormat == nullptr) {
-        throw std::runtime_error("IAudioClient::GetMixFormat returned no format");
+            device->Activate(
+                __uuidof(IAudioClient),
+                CLSCTX_ALL,
+                nullptr,
+                reinterpret_cast<void**>(audioClient_.ReleaseAndGetAddressOf())),
+            "IMMDevice::Activate(IAudioClient)");
     }
 
     struct MixFormatDeleter {
         void operator()(WAVEFORMATEX* value) const noexcept { CoTaskMemFree(value); }
     };
-    std::unique_ptr<WAVEFORMATEX, MixFormatDeleter> mixFormat(rawMixFormat);
+    std::unique_ptr<WAVEFORMATEX, MixFormatDeleter> mixFormat;
+    WAVEFORMATEX processLoopbackFormat{};
+    WAVEFORMATEX* activeFormat = nullptr;
+    if (config.source == AudioCaptureSource::ProcessOutput) {
+        processLoopbackFormat.wFormatTag = WAVE_FORMAT_PCM;
+        processLoopbackFormat.nChannels = 2;
+        processLoopbackFormat.nSamplesPerSec = 48'000;
+        processLoopbackFormat.wBitsPerSample = 16;
+        processLoopbackFormat.nBlockAlign =
+            processLoopbackFormat.nChannels * processLoopbackFormat.wBitsPerSample / 8;
+        processLoopbackFormat.nAvgBytesPerSec =
+            processLoopbackFormat.nSamplesPerSec * processLoopbackFormat.nBlockAlign;
+        activeFormat = &processLoopbackFormat;
+    } else {
+        WAVEFORMATEX* rawMixFormat = nullptr;
+        ThrowIfFailed(audioClient_->GetMixFormat(&rawMixFormat), "IAudioClient::GetMixFormat");
+        if (rawMixFormat == nullptr) {
+            throw std::runtime_error("IAudioClient::GetMixFormat returned no format");
+        }
+        mixFormat.reset(rawMixFormat);
+        activeFormat = mixFormat.get();
+    }
 
-    sampleKind_ = DetermineSampleKind(*mixFormat);
-    format_.sampleRate = mixFormat->nSamplesPerSec;
-    format_.channels = mixFormat->nChannels;
-    format_.bitsPerSample = mixFormat->wBitsPerSample;
-    format_.blockAlign = mixFormat->nBlockAlign;
+    sampleKind_ = DetermineSampleKind(*activeFormat);
+    format_.sampleRate = activeFormat->nSamplesPerSec;
+    format_.channels = activeFormat->nChannels;
+    format_.bitsPerSample = activeFormat->wBitsPerSample;
+    format_.blockAlign = activeFormat->nBlockAlign;
     format_.sampleFormat = SampleKindName(sampleKind_);
 
     const REFERENCE_TIME bufferDuration =
         static_cast<REFERENCE_TIME>(std::max<int64_t>(1, config.bufferDuration.count())) * 10'000;
     DWORD streamFlags = 0;
-    if (config.source == AudioCaptureSource::SystemOutput) {
+    if (config.source == AudioCaptureSource::SystemOutput ||
+        config.source == AudioCaptureSource::ProcessOutput) {
         streamFlags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
+    }
+    if (config.source == AudioCaptureSource::ProcessOutput) {
+        streamFlags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
     }
 
     ThrowIfFailed(
@@ -359,7 +572,7 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
             streamFlags,
             bufferDuration,
             0,
-            mixFormat.get(),
+            activeFormat,
             nullptr),
         "IAudioClient::Initialize");
     ThrowIfFailed(audioClient_->GetBufferSize(&bufferFrames_), "IAudioClient::GetBufferSize");
@@ -441,10 +654,13 @@ AudioCaptureSource ParseAudioCaptureSource(const std::string& value)
     if (value == "system" || value == "loopback" || value == "render") {
         return AudioCaptureSource::SystemOutput;
     }
+    if (value == "process" || value == "application" || value == "app") {
+        return AudioCaptureSource::ProcessOutput;
+    }
     if (value == "microphone" || value == "mic" || value == "capture") {
         return AudioCaptureSource::Microphone;
     }
-    throw std::invalid_argument("Invalid audio capture source: " + value + " (expected system or microphone)");
+    throw std::invalid_argument("Invalid audio capture source: " + value + " (expected system, process, or microphone)");
 }
 
 const char* AudioCaptureSourceName(AudioCaptureSource source)
@@ -454,6 +670,8 @@ const char* AudioCaptureSourceName(AudioCaptureSource source)
         return "system";
     case AudioCaptureSource::Microphone:
         return "microphone";
+    case AudioCaptureSource::ProcessOutput:
+        return "process";
     default:
         return "unknown";
     }
