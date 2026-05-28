@@ -20,6 +20,11 @@ QFrame#AppShellFrame {
 QFrame#AppShellFrame[maximized="true"] {
     border-radius: 0;
 }
+QFrame#AppShellFrame[chromeHidden="true"] {
+    background: #000000;
+    border: 0;
+    border-radius: 0;
+}
 QWidget#AppTitleBar {
     background: transparent;
     border: 0;
@@ -777,6 +782,11 @@ QFrame#WatchVolumePanel {
 }
 QFrame#WatchPreviewPanel {
     background: #111514;
+}
+QFrame#WatchPreviewPanel[streamFullscreen="true"] {
+    background: #000000;
+    border: 0;
+    border-radius: 0;
 }
 QWidget#VideoFrameWidget {
     background: transparent;

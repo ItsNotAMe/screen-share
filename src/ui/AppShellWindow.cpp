@@ -112,6 +112,18 @@ void AppShellWindow::setCurrentWidget(QWidget* page)
     stack_->setCurrentWidget(page);
 }
 
+void AppShellWindow::setChromeVisible(bool visible)
+{
+    if (titleBar_ != nullptr) {
+        titleBar_->setVisible(visible);
+    }
+    if (frame_ != nullptr) {
+        frame_->setProperty("chromeHidden", !visible);
+        frame_->style()->unpolish(frame_);
+        frame_->style()->polish(frame_);
+    }
+}
+
 QWidget* AppShellWindow::buildTitleBar()
 {
     auto* frame = new QWidget;
