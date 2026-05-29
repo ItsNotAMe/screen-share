@@ -22,11 +22,13 @@ namespace screenshare {
 struct UdpSenderEndpoint {
     std::string host;
     uint16_t port = 0;
+    uint32_t group = 0;
 };
 
 struct UdpSenderConfig {
     std::string host;
     uint16_t port = 0;
+    uint32_t group = 0;
     std::vector<UdpSenderEndpoint> additionalTargets;
     uint16_t localPort = 0;
     uint32_t maxPayloadBytes = 1'200;
@@ -75,6 +77,7 @@ struct UdpSenderStats {
     udp_protocol::FeedbackSnapshot latestFeedback;
     struct FeedbackPeer {
         std::string endpoint;
+        uint32_t group = 0;
         uint64_t packetsReceived = 0;
         udp_protocol::FeedbackSnapshot latestFeedback;
     };
@@ -130,6 +133,11 @@ private:
         uint64_t mediaId = 0;
     };
 
+    struct GroupedAddress {
+        std::vector<std::byte> address;
+        uint32_t group = 0;
+    };
+
     std::vector<std::byte> BuildDatagram(
         const std::byte* payload,
         uint32_t payloadBytes,
@@ -156,6 +164,7 @@ private:
         const void* address,
         int addressLength,
         const NatProbeDatagramInfo& probe);
+    [[nodiscard]] uint32_t EndpointGroupForAddressLocked(const std::vector<std::byte>& address) const;
     void RescheduleQueueLocked(Clock::time_point now);
     void CheckWorkerErrorLocked() const;
     void UpdatePendingStatsLocked();
@@ -169,8 +178,8 @@ private:
 
     uintptr_t socket_ = 0;
     std::vector<std::byte> address_;
-    std::vector<std::vector<std::byte>> additionalAddresses_;
-    std::vector<std::vector<std::byte>> natProbeAddresses_;
+    std::vector<GroupedAddress> additionalAddresses_;
+    std::vector<GroupedAddress> natProbeAddresses_;
     std::vector<UdpSenderStats::FeedbackPeer> feedbackPeers_;
     int addressLength_ = 0;
     UdpSenderConfig config_{};
