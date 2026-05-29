@@ -25,6 +25,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1247,10 +1248,35 @@ std::string UdpEndpointText(const std::string& host, uint16_t port)
     return host + ":" + std::to_string(port);
 }
 
+std::string LogTokenEncode(std::string_view text)
+{
+    constexpr char Hex[] = "0123456789ABCDEF";
+    std::string encoded;
+    for (const unsigned char ch : text) {
+        const bool safe =
+            (ch >= 'A' && ch <= 'Z') ||
+            (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9') ||
+            ch == '-' ||
+            ch == '_' ||
+            ch == '.' ||
+            ch == '~';
+        if (safe) {
+            encoded.push_back(static_cast<char>(ch));
+        } else {
+            encoded.push_back('%');
+            encoded.push_back(Hex[(ch >> 4) & 0x0F]);
+            encoded.push_back(Hex[ch & 0x0F]);
+        }
+    }
+    return encoded;
+}
+
 class UdpSenderFanout {
 public:
     struct Target {
         std::unique_ptr<screenshare::UdpSender> sender;
+        uint32_t group = 0;
         std::string endpoint;
         std::vector<std::string> additionalEndpoints;
         bool failed = false;
@@ -1266,6 +1292,7 @@ public:
         uint64_t pendingDatagrams = 0;
         uint64_t pendingQueueDelayMs = 0;
         bool hasFeedback = false;
+        std::string displayName;
         screenshare::udp_protocol::FeedbackSnapshot latestFeedback{};
     };
 
@@ -1281,6 +1308,7 @@ public:
             sender->Open(config);
             Target target;
             target.sender = std::move(sender);
+            target.group = config.group;
             target.endpoint = UdpEndpointText(config.host, config.port);
             target.additionalEndpoints.reserve(config.additionalTargets.size());
             for (const auto& additional : config.additionalTargets) {
@@ -1320,6 +1348,14 @@ public:
     void UnsuppressEndpoint(const std::string& endpoint)
     {
         suppressedEndpoints_.erase(endpoint);
+    }
+
+    void SetViewerName(uint32_t group, std::string name)
+    {
+        if (group == 0 || name.empty()) {
+            return;
+        }
+        viewerNames_[group] = std::move(name);
     }
 
     [[nodiscard]] size_t targetCount() const noexcept
@@ -1472,19 +1508,21 @@ public:
     [[nodiscard]] std::vector<ViewerSnapshot> viewerSnapshots() const
     {
         std::vector<ViewerSnapshot> snapshots;
-        for (size_t targetIndex = 0; targetIndex < targets_.size(); ++targetIndex) {
-            const auto& target = targets_[targetIndex];
+        for (const auto& target : targets_) {
             const screenshare::UdpSenderStats stats =
                 target.sender != nullptr ? target.sender->stats() : screenshare::UdpSenderStats{};
 
             auto buildSnapshot = [&](const std::string& endpoint) {
                 ViewerSnapshot snapshot;
-                snapshot.group = targetIndex;
+                snapshot.group = target.group;
                 snapshot.endpoint = endpoint;
                 snapshot.failed = target.failed;
                 snapshot.error = target.error;
                 snapshot.pendingDatagrams = stats.pendingDatagrams;
                 snapshot.pendingQueueDelayMs = stats.pendingQueueDelayMs;
+                if (auto name = viewerNames_.find(snapshot.group); name != viewerNames_.end()) {
+                    snapshot.displayName = name->second;
+                }
                 return snapshot;
             };
 
@@ -1505,6 +1543,10 @@ public:
                     continue;
                 }
                 ViewerSnapshot snapshot = buildSnapshot(peer.endpoint);
+                snapshot.group = peer.group;
+                if (auto name = viewerNames_.find(snapshot.group); name != viewerNames_.end()) {
+                    snapshot.displayName = name->second;
+                }
                 snapshot.feedbackPacketsReceived = peer.packetsReceived;
                 snapshot.hasFeedback = true;
                 snapshot.latestFeedback = peer.latestFeedback;
@@ -1547,6 +1589,7 @@ private:
 
     std::vector<Target> targets_;
     std::set<std::string> suppressedEndpoints_;
+    std::map<uint32_t, std::string> viewerNames_;
 };
 
 template <typename UdpSenderLike>
@@ -1587,6 +1630,7 @@ void PrintViewerSnapshots(const UdpSenderFanout& udpSender)
             << "viewer_target=" << index
             << " viewer_group=" << viewer.group
             << " viewer_endpoint=" << (viewer.endpoint.empty() ? "unknown" : viewer.endpoint)
+            << " viewer_name=" << (viewer.displayName.empty() ? "none" : LogTokenEncode(viewer.displayName))
             << " viewer_state=" << state
             << " viewer_feedback_packets=" << viewer.feedbackPacketsReceived
             << " viewer_pending=" << viewer.pendingDatagrams
@@ -1614,6 +1658,34 @@ void PrintViewerSnapshots(const UdpSenderFanout& udpSender)
 std::string SignalingCandidateEndpoint(const screenshare::SignalingCandidate& candidate)
 {
     return candidate.ip + ":" + std::to_string(candidate.port);
+}
+
+uint32_t SignalingPeerGroup(const std::string& peerId)
+{
+    uint32_t hash = 2166136261u;
+    for (const unsigned char ch : peerId) {
+        hash ^= ch;
+        hash *= 16777619u;
+    }
+    hash &= 0x7fffffffu;
+    return hash == 0 ? 1u : hash;
+}
+
+std::string DefaultSignalingPeerName()
+{
+    if (const char* computerName = std::getenv("COMPUTERNAME");
+        computerName != nullptr && *computerName != '\0') {
+        return computerName;
+    }
+    return "ScreenShare";
+}
+
+std::string SignalingPeerDisplayName(const screenshare::SignalingPeer& peer)
+{
+    if (!peer.metadata.name.empty()) {
+        return peer.metadata.name;
+    }
+    return peer.peerId;
 }
 
 bool IsUsableHostSignalingAddress(const std::string& address)
@@ -1675,7 +1747,9 @@ screenshare::SignalingPeerState BuildLiveSignalingPeerState(const Options& optio
 
     screenshare::SignalingPeerState peer;
     peer.peerId = options.signalingPeerId;
-    peer.metadata.name = options.signalingName.empty() ? options.lanName : options.signalingName;
+    peer.metadata.name = options.signalingName.empty() ?
+        (options.lanName.empty() ? DefaultSignalingPeerName() : options.lanName) :
+        options.signalingName;
     peer.metadata.platform = options.signalingPlatform.empty() ? "windows" : options.signalingPlatform;
     peer.roomName = options.signalingRoomName;
     peer.roomPassword = options.signalingRoomPassword;
@@ -1695,6 +1769,7 @@ screenshare::SignalingPeerState BuildLiveSignalingPeerState(const Options& optio
 struct LiveSignalingPeerCandidate {
     std::string peerId;
     screenshare::SignalingCandidate candidate;
+    std::string displayName;
 };
 
 class LiveSignalingRuntime {
@@ -1825,7 +1900,7 @@ private:
             }
             for (const auto& candidate : peer.candidates) {
                 const std::string key = CandidateKey(peer.peerId, candidate);
-                LiveSignalingPeerCandidate record{peer.peerId, candidate};
+                LiveSignalingPeerCandidate record{peer.peerId, candidate, SignalingPeerDisplayName(peer)};
                 latestCandidates.emplace(key, record);
                 if (state->seenCandidates.find(key) == state->seenCandidates.end()) {
                     state->discoveredPeers.push_back(std::move(record));
@@ -1992,7 +2067,9 @@ private:
 UdpSendTargetSpec SignalingSendTargetSpec(
     const screenshare::SignalingCandidate& candidate,
     uint16_t localPort,
-    uint64_t probeSession)
+    uint64_t probeSession,
+    uint32_t group,
+    std::string displayName)
 {
     return UdpSendTargetSpec{
         SignalingCandidateEndpoint(candidate),
@@ -2002,7 +2079,9 @@ UdpSendTargetSpec SignalingSendTargetSpec(
         false,
         true,
         true,
-        probeSession};
+        probeSession,
+        group,
+        std::move(displayName)};
 }
 
 class AdaptiveBitrateAdvisor {
@@ -3009,19 +3088,26 @@ void RunCaptureStats(
         }
 
         std::vector<screenshare::UdpSenderConfig> udpConfigs;
+        std::vector<std::pair<uint32_t, std::string>> viewerNames;
         udpConfigs.reserve(udpTargets.size());
         for (size_t targetIndex = 0; targetIndex < udpTargets.size(); ++targetIndex) {
             const auto& target = udpTargets[targetIndex];
             auto udpConfig = screenshare::ParseUdpSenderTarget(target.target);
+            const uint32_t targetGroup =
+                target.group != 0 ? target.group : static_cast<uint32_t>(targetIndex + 1);
+            if (!target.displayName.empty()) {
+                viewerNames.push_back({targetGroup, target.displayName});
+            }
             if (targetIndex > 0 &&
                 target.fromPeerInvite &&
                 target.localPort == 0 &&
                 !udpConfigs.empty() &&
                 udpConfigs.front().collectNatProbeTargets) {
                 udpConfigs.front().additionalTargets.push_back(
-                    screenshare::UdpSenderEndpoint{udpConfig.host, udpConfig.port});
+                    screenshare::UdpSenderEndpoint{udpConfig.host, udpConfig.port, targetGroup});
                 continue;
             }
+            udpConfig.group = targetGroup;
             udpConfig.localPort = target.localPort;
             udpConfig.pacingEnabled = options.udpPacing;
             udpConfig.pacingBitrate = combinedUdpPacingBitrate();
@@ -3047,6 +3133,9 @@ void RunCaptureStats(
 
         udpSender = std::make_unique<UdpSenderFanout>();
         udpSender->Open(udpConfigs);
+        for (const auto& [group, name] : viewerNames) {
+            udpSender->SetViewerName(group, name);
+        }
         const size_t inviteTargetCount = static_cast<size_t>(std::count_if(
             udpTargets.begin(),
             udpTargets.end(),
@@ -3167,13 +3256,16 @@ void RunCaptureStats(
             UdpSendTargetSpec target = SignalingSendTargetSpec(
                 peer.candidate,
                 udpSendTargetSpecs.empty() ? options.udpLocalPort : static_cast<uint16_t>(0),
-                probeSession);
+                probeSession,
+                SignalingPeerGroup(peer.peerId),
+                peer.displayName);
             udpSendTargetSpecs.push_back(target);
 
             bool active = false;
             if (udpSender) {
+                udpSender->SetViewerName(target.group, target.displayName);
                 active = udpSender->AddAdditionalTarget(
-                    screenshare::UdpSenderEndpoint{peer.candidate.ip, peer.candidate.port});
+                    screenshare::UdpSenderEndpoint{peer.candidate.ip, peer.candidate.port, target.group});
             }
 
             std::cout
@@ -3181,6 +3273,7 @@ void RunCaptureStats(
                 << " room=" << options.signalingRoomId
                 << " peer_id=" << peer.peerId
                 << " endpoint=" << endpoint
+                << " name=" << (peer.displayName.empty() ? "none" : LogTokenEncode(peer.displayName))
                 << " active=" << (udpSender ? (active ? "yes" : "duplicate") : "pending")
                 << "\n";
         }
@@ -4238,6 +4331,7 @@ void PrepareLiveSignaling(Options& options)
             std::cout
                 << "signaling_live_peer id=" << peerId
                 << " endpoint=" << endpoint
+                << " name=" << (peerInfo.metadata.name.empty() ? "none" : LogTokenEncode(peerInfo.metadata.name))
                 << " type=" << candidate.type
                 << " protocol=" << candidate.protocol
                 << "\n";
@@ -4246,7 +4340,9 @@ void PrepareLiveSignaling(Options& options)
                 sendTargets.push_back(SignalingSendTargetSpec(
                     candidate,
                     sendTargets.empty() ? localPort : static_cast<uint16_t>(0),
-                    probeSession));
+                    probeSession,
+                    SignalingPeerGroup(peerId),
+                    SignalingPeerDisplayName(peerInfo)));
             } else {
                 probeTargets.push_back(screenshare::UdpNatProbeTarget{
                     candidate.ip,

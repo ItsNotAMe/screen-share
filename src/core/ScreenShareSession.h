@@ -185,6 +185,7 @@ struct WatchSessionConfig {
 
 struct SessionViewer {
     std::string id;
+    std::string name;
     std::string endpoint;
     int group = -1;
     SessionState state = SessionState::Idle;

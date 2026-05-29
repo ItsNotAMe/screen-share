@@ -208,8 +208,9 @@ QString viewerListSignature(const screenshare::SessionStatus& status)
         .arg(activeViewerCount(status.viewers))
         .arg(static_cast<int>(status.viewers.size()));
     for (const auto& viewer : status.viewers) {
-        parts << QStringLiteral("%1|%2|%3|%4|%5|%6")
+        parts << QStringLiteral("%1|%2|%3|%4|%5|%6|%7")
             .arg(QString::fromStdString(viewer.id))
+            .arg(QString::fromStdString(viewer.name))
             .arg(QString::fromStdString(viewer.sessionFingerprint))
             .arg(QString::fromStdString(viewer.health))
             .arg(static_cast<int>(viewer.state))
@@ -731,9 +732,11 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
     layout->setSpacing(10);
     layout->addWidget(textLabel(viewer.hasFeedback ? "●" : "○", viewer.hasFeedback ? "ActiveViewerDot" : "ActiveMuted"));
     layout->addWidget(iconLabel("viewers", 22, QStringLiteral("#b7c5c1")));
-    const QString name = viewer.sessionFingerprint.empty() ?
-        (viewer.id.empty() ? QStringLiteral("Viewer %1").arg(index + 1) : QString::fromStdString(viewer.id)) :
-        QStringLiteral("Viewer %1").arg(QString::fromStdString(viewer.sessionFingerprint).left(8));
+    const QString name = !viewer.name.empty() ?
+        QString::fromStdString(viewer.name) :
+        (viewer.sessionFingerprint.empty() ?
+            (viewer.id.empty() ? QStringLiteral("Viewer %1").arg(index + 1) : QString::fromStdString(viewer.id)) :
+            QStringLiteral("Viewer %1").arg(QString::fromStdString(viewer.sessionFingerprint).left(8)));
     layout->addWidget(textLabel(name, "ActiveViewerName"), 1);
     layout->addWidget(textLabel(viewerHealthText(viewer), viewer.hasFeedback ? "ActiveGoodText" : "ActiveMuted"));
     return row;

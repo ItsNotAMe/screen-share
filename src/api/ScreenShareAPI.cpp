@@ -143,6 +143,42 @@ std::string LogFieldValue(std::string_view text, std::string_view field)
     return {};
 }
 
+int HexValue(char ch)
+{
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return 10 + ch - 'A';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return 10 + ch - 'a';
+    }
+    return -1;
+}
+
+std::string LogTokenDecode(std::string_view text)
+{
+    if (text.empty() || text == "none") {
+        return {};
+    }
+
+    std::string decoded;
+    for (size_t index = 0; index < text.size(); ++index) {
+        if (text[index] == '%' && index + 2 < text.size()) {
+            const int high = HexValue(text[index + 1]);
+            const int low = HexValue(text[index + 2]);
+            if (high >= 0 && low >= 0) {
+                decoded.push_back(static_cast<char>((high << 4) | low));
+                index += 2;
+                continue;
+            }
+        }
+        decoded.push_back(static_cast<char>(text[index]));
+    }
+    return decoded;
+}
+
 std::string LowercaseCopy(std::string_view text)
 {
     std::string result(text);
@@ -1176,6 +1212,7 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
     }
 
     const int group = ParseInt(LogFieldValue(line, "viewer_group")).value_or(-1);
+    const std::string name = LogTokenDecode(LogFieldValue(line, "viewer_name"));
     const uint64_t feedbackPackets = ParseUint64(LogFieldValue(line, "viewer_feedback_packets")).value_or(0);
     const bool hasFeedback = feedbackPackets > 0;
     bool activeNow = false;
@@ -1200,12 +1237,16 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
         if (viewerIt == viewers_.end()) {
             SessionViewer viewer;
             viewer.group = group;
+            viewer.name = name;
             viewer.endpoint = endpoint;
             viewer.id = std::to_string(group) + ":" + endpoint;
             viewers_.push_back(std::move(viewer));
             viewerIt = std::prev(viewers_.end());
         }
 
+        if (!name.empty()) {
+            viewerIt->name = name;
+        }
         activeNow = CounterAdvanced(feedbackPackets, viewerIt->feedbackPackets);
         viewerIt->feedbackPackets = feedbackPackets;
         viewerIt->hasFeedback = hasFeedback;

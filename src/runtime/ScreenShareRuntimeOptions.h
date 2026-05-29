@@ -71,6 +71,8 @@ struct UdpSendTargetSpec {
     bool collectNatProbeTargets = false;
     bool preferNatProbeTargets = false;
     uint64_t natProbeSessionFingerprint = 0;
+    uint32_t group = 0;
+    std::string displayName;
 };
 
 struct ExtraShareTargetOption {
