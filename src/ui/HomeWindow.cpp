@@ -1,5 +1,6 @@
 #include "ui/HomeWindow.h"
 
+#include "ui/RoomAccessCheck.h"
 #include "ui/UiStyle.h"
 
 #include <QtCore/QFile>
@@ -22,6 +23,7 @@
 #include <QtWidgets/QInputDialog>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QVBoxLayout>
@@ -370,6 +372,10 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
             if (!ok) {
                 return;
             }
+            if (password.isEmpty()) {
+                QMessageBox::warning(this, "Room password", "Enter the room password.");
+                return;
+            }
         }
 
         WatchSessionUiState state;
@@ -385,7 +391,26 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
         state.roomId = room.roomId;
         state.roomName = room.name;
         state.passwordProtected = room.passwordProtected;
-        actions_.quickJoinRoom(state);
+        startRoomAccessCheck(
+            QString::fromUtf8(kDefaultSignalServer),
+            room.roomId,
+            password,
+            this,
+            [this, state](const RoomAccessCheckResult& result) {
+                if (result.status == RoomAccessCheckResult::Status::Accepted) {
+                    actions_.quickJoinRoom(state);
+                    return;
+                }
+                const QString message =
+                    result.status == RoomAccessCheckResult::Status::WrongPassword
+                        ? QStringLiteral("Room password is wrong.")
+                    : result.status == RoomAccessCheckResult::Status::PasswordRequired
+                        ? QStringLiteral("Room password required.")
+                    : result.message.isEmpty()
+                        ? QStringLiteral("Could not verify room access.")
+                        : result.message;
+                QMessageBox::warning(this, "Join room", message);
+            });
     });
     layout->addWidget(join, 0, Qt::AlignVCenter);
     return row;

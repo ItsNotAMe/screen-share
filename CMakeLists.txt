@@ -211,6 +211,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/CreateRoomWindow.cpp
             src/ui/HomeWindow.cpp
             src/ui/JoinRoomWindow.cpp
+            src/ui/RoomAccessCheck.cpp
             src/ui/UiStyle.cpp
             src/ui/VideoFrameWidget.cpp
             src/ui/resources.qrc
