@@ -2,6 +2,7 @@
 
 #include "core/ScreenShareSession.h"
 #include "ui/QtSessionBackend.h"
+#include "ui/RoomAccessCheck.h"
 #include "ui/WatchSessionUiState.h"
 
 #include <QtCore/QString>
@@ -53,6 +54,11 @@ private:
     void joinRoom(const JoinRoomInfo& room);
     void joinRoomLink();
     void startWatch(const QString& roomId, const QString& roomName, bool passwordProtected, const QString& password);
+    void finishRoomAccessCheck(
+        const WatchSessionUiState& state,
+        bool passwordProtected,
+        const RoomAccessCheckResult& result);
+    void setJoinControlsEnabled(bool enabled);
     QString promptPassword(const QString& roomName, bool* accepted);
     void installBackendHandlers();
     screenshare::WatchSessionConfig currentConfig(const QString& roomId, const QString& password) const;
@@ -73,4 +79,5 @@ private:
     QLabel* statusLabel_ = nullptr;
     QPushButton* refreshButton_ = nullptr;
     QPushButton* linkJoinButton_ = nullptr;
+    int accessCheckGeneration_ = 0;
 };

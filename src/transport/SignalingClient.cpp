@@ -227,9 +227,14 @@ std::string RoomPath(const std::string& roomId, std::string_view action)
 
 std::string RoomEventsPath(
     const std::string& roomId,
-    const std::string& peerId)
+    const std::string& peerId,
+    const std::string& roomPassword)
 {
-    return RoomPath(roomId, "events") + "?peerId=" + UrlEncode(peerId);
+    std::string path = RoomPath(roomId, "events") + "?peerId=" + UrlEncode(peerId);
+    if (!roomPassword.empty()) {
+        path += "&roomPassword=" + UrlEncode(roomPassword);
+    }
+    return path;
 }
 
 std::string ReadResponseBody(HINTERNET request)
@@ -828,6 +833,9 @@ SignalingRoomResponse SignalingClient::Peers(
     ValidateSignalingPeerId(peerId);
     ValidateSignalingRoomPassword(roomPassword);
     std::string path = RoomPath(roomId, "peers") + "?peerId=" + UrlEncode(peerId);
+    if (!roomPassword.empty()) {
+        path += "&roomPassword=" + UrlEncode(roomPassword);
+    }
     return ParseRoomResponse(Request(
         L"GET",
         path,
@@ -870,7 +878,7 @@ void SignalingClient::ListenRoomEvents(
         throw std::runtime_error(WinHttpErrorMessage("WinHttpConnect"));
     }
 
-    const std::wstring path = url_.pathPrefix + Utf8ToWide(RoomEventsPath(roomId, peerId));
+    const std::wstring path = url_.pathPrefix + Utf8ToWide(RoomEventsPath(roomId, peerId, roomPassword));
     const WinHttpHandle request(WinHttpOpenRequest(
         connection.get(),
         L"GET",

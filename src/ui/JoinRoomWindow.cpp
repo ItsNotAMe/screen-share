@@ -1,5 +1,6 @@
 #include "ui/JoinRoomWindow.h"
 
+#include "ui/RoomAccessCheck.h"
 #include "ui/UiStyle.h"
 
 #include <QtCore/QByteArray>
@@ -460,6 +461,10 @@ void JoinRoomWindow::joinRoom(const JoinRoomInfo& room)
     if (!accepted) {
         return;
     }
+    if (room.passwordProtected && password.isEmpty()) {
+        setStatus("Enter the room password.", "JoinStatusError");
+        return;
+    }
     startWatch(room.roomId, room.name, room.passwordProtected, password);
 }
 
@@ -490,8 +495,72 @@ void JoinRoomWindow::startWatch(
     }
 
     const WatchSessionUiState state = currentWatchUiState(roomId, roomName, passwordProtected, password);
-    if (actions_.watchStarted) {
-        actions_.watchStarted(state);
+    const int accessCheckGeneration = ++accessCheckGeneration_;
+    setJoinControlsEnabled(false);
+    setStatus(passwordProtected ? "Checking room password..." : "Checking room access...", "JoinStatusConnecting");
+    startRoomAccessCheck(
+        QString::fromUtf8(kDefaultSignalServer),
+        roomId,
+        password,
+        this,
+        [this, state, passwordProtected, accessCheckGeneration](const RoomAccessCheckResult& result) {
+            if (accessCheckGeneration != accessCheckGeneration_) {
+                return;
+            }
+            setJoinControlsEnabled(true);
+            finishRoomAccessCheck(state, passwordProtected, result);
+        });
+}
+
+void JoinRoomWindow::finishRoomAccessCheck(
+    const WatchSessionUiState& state,
+    bool passwordProtected,
+    const RoomAccessCheckResult& result)
+{
+    switch (result.status) {
+    case RoomAccessCheckResult::Status::Accepted:
+        if (actions_.watchStarted) {
+            actions_.watchStarted(state);
+        }
+        return;
+    case RoomAccessCheckResult::Status::PasswordRequired: {
+        if (passwordProtected) {
+            setStatus("Enter the room password.", "JoinStatusError");
+            return;
+        }
+        bool accepted = false;
+        const QString password = promptPassword(
+            state.roomName.isEmpty() ? state.roomId : state.roomName,
+            &accepted);
+        if (!accepted) {
+            setStatus("Room password required.", "JoinStatusError");
+            return;
+        }
+        if (password.isEmpty()) {
+            setStatus("Enter the room password.", "JoinStatusError");
+            return;
+        }
+        startWatch(state.roomId, state.roomName, true, password);
+        return;
+    }
+    case RoomAccessCheckResult::Status::WrongPassword:
+        setStatus("Room password is wrong.", "JoinStatusError");
+        return;
+    case RoomAccessCheckResult::Status::Failed:
+        setStatus(
+            result.message.isEmpty() ? QStringLiteral("Could not verify room access.") : result.message,
+            "JoinStatusError");
+        return;
+    }
+}
+
+void JoinRoomWindow::setJoinControlsEnabled(bool enabled)
+{
+    if (refreshButton_ != nullptr) {
+        refreshButton_->setEnabled(enabled);
+    }
+    if (linkJoinButton_ != nullptr) {
+        linkJoinButton_->setEnabled(enabled);
     }
 }
 
