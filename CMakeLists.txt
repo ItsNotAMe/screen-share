@@ -19,6 +19,14 @@ if(SCREENSHARE_ENABLE_RELEASE_LTO)
     endif()
 endif()
 
+function(screenshare_configure_release_lto_warnings target_name)
+    if(SCREENSHARE_ENABLE_RELEASE_LTO AND SCREENSHARE_RELEASE_LTO_SUPPORTED AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # GCC's LTO ODR checker can warn on equivalent Windows API declarations from
+        # C++/WinRT and MinGW headers, such as GetProcAddress/FARPROC at executable link time.
+        target_link_options(${target_name} PRIVATE $<$<CONFIG:Release>:-Wno-odr>)
+    endif()
+endfunction()
+
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(OPUS QUIET IMPORTED_TARGET opus)
@@ -156,6 +164,8 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_R
     target_link_options(ScreenShare PRIVATE -static)
 endif()
 
+screenshare_configure_release_lto_warnings(ScreenShare)
+
 target_link_libraries(ScreenShare PRIVATE
     ScreenShareAPI
 )
@@ -239,6 +249,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             WIN32_LEAN_AND_MEAN
             NOMINMAX
         )
+        screenshare_configure_release_lto_warnings(ScreenShareUi)
         add_dependencies(ScreenShareUi ScreenShare)
 
         if(MSVC)

@@ -2,28 +2,17 @@
 
 ## Build Work
 
-1. Performance optimization pass.
-   - [x] Add or tighten hot-path timing so reports clearly show capture time, encode time, UDP queue delay, decoder time, preview queue, dropped frames, viewer queue, audio queue, and likely CPU/GPU bottlenecks.
-   - [x] Reduce receiver preview playout backlog with live-edge clock catch-up and non-vsync native preview presentation.
-   - [x] Lower default A/V Watch latency to 40 ms preview and 60 ms audio after confirming the receiver live catch-up path stays stable in loopback.
-   - [x] Remove unnecessary BGRA CPU readback from normal Share streaming while keeping BGRA readback for recording, BMP dumps, and capture-only diagnostics.
-   - [x] Make `--stream-encoder auto` fall back to software when hardware input drops persist, with report counters and hints for the fallback.
-   - [x] Keep receiver preview fast by avoiding one extra NV12 copy into Qt, skipping no-op D3D surface resizes, and keeping embedded/fullscreen presentation on the same surface.
-   - [x] Optimize UDP fanout for multiple viewers by caching resolved send targets and rebuilding the fanout list only when targets change; two-viewer loopback stayed healthy with 0 ms viewer queue average.
-   - [x] Keep audio capture/playback and Opus queues bounded and event-driven: WASAPI capture waits on audio events, receiver playout tracks queued frames directly, and audio-only loopback stayed at 0 ms playback queue with no drops.
-   - [x] Review release build settings for safe speed wins: Release builds now enable CMake-supported LTO/IPO when available, and the release ScreenShare target builds cleanly with it.
-
-2. User-facing diagnostics pass.
+1. User-facing diagnostics pass.
    - [ ] Map known runtime/report states to plain UI messages, starting with waiting for stream, password/encryption mismatch, UDP hole-punch failure, host left, and host idle.
    - [ ] Show an actionable next step in the active Share/Watch screens when setup is not healthy.
    - [ ] Keep warnings driven by real runtime/report signals, not guesses.
 
-3. Runtime state polish.
+2. Runtime state polish.
    - [ ] Make active-session wording freshness-aware so connected, idle, disconnected, and waiting states do not stay sticky after packets or feedback stop.
    - [ ] Keep Share and Watch state transitions consistent when viewers join, leave, rejoin, or when the host leaves.
    - [ ] Clean up NAT/feedback status summaries so they match the current session state, not only the last successful event.
 
-4. Report summary polish.
+3. Report summary polish.
    - [ ] Add the smallest useful report fields needed by the new UI diagnostics.
    - [ ] Warn about likely silent or wrong-device audio capture only when transport is healthy but audio evidence looks wrong.
    - [ ] Promote items from Report-Driven Follow-Ups into build work only after reports reproduce them.
