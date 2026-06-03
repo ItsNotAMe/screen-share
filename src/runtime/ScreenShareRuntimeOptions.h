@@ -60,6 +60,7 @@ constexpr int MaxAvSyncCorrectionBiasMs = 250;
 constexpr uint64_t AvSyncVideoOnlyFallbackFrames = 30;
 constexpr uint64_t SenderDirectUdpBlockedDatagrams = 1024;
 constexpr uint64_t ReceiverDirectUdpBlockedNatProbes = 120;
+constexpr uint32_t AutoHardwareDropReportsBeforeSoftwareFallback = 2;
 constexpr std::string_view DefaultSignalingServerUrl = "https://screenshare-signaling.bit-yeet.workers.dev";
 
 struct UdpSendTargetSpec {

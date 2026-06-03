@@ -686,6 +686,9 @@ void AppendPerformanceHints(
     if (const auto* streamQueue = metric("sender encoder queue"); streamQueue != nullptr && streamQueue->max >= 3.0) {
         hints.push_back("encoder input queue is backing up");
     }
+    if (const auto* autoFallbacks = metric("sender auto encoder fallbacks"); autoFallbacks != nullptr && autoFallbacks->max > 0.0) {
+        hints.push_back("auto stream encoder fell back from hardware to software after input drops");
+    }
     if (const auto* previewQueue = metric("receiver preview queue"); previewQueue != nullptr && previewQueue->max >= 8.0) {
         hints.push_back("receiver preview queue is growing");
     }
@@ -755,6 +758,8 @@ PerformanceReport BuildPerformanceReport(std::string_view consoleLog)
             AddMetric(metrics, sample, "stream_encode_avg_ms", "sender encode ms");
             AddMetric(metrics, sample, "stream_queue", "sender encoder queue");
             AddMetric(metrics, sample, "stream_dropped", "sender encoder dropped frames");
+            AddMetric(metrics, sample, "stream_auto_drop_reports", "sender auto encoder drop reports");
+            AddMetric(metrics, sample, "stream_auto_fallbacks", "sender auto encoder fallbacks");
             AddMetric(metrics, sample, "udp_queue_ms", "sender UDP queue ms");
             AddMetric(metrics, sample, "udp_peak_queue_ms", "sender peak UDP queue ms");
             AddMetric(metrics, sample, "udp_pending", "sender pending datagrams");
@@ -812,6 +817,8 @@ PerformanceReport BuildPerformanceReport(std::string_view consoleLog)
         {"Encode ms", metrics["sender encode ms"]},
         {"Encoder queue", metrics["sender encoder queue"]},
         {"Encoder dropped frames", metrics["sender encoder dropped frames"]},
+        {"Auto drop reports", metrics["sender auto encoder drop reports"]},
+        {"Auto fallbacks", metrics["sender auto encoder fallbacks"]},
         {"UDP queue ms", metrics["sender UDP queue ms"]},
         {"Peak UDP queue ms", metrics["sender peak UDP queue ms"]},
         {"Pending datagrams", metrics["sender pending datagrams"]},

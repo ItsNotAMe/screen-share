@@ -3053,6 +3053,9 @@ void RunCaptureStats(
     uint32_t streamTargetBitrate = 0;
     int streamEncoderWidth = 0;
     int streamEncoderHeight = 0;
+    uint64_t lastHardwareAutoDroppedInputs = 0;
+    uint32_t hardwareAutoDropReports = 0;
+    uint64_t hardwareAutoSoftwareFallbacks = 0;
     bool autoBitrateEnabled = options.bitrate == 0;
     uint64_t bitrateAdaptations = 0;
     uint64_t bitrateAdaptationFailures = 0;
@@ -3326,6 +3329,8 @@ void RunCaptureStats(
         streamEncoder.reset();
         streamEncoderWidth = 0;
         streamEncoderHeight = 0;
+        lastHardwareAutoDroppedInputs = 0;
+        hardwareAutoDropReports = 0;
     };
 
     auto drainLiveSignalingSendTargets = [&]() {
@@ -4118,6 +4123,23 @@ void RunCaptureStats(
                 udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
             const AudioCaptureWorkerStats audioCaptureStatsNow =
                 audioCaptureWorker ? audioCaptureWorker->stats() : AudioCaptureWorkerStats{};
+            const bool usingAutoHardwareEncoder =
+                options.streamEncoderPreference == StreamEncoderPreference::Auto &&
+                streamEncoderPreference == StreamEncoderPreference::Auto &&
+                streamEncoder &&
+                streamEncoder->backend() == screenshare::H264StreamEncoderBackend::Hardware;
+            const uint64_t streamDroppedInputsNow = streamEncoder ? streamEncoder->droppedInputFrames() : 0;
+            const bool hardwareDroppedInputsThisReport =
+                usingAutoHardwareEncoder && streamDroppedInputsNow > lastHardwareAutoDroppedInputs;
+            if (hardwareDroppedInputsThisReport) {
+                ++hardwareAutoDropReports;
+            } else if (usingAutoHardwareEncoder) {
+                hardwareAutoDropReports = 0;
+            }
+            lastHardwareAutoDroppedInputs = streamDroppedInputsNow;
+            const bool fallbackAutoHardwareToSoftware =
+                usingAutoHardwareEncoder &&
+                hardwareAutoDropReports >= AutoHardwareDropReportsBeforeSoftwareFallback;
             if (udpSender) {
                 bitrateAdvisor.Update(udpStatsNow);
                 applyAdaptiveBitrate();
@@ -4149,7 +4171,9 @@ void RunCaptureStats(
                 << " video_paused=" << (runtimeVideoPaused ? "yes" : "no")
                 << " stream_bitrate_mbps=" << Mbps(streamBitrate)
                 << " stream_queue=" << (streamEncoder ? streamEncoder->queuedInputCount() : 0)
-                << " stream_dropped=" << (streamEncoder ? streamEncoder->droppedInputFrames() : 0)
+                << " stream_dropped=" << streamDroppedInputsNow
+                << " stream_auto_drop_reports=" << hardwareAutoDropReports
+                << " stream_auto_fallbacks=" << hardwareAutoSoftwareFallbacks
                 << " output_fps=" << outputFps
                 << " desktop_update_fps=" << desktopUpdateFps
                 << " capture_avg_ms=" << captureAvgMs
@@ -4231,6 +4255,20 @@ void RunCaptureStats(
             if (udpSender) {
                 PrintViewerSnapshots(*udpSender);
                 std::cout << std::flush;
+            }
+            if (fallbackAutoHardwareToSoftware) {
+                ++hardwareAutoSoftwareFallbacks;
+                std::cerr
+                    << "Hardware stream encoder input drops persisted; falling back to software"
+                    << " dropped_inputs=" << streamDroppedInputsNow
+                    << " reports=" << hardwareAutoDropReports
+                    << "\n";
+                streamEncoderPreference = StreamEncoderPreference::Software;
+                ConfigureCapturePayloads(config, options, streamEncoderPreference);
+                capturer.Stop();
+                capturer.Start(config);
+                hasFrame = false;
+                resetStreamEncoder();
             }
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
