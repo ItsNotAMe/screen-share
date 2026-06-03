@@ -386,7 +386,7 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
         state.config.signalingStunServer = kDefaultStunServer;
         state.config.reportPath = "receiver-report.zip";
         state.config.playAudio = true;
-        state.config.previewLatencyMs = 100;
+        state.config.previewLatencyMs = 60;
         state.config.audioPlaybackVolumePercent = 100;
         state.roomId = room.roomId;
         state.roomName = room.name;

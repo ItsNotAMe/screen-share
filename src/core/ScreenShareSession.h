@@ -178,7 +178,7 @@ struct WatchSessionConfig {
     bool muted = false;
     bool lanAdvertise = false;
     std::string peerInvite;
-    int previewLatencyMs = 100;
+    int previewLatencyMs = 60;
     bool emitVideoFrames = false;
     int audioPlaybackVolumePercent = 100;
 };
