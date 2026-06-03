@@ -50,9 +50,9 @@ constexpr uint32_t ResolutionBitrateReducedPercentBeforeQueueScale = 60;
 constexpr uint32_t ResolutionStableReportsBeforeUpscale = 4;
 constexpr uint32_t ResolutionPressureReportsBeforeReduce = 3;
 constexpr int DefaultPreviewLatencyMs = 150;
-constexpr int DefaultAvSyncPreviewLatencyMs = 100;
+constexpr int DefaultAvSyncPreviewLatencyMs = 40;
 constexpr int DefaultPreviewMaxLateMs = 500;
-constexpr int DefaultAudioPlaybackLatencyMs = 120;
+constexpr int DefaultAudioPlaybackLatencyMs = 60;
 constexpr int DefaultUdpMaxQueueMs = 0;
 constexpr int DefaultShareUdpMaxQueueMs = 1500;
 constexpr uint32_t DefaultUdpPacingHeadroomPercent = 125;
@@ -60,6 +60,7 @@ constexpr int MaxAvSyncCorrectionBiasMs = 250;
 constexpr uint64_t AvSyncVideoOnlyFallbackFrames = 30;
 constexpr uint64_t SenderDirectUdpBlockedDatagrams = 1024;
 constexpr uint64_t ReceiverDirectUdpBlockedNatProbes = 120;
+constexpr uint32_t AutoHardwareDropReportsBeforeSoftwareFallback = 2;
 constexpr std::string_view DefaultSignalingServerUrl = "https://screenshare-signaling.bit-yeet.workers.dev";
 
 struct UdpSendTargetSpec {
@@ -84,6 +85,7 @@ struct Options {
     bool listDisplays = false;
     bool listH264Encoders = false;
     bool listAudioDevices = false;
+    bool selfTest = false;
     int displayIndex = 0;
     screenshare::CaptureSourceType captureSourceType = screenshare::CaptureSourceType::Display;
     uint64_t windowHandle = 0;

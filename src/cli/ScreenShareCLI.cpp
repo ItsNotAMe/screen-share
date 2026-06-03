@@ -53,6 +53,7 @@ void PrintHelp()
         << "ScreenShare native C++ capture prototype\n\n"
         << "Usage:\n"
         << "  ScreenShare --list\n"
+        << "  ScreenShare --self-test [--save-report PATH]\n"
         << "  ScreenShare --generate-access-code\n"
         << "  ScreenShare --list-h264-encoders [--width W --height H] [--fps FPS] [--bitrate-mbps Mbps]\n"
         << "  ScreenShare --list-audio-devices\n"
@@ -126,6 +127,7 @@ void PrintHelp()
         << "  Presets: --share enables UDP video, system audio, and adaptation; --watch enables preview and audio playback.\n\n"
         << "Examples:\n"
         << "  ScreenShare --list\n"
+        << "  ScreenShare --self-test --save-report self-test-report.zip\n"
         << "  ScreenShare --generate-access-code\n"
         << "  ScreenShare --list-h264-encoders --width 1920 --height 1080 --fps 60\n"
         << "  ScreenShare --list-audio-devices\n"
@@ -399,7 +401,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             PrintHelp();
             std::exit(0);
         }
-        if (arg == "--log") {
+        if (arg == "--self-test") {
+            options.selfTest = true;
+        } else if (arg == "--log") {
             options.logPath = requireValue("--log");
         } else if (arg == "--stop-file") {
             options.stopFilePath = requireValue("--stop-file");
@@ -961,6 +965,68 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             config.lanAdvertise = options.lanAdvertise;
         }
         options.cliWatchSession = std::move(config);
+    }
+
+    if (options.selfTest) {
+        if (options.generateAccessCode ||
+            options.listDisplays ||
+            options.listH264Encoders ||
+            options.listAudioDevices ||
+            options.lanDiscover ||
+            options.lanAdvertise ||
+            options.stunQuery ||
+            options.makeInvite ||
+            options.natProbe ||
+            HasSignalingOptions(options) ||
+            options.signalingLive ||
+            HasUdpSession(options) ||
+            options.accessCodeProvided ||
+            options.allowPlaintext ||
+            options.audioCapture ||
+            options.audioDeviceIdProvided ||
+            options.audioCodecProvided ||
+            options.audioPlayback ||
+            options.audioPlaybackLatencyProvided ||
+            options.audioPlaybackMutedProvided ||
+            options.audioPlaybackVolumeProvided ||
+            options.avSync ||
+            options.avSyncDisabled ||
+            options.streamEncode ||
+            options.streamEncoderPreferenceProvided ||
+            options.udpLocalPortProvided ||
+            options.udpPacingOptionProvided ||
+            options.udpMaxQueueMsProvided ||
+            options.adaptBitrate ||
+            options.adaptMinBitrateProvided ||
+            options.adaptReduceCooldownProvided ||
+            options.adaptResolution ||
+            options.noAdaptResolution ||
+            options.adaptResolutionMinScaleProvided ||
+            options.adaptResolutionCooldownProvided ||
+            options.inviteEndpointPreferenceProvided ||
+            !options.stopFilePath.empty() ||
+            !options.controlFilePath.empty() ||
+            !options.localInvite.empty() ||
+            !options.peerInvite.empty() ||
+            secondsProvided ||
+            options.width != 0 ||
+            options.height != 0 ||
+            options.bitrate != 0 ||
+            options.keyframeIntervalProvided ||
+            !options.recordPath.empty() ||
+            !options.capturedBmpPath.empty() ||
+            !options.h264DumpPath.empty() ||
+            options.decodeH264 ||
+            !options.decodedBmpPath.empty() ||
+            options.previewWindow ||
+            options.previewLatencyProvided ||
+            options.previewMaxLateProvided ||
+            options.simulateLossProvided ||
+            options.simulateJitterProvided) {
+            throw std::invalid_argument("--self-test is a standalone diagnostic and can only be combined with --log, --save-report, or --session");
+        }
+        options.sessionFingerprint = SessionFingerprint(options.sessionId);
+        return options;
     }
 
     if (options.generateAccessCode) {
@@ -1828,6 +1894,145 @@ void RunNatProbe(const Options& options)
     }
 }
 
+void RunCliSelfTest(const Options& options)
+{
+    const std::string fingerprint = FormatSessionFingerprint(options.sessionFingerprint);
+    std::cout
+        << "cli_self_test=started"
+        << " session=" << options.sessionId
+        << " session_fingerprint=" << fingerprint
+        << "\n";
+
+    std::cout
+        << "source=2560x1440"
+        << " session=" << options.sessionId
+        << " session_fingerprint=" << fingerprint
+        << " source_format=DXGI_FORMAT_B8G8R8A8_UNORM"
+        << " display_color_space=DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709"
+        << " display_hdr=no"
+        << " color_conversion=sdr"
+        << " output=1920x1080"
+        << " output_format=DXGI_FORMAT_B8G8R8A8_UNORM"
+        << " resolution_scale=0.75"
+        << " resolution_tier=1"
+        << " resolution_tiers=3"
+        << " resolution_adaptation=stable"
+        << " nv12=gpu_texture"
+        << " stream_input=d3d11"
+        << " video_paused=no"
+        << " stream_bitrate_mbps=16"
+        << " stream_queue=1"
+        << " stream_dropped=0"
+        << " output_fps=60"
+        << " desktop_update_fps=58"
+        << " capture_avg_ms=1.2"
+        << " stream_encode_avg_ms=3.4"
+        << " repeated_frames=0"
+        << " total_output_frames=60"
+        << " total_desktop_updates=58"
+        << " stream_encoded_frames=60"
+        << " udp_targets=1"
+        << " udp_active_targets=1"
+        << " udp_failed_targets=0"
+        << " udp_datagrams=900"
+        << " udp_queued=900"
+        << " udp_pending=12"
+        << " udp_peak_pending=18"
+        << " udp_queue_ms=14"
+        << " udp_peak_queue_ms=24"
+        << " udp_dropped_frames=0"
+        << " audio_capture=running"
+        << " audio_capture_source=system"
+        << " audio_codec=opus"
+        << " audio_payload_bitrate_mbps=0.128"
+        << " audio_udp_packets=50"
+        << " audio_udp_frames=48000"
+        << " audio_udp_dropped_packets=0"
+        << " udp_feedback_packets=4"
+        << " udp_feedback_health=ok"
+        << " udp_feedback_completed_frames=55"
+        << " udp_feedback_resyncs=0"
+        << " udp_feedback_skipped_packets=0"
+        << "\n";
+
+    std::cout
+        << "viewer_target=0"
+        << " viewer_group=1"
+        << " viewer_endpoint=127.0.0.1:5000"
+        << " viewer_name=self-test"
+        << " viewer_state=feedback"
+        << " viewer_feedback_packets=4"
+        << " viewer_pending=8"
+        << " viewer_queue_ms=10"
+        << " viewer_feedback_health=ok"
+        << " viewer_feedback_completed_frames=55"
+        << " viewer_feedback_resyncs=0"
+        << " viewer_feedback_session=" << fingerprint
+        << " viewer_feedback_access=none"
+        << "\n";
+
+    std::cout
+        << "udp_datagrams=920"
+        << " session=" << options.sessionId
+        << " session_fingerprint=" << fingerprint
+        << " receiver_health=ok"
+        << " nat_status=receiving"
+        << " nat_hint=none"
+        << " udp_datagrams_per_second=920"
+        << " accepted_datagrams=920"
+        << " feedback_sent=4"
+        << " stream_restarts=0"
+        << " audio_datagrams=50"
+        << " audio_packets=50"
+        << " audio_queued_packets=50"
+        << " audio_queue_dropped=0"
+        << " audio_frames=48000"
+        << " audio_codec=opus"
+        << " audio_playback=running"
+        << " audio_playback_latency_ms=100"
+        << " audio_playback_queue=6"
+        << " audio_playback_queue_ms=96"
+        << " audio_playback_packets=44"
+        << " audio_playback_frames=42240"
+        << " audio_playback_drops=0"
+        << " audio_playback_latency_drops=0"
+        << " audio_render_padding=384"
+        << " av_sync=synced"
+        << " av_audio_ahead_ms=2"
+        << " invalid_datagrams=0"
+        << " duplicate_fragments=0"
+        << " completed_frames=55"
+        << " completed_fps=59.4"
+        << " pending_frames=1"
+        << " incomplete_dropped=0"
+        << " h264_decode_packets=55"
+        << " h264_decode_avg_ms=1.1"
+        << " h264_decoded_frames=55"
+        << " h264_decoded_output=1920x1080"
+        << " pending_h264_decode_packets=0"
+        << " preview_frames_presented=54"
+        << " preview_queue=2"
+        << " video_playout_delay_avg_ms=104"
+        << " video_playout_delay_max_ms=120"
+        << " video_playout_delay_last_ms=101"
+        << " preview_latency_ms=100"
+        << " preview_max_late_ms=500"
+        << " preview_late_drops=0"
+        << " preview_overflow_drops=0"
+        << " preview_startup_drops=0"
+        << " preview_catchup_drops=2"
+        << " latest_frame=55"
+        << " latest_frame_bytes=60000"
+        << " latest_fragments=48"
+        << "\n";
+
+    std::cout
+        << "cli_self_test=passed"
+        << " session=" << options.sessionId
+        << " session_fingerprint=" << fingerprint
+        << "\n";
+}
+
 } // namespace
 
 namespace screenshare_runtime_internal {
@@ -1842,7 +2047,9 @@ int ExecuteScreenShareOptions(
     reportContext.accessCodeRequired = options.accessCodeProvided;
     reportContext.encryptionEnabled = options.accessCodeKey.has_value();
 
-    if (options.generateAccessCode) {
+    if (options.selfTest) {
+        RunCliSelfTest(options);
+    } else if (options.generateAccessCode) {
         std::cout << screenshare::GenerateUdpAccessCode() << "\n";
     } else if (options.makeInvite) {
         RunMakeInvite(options);

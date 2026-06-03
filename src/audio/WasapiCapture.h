@@ -9,6 +9,7 @@
 
 #include <audioclient.h>
 #include <mmdeviceapi.h>
+#include <windows.h>
 #include <wrl/client.h>
 
 namespace screenshare {
@@ -96,6 +97,7 @@ private:
 
     Microsoft::WRL::ComPtr<IAudioClient> audioClient_;
     Microsoft::WRL::ComPtr<IAudioCaptureClient> captureClient_;
+    HANDLE captureEvent_ = nullptr;
 };
 
 AudioCaptureSource ParseAudioCaptureSource(const std::string& value);

@@ -249,7 +249,7 @@ public:
             ++key;
         }
 
-        frames_.emplace(key, std::move(frame));
+        frames_.emplace(key, QueuedFrame{std::move(frame), Clock::now()});
         while (frames_.size() > maxQueuedFrames_) {
             frames_.erase(frames_.begin());
             ++overflowDrops_;
@@ -268,6 +268,11 @@ public:
         EnsureClockStarted(now);
 
         while (!frames_.empty()) {
+            if (!flush) {
+                AdvanceClockTowardLiveEdge(now);
+                DropReadyBacklog(now, maxPresentationTimestamp100ns);
+            }
+
             const int64_t frameTimestamp100ns = frames_.begin()->first;
             if (!flush &&
                 maxPresentationTimestamp100ns &&
@@ -286,9 +291,17 @@ public:
                 continue;
             }
 
-            auto frame = std::move(frames_.begin()->second);
+            auto queuedFrame = std::move(frames_.begin()->second);
             frames_.erase(frames_.begin());
-            previewWindow.PresentFrame(frame);
+            const double presentDelayMs =
+                std::chrono::duration<double, std::milli>(now - queuedFrame.enqueuedAt).count();
+            if (std::isfinite(presentDelayMs) && presentDelayMs >= 0.0) {
+                lastPresentDelayMs_ = presentDelayMs;
+                maxPresentDelayMs_ = std::max(maxPresentDelayMs_, presentDelayMs);
+                totalPresentDelayMs_ += presentDelayMs;
+                ++presentDelaySamples_;
+            }
+            previewWindow.PresentFrame(queuedFrame.frame);
             lastPresentedTimestamp100ns_ = frameTimestamp100ns;
             hasPresentedTimestamp_ = true;
         }
@@ -323,6 +336,8 @@ public:
     [[nodiscard]] size_t queuedFrameCount() const noexcept { return frames_.size(); }
     [[nodiscard]] uint64_t lateDrops() const noexcept { return lateDrops_; }
     [[nodiscard]] uint64_t overflowDrops() const noexcept { return overflowDrops_; }
+    [[nodiscard]] uint64_t startupDrops() const noexcept { return startupDrops_; }
+    [[nodiscard]] uint64_t catchupDrops() const noexcept { return catchupDrops_; }
     [[nodiscard]] uint64_t syncDrops() const noexcept { return syncDrops_; }
     [[nodiscard]] uint64_t syncWaits() const noexcept { return syncWaits_; }
     [[nodiscard]] bool clockStarted() const noexcept { return clockStarted_; }
@@ -332,6 +347,12 @@ public:
     [[nodiscard]] int64_t lastPresentedTimestamp100ns() const noexcept { return lastPresentedTimestamp100ns_; }
     [[nodiscard]] std::chrono::milliseconds initialDelay() const noexcept { return initialDelay_; }
     [[nodiscard]] std::chrono::milliseconds maxLateFrameAge() const noexcept { return maxLateFrameAge_; }
+    [[nodiscard]] double averagePresentDelayMs() const noexcept
+    {
+        return presentDelaySamples_ == 0 ? 0.0 : totalPresentDelayMs_ / static_cast<double>(presentDelaySamples_);
+    }
+    [[nodiscard]] double maxPresentDelayMs() const noexcept { return maxPresentDelayMs_; }
+    [[nodiscard]] double lastPresentDelayMs() const noexcept { return lastPresentDelayMs_; }
     void AddInitialDelayBias(std::chrono::milliseconds bias)
     {
         initialDelay_ += bias;
@@ -361,9 +382,91 @@ private:
             return;
         }
 
+        TrimStartupBacklogToLatencyTarget();
         firstTimestamp100ns_ = frames_.begin()->first;
         firstPresentationAt_ = now + initialDelay_;
         clockStarted_ = true;
+    }
+
+    void TrimStartupBacklogToLatencyTarget()
+    {
+        TrimBacklogToLatencyTarget(startupDrops_);
+    }
+
+    void DropReadyBacklog(
+        Clock::time_point now,
+        std::optional<int64_t> maxPresentationTimestamp100ns)
+    {
+        while (frames_.size() > 1) {
+            auto current = frames_.begin();
+            auto next = std::next(current);
+            if (maxPresentationTimestamp100ns && next->first > *maxPresentationTimestamp100ns) {
+                break;
+            }
+            if (now < PresentationTime(next->first)) {
+                break;
+            }
+
+            frames_.erase(current);
+            ++catchupDrops_;
+        }
+    }
+
+    void AdvanceClockTowardLiveEdge(Clock::time_point now)
+    {
+        if (frames_.size() < 3) {
+            return;
+        }
+
+        const auto newestPresentationTime = PresentationTime(frames_.rbegin()->first);
+        const auto targetLead =
+            initialDelay_ +
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::nanoseconds(EstimateFrameTicks100ns() * 200));
+        const auto targetNewestPresentationTime = now + targetLead;
+        if (newestPresentationTime <= targetNewestPresentationTime) {
+            return;
+        }
+
+        firstPresentationAt_ -= std::chrono::duration_cast<Clock::duration>(
+            newestPresentationTime - targetNewestPresentationTime);
+    }
+
+    void TrimBacklogToLatencyTarget(uint64_t& dropCounter)
+    {
+        if (frames_.size() < 3) {
+            return;
+        }
+
+        const int64_t newestTimestamp100ns = frames_.rbegin()->first;
+        if (newestTimestamp100ns <= frames_.begin()->first) {
+            return;
+        }
+
+        const int64_t frameTicks100ns = EstimateFrameTicks100ns();
+        const int64_t targetTicks100ns =
+            std::max<int64_t>(0, initialDelay_.count()) * 10'000LL;
+        const int64_t slackTicks100ns = std::max<int64_t>(frameTicks100ns * 2, 1);
+        const int64_t maxQueuedSpan100ns = targetTicks100ns + slackTicks100ns;
+
+        while (frames_.size() > 2 &&
+               newestTimestamp100ns - frames_.begin()->first > maxQueuedSpan100ns) {
+            frames_.erase(frames_.begin());
+            ++dropCounter;
+        }
+    }
+
+    [[nodiscard]] int64_t EstimateFrameTicks100ns() const
+    {
+        int64_t frameTicks100ns = 166'667;
+        auto previous = frames_.begin();
+        for (auto current = std::next(previous); current != frames_.end(); ++current, ++previous) {
+            const int64_t delta = current->first - previous->first;
+            if (delta > 0) {
+                return delta;
+            }
+        }
+        return frameTicks100ns;
     }
 
     [[nodiscard]] Clock::time_point PresentationTime(int64_t timestamp100ns) const
@@ -379,7 +482,12 @@ private:
         return firstPresentationAt_ + std::chrono::duration_cast<Clock::duration>(delta);
     }
 
-    std::map<int64_t, screenshare::DecodedFrameInfo> frames_;
+    struct QueuedFrame {
+        screenshare::DecodedFrameInfo frame;
+        Clock::time_point enqueuedAt;
+    };
+
+    std::map<int64_t, QueuedFrame> frames_;
     Clock::time_point firstPresentationAt_{};
     int64_t firstTimestamp100ns_ = 0;
     int64_t lastPresentedTimestamp100ns_ = 0;
@@ -387,8 +495,14 @@ private:
     bool hasPresentedTimestamp_ = false;
     uint64_t lateDrops_ = 0;
     uint64_t overflowDrops_ = 0;
+    uint64_t startupDrops_ = 0;
+    uint64_t catchupDrops_ = 0;
     uint64_t syncDrops_ = 0;
     uint64_t syncWaits_ = 0;
+    uint64_t presentDelaySamples_ = 0;
+    double totalPresentDelayMs_ = 0.0;
+    double maxPresentDelayMs_ = 0.0;
+    double lastPresentDelayMs_ = 0.0;
     size_t maxQueuedFrames_ = 180;
     std::chrono::milliseconds initialDelay_;
     std::chrono::milliseconds maxLateFrameAge_;
@@ -408,6 +522,8 @@ public:
         started_ = false;
         lastRenderedEndQpc100ns_ = 0;
         hasRenderedQpc_ = false;
+        queuedFrames_ = 0;
+        queuedSampleRate_ = 0;
     }
 
     void Enqueue(screenshare::UdpCompletedAudioPacket packet)
@@ -416,14 +532,22 @@ public:
             ++lateDrops_;
             return;
         }
+        const uint32_t packetFrames = packet.audioFrames;
+        const uint32_t packetSampleRate = packet.sampleRate;
         if (!packets_.emplace(packet.packetId, std::move(packet)).second) {
             ++duplicateDrops_;
             return;
         }
+        queuedFrames_ += packetFrames;
+        if (packetSampleRate != 0) {
+            queuedSampleRate_ = packetSampleRate;
+        }
         while (packets_.size() > maxQueuedPackets_) {
+            queuedFrames_ -= std::min<uint64_t>(queuedFrames_, packets_.begin()->second.audioFrames);
             packets_.erase(packets_.begin());
             ++overflowDrops_;
         }
+        TrimLatencyBacklog();
     }
 
     void RenderReady(
@@ -470,6 +594,7 @@ public:
             if (packet.audioFrames > renderer.bufferFrames()) {
                 ++oversizedDrops_;
                 ++(*nextPacketId_);
+                queuedFrames_ -= std::min<uint64_t>(queuedFrames_, packet.audioFrames);
                 packets_.erase(next);
                 continue;
             }
@@ -490,6 +615,7 @@ public:
                 hasRenderedQpc_ = true;
             }
             ++(*nextPacketId_);
+            queuedFrames_ -= std::min<uint64_t>(queuedFrames_, packet.audioFrames);
             packets_.erase(next);
         }
     }
@@ -524,6 +650,7 @@ public:
             if (nextPacketId_ && packetId >= *nextPacketId_) {
                 nextPacketId_ = packetId + 1;
             }
+            queuedFrames_ -= std::min<uint64_t>(queuedFrames_, packets_.begin()->second.audioFrames);
             packets_.erase(packets_.begin());
             ++dropped;
         }
@@ -536,25 +663,17 @@ public:
         if (packets_.empty()) {
             return std::chrono::milliseconds(0);
         }
-
-        uint64_t frames = 0;
-        uint32_t sampleRate = 0;
-        for (const auto& [packetId, packet] : packets_) {
-            static_cast<void>(packetId);
-            frames += packet.audioFrames;
-            sampleRate = packet.sampleRate;
-        }
-        if (sampleRate == 0) {
+        if (queuedSampleRate_ == 0) {
             return std::chrono::milliseconds(0);
         }
 
-        return std::chrono::milliseconds(static_cast<int64_t>(frames * 1000 / sampleRate));
+        return std::chrono::milliseconds(static_cast<int64_t>(queuedFrames_ * 1000 / queuedSampleRate_));
     }
 
 private:
     void TrimLatencyBacklog()
     {
-        if (!started_ || packets_.empty()) {
+        if (packets_.empty()) {
             return;
         }
 
@@ -573,6 +692,7 @@ private:
                     nextPacketId_ = oldest->first + 1;
                 }
             }
+            queuedFrames_ -= std::min<uint64_t>(queuedFrames_, oldest->second.audioFrames);
             packets_.erase(oldest);
             ++latencyDrops_;
         }
@@ -583,6 +703,8 @@ private:
     bool started_ = false;
     bool hasRenderedQpc_ = false;
     size_t maxQueuedPackets_ = 512;
+    uint64_t queuedFrames_ = 0;
+    uint32_t queuedSampleRate_ = 0;
     std::chrono::milliseconds targetLatency_;
     std::chrono::milliseconds maxQueueOverTarget_{250};
     uint64_t packetsRendered_ = 0;
@@ -2352,7 +2474,7 @@ void ConfigureCapturePayloads(
     config.includeNv12 = options.streamEncode;
     config.includeNv12Readback = !optimizeForHardwareStream;
     config.includeBgraReadback =
-        !optimizeForHardwareStream ||
+        !options.streamEncode ||
         !options.recordPath.empty() ||
         !options.capturedBmpPath.empty();
 }
@@ -2939,6 +3061,9 @@ void RunCaptureStats(
     uint32_t streamTargetBitrate = 0;
     int streamEncoderWidth = 0;
     int streamEncoderHeight = 0;
+    uint64_t lastHardwareAutoDroppedInputs = 0;
+    uint32_t hardwareAutoDropReports = 0;
+    uint64_t hardwareAutoSoftwareFallbacks = 0;
     bool autoBitrateEnabled = options.bitrate == 0;
     uint64_t bitrateAdaptations = 0;
     uint64_t bitrateAdaptationFailures = 0;
@@ -3212,6 +3337,8 @@ void RunCaptureStats(
         streamEncoder.reset();
         streamEncoderWidth = 0;
         streamEncoderHeight = 0;
+        lastHardwareAutoDroppedInputs = 0;
+        hardwareAutoDropReports = 0;
     };
 
     auto drainLiveSignalingSendTargets = [&]() {
@@ -4004,6 +4131,23 @@ void RunCaptureStats(
                 udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
             const AudioCaptureWorkerStats audioCaptureStatsNow =
                 audioCaptureWorker ? audioCaptureWorker->stats() : AudioCaptureWorkerStats{};
+            const bool usingAutoHardwareEncoder =
+                options.streamEncoderPreference == StreamEncoderPreference::Auto &&
+                streamEncoderPreference == StreamEncoderPreference::Auto &&
+                streamEncoder &&
+                streamEncoder->backend() == screenshare::H264StreamEncoderBackend::Hardware;
+            const uint64_t streamDroppedInputsNow = streamEncoder ? streamEncoder->droppedInputFrames() : 0;
+            const bool hardwareDroppedInputsThisReport =
+                usingAutoHardwareEncoder && streamDroppedInputsNow > lastHardwareAutoDroppedInputs;
+            if (hardwareDroppedInputsThisReport) {
+                ++hardwareAutoDropReports;
+            } else if (usingAutoHardwareEncoder) {
+                hardwareAutoDropReports = 0;
+            }
+            lastHardwareAutoDroppedInputs = streamDroppedInputsNow;
+            const bool fallbackAutoHardwareToSoftware =
+                usingAutoHardwareEncoder &&
+                hardwareAutoDropReports >= AutoHardwareDropReportsBeforeSoftwareFallback;
             if (udpSender) {
                 bitrateAdvisor.Update(udpStatsNow);
                 applyAdaptiveBitrate();
@@ -4035,7 +4179,9 @@ void RunCaptureStats(
                 << " video_paused=" << (runtimeVideoPaused ? "yes" : "no")
                 << " stream_bitrate_mbps=" << Mbps(streamBitrate)
                 << " stream_queue=" << (streamEncoder ? streamEncoder->queuedInputCount() : 0)
-                << " stream_dropped=" << (streamEncoder ? streamEncoder->droppedInputFrames() : 0)
+                << " stream_dropped=" << streamDroppedInputsNow
+                << " stream_auto_drop_reports=" << hardwareAutoDropReports
+                << " stream_auto_fallbacks=" << hardwareAutoSoftwareFallbacks
                 << " output_fps=" << outputFps
                 << " desktop_update_fps=" << desktopUpdateFps
                 << " capture_avg_ms=" << captureAvgMs
@@ -4117,6 +4263,20 @@ void RunCaptureStats(
             if (udpSender) {
                 PrintViewerSnapshots(*udpSender);
                 std::cout << std::flush;
+            }
+            if (fallbackAutoHardwareToSoftware) {
+                ++hardwareAutoSoftwareFallbacks;
+                std::cerr
+                    << "Hardware stream encoder input drops persisted; falling back to software"
+                    << " dropped_inputs=" << streamDroppedInputsNow
+                    << " reports=" << hardwareAutoDropReports
+                    << "\n";
+                streamEncoderPreference = StreamEncoderPreference::Software;
+                ConfigureCapturePayloads(config, options, streamEncoderPreference);
+                capturer.Stop();
+                capturer.Start(config);
+                hasFrame = false;
+                resetStreamEncoder();
             }
             intervalOutputFrames = 0;
             intervalDesktopUpdates = 0;
@@ -4645,6 +4805,10 @@ void RunUdpReceiverStats(
     uint64_t h264DecodeResyncs = 0;
     uint64_t h264DecodeDecoderRestarts = 0;
     uint64_t h264DecodeSkippedPackets = 0;
+    double intervalH264DecodeMs = 0.0;
+    uint64_t intervalH264DecodeCalls = 0;
+    double totalH264DecodeMs = 0.0;
+    uint64_t totalH264DecodeCalls = 0;
     int h264DecodedWidth = 0;
     int h264DecodedHeight = 0;
     uint64_t nextH264DecodeFrameId = 0;
@@ -5199,7 +5363,15 @@ void RunUdpReceiverStats(
                 static_cast<int64_t>(frame.senderQpc100ns) :
                 static_cast<int64_t>(frame.timestamp100ns);
         packet.bytes = frame.bytes;
+        const auto decodeStart = Clock::now();
         auto decodedFrames = h264Decoder->DecodePacket(packet);
+        const double decodeMs = std::chrono::duration<double, std::milli>(Clock::now() - decodeStart).count();
+        if (std::isfinite(decodeMs) && decodeMs >= 0.0) {
+            intervalH264DecodeMs += decodeMs;
+            ++intervalH264DecodeCalls;
+            totalH264DecodeMs += decodeMs;
+            ++totalH264DecodeCalls;
+        }
         countDecodedFrames(std::move(decodedFrames));
         ++h264DecodePackets;
     };
@@ -5487,6 +5659,8 @@ void RunUdpReceiverStats(
             const auto& stats = receiver.stats();
             const double datagramsPerSecond = static_cast<double>(stats.datagramsReceived - lastDatagramsReceived) / elapsed;
             const double completedFps = static_cast<double>(stats.framesCompleted - lastFramesCompleted) / elapsed;
+            const double h264DecodeAvgMs =
+                intervalH264DecodeCalls == 0 ? 0.0 : intervalH264DecodeMs / static_cast<double>(intervalH264DecodeCalls);
             const uint64_t previewLateDrops = previewWindow ? previewPlayout.lateDrops() : 0;
             const uint64_t previewOverflowDrops = previewWindow ? previewPlayout.overflowDrops() : 0;
             const AvSyncSnapshot avSyncNow = avSync.snapshot();
@@ -5678,6 +5852,7 @@ void RunUdpReceiverStats(
                 << " dumped_h264_bytes=" << h264DumpBytes
                 << " pending_h264_dump_packets=" << h264DumpBacklog.size()
                 << " h264_decode_packets=" << h264DecodePackets
+                << " h264_decode_avg_ms=" << h264DecodeAvgMs
                 << " h264_decoded_frames=" << h264DecodedFrames
                 << " h264_decoded_bytes=" << h264DecodedBytes
                 << " h264_decode_resyncs=" << h264DecodeResyncs
@@ -5687,11 +5862,16 @@ void RunUdpReceiverStats(
                 << " pending_h264_decode_packets=" << h264DecodeBacklog.size()
                 << " preview_frames_presented=" << (previewWindow ? previewWindow->framesPresented() : 0)
                 << " preview_queue=" << (previewWindow ? previewPlayout.queuedFrameCount() : 0)
+                << " video_playout_delay_avg_ms=" << (previewWindow ? previewPlayout.averagePresentDelayMs() : 0.0)
+                << " video_playout_delay_max_ms=" << (previewWindow ? previewPlayout.maxPresentDelayMs() : 0.0)
+                << " video_playout_delay_last_ms=" << (previewWindow ? previewPlayout.lastPresentDelayMs() : 0.0)
                 << " preview_latency_ms=" << (previewWindow ? previewPlayout.initialDelay().count() : 0)
                 << " preview_max_late_ms=" << (previewWindow ? previewPlayout.maxLateFrameAge().count() : 0)
                 << " preview_playout_resets=" << (previewWindow ? previewPlayoutResets : 0)
                 << " preview_late_drops=" << (previewWindow ? previewPlayout.lateDrops() : 0)
                 << " preview_overflow_drops=" << (previewWindow ? previewPlayout.overflowDrops() : 0)
+                << " preview_startup_drops=" << (previewWindow ? previewPlayout.startupDrops() : 0)
+                << " preview_catchup_drops=" << (previewWindow ? previewPlayout.catchupDrops() : 0)
                 << " preview_sync_drops=" << (previewWindow ? previewPlayout.syncDrops() : 0)
                 << " preview_sync_waits=" << (previewWindow ? previewPlayout.syncWaits() : 0);
 
@@ -5705,6 +5885,8 @@ void RunUdpReceiverStats(
             std::cout << "\n" << std::flush;
 
             updateReportBaselines(stats, previewLateDrops, previewOverflowDrops, now);
+            intervalH264DecodeMs = 0.0;
+            intervalH264DecodeCalls = 0;
         }
     }
 
@@ -5884,6 +6066,8 @@ void RunUdpReceiverStats(
         << ", dumped H.264 bytes: " << h264DumpBytes
         << ", pending H.264 dump packets: " << h264DumpBacklog.size()
         << ", H.264 decode packets: " << h264DecodePackets
+        << ", average H.264 decode ms: "
+        << (totalH264DecodeCalls == 0 ? 0.0 : totalH264DecodeMs / static_cast<double>(totalH264DecodeCalls))
         << ", H.264 decoded frames: " << h264DecodedFrames
         << ", H.264 decoded bytes: " << h264DecodedBytes
         << ", H.264 decode resyncs: " << h264DecodeResyncs
@@ -5893,11 +6077,16 @@ void RunUdpReceiverStats(
         << ", pending H.264 decode packets: " << h264DecodeBacklog.size()
         << ", preview frames presented: " << (previewWindow ? previewWindow->framesPresented() : 0)
         << ", preview queued frames: " << (previewWindow ? previewPlayout.queuedFrameCount() : 0)
+        << ", video playout delay avg ms: " << (previewWindow ? previewPlayout.averagePresentDelayMs() : 0.0)
+        << ", video playout delay max ms: " << (previewWindow ? previewPlayout.maxPresentDelayMs() : 0.0)
+        << ", video playout delay last ms: " << (previewWindow ? previewPlayout.lastPresentDelayMs() : 0.0)
         << ", preview latency ms: " << (previewWindow ? previewPlayout.initialDelay().count() : 0)
         << ", preview max late ms: " << (previewWindow ? previewPlayout.maxLateFrameAge().count() : 0)
         << ", preview playout resets: " << (previewWindow ? previewPlayoutResets : 0)
         << ", preview late drops: " << (previewWindow ? previewPlayout.lateDrops() : 0)
         << ", preview overflow drops: " << (previewWindow ? previewPlayout.overflowDrops() : 0)
+        << ", preview startup drops: " << (previewWindow ? previewPlayout.startupDrops() : 0)
+        << ", preview catchup drops: " << (previewWindow ? previewPlayout.catchupDrops() : 0)
         << ", preview sync drops: " << (previewWindow ? previewPlayout.syncDrops() : 0)
         << ", preview sync waits: " << (previewWindow ? previewPlayout.syncWaits() : 0)
         << ", decoded BMP written: " << (decodedBmpWritten ? "yes" : "no")

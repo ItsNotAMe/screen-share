@@ -6,6 +6,26 @@ option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread r
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
 option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
 option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets and Svg are available" ON)
+option(SCREENSHARE_ENABLE_RELEASE_LTO "Enable compiler-supported link-time optimization for Release builds" ON)
+
+if(SCREENSHARE_ENABLE_RELEASE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT SCREENSHARE_RELEASE_LTO_SUPPORTED OUTPUT SCREENSHARE_RELEASE_LTO_OUTPUT)
+    if(SCREENSHARE_RELEASE_LTO_SUPPORTED)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        message(STATUS "Release LTO enabled")
+    else()
+        message(WARNING "Release LTO requested but not supported by this toolchain: ${SCREENSHARE_RELEASE_LTO_OUTPUT}")
+    endif()
+endif()
+
+function(screenshare_configure_release_lto_warnings target_name)
+    if(SCREENSHARE_ENABLE_RELEASE_LTO AND SCREENSHARE_RELEASE_LTO_SUPPORTED AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # GCC's LTO ODR checker can warn on equivalent Windows API declarations from
+        # C++/WinRT and MinGW headers, such as GetProcAddress/FARPROC at executable link time.
+        target_link_options(${target_name} PRIVATE $<$<CONFIG:Release>:-Wno-odr>)
+    endif()
+endfunction()
 
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
@@ -144,6 +164,8 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_R
     target_link_options(ScreenShare PRIVATE -static)
 endif()
 
+screenshare_configure_release_lto_warnings(ScreenShare)
+
 target_link_libraries(ScreenShare PRIVATE
     ScreenShareAPI
 )
@@ -227,6 +249,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             WIN32_LEAN_AND_MEAN
             NOMINMAX
         )
+        screenshare_configure_release_lto_warnings(ScreenShareUi)
         add_dependencies(ScreenShareUi ScreenShare)
 
         if(MSVC)

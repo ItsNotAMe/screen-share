@@ -585,6 +585,8 @@ void JoinRoomWindow::installBackendHandlers()
     if (backend_ == nullptr) {
         return;
     }
+    backend_->setVideoFrameHandler({});
+    backend_->setDirectVideoFrameHandler({});
     backend_->setStartedHandler([this] {
         setStatus("Watching started", "JoinStatusLive");
     });
@@ -640,7 +642,7 @@ screenshare::WatchSessionConfig JoinRoomWindow::currentConfig(const QString& roo
     config.signalingStunServer = kDefaultStunServer;
     config.reportPath = "receiver-report.zip";
     config.playAudio = true;
-    config.previewLatencyMs = 100;
+    config.previewLatencyMs = 40;
     config.audioPlaybackVolumePercent = 100;
     return config;
 }

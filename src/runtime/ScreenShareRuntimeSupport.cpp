@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <cmath>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -14,6 +16,7 @@
 #include <stdexcept>
 #include <streambuf>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 
 namespace screenshare_runtime_internal {
@@ -359,6 +362,12 @@ bool RedactInlineSensitiveOption(std::string& option)
     return false;
 }
 
+std::string ReadTextFile(const std::filesystem::path& path)
+{
+    const auto bytes = ReadBinaryFile(path);
+    return std::string(bytes.begin(), bytes.end());
+}
+
 std::string JoinCommandLine(int argc, char** argv)
 {
     std::ostringstream command;
@@ -391,6 +400,554 @@ std::string JoinCommandLine(int argc, char** argv)
         command << '"';
     }
     return command.str();
+}
+
+using LogFields = std::unordered_map<std::string, std::string>;
+
+LogFields ParseLogFields(std::string_view line)
+{
+    LogFields fields;
+    size_t index = 0;
+    while (index < line.size()) {
+        while (index < line.size() && std::isspace(static_cast<unsigned char>(line[index]))) {
+            ++index;
+        }
+        if (index >= line.size()) {
+            break;
+        }
+
+        const size_t keyStart = index;
+        while (index < line.size() &&
+               !std::isspace(static_cast<unsigned char>(line[index])) &&
+               line[index] != '=') {
+            ++index;
+        }
+        if (index >= line.size() || line[index] != '=') {
+            while (index < line.size() && !std::isspace(static_cast<unsigned char>(line[index]))) {
+                ++index;
+            }
+            continue;
+        }
+
+        std::string key(line.substr(keyStart, index - keyStart));
+        ++index;
+
+        std::string value;
+        if (index < line.size() && line[index] == '"') {
+            ++index;
+            while (index < line.size()) {
+                const char ch = line[index++];
+                if (ch == '"') {
+                    break;
+                }
+                value.push_back(ch);
+            }
+        } else {
+            const size_t valueStart = index;
+            while (index < line.size() && !std::isspace(static_cast<unsigned char>(line[index]))) {
+                ++index;
+            }
+            value.assign(line.substr(valueStart, index - valueStart));
+        }
+
+        if (!key.empty()) {
+            fields[std::move(key)] = std::move(value);
+        }
+    }
+    return fields;
+}
+
+const std::string* FindField(const LogFields& fields, const std::string& name)
+{
+    const auto found = fields.find(name);
+    return found == fields.end() ? nullptr : &found->second;
+}
+
+std::string FieldOrDash(const LogFields& fields, const std::string& name)
+{
+    if (const std::string* value = FindField(fields, name)) {
+        return value->empty() ? "-" : *value;
+    }
+    return "-";
+}
+
+std::optional<double> FieldDouble(const LogFields& fields, const std::string& name)
+{
+    const std::string* value = FindField(fields, name);
+    if (value == nullptr || value->empty() || *value == "-") {
+        return std::nullopt;
+    }
+    try {
+        size_t parsed = 0;
+        const double number = std::stod(*value, &parsed);
+        return parsed == value->size() ? std::optional<double>(number) : std::nullopt;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::string FormatNumber(double value)
+{
+    if (!std::isfinite(value)) {
+        return "-";
+    }
+
+    std::ostringstream text;
+    text << std::fixed << std::setprecision(2) << value;
+    std::string formatted = text.str();
+    while (formatted.size() > 1 && formatted.back() == '0') {
+        formatted.pop_back();
+    }
+    if (!formatted.empty() && formatted.back() == '.') {
+        formatted.pop_back();
+    }
+    return formatted;
+}
+
+std::string CsvEscape(const std::string& value)
+{
+    if (value.find_first_of(",\"\r\n") == std::string::npos) {
+        return value;
+    }
+
+    std::string escaped = "\"";
+    for (const char ch : value) {
+        if (ch == '"') {
+            escaped += "\"\"";
+        } else {
+            escaped += ch;
+        }
+    }
+    escaped += '"';
+    return escaped;
+}
+
+struct MetricSummary {
+    size_t count = 0;
+    double sum = 0.0;
+    double min = std::numeric_limits<double>::infinity();
+    double max = -std::numeric_limits<double>::infinity();
+    double last = 0.0;
+
+    void Add(double value)
+    {
+        if (!std::isfinite(value)) {
+            return;
+        }
+        ++count;
+        sum += value;
+        min = std::min(min, value);
+        max = std::max(max, value);
+        last = value;
+    }
+
+    [[nodiscard]] double Average() const
+    {
+        return count == 0 ? 0.0 : sum / static_cast<double>(count);
+    }
+};
+
+struct PerformanceSample {
+    std::string role;
+    size_t lineNumber = 0;
+    LogFields fields;
+};
+
+struct PerformanceReport {
+    std::string summaryMarkdown;
+    std::string samplesCsv;
+    size_t senderSamples = 0;
+    size_t receiverSamples = 0;
+    size_t viewerSamples = 0;
+
+    [[nodiscard]] bool HasSamples() const
+    {
+        return senderSamples != 0 || receiverSamples != 0 || viewerSamples != 0;
+    }
+};
+
+bool HasAnyField(const LogFields& fields, std::initializer_list<const char*> names)
+{
+    return std::any_of(names.begin(), names.end(), [&](const char* name) {
+        return fields.find(name) != fields.end();
+    });
+}
+
+std::string SampleResolution(const PerformanceSample& sample)
+{
+    if (sample.role == "sender") {
+        return FieldOrDash(sample.fields, "output");
+    }
+    if (sample.role == "receiver") {
+        return FieldOrDash(sample.fields, "h264_decoded_output");
+    }
+    return "-";
+}
+
+std::string SampleFps(const PerformanceSample& sample)
+{
+    if (sample.role == "sender") {
+        return FieldOrDash(sample.fields, "output_fps");
+    }
+    if (sample.role == "receiver") {
+        return FieldOrDash(sample.fields, "completed_fps");
+    }
+    return "-";
+}
+
+std::string SampleHealth(const PerformanceSample& sample)
+{
+    if (sample.role == "sender") {
+        return FieldOrDash(sample.fields, "udp_feedback_health");
+    }
+    if (sample.role == "receiver") {
+        return FieldOrDash(sample.fields, "receiver_health");
+    }
+    return FieldOrDash(sample.fields, "viewer_feedback_health");
+}
+
+void AddMetric(
+    std::unordered_map<std::string, MetricSummary>& summaries,
+    const PerformanceSample& sample,
+    const std::string& field,
+    const std::string& label)
+{
+    if (const auto value = FieldDouble(sample.fields, field)) {
+        summaries[label].Add(*value);
+    }
+}
+
+void AddMetricSum(
+    std::unordered_map<std::string, MetricSummary>& summaries,
+    const PerformanceSample& sample,
+    std::initializer_list<const char*> fields,
+    const std::string& label)
+{
+    double sum = 0.0;
+    bool hasValue = false;
+    for (const char* field : fields) {
+        if (const auto value = FieldDouble(sample.fields, field)) {
+            sum += *value;
+            hasValue = true;
+        }
+    }
+    if (hasValue) {
+        summaries[label].Add(sum);
+    }
+}
+
+void AppendMetricTable(
+    std::ostringstream& report,
+    const std::string& title,
+    const std::vector<std::pair<std::string, MetricSummary>>& metrics)
+{
+    report << "### " << title << "\n\n";
+    bool wroteAny = false;
+    report << "| Metric | Samples | Avg | Max | Last |\n";
+    report << "| --- | ---: | ---: | ---: | ---: |\n";
+    for (const auto& [label, metric] : metrics) {
+        if (metric.count == 0) {
+            continue;
+        }
+        wroteAny = true;
+        report
+            << "| " << label
+            << " | " << metric.count
+            << " | " << FormatNumber(metric.Average())
+            << " | " << FormatNumber(metric.max)
+            << " | " << FormatNumber(metric.last)
+            << " |\n";
+    }
+    if (!wroteAny) {
+        report << "| No numeric samples found | 0 | - | - | - |\n";
+    }
+    report << "\n";
+}
+
+void AppendPerformanceHints(
+    std::ostringstream& report,
+    const std::unordered_map<std::string, MetricSummary>& metrics)
+{
+    std::vector<std::string> hints;
+    auto metric = [&](const std::string& name) -> const MetricSummary* {
+        const auto found = metrics.find(name);
+        return found == metrics.end() || found->second.count == 0 ? nullptr : &found->second;
+    };
+
+    if (const auto* capture = metric("sender capture ms"); capture != nullptr && capture->max >= 8.0) {
+        hints.push_back("sender capture is taking a noticeable part of a 60 FPS frame budget");
+    }
+    if (const auto* encode = metric("sender encode ms"); encode != nullptr && encode->max >= 8.0) {
+        hints.push_back("sender encoding is taking a noticeable part of a 60 FPS frame budget");
+    }
+    if (const auto* udpQueue = metric("sender UDP queue ms"); udpQueue != nullptr && udpQueue->max >= 250.0) {
+        hints.push_back("sender UDP pacing queue is building live latency");
+    }
+    if (const auto* streamQueue = metric("sender encoder queue"); streamQueue != nullptr && streamQueue->max >= 3.0) {
+        hints.push_back("encoder input queue is backing up");
+    }
+    if (const auto* autoFallbacks = metric("sender auto encoder fallbacks"); autoFallbacks != nullptr && autoFallbacks->max > 0.0) {
+        hints.push_back("auto stream encoder fell back from hardware to software after input drops");
+    }
+    if (const auto* previewQueue = metric("receiver preview queue"); previewQueue != nullptr && previewQueue->max >= 8.0) {
+        hints.push_back("receiver preview queue is growing");
+    }
+    if (const auto* decode = metric("receiver decode ms"); decode != nullptr && decode->max >= 8.0) {
+        hints.push_back("receiver H.264 decode is taking a noticeable part of a 60 FPS frame budget");
+    }
+    if (const auto* playoutDelay = metric("receiver video playout delay ms"); playoutDelay != nullptr && playoutDelay->max >= 250.0) {
+        hints.push_back("receiver preview playout delay is high");
+    }
+    if (const auto* audioQueue = metric("receiver audio queue ms"); audioQueue != nullptr && audioQueue->max >= 300.0) {
+        hints.push_back("receiver audio queue is carrying high latency");
+    }
+    if (const auto* viewerQueue = metric("viewer queue ms"); viewerQueue != nullptr && viewerQueue->max >= 250.0) {
+        hints.push_back("at least one viewer-specific sender queue is building latency");
+    }
+
+    report << "### Bottleneck Hints\n\n";
+    if (hints.empty()) {
+        report << "- No obvious queue or timing bottleneck crossed the first-pass thresholds.\n\n";
+        return;
+    }
+    for (const std::string& hint : hints) {
+        report << "- " << hint << ".\n";
+    }
+    report << "\n";
+}
+
+PerformanceReport BuildPerformanceReport(std::string_view consoleLog)
+{
+    std::vector<PerformanceSample> samples;
+
+    std::istringstream input{std::string(consoleLog)};
+    std::string line;
+    size_t lineNumber = 0;
+    while (std::getline(input, line)) {
+        ++lineNumber;
+        LogFields fields = ParseLogFields(line);
+        if (fields.empty()) {
+            continue;
+        }
+
+        std::string role;
+        if (fields.find("viewer_target") != fields.end()) {
+            role = "viewer";
+        } else if (HasAnyField(fields, {"capture_avg_ms", "stream_encode_avg_ms", "output_fps"}) &&
+                   HasAnyField(fields, {"source", "output"})) {
+            role = "sender";
+        } else if (HasAnyField(fields, {"completed_fps", "preview_queue", "audio_playback_queue_ms"}) &&
+                   HasAnyField(fields, {"receiver_health", "completed_frames", "udp_datagrams"})) {
+            role = "receiver";
+        }
+
+        if (!role.empty()) {
+            samples.push_back(PerformanceSample{std::move(role), lineNumber, std::move(fields)});
+        }
+    }
+
+    PerformanceReport result;
+    std::unordered_map<std::string, MetricSummary> metrics;
+
+    for (const PerformanceSample& sample : samples) {
+        if (sample.role == "sender") {
+            ++result.senderSamples;
+            AddMetric(metrics, sample, "output_fps", "sender output FPS");
+            AddMetric(metrics, sample, "desktop_update_fps", "sender desktop update FPS");
+            AddMetric(metrics, sample, "capture_avg_ms", "sender capture ms");
+            AddMetric(metrics, sample, "stream_encode_avg_ms", "sender encode ms");
+            AddMetric(metrics, sample, "stream_queue", "sender encoder queue");
+            AddMetric(metrics, sample, "stream_dropped", "sender encoder dropped frames");
+            AddMetric(metrics, sample, "stream_auto_drop_reports", "sender auto encoder drop reports");
+            AddMetric(metrics, sample, "stream_auto_fallbacks", "sender auto encoder fallbacks");
+            AddMetric(metrics, sample, "udp_queue_ms", "sender UDP queue ms");
+            AddMetric(metrics, sample, "udp_peak_queue_ms", "sender peak UDP queue ms");
+            AddMetric(metrics, sample, "udp_pending", "sender pending datagrams");
+            AddMetric(metrics, sample, "udp_dropped_frames", "sender UDP dropped frames");
+            AddMetricSum(
+                metrics,
+                sample,
+                {"capture_avg_ms", "stream_encode_avg_ms", "udp_queue_ms"},
+                "sender estimated video path ms");
+        } else if (sample.role == "receiver") {
+            ++result.receiverSamples;
+            AddMetric(metrics, sample, "completed_fps", "receiver completed FPS");
+            AddMetric(metrics, sample, "pending_frames", "receiver pending frames");
+            AddMetric(metrics, sample, "h264_decode_packets", "receiver H264 packets");
+            AddMetric(metrics, sample, "h264_decode_avg_ms", "receiver decode ms");
+            AddMetric(metrics, sample, "h264_decoded_frames", "receiver decoded frames");
+            AddMetric(metrics, sample, "preview_queue", "receiver preview queue");
+            AddMetric(metrics, sample, "video_playout_delay_avg_ms", "receiver video playout delay ms");
+            AddMetric(metrics, sample, "video_playout_delay_max_ms", "receiver max video playout delay ms");
+            AddMetric(metrics, sample, "preview_late_drops", "receiver preview late drops");
+            AddMetric(metrics, sample, "preview_overflow_drops", "receiver preview overflow drops");
+            AddMetric(metrics, sample, "preview_startup_drops", "receiver preview startup drops");
+            AddMetric(metrics, sample, "preview_catchup_drops", "receiver preview catchup drops");
+            AddMetric(metrics, sample, "audio_playback_queue_ms", "receiver audio queue ms");
+            AddMetric(metrics, sample, "audio_playback_drops", "receiver audio playback drops");
+            AddMetric(metrics, sample, "audio_render_padding", "receiver audio render padding");
+            AddMetricSum(
+                metrics,
+                sample,
+                {"h264_decode_avg_ms", "video_playout_delay_avg_ms"},
+                "receiver estimated video path ms");
+        } else if (sample.role == "viewer") {
+            ++result.viewerSamples;
+            AddMetric(metrics, sample, "viewer_queue_ms", "viewer queue ms");
+            AddMetric(metrics, sample, "viewer_pending", "viewer pending datagrams");
+            AddMetric(metrics, sample, "viewer_feedback_completed_frames", "viewer feedback completed frames");
+            AddMetric(metrics, sample, "viewer_feedback_resyncs", "viewer feedback resyncs");
+        }
+    }
+
+    std::ostringstream markdown;
+    markdown
+        << "# ScreenShare Performance Summary\n\n"
+        << "This file is generated from `logs/console.log` after the run. It adds no work to the live media path.\n\n"
+        << "| Sample type | Count |\n"
+        << "| --- | ---: |\n"
+        << "| Sender | " << result.senderSamples << " |\n"
+        << "| Receiver | " << result.receiverSamples << " |\n"
+        << "| Viewer target | " << result.viewerSamples << " |\n\n";
+
+    AppendMetricTable(markdown, "Sender Metrics", {
+        {"Output FPS", metrics["sender output FPS"]},
+        {"Desktop update FPS", metrics["sender desktop update FPS"]},
+        {"Capture ms", metrics["sender capture ms"]},
+        {"Encode ms", metrics["sender encode ms"]},
+        {"Encoder queue", metrics["sender encoder queue"]},
+        {"Encoder dropped frames", metrics["sender encoder dropped frames"]},
+        {"Auto drop reports", metrics["sender auto encoder drop reports"]},
+        {"Auto fallbacks", metrics["sender auto encoder fallbacks"]},
+        {"UDP queue ms", metrics["sender UDP queue ms"]},
+        {"Peak UDP queue ms", metrics["sender peak UDP queue ms"]},
+        {"Pending datagrams", metrics["sender pending datagrams"]},
+        {"UDP dropped frames", metrics["sender UDP dropped frames"]},
+        {"Estimated video path ms", metrics["sender estimated video path ms"]},
+    });
+    AppendMetricTable(markdown, "Receiver Metrics", {
+        {"Completed FPS", metrics["receiver completed FPS"]},
+        {"Pending frames", metrics["receiver pending frames"]},
+        {"H.264 packets", metrics["receiver H264 packets"]},
+        {"Decode ms", metrics["receiver decode ms"]},
+        {"Decoded frames", metrics["receiver decoded frames"]},
+        {"Preview queue", metrics["receiver preview queue"]},
+        {"Video playout delay ms", metrics["receiver video playout delay ms"]},
+        {"Max video playout delay ms", metrics["receiver max video playout delay ms"]},
+        {"Preview late drops", metrics["receiver preview late drops"]},
+        {"Preview overflow drops", metrics["receiver preview overflow drops"]},
+        {"Preview startup drops", metrics["receiver preview startup drops"]},
+        {"Preview catchup drops", metrics["receiver preview catchup drops"]},
+        {"Audio queue ms", metrics["receiver audio queue ms"]},
+        {"Audio playback drops", metrics["receiver audio playback drops"]},
+        {"Audio render padding", metrics["receiver audio render padding"]},
+        {"Estimated video path ms", metrics["receiver estimated video path ms"]},
+    });
+    AppendMetricTable(markdown, "Viewer Target Metrics", {
+        {"Viewer queue ms", metrics["viewer queue ms"]},
+        {"Viewer pending datagrams", metrics["viewer pending datagrams"]},
+        {"Viewer completed frames", metrics["viewer feedback completed frames"]},
+        {"Viewer resyncs", metrics["viewer feedback resyncs"]},
+    });
+    AppendPerformanceHints(markdown, metrics);
+
+    markdown
+        << "### Timeline Samples\n\n"
+        << "| # | Role | Line | Resolution | FPS | Capture ms | Encode ms | Decode ms | UDP queue ms | Preview queue | Video playout ms | Audio queue ms | Health |\n"
+        << "| ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n";
+    for (size_t index = 0; index < samples.size(); ++index) {
+        const PerformanceSample& sample = samples[index];
+        markdown
+            << "| " << (index + 1)
+            << " | " << sample.role
+            << " | " << sample.lineNumber
+            << " | " << SampleResolution(sample)
+            << " | " << SampleFps(sample)
+            << " | " << FieldOrDash(sample.fields, "capture_avg_ms")
+            << " | " << FieldOrDash(sample.fields, "stream_encode_avg_ms")
+            << " | " << FieldOrDash(sample.fields, "h264_decode_avg_ms")
+            << " | " << (sample.role == "viewer" ? FieldOrDash(sample.fields, "viewer_queue_ms") : FieldOrDash(sample.fields, "udp_queue_ms"))
+            << " | " << FieldOrDash(sample.fields, "preview_queue")
+            << " | " << FieldOrDash(sample.fields, "video_playout_delay_avg_ms")
+            << " | " << FieldOrDash(sample.fields, "audio_playback_queue_ms")
+            << " | " << SampleHealth(sample)
+            << " |\n";
+    }
+    if (samples.empty()) {
+        markdown << "| 0 | none | 0 | - | - | - | - | - | - | - | - | - | no periodic performance samples found |\n";
+    }
+
+    std::vector<std::string> csvColumns = {
+        "sample",
+        "role",
+        "line",
+        "session",
+        "source",
+        "output",
+        "h264_decoded_output",
+        "output_fps",
+        "completed_fps",
+        "capture_avg_ms",
+        "stream_encode_avg_ms",
+        "stream_queue",
+        "stream_dropped",
+        "udp_queue_ms",
+        "udp_peak_queue_ms",
+        "udp_pending",
+        "udp_targets",
+        "udp_active_targets",
+        "udp_feedback_health",
+        "receiver_health",
+        "pending_frames",
+        "h264_decode_packets",
+        "h264_decode_avg_ms",
+        "h264_decoded_frames",
+        "preview_queue",
+        "video_playout_delay_avg_ms",
+        "video_playout_delay_max_ms",
+        "video_playout_delay_last_ms",
+        "preview_late_drops",
+        "preview_overflow_drops",
+        "preview_startup_drops",
+        "preview_catchup_drops",
+        "audio_capture",
+        "audio_playback",
+        "audio_playback_queue_ms",
+        "audio_playback_drops",
+        "viewer_queue_ms",
+        "viewer_feedback_health",
+    };
+
+    std::ostringstream csv;
+    for (size_t column = 0; column < csvColumns.size(); ++column) {
+        if (column > 0) {
+            csv << ',';
+        }
+        csv << csvColumns[column];
+    }
+    csv << "\n";
+    for (size_t index = 0; index < samples.size(); ++index) {
+        const PerformanceSample& sample = samples[index];
+        for (size_t column = 0; column < csvColumns.size(); ++column) {
+            if (column > 0) {
+                csv << ',';
+            }
+            if (csvColumns[column] == "sample") {
+                csv << (index + 1);
+            } else if (csvColumns[column] == "role") {
+                csv << sample.role;
+            } else if (csvColumns[column] == "line") {
+                csv << sample.lineNumber;
+            } else {
+                csv << CsvEscape(FieldOrDash(sample.fields, csvColumns[column]));
+            }
+        }
+        csv << "\n";
+    }
+
+    result.summaryMarkdown = markdown.str();
+    result.samplesCsv = csv.str();
+    return result;
 }
 
 void AppendReceiverFeedbackSummary(
@@ -574,6 +1131,11 @@ void WriteSavedReport(
         executablePath.parent_path() / "ScreenShare-runtime-dependencies.txt" :
         std::filesystem::path("ScreenShare-runtime-dependencies.txt");
 
+    std::optional<PerformanceReport> performanceReport;
+    if (consoleLogPath && std::filesystem::exists(*consoleLogPath) && std::filesystem::is_regular_file(*consoleLogPath)) {
+        performanceReport = BuildPerformanceReport(ReadTextFile(*consoleLogPath));
+    }
+
     std::ostringstream report;
     report
         << "ScreenShare saved run report\n\n"
@@ -600,6 +1162,17 @@ void WriteSavedReport(
     if (consoleLogPath && std::filesystem::exists(*consoleLogPath)) {
         report << "Console log bytes: " << std::filesystem::file_size(*consoleLogPath) << "\n";
     }
+    if (performanceReport && performanceReport->HasSamples()) {
+        report
+            << "Performance samples: sender=" << performanceReport->senderSamples
+            << ", receiver=" << performanceReport->receiverSamples
+            << ", viewer=" << performanceReport->viewerSamples
+            << "\n"
+            << "Performance summary: performance/performance-summary.md\n"
+            << "Performance samples CSV: performance/performance-samples.csv\n";
+    } else {
+        report << "Performance samples: none found\n";
+    }
     AppendReceiverFeedbackSummary(report, reportContext.latestReceiverFeedback);
     report
         << "Runtime dependency manifest: "
@@ -614,6 +1187,15 @@ void WriteSavedReport(
         zip.AddFile(
             UniqueArchiveName("logs/console.log", archiveNames),
             ReadBinaryFile(*consoleLogPath));
+    }
+
+    if (performanceReport) {
+        zip.AddFile(
+            UniqueArchiveName("performance/performance-summary.md", archiveNames),
+            StringBytes(performanceReport->summaryMarkdown));
+        zip.AddFile(
+            UniqueArchiveName("performance/performance-samples.csv", archiveNames),
+            StringBytes(performanceReport->samplesCsv));
     }
 
     if (std::filesystem::exists(dependencyManifest) && std::filesystem::is_regular_file(dependencyManifest)) {

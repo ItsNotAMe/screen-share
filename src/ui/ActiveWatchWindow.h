@@ -9,6 +9,8 @@
 #include <QtCore/Qt>
 #include <QtWidgets/QWidget>
 
+#include <atomic>
+#include <cstdint>
 #include <functional>
 
 class QLabel;
@@ -52,6 +54,8 @@ private:
     void toggleFullscreen();
     void closeStreamFullscreen();
     void setStreamFullscreen(bool enabled);
+    void updatePresentedFps();
+    void refreshFpsLabel(double streamFps);
     void installFullscreenEventFilter(bool installed);
     void setPreviewStatusText(const QString& text);
     void handleHostLeft();
@@ -96,8 +100,13 @@ private:
     bool receivedVideoFrame_ = false;
     bool hostLeft_ = false;
     bool leaveRequested_ = false;
+    std::atomic_bool firstVideoFramePosted_{false};
     bool streamFullscreen_ = false;
     bool fullscreenEventFilterInstalled_ = false;
+    std::uint64_t lastPresentedFrameCount_ = 0;
+    double presentedFps_ = 0.0;
+    double latestStreamFps_ = 0.0;
+    QElapsedTimer presentedFpsTimer_;
     QRect preFullscreenGeometry_;
     Qt::WindowStates preFullscreenState_{};
     QString previewStatusText_;

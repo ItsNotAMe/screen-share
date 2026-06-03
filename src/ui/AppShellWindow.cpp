@@ -317,14 +317,20 @@ bool AppShellWindow::nativeEvent(const QByteArray& eventType, void* message, qin
         updateChromeState();
         break;
     case WM_NCHITTEST: {
+        const QPoint globalPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
+        const QPoint localPos = mapFromGlobal(globalPos);
+        QWidget* child = childAt(localPos);
+        if (isTitleControl(child)) {
+            *result = HTCLIENT;
+            return true;
+        }
+
         const LRESULT nativeHit = DefWindowProc(msg->hwnd, msg->message, msg->wParam, msg->lParam);
-        if (nativeHit != HTCLIENT) {
+        if (nativeHit != HTCLIENT && nativeHit != HTMINBUTTON && nativeHit != HTMAXBUTTON && nativeHit != HTCLOSE) {
             *result = nativeHit;
             return true;
         }
 
-        const QPoint globalPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
-        const QPoint localPos = mapFromGlobal(globalPos);
         if (!IsZoomed(msg->hwnd)) {
             int border = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
             if (border < 8) {
@@ -371,7 +377,6 @@ bool AppShellWindow::nativeEvent(const QByteArray& eventType, void* message, qin
 
         constexpr int dragHeight = 54;
         if (localPos.y() >= 0 && localPos.y() < dragHeight) {
-            QWidget* child = childAt(localPos);
             if (!isTitleControl(child)) {
                 *result = HTCAPTION;
                 return true;

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace screenshare {
@@ -178,7 +179,7 @@ struct WatchSessionConfig {
     bool muted = false;
     bool lanAdvertise = false;
     std::string peerInvite;
-    int previewLatencyMs = 100;
+    int previewLatencyMs = 40;
     bool emitVideoFrames = false;
     int audioPlaybackVolumePercent = 100;
 };
@@ -308,6 +309,14 @@ class ISessionEventSink {
 public:
     virtual ~ISessionEventSink() = default;
     virtual void OnSessionEvent(const SessionEvent& event) = 0;
+    virtual void OnSessionVideoFrame(const SessionStatus& status, SessionEvent::VideoFrame frame)
+    {
+        SessionEvent event;
+        event.type = SessionEventType::VideoFrameReady;
+        event.status = status;
+        event.videoFrame = std::move(frame);
+        OnSessionEvent(event);
+    }
 };
 
 const char* ToString(SessionState state);

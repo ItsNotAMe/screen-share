@@ -164,6 +164,7 @@ private:
         const void* address,
         int addressLength,
         const NatProbeDatagramInfo& probe);
+    void RebuildSendAddressesLocked();
     [[nodiscard]] uint32_t EndpointGroupForAddressLocked(const std::vector<std::byte>& address) const;
     void RescheduleQueueLocked(Clock::time_point now);
     void CheckWorkerErrorLocked() const;
@@ -180,6 +181,7 @@ private:
     std::vector<std::byte> address_;
     std::vector<GroupedAddress> additionalAddresses_;
     std::vector<GroupedAddress> natProbeAddresses_;
+    std::shared_ptr<std::vector<std::vector<std::byte>>> cachedSendAddresses_;
     std::vector<UdpSenderStats::FeedbackPeer> feedbackPeers_;
     int addressLength_ = 0;
     UdpSenderConfig config_{};
@@ -198,6 +200,7 @@ private:
     uint32_t audioNoncePrefix_ = 0;
     bool stopWorker_ = false;
     bool datagramInFlight_ = false;
+    bool sendAddressesDirty_ = true;
     bool winsockStarted_ = false;
 };
 

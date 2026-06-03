@@ -7,6 +7,7 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>
+#include <QtCore/QMetaObject>
 #include <QtCore/QPointF>
 #include <QtCore/QRectF>
 #include <QtCore/QSizeF>
@@ -30,6 +31,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace {
 
@@ -188,6 +190,11 @@ void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
     receivedVideoFrame_ = false;
     hostLeft_ = false;
     leaveRequested_ = false;
+    firstVideoFramePosted_.store(false, std::memory_order_release);
+    lastPresentedFrameCount_ = 0;
+    presentedFps_ = 0.0;
+    latestStreamFps_ = 0.0;
+    presentedFpsTimer_.restart();
     videoFrameWidget_->clearFrame();
     setPreviewStatusText("Connecting...");
     startWatch();
@@ -442,15 +449,32 @@ void ActiveWatchWindow::installBackendHandlers()
             }
         }
     });
-    backend_->setVideoFrameHandler([this](const screenshare::SessionEvent::VideoFrame& frame) {
-        if (hostLeft_) {
+    backend_->setVideoFrameHandler({});
+    backend_->setDirectVideoFrameHandler([this](screenshare::SessionEvent::VideoFrame frame) {
+        if (videoFrameWidget_ != nullptr) {
+            videoFrameWidget_->presentVideoFrameAsync(std::move(frame));
+        }
+
+        bool expected = false;
+        if (!firstVideoFramePosted_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
             return;
         }
-        receivedVideoFrame_ = true;
-        if (previewStatusText_ == QStringLiteral("Waiting for encrypted stream")) {
-            setPreviewStatusText("Receiving stream");
-        }
-        videoFrameWidget_->setVideoFrame(frame);
+
+        QMetaObject::invokeMethod(
+            this,
+            [this] {
+                if (hostLeft_) {
+                    return;
+                }
+                receivedVideoFrame_ = true;
+                if (videoFrameWidget_ != nullptr) {
+                    videoFrameWidget_->showVideoSurface();
+                }
+                if (previewStatusText_ == QStringLiteral("Waiting for encrypted stream")) {
+                    setPreviewStatusText("Receiving stream");
+                }
+            },
+            Qt::QueuedConnection);
     });
 }
 
@@ -520,7 +544,7 @@ void ActiveWatchWindow::updateStatus(const screenshare::SessionStatus& status)
     avSyncLabel_->setText(status.audio.hasStats ? QStringLiteral("%1 ms").arg(status.audio.avAudioAheadMs) : QStringLiteral("-"));
     qualityLabel_->setText(status.stream.hasStats ? QStringLiteral("High") : QStringLiteral("-"));
     resolutionLabel_->setText(resolutionText(status));
-    fpsLabel_->setText(fpsText(status.stream.outputFps));
+    refreshFpsLabel(status.stream.outputFps);
     bitrateLabel_->setText(bitrateText(status.stream.bitrateMbps));
     updateAudioControls(status.audio);
 }
@@ -679,6 +703,57 @@ void ActiveWatchWindow::setStreamFullscreen(bool enabled)
             }
         }
     }
+}
+
+void ActiveWatchWindow::updatePresentedFps()
+{
+    if (videoFrameWidget_ == nullptr) {
+        return;
+    }
+    const std::uint64_t currentCount = videoFrameWidget_->presentedFrameCount();
+    if (!presentedFpsTimer_.isValid() || lastPresentedFrameCount_ == 0) {
+        lastPresentedFrameCount_ = currentCount;
+        presentedFpsTimer_.restart();
+        return;
+    }
+
+    const qint64 elapsedMs = presentedFpsTimer_.elapsed();
+    if (elapsedMs < 1000) {
+        return;
+    }
+
+    const std::uint64_t presentedDelta = currentCount - lastPresentedFrameCount_;
+    presentedFps_ = static_cast<double>(presentedDelta) * 1000.0 / static_cast<double>(elapsedMs);
+    lastPresentedFrameCount_ = currentCount;
+    presentedFpsTimer_.restart();
+}
+
+void ActiveWatchWindow::refreshFpsLabel(double streamFps)
+{
+    latestStreamFps_ = streamFps;
+    updatePresentedFps();
+    if (fpsLabel_ == nullptr) {
+        return;
+    }
+    if (presentedFps_ > 0.0) {
+        fpsLabel_->setText(fpsText(presentedFps_));
+        const auto stats = videoFrameWidget_ != nullptr
+            ? videoFrameWidget_->presentationStats()
+            : VideoFrameWidget::PresentationStats{};
+        fpsLabel_->setToolTip(QStringLiteral(
+            "Presented FPS\n"
+            "Queued: %1\n"
+            "Dropped: %2\n"
+            "Present: %3 ms avg / %4 ms max / %5 ms last")
+            .arg(stats.queuedFrames)
+            .arg(stats.droppedFrames)
+            .arg(stats.averagePresentMs, 0, 'f', 2)
+            .arg(stats.maxPresentMs, 0, 'f', 2)
+            .arg(stats.lastPresentMs, 0, 'f', 2));
+        return;
+    }
+    fpsLabel_->setText(fpsText(streamFps));
+    fpsLabel_->setToolTip(QStringLiteral("Stream FPS"));
 }
 
 void ActiveWatchWindow::installFullscreenEventFilter(bool installed)
