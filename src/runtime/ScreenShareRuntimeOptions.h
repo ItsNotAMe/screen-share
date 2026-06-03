@@ -84,6 +84,7 @@ struct Options {
     bool listDisplays = false;
     bool listH264Encoders = false;
     bool listAudioDevices = false;
+    bool selfTest = false;
     int displayIndex = 0;
     screenshare::CaptureSourceType captureSourceType = screenshare::CaptureSourceType::Display;
     uint64_t windowHandle = 0;

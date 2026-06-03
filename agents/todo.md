@@ -2,17 +2,26 @@
 
 ## Build Work
 
-1. User-facing diagnostics pass.
+1. Performance optimization pass.
+   - [x] Add or tighten hot-path timing so reports clearly show capture time, encode time, UDP queue delay, decoder time, preview queue, dropped frames, viewer queue, audio queue, and likely CPU/GPU bottlenecks.
+   - [ ] Optimize the sender GPU path so display/window capture, scaling, NV12 conversion, and hardware encoding avoid CPU readback unless diagnostics require it.
+   - [ ] Reduce encoder latency with low-latency settings, bounded queues, stale-frame dropping before visible lag, and safer hardware-to-software fallback when hardware queues misbehave.
+   - [ ] Keep receiver preview fast by avoiding extra frame copies into Qt, reducing resize/present stalls, and keeping embedded/fullscreen presentation on the same efficient path.
+   - [ ] Optimize UDP fanout and packet queues for multiple viewers, including allocation reuse, queue caps, feedback handling, and keyframe recovery after drops.
+   - [ ] Keep audio capture/playback and Opus queues bounded and event-driven so audio cannot build long live latency.
+   - [ ] Review release build settings for safe speed wins such as optimized release flags and optional LTO, without mixing this up with DLL/static-link packaging.
+
+2. User-facing diagnostics pass.
    - [ ] Map known runtime/report states to plain UI messages, starting with waiting for stream, password/encryption mismatch, UDP hole-punch failure, host left, and host idle.
    - [ ] Show an actionable next step in the active Share/Watch screens when setup is not healthy.
    - [ ] Keep warnings driven by real runtime/report signals, not guesses.
 
-2. Runtime state polish.
+3. Runtime state polish.
    - [ ] Make active-session wording freshness-aware so connected, idle, disconnected, and waiting states do not stay sticky after packets or feedback stop.
    - [ ] Keep Share and Watch state transitions consistent when viewers join, leave, rejoin, or when the host leaves.
    - [ ] Clean up NAT/feedback status summaries so they match the current session state, not only the last successful event.
 
-3. Report summary polish.
+4. Report summary polish.
    - [ ] Add the smallest useful report fields needed by the new UI diagnostics.
    - [ ] Warn about likely silent or wrong-device audio capture only when transport is healthy but audio evidence looks wrong.
    - [ ] Promote items from Report-Driven Follow-Ups into build work only after reports reproduce them.
