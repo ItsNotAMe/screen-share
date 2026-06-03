@@ -259,6 +259,7 @@ void UdpSender::Open(const UdpSenderConfig& config)
         addressLength_ = static_cast<int>(resolved->ai_addrlen);
         additionalAddresses_ = std::move(additionalAddresses);
         natProbeAddresses_.clear();
+        cachedSendAddresses_.reset();
         feedbackPeers_.clear();
         config_ = config;
         stats_ = {};
@@ -273,6 +274,7 @@ void UdpSender::Open(const UdpSenderConfig& config)
         workerError_.clear();
         stopWorker_ = false;
         datagramInFlight_ = false;
+        sendAddressesDirty_ = true;
     }
 
     freeaddrinfo(resolved);
@@ -303,6 +305,7 @@ void UdpSender::Close()
         address_.clear();
         additionalAddresses_.clear();
         natProbeAddresses_.clear();
+        cachedSendAddresses_.reset();
         feedbackPeers_.clear();
         addressLength_ = 0;
         crypto_.reset();
@@ -311,6 +314,7 @@ void UdpSender::Close()
         workerError_.clear();
         stopWorker_ = false;
         datagramInFlight_ = false;
+        sendAddressesDirty_ = true;
         UpdatePendingStatsLocked();
     }
 }
@@ -340,6 +344,7 @@ bool UdpSender::AddAdditionalTarget(const UdpSenderEndpoint& target)
 
     additionalAddresses_.push_back(GroupedAddress{std::move(address), target.group});
     config_.additionalTargets.push_back(target);
+    sendAddressesDirty_ = true;
     return true;
 }
 
@@ -910,65 +915,25 @@ void UdpSender::WorkerLoop()
 
 void UdpSender::SendDatagramBytes(const std::vector<std::byte>& datagram)
 {
-    std::vector<std::vector<std::byte>> addresses;
+    std::shared_ptr<const std::vector<std::vector<std::byte>>> addresses;
     {
         std::lock_guard lock(mutex_);
         if (address_.empty() || addressLength_ <= 0) {
             throw std::runtime_error("UDP sender target address is not available");
         }
-
-        struct SendGroup {
-            uint32_t group = 0;
-            std::vector<std::vector<std::byte>> staticAddresses;
-            std::vector<std::vector<std::byte>> natProbeAddresses;
-        };
-
-        std::vector<SendGroup> groups;
-        auto groupFor = [&](uint32_t groupId) -> SendGroup& {
-            auto existing = std::find_if(groups.begin(), groups.end(), [&](const SendGroup& group) {
-                return group.group == groupId;
-            });
-            if (existing != groups.end()) {
-                return *existing;
-            }
-            groups.push_back(SendGroup{groupId});
-            return groups.back();
-        };
-        auto addUnique = [](std::vector<std::vector<std::byte>>& list, const std::vector<std::byte>& address) {
-            if (std::find(list.begin(), list.end(), address) == list.end()) {
-                list.push_back(address);
-            }
-        };
-
-        groupFor(config_.group).staticAddresses.push_back(address_);
-        for (const auto& address : additionalAddresses_) {
-            addUnique(groupFor(address.group).staticAddresses, address.address);
+        if (sendAddressesDirty_ || !cachedSendAddresses_) {
+            RebuildSendAddressesLocked();
         }
-        for (const auto& address : natProbeAddresses_) {
-            addUnique(groupFor(address.group).natProbeAddresses, address.address);
-        }
-
-        for (const auto& group : groups) {
-            const bool useStaticTargets =
-                !config_.preferNatProbeTargets || group.natProbeAddresses.empty();
-            if (useStaticTargets) {
-                for (const auto& address : group.staticAddresses) {
-                    addUnique(addresses, address);
-                }
-            }
-            for (const auto& address : group.natProbeAddresses) {
-                addUnique(addresses, address);
-            }
-        }
+        addresses = cachedSendAddresses_;
     }
 
-    if (addresses.empty()) {
+    if (!addresses || addresses->empty()) {
         throw std::runtime_error("UDP sender target address is not available");
     }
 
     uint64_t sentDatagrams = 0;
     uint64_t sentBytes = 0;
-    for (const auto& address : addresses) {
+    for (const auto& address : *addresses) {
         const int sent = sendto(
             AsSocket(socket_),
             reinterpret_cast<const char*>(datagram.data()),
@@ -988,6 +953,58 @@ void UdpSender::SendDatagramBytes(const std::vector<std::byte>& datagram)
     std::lock_guard lock(mutex_);
     stats_.datagramsSent += sentDatagrams;
     stats_.wireBytesSent += sentBytes;
+}
+
+void UdpSender::RebuildSendAddressesLocked()
+{
+    struct SendGroup {
+        uint32_t group = 0;
+        std::vector<std::vector<std::byte>> staticAddresses;
+        std::vector<std::vector<std::byte>> natProbeAddresses;
+    };
+
+    std::vector<SendGroup> groups;
+    auto groupFor = [&](uint32_t groupId) -> SendGroup& {
+        auto existing = std::find_if(groups.begin(), groups.end(), [&](const SendGroup& group) {
+            return group.group == groupId;
+        });
+        if (existing != groups.end()) {
+            return *existing;
+        }
+        groups.push_back(SendGroup{groupId});
+        return groups.back();
+    };
+    auto addUnique = [](std::vector<std::vector<std::byte>>& list, const std::vector<std::byte>& address) {
+        if (std::find(list.begin(), list.end(), address) == list.end()) {
+            list.push_back(address);
+        }
+    };
+
+    std::vector<std::vector<std::byte>> addresses;
+    groupFor(config_.group).staticAddresses.push_back(address_);
+    for (const auto& address : additionalAddresses_) {
+        addUnique(groupFor(address.group).staticAddresses, address.address);
+    }
+    for (const auto& address : natProbeAddresses_) {
+        addUnique(groupFor(address.group).natProbeAddresses, address.address);
+    }
+
+    for (const auto& group : groups) {
+        const bool useStaticTargets =
+            !config_.preferNatProbeTargets || group.natProbeAddresses.empty();
+        if (useStaticTargets) {
+            for (const auto& address : group.staticAddresses) {
+                addUnique(addresses, address);
+            }
+        }
+        for (const auto& address : group.natProbeAddresses) {
+            addUnique(addresses, address);
+        }
+    }
+
+    cachedSendAddresses_ =
+        std::make_shared<std::vector<std::vector<std::byte>>>(std::move(addresses));
+    sendAddressesDirty_ = false;
 }
 
 void UdpSender::MaybeRetargetFromNatProbe(
@@ -1032,6 +1049,7 @@ void UdpSender::MaybeRetargetFromNatProbe(
                 return;
             }
             natProbeAddresses_.push_back(GroupedAddress{std::move(candidate), group});
+            sendAddressesDirty_ = true;
             ++stats_.natProbeRetargets;
         }
 
@@ -1045,6 +1063,7 @@ void UdpSender::MaybeRetargetFromNatProbe(
     if (changed) {
         address_ = std::move(candidate);
         addressLength_ = addressLength;
+        sendAddressesDirty_ = true;
         ++stats_.natProbeRetargets;
     }
 

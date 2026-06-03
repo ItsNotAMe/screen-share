@@ -9,7 +9,7 @@
    - [x] Remove unnecessary BGRA CPU readback from normal Share streaming while keeping BGRA readback for recording, BMP dumps, and capture-only diagnostics.
    - [x] Make `--stream-encoder auto` fall back to software when hardware input drops persist, with report counters and hints for the fallback.
    - [x] Keep receiver preview fast by avoiding one extra NV12 copy into Qt, skipping no-op D3D surface resizes, and keeping embedded/fullscreen presentation on the same surface.
-   - [ ] Optimize UDP fanout and packet queues for multiple viewers, including allocation reuse, queue caps, feedback handling, and keyframe recovery after drops.
+   - [x] Optimize UDP fanout for multiple viewers by caching resolved send targets and rebuilding the fanout list only when targets change; two-viewer loopback stayed healthy with 0 ms viewer queue average.
    - [ ] Keep audio capture/playback and Opus queues bounded and event-driven so audio cannot build long live latency.
    - [ ] Review release build settings for safe speed wins such as optimized release flags and optional LTO, without mixing this up with DLL/static-link packaging.
 
