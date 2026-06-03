@@ -31,7 +31,8 @@ public:
     void setErrorHandler(std::function<void(const QString&)> handler);
     void setFinishedHandler(std::function<void(const FinishInfo&)> handler);
     void setStatusHandler(std::function<void(const screenshare::SessionEvent&)> handler);
-    void setVideoFrameHandler(std::function<void(const screenshare::SessionEvent::VideoFrame&)> handler);
+    void setVideoFrameHandler(std::function<void(screenshare::SessionEvent::VideoFrame)> handler);
+    void setDirectVideoFrameHandler(std::function<void(screenshare::SessionEvent::VideoFrame)> handler);
 
     bool startShare(const screenshare::ShareSessionConfig& config, QString* errorMessage = nullptr);
     bool startWatch(const screenshare::WatchSessionConfig& config, QString* errorMessage = nullptr);
@@ -64,7 +65,9 @@ private:
     std::function<void(const QString&)> errorHandler_;
     std::function<void(const FinishInfo&)> finishedHandler_;
     std::function<void(const screenshare::SessionEvent&)> statusHandler_;
-    std::function<void(const screenshare::SessionEvent::VideoFrame&)> videoFrameHandler_;
+    std::function<void(screenshare::SessionEvent::VideoFrame)> videoFrameHandler_;
+    std::function<void(screenshare::SessionEvent::VideoFrame)> directVideoFrameHandler_;
+    std::mutex directVideoFrameHandlerMutex_;
     std::mutex videoFrameMutex_;
     std::optional<screenshare::SessionEvent::VideoFrame> pendingVideoFrame_;
     bool videoFrameDeliveryQueued_ = false;

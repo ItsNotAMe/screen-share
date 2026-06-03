@@ -828,6 +828,8 @@ void CreateRoomWindow::installBackendHandlers()
         return;
     }
 
+    backend_->setVideoFrameHandler({});
+    backend_->setDirectVideoFrameHandler({});
     backend_->setStartedHandler([this] {
         updateRunningState(true);
         setStatus("Opening room...", "RoomInlineStatusConnecting");

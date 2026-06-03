@@ -33,6 +33,7 @@ public:
     void SetLinearSampling(bool enabled);
     void Present(const FrameView& frame);
     void Clear();
+    void Reset();
 
     [[nodiscard]] std::uint64_t framesPresented() const noexcept { return framesPresented_; }
 

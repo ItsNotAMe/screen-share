@@ -800,6 +800,8 @@ void ActiveShareWindow::installBackendHandlers()
     if (backend_ == nullptr) {
         return;
     }
+    backend_->setVideoFrameHandler({});
+    backend_->setDirectVideoFrameHandler({});
     backend_->setStartedHandler({});
     backend_->setErrorHandler([this](const QString& message) {
         healthStateLabel_->setText(message.isEmpty() ? QStringLiteral("Error") : message);

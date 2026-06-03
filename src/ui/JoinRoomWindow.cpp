@@ -585,6 +585,8 @@ void JoinRoomWindow::installBackendHandlers()
     if (backend_ == nullptr) {
         return;
     }
+    backend_->setVideoFrameHandler({});
+    backend_->setDirectVideoFrameHandler({});
     backend_->setStartedHandler([this] {
         setStatus("Watching started", "JoinStatusLive");
     });

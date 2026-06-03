@@ -691,4 +691,9 @@ void Nv12D3D11Presenter::Clear()
     }
 }
 
+void Nv12D3D11Presenter::Reset()
+{
+    impl_->ResetDevice();
+}
+
 } // namespace screenshare

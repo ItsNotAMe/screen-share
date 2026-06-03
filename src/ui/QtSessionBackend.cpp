@@ -64,9 +64,15 @@ void QtSessionBackend::setStatusHandler(std::function<void(const screenshare::Se
     statusHandler_ = std::move(handler);
 }
 
-void QtSessionBackend::setVideoFrameHandler(std::function<void(const screenshare::SessionEvent::VideoFrame&)> handler)
+void QtSessionBackend::setVideoFrameHandler(std::function<void(screenshare::SessionEvent::VideoFrame)> handler)
 {
     videoFrameHandler_ = std::move(handler);
+}
+
+void QtSessionBackend::setDirectVideoFrameHandler(std::function<void(screenshare::SessionEvent::VideoFrame)> handler)
+{
+    std::scoped_lock lock(directVideoFrameHandlerMutex_);
+    directVideoFrameHandler_ = std::move(handler);
 }
 
 bool QtSessionBackend::prepareStart(QString* errorMessage)
@@ -242,6 +248,15 @@ void QtSessionBackend::OnSessionVideoFrame(
     screenshare::SessionEvent::VideoFrame frame)
 {
     Q_UNUSED(status);
+    std::function<void(screenshare::SessionEvent::VideoFrame)> directHandler;
+    {
+        std::scoped_lock lock(directVideoFrameHandlerMutex_);
+        directHandler = directVideoFrameHandler_;
+    }
+    if (directHandler) {
+        directHandler(std::move(frame));
+        return;
+    }
     queueVideoFrame(std::move(frame));
 }
 
@@ -279,7 +294,7 @@ void QtSessionBackend::deliverPendingVideoFrame()
     }
 
     if (frame && videoFrameHandler_) {
-        videoFrameHandler_(*frame);
+        videoFrameHandler_(std::move(*frame));
     }
 
     bool shouldScheduleNext = false;
