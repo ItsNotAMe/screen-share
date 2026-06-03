@@ -5,7 +5,7 @@
 1. Performance optimization pass.
    - [x] Add or tighten hot-path timing so reports clearly show capture time, encode time, UDP queue delay, decoder time, preview queue, dropped frames, viewer queue, audio queue, and likely CPU/GPU bottlenecks.
    - [x] Reduce receiver preview playout backlog with live-edge clock catch-up and non-vsync native preview presentation.
-   - [x] Lower default A/V Watch latency after confirming the receiver live catch-up path stays stable in loopback.
+   - [x] Lower default A/V Watch latency to 40 ms preview and 60 ms audio after confirming the receiver live catch-up path stays stable in loopback.
    - [ ] Optimize the sender GPU path so display/window capture, scaling, NV12 conversion, and hardware encoding avoid CPU readback unless diagnostics require it.
    - [ ] Reduce encoder latency with low-latency settings, bounded queues, stale-frame dropping before visible lag, and safer hardware-to-software fallback when hardware queues misbehave.
    - [ ] Keep receiver preview fast by avoiding extra frame copies into Qt, reducing resize/present stalls, and keeping embedded/fullscreen presentation on the same efficient path.

@@ -812,7 +812,7 @@ int main(int argc, char** argv)
             const bool nearbyWatchArgumentsOk = nearbyWatchArguments == QStringList{
                 "--watch", "5000",
                 "--lan-advertise",
-                "--preview-latency-ms", "60",
+                "--preview-latency-ms", "40",
                 "--audio-playback-volume", "100",
                 "--audio-playback-muted",
             };
@@ -825,7 +825,7 @@ int main(int argc, char** argv)
             const bool inviteWatchArgumentsOk = inviteWatchArguments == QStringList{
                 "--watch", "5001",
                 "--peer-invite", "ss1e:sender",
-                "--preview-latency-ms", "60",
+                "--preview-latency-ms", "40",
                 "--audio-playback-volume", "100",
             };
             bool missingDirectShareRejected = false;

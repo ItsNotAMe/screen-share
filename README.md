@@ -584,7 +584,7 @@ This automatically enables A/V sync correction. Disable it only for diagnostics:
 ```
 
 Add `--seconds S` to stop preview automatically after a fixed duration. The preview playout buffer
-starts with 150 ms of latency for video-only preview, or 60 ms when A/V sync is enabled, and drops
+starts with 150 ms of latency for video-only preview, or 40 ms when A/V sync is enabled, and drops
 frames that are more than 500 ms late by default. Use `--preview-latency-ms MS` to trade latency for
 jitter tolerance, and `--preview-max-late-ms MS` to control how long late frames can stay eligible for
 presentation before they are dropped. When A/V sync is enabled, the effective audio jitter target is
@@ -606,7 +606,7 @@ Play received audio on the receiver:
 ```
 
 Audio playback is opt-in. It uses the default Windows render endpoint in shared mode and starts
-after buffering 80 ms of audio by default. Use `--audio-playback-latency-ms MS` to trade latency
+after buffering 60 ms of audio by default. Use `--audio-playback-latency-ms MS` to trade latency
 for jitter tolerance. Use `--audio-playback-muted` to consume and time audio packets without audible
 output, which is useful when testing sender and receiver on the same computer. Use
 `--audio-playback-volume PERCENT` to set the initial receiver playback volume from 0 to 200 percent.

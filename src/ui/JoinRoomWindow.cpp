@@ -640,7 +640,7 @@ screenshare::WatchSessionConfig JoinRoomWindow::currentConfig(const QString& roo
     config.signalingStunServer = kDefaultStunServer;
     config.reportPath = "receiver-report.zip";
     config.playAudio = true;
-    config.previewLatencyMs = 60;
+    config.previewLatencyMs = 40;
     config.audioPlaybackVolumePercent = 100;
     return config;
 }
