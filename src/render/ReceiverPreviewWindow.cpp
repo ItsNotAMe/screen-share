@@ -873,7 +873,7 @@ void ReceiverPreviewWindow::Render()
     context_->ClearRenderTargetView(renderTarget_.Get(), clearColor);
 
     if (!lumaView_ || !chromaView_) {
-        ThrowIfFailed(swapChain_->Present(1, 0), "IDXGISwapChain::Present(receiver preview)");
+        ThrowIfFailed(swapChain_->Present(0, 0), "IDXGISwapChain::Present(receiver preview)");
         return;
     }
 
@@ -913,7 +913,7 @@ void ReceiverPreviewWindow::Render()
     context_->PSSetConstantBuffers(0, 1, nullConstantBuffers);
     context_->OMSetRenderTargets(1, nullRenderTargets, nullptr);
 
-    ThrowIfFailed(swapChain_->Present(1, 0), "IDXGISwapChain::Present(receiver preview)");
+    ThrowIfFailed(swapChain_->Present(0, 0), "IDXGISwapChain::Present(receiver preview)");
 }
 
 } // namespace screenshare

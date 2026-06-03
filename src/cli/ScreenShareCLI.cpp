@@ -2019,6 +2019,8 @@ void RunCliSelfTest(const Options& options)
         << " preview_max_late_ms=500"
         << " preview_late_drops=0"
         << " preview_overflow_drops=0"
+        << " preview_startup_drops=0"
+        << " preview_catchup_drops=2"
         << " latest_frame=55"
         << " latest_frame_bytes=60000"
         << " latest_fragments=48"

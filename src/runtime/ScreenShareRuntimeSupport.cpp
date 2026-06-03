@@ -776,6 +776,8 @@ PerformanceReport BuildPerformanceReport(std::string_view consoleLog)
             AddMetric(metrics, sample, "video_playout_delay_max_ms", "receiver max video playout delay ms");
             AddMetric(metrics, sample, "preview_late_drops", "receiver preview late drops");
             AddMetric(metrics, sample, "preview_overflow_drops", "receiver preview overflow drops");
+            AddMetric(metrics, sample, "preview_startup_drops", "receiver preview startup drops");
+            AddMetric(metrics, sample, "preview_catchup_drops", "receiver preview catchup drops");
             AddMetric(metrics, sample, "audio_playback_queue_ms", "receiver audio queue ms");
             AddMetric(metrics, sample, "audio_playback_drops", "receiver audio playback drops");
             AddMetric(metrics, sample, "audio_render_padding", "receiver audio render padding");
@@ -827,6 +829,8 @@ PerformanceReport BuildPerformanceReport(std::string_view consoleLog)
         {"Max video playout delay ms", metrics["receiver max video playout delay ms"]},
         {"Preview late drops", metrics["receiver preview late drops"]},
         {"Preview overflow drops", metrics["receiver preview overflow drops"]},
+        {"Preview startup drops", metrics["receiver preview startup drops"]},
+        {"Preview catchup drops", metrics["receiver preview catchup drops"]},
         {"Audio queue ms", metrics["receiver audio queue ms"]},
         {"Audio playback drops", metrics["receiver audio playback drops"]},
         {"Audio render padding", metrics["receiver audio render padding"]},
@@ -897,6 +901,8 @@ PerformanceReport BuildPerformanceReport(std::string_view consoleLog)
         "video_playout_delay_last_ms",
         "preview_late_drops",
         "preview_overflow_drops",
+        "preview_startup_drops",
+        "preview_catchup_drops",
         "audio_capture",
         "audio_playback",
         "audio_playback_queue_ms",

@@ -268,6 +268,11 @@ public:
         EnsureClockStarted(now);
 
         while (!frames_.empty()) {
+            if (!flush) {
+                AdvanceClockTowardLiveEdge(now);
+                DropReadyBacklog(now, maxPresentationTimestamp100ns);
+            }
+
             const int64_t frameTimestamp100ns = frames_.begin()->first;
             if (!flush &&
                 maxPresentationTimestamp100ns &&
@@ -331,6 +336,8 @@ public:
     [[nodiscard]] size_t queuedFrameCount() const noexcept { return frames_.size(); }
     [[nodiscard]] uint64_t lateDrops() const noexcept { return lateDrops_; }
     [[nodiscard]] uint64_t overflowDrops() const noexcept { return overflowDrops_; }
+    [[nodiscard]] uint64_t startupDrops() const noexcept { return startupDrops_; }
+    [[nodiscard]] uint64_t catchupDrops() const noexcept { return catchupDrops_; }
     [[nodiscard]] uint64_t syncDrops() const noexcept { return syncDrops_; }
     [[nodiscard]] uint64_t syncWaits() const noexcept { return syncWaits_; }
     [[nodiscard]] bool clockStarted() const noexcept { return clockStarted_; }
@@ -375,9 +382,91 @@ private:
             return;
         }
 
+        TrimStartupBacklogToLatencyTarget();
         firstTimestamp100ns_ = frames_.begin()->first;
         firstPresentationAt_ = now + initialDelay_;
         clockStarted_ = true;
+    }
+
+    void TrimStartupBacklogToLatencyTarget()
+    {
+        TrimBacklogToLatencyTarget(startupDrops_);
+    }
+
+    void DropReadyBacklog(
+        Clock::time_point now,
+        std::optional<int64_t> maxPresentationTimestamp100ns)
+    {
+        while (frames_.size() > 1) {
+            auto current = frames_.begin();
+            auto next = std::next(current);
+            if (maxPresentationTimestamp100ns && next->first > *maxPresentationTimestamp100ns) {
+                break;
+            }
+            if (now < PresentationTime(next->first)) {
+                break;
+            }
+
+            frames_.erase(current);
+            ++catchupDrops_;
+        }
+    }
+
+    void AdvanceClockTowardLiveEdge(Clock::time_point now)
+    {
+        if (frames_.size() < 3) {
+            return;
+        }
+
+        const auto newestPresentationTime = PresentationTime(frames_.rbegin()->first);
+        const auto targetLead =
+            initialDelay_ +
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::nanoseconds(EstimateFrameTicks100ns() * 200));
+        const auto targetNewestPresentationTime = now + targetLead;
+        if (newestPresentationTime <= targetNewestPresentationTime) {
+            return;
+        }
+
+        firstPresentationAt_ -= std::chrono::duration_cast<Clock::duration>(
+            newestPresentationTime - targetNewestPresentationTime);
+    }
+
+    void TrimBacklogToLatencyTarget(uint64_t& dropCounter)
+    {
+        if (frames_.size() < 3) {
+            return;
+        }
+
+        const int64_t newestTimestamp100ns = frames_.rbegin()->first;
+        if (newestTimestamp100ns <= frames_.begin()->first) {
+            return;
+        }
+
+        const int64_t frameTicks100ns = EstimateFrameTicks100ns();
+        const int64_t targetTicks100ns =
+            std::max<int64_t>(0, initialDelay_.count()) * 10'000LL;
+        const int64_t slackTicks100ns = std::max<int64_t>(frameTicks100ns * 2, 1);
+        const int64_t maxQueuedSpan100ns = targetTicks100ns + slackTicks100ns;
+
+        while (frames_.size() > 2 &&
+               newestTimestamp100ns - frames_.begin()->first > maxQueuedSpan100ns) {
+            frames_.erase(frames_.begin());
+            ++dropCounter;
+        }
+    }
+
+    [[nodiscard]] int64_t EstimateFrameTicks100ns() const
+    {
+        int64_t frameTicks100ns = 166'667;
+        auto previous = frames_.begin();
+        for (auto current = std::next(previous); current != frames_.end(); ++current, ++previous) {
+            const int64_t delta = current->first - previous->first;
+            if (delta > 0) {
+                return delta;
+            }
+        }
+        return frameTicks100ns;
     }
 
     [[nodiscard]] Clock::time_point PresentationTime(int64_t timestamp100ns) const
@@ -406,6 +495,8 @@ private:
     bool hasPresentedTimestamp_ = false;
     uint64_t lateDrops_ = 0;
     uint64_t overflowDrops_ = 0;
+    uint64_t startupDrops_ = 0;
+    uint64_t catchupDrops_ = 0;
     uint64_t syncDrops_ = 0;
     uint64_t syncWaits_ = 0;
     uint64_t presentDelaySamples_ = 0;
@@ -5733,6 +5824,8 @@ void RunUdpReceiverStats(
                 << " preview_playout_resets=" << (previewWindow ? previewPlayoutResets : 0)
                 << " preview_late_drops=" << (previewWindow ? previewPlayout.lateDrops() : 0)
                 << " preview_overflow_drops=" << (previewWindow ? previewPlayout.overflowDrops() : 0)
+                << " preview_startup_drops=" << (previewWindow ? previewPlayout.startupDrops() : 0)
+                << " preview_catchup_drops=" << (previewWindow ? previewPlayout.catchupDrops() : 0)
                 << " preview_sync_drops=" << (previewWindow ? previewPlayout.syncDrops() : 0)
                 << " preview_sync_waits=" << (previewWindow ? previewPlayout.syncWaits() : 0);
 
@@ -5946,6 +6039,8 @@ void RunUdpReceiverStats(
         << ", preview playout resets: " << (previewWindow ? previewPlayoutResets : 0)
         << ", preview late drops: " << (previewWindow ? previewPlayout.lateDrops() : 0)
         << ", preview overflow drops: " << (previewWindow ? previewPlayout.overflowDrops() : 0)
+        << ", preview startup drops: " << (previewWindow ? previewPlayout.startupDrops() : 0)
+        << ", preview catchup drops: " << (previewWindow ? previewPlayout.catchupDrops() : 0)
         << ", preview sync drops: " << (previewWindow ? previewPlayout.syncDrops() : 0)
         << ", preview sync waits: " << (previewWindow ? previewPlayout.syncWaits() : 0)
         << ", decoded BMP written: " << (decodedBmpWritten ? "yes" : "no")
