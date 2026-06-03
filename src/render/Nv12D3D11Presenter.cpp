@@ -277,6 +277,7 @@ struct Nv12D3D11Presenter::Impl {
         DisableDxgiDefaultAltEnter(swapChain.Get(), hwnd);
         SetSwapChainSdrColorSpace(swapChain.Get());
         EnsureRenderTarget();
+        swapChainResizePending = false;
     }
 
     void ResizeSwapChainIfNeeded()
@@ -600,8 +601,16 @@ void Nv12D3D11Presenter::Attach(HWND hwnd)
 
 void Nv12D3D11Presenter::Resize(std::uint32_t width, std::uint32_t height)
 {
-    impl_->clientWidth = ClampDimension(width);
-    impl_->clientHeight = ClampDimension(height);
+    const std::uint32_t clampedWidth = ClampDimension(width);
+    const std::uint32_t clampedHeight = ClampDimension(height);
+    if (impl_->clientWidth == clampedWidth &&
+        impl_->clientHeight == clampedHeight &&
+        !impl_->swapChainResizePending) {
+        return;
+    }
+
+    impl_->clientWidth = clampedWidth;
+    impl_->clientHeight = clampedHeight;
     impl_->swapChainResizePending = true;
     if (impl_->swapChain) {
         impl_->Render();

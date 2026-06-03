@@ -699,17 +699,15 @@ void ScreenShareSession::Impl::HandleOutput(std::string_view text)
 void ScreenShareSession::Impl::HandleVideoFrame(SessionEvent::VideoFrame frame)
 {
     ISessionEventSink* observer = nullptr;
-    SessionEvent event;
+    SessionStatus status;
     {
         std::scoped_lock lock(mutex_);
         observer = observer_;
-        event.type = SessionEventType::VideoFrameReady;
-        event.status = BuildStatusLocked();
-        event.videoFrame = std::move(frame);
+        status = BuildStatusLocked();
     }
 
     if (observer != nullptr) {
-        observer->OnSessionEvent(event);
+        observer->OnSessionVideoFrame(status, std::move(frame));
     }
 }
 

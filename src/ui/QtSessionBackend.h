@@ -49,6 +49,9 @@ private:
     bool finishStartWithError(const std::exception& error, QString* errorMessage);
     void notifyStarted();
     void OnSessionEvent(const screenshare::SessionEvent& event) override;
+    void OnSessionVideoFrame(
+        const screenshare::SessionStatus& status,
+        screenshare::SessionEvent::VideoFrame frame) override;
     void queueVideoFrame(screenshare::SessionEvent::VideoFrame frame);
     void deliverPendingVideoFrame();
     void handleSessionEvent(const screenshare::SessionEvent& event);

@@ -237,6 +237,14 @@ void QtSessionBackend::OnSessionEvent(const screenshare::SessionEvent& event)
         Qt::QueuedConnection);
 }
 
+void QtSessionBackend::OnSessionVideoFrame(
+    const screenshare::SessionStatus& status,
+    screenshare::SessionEvent::VideoFrame frame)
+{
+    Q_UNUSED(status);
+    queueVideoFrame(std::move(frame));
+}
+
 void QtSessionBackend::queueVideoFrame(screenshare::SessionEvent::VideoFrame frame)
 {
     bool shouldSchedule = false;

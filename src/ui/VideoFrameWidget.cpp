@@ -142,9 +142,13 @@ void VideoFrameWidget::setVideoFrame(const screenshare::SessionEvent::VideoFrame
     if (!d3dUnavailable_ && d3dSurface_ != nullptr) {
         try {
             image_ = {};
-            d3dSurface_->setGeometry(rect());
-            d3dSurface_->show();
-            d3dSurface_->raise();
+            if (d3dSurface_->geometry() != rect()) {
+                d3dSurface_->setGeometry(rect());
+            }
+            if (!d3dSurface_->isVisible()) {
+                d3dSurface_->show();
+                d3dSurface_->raise();
+            }
             d3dSurface_->presentFrame(frame);
             return;
         } catch (const std::exception&) {
