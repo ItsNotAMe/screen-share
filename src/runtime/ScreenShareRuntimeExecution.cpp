@@ -2466,7 +2466,7 @@ void ConfigureCapturePayloads(
     config.includeNv12 = options.streamEncode;
     config.includeNv12Readback = !optimizeForHardwareStream;
     config.includeBgraReadback =
-        !optimizeForHardwareStream ||
+        !options.streamEncode ||
         !options.recordPath.empty() ||
         !options.capturedBmpPath.empty();
 }
