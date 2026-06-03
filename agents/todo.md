@@ -11,7 +11,7 @@
    - [x] Keep receiver preview fast by avoiding one extra NV12 copy into Qt, skipping no-op D3D surface resizes, and keeping embedded/fullscreen presentation on the same surface.
    - [x] Optimize UDP fanout for multiple viewers by caching resolved send targets and rebuilding the fanout list only when targets change; two-viewer loopback stayed healthy with 0 ms viewer queue average.
    - [x] Keep audio capture/playback and Opus queues bounded and event-driven: WASAPI capture waits on audio events, receiver playout tracks queued frames directly, and audio-only loopback stayed at 0 ms playback queue with no drops.
-   - [ ] Review release build settings for safe speed wins such as optimized release flags and optional LTO, without mixing this up with DLL/static-link packaging.
+   - [x] Review release build settings for safe speed wins: Release builds now enable CMake-supported LTO/IPO when available, and the release ScreenShare target builds cleanly with it.
 
 2. User-facing diagnostics pass.
    - [ ] Map known runtime/report states to plain UI messages, starting with waiting for stream, password/encryption mismatch, UDP hole-punch failure, host left, and host idle.

@@ -6,6 +6,18 @@ option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread r
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
 option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
 option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets and Svg are available" ON)
+option(SCREENSHARE_ENABLE_RELEASE_LTO "Enable compiler-supported link-time optimization for Release builds" ON)
+
+if(SCREENSHARE_ENABLE_RELEASE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT SCREENSHARE_RELEASE_LTO_SUPPORTED OUTPUT SCREENSHARE_RELEASE_LTO_OUTPUT)
+    if(SCREENSHARE_RELEASE_LTO_SUPPORTED)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        message(STATUS "Release LTO enabled")
+    else()
+        message(WARNING "Release LTO requested but not supported by this toolchain: ${SCREENSHARE_RELEASE_LTO_OUTPUT}")
+    endif()
+endif()
 
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)

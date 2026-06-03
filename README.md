@@ -89,6 +89,10 @@ cmake --build --preset release --target package-portable
 Set `SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD=OFF` at configure time if you want normal builds to skip
 zip creation.
 
+Release builds enable compiler-supported link-time optimization by default when CMake reports that
+the active toolchain supports it. Set `SCREENSHARE_ENABLE_RELEASE_LTO=OFF` at configure time if you
+need to compare non-LTO builds or work around a toolchain issue.
+
 ## Run
 
 Start the desktop control UI:
