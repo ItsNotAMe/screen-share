@@ -557,13 +557,18 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
 
     const REFERENCE_TIME bufferDuration =
         static_cast<REFERENCE_TIME>(std::max<int64_t>(1, config.bufferDuration.count())) * 10'000;
-    DWORD streamFlags = 0;
+    DWORD streamFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
     if (config.source == AudioCaptureSource::SystemOutput ||
         config.source == AudioCaptureSource::ProcessOutput) {
         streamFlags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
     if (config.source == AudioCaptureSource::ProcessOutput) {
         streamFlags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+    }
+
+    captureEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (captureEvent_ == nullptr) {
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "CreateEventW(audio capture)");
     }
 
     ThrowIfFailed(
@@ -575,6 +580,7 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
             activeFormat,
             nullptr),
         "IAudioClient::Initialize");
+    ThrowIfFailed(audioClient_->SetEventHandle(captureEvent_), "IAudioClient::SetEventHandle");
     ThrowIfFailed(audioClient_->GetBufferSize(&bufferFrames_), "IAudioClient::GetBufferSize");
     ThrowIfFailed(audioClient_->GetService(IID_PPV_ARGS(&captureClient_)), "IAudioClient::GetService");
     ThrowIfFailed(audioClient_->Start(), "IAudioClient::Start");
@@ -589,6 +595,10 @@ void WasapiCapture::Stop()
     started_ = false;
     captureClient_.Reset();
     audioClient_.Reset();
+    if (captureEvent_ != nullptr) {
+        CloseHandle(captureEvent_);
+        captureEvent_ = nullptr;
+    }
     bufferFrames_ = 0;
     deviceId_.clear();
     deviceName_.clear();
@@ -642,10 +652,25 @@ std::optional<CapturedAudioPacket> WasapiCapture::CapturePacket(std::chrono::mil
             return packet;
         }
 
-        if (timeout.count() <= 0 || std::chrono::steady_clock::now() >= deadline) {
+        const auto now = std::chrono::steady_clock::now();
+        if (timeout.count() <= 0 || now >= deadline) {
             return std::nullopt;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        if (captureEvent_ != nullptr) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+            const DWORD waitMs = static_cast<DWORD>(std::max<int64_t>(1, remaining.count()));
+            const DWORD waitResult = WaitForSingleObject(captureEvent_, waitMs);
+            if (waitResult == WAIT_OBJECT_0) {
+                continue;
+            }
+            if (waitResult == WAIT_TIMEOUT) {
+                return std::nullopt;
+            }
+            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "WaitForSingleObject(audio capture)");
+        } else {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+            std::this_thread::sleep_for(std::min(std::chrono::milliseconds(5), remaining));
+        }
     }
 }
 

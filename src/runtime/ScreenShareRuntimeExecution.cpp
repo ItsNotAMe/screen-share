@@ -522,6 +522,8 @@ public:
         started_ = false;
         lastRenderedEndQpc100ns_ = 0;
         hasRenderedQpc_ = false;
+        queuedFrames_ = 0;
+        queuedSampleRate_ = 0;
     }
 
     void Enqueue(screenshare::UdpCompletedAudioPacket packet)
@@ -530,14 +532,22 @@ public:
             ++lateDrops_;
             return;
         }
+        const uint32_t packetFrames = packet.audioFrames;
+        const uint32_t packetSampleRate = packet.sampleRate;
         if (!packets_.emplace(packet.packetId, std::move(packet)).second) {
             ++duplicateDrops_;
             return;
         }
+        queuedFrames_ += packetFrames;
+        if (packetSampleRate != 0) {
+            queuedSampleRate_ = packetSampleRate;
+        }
         while (packets_.size() > maxQueuedPackets_) {
+            queuedFrames_ -= std::min<uint64_t>(queuedFrames_, packets_.begin()->second.audioFrames);
             packets_.erase(packets_.begin());
             ++overflowDrops_;
         }
+        TrimLatencyBacklog();
     }
 
     void RenderReady(
@@ -584,6 +594,7 @@ public:
             if (packet.audioFrames > renderer.bufferFrames()) {
                 ++oversizedDrops_;
                 ++(*nextPacketId_);
+                queuedFrames_ -= std::min<uint64_t>(queuedFrames_, packet.audioFrames);
                 packets_.erase(next);
                 continue;
             }
@@ -604,6 +615,7 @@ public:
                 hasRenderedQpc_ = true;
             }
             ++(*nextPacketId_);
+            queuedFrames_ -= std::min<uint64_t>(queuedFrames_, packet.audioFrames);
             packets_.erase(next);
         }
     }
@@ -638,6 +650,7 @@ public:
             if (nextPacketId_ && packetId >= *nextPacketId_) {
                 nextPacketId_ = packetId + 1;
             }
+            queuedFrames_ -= std::min<uint64_t>(queuedFrames_, packets_.begin()->second.audioFrames);
             packets_.erase(packets_.begin());
             ++dropped;
         }
@@ -650,25 +663,17 @@ public:
         if (packets_.empty()) {
             return std::chrono::milliseconds(0);
         }
-
-        uint64_t frames = 0;
-        uint32_t sampleRate = 0;
-        for (const auto& [packetId, packet] : packets_) {
-            static_cast<void>(packetId);
-            frames += packet.audioFrames;
-            sampleRate = packet.sampleRate;
-        }
-        if (sampleRate == 0) {
+        if (queuedSampleRate_ == 0) {
             return std::chrono::milliseconds(0);
         }
 
-        return std::chrono::milliseconds(static_cast<int64_t>(frames * 1000 / sampleRate));
+        return std::chrono::milliseconds(static_cast<int64_t>(queuedFrames_ * 1000 / queuedSampleRate_));
     }
 
 private:
     void TrimLatencyBacklog()
     {
-        if (!started_ || packets_.empty()) {
+        if (packets_.empty()) {
             return;
         }
 
@@ -687,6 +692,7 @@ private:
                     nextPacketId_ = oldest->first + 1;
                 }
             }
+            queuedFrames_ -= std::min<uint64_t>(queuedFrames_, oldest->second.audioFrames);
             packets_.erase(oldest);
             ++latencyDrops_;
         }
@@ -697,6 +703,8 @@ private:
     bool started_ = false;
     bool hasRenderedQpc_ = false;
     size_t maxQueuedPackets_ = 512;
+    uint64_t queuedFrames_ = 0;
+    uint32_t queuedSampleRate_ = 0;
     std::chrono::milliseconds targetLatency_;
     std::chrono::milliseconds maxQueueOverTarget_{250};
     uint64_t packetsRendered_ = 0;

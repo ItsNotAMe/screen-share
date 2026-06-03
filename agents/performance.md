@@ -31,6 +31,8 @@ The CSV's `estimated_video_e2e_*` columns are report estimates, not clock-synchr
 glass-to-glass measurements. They add the sender estimated video path
 (`capture + encode + UDP queue`) to the receiver estimated video path
 (`decode + preview playout delay`).
+Audio-only rows intentionally leave video-only timing columns blank and put the audio evidence in
+the notes column.
 
 ## Comparison Rules
 
