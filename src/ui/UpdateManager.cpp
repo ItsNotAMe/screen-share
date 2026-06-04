@@ -3,16 +3,24 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
+#include <QtCore/QEvent>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QPoint>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QSize>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtGui/QIcon>
+#include <QtGui/QMouseEvent>
+#include <QtGui/QPainter>
+#include <QtGui/QPixmap>
+#include <QtSvg/QSvgRenderer>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -37,6 +45,48 @@
 namespace {
 
 constexpr qsizetype kMaxManifestBytes = 256 * 1024;
+
+class UpdateDialog final : public QDialog {
+public:
+    explicit UpdateDialog(QWidget* parent = nullptr)
+        : QDialog(parent)
+    {
+    }
+
+    void enableDrag(QWidget* widget)
+    {
+        if (widget != nullptr) {
+            widget->installEventFilter(this);
+        }
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        Q_UNUSED(watched);
+
+        if (event->type() == QEvent::MouseButtonPress) {
+            auto* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                dragging_ = true;
+                dragOffset_ = mouseEvent->globalPosition().toPoint() - frameGeometry().topLeft();
+            }
+        } else if (event->type() == QEvent::MouseMove) {
+            auto* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (dragging_ && (mouseEvent->buttons() & Qt::LeftButton)) {
+                move(mouseEvent->globalPosition().toPoint() - dragOffset_);
+            }
+        } else if (event->type() == QEvent::MouseButtonRelease) {
+            dragging_ = false;
+        }
+
+        return QDialog::eventFilter(watched, event);
+    }
+
+private:
+    bool dragging_ = false;
+    QPoint dragOffset_;
+};
 
 QString appVersion()
 {
@@ -105,19 +155,20 @@ QString tempUpdateDir()
     return dir.filePath(QStringLiteral("ScreenShare/updates"));
 }
 
-QString notesText(const QStringList& notes)
+QStringList normalizedNotes(const QStringList& notes)
 {
+    QStringList result;
     if (notes.isEmpty()) {
-        return QStringLiteral("This update includes the latest ScreenShare fixes and improvements.");
+        result.push_back(QStringLiteral("Latest ScreenShare fixes and improvements"));
+        return result;
     }
 
-    QStringList lines;
     for (const QString& note : notes) {
         if (!note.trimmed().isEmpty()) {
-            lines.push_back(QStringLiteral("- %1").arg(note.trimmed()));
+            result.push_back(note.trimmed());
         }
     }
-    return lines.join(QLatin1Char('\n'));
+    return result;
 }
 
 QLabel* updateLabel(const QString& text, const char* objectName)
@@ -125,6 +176,47 @@ QLabel* updateLabel(const QString& text, const char* objectName)
     auto* label = new QLabel(text);
     label->setObjectName(objectName);
     label->setWordWrap(true);
+    return label;
+}
+
+QFrame* updateSeparator(const char* objectName)
+{
+    auto* line = new QFrame;
+    line->setObjectName(objectName);
+    line->setFrameShape(QFrame::HLine);
+    line->setFixedHeight(1);
+    return line;
+}
+
+QPixmap updateIconPixmap(const QString& name, const char* color, int size)
+{
+    QFile file(QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(name));
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+
+    QByteArray svg = file.readAll();
+    svg.replace("currentColor", color);
+    QSvgRenderer renderer(svg);
+    if (!renderer.isValid()) {
+        return {};
+    }
+
+    QPixmap pixmap(size, size);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    renderer.render(&painter);
+    return pixmap;
+}
+
+QLabel* updateIconLabel(const QString& iconName, const char* color, int size, const char* objectName)
+{
+    auto* label = new QLabel;
+    label->setObjectName(objectName);
+    label->setFixedSize(size, size);
+    label->setAlignment(Qt::AlignCenter);
+    label->setPixmap(updateIconPixmap(iconName, color, size - 14));
     return label;
 }
 
@@ -220,11 +312,14 @@ void UpdateManager::handleManifestReply(QNetworkReply* reply)
 
 void UpdateManager::showUpdateDialog(const UpdateInfo& update)
 {
-    auto* dialog = new QDialog(dialogParent_);
+    auto* dialog = new UpdateDialog(dialogParent_);
     dialog->setObjectName("UpdateDialog");
     dialog->setWindowTitle(QStringLiteral("ScreenShare update"));
+    dialog->setWindowIcon(QIcon(QStringLiteral(":/screenshare/brand/screenshare-mark.svg")));
+    dialog->setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     dialog->setModal(false);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setAttribute(Qt::WA_TranslucentBackground);
 
     auto* outerLayout = new QVBoxLayout(dialog);
     outerLayout->setContentsMargins(0, 0, 0, 0);
@@ -234,29 +329,80 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
     outerLayout->addWidget(frame);
 
     auto* layout = new QVBoxLayout(frame);
-    layout->setContentsMargins(22, 20, 22, 18);
-    layout->setSpacing(14);
+    layout->setContentsMargins(22, 18, 22, 22);
+    layout->setSpacing(16);
 
-    layout->addWidget(updateLabel(QStringLiteral("Update available"), "UpdateTitle"));
-    layout->addWidget(updateLabel(
-        QStringLiteral("ScreenShare %1 is ready. You are running %2.")
-            .arg(update.version, appVersion()),
-        "UpdateBody"));
+    auto* header = new QFrame;
+    header->setObjectName("UpdateHeader");
+    auto* headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+    headerLayout->setSpacing(16);
+
+    auto* downloadBadge = updateIconLabel(QStringLiteral("download"), "#28ded3", 54, "UpdateDownloadBadge");
+    auto* titleLabel = updateLabel(QStringLiteral("Update Available"), "UpdateTitle");
+    auto* closeButton = new QPushButton;
+    closeButton->setObjectName("UpdateCloseButton");
+    closeButton->setFixedSize(34, 34);
+    closeButton->setIcon(QIcon(updateIconPixmap(QStringLiteral("window-close"), "#cfd8d5", 22)));
+    closeButton->setIconSize(QSize(22, 22));
+    closeButton->setFlat(true);
+
+    headerLayout->addWidget(downloadBadge, 0, Qt::AlignVCenter);
+    headerLayout->addWidget(titleLabel, 1, Qt::AlignVCenter);
+    headerLayout->addWidget(closeButton, 0, Qt::AlignTop);
+    layout->addWidget(header);
+    layout->addWidget(updateSeparator("UpdateSeparator"));
+    dialog->enableDrag(header);
+    dialog->enableDrag(downloadBadge);
+    dialog->enableDrag(titleLabel);
+    QObject::connect(closeButton, &QPushButton::clicked, dialog, &QDialog::close);
+
+    auto* versionLabel = updateLabel(
+        QStringLiteral("Version <span style=\"color:#28ded3; font-size:18pt; font-weight:800;\">%1</span> is ready to download.")
+            .arg(update.version.toHtmlEscaped()),
+        "UpdateVersion");
+    versionLabel->setTextFormat(Qt::RichText);
+    layout->addWidget(versionLabel);
 
     auto* notesFrame = new QFrame;
     notesFrame->setObjectName("UpdateNotesFrame");
     auto* notesLayout = new QVBoxLayout(notesFrame);
-    notesLayout->setContentsMargins(14, 12, 14, 12);
-    notesLayout->setSpacing(8);
-    notesLayout->addWidget(updateLabel(QStringLiteral("What changed"), "UpdateSectionTitle"));
-    notesLayout->addWidget(updateLabel(notesText(update.notes), "UpdateNote"));
+    notesLayout->setContentsMargins(18, 2, 18, 2);
+    notesLayout->setSpacing(0);
+
+    const QStringList notes = normalizedNotes(update.notes);
+    for (int index = 0; index < notes.size(); ++index) {
+        auto* row = new QFrame;
+        row->setObjectName("UpdateNoteRow");
+        auto* rowLayout = new QHBoxLayout(row);
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        rowLayout->setSpacing(16);
+
+        auto* bullet = new QLabel;
+        bullet->setObjectName("UpdateBullet");
+        bullet->setFixedSize(8, 8);
+        auto* noteLabel = updateLabel(notes[index], "UpdateNote");
+        rowLayout->addWidget(bullet, 0, Qt::AlignVCenter);
+        rowLayout->addWidget(noteLabel, 1);
+        notesLayout->addWidget(row);
+
+        if (index + 1 < notes.size()) {
+            notesLayout->addWidget(updateSeparator("UpdateNoteDivider"));
+        }
+    }
     layout->addWidget(notesFrame);
 
-    layout->addWidget(updateLabel(
-        QStringLiteral("The package is downloaded over HTTPS and must match the release SHA-256 hash before installation."),
-        "UpdateSecurity"));
+    auto* securityRow = new QFrame;
+    securityRow->setObjectName("UpdateSecurityRow");
+    auto* securityLayout = new QHBoxLayout(securityRow);
+    securityLayout->setContentsMargins(0, 0, 0, 0);
+    securityLayout->setSpacing(14);
+    securityLayout->addWidget(updateIconLabel(QStringLiteral("shield"), "#28ded3", 38, "UpdateSecurityIcon"), 0, Qt::AlignVCenter);
+    securityLayout->addWidget(updateLabel(QStringLiteral("Package is verified before install"), "UpdateSecurity"), 1);
+    layout->addWidget(securityRow);
 
-    auto* statusLabel = updateLabel(QStringLiteral("Ready to download"), "UpdateBody");
+    auto* statusLabel = updateLabel(QStringLiteral("Ready to download"), "UpdateStatus");
+    statusLabel->hide();
     layout->addWidget(statusLabel);
 
     auto* progress = new QProgressBar;
@@ -267,13 +413,17 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
     layout->addWidget(progress);
 
     auto* buttons = new QHBoxLayout;
-    buttons->addStretch(1);
+    buttons->setSpacing(18);
     auto* laterButton = new QPushButton(QStringLiteral("Later"));
     laterButton->setObjectName("UpdateSecondary");
-    auto* installButton = new QPushButton(QStringLiteral("Download and install"));
+    laterButton->setMinimumHeight(56);
+    auto* installButton = new QPushButton(QStringLiteral("Download Update"));
     installButton->setObjectName("UpdatePrimary");
-    buttons->addWidget(laterButton);
-    buttons->addWidget(installButton);
+    installButton->setMinimumHeight(56);
+    installButton->setIcon(QIcon(updateIconPixmap(QStringLiteral("download"), "#ffffff", 24)));
+    installButton->setIconSize(QSize(24, 24));
+    buttons->addWidget(laterButton, 1);
+    buttons->addWidget(installButton, 1);
     layout->addLayout(buttons);
 
     QObject::connect(laterButton, &QPushButton::clicked, dialog, &QDialog::close);
@@ -281,7 +431,7 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
         downloadUpdate(update, progress, statusLabel, installButton, laterButton);
     });
 
-    dialog->resize(470, 360);
+    dialog->setFixedSize(500, 480);
     dialog->show();
 }
 
@@ -293,8 +443,10 @@ void UpdateManager::downloadUpdate(
     QPushButton* laterButton)
 {
     installButton->setEnabled(false);
+    installButton->setText(QStringLiteral("Downloading..."));
     laterButton->setEnabled(false);
     progress->show();
+    statusLabel->show();
     statusLabel->setText(QStringLiteral("Downloading update..."));
 
     const QString outputDir = tempUpdateDir();
@@ -304,6 +456,8 @@ void UpdateManager::downloadUpdate(
     auto* output = new QFile(outputPath, this);
     if (!output->open(QIODevice::WriteOnly)) {
         statusLabel->setText(QStringLiteral("Could not create the update package file."));
+        installButton->setText(QStringLiteral("Download Update"));
+        installButton->setEnabled(true);
         laterButton->setEnabled(true);
         output->deleteLater();
         return;
@@ -331,6 +485,7 @@ void UpdateManager::downloadUpdate(
         if (reply->error() != QNetworkReply::NoError) {
             QFile::remove(outputPath);
             statusLabel->setText(QStringLiteral("Download failed. Check your connection and try again."));
+            installButton->setText(QStringLiteral("Download Update"));
             installButton->setEnabled(true);
             laterButton->setEnabled(true);
             return;
@@ -342,6 +497,8 @@ void UpdateManager::downloadUpdate(
         if (actualHash.compare(update.sha256, Qt::CaseInsensitive) != 0) {
             QFile::remove(outputPath);
             statusLabel->setText(QStringLiteral("Update verification failed. The package hash did not match the release manifest."));
+            installButton->setText(QStringLiteral("Download Update"));
+            installButton->setEnabled(true);
             laterButton->setEnabled(true);
             return;
         }
@@ -349,10 +506,13 @@ void UpdateManager::downloadUpdate(
         QString errorMessage;
         if (!launchUpdater(update, outputPath, &errorMessage)) {
             statusLabel->setText(errorMessage);
+            installButton->setText(QStringLiteral("Download Update"));
+            installButton->setEnabled(true);
             laterButton->setEnabled(true);
             return;
         }
 
+        installButton->setText(QStringLiteral("Installing..."));
         statusLabel->setText(QStringLiteral("Installing after ScreenShare closes..."));
         QTimer::singleShot(100, qApp, &QCoreApplication::quit);
     });
@@ -361,6 +521,13 @@ void UpdateManager::downloadUpdate(
 bool UpdateManager::launchUpdater(const UpdateInfo& update, const QString& packagePath, QString* errorMessage)
 {
     const QString appDir = QCoreApplication::applicationDirPath();
+    const QDir appDirectory(appDir);
+    if (QFileInfo::exists(appDirectory.filePath(QStringLiteral("CMakeCache.txt"))) ||
+        appDirectory.exists(QStringLiteral("CMakeFiles"))) {
+        *errorMessage = QStringLiteral("Updates cannot be installed from a CMake build folder. Extract the portable zip to a separate app folder and run ScreenShareUi.exe there.");
+        return false;
+    }
+
     const QString helperPath = QDir(appDir).filePath(QStringLiteral("ScreenShareUpdater.exe"));
     if (!QFileInfo::exists(helperPath)) {
         *errorMessage = QStringLiteral("ScreenShareUpdater.exe was not found beside the app.");
@@ -381,7 +548,7 @@ bool UpdateManager::launchUpdater(const UpdateInfo& update, const QString& packa
         << QStringLiteral("--target") << appDir
         << QStringLiteral("--restart") << QCoreApplication::applicationFilePath();
 
-    if (!QProcess::startDetached(tempHelper, arguments, appDir)) {
+    if (!QProcess::startDetached(tempHelper, arguments, tempUpdateDir())) {
         *errorMessage = QStringLiteral("Could not start the updater helper.");
         return false;
     }

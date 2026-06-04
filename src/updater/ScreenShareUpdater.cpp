@@ -34,6 +34,14 @@ void log(std::wstring_view message)
     }
 }
 
+void logError(std::wstring_view message, const std::error_code& error)
+{
+    auto& stream = logStream();
+    if (stream.is_open()) {
+        stream << message << L": " << error.message().c_str() << L"\n";
+    }
+}
+
 std::vector<std::wstring> commandLineArguments()
 {
     int argc = 0;
@@ -138,7 +146,7 @@ bool extractPackage(const fs::path& packagePath, const fs::path& extractDir)
     fs::remove_all(extractDir, error);
     fs::create_directories(extractDir, error);
     if (error) {
-        log(L"Could not create extraction directory");
+        logError(L"Could not create extraction directory", error);
         return false;
     }
 
@@ -162,12 +170,17 @@ bool moveOrCopyDirectory(const fs::path& source, const fs::path& destination)
     error.clear();
     fs::copy(source, destination, fs::copy_options::recursive | fs::copy_options::overwrite_existing, error);
     if (error) {
-        log(L"Could not copy package directory into place");
+        logError(L"Could not copy package directory into place", error);
         return false;
     }
 
     fs::remove_all(source, error);
     return true;
+}
+
+bool isCMakeBuildDirectory(const fs::path& path)
+{
+    return fs::exists(path / L"CMakeCache.txt") || fs::exists(path / L"CMakeFiles");
 }
 
 fs::path findExtractedPackageRoot(const fs::path& extractDir)
@@ -214,6 +227,11 @@ void preserveUserFiles(const fs::path& backupDir, const fs::path& targetDir)
 
 bool replaceInstallFolder(const fs::path& packageRoot, const fs::path& targetDir)
 {
+    if (isCMakeBuildDirectory(targetDir)) {
+        log(L"Refusing to update a CMake build directory");
+        return false;
+    }
+
     const fs::path backupDir = targetDir.parent_path() /
         (targetDir.filename().wstring() + L".update-backup");
 
@@ -222,7 +240,7 @@ bool replaceInstallFolder(const fs::path& packageRoot, const fs::path& targetDir
     error.clear();
     fs::rename(targetDir, backupDir, error);
     if (error) {
-        log(L"Could not move current install folder to backup");
+        logError(L"Could not move current install folder to backup", error);
         return false;
     }
 

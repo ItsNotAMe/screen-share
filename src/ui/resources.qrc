@@ -7,6 +7,7 @@
     <file alias="ui/icons/chevron-down.svg">../../assets/ui/icons/chevron-down.svg</file>
     <file alias="ui/icons/copy.svg">../../assets/ui/icons/copy.svg</file>
     <file alias="ui/icons/display.svg">../../assets/ui/icons/display.svg</file>
+    <file alias="ui/icons/download.svg">../../assets/ui/icons/download.svg</file>
     <file alias="ui/icons/fps.svg">../../assets/ui/icons/fps.svg</file>
     <file alias="ui/icons/fullscreen.svg">../../assets/ui/icons/fullscreen.svg</file>
     <file alias="ui/icons/lock.svg">../../assets/ui/icons/lock.svg</file>
@@ -20,6 +21,7 @@
     <file alias="ui/icons/report.svg">../../assets/ui/icons/report.svg</file>
     <file alias="ui/icons/room.svg">../../assets/ui/icons/room.svg</file>
     <file alias="ui/icons/settings.svg">../../assets/ui/icons/settings.svg</file>
+    <file alias="ui/icons/shield.svg">../../assets/ui/icons/shield.svg</file>
     <file alias="ui/icons/share.svg">../../assets/ui/icons/share.svg</file>
     <file alias="ui/icons/stop.svg">../../assets/ui/icons/stop.svg</file>
     <file alias="ui/icons/toggle-off.svg">../../assets/ui/icons/toggle-off.svg</file>
