@@ -3,10 +3,10 @@
 ## Build Work
 
 1. Auto-update feature.
-   - [ ] Add an HTTPS update manifest with version, release notes, zip URL, SHA-256 hash, and channel.
-   - [ ] Add UI support for checking updates, showing available updates, downloading verified packages, and deferring updates.
-   - [ ] Add a small updater helper that runs after `ScreenShareUi.exe` exits, replaces the portable app folder safely, preserves reports/config, and restarts the app.
-   - [ ] Require hash validation at minimum; prefer signed manifests or code signing before trusting downloaded binaries.
+   - [x] Add an HTTPS update manifest with version, release notes, zip URL, SHA-256 hash, and channel.
+   - [x] Add UI support for checking updates, showing available updates, downloading verified packages, and deferring updates.
+   - [x] Add a small updater helper that runs after `ScreenShareUi.exe` exits, replaces the portable app folder safely, preserves reports/config, and restarts the app.
+   - [x] Require hash validation at minimum; prefer signed manifests or code signing before trusting downloaded binaries.
 
 2. Session ergonomics.
    - [x] Keep the display awake during active Share and Watch sessions, then restore the normal Windows sleep policy when the session stops.

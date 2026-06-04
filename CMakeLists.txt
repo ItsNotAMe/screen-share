@@ -1,12 +1,16 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative LANGUAGES CXX)
+project(ScreenShareNative VERSION 0.1.0 LANGUAGES CXX)
 
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
 option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
 option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets and Svg are available" ON)
 option(SCREENSHARE_ENABLE_RELEASE_LTO "Enable compiler-supported link-time optimization for Release builds" ON)
+set(SCREENSHARE_UPDATE_MANIFEST_URL
+    "https://github.com/ItsNotAMe/screen-share/releases/latest/download/screenshare-update.json"
+    CACHE STRING
+    "HTTPS URL for the ScreenShare auto-update manifest")
 
 if(SCREENSHARE_ENABLE_RELEASE_LTO)
     include(CheckIPOSupported)
@@ -174,6 +178,30 @@ if(MSVC)
     target_compile_options(ScreenShare PRIVATE /W4 /permissive- /EHsc)
 endif()
 
+add_executable(ScreenShareUpdater WIN32
+    src/updater/ScreenShareUpdater.cpp
+)
+
+target_compile_features(ScreenShareUpdater PRIVATE cxx_std_20)
+target_compile_definitions(ScreenShareUpdater PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+)
+
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
+    target_link_options(ScreenShareUpdater PRIVATE -static)
+endif()
+
+screenshare_configure_release_lto_warnings(ScreenShareUpdater)
+
+target_link_libraries(ScreenShareUpdater PRIVATE
+    shell32
+)
+
+if(MSVC)
+    target_compile_options(ScreenShareUpdater PRIVATE /W4 /permissive- /EHsc)
+endif()
+
 if(SCREENSHARE_BUILD_QT_UI)
     if(WIN32 AND EXISTS "C:/msys64/ucrt64/lib/cmake/Qt6")
         list(APPEND CMAKE_PREFIX_PATH "C:/msys64/ucrt64")
@@ -236,6 +264,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/RoomAccessCheck.cpp
             src/ui/ScreenAwakeGuard.cpp
             src/ui/UiStyle.cpp
+            src/ui/UpdateManager.cpp
             src/ui/VideoFrameWidget.cpp
             src/ui/resources.qrc
             ${SCREENSHARE_UI_ICON_RC}
@@ -249,6 +278,8 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX
+            SCREENSHARE_APP_VERSION="${PROJECT_VERSION}"
+            SCREENSHARE_UPDATE_MANIFEST_URL="${SCREENSHARE_UPDATE_MANIFEST_URL}"
         )
         screenshare_configure_release_lto_warnings(ScreenShareUi)
         add_dependencies(ScreenShareUi ScreenShare)
@@ -411,7 +442,7 @@ set(SCREENSHARE_PACKAGE_ARGS
     -D "RUNTIME_SEARCH_DIRS=${SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS_ARG}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PackagePortable.cmake"
 )
-set(SCREENSHARE_PACKAGE_DEPENDS ScreenShare)
+set(SCREENSHARE_PACKAGE_DEPENDS ScreenShare ScreenShareUpdater)
 if(TARGET ScreenShareUi)
     list(APPEND SCREENSHARE_PACKAGE_DEPENDS ScreenShareUi)
 endif()

@@ -15,6 +15,7 @@ while `ScreenShare.exe` remains available for CLI diagnostics and automation.
 - Decode and preview video in the Qt UI with a Direct3D/NV12 render path.
 - Support multiple viewers, room passwords, automatic UDP encryption keys, reports, and live stream settings.
 - Build a portable Windows zip with the UI, CLI, runtime DLLs, README, and license.
+- Check GitHub Releases for verified portable updates.
 
 ## Requirements
 
@@ -113,6 +114,7 @@ Use `--allow-plaintext` only for intentional unencrypted local tests.
 ## More Documentation
 
 - [Detailed usage and CLI reference](docs/usage.md)
+- [Release and update publishing](docs/release.md)
 - [Signaling Worker](signaling-worker/README.md)
 - [Assets and branding](assets/README.md)
 - [Performance tracking](agents/performance.md) and [CSV results](agents/performance.csv)

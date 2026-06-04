@@ -9,6 +9,7 @@
 #include "ui/JoinRoomWindow.h"
 #include "ui/QtSessionBackend.h"
 #include "ui/ScreenAwakeGuard.h"
+#include "ui/UpdateManager.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QByteArray>
@@ -25,6 +26,7 @@
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
 #include <QtCore/QSet>
+#include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtCore/QVector>
 #include <QtGui/QIcon>
@@ -1056,5 +1058,9 @@ int main(int argc, char** argv)
     window.setMinimumSize(740, 600);
     window.show();
 
+    auto* updateManager = new UpdateManager(&window, &window);
+    QTimer::singleShot(1500, updateManager, [updateManager] {
+        updateManager->checkForUpdates();
+    });
     return app.exec();
 }
