@@ -8,21 +8,25 @@
    - [ ] Add a small updater helper that runs after `ScreenShareUi.exe` exits, replaces the portable app folder safely, preserves reports/config, and restarts the app.
    - [ ] Require hash validation at minimum; prefer signed manifests or code signing before trusting downloaded binaries.
 
-2. User-facing diagnostics pass.
+2. Session ergonomics.
+   - [x] Keep the display awake during active Share and Watch sessions, then restore the normal Windows sleep policy when the session stops.
+   - [x] Reload the room list whenever the Home/Quick Join screen is re-entered, not only on app start or manual refresh.
+
+3. User-facing diagnostics pass.
    - [ ] Map known runtime/report states to plain UI messages, starting with waiting for stream, password/encryption mismatch, UDP hole-punch failure, host left, and host idle.
    - [ ] Show an actionable next step in the active Share/Watch screens when setup is not healthy.
    - [ ] Keep warnings driven by real runtime/report signals, not guesses.
 
-3. Window chrome reliability.
+4. Window chrome reliability.
    - [ ] Fix custom title bar buttons so minimize, maximize/restore, and close keep working on the active Watch screen, maximized windows, and embedded preview surfaces.
    - [ ] Keep drag-to-move, drag-to-maximize, resize borders, and rounded-corner outline behavior consistent across normal, maximized, and fullscreen transitions.
 
-4. Runtime state polish.
+5. Runtime state polish.
    - [ ] Make active-session wording freshness-aware so connected, idle, disconnected, and waiting states do not stay sticky after packets or feedback stop.
    - [ ] Keep Share and Watch state transitions consistent when viewers join, leave, rejoin, or when the host leaves.
    - [ ] Clean up NAT/feedback status summaries so they match the current session state, not only the last successful event.
 
-5. Report summary polish.
+6. Report summary polish.
    - [ ] Add the smallest useful report fields needed by the new UI diagnostics.
    - [ ] Warn about likely silent or wrong-device audio capture only when transport is healthy but audio evidence looks wrong.
    - [ ] Promote items from Report-Driven Follow-Ups into build work only after reports reproduce them.
