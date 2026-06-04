@@ -225,6 +225,89 @@ QPushButton#HomeTinyButton:disabled {
     color: #4f6865;
     border: 1px solid #2d3c3a;
 }
+QDialog#UpdateDialog {
+    background: transparent;
+    color: #eef3f1;
+    font-family: "Segoe UI", "Inter", Arial, sans-serif;
+    font-size: 10pt;
+}
+QFrame#UpdateDialogFrame {
+    background: #191c1b;
+    border: 1px solid #303937;
+    border-radius: 8px;
+}
+QFrame#UpdateNotesFrame {
+    background: #151918;
+    border: 1px solid #2a302f;
+    border-radius: 8px;
+}
+QLabel#UpdateTitle {
+    background: transparent;
+    color: #f4fbf9;
+    font-size: 15pt;
+    font-weight: 760;
+}
+QLabel#UpdateSectionTitle {
+    background: transparent;
+    color: #edf5f2;
+    font-size: 10.5pt;
+    font-weight: 720;
+}
+QLabel#UpdateBody,
+QLabel#UpdateNote,
+QLabel#UpdateSecurity {
+    background: transparent;
+    color: #b8c4c0;
+    font-size: 9.5pt;
+    font-weight: 540;
+}
+QLabel#UpdateSecurity {
+    color: #82dad2;
+}
+QPushButton#UpdatePrimary {
+    background: #168f82;
+    color: #ffffff;
+    border: 0;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-weight: 750;
+}
+QPushButton#UpdatePrimary:hover {
+    background: #1aa99a;
+}
+QPushButton#UpdatePrimary:pressed {
+    background: #107468;
+}
+QPushButton#UpdatePrimary:disabled {
+    background: #244743;
+    color: #90aaa6;
+}
+QPushButton#UpdateSecondary {
+    background: #202625;
+    color: #edf5f2;
+    border: 1px solid #353e3c;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-weight: 720;
+}
+QPushButton#UpdateSecondary:hover {
+    background: #26302e;
+}
+QPushButton#UpdateSecondary:disabled {
+    color: #667470;
+}
+QProgressBar#UpdateProgress {
+    background: #101413;
+    border: 1px solid #2f3a37;
+    border-radius: 6px;
+    min-height: 12px;
+    max-height: 12px;
+    text-align: center;
+}
+QProgressBar#UpdateProgress::chunk {
+    background: #27c9bd;
+    border-radius: 5px;
+}
 QWidget#RoomTransparentBlock,
 QWidget#RoomFieldBlock,
 QLabel#RoomIconLabel {

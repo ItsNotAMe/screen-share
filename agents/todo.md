@@ -3,10 +3,10 @@
 ## Build Work
 
 1. Auto-update feature.
-   - [ ] Add an HTTPS update manifest with version, release notes, zip URL, SHA-256 hash, and channel.
-   - [ ] Add UI support for checking updates, showing available updates, downloading verified packages, and deferring updates.
-   - [ ] Add a small updater helper that runs after `ScreenShareUi.exe` exits, replaces the portable app folder safely, preserves reports/config, and restarts the app.
-   - [ ] Require hash validation at minimum; prefer signed manifests or code signing before trusting downloaded binaries.
+   - [x] Add an HTTPS update manifest with version, release notes, zip URL, SHA-256 hash, and channel.
+   - [x] Add UI support for checking updates, showing available updates, downloading verified packages, and deferring updates.
+   - [x] Add a small updater helper that runs after `ScreenShareUi.exe` exits, replaces the portable app folder safely, preserves reports/config, and restarts the app.
+   - [x] Require hash validation at minimum; prefer signed manifests or code signing before trusting downloaded binaries.
 
 2. User-facing diagnostics pass.
    - [ ] Map known runtime/report states to plain UI messages, starting with waiting for stream, password/encryption mismatch, UDP hole-punch failure, host left, and host idle.

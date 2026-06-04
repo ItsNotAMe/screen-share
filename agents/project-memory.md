@@ -5,6 +5,7 @@
 - Build a native Windows C++ screen-sharing app for friends.
 - No web app, no C#.
 - Use local `git` and `gh` for GitHub work; do not use the GitHub connector for this repo.
+- Run local `gh` commands with escalated permission from the start; do not first try them in the sandbox.
 - Keep PRs cohesive and reviewable; bigger PRs are fine when they advance one clear step. Self-review before opening or merging.
 - Prefer the cleanest simple design when it has no real product or maintenance downside, even if it takes more implementation effort.
 - Do not keep compatibility/fallback code for a feature that is being replaced unless there is a concrete product or diagnostic reason.
