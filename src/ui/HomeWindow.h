@@ -30,6 +30,7 @@ public:
     };
 
     explicit HomeWindow(Actions actions, QWidget* parent = nullptr);
+    void refreshRooms();
 
 private:
     QWidget* buildTopBar();
@@ -43,7 +44,6 @@ private:
     QWidget* buildRoomPanel();
     QWidget* buildRoomRow(
         const HomeActiveRoom& room);
-    void refreshRooms();
     void updateRooms(const QVector<HomeActiveRoom>& rooms);
     void showRoomStatus(const QString& message);
     QWidget* buildMetric(const QString& value, const QString& label);

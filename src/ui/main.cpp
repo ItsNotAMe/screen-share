@@ -8,6 +8,7 @@
 #include "ui/HomeWindow.h"
 #include "ui/JoinRoomWindow.h"
 #include "ui/QtSessionBackend.h"
+#include "ui/ScreenAwakeGuard.h"
 #include "ui/UpdateManager.h"
 
 #include <QtCore/QCoreApplication>
@@ -978,12 +979,17 @@ int main(int argc, char** argv)
     AppShellWindow window;
 
     auto* sessionBackend = new QtSessionBackend(&window);
+    auto* screenAwakeGuard = new ScreenAwakeGuard(&window);
     HomeWindow* homeWindow = nullptr;
     CreateRoomWindow* createRoomWindow = nullptr;
     JoinRoomWindow* joinRoomWindow = nullptr;
     ActiveShareWindow* activeShareWindow = nullptr;
     ActiveWatchWindow* activeWatchWindow = nullptr;
-    auto showHome = [&window, &homeWindow] {
+    auto showHome = [&window, &homeWindow, screenAwakeGuard] {
+        screenAwakeGuard->setActive(false);
+        if (homeWindow != nullptr) {
+            homeWindow->refreshRooms();
+        }
         window.setCurrentWidget(homeWindow);
     };
     auto showCreateRoom = [&window, &createRoomWindow] {
@@ -993,14 +999,16 @@ int main(int argc, char** argv)
         joinRoomWindow->refreshRooms();
         window.setCurrentWidget(joinRoomWindow);
     };
-    auto showActiveShare = [&window, &activeShareWindow](const ShareSessionUiState& session) {
+    auto showActiveShare = [&window, &activeShareWindow, screenAwakeGuard](const ShareSessionUiState& session) {
+        screenAwakeGuard->setActive(true);
         if (!window.isMaximized()) {
             window.resize(std::max(window.width(), 940), std::max(window.height(), 690));
         }
         activeShareWindow->setSession(session);
         window.setCurrentWidget(activeShareWindow);
     };
-    auto showActiveWatch = [&window, &activeWatchWindow](const WatchSessionUiState& session) {
+    auto showActiveWatch = [&window, &activeWatchWindow, screenAwakeGuard](const WatchSessionUiState& session) {
+        screenAwakeGuard->setActive(true);
         if (!window.isMaximized()) {
             window.resize(std::max(window.width(), 940), std::max(window.height(), 690));
         }
@@ -1018,11 +1026,11 @@ int main(int argc, char** argv)
         [&showActiveShare](const ShareSessionUiState& session) { showActiveShare(session); },
     });
     activeShareWindow = new ActiveShareWindow(sessionBackend, ActiveShareWindow::Actions{
-        [&window, &homeWindow, &createRoomWindow] {
+        [&window, &showHome, &createRoomWindow] {
             if (createRoomWindow != nullptr) {
                 createRoomWindow->resetForNextRoom();
             }
-            window.setCurrentWidget(homeWindow);
+            showHome();
             if (!window.isMaximized()) {
                 window.resize(820, 640);
             }
@@ -1033,8 +1041,8 @@ int main(int argc, char** argv)
         [&showActiveWatch](const WatchSessionUiState& session) { showActiveWatch(session); },
     });
     activeWatchWindow = new ActiveWatchWindow(sessionBackend, ActiveWatchWindow::Actions{
-        [&window, &homeWindow] {
-            window.setCurrentWidget(homeWindow);
+        [&window, &showHome] {
+            showHome();
             if (!window.isMaximized()) {
                 window.resize(820, 640);
             }

@@ -262,6 +262,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/HomeWindow.cpp
             src/ui/JoinRoomWindow.cpp
             src/ui/RoomAccessCheck.cpp
+            src/ui/ScreenAwakeGuard.cpp
             src/ui/UiStyle.cpp
             src/ui/UpdateManager.cpp
             src/ui/VideoFrameWidget.cpp
