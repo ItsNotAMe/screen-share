@@ -69,6 +69,19 @@ QLabel#HomeBrand {
     font-weight: 750;
     letter-spacing: 0;
 }
+QWidget#HomeBrandBlock {
+    background: transparent;
+    border: 0;
+}
+QLabel#HomeVersion {
+    background: #1d2826;
+    color: #7be1d8;
+    border: 1px solid #2b514d;
+    border-radius: 7px;
+    padding: 3px 8px;
+    font-size: 9.5pt;
+    font-weight: 720;
+}
 QLabel#HomeSectionTitle {
     color: #edf5f2;
     font-size: 12pt;
@@ -232,45 +245,99 @@ QDialog#UpdateDialog {
     font-size: 10pt;
 }
 QFrame#UpdateDialogFrame {
-    background: #191c1b;
-    border: 1px solid #303937;
-    border-radius: 8px;
+    background: #1a1f1e;
+    border: 1px solid #303b38;
+    border-radius: 10px;
+}
+QFrame#UpdateHeader {
+    background: transparent;
+    border: 0;
+}
+QLabel#UpdateDownloadBadge {
+    background: transparent;
+    border: 3px solid #28ded3;
+    border-radius: 27px;
 }
 QFrame#UpdateNotesFrame {
-    background: #151918;
-    border: 1px solid #2a302f;
+    background: #1d2422;
+    border: 1px solid #303b38;
     border-radius: 8px;
+}
+QFrame#UpdateNoteRow {
+    background: transparent;
+    border: 0;
+    min-height: 50px;
+}
+QFrame#UpdateSeparator,
+QFrame#UpdateNoteDivider {
+    background: #2c3533;
+    border: 0;
+    color: #2c3533;
+}
+QLabel#UpdateBullet {
+    background: #28ded3;
+    border: 0;
+    border-radius: 4px;
 }
 QLabel#UpdateTitle {
     background: transparent;
     color: #f4fbf9;
-    font-size: 15pt;
-    font-weight: 760;
+    font-size: 20pt;
+    font-weight: 780;
 }
-QLabel#UpdateSectionTitle {
+QLabel#UpdateVersion {
     background: transparent;
-    color: #edf5f2;
-    font-size: 10.5pt;
-    font-weight: 720;
+    color: #d9e4e1;
+    font-size: 12.5pt;
+    font-weight: 540;
 }
 QLabel#UpdateBody,
 QLabel#UpdateNote,
 QLabel#UpdateSecurity {
     background: transparent;
-    color: #b8c4c0;
-    font-size: 9.5pt;
+    color: #c4cfcb;
+    font-size: 11pt;
     font-weight: 540;
 }
+QLabel#UpdateNote {
+    color: #d7e0dd;
+    font-size: 12pt;
+}
+QFrame#UpdateSecurityRow {
+    background: transparent;
+    border: 0;
+}
 QLabel#UpdateSecurity {
+    color: #b8c4c0;
+    font-size: 11.5pt;
+}
+QLabel#UpdateSecurityIcon {
+    background: transparent;
+    border: 0;
+}
+QLabel#UpdateStatus {
+    background: transparent;
     color: #82dad2;
+    font-size: 9.5pt;
+    font-weight: 600;
+}
+QPushButton#UpdateCloseButton {
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    padding: 0;
+}
+QPushButton#UpdateCloseButton:hover {
+    background: #26302e;
 }
 QPushButton#UpdatePrimary {
     background: #168f82;
     color: #ffffff;
     border: 0;
     border-radius: 8px;
-    padding: 9px 18px;
-    font-weight: 750;
+    padding: 0 18px;
+    font-size: 12pt;
+    font-weight: 780;
 }
 QPushButton#UpdatePrimary:hover {
     background: #1aa99a;
@@ -287,8 +354,9 @@ QPushButton#UpdateSecondary {
     color: #edf5f2;
     border: 1px solid #353e3c;
     border-radius: 8px;
-    padding: 9px 18px;
-    font-weight: 720;
+    padding: 0 18px;
+    font-size: 11.5pt;
+    font-weight: 740;
 }
 QPushButton#UpdateSecondary:hover {
     background: #26302e;

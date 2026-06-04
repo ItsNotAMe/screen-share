@@ -39,6 +39,19 @@ namespace {
 constexpr const char* kDefaultSignalServer = "https://screenshare-signaling.bit-yeet.workers.dev";
 constexpr const char* kDefaultStunServer = "stun.l.google.com:19302";
 
+#ifndef SCREENSHARE_APP_VERSION
+#define SCREENSHARE_APP_VERSION "0.0.0"
+#endif
+
+QString appVersionText()
+{
+    const QString version = QString::fromUtf8(SCREENSHARE_APP_VERSION).trimmed();
+    if (version.isEmpty()) {
+        return {};
+    }
+    return QStringLiteral("v%1").arg(version);
+}
+
 std::string toStdUtf8(const QString& value)
 {
     const QByteArray bytes = value.toUtf8();
@@ -192,7 +205,15 @@ QWidget* HomeWindow::buildTopBar()
         QSize(46, 46)));
     layout->addWidget(mark, 0, Qt::AlignVCenter);
 
-    layout->addWidget(label("ScreenShare", "HomeBrand"), 1, Qt::AlignVCenter);
+    auto* brandBlock = new QWidget;
+    brandBlock->setObjectName("HomeBrandBlock");
+    auto* brandLayout = new QHBoxLayout(brandBlock);
+    brandLayout->setContentsMargins(0, 0, 0, 0);
+    brandLayout->setSpacing(10);
+    brandLayout->addWidget(label("ScreenShare", "HomeBrand"), 0, Qt::AlignVCenter);
+    brandLayout->addWidget(label(appVersionText(), "HomeVersion"), 0, Qt::AlignVCenter);
+    brandLayout->addStretch(1);
+    layout->addWidget(brandBlock, 1, Qt::AlignVCenter);
     return frame;
 }
 
