@@ -35,6 +35,7 @@ struct SignalingPeerState {
     std::string roomName;
     std::string roomPassword;
     bool passwordProtected = false;
+    bool host = false;
 };
 
 struct SignalingRoomResponse {

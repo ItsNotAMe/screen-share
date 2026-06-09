@@ -68,6 +68,7 @@ interface JoinRequest {
   candidates: unknown;
   metadata?: unknown;
   room?: unknown;
+  host?: unknown;
 }
 
 interface PeerRequest {
@@ -302,6 +303,16 @@ function validateMetadata(metadata: unknown): PeerMetadata | undefined {
     clean.platform = metadata.platform.trim();
   }
   return Object.keys(clean).length > 0 ? clean : undefined;
+}
+
+function validateHostFlag(host: unknown): boolean {
+  if (host === undefined) {
+    return false;
+  }
+  if (typeof host !== "boolean") {
+    throw new HttpError(400, "invalid_host", "host must be a boolean.");
+  }
+  return host;
 }
 
 function base64UrlEncode(bytes: Uint8Array): string {
@@ -1095,6 +1106,7 @@ export class RoomObject extends DurableObject<Env> {
   private roomAccessKey: string | undefined;
   private roomInfo: RoomInfo | undefined;
   private roomPasswordVerifier: PasswordVerifier | undefined;
+  private hostPeerId: string | undefined;
 
   async fetch(request: Request): Promise<Response> {
     try {
@@ -1213,6 +1225,20 @@ export class RoomObject extends DurableObject<Env> {
     }
   }
 
+  private async loadHostPeerId(): Promise<string | undefined> {
+    if (this.hostPeerId !== undefined) {
+      return this.hostPeerId || undefined;
+    }
+    const stored = await this.ctx.storage.get<string>("hostPeerId");
+    this.hostPeerId = typeof stored === "string" ? stored : "";
+    return this.hostPeerId || undefined;
+  }
+
+  private async saveHostPeerId(peerId: string): Promise<void> {
+    this.hostPeerId = peerId;
+    await this.ctx.storage.put("hostPeerId", peerId);
+  }
+
   private async applyRoomInfoUpdate(update: Partial<RoomInfo> | undefined): Promise<RoomInfo | undefined> {
     const current = await this.loadRoomInfo();
     const merged = mergeRoomInfo(current, update);
@@ -1231,9 +1257,11 @@ export class RoomObject extends DurableObject<Env> {
       await this.ctx.storage.delete("roomAccessKey");
       await this.ctx.storage.delete("roomInfo");
       await this.ctx.storage.delete("roomPasswordVerifier");
+      await this.ctx.storage.delete("hostPeerId");
       this.roomAccessKey = undefined;
       this.roomInfo = undefined;
       this.roomPasswordVerifier = undefined;
+      this.hostPeerId = "";
       await trySyncRoomDirectory(this.env, roomId, [], undefined, now);
       return;
     }
@@ -1315,6 +1343,7 @@ export class RoomObject extends DurableObject<Env> {
     const candidates = validateCandidates(body.candidates);
     const metadata = validateMetadata(body.metadata);
     const roomInfoUpdate = validateRoomInfo(body.room);
+    const isHost = validateHostFlag(body.host);
     const now = Date.now();
     const peers = await this.loadPeers();
     this.cleanupPeers(peers, now);
@@ -1336,6 +1365,9 @@ export class RoomObject extends DurableObject<Env> {
       !previousPeer || peerAnnouncementKey(previousPeer) !== peerAnnouncementKey(nextPeer);
     peers.set(peerId, nextPeer);
     await this.savePeers(roomId, peers, now);
+    if (isHost && (await this.loadHostPeerId()) !== peerId) {
+      await this.saveHostPeerId(peerId);
+    }
     if (shouldBroadcastPeer) {
       this.broadcastRoomEvent(roomId, {
         type: previousPeer ? "peer_updated" : "peer_joined",
@@ -1404,6 +1436,18 @@ export class RoomObject extends DurableObject<Env> {
     const peerId = validatePeerId(body.peerId);
     const peers = await this.loadPeers();
     const removed = peers.delete(peerId);
+    const hostPeerId = await this.loadHostPeerId();
+
+    if (removed && hostPeerId === peerId) {
+      // The host left: close the whole room. Tell remaining viewers first, then
+      // wipe all room state (the empty-map branch of savePeers also clears the
+      // access key, info, password verifier, hostPeerId, and the directory entry).
+      this.broadcastRoomEvent(roomId, { type: "room_closed" }, peerId);
+      peers.clear();
+      await this.savePeers(roomId, peers);
+      return jsonResponse({ ok: true });
+    }
+
     await this.savePeers(roomId, peers);
     if (removed) {
       this.broadcastRoomEvent(roomId, {

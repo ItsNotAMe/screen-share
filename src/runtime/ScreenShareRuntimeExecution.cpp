@@ -1876,6 +1876,7 @@ screenshare::SignalingPeerState BuildLiveSignalingPeerState(const Options& optio
     peer.roomName = options.signalingRoomName;
     peer.roomPassword = options.signalingRoomPassword;
     peer.passwordProtected = !options.signalingRoomPassword.empty();
+    peer.host = options.shareRoom;
     peer.candidates.push_back(options.signalingLocalCandidate);
     if (options.signalingHostCandidateAvailable) {
         const bool duplicate =
@@ -2093,6 +2094,8 @@ private:
                     state->peer.peerId,
                     state->peer.roomPassword,
                     [state](const std::string& message) {
+                        const bool roomClosed =
+                            message.find("\"type\":\"room_closed\"") != std::string::npos;
                         const bool shouldRefresh =
                             message.find("\"type\":\"hello\"") != std::string::npos ||
                             message.find("\"type\":\"peer_joined\"") != std::string::npos ||
@@ -2105,6 +2108,16 @@ private:
                             << " bytes=" << message.size()
                             << " refresh=" << (shouldRefresh ? "yes" : "no")
                             << "\n";
+                        if (roomClosed) {
+                            // The host closed the room. Viewers learn immediately via this
+                            // event, independent of whether media had started flowing. The
+                            // session API maps this to SessionIssue::HostLeft.
+                            std::cout
+                                << "watch_host_left=room_closed"
+                                << " room=" << state->roomId
+                                << " peer_id=" << state->peer.peerId
+                                << "\n";
+                        }
                         if (shouldRefresh) {
                             RequestRefresh(state);
                         }

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative VERSION 0.1.1 LANGUAGES CXX)
+project(ScreenShareNative VERSION 0.1.2 LANGUAGES CXX)
 
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
@@ -263,6 +263,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/JoinRoomWindow.cpp
             src/ui/RoomAccessCheck.cpp
             src/ui/ScreenAwakeGuard.cpp
+            src/ui/Toast.cpp
             src/ui/UiStyle.cpp
             src/ui/UpdateManager.cpp
             src/ui/VideoFrameWidget.cpp

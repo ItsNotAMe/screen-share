@@ -25,6 +25,7 @@ class ActiveWatchWindow final : public QWidget {
 public:
     struct Actions {
         std::function<void()> sessionStopped;
+        std::function<void()> sessionEndedByHost;
     };
 
     explicit ActiveWatchWindow(QtSessionBackend* backend, Actions actions, QWidget* parent = nullptr);
@@ -59,6 +60,7 @@ private:
     void installFullscreenEventFilter(bool installed);
     void setPreviewStatusText(const QString& text);
     void handleHostLeft();
+    void exitToHomeAfterHostLeft();
     void leaveRoom();
     void handleFinished(const QtSessionBackend::FinishInfo& info);
     QString stateText(const screenshare::SessionStatus& status) const;
@@ -99,6 +101,7 @@ private:
     bool audioControlsTouched_ = false;
     bool receivedVideoFrame_ = false;
     bool hostLeft_ = false;
+    bool hostLeftHandled_ = false;
     bool leaveRequested_ = false;
     std::atomic_bool firstVideoFramePosted_{false};
     bool streamFullscreen_ = false;
