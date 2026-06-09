@@ -1,5 +1,6 @@
 #include "ui/AppShellWindow.h"
 
+#include "ui/Toast.h"
 #include "ui/UiStyle.h"
 
 #include <QtCore/QByteArray>
@@ -110,6 +111,11 @@ int AppShellWindow::addPage(QWidget* page)
 void AppShellWindow::setCurrentWidget(QWidget* page)
 {
     stack_->setCurrentWidget(page);
+}
+
+void AppShellWindow::showToast(const QString& message)
+{
+    Toast::show(this, message);
 }
 
 void AppShellWindow::setChromeVisible(bool visible)

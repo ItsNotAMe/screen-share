@@ -1047,6 +1047,13 @@ int main(int argc, char** argv)
                 window.resize(820, 640);
             }
         },
+        [&window, &showHome] {
+            showHome();
+            if (!window.isMaximized()) {
+                window.resize(820, 640);
+            }
+            window.showToast("The host ended the session.");
+        },
     });
 
     window.addPage(homeWindow);

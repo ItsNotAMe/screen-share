@@ -1147,7 +1147,7 @@ void ScreenShareSession::Impl::HandleDiagnosticLogLine(const std::string& line)
         }
     }
 
-    if (line.find("watch_host_left=peer_left") != std::string::npos) {
+    if (line.find("watch_host_left=") != std::string::npos) {
         bool shouldEmit = false;
         {
             std::scoped_lock lock(mutex_);

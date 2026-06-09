@@ -351,6 +351,9 @@ std::string JoinRequestJson(const SignalingPeerState& peer)
         }
         json += "}";
     }
+    if (peer.host) {
+        json += ",\"host\":true";
+    }
     json += "}";
     return json;
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QtCore/QString>
 #include <QtWidgets/QWidget>
 
 class QPushButton;
@@ -14,6 +15,7 @@ public:
     int addPage(QWidget* page);
     void setCurrentWidget(QWidget* page);
     void setChromeVisible(bool visible);
+    void showToast(const QString& message);
 
 protected:
     void changeEvent(QEvent* event) override;

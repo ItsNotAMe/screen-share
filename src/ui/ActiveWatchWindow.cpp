@@ -788,12 +788,15 @@ void ActiveWatchWindow::setPreviewStatusText(const QString& text)
 
 void ActiveWatchWindow::handleHostLeft()
 {
+    if (hostLeft_) {
+        return;
+    }
     hostLeft_ = true;
     closeStreamFullscreen();
     if (videoFrameWidget_ != nullptr) {
         videoFrameWidget_->clearFrame();
     }
-    setPreviewStatusText("Host left the room");
+    setPreviewStatusText("Host ended the session");
     if (stateLabel_ != nullptr) {
         stateLabel_->setText("● Host left");
         stateLabel_->setObjectName("ActiveTopError");
@@ -803,9 +806,36 @@ void ActiveWatchWindow::handleHostLeft()
     if (connectionLabel_ != nullptr) {
         connectionLabel_->setText("Host left");
     }
-    if (leaveButton_ != nullptr) {
-        leaveButton_->setEnabled(true);
-        leaveButton_->setText("Leave Room");
+
+    // Leave the room right away. This stops the live signaling refresh loop, so
+    // the watcher stops re-joining and re-creating the now host-less room in the
+    // directory (otherwise it lingers there with a random-looking name). The
+    // popup + navigation home then runs from handleFinished once stop completes.
+    if (backend_ != nullptr && backend_->isRunning()) {
+        leaveRequested_ = true;
+        if (leaveButton_ != nullptr) {
+            leaveButton_->setEnabled(false);
+            leaveButton_->setText("Leaving...");
+        }
+        backend_->stop();
+    } else {
+        QTimer::singleShot(0, this, [this] { exitToHomeAfterHostLeft(); });
+    }
+}
+
+void ActiveWatchWindow::exitToHomeAfterHostLeft()
+{
+    if (hostLeftHandled_) {
+        return;
+    }
+    hostLeftHandled_ = true;
+
+    // Return straight to the home screen and let the shell show a brief,
+    // non-blocking notice there explaining why. No modal to dismiss.
+    if (actions_.sessionEndedByHost) {
+        actions_.sessionEndedByHost();
+    } else if (actions_.sessionStopped) {
+        actions_.sessionStopped();
     }
 }
 
@@ -829,8 +859,11 @@ void ActiveWatchWindow::handleFinished(const QtSessionBackend::FinishInfo& info)
     elapsedTimer_->stop();
     leaveButton_->setEnabled(true);
     leaveButton_->setText("Leave Room");
-    if (hostLeft_ && !leaveRequested_) {
-        handleHostLeft();
+    if (hostLeft_) {
+        // The session stopped because the host left. Return home (with a toast on
+        // the home screen), deferred so we do not destroy this window from inside
+        // the backend's finished callback.
+        QTimer::singleShot(0, this, [this] { exitToHomeAfterHostLeft(); });
         return;
     }
     setPreviewStatusText(info.failed ? "Watching failed" : "Room left");

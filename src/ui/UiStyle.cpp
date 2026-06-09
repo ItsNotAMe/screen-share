@@ -29,6 +29,18 @@ QWidget#AppTitleBar {
     background: transparent;
     border: 0;
 }
+QWidget#Toast {
+    background: rgba(24, 27, 26, 240);
+    border: 1px solid #3a4543;
+    border-radius: 10px;
+}
+QLabel#ToastText {
+    color: #eef3f1;
+    font-size: 10pt;
+    font-weight: 600;
+    background: transparent;
+    border: 0;
+}
 QPushButton#WindowControlButton,
 QPushButton#WindowCloseButton {
     background: transparent;
