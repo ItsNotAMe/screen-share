@@ -23,6 +23,7 @@
 #include <QtGui/QWheelEvent>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QAbstractItemView>
+#include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QGridLayout>
@@ -208,14 +209,16 @@ QString viewerListSignature(const screenshare::SessionStatus& status)
         .arg(activeViewerCount(status.viewers))
         .arg(static_cast<int>(status.viewers.size()));
     for (const auto& viewer : status.viewers) {
-        parts << QStringLiteral("%1|%2|%3|%4|%5|%6|%7")
+        parts << QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9")
             .arg(QString::fromStdString(viewer.id))
             .arg(QString::fromStdString(viewer.name))
             .arg(QString::fromStdString(viewer.sessionFingerprint))
             .arg(QString::fromStdString(viewer.health))
             .arg(static_cast<int>(viewer.state))
             .arg(viewer.hasFeedback ? 1 : 0)
-            .arg(viewer.activeNow ? 1 : 0);
+            .arg(viewer.activeNow ? 1 : 0)
+            .arg(viewer.requestingControl ? 1 : 0)
+            .arg(viewer.grantedCapabilities);
     }
     return parts.join(';');
 }
@@ -650,6 +653,19 @@ QWidget* ActiveShareWindow::buildSettingsPanel()
     });
     formLayout->addWidget(settingsFpsCombo_);
 
+    formLayout->addWidget(textLabel("Low Latency", "ActiveSettingsLabel"));
+    settingsLowLatencyCheck_ = new QCheckBox;
+    settingsLowLatencyCheck_->setObjectName("RoomSwitch");
+    settingsLowLatencyCheck_->setCursor(Qt::PointingHandCursor);
+    settingsLowLatencyCheck_->setToolTip(
+        "Send frames immediately for minimal input lag (best for gaming / remote control).");
+    connect(settingsLowLatencyCheck_, &QCheckBox::toggled, this, [this] {
+        if (!updatingSettingsUi_) {
+            updateSettingsApplyState();
+        }
+    });
+    formLayout->addWidget(settingsLowLatencyCheck_);
+
     formLayout->addWidget(textLabel("Audio", "ActiveSettingsHeading"));
     formLayout->addWidget(textLabel("Audio Output", "ActiveSettingsLabel"));
     settingsAudioCombo_ = new SettingsComboBox;
@@ -738,6 +754,57 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
             (viewer.id.empty() ? QStringLiteral("Viewer %1").arg(index + 1) : QString::fromStdString(viewer.id)) :
             QStringLiteral("Viewer %1").arg(QString::fromStdString(viewer.sessionFingerprint).left(8)));
     layout->addWidget(textLabel(name, "ActiveViewerName"), 1);
+
+    if (viewer.requestingControl && viewer.grantedCapabilities == 0) {
+        layout->addWidget(textLabel("wants control", "ActiveViewerRequest"));
+    }
+
+    // Per-input-type control toggles. Use clicked() (not toggled()) so that
+    // programmatically syncing the checked state during a list rebuild does not
+    // re-issue grant requests.
+    const std::string endpoint = viewer.endpoint;
+    auto makeControlToggle = [&](const char* iconName, const QString& tooltip, uint32_t bit, bool enabled) {
+        auto* toggle = new QPushButton;
+        toggle->setObjectName("ViewerControlToggle");
+        toggle->setCheckable(true);
+        toggle->setCursor(Qt::PointingHandCursor);
+        toggle->setFixedSize(40, 28);
+        toggle->setToolTip(tooltip);
+        const bool on = (viewer.grantedCapabilities & bit) != 0;
+        toggle->setChecked(on);
+        toggle->setEnabled(enabled);
+        const QPixmap pixmap = renderSvgResource(
+            QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(QString::fromUtf8(iconName)),
+            QSize(18, 18),
+            on ? QStringLiteral("#ffffff") : QStringLiteral("#b7c5c1"));
+        if (!pixmap.isNull()) {
+            toggle->setIcon(QIcon(pixmap));
+            toggle->setIconSize(QSize(18, 18));
+        }
+        return toggle;
+    };
+    auto* mouseToggle = makeControlToggle("mouse", "Allow mouse control", screenshare::ControlCapabilityMouse, true);
+    auto* keyboardToggle = makeControlToggle("keyboard", "Allow keyboard control", screenshare::ControlCapabilityKeyboard, true);
+    auto* gamepadToggle = makeControlToggle("gamepad", "Gamepad control is coming in a future version", screenshare::ControlCapabilityGamepad, false);
+
+    auto applyControl = [this, endpoint, mouseToggle, keyboardToggle]() {
+        uint32_t capabilities = 0;
+        if (mouseToggle->isChecked()) {
+            capabilities |= screenshare::ControlCapabilityMouse;
+        }
+        if (keyboardToggle->isChecked()) {
+            capabilities |= screenshare::ControlCapabilityKeyboard;
+        }
+        if (backend_ != nullptr) {
+            backend_->setViewerControl(endpoint, capabilities);
+        }
+    };
+    connect(mouseToggle, &QPushButton::clicked, this, [applyControl](bool) { applyControl(); });
+    connect(keyboardToggle, &QPushButton::clicked, this, [applyControl](bool) { applyControl(); });
+    layout->addWidget(mouseToggle);
+    layout->addWidget(keyboardToggle);
+    layout->addWidget(gamepadToggle);
+
     layout->addWidget(textLabel(viewerHealthText(viewer), viewer.hasFeedback ? "ActiveGoodText" : "ActiveMuted"));
     return row;
 }
@@ -970,6 +1037,14 @@ void ActiveShareWindow::updateShareSummary()
         appliedBitrateBps_ = comboBitrateBps(bitrateCombo_);
         updatingSettingsUi_ = false;
     }
+    if (settingsLowLatencyCheck_ != nullptr) {
+        updatingSettingsUi_ = true;
+        const bool blocked = settingsLowLatencyCheck_->blockSignals(true);
+        settingsLowLatencyCheck_->setChecked(session_.config.stream.lowLatency);
+        settingsLowLatencyCheck_->blockSignals(blocked);
+        appliedLowLatency_ = session_.config.stream.lowLatency;
+        updatingSettingsUi_ = false;
+    }
     if (settingsAudioCombo_ != nullptr) {
         updatingSettingsUi_ = true;
         const bool blocked = settingsAudioCombo_->blockSignals(true);
@@ -1187,6 +1262,7 @@ screenshare::ShareSessionSettings ActiveShareWindow::selectedShareSettings() con
     settings.stream.bitrateBps = comboBitrateBps(bitrateCombo_);
     settings.stream.adaptBitrate = settings.stream.bitrateBps == 0;
     settings.stream.adaptFps = false;
+    settings.stream.lowLatency = settingsLowLatencyCheck_ != nullptr && settingsLowLatencyCheck_->isChecked();
     if (value == "auto" || value.isEmpty()) {
         settings.stream.outputResolution.reset();
         settings.stream.adaptResolution = true;
@@ -1240,6 +1316,7 @@ void ActiveShareWindow::applySettings()
     appliedResolutionValue_ = session_.resolutionValue;
     appliedFpsValue_ = settings.stream.fps;
     appliedBitrateBps_ = settings.stream.bitrateBps;
+    appliedLowLatency_ = settings.stream.lowLatency;
     appliedAudioDeviceValue_ = session_.audioDeviceValue;
     settingsApplyButton_->setEnabled(false);
     resolutionLabel_->setText(session_.resolutionText);
@@ -1274,12 +1351,16 @@ void ActiveShareWindow::updateSettingsApplyState()
     const QString audioDevice = settingsAudioCombo_ == nullptr ?
         appliedAudioDeviceValue_ :
         settingsAudioCombo_->currentData().toString();
+    const bool lowLatency = settingsLowLatencyCheck_ == nullptr ?
+        appliedLowLatency_ :
+        settingsLowLatencyCheck_->isChecked();
     const bool changed =
         roomName != appliedRoomName_ ||
         selectedDisplaySourceValue != appliedDisplaySourceValue_ ||
         resolutionValue != appliedResolutionValue_ ||
         fpsValue != appliedFpsValue_ ||
         bitrateBps != appliedBitrateBps_ ||
+        lowLatency != appliedLowLatency_ ||
         audioDevice != appliedAudioDeviceValue_;
     settingsApplyButton_->setEnabled(changed);
 }

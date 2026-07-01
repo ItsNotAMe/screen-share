@@ -47,6 +47,8 @@ enum class SessionEventType {
     SettingsChanged,
     StreamStatusChanged,
     AudioStatusChanged,
+    ControlStateChanged,
+    ControlRequested,
     Issue,
     Error,
 };
@@ -111,6 +113,7 @@ struct StreamSettings {
     bool adaptBitrate = true;
     bool adaptResolution = true;
     bool adaptFps = false;
+    bool lowLatency = false; // disable send pacing/queue buffering for minimal latency
 };
 
 struct ShareSessionSettings {
@@ -184,6 +187,39 @@ struct WatchSessionConfig {
     int audioPlaybackVolumePercent = 100;
 };
 
+// Per-input-type remote-control permission bitmask. Bit values match
+// udp_protocol::ControlCapabilityFlags so they cross the wire unchanged.
+enum ControlCapability : uint32_t {
+    ControlCapabilityNone = 0,
+    ControlCapabilityMouse = 1U << 0,
+    ControlCapabilityKeyboard = 1U << 1,
+    ControlCapabilityGamepad = 1U << 2, // reserved for v2 (gamepad injection)
+};
+
+enum class RemoteInputKind {
+    MouseMove,
+    MouseButton,
+    MouseScroll,
+    Key,
+    RequestControl,  // viewer asks the host for control
+    ReleaseControl,  // viewer gives control back
+};
+
+// A single viewer-originated remote-control event, queued by the viewer UI and
+// drained by the watch runtime, which turns it into a control packet.
+struct RemoteInputEvent {
+    RemoteInputKind kind = RemoteInputKind::MouseMove;
+    float normX = 0.0f; // [0..1] across the video frame
+    float normY = 0.0f;
+    int button = 0;     // mouse button id (0=left,1=right,2=middle,3=x1,4=x2)
+    bool pressed = false;
+    int scrollX = 0;    // wheel deltas (WHEEL_DELTA units)
+    int scrollY = 0;
+    int key = 0;        // virtual-key code
+    int scancode = 0;
+    uint32_t requestedCapabilities = 0; // for RequestControl
+};
+
 struct SessionViewer {
     std::string id;
     std::string name;
@@ -199,6 +235,8 @@ struct SessionViewer {
     uint64_t queueDelayMs = 0;
     bool hasFeedback = false;
     bool activeNow = false;
+    bool requestingControl = false;   // viewer has an outstanding control request
+    uint32_t grantedCapabilities = 0; // ControlCapability bits the host granted
 };
 
 struct SessionStreamStatus {
@@ -287,6 +325,11 @@ struct SessionStatus {
     uint64_t audioPackets = 0;
     std::string natStatus;
     std::string natHint;
+    // Remote control. On the host: the viewer currently holding control and the
+    // input types granted to it. On the viewer: the input types the host granted
+    // to this client (0 = none / view-only).
+    std::string controllerViewerId;
+    uint32_t controlCapabilities = 0;
 };
 
 struct SessionEvent {
@@ -294,6 +337,10 @@ struct SessionEvent {
     SessionStatus status;
     SessionIssue issue = SessionIssue::None;
     std::string message;
+    // For ControlRequested (host): the requesting viewer and the input types it
+    // asked for. For ControlStateChanged (viewer): the types now granted to us.
+    std::string controlViewerId;
+    uint32_t controlCapabilities = 0;
     struct VideoFrame {
         int width = 0;
         int height = 0;

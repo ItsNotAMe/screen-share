@@ -184,12 +184,17 @@ void UdpSender::Open(const UdpSenderConfig& config)
     std::unique_ptr<UdpAesGcm> crypto;
     uint32_t videoNoncePrefix = 0;
     uint32_t audioNoncePrefix = 0;
+    uint32_t controlNoncePrefix = 0;
     if (config.encryptionKey) {
         crypto = std::make_unique<UdpAesGcm>(*config.encryptionKey);
         videoNoncePrefix = GenerateUdpCryptoNoncePrefix();
         audioNoncePrefix = GenerateUdpCryptoNoncePrefix();
         while (audioNoncePrefix == videoNoncePrefix) {
             audioNoncePrefix = GenerateUdpCryptoNoncePrefix();
+        }
+        controlNoncePrefix = GenerateUdpCryptoNoncePrefix();
+        while (controlNoncePrefix == videoNoncePrefix || controlNoncePrefix == audioNoncePrefix) {
+            controlNoncePrefix = GenerateUdpCryptoNoncePrefix();
         }
     }
 
@@ -270,6 +275,9 @@ void UdpSender::Open(const UdpSenderConfig& config)
         crypto_ = std::move(crypto);
         videoNoncePrefix_ = videoNoncePrefix;
         audioNoncePrefix_ = audioNoncePrefix;
+        controlNoncePrefix_ = controlNoncePrefix;
+        nextControlSequence_ = 1;
+        controlPeers_.clear();
         nextSendAt_ = Clock::now();
         workerError_.clear();
         stopWorker_ = false;
@@ -311,6 +319,9 @@ void UdpSender::Close()
         crypto_.reset();
         videoNoncePrefix_ = 0;
         audioNoncePrefix_ = 0;
+        controlNoncePrefix_ = 0;
+        nextControlSequence_ = 1;
+        controlPeers_.clear();
         workerError_.clear();
         stopWorker_ = false;
         datagramInFlight_ = false;
@@ -550,6 +561,31 @@ void UdpSender::SetPacingBitrate(uint32_t bitrate)
     }
 }
 
+void UdpSender::SetPacingEnabled(bool enabled)
+{
+    bool notify = false;
+    {
+        std::lock_guard lock(mutex_);
+        CheckWorkerErrorLocked();
+        if (config_.pacingEnabled == enabled) {
+            return;
+        }
+        config_.pacingEnabled = enabled;
+        const auto now = Clock::now();
+        if (!enabled) {
+            // Pacing off: release any held datagrams to send immediately.
+            nextSendAt_ = now;
+            if (!queue_.empty()) {
+                RescheduleQueueLocked(now);
+                notify = true;
+            }
+        }
+    }
+    if (notify) {
+        queueChanged_.notify_one();
+    }
+}
+
 bool UdpSender::isOpen() const noexcept
 {
     return socket_ != 0 && !address_.empty();
@@ -631,6 +667,14 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
             MaybeRetargetFromNatProbe(&senderAddress, senderAddressLength, *probe);
             continue;
         }
+        if (receivedDatagram.size() >= sizeof(uint32_t)) {
+            uint32_t rawMagic = 0;
+            std::memcpy(&rawMagic, receivedDatagram.data(), sizeof(rawMagic));
+            if (udp_protocol::FromNetwork32(rawMagic) == udp_protocol::ControlMagic) {
+                ProcessControlPacket(&senderAddress, senderAddressLength, receivedDatagram);
+                continue;
+            }
+        }
 
         std::optional<std::vector<std::byte>> decryptedFeedbackDatagram;
         std::span<const std::byte> parseDatagram = receivedDatagram;
@@ -680,6 +724,28 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
         std::memcpy(feedbackAddress.data(), &senderAddress, static_cast<size_t>(senderAddressLength));
         const uint32_t feedbackGroup = EndpointGroupForAddressLocked(feedbackAddress);
         const std::string feedbackEndpoint = SocketAddressToString(&senderAddress, senderAddressLength);
+
+        // Feedback and control arrive from the same viewer socket, so record this
+        // endpoint as a control-ack target now. That lets the host send a grant
+        // (SendControlTo) immediately when it toggles a permission, without
+        // waiting for the viewer to first send a "request control" packet.
+        {
+            auto controlPeer = std::find_if(
+                controlPeers_.begin(),
+                controlPeers_.end(),
+                [&](const ControlPeer& candidate) { return candidate.endpoint == feedbackEndpoint; });
+            if (controlPeer == controlPeers_.end()) {
+                ControlPeer added;
+                added.endpoint = feedbackEndpoint;
+                added.address = feedbackAddress;
+                added.addressLength = senderAddressLength;
+                controlPeers_.push_back(std::move(added));
+            } else {
+                controlPeer->address = feedbackAddress;
+                controlPeer->addressLength = senderAddressLength;
+            }
+        }
+
         ++stats_.feedbackPacketsReceived;
         stats_.hasFeedback = true;
         stats_.latestFeedback = *feedback;
@@ -858,6 +924,143 @@ std::optional<std::vector<std::byte>> UdpSender::DecryptFeedbackDatagram(std::sp
         plaintext->data(),
         plaintext->size());
     return decrypted;
+}
+
+void UdpSender::SetControlHandler(
+    std::function<void(const std::string& endpoint, const udp_protocol::ControlMessage&)> handler)
+{
+    onControl_ = std::move(handler);
+}
+
+bool UdpSender::EncryptControlDatagram(std::vector<std::byte>& datagram)
+{
+    if (!crypto_) {
+        return false;
+    }
+    if (datagram.size() != sizeof(udp_protocol::ControlPacket)) {
+        throw std::runtime_error("Control datagram has unexpected size for encryption");
+    }
+
+    udp_protocol::ControlPacket packet{};
+    std::memcpy(&packet, datagram.data(), sizeof(packet));
+    packet.flags = udp_protocol::ToNetwork32(udp_protocol::PacketFlagEncrypted);
+    WriteUdpCryptoNonce(
+        std::span<std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
+        controlNoncePrefix_,
+        udp_protocol::FromNetwork64(packet.sequence),
+        0);
+    std::memcpy(datagram.data(), &packet, sizeof(packet));
+
+    EncryptDatagramPayload(
+        datagram,
+        udp_protocol::ControlPacketEncryptedPayloadOffset,
+        udp_protocol::ControlPacketAuthenticatedBytes,
+        std::span<const std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
+        std::span<std::byte, UdpCryptoTagBytes>(
+            datagram.data() + offsetof(udp_protocol::ControlPacket, encryptionTag),
+            UdpCryptoTagBytes));
+    return true;
+}
+
+void UdpSender::ProcessControlPacket(const void* address, int addressLength, std::span<const std::byte> datagram)
+{
+    if (datagram.size() != sizeof(udp_protocol::ControlPacket)) {
+        return;
+    }
+
+    udp_protocol::ControlPacket header{};
+    std::memcpy(&header, datagram.data(), sizeof(header));
+    const uint32_t flags = udp_protocol::FromNetwork32(header.flags);
+
+    std::vector<std::byte> reassembled(datagram.begin(), datagram.end());
+    if ((flags & udp_protocol::PacketFlagEncrypted) != 0) {
+        if (!crypto_) {
+            return;
+        }
+        auto plaintext = crypto_->Decrypt(
+            std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
+            std::span<const std::byte>(datagram.data(), udp_protocol::ControlPacketAuthenticatedBytes),
+            std::span<const std::byte>(
+                datagram.data() + udp_protocol::ControlPacketEncryptedPayloadOffset,
+                datagram.size() - udp_protocol::ControlPacketEncryptedPayloadOffset),
+            std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes));
+        if (!plaintext) {
+            return;
+        }
+        std::memcpy(
+            reassembled.data() + udp_protocol::ControlPacketEncryptedPayloadOffset,
+            plaintext->data(),
+            plaintext->size());
+    } else if (crypto_) {
+        return; // reject plaintext control when the session is encrypted
+    }
+
+    auto message = udp_protocol::ParseControlDatagram(reassembled);
+    if (!message) {
+        return;
+    }
+    // A successful decrypt already authenticates the sender for encrypted
+    // sessions; skip a redundant access-code fingerprint compare that can falsely
+    // reject when the two sides plumb the fingerprint differently.
+
+    const std::string endpoint = SocketAddressToString(address, addressLength);
+    {
+        std::lock_guard lock(mutex_);
+        auto peer = std::find_if(
+            controlPeers_.begin(),
+            controlPeers_.end(),
+            [&](const ControlPeer& candidate) { return candidate.endpoint == endpoint; });
+        const auto* addressBytes = static_cast<const std::byte*>(address);
+        if (peer == controlPeers_.end()) {
+            ControlPeer added;
+            added.endpoint = endpoint;
+            added.address.assign(addressBytes, addressBytes + addressLength);
+            added.addressLength = addressLength;
+            controlPeers_.push_back(std::move(added));
+        } else {
+            peer->address.assign(addressBytes, addressBytes + addressLength);
+            peer->addressLength = addressLength;
+        }
+    }
+
+    if (onControl_) {
+        onControl_(endpoint, *message);
+    }
+}
+
+bool UdpSender::SendControlTo(const std::string& endpoint, const udp_protocol::ControlMessage& message)
+{
+    if (!isOpen()) {
+        return false;
+    }
+
+    std::vector<std::byte> targetAddress;
+    int targetAddressLength = 0;
+    udp_protocol::ControlMessage outgoing = message;
+    {
+        std::lock_guard lock(mutex_);
+        auto peer = std::find_if(
+            controlPeers_.begin(),
+            controlPeers_.end(),
+            [&](const ControlPeer& candidate) { return candidate.endpoint == endpoint; });
+        if (peer == controlPeers_.end()) {
+            return false;
+        }
+        targetAddress = peer->address;
+        targetAddressLength = peer->addressLength;
+        outgoing.sequence = nextControlSequence_++;
+    }
+
+    auto datagram = udp_protocol::BuildControlDatagram(outgoing);
+    EncryptControlDatagram(datagram);
+    const int sent = sendto(
+        AsSocket(socket_),
+        reinterpret_cast<const char*>(datagram.data()),
+        static_cast<int>(datagram.size()),
+        0,
+        reinterpret_cast<const sockaddr*>(targetAddress.data()),
+        targetAddressLength);
+    return sent != SOCKET_ERROR && sent == static_cast<int>(datagram.size());
 }
 
 void UdpSender::WorkerLoop()

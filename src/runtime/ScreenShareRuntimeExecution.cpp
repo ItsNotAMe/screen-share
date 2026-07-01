@@ -9,6 +9,7 @@
 #include "codec/H264StreamDecoder.h"
 #include "codec/H264StreamEncoder.h"
 #include "core/SessionRuntimeControl.h"
+#include "input/RemoteInputInjector.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/NatTraversal.h"
 #include "transport/SignalingClient.h"
@@ -1526,6 +1527,16 @@ public:
         });
     }
 
+    void SetPacingEnabled(bool enabled)
+    {
+        for (auto& target : targets_) {
+            if (target.failed || target.sender == nullptr) {
+                continue;
+            }
+            target.sender->SetPacingEnabled(enabled);
+        }
+    }
+
     void Flush()
     {
         for (auto& target : targets_) {
@@ -1538,6 +1549,31 @@ public:
                 MarkFailed(target, "flush", error.what());
             }
         }
+    }
+
+    void SetControlHandler(
+        std::function<void(const std::string&, const screenshare::udp_protocol::ControlMessage&)> handler)
+    {
+        controlHandler_ = std::move(handler);
+        for (auto& target : targets_) {
+            if (target.sender != nullptr) {
+                target.sender->SetControlHandler(controlHandler_);
+            }
+        }
+    }
+
+    bool SendControlTo(const std::string& endpoint, const screenshare::udp_protocol::ControlMessage& message)
+    {
+        bool sent = false;
+        for (auto& target : targets_) {
+            if (target.failed || target.sender == nullptr) {
+                continue;
+            }
+            if (target.sender->SendControlTo(endpoint, message)) {
+                sent = true;
+            }
+        }
+        return sent;
     }
 
     [[nodiscard]] std::optional<screenshare::udp_protocol::FeedbackSnapshot> ReceiveFeedback(
@@ -1710,6 +1746,7 @@ private:
     }
 
     std::vector<Target> targets_;
+    std::function<void(const std::string&, const screenshare::udp_protocol::ControlMessage&)> controlHandler_;
     std::set<std::string> suppressedEndpoints_;
     std::map<uint32_t, std::string> viewerNames_;
 };
@@ -3110,6 +3147,39 @@ void RunCaptureStats(
     std::unique_ptr<UdpSenderFanout> udpSender;
     std::unique_ptr<AudioUdpCaptureWorker> audioCaptureWorker;
     std::unique_ptr<LiveSignalingRuntime> liveSignalingRuntime;
+    // Remote control (host side). The control handler runs on this same thread
+    // (inside fanout ReceiveFeedback), so plain locals need no extra locking.
+    screenshare::RemoteInputInjector remoteInputInjector;
+    std::string remoteControlEndpoint;   // endpoint of the viewer currently granted control
+    uint32_t remoteControlCapabilities = 0;
+    // A control ack is a single UDP datagram; to survive loss we re-send the
+    // latest ack a few times right after each state change. This is a bounded
+    // burst, not a perpetual re-assert: a steady-state re-grant would fight an
+    // optimistic viewer-side release (re-arming capture the user just dropped)
+    // and would keep spamming a controller that has since disconnected.
+    std::string controlAckEndpoint;      // who to (re)send the latest ack to
+    uint32_t controlAckCaps = 0;         // caps of that ack (0 = revoke)
+    int controlAckResendsLeft = 0;
+    Clock::time_point nextControlAckAt = Clock::now();
+    auto scheduleControlAckBurst = [&](std::string endpoint, uint32_t caps) {
+        controlAckEndpoint = std::move(endpoint);
+        controlAckCaps = caps;
+        controlAckResendsLeft = 3;
+        nextControlAckAt = Clock::now() + std::chrono::milliseconds(150);
+    };
+    auto refreshRemoteControlBounds = [&](int displayIndex) {
+        const auto displays = screenshare::DesktopCapturer::EnumerateDisplays();
+        for (const auto& display : displays) {
+            if (display.index == displayIndex) {
+                remoteInputInjector.SetTargetBounds(
+                    static_cast<int>(display.left),
+                    static_cast<int>(display.top),
+                    static_cast<int>(display.right - display.left),
+                    static_cast<int>(display.bottom - display.top));
+                return;
+            }
+        }
+    };
     std::vector<UdpSendTargetSpec> udpSendTargetSpecs = options.udpSendTargetSpecs;
     std::set<std::string> liveSignalingSendTargets;
     uint64_t audioPacingBitrate = 0;
@@ -3271,6 +3341,65 @@ void RunCaptureStats(
 
         udpSender = std::make_unique<UdpSenderFanout>();
         udpSender->Open(udpConfigs);
+        refreshRemoteControlBounds(config.displayIndex);
+        udpSender->SetControlHandler(
+            [&](const std::string& endpoint, const screenshare::udp_protocol::ControlMessage& message) {
+                using Command = screenshare::udp_protocol::ControlCommandType;
+                if (message.command == Command::RequestControl) {
+                    std::cout << "remote_control_request endpoint=" << endpoint
+                              << " caps=" << message.capabilities << "\n" << std::flush;
+                    return;
+                }
+                if (message.command == Command::ReleaseControl) {
+                    if (endpoint == remoteControlEndpoint) {
+                        remoteControlEndpoint.clear();
+                        remoteControlCapabilities = 0;
+                        // The viewer already updated its own UI optimistically;
+                        // cancel any in-flight grant burst so it does not re-arm
+                        // the capture the viewer just released.
+                        controlAckResendsLeft = 0;
+                        std::cout << "remote_control_grant endpoint=" << endpoint << " caps=0\n" << std::flush;
+                    }
+                    return;
+                }
+                // Input commands: honor only the single granted controller, and
+                // only the input types currently permitted.
+                if (endpoint != remoteControlEndpoint || remoteControlCapabilities == 0) {
+                    return;
+                }
+                const bool mouseOk =
+                    (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityMouse) != 0;
+                const bool keyboardOk =
+                    (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityKeyboard) != 0;
+                switch (message.command) {
+                case Command::MouseMove:
+                    if (mouseOk) {
+                        remoteInputInjector.InjectMouseMove(message.mouseX, message.mouseY);
+                    }
+                    break;
+                case Command::MouseButton:
+                    if (mouseOk) {
+                        remoteInputInjector.InjectMouseButton(
+                            static_cast<screenshare::RemoteInputInjector::MouseButton>(message.button),
+                            message.pressed,
+                            message.mouseX,
+                            message.mouseY);
+                    }
+                    break;
+                case Command::MouseScroll:
+                    if (mouseOk) {
+                        remoteInputInjector.InjectMouseScroll(message.scrollX, message.scrollY);
+                    }
+                    break;
+                case Command::KeyEvent:
+                    if (keyboardOk) {
+                        remoteInputInjector.InjectKey(message.key, message.scancode, message.pressed);
+                    }
+                    break;
+                default:
+                    break;
+                }
+            });
         for (const auto& [group, name] : viewerNames) {
             udpSender->SetViewerName(group, name);
         }
@@ -3372,6 +3501,14 @@ void RunCaptureStats(
                 udpSendTargetSpecs.end());
             if (udpSender) {
                 udpSender->SuppressEndpoint(endpoint);
+            }
+            // If the departing peer held control, drop the grant so a later
+            // viewer that reuses this ip:port can't silently inherit it, and
+            // stop any pending ack burst aimed at the dead endpoint.
+            if (endpoint == remoteControlEndpoint) {
+                remoteControlEndpoint.clear();
+                remoteControlCapabilities = 0;
+                controlAckResendsLeft = 0;
             }
 
             std::cout
@@ -3662,6 +3799,15 @@ void RunCaptureStats(
                 restartCapture = true;
                 adaptiveResolutionTiers.clear();
                 adaptiveResolutionTierIndex = 0;
+                // Keep remote-input bounds in step with the capture source.
+                // Display capture has known monitor bounds; window capture does
+                // not yet (v1), so clear the bounds to disable injection rather
+                // than mapping onto the stale previous monitor rectangle.
+                if (config.sourceType == screenshare::CaptureSourceType::Display) {
+                    refreshRemoteControlBounds(config.displayIndex);
+                } else {
+                    remoteInputInjector.SetTargetBounds(0, 0, 0, 0);
+                }
                 std::cout << "runtime_capture_source="
                           << (config.sourceType == screenshare::CaptureSourceType::Window ? "window" : "display")
                           << "\n";
@@ -3672,6 +3818,7 @@ void RunCaptureStats(
             restartCapture = true;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
+            refreshRemoteControlBounds(config.displayIndex);
             std::cout << "runtime_display=" << config.displayIndex << "\n";
         }
         if (request->windowHandle && *request->windowHandle != 0 && config.windowHandle != *request->windowHandle) {
@@ -3745,6 +3892,13 @@ void RunCaptureStats(
                         << "\n";
                 }
             }
+        }
+        if (request->lowLatency) {
+            const bool low = *request->lowLatency;
+            if (udpSender) {
+                udpSender->SetPacingEnabled(!low);
+            }
+            std::cout << "runtime_low_latency=" << (low ? "on" : "off") << "\n" << std::flush;
         }
         if (request->adaptBitrate) {
             adaptiveBitrateEnabled = *request->adaptBitrate;
@@ -3885,10 +4039,70 @@ void RunCaptureStats(
     };
 
     while (keepRunning()) {
-        std::this_thread::sleep_until(nextFrameAt);
+        // While a viewer holds control, drain their input during the inter-frame
+        // wait so it is injected within a couple of ms instead of once per frame
+        // (which would otherwise add up to a full frame interval of input lag).
+        if (!remoteControlEndpoint.empty() && udpSender) {
+            while (Clock::now() < nextFrameAt) {
+                const auto remaining = nextFrameAt - Clock::now();
+                const auto slice = (std::min)(remaining, std::chrono::duration_cast<Clock::duration>(
+                    std::chrono::milliseconds(2)));
+                if (slice > Clock::duration::zero()) {
+                    std::this_thread::sleep_for(slice);
+                }
+                udpSender->ReceiveFeedback(std::chrono::milliseconds(0));
+            }
+        } else {
+            std::this_thread::sleep_until(nextFrameAt);
+        }
         nextFrameAt += targetFrameTime;
         drainLiveSignalingSendTargets();
         applyRuntimeStreamSettingsControl();
+
+        // Apply host grant/revoke requests from the UI and acknowledge the viewer.
+        while (auto controlRequest = runtimeControl.TakeViewerControlRequest()) {
+            // Single controller: if control moves to a different viewer, revoke
+            // the previous one so its UI stops showing "in control".
+            if (!remoteControlEndpoint.empty() &&
+                remoteControlEndpoint != controlRequest->viewerId && udpSender) {
+                screenshare::udp_protocol::ControlMessage revoke;
+                revoke.command = screenshare::udp_protocol::ControlCommandType::RevokeControl;
+                revoke.accessCodeFingerprint = options.accessCodeFingerprint;
+                udpSender->SendControlTo(remoteControlEndpoint, revoke);
+                std::cout << "remote_control_grant endpoint=" << remoteControlEndpoint
+                          << " caps=0\n" << std::flush;
+            }
+            remoteControlEndpoint = controlRequest->capabilities != 0 ? controlRequest->viewerId : std::string();
+            remoteControlCapabilities = controlRequest->capabilities;
+            screenshare::udp_protocol::ControlMessage ack;
+            ack.command = controlRequest->capabilities != 0
+                ? screenshare::udp_protocol::ControlCommandType::GrantControl
+                : screenshare::udp_protocol::ControlCommandType::RevokeControl;
+            ack.capabilities = controlRequest->capabilities;
+            ack.accessCodeFingerprint = options.accessCodeFingerprint;
+            const bool acked = udpSender && udpSender->SendControlTo(controlRequest->viewerId, ack);
+            std::cout << "remote_control_grant endpoint=" << controlRequest->viewerId
+                      << " caps=" << controlRequest->capabilities
+                      << " sent=" << (acked ? "yes" : "no") << "\n" << std::flush;
+            // Re-send the ack a few times (below) so a single dropped datagram
+            // does not leave the viewer's control state out of sync.
+            scheduleControlAckBurst(controlRequest->viewerId, controlRequest->capabilities);
+        }
+
+        // Bounded loss-resilience burst: re-send the latest ack a few times over
+        // ~0.5s after a state change, then stop. No perpetual re-assert (which
+        // would fight an optimistic release or spam a departed controller).
+        if (controlAckResendsLeft > 0 && udpSender && Clock::now() >= nextControlAckAt) {
+            screenshare::udp_protocol::ControlMessage ack;
+            ack.command = controlAckCaps != 0
+                ? screenshare::udp_protocol::ControlCommandType::GrantControl
+                : screenshare::udp_protocol::ControlCommandType::RevokeControl;
+            ack.capabilities = controlAckCaps;
+            ack.accessCodeFingerprint = options.accessCodeFingerprint;
+            udpSender->SendControlTo(controlAckEndpoint, ack);
+            --controlAckResendsLeft;
+            nextControlAckAt = Clock::now() + std::chrono::milliseconds(150);
+        }
 
         std::optional<screenshare::CapturedFrame> frame;
         if (!runtimeVideoPaused) {
@@ -4594,6 +4808,18 @@ void RunUdpReceiverStats(
         options.signalingNatProbeTargets.begin(),
         options.signalingNatProbeTargets.end());
     receiver.Open(config);
+    // Remote control (viewer side): surface host grant/deny/revoke acks so the
+    // session API can tell the UI what input types we now hold.
+    receiver.SetControlHandler([](const screenshare::udp_protocol::ControlMessage& message) {
+        using Command = screenshare::udp_protocol::ControlCommandType;
+        uint32_t caps = 0;
+        if (message.command == Command::GrantControl) {
+            caps = message.capabilities;
+        } else if (message.command != Command::DenyControl && message.command != Command::RevokeControl) {
+            return;
+        }
+        std::cout << "remote_control_state caps=" << caps << "\n" << std::flush;
+    });
     std::unique_ptr<LiveSignalingRuntime> liveSignalingRuntime;
     if (options.signalingLive && !options.shareRoom) {
         liveSignalingRuntime = std::make_unique<LiveSignalingRuntime>();
@@ -5611,6 +5837,49 @@ void RunUdpReceiverStats(
 
     while (shouldContinue()) {
         applyAudioPlaybackSettingsRequest();
+
+        // Forward queued local input (and control requests) to the host.
+        for (const auto& input : runtimeControl.DrainInput()) {
+            screenshare::udp_protocol::ControlMessage message;
+            message.accessCodeFingerprint = options.accessCodeFingerprint;
+            message.sessionFingerprint = options.sessionFingerprint;
+            using K = screenshare::RemoteInputKind;
+            using Command = screenshare::udp_protocol::ControlCommandType;
+            switch (input.kind) {
+            case K::MouseMove:
+                message.command = Command::MouseMove;
+                message.mouseX = input.normX;
+                message.mouseY = input.normY;
+                break;
+            case K::MouseButton:
+                message.command = Command::MouseButton;
+                message.button = static_cast<uint16_t>(input.button);
+                message.pressed = input.pressed;
+                message.mouseX = input.normX;
+                message.mouseY = input.normY;
+                break;
+            case K::MouseScroll:
+                message.command = Command::MouseScroll;
+                message.scrollX = input.scrollX;
+                message.scrollY = input.scrollY;
+                break;
+            case K::Key:
+                message.command = Command::KeyEvent;
+                message.key = static_cast<uint16_t>(input.key);
+                message.scancode = static_cast<uint16_t>(input.scancode);
+                message.pressed = input.pressed;
+                break;
+            case K::RequestControl:
+                message.command = Command::RequestControl;
+                message.capabilities = input.requestedCapabilities;
+                break;
+            case K::ReleaseControl:
+                message.command = Command::ReleaseControl;
+                break;
+            }
+            receiver.SendControl(message);
+        }
+
         if (drainLiveSignalingProbeTargets() > 0) {
             hasNatProbeSetup = true;
         }
@@ -5623,6 +5892,11 @@ void RunUdpReceiverStats(
             previewPlayout.ReceiveTimeout(Clock::now()) :
             std::chrono::milliseconds(100);
         if (options.audioPlayback) {
+            receiveTimeout = std::min(receiveTimeout, std::chrono::milliseconds(5));
+        }
+        if (options.emitVideoFrames) {
+            // The desktop UI viewer can hold remote control, so keep the loop
+            // tight (>=200 Hz) to forward input promptly even without audio.
             receiveTimeout = std::min(receiveTimeout, std::chrono::milliseconds(5));
         }
         if (auto frame = receiver.ReceiveFrame(receiveTimeout)) {

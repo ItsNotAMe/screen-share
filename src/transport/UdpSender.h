@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -112,8 +113,16 @@ public:
     void SendFrame(const EncodedPacket& packet);
     void SendAudioPacket(const UdpAudioPacket& packet);
     void SetPacingBitrate(uint32_t bitrate);
+    void SetPacingEnabled(bool enabled);
     void Flush();
     [[nodiscard]] std::optional<udp_protocol::FeedbackSnapshot> ReceiveFeedback(std::chrono::milliseconds timeout);
+
+    // Remote-control channel (host side). Incoming viewer control packets are
+    // surfaced through the handler (decoded during ReceiveFeedback). SendControlTo
+    // ships a grant/deny/revoke acknowledgement back to a specific viewer endpoint
+    // that has previously sent a control packet.
+    void SetControlHandler(std::function<void(const std::string& endpoint, const udp_protocol::ControlMessage&)> handler);
+    bool SendControlTo(const std::string& endpoint, const udp_protocol::ControlMessage& message);
 
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] UdpSenderStats stats() const;
@@ -176,6 +185,14 @@ private:
         std::span<const std::byte, UdpCryptoNonceBytes> nonce,
         std::span<std::byte, UdpCryptoTagBytes> tag);
     [[nodiscard]] std::optional<std::vector<std::byte>> DecryptFeedbackDatagram(std::span<const std::byte> datagram);
+    bool EncryptControlDatagram(std::vector<std::byte>& datagram);
+    void ProcessControlPacket(const void* address, int addressLength, std::span<const std::byte> datagram);
+
+    struct ControlPeer {
+        std::string endpoint;
+        std::vector<std::byte> address;
+        int addressLength = 0;
+    };
 
     uintptr_t socket_ = 0;
     std::vector<std::byte> address_;
@@ -198,6 +215,10 @@ private:
     std::unique_ptr<UdpAesGcm> crypto_;
     uint32_t videoNoncePrefix_ = 0;
     uint32_t audioNoncePrefix_ = 0;
+    uint32_t controlNoncePrefix_ = 0;
+    uint64_t nextControlSequence_ = 1;
+    std::function<void(const std::string& endpoint, const udp_protocol::ControlMessage&)> onControl_;
+    std::vector<ControlPeer> controlPeers_;
     bool stopWorker_ = false;
     bool datagramInFlight_ = false;
     bool sendAddressesDirty_ = true;

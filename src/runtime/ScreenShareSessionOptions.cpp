@@ -411,8 +411,10 @@ void ApplyTypedSharePreset(Options& options, const screenshare::ShareSessionConf
     options.streamEncode = true;
     options.sharePreset = true;
     options.seconds = config.seconds;
-    options.udpPacing = true;
-    options.udpMaxQueueMs = DefaultShareUdpMaxQueueMs;
+    // Low latency mode: push frames onto the wire immediately (no send pacing)
+    // and do not let datagrams sit queued, trading smoothing for responsiveness.
+    options.udpPacing = !config.stream.lowLatency;
+    options.udpMaxQueueMs = config.stream.lowLatency ? 0 : DefaultShareUdpMaxQueueMs;
     if (config.udpLocalPort > 0) {
         options.udpLocalPort = config.udpLocalPort;
         options.udpLocalPortProvided = true;

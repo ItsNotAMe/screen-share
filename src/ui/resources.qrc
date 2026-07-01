@@ -10,7 +10,10 @@
     <file alias="ui/icons/download.svg">../../assets/ui/icons/download.svg</file>
     <file alias="ui/icons/fps.svg">../../assets/ui/icons/fps.svg</file>
     <file alias="ui/icons/fullscreen.svg">../../assets/ui/icons/fullscreen.svg</file>
+    <file alias="ui/icons/gamepad.svg">../../assets/ui/icons/gamepad.svg</file>
+    <file alias="ui/icons/keyboard.svg">../../assets/ui/icons/keyboard.svg</file>
     <file alias="ui/icons/lock.svg">../../assets/ui/icons/lock.svg</file>
+    <file alias="ui/icons/mouse.svg">../../assets/ui/icons/mouse.svg</file>
     <file alias="ui/icons/mute.svg">../../assets/ui/icons/mute.svg</file>
     <file alias="ui/icons/paste.svg">../../assets/ui/icons/paste.svg</file>
     <file alias="ui/icons/pause.svg">../../assets/ui/icons/pause.svg</file>

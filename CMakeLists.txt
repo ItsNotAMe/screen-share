@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative VERSION 0.1.2 LANGUAGES CXX)
+project(ScreenShareNative VERSION 0.2.0 LANGUAGES CXX)
 
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
@@ -72,6 +72,7 @@ add_library(ScreenShareCore STATIC
     src/core/ScreenShareSession.cpp
     src/core/SessionCommand.cpp
     src/core/SessionRuntimeControl.cpp
+    src/input/RemoteInputInjector.cpp
     src/render/Nv12D3D11Presenter.cpp
     src/render/ReceiverPreviewWindow.cpp
     src/transport/NatTraversal.cpp

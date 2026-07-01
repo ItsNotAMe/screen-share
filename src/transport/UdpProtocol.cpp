@@ -234,4 +234,141 @@ std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte>
     return feedback;
 }
 
+namespace {
+
+constexpr uint32_t kControlNormScale = 1000000;
+
+uint32_t EncodeControlNorm(float value)
+{
+    if (value < 0.0f) {
+        value = 0.0f;
+    }
+    if (value > 1.0f) {
+        value = 1.0f;
+    }
+    return static_cast<uint32_t>(value * static_cast<float>(kControlNormScale) + 0.5f);
+}
+
+float DecodeControlNorm(uint32_t value)
+{
+    if (value > kControlNormScale) {
+        value = kControlNormScale;
+    }
+    return static_cast<float>(value) / static_cast<float>(kControlNormScale);
+}
+
+bool IsKnownControlCommand(uint16_t command)
+{
+    switch (static_cast<ControlCommandType>(command)) {
+    case ControlCommandType::RequestControl:
+    case ControlCommandType::ReleaseControl:
+    case ControlCommandType::GrantControl:
+    case ControlCommandType::DenyControl:
+    case ControlCommandType::RevokeControl:
+    case ControlCommandType::MouseMove:
+    case ControlCommandType::MouseButton:
+    case ControlCommandType::MouseScroll:
+    case ControlCommandType::KeyEvent:
+        return true;
+    case ControlCommandType::Unknown:
+    default:
+        return false;
+    }
+}
+
+} // namespace
+
+const char* ControlCommandName(ControlCommandType command)
+{
+    switch (command) {
+    case ControlCommandType::RequestControl:
+        return "request_control";
+    case ControlCommandType::ReleaseControl:
+        return "release_control";
+    case ControlCommandType::GrantControl:
+        return "grant_control";
+    case ControlCommandType::DenyControl:
+        return "deny_control";
+    case ControlCommandType::RevokeControl:
+        return "revoke_control";
+    case ControlCommandType::MouseMove:
+        return "mouse_move";
+    case ControlCommandType::MouseButton:
+        return "mouse_button";
+    case ControlCommandType::MouseScroll:
+        return "mouse_scroll";
+    case ControlCommandType::KeyEvent:
+        return "key_event";
+    case ControlCommandType::Unknown:
+    default:
+        return "unknown";
+    }
+}
+
+std::vector<std::byte> BuildControlDatagram(const ControlMessage& message)
+{
+    ControlPacket packet;
+    packet.magic = ToNetwork32(ControlMagic);
+    packet.version = ToNetwork16(PacketVersion);
+    packet.packetBytes = ToNetwork16(static_cast<uint16_t>(sizeof(ControlPacket)));
+    packet.flags = 0;
+    packet.sequence = ToNetwork64(message.sequence);
+    packet.sessionFingerprint = ToNetwork64(message.sessionFingerprint);
+    packet.accessCodeFingerprint = ToNetwork64(message.accessCodeFingerprint);
+    packet.command = ToNetwork16(static_cast<uint16_t>(message.command));
+    packet.button = ToNetwork16(message.button);
+    packet.key = ToNetwork16(message.key);
+    packet.scancode = ToNetwork16(message.scancode);
+    packet.modifiers = ToNetwork16(message.modifiers);
+    packet.capabilities = ToNetwork32(message.capabilities);
+    packet.mouseX = ToNetwork32(EncodeControlNorm(message.mouseX));
+    packet.mouseY = ToNetwork32(EncodeControlNorm(message.mouseY));
+    packet.scrollX = static_cast<int32_t>(ToNetwork32(static_cast<uint32_t>(message.scrollX)));
+    packet.scrollY = static_cast<int32_t>(ToNetwork32(static_cast<uint32_t>(message.scrollY)));
+    packet.pressed = ToNetwork32(message.pressed ? 1U : 0U);
+
+    std::vector<std::byte> datagram(sizeof(packet));
+    std::memcpy(datagram.data(), &packet, sizeof(packet));
+    return datagram;
+}
+
+std::optional<ControlMessage> ParseControlDatagram(std::span<const std::byte> datagram)
+{
+    if (datagram.size() != sizeof(ControlPacket)) {
+        return std::nullopt;
+    }
+
+    ControlPacket packet{};
+    std::memcpy(&packet, datagram.data(), sizeof(packet));
+    const uint32_t magic = FromNetwork32(packet.magic);
+    const uint16_t version = FromNetwork16(packet.version);
+    const uint16_t packetBytes = FromNetwork16(packet.packetBytes);
+    const uint32_t flags = FromNetwork32(packet.flags);
+    const uint16_t command = FromNetwork16(packet.command);
+    if (magic != ControlMagic ||
+        version != PacketVersion ||
+        packetBytes != datagram.size() ||
+        (flags & ~PacketFlagEncrypted) != 0 ||
+        !IsKnownControlCommand(command)) {
+        return std::nullopt;
+    }
+
+    ControlMessage message;
+    message.command = static_cast<ControlCommandType>(command);
+    message.sequence = FromNetwork64(packet.sequence);
+    message.sessionFingerprint = FromNetwork64(packet.sessionFingerprint);
+    message.accessCodeFingerprint = FromNetwork64(packet.accessCodeFingerprint);
+    message.capabilities = FromNetwork32(packet.capabilities);
+    message.mouseX = DecodeControlNorm(FromNetwork32(packet.mouseX));
+    message.mouseY = DecodeControlNorm(FromNetwork32(packet.mouseY));
+    message.scrollX = static_cast<int32_t>(FromNetwork32(static_cast<uint32_t>(packet.scrollX)));
+    message.scrollY = static_cast<int32_t>(FromNetwork32(static_cast<uint32_t>(packet.scrollY)));
+    message.button = FromNetwork16(packet.button);
+    message.key = FromNetwork16(packet.key);
+    message.scancode = FromNetwork16(packet.scancode);
+    message.modifiers = FromNetwork16(packet.modifiers);
+    message.pressed = FromNetwork32(packet.pressed) != 0;
+    return message;
+}
+
 } // namespace screenshare::udp_protocol

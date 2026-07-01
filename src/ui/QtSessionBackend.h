@@ -40,6 +40,10 @@ public:
     void applyStreamSettings(const screenshare::StreamSettings& settings);
     void applyShareSettings(const screenshare::ShareSessionSettings& settings);
     void applyAudioPlaybackSettings(const screenshare::AudioPlaybackSettings& settings);
+    void sendRemoteInput(const screenshare::RemoteInputEvent& event);
+    void requestControl(uint32_t capabilities);
+    void releaseControl();
+    void setViewerControl(const std::string& viewerId, uint32_t capabilities);
     screenshare::SessionStatus currentStatus() const;
     std::vector<screenshare::SessionDisplayInfo> listDisplays(QString* errorMessage = nullptr);
     std::vector<screenshare::SessionWindowInfo> listWindows(QString* errorMessage = nullptr);

@@ -8,6 +8,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>
 #include <QtCore/QMetaObject>
+#include <QtCore/QPointer>
 #include <QtCore/QPointF>
 #include <QtCore/QRectF>
 #include <QtCore/QSizeF>
@@ -153,6 +154,43 @@ QString bitrateText(double bitrateMbps)
     return QStringLiteral("%1 Mbps").arg(bitrateMbps, 0, 'f', 1);
 }
 
+QString avSyncText(const screenshare::SessionAudioStatus& audio)
+{
+    if (!audio.hasStats) {
+        return QStringLiteral("-");
+    }
+    if (audio.playbackMuted) {
+        return QStringLiteral("Muted");
+    }
+    return QStringLiteral("%1 ms").arg(audio.avAudioAheadMs);
+}
+
+QString controlTypesString(uint32_t capabilities)
+{
+    QString types;
+    if ((capabilities & screenshare::ControlCapabilityMouse) != 0) {
+        types += QStringLiteral("Mouse");
+    }
+    if ((capabilities & screenshare::ControlCapabilityKeyboard) != 0) {
+        if (!types.isEmpty()) {
+            types += QStringLiteral(" + ");
+        }
+        types += QStringLiteral("Keyboard");
+    }
+    return types;
+}
+
+QString latencyText(const screenshare::SessionAudioStatus& audio)
+{
+    if (!audio.hasStats) {
+        return QStringLiteral("-");
+    }
+    // Receive-side playout latency: fixed device latency plus the queued buffer.
+    const qulonglong totalMs =
+        static_cast<qulonglong>(std::max(0, audio.playbackLatencyMs)) + audio.playbackQueueMs;
+    return QStringLiteral("%1 ms").arg(totalMs);
+}
+
 } // namespace
 
 ActiveWatchWindow::ActiveWatchWindow(QtSessionBackend* backend, Actions actions, QWidget* parent)
@@ -195,6 +233,12 @@ void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
     presentedFps_ = 0.0;
     latestStreamFps_ = 0.0;
     presentedFpsTimer_.restart();
+    // Re-baseline the received-bitrate sampler: elapsed_ was just restarted, so
+    // a stale sample time would otherwise make the delta negative and freeze the
+    // stat on rejoin.
+    lastBitrateBytes_ = 0;
+    lastBitrateSampleMs_ = -1;
+    receiveBitrateMbps_ = 0.0;
     videoFrameWidget_->clearFrame();
     setPreviewStatusText("Connecting...");
     startWatch();
@@ -274,6 +318,11 @@ QWidget* ActiveWatchWindow::buildPreviewPanel()
     videoFrameWidget_ = new VideoFrameWidget;
     videoFrameWidget_->setStatusText("Waiting for stream");
     videoFrameWidget_->setFocusPolicy(Qt::StrongFocus);
+    videoFrameWidget_->setRemoteInputHandler([this](const screenshare::RemoteInputEvent& event) {
+        if (backend_ != nullptr) {
+            backend_->sendRemoteInput(event);
+        }
+    });
     layout->addWidget(videoFrameWidget_, 1);
     return panel;
 }
@@ -293,7 +342,36 @@ QWidget* ActiveWatchWindow::buildSideStats()
     layout->addWidget(buildStatRow("Resolution", resolutionLabel_));
     layout->addWidget(buildStatRow("FPS", fpsLabel_));
     layout->addWidget(buildStatRow("Bitrate", bitrateLabel_));
+    layout->addWidget(buildStatRow("Latency", latencyLabel_));
     layout->addStretch(1);
+
+    // Remote-control permissions: shown only while the host has granted control.
+    controlStatusRow_ = new QWidget;
+    auto* controlRowLayout = new QVBoxLayout(controlStatusRow_);
+    controlRowLayout->setContentsMargins(0, 12, 0, 0);
+    controlRowLayout->setSpacing(8);
+    controlRowLayout->addWidget(textLabel("Your Control", "ActiveMuted"));
+    auto* iconsRow = new QWidget;
+    auto* iconsLayout = new QHBoxLayout(iconsRow);
+    iconsLayout->setContentsMargins(0, 0, 0, 0);
+    iconsLayout->setSpacing(10);
+    auto makeControlIcon = [&](const QString& tooltip) {
+        auto* iconLabel = new QLabel;
+        iconLabel->setObjectName("WatchControlIcon");
+        iconLabel->setFixedSize(24, 24);
+        iconLabel->setAlignment(Qt::AlignCenter);
+        iconLabel->setToolTip(tooltip);
+        iconLabel->setVisible(false);
+        return iconLabel;
+    };
+    controlMouseIcon_ = makeControlIcon("You can control the mouse");
+    controlKeyboardIcon_ = makeControlIcon("You can control the keyboard");
+    iconsLayout->addWidget(controlMouseIcon_);
+    iconsLayout->addWidget(controlKeyboardIcon_);
+    iconsLayout->addStretch(1);
+    controlRowLayout->addWidget(iconsRow);
+    controlStatusRow_->setVisible(false);
+    layout->addWidget(controlStatusRow_);
     return panel;
 }
 
@@ -322,8 +400,10 @@ QWidget* ActiveWatchWindow::buildFooter()
 
     volumeSlider_ = new VolumeSlider;
     volumeSlider_->setObjectName("WatchVolumeSlider");
-    volumeSlider_->setFixedWidth(180);
+    volumeSlider_->setMinimumWidth(70);
+    volumeSlider_->setMaximumWidth(200);
     volumeSlider_->setFixedHeight(24);
+    volumeSlider_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     volumeSlider_->setRange(0, 200);
     volumeSlider_->setValue(100);
     connect(volumeSlider_, &QSlider::valueChanged, this, [this](int value) {
@@ -343,15 +423,26 @@ QWidget* ActiveWatchWindow::buildFooter()
     volumeLayout->addWidget(muteButton_);
 
     constexpr int footerControlHeight = 56;
-    volumePanel->setFixedSize(410, footerControlHeight);
-    layout->addWidget(volumePanel);
+    // Let the volume panel flex (and the slider shrink) so the footer compresses
+    // gracefully on small windows instead of overlapping the buttons.
+    volumePanel->setFixedHeight(footerControlHeight);
+    volumePanel->setMinimumWidth(210);
+    volumePanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    layout->addWidget(volumePanel, 1);
 
     fullscreenButton_ = iconButton("Fullscreen", "ActiveSecondaryButton", "fullscreen");
     connect(fullscreenButton_, &QPushButton::clicked, this, [this] {
         toggleFullscreen();
     });
-    fullscreenButton_->setFixedSize(150, footerControlHeight);
+    fullscreenButton_->setFixedSize(140, footerControlHeight);
     layout->addWidget(fullscreenButton_);
+
+    controlButton_ = iconButton("Request Control", "ActiveSecondaryButton", "");
+    controlButton_->setFixedSize(190, footerControlHeight);
+    connect(controlButton_, &QPushButton::clicked, this, [this] {
+        toggleControlRequest();
+    });
+    layout->addWidget(controlButton_);
 
     leaveButton_ = iconButton("Leave Room", "WatchLeaveButton", "stop");
     leaveButton_->setFixedSize(220, footerControlHeight);
@@ -423,6 +514,10 @@ void ActiveWatchWindow::installBackendHandlers()
     });
     backend_->setStatusHandler([this](const screenshare::SessionEvent& event) {
         updateStatus(event.status);
+        if (event.type == screenshare::SessionEventType::ControlStateChanged) {
+            handleControlState(event.controlCapabilities);
+            return;
+        }
         if (event.type == screenshare::SessionEventType::Issue) {
             if (event.issue == screenshare::SessionIssue::HostLeft) {
                 handleHostLeft();
@@ -540,13 +635,47 @@ void ActiveWatchWindow::updateStatus(const screenshare::SessionStatus& status)
     } else {
         setPreviewStatusText(status.state == screenshare::SessionState::Live ? "Receiving stream" : "Waiting for stream");
     }
-    connectionLabel_->setText(connectionText(status));
-    avSyncLabel_->setText(status.audio.hasStats ? QStringLiteral("%1 ms").arg(status.audio.avAudioAheadMs) : QStringLiteral("-"));
+    // While a control grant is active, keep the "You control" indicator; the
+    // ordinary ~1/sec status tick would otherwise clobber it back to the plain
+    // connection text.
+    if (controlCapabilities_ != 0) {
+        connectionLabel_->setText(QStringLiteral("You control: %1").arg(controlTypesString(controlCapabilities_)));
+    } else {
+        connectionLabel_->setText(connectionText(status));
+    }
+    avSyncLabel_->setText(avSyncText(status.audio));
     qualityLabel_->setText(status.stream.hasStats ? QStringLiteral("High") : QStringLiteral("-"));
     resolutionLabel_->setText(resolutionText(status));
     refreshFpsLabel(status.stream.outputFps);
-    bitrateLabel_->setText(bitrateText(status.stream.bitrateMbps));
+    updateReceiveBitrate(status.payloadBytes);
+    bitrateLabel_->setText(bitrateText(receiveBitrateMbps_));
+    if (latencyLabel_ != nullptr) {
+        latencyLabel_->setText(latencyText(status.audio));
+    }
     updateAudioControls(status.audio);
+}
+
+void ActiveWatchWindow::updateReceiveBitrate(uint64_t payloadBytes)
+{
+    // The stream's bitrate field is sender-side and always 0 on the viewer, so
+    // derive the received bitrate from the cumulative payload-byte counter.
+    const qint64 nowMs = elapsed_.isValid() ? elapsed_.elapsed() : 0;
+    if (lastBitrateSampleMs_ < 0 || payloadBytes < lastBitrateBytes_) {
+        // First sample, or the counter rewound (stream restart): re-baseline.
+        lastBitrateSampleMs_ = nowMs;
+        lastBitrateBytes_ = payloadBytes;
+        receiveBitrateMbps_ = 0.0;
+        return;
+    }
+    const qint64 deltaMs = nowMs - lastBitrateSampleMs_;
+    if (deltaMs < 500) {
+        return; // keep the previous value until a meaningful interval elapses
+    }
+    const uint64_t deltaBytes = payloadBytes - lastBitrateBytes_;
+    receiveBitrateMbps_ =
+        static_cast<double>(deltaBytes) * 8.0 / (static_cast<double>(deltaMs) / 1000.0) / 1'000'000.0;
+    lastBitrateBytes_ = payloadBytes;
+    lastBitrateSampleMs_ = nowMs;
 }
 
 void ActiveWatchWindow::updateAudioControls(const screenshare::SessionAudioStatus& audio)
@@ -701,6 +830,19 @@ void ActiveWatchWindow::setStreamFullscreen(bool enabled)
                     topLevel->setGeometry(preFullscreenGeometry_);
                 }
             }
+            // The fullscreen->windowed transition on this frameless window can
+            // leave a stale copy of the footer painted. Force a full relayout and
+            // repaint once the window has settled into its new state.
+            QPointer<QWidget> repaintTarget(topLevel);
+            QTimer::singleShot(0, this, [this, repaintTarget] {
+                if (layout() != nullptr) {
+                    layout()->invalidate();
+                    layout()->activate();
+                }
+                if (repaintTarget != nullptr) {
+                    repaintTarget->update();
+                }
+            });
         }
     }
 }
@@ -836,6 +978,58 @@ void ActiveWatchWindow::exitToHomeAfterHostLeft()
         actions_.sessionEndedByHost();
     } else if (actions_.sessionStopped) {
         actions_.sessionStopped();
+    }
+}
+
+void ActiveWatchWindow::handleControlState(uint32_t capabilities)
+{
+    controlCapabilities_ = capabilities;
+    const bool mouse = (capabilities & screenshare::ControlCapabilityMouse) != 0;
+    const bool keyboard = (capabilities & screenshare::ControlCapabilityKeyboard) != 0;
+    if (videoFrameWidget_ != nullptr) {
+        videoFrameWidget_->setControlCapture(capabilities != 0, mouse, keyboard);
+    }
+    const QString types = controlTypesString(capabilities);
+    if (controlButton_ != nullptr) {
+        controlButton_->setText(capabilities != 0
+            ? QStringLiteral("Release Control")
+            : QStringLiteral("Request Control"));
+    }
+    const auto applyControlIcon = [](QLabel* iconLabel, const char* name, bool active) {
+        if (iconLabel == nullptr) {
+            return;
+        }
+        iconLabel->setVisible(active);
+        if (active) {
+            iconLabel->setPixmap(renderSvgResource(
+                QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(QString::fromUtf8(name)),
+                QSize(20, 20),
+                QStringLiteral("#38b27e")));
+        }
+    };
+    applyControlIcon(controlMouseIcon_, "mouse", mouse);
+    applyControlIcon(controlKeyboardIcon_, "keyboard", keyboard);
+    if (controlStatusRow_ != nullptr) {
+        controlStatusRow_->setVisible(capabilities != 0);
+    }
+    if (connectionLabel_ != nullptr && capabilities != 0) {
+        connectionLabel_->setText(QStringLiteral("You control: %1").arg(types));
+    }
+}
+
+void ActiveWatchWindow::toggleControlRequest()
+{
+    if (backend_ == nullptr) {
+        return;
+    }
+    if (controlCapabilities_ != 0) {
+        backend_->releaseControl();
+        handleControlState(0); // optimistic: the host does not ack our own release
+        return;
+    }
+    backend_->requestControl(screenshare::ControlCapabilityMouse | screenshare::ControlCapabilityKeyboard);
+    if (controlButton_ != nullptr) {
+        controlButton_->setText(QStringLiteral("Requesting..."));
     }
 }
 

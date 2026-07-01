@@ -178,6 +178,34 @@ void QtSessionBackend::applyAudioPlaybackSettings(const screenshare::AudioPlayba
     }
 }
 
+void QtSessionBackend::sendRemoteInput(const screenshare::RemoteInputEvent& event)
+{
+    if (running_) {
+        session_.SendRemoteInput(event);
+    }
+}
+
+void QtSessionBackend::requestControl(uint32_t capabilities)
+{
+    if (running_) {
+        session_.RequestControl(capabilities);
+    }
+}
+
+void QtSessionBackend::releaseControl()
+{
+    if (running_) {
+        session_.ReleaseControl();
+    }
+}
+
+void QtSessionBackend::setViewerControl(const std::string& viewerId, uint32_t capabilities)
+{
+    if (running_) {
+        session_.SetViewerControl(viewerId, capabilities);
+    }
+}
+
 screenshare::SessionStatus QtSessionBackend::currentStatus() const
 {
     return session_.GetStatus();
