@@ -165,9 +165,11 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
 
     std::unique_ptr<UdpAesGcm> crypto;
     uint32_t feedbackNoncePrefix = 0;
+    uint32_t controlNoncePrefix = 0;
     if (config.encryptionKey) {
         crypto = std::make_unique<UdpAesGcm>(*config.encryptionKey);
         feedbackNoncePrefix = GenerateUdpCryptoNoncePrefix();
+        controlNoncePrefix = GenerateUdpCryptoNoncePrefix();
     }
 
     std::vector<NatProbeTargetAddress> natProbeTargets;
@@ -245,6 +247,8 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     config_ = config;
     crypto_ = std::move(crypto);
     feedbackNoncePrefix_ = feedbackNoncePrefix;
+    controlNoncePrefix_ = controlNoncePrefix;
+    nextControlSequence_ = 1;
     datagramBuffer_.assign(config_.maxDatagramBytes, std::byte{});
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
@@ -269,6 +273,8 @@ void UdpReceiver::Close()
     datagramBuffer_.clear();
     crypto_.reset();
     feedbackNoncePrefix_ = 0;
+    controlNoncePrefix_ = 0;
+    nextControlSequence_ = 1;
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
     natProbeTargets_.clear();
@@ -486,6 +492,31 @@ bool UdpReceiver::SendFeedback(const udp_protocol::FeedbackSnapshot& feedback)
     return true;
 }
 
+void UdpReceiver::SetControlHandler(std::function<void(const udp_protocol::ControlMessage&)> handler)
+{
+    onControl_ = std::move(handler);
+}
+
+bool UdpReceiver::SendControl(const udp_protocol::ControlMessage& message)
+{
+    if (!isOpen() || feedbackAddress_.empty() || feedbackAddressLength_ == 0) {
+        return false;
+    }
+
+    udp_protocol::ControlMessage outgoing = message;
+    outgoing.sequence = nextControlSequence_++;
+    auto datagram = udp_protocol::BuildControlDatagram(outgoing);
+    EncryptControlDatagram(datagram);
+    const int sent = sendto(
+        AsSocket(socket_),
+        reinterpret_cast<const char*>(datagram.data()),
+        static_cast<int>(datagram.size()),
+        0,
+        reinterpret_cast<const sockaddr*>(feedbackAddress_.data()),
+        feedbackAddressLength_);
+    return sent != SOCKET_ERROR && sent == static_cast<int>(datagram.size());
+}
+
 void UdpReceiver::MaybeSendNatProbes(Clock::time_point now)
 {
     if (!isOpen() || natProbeTargets_.empty() || now < nextNatProbeAt_) {
@@ -547,6 +578,10 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     const uint32_t datagramMagic = udp_protocol::FromNetwork32(rawMagic);
     if (datagramMagic == udp_protocol::AudioMagic) {
         ProcessAudioDatagram(datagram, datagramBytes);
+        return std::nullopt;
+    }
+    if (datagramMagic == udp_protocol::ControlMagic) {
+        ProcessControlDatagram(datagram, datagramBytes);
         return std::nullopt;
     }
 
@@ -984,6 +1019,87 @@ bool UdpReceiver::EncryptFeedbackDatagram(std::vector<std::byte>& datagram)
         ciphertext.data(),
         ciphertext.size());
     return true;
+}
+
+bool UdpReceiver::EncryptControlDatagram(std::vector<std::byte>& datagram)
+{
+    if (!crypto_) {
+        return false;
+    }
+    if (datagram.size() != sizeof(udp_protocol::ControlPacket)) {
+        throw std::runtime_error("Control datagram has unexpected size for encryption");
+    }
+
+    udp_protocol::ControlPacket packet{};
+    std::memcpy(&packet, datagram.data(), sizeof(packet));
+    packet.flags = udp_protocol::ToNetwork32(udp_protocol::PacketFlagEncrypted);
+    WriteUdpCryptoNonce(
+        std::span<std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
+        controlNoncePrefix_,
+        udp_protocol::FromNetwork64(packet.sequence),
+        0);
+    std::memcpy(datagram.data(), &packet, sizeof(packet));
+
+    auto ciphertext = crypto_->Encrypt(
+        std::span<const std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
+        std::span<const std::byte>(datagram.data(), udp_protocol::ControlPacketAuthenticatedBytes),
+        std::span<const std::byte>(
+            datagram.data() + udp_protocol::ControlPacketEncryptedPayloadOffset,
+            datagram.size() - udp_protocol::ControlPacketEncryptedPayloadOffset),
+        std::span<std::byte, UdpCryptoTagBytes>(
+            datagram.data() + offsetof(udp_protocol::ControlPacket, encryptionTag),
+            UdpCryptoTagBytes));
+    std::memcpy(
+        datagram.data() + udp_protocol::ControlPacketEncryptedPayloadOffset,
+        ciphertext.data(),
+        ciphertext.size());
+    return true;
+}
+
+void UdpReceiver::ProcessControlDatagram(const std::byte* datagram, int datagramBytes)
+{
+    if (datagramBytes != static_cast<int>(sizeof(udp_protocol::ControlPacket))) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+
+    udp_protocol::ControlPacket header{};
+    std::memcpy(&header, datagram, sizeof(header));
+    const uint32_t flags = udp_protocol::FromNetwork32(header.flags);
+
+    auto payload = DecryptDatagramPayload(
+        datagram,
+        datagramBytes,
+        udp_protocol::ControlPacketEncryptedPayloadOffset,
+        udp_protocol::ControlPacketAuthenticatedBytes,
+        std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
+        std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes),
+        flags);
+    if (!payload ||
+        payload->size() != sizeof(udp_protocol::ControlPacket) - udp_protocol::ControlPacketEncryptedPayloadOffset) {
+        ++stats_.cryptoRejectedDatagrams;
+        return;
+    }
+
+    std::vector<std::byte> reassembled(sizeof(udp_protocol::ControlPacket));
+    std::memcpy(reassembled.data(), datagram, udp_protocol::ControlPacketEncryptedPayloadOffset);
+    std::memcpy(
+        reassembled.data() + udp_protocol::ControlPacketEncryptedPayloadOffset,
+        payload->data(),
+        payload->size());
+
+    auto message = udp_protocol::ParseControlDatagram(reassembled);
+    if (!message) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+    // No separate access-code check here: for encrypted sessions a successful
+    // AES-GCM decrypt already proves the sender holds the room key, and an
+    // explicit fingerprint compare only risks false rejects when the two sides'
+    // fingerprints are plumbed inconsistently.
+    if (onControl_) {
+        onControl_(*message);
+    }
 }
 
 void UdpReceiver::QueueDelayedDatagram(const std::byte* datagram, int datagramBytes, Clock::time_point releaseAt)

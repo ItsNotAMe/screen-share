@@ -41,6 +41,30 @@ QLabel#ToastText {
     background: transparent;
     border: 0;
 }
+QPushButton#ViewerControlToggle {
+    background: #20282a;
+    color: #b7c5c1;
+    border: 1px solid #2d3533;
+    border-radius: 6px;
+    padding: 2px 12px;
+    font-size: 9pt;
+}
+QPushButton#ViewerControlToggle:hover {
+    border-color: #3a4543;
+}
+QPushButton#ViewerControlToggle:checked {
+    background: #2a6f56;
+    color: #ffffff;
+    border-color: #38b27e;
+}
+QPushButton#ViewerControlToggle:disabled {
+    color: #5b6663;
+    border-color: #232b29;
+}
+QLabel#ActiveViewerRequest {
+    color: #f0b429;
+    font-weight: 600;
+}
 QPushButton#WindowControlButton,
 QPushButton#WindowCloseButton {
     background: transparent;

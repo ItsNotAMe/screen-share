@@ -4,7 +4,10 @@
 
 #include <QtGui/QPainter>
 #include <QtGui/QPaintEngine>
+#include <QtGui/QKeyEvent>
+#include <QtGui/QMouseEvent>
 #include <QtGui/QResizeEvent>
+#include <QtGui/QWheelEvent>
 #include <QtWidgets/QSizePolicy>
 
 #include <algorithm>
@@ -326,6 +329,10 @@ VideoFrameWidget::VideoFrameWidget(QWidget* parent) : QWidget(parent)
     framePresenter_ = std::make_shared<D3DFramePresenter>();
     d3dSurface_ = new D3DVideoSurface(this);
     d3dSurface_->setGeometry(rect());
+    // The D3D surface is a native child window, so it receives mouse/keyboard
+    // events instead of this widget while video is rendering. Filter its events
+    // so remote-control capture works over live video, not just the QImage path.
+    d3dSurface_->installEventFilter(this);
     updateD3DTarget();
 }
 
@@ -342,6 +349,10 @@ void VideoFrameWidget::setStatusText(const QString& text)
 
 bool VideoFrameWidget::setVideoFrame(screenshare::SessionEvent::VideoFrame frame)
 {
+    if (frame.width > 0 && frame.height > 0) {
+        frameWidth_.store(frame.width, std::memory_order_relaxed);
+        frameHeight_.store(frame.height, std::memory_order_relaxed);
+    }
     if (d3dSurface_ == nullptr) {
         QImage image = nv12ToRgb(frame);
         if (image.isNull()) {
@@ -358,6 +369,10 @@ bool VideoFrameWidget::setVideoFrame(screenshare::SessionEvent::VideoFrame frame
 
 bool VideoFrameWidget::presentVideoFrameAsync(screenshare::SessionEvent::VideoFrame frame)
 {
+    if (frame.width > 0 && frame.height > 0) {
+        frameWidth_.store(frame.width, std::memory_order_relaxed);
+        frameHeight_.store(frame.height, std::memory_order_relaxed);
+    }
     const auto presenter = framePresenter_;
     if (!presenter) {
         return false;
@@ -426,6 +441,261 @@ void VideoFrameWidget::clearFrame()
     }
     image_ = {};
     update();
+}
+
+void VideoFrameWidget::setRemoteInputHandler(std::function<void(const screenshare::RemoteInputEvent&)> handler)
+{
+    inputHandler_ = std::move(handler);
+}
+
+void VideoFrameWidget::setControlCapture(bool enabled, bool mouse, bool keyboard)
+{
+    controlActive_ = enabled;
+    controlMouse_ = enabled && mouse;
+    controlKeyboard_ = enabled && keyboard;
+    setMouseTracking(controlMouse_);
+    if (controlActive_) {
+        setFocusPolicy(Qt::StrongFocus);
+        setCursor(controlMouse_ ? Qt::CrossCursor : Qt::ArrowCursor);
+        setFocus(Qt::OtherFocusReason);
+    } else {
+        setFocusPolicy(Qt::NoFocus);
+        unsetCursor();
+    }
+    // Mirror the capture state onto the native render surface, which is the
+    // window that actually receives the events while video is on screen.
+    if (d3dSurface_ != nullptr) {
+        d3dSurface_->setMouseTracking(controlMouse_);
+        if (controlActive_) {
+            d3dSurface_->setFocusPolicy(Qt::StrongFocus);
+            d3dSurface_->setCursor(controlMouse_ ? Qt::CrossCursor : Qt::ArrowCursor);
+            d3dSurface_->setFocus(Qt::OtherFocusReason);
+        } else {
+            d3dSurface_->setFocusPolicy(Qt::NoFocus);
+            d3dSurface_->unsetCursor();
+        }
+    }
+}
+
+bool VideoFrameWidget::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched != d3dSurface_ || !controlActive_) {
+        return QWidget::eventFilter(watched, event);
+    }
+    switch (event->type()) {
+    case QEvent::MouseMove:
+        if (controlMouse_ && inputHandler_) {
+            auto* mouseEvent = static_cast<QMouseEvent*>(event);
+            float normX = 0.0f;
+            float normY = 0.0f;
+            if (mapToNormalized(mouseEvent->position().toPoint(), normX, normY)) {
+                screenshare::RemoteInputEvent input;
+                input.kind = screenshare::RemoteInputKind::MouseMove;
+                input.normX = normX;
+                input.normY = normY;
+                inputHandler_(input);
+            }
+            return true;
+        }
+        break;
+    case QEvent::MouseButtonPress:
+        if (controlMouse_) {
+            d3dSurface_->setFocus(Qt::MouseFocusReason);
+            emitMouseButton(static_cast<QMouseEvent*>(event), true);
+            return true;
+        }
+        break;
+    case QEvent::MouseButtonRelease:
+        if (controlMouse_) {
+            emitMouseButton(static_cast<QMouseEvent*>(event), false);
+            return true;
+        }
+        break;
+    case QEvent::Wheel:
+        if (controlMouse_ && inputHandler_) {
+            auto* wheelEvent = static_cast<QWheelEvent*>(event);
+            const QPoint delta = wheelEvent->angleDelta();
+            if (delta.x() != 0 || delta.y() != 0) {
+                screenshare::RemoteInputEvent input;
+                input.kind = screenshare::RemoteInputKind::MouseScroll;
+                input.scrollX = delta.x();
+                input.scrollY = delta.y();
+                inputHandler_(input);
+            }
+            return true;
+        }
+        break;
+    case QEvent::KeyPress:
+        if (controlKeyboard_) {
+            emitKey(static_cast<QKeyEvent*>(event), true);
+            return true;
+        }
+        break;
+    case QEvent::KeyRelease:
+        if (controlKeyboard_) {
+            emitKey(static_cast<QKeyEvent*>(event), false);
+            return true;
+        }
+        break;
+    default:
+        break;
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+bool VideoFrameWidget::mapToNormalized(const QPoint& pos, float& normX, float& normY) const
+{
+    const int frameW = frameWidth_.load(std::memory_order_relaxed);
+    const int frameH = frameHeight_.load(std::memory_order_relaxed);
+    if (frameW <= 0 || frameH <= 0 || width() <= 0 || height() <= 0) {
+        return false;
+    }
+    const QSize scaled = QSize(frameW, frameH).scaled(size(), Qt::KeepAspectRatio);
+    if (scaled.width() <= 0 || scaled.height() <= 0) {
+        return false;
+    }
+    const int left = (width() - scaled.width()) / 2;
+    const int top = (height() - scaled.height()) / 2;
+    const double relX = static_cast<double>(pos.x() - left) / static_cast<double>(scaled.width());
+    const double relY = static_cast<double>(pos.y() - top) / static_cast<double>(scaled.height());
+    if (relX < 0.0 || relX > 1.0 || relY < 0.0 || relY > 1.0) {
+        return false; // outside the letterboxed image
+    }
+    normX = static_cast<float>(relX);
+    normY = static_cast<float>(relY);
+    return true;
+}
+
+namespace {
+int RemoteMouseButtonId(Qt::MouseButton button)
+{
+    switch (button) {
+    case Qt::LeftButton:
+        return 0;
+    case Qt::RightButton:
+        return 1;
+    case Qt::MiddleButton:
+        return 2;
+    case Qt::XButton1:
+        return 3;
+    case Qt::XButton2:
+        return 4;
+    default:
+        return -1;
+    }
+}
+} // namespace
+
+void VideoFrameWidget::emitMouseButton(QMouseEvent* event, bool pressed)
+{
+    if (!controlMouse_ || !inputHandler_) {
+        return;
+    }
+    const int button = RemoteMouseButtonId(event->button());
+    if (button < 0) {
+        return;
+    }
+    float normX = 0.0f;
+    float normY = 0.0f;
+    if (!mapToNormalized(event->position().toPoint(), normX, normY)) {
+        return;
+    }
+    screenshare::RemoteInputEvent input;
+    input.kind = screenshare::RemoteInputKind::MouseButton;
+    input.button = button;
+    input.pressed = pressed;
+    input.normX = normX;
+    input.normY = normY;
+    inputHandler_(input);
+}
+
+void VideoFrameWidget::emitKey(QKeyEvent* event, bool pressed)
+{
+    if (!controlKeyboard_ || !inputHandler_) {
+        return;
+    }
+    screenshare::RemoteInputEvent input;
+    input.kind = screenshare::RemoteInputKind::Key;
+    input.key = static_cast<int>(event->nativeVirtualKey());
+    input.scancode = static_cast<int>(event->nativeScanCode());
+    input.pressed = pressed;
+    inputHandler_(input);
+}
+
+void VideoFrameWidget::mousePressEvent(QMouseEvent* event)
+{
+    if (controlMouse_) {
+        setFocus(Qt::MouseFocusReason);
+        emitMouseButton(event, true);
+        event->accept();
+        return;
+    }
+    QWidget::mousePressEvent(event);
+}
+
+void VideoFrameWidget::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (controlMouse_) {
+        emitMouseButton(event, false);
+        event->accept();
+        return;
+    }
+    QWidget::mouseReleaseEvent(event);
+}
+
+void VideoFrameWidget::mouseMoveEvent(QMouseEvent* event)
+{
+    if (controlMouse_ && inputHandler_) {
+        float normX = 0.0f;
+        float normY = 0.0f;
+        if (mapToNormalized(event->position().toPoint(), normX, normY)) {
+            screenshare::RemoteInputEvent input;
+            input.kind = screenshare::RemoteInputKind::MouseMove;
+            input.normX = normX;
+            input.normY = normY;
+            inputHandler_(input);
+        }
+        event->accept();
+        return;
+    }
+    QWidget::mouseMoveEvent(event);
+}
+
+void VideoFrameWidget::wheelEvent(QWheelEvent* event)
+{
+    if (controlMouse_ && inputHandler_) {
+        const QPoint delta = event->angleDelta();
+        if (delta.x() != 0 || delta.y() != 0) {
+            screenshare::RemoteInputEvent input;
+            input.kind = screenshare::RemoteInputKind::MouseScroll;
+            input.scrollX = delta.x();
+            input.scrollY = delta.y();
+            inputHandler_(input);
+        }
+        event->accept();
+        return;
+    }
+    QWidget::wheelEvent(event);
+}
+
+void VideoFrameWidget::keyPressEvent(QKeyEvent* event)
+{
+    if (controlKeyboard_) {
+        emitKey(event, true);
+        event->accept();
+        return;
+    }
+    QWidget::keyPressEvent(event);
+}
+
+void VideoFrameWidget::keyReleaseEvent(QKeyEvent* event)
+{
+    if (controlKeyboard_) {
+        emitKey(event, false);
+        event->accept();
+        return;
+    }
+    QWidget::keyReleaseEvent(event);
 }
 
 void VideoFrameWidget::paintEvent(QPaintEvent* event)

@@ -87,6 +87,7 @@ private:
     QComboBox* audioDeviceCombo_ = nullptr;
     QCheckBox* captureAudioCheck_ = nullptr;
     QCheckBox* reportCheck_ = nullptr;
+    QCheckBox* lowLatencyCheck_ = nullptr;
     QLineEdit* reportPathEdit_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     QPushButton* startButton_ = nullptr;

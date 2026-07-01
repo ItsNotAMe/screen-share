@@ -549,6 +549,16 @@ QWidget* CreateRoomWindow::buildSettingsPanel()
     tuneComboPopup(fpsCombo_);
     layout->addWidget(buildSettingRow("fps", "FPS", fpsCombo_));
 
+    lowLatencyCheck_ = new QCheckBox;
+    lowLatencyCheck_->setObjectName("RoomSwitch");
+    lowLatencyCheck_->setChecked(false);
+    lowLatencyCheck_->setCursor(Qt::PointingHandCursor);
+    lowLatencyCheck_->setFixedSize(44, 24);
+    lowLatencyCheck_->setToolTip(
+        "Send frames immediately for minimal input lag (best for gaming / remote control).\n"
+        "Trades a little smoothing for responsiveness.");
+    layout->addWidget(buildSettingRow("quality", "Low Latency", lowLatencyCheck_));
+
     audioDeviceCombo_ = new QComboBox;
     audioDeviceCombo_->setObjectName("RoomSettingsInput");
     audioDeviceCombo_->setFixedHeight(40);
@@ -922,6 +932,7 @@ screenshare::StreamSettings CreateRoomWindow::currentStreamSettings() const
     settings.fps = fpsCombo_ != nullptr ? fpsCombo_->currentData().toInt() : 60;
     settings.adaptBitrate = true;
     settings.adaptResolution = resolutionCombo_->currentData().toString() == "auto";
+    settings.lowLatency = lowLatencyCheck_ != nullptr && lowLatencyCheck_->isChecked();
     const QSize resolution = selectedResolution();
     if (validResolutionSize(resolution)) {
         settings.outputResolution = screenshare::SessionResolution{resolution.width(), resolution.height()};

@@ -51,6 +51,7 @@ void ApplyStreamSettingsToRuntimeRequest(
     request.adaptBitrate = settings.adaptBitrate;
     request.adaptResolution = settings.adaptResolution;
     request.adaptFps = settings.adaptFps;
+    request.lowLatency = settings.lowLatency;
 }
 
 RuntimeStreamSettingsRequest BuildRuntimeStreamSettingsRequest(const StreamSettings& settings)
@@ -349,6 +350,10 @@ public:
     void ApplyStreamSettings(const StreamSettings& settings);
     void ApplyShareSettings(const ShareSessionSettings& settings);
     void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
+    void SendRemoteInput(const RemoteInputEvent& event);
+    void RequestControl(uint32_t capabilities);
+    void ReleaseControl();
+    void SetViewerControl(const std::string& viewerId, uint32_t capabilities);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
     std::vector<SessionWindowInfo> ListWindows();
@@ -371,6 +376,7 @@ private:
     void HandleWatchLogLine(const std::string& line);
     void EmitStatus(SessionEventType type, std::string message);
     void EmitIssue(SessionIssue issue, std::string message);
+    void EmitControlEvent(SessionEventType type, std::string controlViewerId, uint32_t capabilities, std::string message);
     void Notify(SessionEventType type, SessionState state, std::string message);
     SessionStatus BuildStatusLocked() const;
 
@@ -392,6 +398,8 @@ private:
     uint64_t watchAudioPackets_ = 0;
     std::string natStatus_;
     std::string natHint_;
+    std::string controllerViewerId_;        // host: endpoint of the controlling viewer
+    uint32_t localControlCapabilities_ = 0;  // viewer: input types the host granted us
     bool previewClosedNotified_ = false;
     bool hostLeftNotified_ = false;
     bool stopRequested_ = false;
@@ -483,6 +491,31 @@ void ScreenShareSession::Impl::ApplyAudioPlaybackSettings(const AudioPlaybackSet
         currentState = state_;
     }
     Notify(SessionEventType::AudioStatusChanged, currentState, "Audio playback settings queued");
+}
+
+void ScreenShareSession::Impl::SendRemoteInput(const RemoteInputEvent& event)
+{
+    runtimeControl_.EnqueueInput(event);
+}
+
+void ScreenShareSession::Impl::RequestControl(uint32_t capabilities)
+{
+    RemoteInputEvent event;
+    event.kind = RemoteInputKind::RequestControl;
+    event.requestedCapabilities = capabilities;
+    runtimeControl_.EnqueueInput(event);
+}
+
+void ScreenShareSession::Impl::ReleaseControl()
+{
+    RemoteInputEvent event;
+    event.kind = RemoteInputKind::ReleaseControl;
+    runtimeControl_.EnqueueInput(event);
+}
+
+void ScreenShareSession::Impl::SetViewerControl(const std::string& viewerId, uint32_t capabilities)
+{
+    runtimeControl_.RequestViewerControl(RuntimeViewerControlRequest{viewerId, capabilities});
 }
 
 SessionStatus ScreenShareSession::Impl::GetStatus() const
@@ -1172,6 +1205,44 @@ void ScreenShareSession::Impl::HandleDiagnosticLogLine(const std::string& line)
 
 void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
 {
+    if (line.find("remote_control_request") != std::string::npos) {
+        const std::string endpoint = LogFieldValue(line, "endpoint");
+        const uint32_t caps = static_cast<uint32_t>(ParseUint64(LogFieldValue(line, "caps")).value_or(0));
+        std::string viewerId = endpoint;
+        {
+            std::scoped_lock lock(mutex_);
+            auto it = std::find_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
+                return viewer.endpoint == endpoint;
+            });
+            if (it != viewers_.end()) {
+                it->requestingControl = true;
+                viewerId = it->id;
+            }
+        }
+        EmitControlEvent(SessionEventType::ControlRequested, viewerId, caps, "Viewer requested control");
+        return;
+    }
+
+    if (line.find("remote_control_grant") != std::string::npos) {
+        const std::string endpoint = LogFieldValue(line, "endpoint");
+        const uint32_t caps = static_cast<uint32_t>(ParseUint64(LogFieldValue(line, "caps")).value_or(0));
+        std::string viewerId = endpoint;
+        {
+            std::scoped_lock lock(mutex_);
+            auto it = std::find_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
+                return viewer.endpoint == endpoint;
+            });
+            if (it != viewers_.end()) {
+                it->grantedCapabilities = caps;
+                it->requestingControl = false;
+                viewerId = it->id;
+            }
+            controllerViewerId_ = caps != 0 ? endpoint : std::string();
+        }
+        EmitControlEvent(SessionEventType::ControlStateChanged, viewerId, caps, "Control updated");
+        return;
+    }
+
     if (line.find("signaling_live_sender_peer=removed") != std::string::npos) {
         const std::string endpoint = LogFieldValue(line, "endpoint");
         if (endpoint.empty()) {
@@ -1276,6 +1347,20 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
 
 void ScreenShareSession::Impl::HandleWatchLogLine(const std::string& line)
 {
+    if (line.find("remote_control_state") != std::string::npos) {
+        const uint32_t caps = static_cast<uint32_t>(ParseUint64(LogFieldValue(line, "caps")).value_or(0));
+        {
+            std::scoped_lock lock(mutex_);
+            localControlCapabilities_ = caps;
+        }
+        EmitControlEvent(
+            SessionEventType::ControlStateChanged,
+            std::string(),
+            caps,
+            caps != 0 ? "You have control" : "Control ended");
+        return;
+    }
+
     bool activeNow = false;
     bool waitingForStream = false;
     bool hostLeft = false;
@@ -1362,6 +1447,29 @@ void ScreenShareSession::Impl::EmitIssue(SessionIssue issue, std::string message
     }
 }
 
+void ScreenShareSession::Impl::EmitControlEvent(
+    SessionEventType type,
+    std::string controlViewerId,
+    uint32_t capabilities,
+    std::string message)
+{
+    ISessionEventSink* observer = nullptr;
+    SessionEvent event;
+    {
+        std::scoped_lock lock(mutex_);
+        observer = observer_;
+        event.type = type;
+        event.status = BuildStatusLocked();
+        event.controlViewerId = controlViewerId;
+        event.controlCapabilities = capabilities;
+        event.message = std::move(message);
+    }
+
+    if (observer != nullptr) {
+        observer->OnSessionEvent(event);
+    }
+}
+
 void ScreenShareSession::Impl::Notify(SessionEventType type, SessionState state, std::string message)
 {
     ISessionEventSink* observer = nullptr;
@@ -1400,6 +1508,8 @@ SessionStatus ScreenShareSession::Impl::BuildStatusLocked() const
     status.audioPackets = watchAudioPackets_;
     status.natStatus = natStatus_;
     status.natHint = natHint_;
+    status.controllerViewerId = controllerViewerId_;
+    status.controlCapabilities = localControlCapabilities_;
     return status;
 }
 
@@ -1443,6 +1553,26 @@ void ScreenShareSession::ApplyShareSettings(const ShareSessionSettings& settings
 void ScreenShareSession::ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings)
 {
     impl_->ApplyAudioPlaybackSettings(settings);
+}
+
+void ScreenShareSession::SendRemoteInput(const RemoteInputEvent& event)
+{
+    impl_->SendRemoteInput(event);
+}
+
+void ScreenShareSession::RequestControl(uint32_t capabilities)
+{
+    impl_->RequestControl(capabilities);
+}
+
+void ScreenShareSession::ReleaseControl()
+{
+    impl_->ReleaseControl();
+}
+
+void ScreenShareSession::SetViewerControl(const std::string& viewerId, uint32_t capabilities)
+{
+    impl_->SetViewerControl(viewerId, capabilities);
 }
 
 SessionStatus ScreenShareSession::GetStatus() const

@@ -2,7 +2,12 @@
 
 ## Build Work
 
-1. User-facing diagnostics pass.
+1. Performance / latency optimization pass (top priority, once the mouse/keyboard remote-control feature is finished).
+   - [ ] Profile and cut latency + CPU across the live pipeline: capture -> encode -> send, and receive -> decode -> present.
+   - [ ] **Multi-viewer stalls:** with more than one viewer the stream sometimes gets stuck for viewers. Investigate the fanout send path (shared encoder output to multiple `UdpSender`s, per-target queue/pacing, keyframe delivery per target) — a slow/late target or per-target backlog may stall delivery.
+   - [ ] Low-latency mode follow-ups: live toggle in the active Share window, optional viewer-side audio-buffer trim, and confirm the encoder never holds frames for lookahead.
+
+2. User-facing diagnostics pass.
    - [ ] Map known runtime/report states to plain UI messages, starting with waiting for stream, password/encryption mismatch, UDP hole-punch failure, host left, and host idle.
    - [ ] Show an actionable next step in the active Share/Watch screens when setup is not healthy.
    - [ ] Keep warnings driven by real runtime/report signals, not guesses.
@@ -16,6 +21,16 @@
    - [ ] Add the smallest useful report fields needed by the new UI diagnostics.
    - [ ] Warn about likely silent or wrong-device audio capture only when transport is healthy but audio evidence looks wrong.
    - [ ] Promote items from Report-Driven Follow-Ups into build work only after reports reproduce them.
+
+## Remote Control & Optimizations
+
+Remote viewer control (mouse/keyboard, host-permissioned, per-input-type) landed for v0.2.0.
+Gamepad is deferred to v2 (ViGEm). Follow-ups and performance work:
+
+- [ ] Optimization pass across the live pipeline (capture/encode/send + receive/decode/present) to cut latency and CPU.
+- [ ] **Multi-viewer stalls:** with more than one viewer, the stream sometimes gets stuck for viewers. Investigate the fanout send path (shared encoder output to multiple `UdpSender`s, per-target queue/pacing, keyframe delivery per target) — a late/slow target or per-target backlog may be stalling delivery.
+- [ ] Low-latency mode follow-ups: live toggle in the active Share window (currently applied via room/stream settings), optional viewer-side audio-buffer trim, and confirm the encoder never holds frames for lookahead.
+- [ ] Gamepad (v2): viewer XInput capture -> control packets (already in the wire protocol) -> host virtual pad via ViGEmClient (needs the ViGEmBus driver) + enable the Share gamepad toggle.
 
 ## Backlog / Not Now
 

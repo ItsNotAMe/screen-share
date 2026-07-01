@@ -94,6 +94,20 @@ std::optional<RuntimeAudioPlaybackSettingsRequest> NullSessionRuntimeControl::Ta
     return std::nullopt;
 }
 
+std::optional<RuntimeViewerControlRequest> NullSessionRuntimeControl::TakeViewerControlRequest()
+{
+    return std::nullopt;
+}
+
+void NullSessionRuntimeControl::EnqueueInput(const RemoteInputEvent&)
+{
+}
+
+std::vector<RemoteInputEvent> NullSessionRuntimeControl::DrainInput()
+{
+    return {};
+}
+
 bool MemorySessionRuntimeControl::StopRequested()
 {
     std::scoped_lock lock(mutex_);
@@ -140,6 +154,50 @@ void MemorySessionRuntimeControl::RequestAudioPlaybackSettings(RuntimeAudioPlayb
     audioPlaybackSettingsRequest_ = std::move(request);
 }
 
+std::optional<RuntimeViewerControlRequest> MemorySessionRuntimeControl::TakeViewerControlRequest()
+{
+    std::scoped_lock lock(mutex_);
+    if (viewerControlRequests_.empty()) {
+        return std::nullopt;
+    }
+    RuntimeViewerControlRequest request = std::move(viewerControlRequests_.front());
+    viewerControlRequests_.pop_front();
+    return request;
+}
+
+void MemorySessionRuntimeControl::RequestViewerControl(RuntimeViewerControlRequest request)
+{
+    std::scoped_lock lock(mutex_);
+    viewerControlRequests_.push_back(std::move(request));
+}
+
+void MemorySessionRuntimeControl::EnqueueInput(const RemoteInputEvent& event)
+{
+    constexpr size_t kMaxQueuedInputEvents = 512;
+    std::scoped_lock lock(mutex_);
+    // Coalesce a run of mouse-move events: the latest position supersedes the
+    // previous one, so we never let pointer motion flood the queue. Discrete
+    // events (clicks, keys, scroll, control requests) are always kept.
+    if (event.kind == RemoteInputKind::MouseMove &&
+        !inputQueue_.empty() &&
+        inputQueue_.back().kind == RemoteInputKind::MouseMove) {
+        inputQueue_.back() = event;
+        return;
+    }
+    if (inputQueue_.size() >= kMaxQueuedInputEvents) {
+        inputQueue_.pop_front();
+    }
+    inputQueue_.push_back(event);
+}
+
+std::vector<RemoteInputEvent> MemorySessionRuntimeControl::DrainInput()
+{
+    std::scoped_lock lock(mutex_);
+    std::vector<RemoteInputEvent> drained(inputQueue_.begin(), inputQueue_.end());
+    inputQueue_.clear();
+    return drained;
+}
+
 void MemorySessionRuntimeControl::ClearStreamSettingsRequest()
 {
     std::scoped_lock lock(mutex_);
@@ -152,6 +210,8 @@ void MemorySessionRuntimeControl::Reset()
     stopRequested_ = false;
     streamSettingsRequest_.reset();
     audioPlaybackSettingsRequest_.reset();
+    viewerControlRequests_.clear();
+    inputQueue_.clear();
 }
 
 FileSessionRuntimeControl::FileSessionRuntimeControl(std::string stopFilePath, std::string controlFilePath)
@@ -202,6 +262,20 @@ std::optional<RuntimeStreamSettingsRequest> FileSessionRuntimeControl::TakeStrea
 std::optional<RuntimeAudioPlaybackSettingsRequest> FileSessionRuntimeControl::TakeAudioPlaybackSettingsRequest()
 {
     return std::nullopt;
+}
+
+std::optional<RuntimeViewerControlRequest> FileSessionRuntimeControl::TakeViewerControlRequest()
+{
+    return std::nullopt;
+}
+
+void FileSessionRuntimeControl::EnqueueInput(const RemoteInputEvent&)
+{
+}
+
+std::vector<RemoteInputEvent> FileSessionRuntimeControl::DrainInput()
+{
+    return {};
 }
 
 std::optional<RuntimeStreamSettingsRequest> ParseRuntimeStreamSettingsRequest(std::string_view content)

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <random>
@@ -126,6 +127,12 @@ public:
     [[nodiscard]] std::optional<UdpCompletedAudioPacket> PopAudioPacket();
     bool SendFeedback(const udp_protocol::FeedbackSnapshot& feedback);
 
+    // Remote-control channel (viewer side). SendControl ships an input event or
+    // RequestControl/ReleaseControl to the host over the same socket as feedback.
+    // The handler is invoked for host->viewer control messages (grant/deny/revoke).
+    bool SendControl(const udp_protocol::ControlMessage& message);
+    void SetControlHandler(std::function<void(const udp_protocol::ControlMessage&)> handler);
+
     [[nodiscard]] bool isOpen() const noexcept;
     [[nodiscard]] const UdpReceiverStats& stats() const noexcept { return stats_; }
     [[nodiscard]] size_t pendingFrameCount() const noexcept { return pendingFrames_.size(); }
@@ -198,6 +205,7 @@ private:
     [[nodiscard]] std::optional<UdpCompletedFrame> ReleaseReadyDelayedDatagram(Clock::time_point now);
     [[nodiscard]] std::optional<UdpCompletedFrame> ProcessDatagram(const std::byte* datagram, int datagramBytes);
     void ProcessAudioDatagram(const std::byte* datagram, int datagramBytes);
+    void ProcessControlDatagram(const std::byte* datagram, int datagramBytes);
     void QueueDelayedDatagram(const std::byte* datagram, int datagramBytes, Clock::time_point releaseAt);
     [[nodiscard]] bool ShouldSimulateLoss();
     [[nodiscard]] std::chrono::milliseconds NextSimulatedJitterDelay();
@@ -215,6 +223,7 @@ private:
         std::span<const std::byte, UdpCryptoTagBytes> tag,
         uint32_t flags);
     bool EncryptFeedbackDatagram(std::vector<std::byte>& datagram);
+    bool EncryptControlDatagram(std::vector<std::byte>& datagram);
     void MaybeSendNatProbes(Clock::time_point now);
 
     uintptr_t socket_ = 0;
@@ -232,6 +241,9 @@ private:
     std::mt19937 simulationRng_{1};
     std::unique_ptr<UdpAesGcm> crypto_;
     uint32_t feedbackNoncePrefix_ = 0;
+    uint32_t controlNoncePrefix_ = 0;
+    uint64_t nextControlSequence_ = 1;
+    std::function<void(const udp_protocol::ControlMessage&)> onControl_;
     Clock::time_point nextNatProbeAt_{};
     uint64_t nextNatProbeSequence_ = 1;
     bool winsockStarted_ = false;

@@ -23,6 +23,15 @@ public:
     void ApplyStreamSettings(const StreamSettings& settings);
     void ApplyShareSettings(const ShareSessionSettings& settings);
     void ApplyAudioPlaybackSettings(const AudioPlaybackSettings& settings);
+
+    // Remote control. Viewer side: queue an input event, or ask the host for /
+    // release control. Host side: set the exact input types one viewer may drive
+    // (capabilities is a ControlCapability bitmask; 0 revokes).
+    void SendRemoteInput(const RemoteInputEvent& event);
+    void RequestControl(uint32_t capabilities);
+    void ReleaseControl();
+    void SetViewerControl(const std::string& viewerId, uint32_t capabilities);
+
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
     std::vector<SessionWindowInfo> ListWindows();

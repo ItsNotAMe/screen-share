@@ -12,6 +12,7 @@ namespace screenshare::udp_protocol {
 constexpr uint32_t PacketMagic = 0x53535631; // "SSV1"
 constexpr uint32_t FeedbackMagic = 0x53534631; // "SSF1"
 constexpr uint32_t AudioMagic = 0x53534131; // "SSA1"
+constexpr uint32_t ControlMagic = 0x53534331; // "SSC1"
 constexpr uint16_t PacketVersion = 3;
 constexpr uint16_t LegacyPacketVersion = 1;
 constexpr uint16_t AccessCodePacketVersion = 2;
@@ -50,6 +51,55 @@ enum AudioPacketFlags : uint32_t {
     AudioPacketFlagSilent = 1U << 0,
     AudioPacketFlagDataDiscontinuity = 1U << 1,
     AudioPacketFlagTimestampError = 1U << 2,
+};
+
+// Remote-control channel. Viewer -> host: input events + RequestControl/ReleaseControl.
+// Host -> viewer: GrantControl/DenyControl/RevokeControl acknowledgements.
+enum class ControlCommandType : uint16_t {
+    Unknown = 0,
+    RequestControl = 1,
+    ReleaseControl = 2,
+    GrantControl = 3,
+    DenyControl = 4,
+    RevokeControl = 5,
+    MouseMove = 16,
+    MouseButton = 17,
+    MouseScroll = 18,
+    KeyEvent = 19,
+};
+
+// Per-input-type permission bitmask. The host grants each independently.
+enum ControlCapabilityFlags : uint32_t {
+    ControlCapabilityMouse = 1U << 0,
+    ControlCapabilityKeyboard = 1U << 1,
+    ControlCapabilityGamepad = 1U << 2, // reserved for v2 (gamepad injection)
+};
+
+// Mouse button identifiers used by MouseButton commands.
+enum class ControlMouseButton : uint16_t {
+    Left = 0,
+    Right = 1,
+    Middle = 2,
+    X1 = 3,
+    X2 = 4,
+};
+
+// Parsed, host-order representation of a control packet.
+struct ControlMessage {
+    ControlCommandType command = ControlCommandType::Unknown;
+    uint64_t sequence = 0;
+    uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
+    uint32_t capabilities = 0; // for GrantControl/RevokeControl
+    float mouseX = 0.0f;       // normalized [0..1] across the captured surface
+    float mouseY = 0.0f;
+    int32_t scrollX = 0;       // wheel deltas (WHEEL_DELTA units)
+    int32_t scrollY = 0;
+    uint16_t button = 0;       // ControlMouseButton for MouseButton commands
+    uint16_t key = 0;          // virtual-key code for KeyEvent
+    uint16_t scancode = 0;     // hardware scancode for KeyEvent
+    uint16_t modifiers = 0;    // reserved modifier bitmask
+    bool pressed = false;      // down (true) vs up (false) for button/key
 };
 
 struct FeedbackSnapshot {
@@ -140,17 +190,46 @@ struct AudioPacketHeader {
     std::byte encryptionNonce[CryptoNonceBytes]{};
     std::byte encryptionTag[CryptoTagBytes]{};
 };
+
+struct ControlPacket {
+    uint32_t magic = 0;
+    uint16_t version = 0;
+    uint16_t packetBytes = 0;
+    uint32_t flags = 0;
+    std::byte encryptionNonce[CryptoNonceBytes]{};
+    std::byte encryptionTag[CryptoTagBytes]{};
+    // Encrypted region begins here (offsetof sequence).
+    uint64_t sequence = 0;
+    uint64_t sessionFingerprint = 0;
+    uint64_t accessCodeFingerprint = 0;
+    uint16_t command = 0;
+    uint16_t button = 0;
+    uint16_t key = 0;
+    uint16_t scancode = 0;
+    uint16_t modifiers = 0;
+    uint16_t reserved = 0;
+    uint32_t capabilities = 0;
+    uint32_t mouseX = 0; // normalized [0..1] stored as fixed-point (x * 1e6)
+    uint32_t mouseY = 0;
+    int32_t scrollX = 0;
+    int32_t scrollY = 0;
+    uint32_t pressed = 0;
+    uint32_t reserved2 = 0; // pads to an 8-byte multiple so size is layout-invariant
+};
 #pragma pack(pop)
 
 static_assert(sizeof(PacketHeader) == 88);
 static_assert(sizeof(FeedbackPacket) == 144);
 static_assert(sizeof(AudioPacketHeader) == 112);
+static_assert(sizeof(ControlPacket) == 104);
 
 inline constexpr size_t PacketHeaderAuthenticatedBytes = offsetof(PacketHeader, encryptionTag);
 inline constexpr size_t AudioPacketHeaderAuthenticatedBytes = offsetof(AudioPacketHeader, encryptionTag);
 inline constexpr size_t FeedbackPacketAuthenticatedBytes = offsetof(FeedbackPacket, encryptionTag);
 inline constexpr size_t FeedbackPacketEncryptedPayloadOffset =
     offsetof(FeedbackPacket, sequence);
+inline constexpr size_t ControlPacketAuthenticatedBytes = offsetof(ControlPacket, encryptionTag);
+inline constexpr size_t ControlPacketEncryptedPayloadOffset = offsetof(ControlPacket, sequence);
 
 constexpr uint16_t ByteSwap16(uint16_t value) noexcept
 {
@@ -221,5 +300,8 @@ const char* AudioSampleFormatName(AudioSampleFormat format);
 const char* AudioCodecName(AudioCodec codec);
 std::vector<std::byte> BuildFeedbackDatagram(const FeedbackSnapshot& feedback);
 std::optional<FeedbackSnapshot> ParseFeedbackDatagram(std::span<const std::byte> datagram);
+std::vector<std::byte> BuildControlDatagram(const ControlMessage& message);
+std::optional<ControlMessage> ParseControlDatagram(std::span<const std::byte> datagram);
+const char* ControlCommandName(ControlCommandType command);
 
 } // namespace screenshare::udp_protocol

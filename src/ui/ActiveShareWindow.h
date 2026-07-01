@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 
+class QCheckBox;
 class QComboBox;
 class QEvent;
 class QFrame;
@@ -112,6 +113,7 @@ private:
     QComboBox* settingsFpsCombo_ = nullptr;
     QComboBox* bitrateCombo_ = nullptr;
     QComboBox* settingsAudioCombo_ = nullptr;
+    QCheckBox* settingsLowLatencyCheck_ = nullptr;
     QString lastViewerSignature_;
     bool updatingSettingsUi_ = false;
     bool hostAudioMuted_ = false;
@@ -121,5 +123,6 @@ private:
     QString appliedResolutionValue_;
     int appliedFpsValue_ = 60;
     uint32_t appliedBitrateBps_ = 0;
+    bool appliedLowLatency_ = false;
     QString appliedAudioDeviceValue_;
 };

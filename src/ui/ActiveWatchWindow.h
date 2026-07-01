@@ -49,6 +49,7 @@ private:
     void updateElapsed();
     void updateStatus(const screenshare::SessionStatus& status);
     void updateAudioControls(const screenshare::SessionAudioStatus& audio);
+    void updateReceiveBitrate(uint64_t payloadBytes);
     void applyVolume(int volumePercent);
     void toggleMute();
     void refreshMuteButton();
@@ -61,6 +62,8 @@ private:
     void setPreviewStatusText(const QString& text);
     void handleHostLeft();
     void exitToHomeAfterHostLeft();
+    void handleControlState(uint32_t capabilities);
+    void toggleControlRequest();
     void leaveRoom();
     void handleFinished(const QtSessionBackend::FinishInfo& info);
     QString stateText(const screenshare::SessionStatus& status) const;
@@ -90,7 +93,16 @@ private:
     QLabel* resolutionLabel_ = nullptr;
     QLabel* fpsLabel_ = nullptr;
     QLabel* bitrateLabel_ = nullptr;
+    QLabel* latencyLabel_ = nullptr;
     QPushButton* leaveButton_ = nullptr;
+    QPushButton* controlButton_ = nullptr;
+    QWidget* controlStatusRow_ = nullptr;
+    QLabel* controlMouseIcon_ = nullptr;
+    QLabel* controlKeyboardIcon_ = nullptr;
+    uint32_t controlCapabilities_ = 0;
+    uint64_t lastBitrateBytes_ = 0;
+    qint64 lastBitrateSampleMs_ = -1;
+    double receiveBitrateMbps_ = 0.0;
     QPushButton* muteButton_ = nullptr;
     QPushButton* fullscreenButton_ = nullptr;
     QSlider* volumeSlider_ = nullptr;
