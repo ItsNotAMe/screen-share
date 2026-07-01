@@ -499,6 +499,10 @@ bool VideoFrameWidget::eventFilter(QObject* watched, QEvent* event)
         }
         break;
     case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonDblClick:
+        // Qt delivers a double-click as Press, Release, DblClick, Release — the
+        // DblClick stands in for the second press, so forward it as a button-down
+        // or the host only ever sees a single click.
         if (controlMouse_) {
             d3dSurface_->setFocus(Qt::MouseFocusReason);
             emitMouseButton(static_cast<QMouseEvent*>(event), true);

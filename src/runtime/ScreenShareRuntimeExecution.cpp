@@ -3152,10 +3152,21 @@ void RunCaptureStats(
     screenshare::RemoteInputInjector remoteInputInjector;
     std::string remoteControlEndpoint;   // endpoint of the viewer currently granted control
     uint32_t remoteControlCapabilities = 0;
-    // Control acks are single UDP datagrams; a lost grant would leave the viewer
-    // stuck showing "Request Control" forever. Re-assert the current grant to the
-    // controller periodically so a dropped ack self-heals within ~1s.
-    Clock::time_point lastControlResendAt = Clock::now();
+    // A control ack is a single UDP datagram; to survive loss we re-send the
+    // latest ack a few times right after each state change. This is a bounded
+    // burst, not a perpetual re-assert: a steady-state re-grant would fight an
+    // optimistic viewer-side release (re-arming capture the user just dropped)
+    // and would keep spamming a controller that has since disconnected.
+    std::string controlAckEndpoint;      // who to (re)send the latest ack to
+    uint32_t controlAckCaps = 0;         // caps of that ack (0 = revoke)
+    int controlAckResendsLeft = 0;
+    Clock::time_point nextControlAckAt = Clock::now();
+    auto scheduleControlAckBurst = [&](std::string endpoint, uint32_t caps) {
+        controlAckEndpoint = std::move(endpoint);
+        controlAckCaps = caps;
+        controlAckResendsLeft = 3;
+        nextControlAckAt = Clock::now() + std::chrono::milliseconds(150);
+    };
     auto refreshRemoteControlBounds = [&](int displayIndex) {
         const auto displays = screenshare::DesktopCapturer::EnumerateDisplays();
         for (const auto& display : displays) {
@@ -3343,6 +3354,10 @@ void RunCaptureStats(
                     if (endpoint == remoteControlEndpoint) {
                         remoteControlEndpoint.clear();
                         remoteControlCapabilities = 0;
+                        // The viewer already updated its own UI optimistically;
+                        // cancel any in-flight grant burst so it does not re-arm
+                        // the capture the viewer just released.
+                        controlAckResendsLeft = 0;
                         std::cout << "remote_control_grant endpoint=" << endpoint << " caps=0\n" << std::flush;
                     }
                     return;
@@ -3486,6 +3501,14 @@ void RunCaptureStats(
                 udpSendTargetSpecs.end());
             if (udpSender) {
                 udpSender->SuppressEndpoint(endpoint);
+            }
+            // If the departing peer held control, drop the grant so a later
+            // viewer that reuses this ip:port can't silently inherit it, and
+            // stop any pending ack burst aimed at the dead endpoint.
+            if (endpoint == remoteControlEndpoint) {
+                remoteControlEndpoint.clear();
+                remoteControlCapabilities = 0;
+                controlAckResendsLeft = 0;
             }
 
             std::cout
@@ -3776,6 +3799,15 @@ void RunCaptureStats(
                 restartCapture = true;
                 adaptiveResolutionTiers.clear();
                 adaptiveResolutionTierIndex = 0;
+                // Keep remote-input bounds in step with the capture source.
+                // Display capture has known monitor bounds; window capture does
+                // not yet (v1), so clear the bounds to disable injection rather
+                // than mapping onto the stale previous monitor rectangle.
+                if (config.sourceType == screenshare::CaptureSourceType::Display) {
+                    refreshRemoteControlBounds(config.displayIndex);
+                } else {
+                    remoteInputInjector.SetTargetBounds(0, 0, 0, 0);
+                }
                 std::cout << "runtime_capture_source="
                           << (config.sourceType == screenshare::CaptureSourceType::Window ? "window" : "display")
                           << "\n";
@@ -4029,6 +4061,17 @@ void RunCaptureStats(
 
         // Apply host grant/revoke requests from the UI and acknowledge the viewer.
         while (auto controlRequest = runtimeControl.TakeViewerControlRequest()) {
+            // Single controller: if control moves to a different viewer, revoke
+            // the previous one so its UI stops showing "in control".
+            if (!remoteControlEndpoint.empty() &&
+                remoteControlEndpoint != controlRequest->viewerId && udpSender) {
+                screenshare::udp_protocol::ControlMessage revoke;
+                revoke.command = screenshare::udp_protocol::ControlCommandType::RevokeControl;
+                revoke.accessCodeFingerprint = options.accessCodeFingerprint;
+                udpSender->SendControlTo(remoteControlEndpoint, revoke);
+                std::cout << "remote_control_grant endpoint=" << remoteControlEndpoint
+                          << " caps=0\n" << std::flush;
+            }
             remoteControlEndpoint = controlRequest->capabilities != 0 ? controlRequest->viewerId : std::string();
             remoteControlCapabilities = controlRequest->capabilities;
             screenshare::udp_protocol::ControlMessage ack;
@@ -4041,21 +4084,24 @@ void RunCaptureStats(
             std::cout << "remote_control_grant endpoint=" << controlRequest->viewerId
                       << " caps=" << controlRequest->capabilities
                       << " sent=" << (acked ? "yes" : "no") << "\n" << std::flush;
-            lastControlResendAt = Clock::now();
+            // Re-send the ack a few times (below) so a single dropped datagram
+            // does not leave the viewer's control state out of sync.
+            scheduleControlAckBurst(controlRequest->viewerId, controlRequest->capabilities);
         }
 
-        // Re-assert the active grant periodically so a viewer that missed the
-        // initial ack (single UDP datagram) still learns it holds control. The
-        // viewer's state handler is idempotent, so re-sending the same caps is a
-        // no-op there beyond refreshing the UI.
-        if (!remoteControlEndpoint.empty() && udpSender &&
-            Clock::now() - lastControlResendAt >= std::chrono::milliseconds(750)) {
-            screenshare::udp_protocol::ControlMessage refresh;
-            refresh.command = screenshare::udp_protocol::ControlCommandType::GrantControl;
-            refresh.capabilities = remoteControlCapabilities;
-            refresh.accessCodeFingerprint = options.accessCodeFingerprint;
-            udpSender->SendControlTo(remoteControlEndpoint, refresh);
-            lastControlResendAt = Clock::now();
+        // Bounded loss-resilience burst: re-send the latest ack a few times over
+        // ~0.5s after a state change, then stop. No perpetual re-assert (which
+        // would fight an optimistic release or spam a departed controller).
+        if (controlAckResendsLeft > 0 && udpSender && Clock::now() >= nextControlAckAt) {
+            screenshare::udp_protocol::ControlMessage ack;
+            ack.command = controlAckCaps != 0
+                ? screenshare::udp_protocol::ControlCommandType::GrantControl
+                : screenshare::udp_protocol::ControlCommandType::RevokeControl;
+            ack.capabilities = controlAckCaps;
+            ack.accessCodeFingerprint = options.accessCodeFingerprint;
+            udpSender->SendControlTo(controlAckEndpoint, ack);
+            --controlAckResendsLeft;
+            nextControlAckAt = Clock::now() + std::chrono::milliseconds(150);
         }
 
         std::optional<screenshare::CapturedFrame> frame;

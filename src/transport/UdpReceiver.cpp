@@ -1067,6 +1067,15 @@ void UdpReceiver::ProcessControlDatagram(const std::byte* datagram, int datagram
     std::memcpy(&header, datagram, sizeof(header));
     const uint32_t flags = udp_protocol::FromNetwork32(header.flags);
 
+    // Reject unauthenticated plaintext control on an encrypted session. A
+    // successful AES-GCM decrypt is the only proof the sender holds the room
+    // key; without this guard a forged plaintext grant/revoke would be accepted
+    // (mirrors the host-side reject in UdpSender::ProcessControlPacket).
+    if ((flags & udp_protocol::PacketFlagEncrypted) == 0 && crypto_) {
+        ++stats_.cryptoRejectedDatagrams;
+        return;
+    }
+
     auto payload = DecryptDatagramPayload(
         datagram,
         datagramBytes,

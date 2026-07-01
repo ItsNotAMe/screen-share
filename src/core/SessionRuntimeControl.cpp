@@ -185,7 +185,20 @@ void MemorySessionRuntimeControl::EnqueueInput(const RemoteInputEvent& event)
         return;
     }
     if (inputQueue_.size() >= kMaxQueuedInputEvents) {
-        inputQueue_.pop_front();
+        // On overflow sacrifice the oldest pointer motion, never a discrete
+        // event: dropping a click/key/scroll/control press or release would
+        // desync host button/key state (e.g. a keyup with no keydown). Only if
+        // the queue is somehow all-discrete do we drop the oldest as a last
+        // resort.
+        auto stale = std::find_if(
+            inputQueue_.begin(),
+            inputQueue_.end(),
+            [](const RemoteInputEvent& queued) { return queued.kind == RemoteInputKind::MouseMove; });
+        if (stale != inputQueue_.end()) {
+            inputQueue_.erase(stale);
+        } else {
+            inputQueue_.pop_front();
+        }
     }
     inputQueue_.push_back(event);
 }

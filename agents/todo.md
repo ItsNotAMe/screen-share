@@ -32,6 +32,16 @@ Gamepad is deferred to v2 (ViGEm). Follow-ups and performance work:
 - [ ] Low-latency mode follow-ups: live toggle in the active Share window (currently applied via room/stream settings), optional viewer-side audio-buffer trim, and confirm the encoder never holds frames for lookahead.
 - [ ] Gamepad (v2): viewer XInput capture -> control packets (already in the wire protocol) -> host virtual pad via ViGEmClient (needs the ViGEmBus driver) + enable the Share gamepad toggle.
 
+### Remote-control review follow-ups (PR #143 code review; deferred, non-blocking)
+
+- [ ] **Window-capture remote input:** `refreshRemoteControlBounds` only maps display bounds, so remote mouse control is a no-op while sharing a *window* (bounds are cleared on switch-to-window). Add client-rect-in-screen-space mapping for `CaptureSourceType::Window` (track window move/resize).
+- [ ] **Lazy mouse hook:** `RemoteInputInjector` installs a system-wide `WH_MOUSE_LL` hook + pump thread for *every* host session, even view-only ones. Construct the injector/monitor lazily only once a mouse capability is first granted.
+- [ ] **Scroll targeting:** `InjectMouseScroll` sends `MOUSEEVENTF_WHEEL` without repositioning the cursor, so the wheel hits whatever window is under the *host's* real cursor. Carry the cursor position with scroll and reposition first (like clicks do).
+- [ ] **Stuck keys/modifiers:** a lost key-up datagram (or releasing control mid-hold) leaves a key logically held on the host. Release all currently-held viewer keys/buttons when control ends or the controller changes.
+- [ ] **"Requesting..." soft-lock:** if the host never answers, the viewer button stays "Requesting..." with no timeout/cancel. Add a timeout back to "Request Control" and let a click cancel a pending request.
+- [ ] **Mid-session low-latency:** the live in-room toggle flips send pacing but not `udpMaxQueueMs` (which room-creation sets to 0 for low latency), so a live toggle doesn't drop already-queued buffer depth the way starting fresh does.
+- [ ] **Cleanup:** dedup the control-peer upsert block in `UdpSender` (feedback path vs `ProcessControlPacket`) into one `UpsertControlPeerLocked` helper; input auto-repeat and hi-res-wheel handling for `VideoFrameWidget` (classic mice already correct).
+
 ## Backlog / Not Now
 
 These are real ideas, but they should stay behind the current diagnostics/state/report polish pass.

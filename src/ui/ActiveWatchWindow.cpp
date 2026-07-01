@@ -165,6 +165,21 @@ QString avSyncText(const screenshare::SessionAudioStatus& audio)
     return QStringLiteral("%1 ms").arg(audio.avAudioAheadMs);
 }
 
+QString controlTypesString(uint32_t capabilities)
+{
+    QString types;
+    if ((capabilities & screenshare::ControlCapabilityMouse) != 0) {
+        types += QStringLiteral("Mouse");
+    }
+    if ((capabilities & screenshare::ControlCapabilityKeyboard) != 0) {
+        if (!types.isEmpty()) {
+            types += QStringLiteral(" + ");
+        }
+        types += QStringLiteral("Keyboard");
+    }
+    return types;
+}
+
 QString latencyText(const screenshare::SessionAudioStatus& audio)
 {
     if (!audio.hasStats) {
@@ -218,6 +233,12 @@ void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
     presentedFps_ = 0.0;
     latestStreamFps_ = 0.0;
     presentedFpsTimer_.restart();
+    // Re-baseline the received-bitrate sampler: elapsed_ was just restarted, so
+    // a stale sample time would otherwise make the delta negative and freeze the
+    // stat on rejoin.
+    lastBitrateBytes_ = 0;
+    lastBitrateSampleMs_ = -1;
+    receiveBitrateMbps_ = 0.0;
     videoFrameWidget_->clearFrame();
     setPreviewStatusText("Connecting...");
     startWatch();
@@ -614,7 +635,14 @@ void ActiveWatchWindow::updateStatus(const screenshare::SessionStatus& status)
     } else {
         setPreviewStatusText(status.state == screenshare::SessionState::Live ? "Receiving stream" : "Waiting for stream");
     }
-    connectionLabel_->setText(connectionText(status));
+    // While a control grant is active, keep the "You control" indicator; the
+    // ordinary ~1/sec status tick would otherwise clobber it back to the plain
+    // connection text.
+    if (controlCapabilities_ != 0) {
+        connectionLabel_->setText(QStringLiteral("You control: %1").arg(controlTypesString(controlCapabilities_)));
+    } else {
+        connectionLabel_->setText(connectionText(status));
+    }
     avSyncLabel_->setText(avSyncText(status.audio));
     qualityLabel_->setText(status.stream.hasStats ? QStringLiteral("High") : QStringLiteral("-"));
     resolutionLabel_->setText(resolutionText(status));
@@ -961,16 +989,7 @@ void ActiveWatchWindow::handleControlState(uint32_t capabilities)
     if (videoFrameWidget_ != nullptr) {
         videoFrameWidget_->setControlCapture(capabilities != 0, mouse, keyboard);
     }
-    QString types;
-    if (mouse) {
-        types += QStringLiteral("Mouse");
-    }
-    if (keyboard) {
-        if (!types.isEmpty()) {
-            types += QStringLiteral(" + ");
-        }
-        types += QStringLiteral("Keyboard");
-    }
+    const QString types = controlTypesString(capabilities);
     if (controlButton_ != nullptr) {
         controlButton_->setText(capabilities != 0
             ? QStringLiteral("Release Control")

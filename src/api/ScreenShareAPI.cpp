@@ -1259,6 +1259,9 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
                 }),
                 viewers_.end());
             removed = viewers_.size() != oldSize;
+            if (controllerViewerId_ == endpoint) {
+                controllerViewerId_.clear();
+            }
             if (removed && viewers_.empty() && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
                 state_ = SessionState::Connecting;
                 summary_ = "Waiting for viewers";
