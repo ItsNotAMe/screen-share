@@ -3185,6 +3185,16 @@ void RunCaptureStats(
     screenshare::RemoteInputInjector remoteInputInjector;
     std::string remoteControlEndpoint;   // endpoint of the viewer currently granted control
     uint32_t remoteControlCapabilities = 0;
+    // Rate-limit injected input. A granted viewer that is compromised or buggy
+    // could otherwise stream control packets fast enough to flood SendInput and
+    // make the host unusable (and unable to reach the revoke controls). A token
+    // bucket caps the sustained injection rate while allowing a burst, so smooth
+    // high-frequency mouse control is unaffected but an unbounded flood is not.
+    constexpr double kRemoteInputTokensPerSecond = 1000.0;
+    constexpr double kRemoteInputTokenBurst = 500.0;
+    double remoteInputTokens = kRemoteInputTokenBurst;
+    Clock::time_point remoteInputTokensUpdatedAt = Clock::now();
+    uint64_t remoteInputEventsDropped = 0;
     // A control ack is a single UDP datagram; to survive loss we re-send the
     // latest ack a few times right after each state change. This is a bounded
     // burst, not a perpetual re-assert: a steady-state re-grant would fight an
@@ -3419,6 +3429,29 @@ void RunCaptureStats(
                     (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityMouse) != 0;
                 const bool keyboardOk =
                     (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityKeyboard) != 0;
+                // Token-bucket rate limit. Every remaining command is an input
+                // command (grant/deny/revoke are host->viewer, request/release
+                // handled above), so each consumes one token; a drained bucket
+                // drops the event rather than injecting it.
+                {
+                    const auto nowInput = Clock::now();
+                    const double elapsedSeconds =
+                        std::chrono::duration<double>(nowInput - remoteInputTokensUpdatedAt).count();
+                    remoteInputTokensUpdatedAt = nowInput;
+                    remoteInputTokens = std::min(
+                        kRemoteInputTokenBurst,
+                        remoteInputTokens + elapsedSeconds * kRemoteInputTokensPerSecond);
+                    if (remoteInputTokens < 1.0) {
+                        ++remoteInputEventsDropped;
+                        // Throttled telemetry: surface a flood without spamming.
+                        if (remoteInputEventsDropped % 500 == 1) {
+                            std::cout << "remote_control_input_throttled endpoint=" << endpoint
+                                      << " dropped=" << remoteInputEventsDropped << "\n" << std::flush;
+                        }
+                        return;
+                    }
+                    remoteInputTokens -= 1.0;
+                }
                 switch (message.command) {
                 case Command::MouseMove:
                     if (mouseOk) {
