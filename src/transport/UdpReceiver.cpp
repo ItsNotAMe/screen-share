@@ -25,6 +25,37 @@
 namespace screenshare {
 namespace {
 
+// Insert byte range [begin, end) into a list of already-received fragment
+// ranges kept sorted by `begin`, rejecting (returning false) if it overlaps an
+// existing range. Because the stored ranges are disjoint and sorted, only the
+// immediate neighbors can overlap, so this is O(log n) (binary search + two
+// neighbor checks) instead of the O(n) linear scan it replaces — bounding the
+// per-frame reassembly cost at O(n log n) rather than O(n^2). Works for both
+// the video and audio pending-fragment structs (identical FragmentRange shape).
+template <typename RangeVec>
+bool InsertDisjointFragmentRange(RangeVec& ranges, uint32_t begin, uint32_t end)
+{
+    // First stored range whose begin is >= the new range's begin.
+    auto next = std::lower_bound(
+        ranges.begin(),
+        ranges.end(),
+        begin,
+        [](const auto& range, uint32_t value) { return range.begin < value; });
+    // Overlap with the successor: the new range extends past its start.
+    if (next != ranges.end() && end > next->begin) {
+        return false;
+    }
+    // Overlap with the predecessor: its end extends past the new range's start.
+    if (next != ranges.begin()) {
+        const auto prev = std::prev(next);
+        if (prev->end > begin) {
+            return false;
+        }
+    }
+    ranges.insert(next, {begin, end});
+    return true;
+}
+
 std::string WinsockErrorDescription(int error)
 {
     switch (error) {
@@ -702,13 +733,13 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     }
 
     const uint32_t fragmentEnd = fragmentOffset + payloadBytes;
-    for (const auto& range : pending.receivedRanges) {
-        if (fragmentOffset < range.end && fragmentEnd > range.begin) {
-            ++stats_.invalidDatagrams;
-            return std::nullopt;
-        }
-    }
     if (payloadBytes > pending.frameBytes - pending.receivedBytes) {
+        ++stats_.invalidDatagrams;
+        return std::nullopt;
+    }
+    // Reject a fragment whose byte range overlaps one already received (a peer
+    // lying about fragmentOffset), recording it in sorted order on success.
+    if (!InsertDisjointFragmentRange(pending.receivedRanges, fragmentOffset, fragmentEnd)) {
         ++stats_.invalidDatagrams;
         return std::nullopt;
     }
@@ -721,7 +752,6 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
 
     std::memcpy(pending.bytes.data() + fragmentOffset, payloadData, payloadBytes);
     pending.fragmentReceived[fragmentIndex] = 1;
-    pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
     ++pending.receivedFragments;
     pending.receivedBytes += payloadBytes;
 
@@ -915,13 +945,13 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     }
 
     const uint32_t fragmentEnd = fragmentOffset + payloadBytes;
-    for (const auto& range : pending.receivedRanges) {
-        if (fragmentOffset < range.end && fragmentEnd > range.begin) {
-            ++stats_.invalidDatagrams;
-            return;
-        }
-    }
     if (payloadBytes > pending.packetBytes - pending.receivedBytes) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+    // Reject a fragment whose byte range overlaps one already received,
+    // recording it in sorted order on success (O(log n), see the video path).
+    if (!InsertDisjointFragmentRange(pending.receivedRanges, fragmentOffset, fragmentEnd)) {
         ++stats_.invalidDatagrams;
         return;
     }
@@ -934,7 +964,6 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
 
     std::memcpy(pending.bytes.data() + fragmentOffset, payloadData, payloadBytes);
     pending.fragmentReceived[fragmentIndex] = 1;
-    pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
     ++pending.receivedFragments;
     pending.receivedBytes += payloadBytes;
 

@@ -176,6 +176,11 @@ private:
         const NatProbeDatagramInfo& probe);
     void RebuildSendAddressesLocked();
     [[nodiscard]] uint32_t EndpointGroupForAddressLocked(const std::vector<std::byte>& address) const;
+    // True if this raw socket address has proven possession of the session key
+    // by delivering a validly-decrypting feedback/control packet (i.e. it is a
+    // known control peer). Used to gate NAT-probe retargeting on encrypted
+    // sessions so an unauthenticated probe cannot redirect the media stream.
+    [[nodiscard]] bool IsVerifiedEndpointLocked(const std::vector<std::byte>& address) const;
     void RescheduleQueueLocked(Clock::time_point now);
     void CheckWorkerErrorLocked() const;
     void UpdatePendingStatsLocked();

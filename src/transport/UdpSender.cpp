@@ -1295,6 +1295,22 @@ void UdpSender::MaybeRetargetFromNatProbe(
 
     std::vector<std::byte> candidate(static_cast<size_t>(addressLength));
     std::memcpy(candidate.data(), address, static_cast<size_t>(addressLength));
+
+    // When the session is encrypted, only retarget to an endpoint that has
+    // already proven possession of the session key by delivering a
+    // validly-decrypting feedback/control packet. The NAT probe itself is
+    // unauthenticated (its fingerprints are observable on the wire), so without
+    // this gate an attacker spoofing a probe from an arbitrary source address
+    // could redirect the encrypted media stream to that source (hijack / DoS).
+    // A genuine NAT rebind re-registers the receiver's new address via its
+    // decrypting feedback before the matching probe arrives, so this only adds a
+    // brief, self-healing delay for legitimate peers. Plaintext sessions have no
+    // key to prove and keep the existing fingerprint-only behavior.
+    if (encryptionEnabled_ && !IsVerifiedEndpointLocked(candidate)) {
+        ++stats_.natProbeRetargetRejected;
+        return;
+    }
+
     if (config_.collectNatProbeTargets) {
         const uint32_t group = EndpointGroupForAddressLocked(candidate);
         const bool alreadyKnown = std::find_if(
@@ -1347,6 +1363,24 @@ uint32_t UdpSender::EndpointGroupForAddressLocked(const std::vector<std::byte>& 
         }
     }
     return 0;
+}
+
+bool UdpSender::IsVerifiedEndpointLocked(const std::vector<std::byte>& address) const
+{
+    // controlPeers_ holds the raw address of every peer that has delivered a
+    // feedback/control packet. On an encrypted session those entries are only
+    // created after a successful AES-GCM decrypt, so membership here proves the
+    // endpoint possesses the session key. The address is also the current send
+    // target itself (already trusted) — allow that so a no-op probe is accepted.
+    if (!address.empty() && address == address_) {
+        return true;
+    }
+    for (const auto& peer : controlPeers_) {
+        if (!peer.address.empty() && peer.address == address) {
+            return true;
+        }
+    }
+    return false;
 }
 
 UdpSender::Clock::duration UdpSender::PacingDelayForBytes(uint64_t wireBytes) const
