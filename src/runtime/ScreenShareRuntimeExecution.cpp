@@ -4100,7 +4100,9 @@ void RunCaptureStats(
                 if (slice > Clock::duration::zero()) {
                     std::this_thread::sleep_for(slice);
                 }
-                udpSender->ReceiveFeedback(std::chrono::milliseconds(0));
+                // Called only to pump the receive loop so queued control input is
+                // dispatched promptly; the returned feedback snapshot is unused here.
+                static_cast<void>(udpSender->ReceiveFeedback(std::chrono::milliseconds(0)));
             }
         } else {
             std::this_thread::sleep_until(nextFrameAt);
