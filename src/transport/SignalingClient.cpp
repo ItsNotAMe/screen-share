@@ -227,14 +227,12 @@ std::string RoomPath(const std::string& roomId, std::string_view action)
 
 std::string RoomEventsPath(
     const std::string& roomId,
-    const std::string& peerId,
-    const std::string& roomPassword)
+    const std::string& peerId)
 {
-    std::string path = RoomPath(roomId, "events") + "?peerId=" + UrlEncode(peerId);
-    if (!roomPassword.empty()) {
-        path += "&roomPassword=" + UrlEncode(roomPassword);
-    }
-    return path;
+    // The room password is carried in the X-ScreenShare-Room-Password header,
+    // never in the query string: query strings routinely end up in server,
+    // proxy, and CDN access logs even over HTTPS.
+    return RoomPath(roomId, "events") + "?peerId=" + UrlEncode(peerId);
 }
 
 std::string ReadResponseBody(HINTERNET request)
@@ -288,6 +286,16 @@ void ValidateSignalingRoomPassword(const std::string& roomPassword)
         if (ch < 0x20) {
             throw std::invalid_argument("Signaling room password must not contain control characters");
         }
+    }
+}
+
+void RequireSecureForRoomPassword(
+    const SignalingClient::ParsedUrl& url,
+    const std::string& roomPassword)
+{
+    if (!roomPassword.empty() && !url.secure) {
+        throw std::invalid_argument(
+            "Refusing to send a room password over an insecure http:// signaling URL; use https://");
     }
 }
 
@@ -824,6 +832,7 @@ SignalingRoomResponse SignalingClient::Join(const std::string& roomId, const Sig
     }
     ValidateSignalingRoomName(peer.roomName);
     ValidateSignalingRoomPassword(peer.roomPassword);
+    RequireSecureForRoomPassword(url_, peer.roomPassword);
     return ParseRoomResponse(Request(L"POST", RoomPath(roomId, "join"), JoinRequestJson(peer)));
 }
 
@@ -835,10 +844,10 @@ SignalingRoomResponse SignalingClient::Peers(
     ValidateSignalingRoomId(roomId);
     ValidateSignalingPeerId(peerId);
     ValidateSignalingRoomPassword(roomPassword);
-    std::string path = RoomPath(roomId, "peers") + "?peerId=" + UrlEncode(peerId);
-    if (!roomPassword.empty()) {
-        path += "&roomPassword=" + UrlEncode(roomPassword);
-    }
+    RequireSecureForRoomPassword(url_, roomPassword);
+    // Password travels in the header only, not the query string (see
+    // RoomEventsPath).
+    const std::string path = RoomPath(roomId, "peers") + "?peerId=" + UrlEncode(peerId);
     return ParseRoomResponse(Request(
         L"GET",
         path,
@@ -856,6 +865,7 @@ void SignalingClient::ListenRoomEvents(
     ValidateSignalingRoomId(roomId);
     ValidateSignalingPeerId(peerId);
     ValidateSignalingRoomPassword(roomPassword);
+    RequireSecureForRoomPassword(url_, roomPassword);
 
     const WinHttpHandle session(WinHttpOpen(
         L"ScreenShare/0.1",
@@ -881,7 +891,7 @@ void SignalingClient::ListenRoomEvents(
         throw std::runtime_error(WinHttpErrorMessage("WinHttpConnect"));
     }
 
-    const std::wstring path = url_.pathPrefix + Utf8ToWide(RoomEventsPath(roomId, peerId, roomPassword));
+    const std::wstring path = url_.pathPrefix + Utf8ToWide(RoomEventsPath(roomId, peerId));
     const WinHttpHandle request(WinHttpOpenRequest(
         connection.get(),
         L"GET",

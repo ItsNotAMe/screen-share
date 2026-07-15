@@ -366,7 +366,10 @@ function validateRoomPassword(password: unknown): string | undefined {
   return password;
 }
 
-function roomPasswordFromRequest(request: Request, url: URL): string | undefined {
+function roomPasswordFromRequest(request: Request, _url: URL): string | undefined {
+  // The room password is only accepted via the X-ScreenShare-Room-Password
+  // header. It must never be read from the query string: query strings are
+  // routinely captured in Cloudflare/proxy/server access logs even over HTTPS.
   const headerPassword = request.headers.get(ROOM_PASSWORD_HEADER);
   if (headerPassword !== null) {
     try {
@@ -375,7 +378,7 @@ function roomPasswordFromRequest(request: Request, url: URL): string | undefined
       throw new HttpError(400, "invalid_room_password", "Room password header is invalid.");
     }
   }
-  return validateRoomPassword(url.searchParams.get("roomPassword") ?? undefined);
+  return undefined;
 }
 
 function validateRoomInfo(info: unknown): RoomInfoUpdate | undefined {
