@@ -4,6 +4,16 @@ export interface Env {
   ROOMS: KVNamespace;
   ROOM_OBJECTS: DurableObjectNamespace<RoomObject>;
   ROOM_DIRECTORY?: DurableObjectNamespace<RoomDirectoryObject>;
+  // Cross-colo authoritative rate limiter (sharded per client IP). Optional so
+  // the Worker still runs if the binding/migration has not been applied yet;
+  // when absent, only the per-isolate in-memory limiter is in force.
+  RATE_LIMITER?: DurableObjectNamespace<RateLimiterObject>;
+  // Comma-separated list of browser origins permitted for CORS. Unset (the
+  // default) means no CORS headers are emitted at all: native clients send no
+  // Origin and are unaffected, while browsers are blocked by same-origin policy.
+  // Set to a specific origin (or "*" to explicitly opt into wildcard) only if
+  // browser access is actually required.
+  ALLOWED_ORIGINS?: string;
 }
 
 type CandidateType = "host" | "srflx";
@@ -117,6 +127,21 @@ const ROOM_PASSWORD_HASH_ITERATIONS = 100_000;
 const ROOM_PASSWORD_HEADER = "X-ScreenShare-Room-Password";
 const PEER_TOKEN_HEADER = "X-ScreenShare-Peer-Token";
 const PEER_TOKEN_BYTES = 32;
+// Global cap on concurrently active rooms, enforced at room-creation time via
+// the directory Durable Object (a single authoritative counter). Prevents an
+// attacker from spinning up unbounded rooms to exhaust storage / the directory.
+const MAX_ACTIVE_ROOMS = 500;
+// How long a room-creation reservation is held in the directory before it is
+// swept if the join never completes. Short so abandoned reservations free their
+// slot quickly; a successful join immediately overwrites it with the full-TTL
+// summary.
+const ROOM_RESERVATION_TTL_MS = 30_000;
+// Cadence of the directory Durable Object's self-scheduled sweep of expired
+// room entries, so the directory does not grow unbounded between reads.
+const DIRECTORY_SWEEP_INTERVAL_MS = 60_000;
+// Edge-cache TTL for the fan-out-heavy GET /rooms listing. Short enough to stay
+// fresh, long enough to collapse bursts of identical listings into one fan-out.
+const ROOM_LIST_CACHE_TTL_SECONDS = 5;
 
 const rateBuckets = new Map<string, { windowStart: number; count: number }>();
 
@@ -130,23 +155,61 @@ class HttpError extends Error {
   }
 }
 
-function corsHeaders(): HeadersInit {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Max-Age": "86400",
-    "Cache-Control": "no-store",
-  };
-}
-
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
-      ...corsHeaders(),
       "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
     },
+  });
+}
+
+// Resolve the CORS Access-Control-Allow-Origin value for a request, or
+// undefined when no CORS headers should be emitted. Native clients send no
+// Origin and never need CORS; browsers are blocked unless the origin is
+// explicitly allow-listed via env.ALLOWED_ORIGINS (secure default: closed).
+function resolveAllowedOrigin(request: Request, env: Env): string | undefined {
+  const origin = request.headers.get("Origin");
+  if (!origin) {
+    return undefined;
+  }
+  const allowed = (env.ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (allowed.length === 0) {
+    return undefined;
+  }
+  if (allowed.includes("*")) {
+    return "*";
+  }
+  return allowed.includes(origin) ? origin : undefined;
+}
+
+// Attach CORS headers to an outgoing response at the edge, scoped to the
+// allow-listed origin. WebSocket upgrades (101) are passed through untouched
+// so the upgrade response is never reconstructed.
+function withCors(response: Response, request: Request, env: Env): Response {
+  if (response.status === 101 || (response as { webSocket?: unknown }).webSocket) {
+    return response;
+  }
+  const allowOrigin = resolveAllowedOrigin(request, env);
+  if (!allowOrigin) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set("Access-Control-Allow-Origin", allowOrigin);
+  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", `Content-Type, ${ROOM_PASSWORD_HEADER}, ${PEER_TOKEN_HEADER}`);
+  headers.set("Access-Control-Max-Age", "86400");
+  if (allowOrigin !== "*") {
+    headers.append("Vary", "Origin");
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
   });
 }
 
@@ -891,6 +954,36 @@ async function syncRoomDirectoryObject(
   return true;
 }
 
+// Reserve a slot for a brand-new room against the global room-count cap. The
+// directory Durable Object is a single authoritative counter, so the check is
+// race-free across colos. Throws 503 when the server is at capacity. When the
+// directory binding is absent the cap cannot be enforced globally, so this is a
+// no-op (the per-room peer cap and rate limiter still apply).
+async function reserveRoomSlot(env: Env, roomId: string, now: number): Promise<void> {
+  if (!env.ROOM_DIRECTORY) {
+    return;
+  }
+  const id = env.ROOM_DIRECTORY.idFromName(ROOM_DIRECTORY_OBJECT_NAME);
+  let response: Response;
+  try {
+    response = await env.ROOM_DIRECTORY.get(id).fetch(new Request("https://directory.local/directory/reserve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, now }),
+    }));
+  } catch (error) {
+    // Fail open on infra errors: a directory outage must not block joins.
+    console.error("Room-count reservation unavailable", error);
+    return;
+  }
+  if (response.status === 503) {
+    throw new HttpError(503, "rooms_at_capacity", "The server is at room capacity. Try again shortly.");
+  }
+  if (!response.ok) {
+    console.error("Room-count reservation failed", response.status);
+  }
+}
+
 async function syncRoomDirectory(
   env: Env,
   roomId: string,
@@ -977,33 +1070,58 @@ async function fetchDurableRoomDirectory(env: Env, limit: number, now: number): 
     .filter((room): room is RoomSummary => room !== undefined);
 }
 
-async function handleRoomList(request: Request, env: Env): Promise<Response> {
-  try {
-    const url = new URL(request.url);
-    const rawLimit = Number(url.searchParams.get("limit") ?? "100");
-    const limit = Number.isInteger(rawLimit) && rawLimit > 0
-      ? Math.min(rawLimit, MAX_ROOM_LIST_LIMIT)
-      : 100;
-    const now = Date.now();
-    const rooms = env.ROOM_DIRECTORY
-      ? await fetchDurableRoomDirectory(env, limit, now)
-      : await fetchKvRoomDirectory(env, limit, now);
-    let visibleRooms = rooms;
-    if (env.ROOM_OBJECTS) {
-      const liveRooms = await Promise.all(rooms.map(async (room) => {
-        try {
-          return await fetchLiveRoomSummary(env, room.roomId);
-        } catch (error) {
-          console.error("Failed to fetch live room summary", room.roomId, error);
-          await trySyncRoomDirectory(env, room.roomId, [], undefined);
-          return undefined;
-        }
-      }));
-      visibleRooms = liveRooms.filter((room): room is RoomSummary => room !== undefined);
-    }
+async function computeRoomList(request: Request, env: Env): Promise<RoomSummary[]> {
+  const url = new URL(request.url);
+  const rawLimit = Number(url.searchParams.get("limit") ?? "100");
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, MAX_ROOM_LIST_LIMIT)
+    : 100;
+  const now = Date.now();
+  const rooms = env.ROOM_DIRECTORY
+    ? await fetchDurableRoomDirectory(env, limit, now)
+    : await fetchKvRoomDirectory(env, limit, now);
+  let visibleRooms = rooms;
+  if (env.ROOM_OBJECTS) {
+    const liveRooms = await Promise.all(rooms.map(async (room) => {
+      try {
+        return await fetchLiveRoomSummary(env, room.roomId);
+      } catch (error) {
+        console.error("Failed to fetch live room summary", room.roomId, error);
+        await trySyncRoomDirectory(env, room.roomId, [], undefined);
+        return undefined;
+      }
+    }));
+    visibleRooms = liveRooms.filter((room): room is RoomSummary => room !== undefined);
+  }
 
-    visibleRooms.sort((a, b) => b.updatedAt - a.updatedAt || a.roomId.localeCompare(b.roomId));
-    return jsonResponse({ ok: true, rooms: visibleRooms });
+  visibleRooms.sort((a, b) => b.updatedAt - a.updatedAt || a.roomId.localeCompare(b.roomId));
+  return visibleRooms;
+}
+
+async function handleRoomList(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  // GET /rooms fans out one subrequest per active room to fetch the live
+  // summary; a burst of identical listings would multiply that fan-out. Serve
+  // a short-lived edge-cached copy so repeated listings collapse to one build.
+  // CORS is applied at the edge after this returns, so it is never baked into
+  // the cached body (which would pin one origin for all callers).
+  const cache = caches.default;
+  const cacheKey = new Request(new URL(request.url).toString(), { method: "GET" });
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const visibleRooms = await computeRoomList(request, env);
+    const response = new Response(JSON.stringify({ ok: true, rooms: visibleRooms }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": `public, max-age=${ROOM_LIST_CACHE_TTL_SECONDS}`,
+      },
+    });
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
   } catch (error) {
     console.error("Room directory unavailable", error);
     return jsonResponse({ ok: true, rooms: [] });
@@ -1024,9 +1142,16 @@ async function fetchLiveRoomSummary(env: Env, roomId: string): Promise<RoomSumma
   return normalizeRoomSummary(data.room);
 }
 
-function applyRateLimit(request: Request): void {
+function clientIp(request: Request): string {
+  return request.headers.get("CF-Connecting-IP") ?? request.headers.get("X-Forwarded-For") ?? "unknown";
+}
+
+// Cheap per-isolate first line of defense. Catches a single-colo flood without
+// a subrequest, but is bypassable by spreading load across colos — the
+// authoritative limiter below closes that gap.
+function applyLocalRateLimit(request: Request): void {
   const now = Date.now();
-  const ip = request.headers.get("CF-Connecting-IP") ?? request.headers.get("X-Forwarded-For") ?? "unknown";
+  const ip = clientIp(request);
   const bucket = rateBuckets.get(ip);
   if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
     rateBuckets.set(ip, { windowStart: now, count: 1 });
@@ -1043,6 +1168,37 @@ function applyRateLimit(request: Request): void {
         rateBuckets.delete(key);
       }
     }
+  }
+}
+
+// Authoritative, cross-colo rate limit: a per-IP Durable Object holds one
+// fixed-window counter that every colo shares, so distributing a flood across
+// colos no longer multiplies the effective limit. Fails open on limiter/infra
+// errors (a limiter outage must not take signaling down) but propagates the
+// 429 when the limit is genuinely exceeded.
+async function applyRateLimit(request: Request, env: Env): Promise<void> {
+  applyLocalRateLimit(request);
+  if (!env.RATE_LIMITER) {
+    return;
+  }
+  try {
+    const id = env.RATE_LIMITER.idFromName(clientIp(request));
+    const response = await env.RATE_LIMITER.get(id).fetch("https://ratelimit.local/limit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS }),
+    });
+    if (response.ok) {
+      const data = await response.json<{ limited?: boolean }>();
+      if (data.limited === true) {
+        throw new HttpError(429, "rate_limited", "Too many signaling requests.");
+      }
+    }
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+    console.error("Cross-colo rate limiter unavailable", error);
   }
 }
 
@@ -1072,8 +1228,95 @@ export class RoomDirectoryObject extends DurableObject<Env> {
     if (pathname === "/directory/sync" && request.method === "POST") {
       return this.handleSync(request);
     }
+    if (pathname === "/directory/reserve" && request.method === "POST") {
+      return this.handleReserve(request);
+    }
 
     throw new HttpError(404, "not_found", "Endpoint not found.");
+  }
+
+  // Count the currently-tracked, non-expired rooms, sweeping any expired entries
+  // encountered on the way. Bounded by MAX_ROOM_LIST_LIMIT reads.
+  private async countActiveRooms(now: number): Promise<number> {
+    const entries = await this.ctx.storage.list<unknown>({
+      prefix: ROOM_DIRECTORY_STORAGE_PREFIX,
+      limit: MAX_ROOM_LIST_LIMIT,
+    });
+    const deletes: string[] = [];
+    let active = 0;
+    for (const [key, value] of entries) {
+      if (normalizeRoomSummary(value, now)) {
+        ++active;
+      } else {
+        deletes.push(key);
+      }
+    }
+    if (deletes.length > 0) {
+      await this.ctx.storage.delete(deletes);
+    }
+    return active;
+  }
+
+  // Ensure the periodic sweep alarm is scheduled so stale directory entries are
+  // reclaimed even when no one lists rooms.
+  private async ensureSweepAlarm(now: number): Promise<void> {
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(now + DIRECTORY_SWEEP_INTERVAL_MS);
+    }
+  }
+
+  // Alarm-driven sweep: drop expired room entries and reschedule while any
+  // entries remain, so the directory storage never grows without bound.
+  async alarm(): Promise<void> {
+    const now = Date.now();
+    const entries = await this.ctx.storage.list<unknown>({ prefix: ROOM_DIRECTORY_STORAGE_PREFIX });
+    const deletes: string[] = [];
+    let remaining = 0;
+    for (const [key, value] of entries) {
+      if (normalizeRoomSummary(value, now)) {
+        ++remaining;
+      } else {
+        deletes.push(key);
+      }
+    }
+    if (deletes.length > 0) {
+      await this.ctx.storage.delete(deletes);
+    }
+    if (remaining > 0) {
+      await this.ctx.storage.setAlarm(now + DIRECTORY_SWEEP_INTERVAL_MS);
+    }
+  }
+
+  private async handleReserve(request: Request): Promise<Response> {
+    const body = await readJson<DirectorySyncRequest & { now?: unknown }>(request);
+    const roomId = validateRoomId(typeof body.roomId === "string" ? body.roomId : "");
+    const now = typeof body.now === "number" && Number.isFinite(body.now) ? body.now : Date.now();
+    const key = roomDirectoryStorageKey(roomId);
+
+    // Re-creating an already-tracked room takes no new slot.
+    const existing = normalizeRoomSummary(await this.ctx.storage.get<unknown>(key), now);
+    if (existing) {
+      return jsonResponse({ ok: true, reserved: true });
+    }
+
+    if ((await this.countActiveRooms(now)) >= MAX_ACTIVE_ROOMS) {
+      return jsonResponse({ ok: false, error: "rooms_at_capacity" }, 503);
+    }
+
+    // Hold a short-lived placeholder so concurrent creations can't overshoot the
+    // cap; a completed join overwrites it with the real full-TTL summary, and an
+    // abandoned reservation expires quickly.
+    const reservation: RoomSummary = {
+      roomId,
+      peerCount: 1,
+      updatedAt: now,
+      expiresAt: now + ROOM_RESERVATION_TTL_MS,
+      requiresRoomKey: false,
+      passwordProtected: false,
+    };
+    await this.ctx.storage.put(key, reservation);
+    await this.ensureSweepAlarm(now);
+    return jsonResponse({ ok: true, reserved: true });
   }
 
   private async handleList(url: URL): Promise<Response> {
@@ -1122,6 +1365,7 @@ export class RoomDirectoryObject extends DurableObject<Env> {
     }
 
     await this.ctx.storage.put(key, summary);
+    await this.ensureSweepAlarm(Date.now());
     return jsonResponse({ ok: true });
   }
 }
@@ -1374,6 +1618,12 @@ export class RoomObject extends DurableObject<Env> {
     const now = Date.now();
     const peers = await this.loadPeers();
     this.cleanupPeers(peers, now);
+    // Creating a brand-new room (no active peers yet) consumes a slot against
+    // the global room-count cap. Enforce it before writing any room state so a
+    // capacity rejection leaves nothing behind.
+    if (peers.size === 0) {
+      await reserveRoomSlot(this.env, roomId, now);
+    }
     const currentInfo = await this.loadRoomInfo();
     const passwordVerifier = await this.loadRoomPasswordVerifier();
     const security = await applyJoinRoomSecurity({
@@ -1531,12 +1781,14 @@ export class RoomObject extends DurableObject<Env> {
   }
 }
 
-async function routeRequest(request: Request, env: Env): Promise<Response> {
+async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders() });
+    // CORS headers (including whether one is emitted at all) are added at the
+    // edge in withCors; the preflight body is empty.
+    return new Response(null, { status: 204 });
   }
 
-  applyRateLimit(request);
+  await applyRateLimit(request, env);
 
   const url = new URL(request.url);
   const pathname = normalizePath(url.pathname);
@@ -1546,7 +1798,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (pathname === "/rooms" && request.method === "GET") {
-    return handleRoomList(request, env);
+    return handleRoomList(request, env, ctx);
   }
 
   const match = pathname.match(/^\/rooms\/([^/]+)\/(join|peers|heartbeat|leave|summary|events)$/);
@@ -1569,16 +1821,56 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
   return env.ROOM_OBJECTS.get(id).fetch(request);
 }
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+// Cross-colo authoritative rate limiter. Sharded per client IP via
+// idFromName(ip): all of one IP's requests, from any colo, land on this single
+// object, so its in-memory fixed-window counter is a global view of that IP.
+// State is intentionally in-memory only — the object stays warm while an IP is
+// active (exactly when limiting matters) and simply resets when idle-evicted,
+// which only ever favors a client that has stopped sending. No storage, so no
+// per-request write cost.
+export class RateLimiterObject extends DurableObject<Env> {
+  private windowStart = 0;
+  private count = 0;
+
+  async fetch(request: Request): Promise<Response> {
+    let windowMs = RATE_LIMIT_WINDOW_MS;
+    let max = RATE_LIMIT_MAX_REQUESTS;
     try {
-      return await routeRequest(request, env);
+      const body = await request.json<{ windowMs?: unknown; max?: unknown }>();
+      if (typeof body.windowMs === "number" && Number.isFinite(body.windowMs) && body.windowMs > 0) {
+        windowMs = body.windowMs;
+      }
+      if (typeof body.max === "number" && Number.isFinite(body.max) && body.max > 0) {
+        max = body.max;
+      }
+    } catch {
+      // Fall back to defaults on a malformed body.
+    }
+
+    const now = Date.now();
+    if (now - this.windowStart >= windowMs) {
+      this.windowStart = now;
+      this.count = 1;
+    } else {
+      this.count += 1;
+    }
+    return jsonResponse({ ok: true, limited: this.count > max });
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    let response: Response;
+    try {
+      response = await routeRequest(request, env, ctx);
     } catch (error) {
       if (error instanceof HttpError) {
-        return jsonResponse({ ok: false, error: error.code, message: error.message }, error.status);
+        response = jsonResponse({ ok: false, error: error.code, message: error.message }, error.status);
+      } else {
+        console.error("Unhandled signaling error", error);
+        response = jsonResponse({ ok: false, error: "internal_error", message: "Internal server error." }, 500);
       }
-      console.error("Unhandled signaling error", error);
-      return jsonResponse({ ok: false, error: "internal_error", message: "Internal server error." }, 500);
     }
+    return withCors(response, request, env);
   },
 };
