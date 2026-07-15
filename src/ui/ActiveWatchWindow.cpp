@@ -228,6 +228,11 @@ void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
     receivedVideoFrame_ = false;
     hostLeft_ = false;
     leaveRequested_ = false;
+    // Remote-control grants never carry across sessions: a rejoin must start with
+    // no control until the host explicitly re-grants it. Reset the "You control"
+    // UI and stop the video widget from capturing local input; otherwise a viewer
+    // that left while controlling would keep swallowing its own mouse/keyboard.
+    handleControlState(0);
     firstVideoFramePosted_.store(false, std::memory_order_release);
     lastPresentedFrameCount_ = 0;
     presentedFps_ = 0.0;
