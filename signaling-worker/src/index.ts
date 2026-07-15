@@ -4,6 +4,16 @@ export interface Env {
   ROOMS: KVNamespace;
   ROOM_OBJECTS: DurableObjectNamespace<RoomObject>;
   ROOM_DIRECTORY?: DurableObjectNamespace<RoomDirectoryObject>;
+  // Cross-colo authoritative rate limiter (sharded per client IP). Optional so
+  // the Worker still runs if the binding/migration has not been applied yet;
+  // when absent, only the per-isolate in-memory limiter is in force.
+  RATE_LIMITER?: DurableObjectNamespace<RateLimiterObject>;
+  // Comma-separated list of browser origins permitted for CORS. Unset (the
+  // default) means no CORS headers are emitted at all: native clients send no
+  // Origin and are unaffected, while browsers are blocked by same-origin policy.
+  // Set to a specific origin (or "*" to explicitly opt into wildcard) only if
+  // browser access is actually required.
+  ALLOWED_ORIGINS?: string;
 }
 
 type CandidateType = "host" | "srflx";
@@ -22,6 +32,17 @@ interface PeerMetadata {
 }
 
 interface Peer {
+  peerId: string;
+  candidates: Candidate[];
+  metadata?: PeerMetadata;
+  lastSeen: number;
+  // Server-issued secret proving ownership of this peerId. Never returned to
+  // other peers; required to read candidates/key or mutate this peer's state.
+  token: string;
+}
+
+// A peer as exposed to other members: no token.
+interface PublicPeer {
   peerId: string;
   candidates: Candidate[];
   metadata?: PeerMetadata;
@@ -92,6 +113,11 @@ const ROOM_DIRECTORY_STORAGE_PREFIX = "room:";
 const MAX_JSON_BYTES = 16 * 1024;
 const MAX_CANDIDATES = 8;
 const MAX_ROOM_LIST_LIMIT = 250;
+// Cap on distinct peers a single room will hold. All peers are persisted as
+// one Durable Object value (~128 KiB limit), so an unbounded peer count both
+// exhausts storage and can break the room; this also bounds the per-request
+// fanout of peer lists. Generous relative to any real screen-share room.
+const MAX_PEERS_PER_ROOM = 64;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 240;
 const ROOM_ACCESS_KEY_BYTES = 32;
@@ -99,6 +125,23 @@ const ROOM_PASSWORD_SALT_BYTES = 16;
 const ROOM_PASSWORD_HASH_BYTES = 32;
 const ROOM_PASSWORD_HASH_ITERATIONS = 100_000;
 const ROOM_PASSWORD_HEADER = "X-ScreenShare-Room-Password";
+const PEER_TOKEN_HEADER = "X-ScreenShare-Peer-Token";
+const PEER_TOKEN_BYTES = 32;
+// Global cap on concurrently active rooms, enforced at room-creation time via
+// the directory Durable Object (a single authoritative counter). Prevents an
+// attacker from spinning up unbounded rooms to exhaust storage / the directory.
+const MAX_ACTIVE_ROOMS = 500;
+// How long a room-creation reservation is held in the directory before it is
+// swept if the join never completes. Short so abandoned reservations free their
+// slot quickly; a successful join immediately overwrites it with the full-TTL
+// summary.
+const ROOM_RESERVATION_TTL_MS = 30_000;
+// Cadence of the directory Durable Object's self-scheduled sweep of expired
+// room entries, so the directory does not grow unbounded between reads.
+const DIRECTORY_SWEEP_INTERVAL_MS = 60_000;
+// Edge-cache TTL for the fan-out-heavy GET /rooms listing. Short enough to stay
+// fresh, long enough to collapse bursts of identical listings into one fan-out.
+const ROOM_LIST_CACHE_TTL_SECONDS = 5;
 
 const rateBuckets = new Map<string, { windowStart: number; count: number }>();
 
@@ -112,23 +155,61 @@ class HttpError extends Error {
   }
 }
 
-function corsHeaders(): HeadersInit {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Max-Age": "86400",
-    "Cache-Control": "no-store",
-  };
-}
-
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
-      ...corsHeaders(),
       "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
     },
+  });
+}
+
+// Resolve the CORS Access-Control-Allow-Origin value for a request, or
+// undefined when no CORS headers should be emitted. Native clients send no
+// Origin and never need CORS; browsers are blocked unless the origin is
+// explicitly allow-listed via env.ALLOWED_ORIGINS (secure default: closed).
+function resolveAllowedOrigin(request: Request, env: Env): string | undefined {
+  const origin = request.headers.get("Origin");
+  if (!origin) {
+    return undefined;
+  }
+  const allowed = (env.ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (allowed.length === 0) {
+    return undefined;
+  }
+  if (allowed.includes("*")) {
+    return "*";
+  }
+  return allowed.includes(origin) ? origin : undefined;
+}
+
+// Attach CORS headers to an outgoing response at the edge, scoped to the
+// allow-listed origin. WebSocket upgrades (101) are passed through untouched
+// so the upgrade response is never reconstructed.
+function withCors(response: Response, request: Request, env: Env): Response {
+  if (response.status === 101 || (response as { webSocket?: unknown }).webSocket) {
+    return response;
+  }
+  const allowOrigin = resolveAllowedOrigin(request, env);
+  if (!allowOrigin) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set("Access-Control-Allow-Origin", allowOrigin);
+  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", `Content-Type, ${ROOM_PASSWORD_HEADER}, ${PEER_TOKEN_HEADER}`);
+  headers.set("Access-Control-Max-Age", "86400");
+  if (allowOrigin !== "*") {
+    headers.append("Vary", "Origin");
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
   });
 }
 
@@ -168,13 +249,29 @@ function roomDirectoryStorageKey(roomId: string): string {
   return `${ROOM_DIRECTORY_STORAGE_PREFIX}${roomId}`;
 }
 
-function publicPeerForEvent(peer: Peer): Peer {
+function publicPeerForEvent(peer: Peer): PublicPeer {
   return {
     peerId: peer.peerId,
     candidates: peer.candidates,
     metadata: peer.metadata,
     lastSeen: peer.lastSeen,
   };
+}
+
+function generatePeerToken(): string {
+  const bytes = new Uint8Array(PEER_TOKEN_BYTES);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+function peerTokenFromRequest(request: Request): string | undefined {
+  const token = request.headers.get(PEER_TOKEN_HEADER);
+  return token !== null && token.length > 0 ? token : undefined;
+}
+
+// Constant-time comparison of a presented token against a peer's stored token.
+function peerTokenMatches(stored: string, presented: string | undefined): boolean {
+  return presented !== undefined && timingSafeEqual(stored, presented);
 }
 
 function peerAnnouncementKey(peer: Peer): string {
@@ -211,6 +308,18 @@ function validateRoomId(roomId: string): string {
   return value;
 }
 
+// Decode a %-encoded room id path segment, turning malformed encodings into a
+// clean 400 instead of an uncaught URIError surfacing as a generic 500.
+function decodeRoomIdSegment(segment: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    throw new HttpError(400, "invalid_room_id", "Room id is not valid percent-encoding.");
+  }
+  return validateRoomId(decoded);
+}
+
 function validatePeerId(peerId: unknown): string {
   if (typeof peerId !== "string") {
     throw new HttpError(400, "invalid_peer_id", "peerId must be a string.");
@@ -238,6 +347,51 @@ function isValidIpv4(ip: string): boolean {
 
 function isLikelyIpv6(ip: string): boolean {
   return ip.includes(":") && /^[0-9A-Fa-f:.]{2,45}$/.test(ip);
+}
+
+function isPrivateAddress(ip: string): boolean {
+  if (isValidIpv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||         // link-local
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127)  // CGNAT
+    );
+  }
+  const lower = ip.toLowerCase();
+  return (
+    lower === "::1" ||
+    lower.startsWith("fc") || lower.startsWith("fd") || // ULA
+    lower.startsWith("fe8") || lower.startsWith("fe9") ||
+    lower.startsWith("fea") || lower.startsWith("feb")   // link-local
+  );
+}
+
+function sameIpFamily(a: string, b: string): boolean {
+  return isValidIpv4(a) === isValidIpv4(b);
+}
+
+// Drop candidates that could turn honest peers into a reflected-DDoS source:
+// a srflx (public) candidate must match the caller's own connecting IP, and a
+// host candidate must be a private/local address. Filtering (rather than
+// rejecting the join) avoids hard-failing peers whose STUN egress differs from
+// their TLS egress; they simply lose the offending candidate.
+function filterReflectionCandidates(candidates: Candidate[], connectingIp: string): Candidate[] {
+  return candidates.filter((candidate) => {
+    if (candidate.type === "host") {
+      return isPrivateAddress(candidate.ip);
+    }
+    if (candidate.type === "srflx") {
+      if (!connectingIp || !sameIpFamily(candidate.ip, connectingIp)) {
+        return true;
+      }
+      return candidate.ip === connectingIp;
+    }
+    return true;
+  });
 }
 
 function validateCandidate(candidate: unknown): Candidate {
@@ -281,6 +435,17 @@ function validateCandidates(candidates: unknown): Candidate[] {
   return [...unique.values()];
 }
 
+// Reject C0 control characters. Peer/room display strings are echoed verbatim
+// to every other peer and to the native client, so keep them to plain text.
+function rejectControlChars(value: string, field: string): string {
+  for (const ch of value) {
+    if (ch < " ") {
+      throw new HttpError(400, "invalid_metadata", `${field} must not contain control characters.`);
+    }
+  }
+  return value;
+}
+
 function validateMetadata(metadata: unknown): PeerMetadata | undefined {
   if (metadata === undefined) {
     return undefined;
@@ -294,13 +459,13 @@ function validateMetadata(metadata: unknown): PeerMetadata | undefined {
     if (typeof metadata.name !== "string" || metadata.name.length > 80) {
       throw new HttpError(400, "invalid_metadata", "metadata.name must be a short string.");
     }
-    clean.name = metadata.name.trim();
+    clean.name = rejectControlChars(metadata.name.trim(), "metadata.name");
   }
   if (metadata.platform !== undefined) {
     if (typeof metadata.platform !== "string" || metadata.platform.length > 80) {
       throw new HttpError(400, "invalid_metadata", "metadata.platform must be a short string.");
     }
-    clean.platform = metadata.platform.trim();
+    clean.platform = rejectControlChars(metadata.platform.trim(), "metadata.platform");
   }
   return Object.keys(clean).length > 0 ? clean : undefined;
 }
@@ -366,7 +531,10 @@ function validateRoomPassword(password: unknown): string | undefined {
   return password;
 }
 
-function roomPasswordFromRequest(request: Request, url: URL): string | undefined {
+function roomPasswordFromRequest(request: Request, _url: URL): string | undefined {
+  // The room password is only accepted via the X-ScreenShare-Room-Password
+  // header. It must never be read from the query string: query strings are
+  // routinely captured in Cloudflare/proxy/server access logs even over HTTPS.
   const headerPassword = request.headers.get(ROOM_PASSWORD_HEADER);
   if (headerPassword !== null) {
     try {
@@ -375,7 +543,7 @@ function roomPasswordFromRequest(request: Request, url: URL): string | undefined
       throw new HttpError(400, "invalid_room_password", "Room password header is invalid.");
     }
   }
-  return validateRoomPassword(url.searchParams.get("roomPassword") ?? undefined);
+  return undefined;
 }
 
 function validateRoomInfo(info: unknown): RoomInfoUpdate | undefined {
@@ -619,11 +787,16 @@ function normalizeStoredPeer(value: unknown): Peer | undefined {
   }
 
   const lastSeen = typeof value.lastSeen === "number" && Number.isFinite(value.lastSeen) ? value.lastSeen : 0;
+  // A peer persisted before this field existed has no token; an empty string
+  // never matches a presented token (timing-safe compare), so such a peer must
+  // re-join to obtain one rather than being silently authable.
+  const token = typeof value.token === "string" ? value.token : "";
   return {
     peerId: value.peerId,
     candidates,
     metadata,
     lastSeen,
+    token,
   };
 }
 
@@ -692,8 +865,10 @@ async function cleanupLegacyRoom(env: Env, roomId: string): Promise<void> {
   await env.ROOMS.delete(roomKey(roomId));
 }
 
-function otherPeers(room: Room, peerId: string): Peer[] {
-  return room.peers.filter((peer) => peer.peerId !== peerId);
+function otherPeers(room: Room, peerId: string): PublicPeer[] {
+  return room.peers
+    .filter((peer) => peer.peerId !== peerId)
+    .map(publicPeerForEvent);
 }
 
 function roomSummary(roomId: string, peers: Peer[], info?: RoomInfo, now = Date.now()): RoomSummary | undefined {
@@ -777,6 +952,36 @@ async function syncRoomDirectoryObject(
     throw new Error(`Room directory sync failed with HTTP ${response.status}`);
   }
   return true;
+}
+
+// Reserve a slot for a brand-new room against the global room-count cap. The
+// directory Durable Object is a single authoritative counter, so the check is
+// race-free across colos. Throws 503 when the server is at capacity. When the
+// directory binding is absent the cap cannot be enforced globally, so this is a
+// no-op (the per-room peer cap and rate limiter still apply).
+async function reserveRoomSlot(env: Env, roomId: string, now: number): Promise<void> {
+  if (!env.ROOM_DIRECTORY) {
+    return;
+  }
+  const id = env.ROOM_DIRECTORY.idFromName(ROOM_DIRECTORY_OBJECT_NAME);
+  let response: Response;
+  try {
+    response = await env.ROOM_DIRECTORY.get(id).fetch(new Request("https://directory.local/directory/reserve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, now }),
+    }));
+  } catch (error) {
+    // Fail open on infra errors: a directory outage must not block joins.
+    console.error("Room-count reservation unavailable", error);
+    return;
+  }
+  if (response.status === 503) {
+    throw new HttpError(503, "rooms_at_capacity", "The server is at room capacity. Try again shortly.");
+  }
+  if (!response.ok) {
+    console.error("Room-count reservation failed", response.status);
+  }
 }
 
 async function syncRoomDirectory(
@@ -865,33 +1070,58 @@ async function fetchDurableRoomDirectory(env: Env, limit: number, now: number): 
     .filter((room): room is RoomSummary => room !== undefined);
 }
 
-async function handleRoomList(request: Request, env: Env): Promise<Response> {
-  try {
-    const url = new URL(request.url);
-    const rawLimit = Number(url.searchParams.get("limit") ?? "100");
-    const limit = Number.isInteger(rawLimit) && rawLimit > 0
-      ? Math.min(rawLimit, MAX_ROOM_LIST_LIMIT)
-      : 100;
-    const now = Date.now();
-    const rooms = env.ROOM_DIRECTORY
-      ? await fetchDurableRoomDirectory(env, limit, now)
-      : await fetchKvRoomDirectory(env, limit, now);
-    let visibleRooms = rooms;
-    if (env.ROOM_OBJECTS) {
-      const liveRooms = await Promise.all(rooms.map(async (room) => {
-        try {
-          return await fetchLiveRoomSummary(env, room.roomId);
-        } catch (error) {
-          console.error("Failed to fetch live room summary", room.roomId, error);
-          await trySyncRoomDirectory(env, room.roomId, [], undefined);
-          return undefined;
-        }
-      }));
-      visibleRooms = liveRooms.filter((room): room is RoomSummary => room !== undefined);
-    }
+async function computeRoomList(request: Request, env: Env): Promise<RoomSummary[]> {
+  const url = new URL(request.url);
+  const rawLimit = Number(url.searchParams.get("limit") ?? "100");
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, MAX_ROOM_LIST_LIMIT)
+    : 100;
+  const now = Date.now();
+  const rooms = env.ROOM_DIRECTORY
+    ? await fetchDurableRoomDirectory(env, limit, now)
+    : await fetchKvRoomDirectory(env, limit, now);
+  let visibleRooms = rooms;
+  if (env.ROOM_OBJECTS) {
+    const liveRooms = await Promise.all(rooms.map(async (room) => {
+      try {
+        return await fetchLiveRoomSummary(env, room.roomId);
+      } catch (error) {
+        console.error("Failed to fetch live room summary", room.roomId, error);
+        await trySyncRoomDirectory(env, room.roomId, [], undefined);
+        return undefined;
+      }
+    }));
+    visibleRooms = liveRooms.filter((room): room is RoomSummary => room !== undefined);
+  }
 
-    visibleRooms.sort((a, b) => b.updatedAt - a.updatedAt || a.roomId.localeCompare(b.roomId));
-    return jsonResponse({ ok: true, rooms: visibleRooms });
+  visibleRooms.sort((a, b) => b.updatedAt - a.updatedAt || a.roomId.localeCompare(b.roomId));
+  return visibleRooms;
+}
+
+async function handleRoomList(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  // GET /rooms fans out one subrequest per active room to fetch the live
+  // summary; a burst of identical listings would multiply that fan-out. Serve
+  // a short-lived edge-cached copy so repeated listings collapse to one build.
+  // CORS is applied at the edge after this returns, so it is never baked into
+  // the cached body (which would pin one origin for all callers).
+  const cache = caches.default;
+  const cacheKey = new Request(new URL(request.url).toString(), { method: "GET" });
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const visibleRooms = await computeRoomList(request, env);
+    const response = new Response(JSON.stringify({ ok: true, rooms: visibleRooms }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": `public, max-age=${ROOM_LIST_CACHE_TTL_SECONDS}`,
+      },
+    });
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
   } catch (error) {
     console.error("Room directory unavailable", error);
     return jsonResponse({ ok: true, rooms: [] });
@@ -912,15 +1142,16 @@ async function fetchLiveRoomSummary(env: Env, roomId: string): Promise<RoomSumma
   return normalizeRoomSummary(data.room);
 }
 
-async function handleRoomSummary(env: Env, roomId: string): Promise<Response> {
-  const room = await loadRoom(env, roomId);
-  await trySyncRoomDirectory(env, roomId, room.peers, room.info);
-  return jsonResponse({ ok: true, room: roomSummary(roomId, room.peers, room.info) ?? null });
+function clientIp(request: Request): string {
+  return request.headers.get("CF-Connecting-IP") ?? request.headers.get("X-Forwarded-For") ?? "unknown";
 }
 
-function applyRateLimit(request: Request): void {
+// Cheap per-isolate first line of defense. Catches a single-colo flood without
+// a subrequest, but is bypassable by spreading load across colos — the
+// authoritative limiter below closes that gap.
+function applyLocalRateLimit(request: Request): void {
   const now = Date.now();
-  const ip = request.headers.get("CF-Connecting-IP") ?? request.headers.get("X-Forwarded-For") ?? "unknown";
+  const ip = clientIp(request);
   const bucket = rateBuckets.get(ip);
   if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
     rateBuckets.set(ip, { windowStart: now, count: 1 });
@@ -940,89 +1171,39 @@ function applyRateLimit(request: Request): void {
   }
 }
 
-async function handleJoin(request: Request, env: Env, roomId: string): Promise<Response> {
-  const body = await readJson<JoinRequest>(request);
-  const peerId = validatePeerId(body.peerId);
-  const candidates = validateCandidates(body.candidates);
-  const metadata = validateMetadata(body.metadata);
-  const roomInfoUpdate = validateRoomInfo(body.room);
-  const now = Date.now();
-  const peer = { peerId, candidates, metadata, lastSeen: now };
-
-  const room = await loadRoom(env, roomId, now);
-  const security = await applyJoinRoomSecurity(room, roomInfoUpdate);
-  room.passwordVerifier = security.passwordVerifier;
-  room.info = mergeRoomInfo(room.info, security.infoUpdate);
-  const roomAccessKey = await ensureRoomAccessKey(env, roomId, room);
-  const nextPeers = [...otherPeers(room, peerId), peer];
-  await savePeer(env, roomId, peer);
-  await saveRoomInfo(env, roomId, room.info);
-  await saveRoomPasswordVerifier(env, roomId, room.passwordVerifier);
-  await cleanupLegacyRoom(env, roomId);
-  await trySyncRoomDirectory(env, roomId, nextPeers, room.info, now);
-
-  return jsonResponse({
-    ok: true,
-    roomAccessKey,
-    roomName: room.info?.name,
-    passwordProtected: room.info?.passwordProtected === true,
-    peers: otherPeers(room, peerId),
-  });
-}
-
-async function handlePeers(request: Request, env: Env, roomId: string): Promise<Response> {
-  const url = new URL(request.url);
-  const peerId = validatePeerId(url.searchParams.get("peerId"));
-  const roomPassword = roomPasswordFromRequest(request, url);
-  const room = await loadRoom(env, roomId);
-  await trySyncRoomDirectory(env, roomId, room.peers, room.info);
-  if (room.peers.length === 0) {
-    return jsonResponse({ ok: true, peers: [] });
+// Authoritative, cross-colo rate limit: a per-IP Durable Object holds one
+// fixed-window counter that every colo shares, so distributing a flood across
+// colos no longer multiplies the effective limit. Fails open on limiter/infra
+// errors (a limiter outage must not take signaling down) but propagates the
+// 429 when the limit is genuinely exceeded.
+async function applyRateLimit(request: Request, env: Env): Promise<void> {
+  applyLocalRateLimit(request);
+  if (!env.RATE_LIMITER) {
+    return;
   }
-  await requireRoomPassword(room, roomPassword);
-  const roomAccessKey = await ensureRoomAccessKey(env, roomId, room);
-
-  return jsonResponse({
-    ok: true,
-    roomAccessKey,
-    roomName: room.info?.name,
-    passwordProtected: room.info?.passwordProtected === true,
-    peers: otherPeers(room, peerId),
-  });
-}
-
-async function handleHeartbeat(request: Request, env: Env, roomId: string): Promise<Response> {
-  const body = await readJson<PeerRequest>(request);
-  const peerId = validatePeerId(body.peerId);
-  const now = Date.now();
-  const peer = normalizeStoredPeer(await env.ROOMS.get<unknown>(roomPeerKey(roomId, peerId), "json"));
-  if (!peer) {
-    await deletePeer(env, roomId, peerId);
-    throw new HttpError(404, "peer_not_found", "Peer is not in this room.");
+  try {
+    const id = env.RATE_LIMITER.idFromName(clientIp(request));
+    const response = await env.RATE_LIMITER.get(id).fetch("https://ratelimit.local/limit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS }),
+    });
+    if (response.ok) {
+      const data = await response.json<{ limited?: boolean }>();
+      if (data.limited === true) {
+        throw new HttpError(429, "rate_limited", "Too many signaling requests.");
+      }
+    }
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+    console.error("Cross-colo rate limiter unavailable", error);
   }
-  peer.lastSeen = now;
-  await savePeer(env, roomId, peer);
-  const room = await loadRoom(env, roomId, now);
-  await trySyncRoomDirectory(env, roomId, room.peers, room.info, now);
-
-  return jsonResponse({ ok: true });
 }
 
-async function handleLeave(request: Request, env: Env, roomId: string): Promise<Response> {
-  const body = await readJson<PeerRequest>(request);
-  const peerId = validatePeerId(body.peerId);
-  await deletePeer(env, roomId, peerId);
-  await cleanupLegacyRoom(env, roomId);
-  const room = await loadRoom(env, roomId);
-  if (room.peers.length === 0) {
-    await env.ROOMS.delete(roomAccessKeyKey(roomId));
-    await saveRoomInfo(env, roomId, undefined);
-    await saveRoomPasswordVerifier(env, roomId, undefined);
-  }
-  await trySyncRoomDirectory(env, roomId, room.peers, room.info);
-
-  return jsonResponse({ ok: true });
-}
+// Legacy per-room KV handlers removed: all room traffic is served by the
+// authenticated RoomObject Durable Object path (see routeRequest).
 
 export class RoomDirectoryObject extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
@@ -1047,8 +1228,95 @@ export class RoomDirectoryObject extends DurableObject<Env> {
     if (pathname === "/directory/sync" && request.method === "POST") {
       return this.handleSync(request);
     }
+    if (pathname === "/directory/reserve" && request.method === "POST") {
+      return this.handleReserve(request);
+    }
 
     throw new HttpError(404, "not_found", "Endpoint not found.");
+  }
+
+  // Count the currently-tracked, non-expired rooms, sweeping any expired entries
+  // encountered on the way. Bounded by MAX_ROOM_LIST_LIMIT reads.
+  private async countActiveRooms(now: number): Promise<number> {
+    const entries = await this.ctx.storage.list<unknown>({
+      prefix: ROOM_DIRECTORY_STORAGE_PREFIX,
+      limit: MAX_ROOM_LIST_LIMIT,
+    });
+    const deletes: string[] = [];
+    let active = 0;
+    for (const [key, value] of entries) {
+      if (normalizeRoomSummary(value, now)) {
+        ++active;
+      } else {
+        deletes.push(key);
+      }
+    }
+    if (deletes.length > 0) {
+      await this.ctx.storage.delete(deletes);
+    }
+    return active;
+  }
+
+  // Ensure the periodic sweep alarm is scheduled so stale directory entries are
+  // reclaimed even when no one lists rooms.
+  private async ensureSweepAlarm(now: number): Promise<void> {
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(now + DIRECTORY_SWEEP_INTERVAL_MS);
+    }
+  }
+
+  // Alarm-driven sweep: drop expired room entries and reschedule while any
+  // entries remain, so the directory storage never grows without bound.
+  async alarm(): Promise<void> {
+    const now = Date.now();
+    const entries = await this.ctx.storage.list<unknown>({ prefix: ROOM_DIRECTORY_STORAGE_PREFIX });
+    const deletes: string[] = [];
+    let remaining = 0;
+    for (const [key, value] of entries) {
+      if (normalizeRoomSummary(value, now)) {
+        ++remaining;
+      } else {
+        deletes.push(key);
+      }
+    }
+    if (deletes.length > 0) {
+      await this.ctx.storage.delete(deletes);
+    }
+    if (remaining > 0) {
+      await this.ctx.storage.setAlarm(now + DIRECTORY_SWEEP_INTERVAL_MS);
+    }
+  }
+
+  private async handleReserve(request: Request): Promise<Response> {
+    const body = await readJson<DirectorySyncRequest & { now?: unknown }>(request);
+    const roomId = validateRoomId(typeof body.roomId === "string" ? body.roomId : "");
+    const now = typeof body.now === "number" && Number.isFinite(body.now) ? body.now : Date.now();
+    const key = roomDirectoryStorageKey(roomId);
+
+    // Re-creating an already-tracked room takes no new slot.
+    const existing = normalizeRoomSummary(await this.ctx.storage.get<unknown>(key), now);
+    if (existing) {
+      return jsonResponse({ ok: true, reserved: true });
+    }
+
+    if ((await this.countActiveRooms(now)) >= MAX_ACTIVE_ROOMS) {
+      return jsonResponse({ ok: false, error: "rooms_at_capacity" }, 503);
+    }
+
+    // Hold a short-lived placeholder so concurrent creations can't overshoot the
+    // cap; a completed join overwrites it with the real full-TTL summary, and an
+    // abandoned reservation expires quickly.
+    const reservation: RoomSummary = {
+      roomId,
+      peerCount: 1,
+      updatedAt: now,
+      expiresAt: now + ROOM_RESERVATION_TTL_MS,
+      requiresRoomKey: false,
+      passwordProtected: false,
+    };
+    await this.ctx.storage.put(key, reservation);
+    await this.ensureSweepAlarm(now);
+    return jsonResponse({ ok: true, reserved: true });
   }
 
   private async handleList(url: URL): Promise<Response> {
@@ -1097,6 +1365,7 @@ export class RoomDirectoryObject extends DurableObject<Env> {
     }
 
     await this.ctx.storage.put(key, summary);
+    await this.ensureSweepAlarm(Date.now());
     return jsonResponse({ ok: true });
   }
 }
@@ -1128,7 +1397,7 @@ export class RoomObject extends DurableObject<Env> {
       throw new HttpError(404, "not_found", "Endpoint not found.");
     }
 
-    const roomId = validateRoomId(decodeURIComponent(match[1]));
+    const roomId = decodeRoomIdSegment(match[1]);
     const action = match[2];
     if (action === "join" && request.method === "POST") {
       return this.handleJoin(request, roomId);
@@ -1306,18 +1575,18 @@ export class RoomObject extends DurableObject<Env> {
 
     const url = new URL(request.url);
     const peerId = validatePeerId(url.searchParams.get("peerId"));
-    const roomPassword = roomPasswordFromRequest(request, url);
     const peers = await this.loadPeers();
     const changed = this.cleanupPeers(peers);
     if (changed) {
       await this.savePeers(roomId, peers);
     }
-    const roomInfo = await this.loadRoomInfo();
-    await requireRoomPassword({
-      peers: [...peers.values()],
-      info: roomInfo,
-      passwordVerifier: await this.loadRoomPasswordVerifier(),
-    }, roomPassword);
+    // The event stream carries other peers' candidates, so require the caller to
+    // be a joined member presenting its token (sent as a header on the upgrade).
+    const self = peers.get(peerId);
+    if (!self || !peerTokenMatches(self.token, peerTokenFromRequest(request))) {
+      throw new HttpError(403, "peer_token_invalid",
+        "A valid peer token for a joined peer is required to stream room events.");
+    }
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -1328,7 +1597,7 @@ export class RoomObject extends DurableObject<Env> {
       type: "hello",
       roomId,
       peerId,
-      peers: otherPeers({ peers: [...peers.values()] }, peerId).map(publicPeerForEvent),
+      peers: otherPeers({ peers: [...peers.values()] }, peerId),
     }));
 
     return new Response(null, {
@@ -1340,13 +1609,21 @@ export class RoomObject extends DurableObject<Env> {
   private async handleJoin(request: Request, roomId: string): Promise<Response> {
     const body = await readJson<JoinRequest>(request);
     const peerId = validatePeerId(body.peerId);
-    const candidates = validateCandidates(body.candidates);
+    const candidates = filterReflectionCandidates(
+      validateCandidates(body.candidates),
+      request.headers.get("CF-Connecting-IP") ?? "");
     const metadata = validateMetadata(body.metadata);
     const roomInfoUpdate = validateRoomInfo(body.room);
     const isHost = validateHostFlag(body.host);
     const now = Date.now();
     const peers = await this.loadPeers();
     this.cleanupPeers(peers, now);
+    // Creating a brand-new room (no active peers yet) consumes a slot against
+    // the global room-count cap. Enforce it before writing any room state so a
+    // capacity rejection leaves nothing behind.
+    if (peers.size === 0) {
+      await reserveRoomSlot(this.env, roomId, now);
+    }
     const currentInfo = await this.loadRoomInfo();
     const passwordVerifier = await this.loadRoomPasswordVerifier();
     const security = await applyJoinRoomSecurity({
@@ -1360,11 +1637,30 @@ export class RoomObject extends DurableObject<Env> {
     const roomAccessKey = await this.ensureRoomAccessKey();
 
     const previousPeer = peers.get(peerId);
-    const nextPeer = { peerId, candidates, metadata, lastSeen: now };
+    // Updating an existing peerId requires proof of ownership (its token), so a
+    // caller cannot overwrite another peer's candidates and hijack the media
+    // path. A fresh peerId is issued a new server-generated token.
+    const presentedToken = peerTokenFromRequest(request);
+    if (previousPeer && !peerTokenMatches(previousPeer.token, presentedToken)) {
+      throw new HttpError(403, "peer_token_invalid",
+        "This peerId is already claimed; a valid peer token is required to update it.");
+    }
+
+    // Bound the number of distinct peers per room. Adding a brand-new peer to
+    // an already-full room is rejected; re-announcing an existing peer is
+    // always allowed so active members are never locked out.
+    if (!previousPeer && peers.size >= MAX_PEERS_PER_ROOM) {
+      throw new HttpError(409, "room_full", "This room already has the maximum number of participants.");
+    }
+
+    const token = previousPeer ? previousPeer.token : generatePeerToken();
+    const nextPeer: Peer = { peerId, candidates, metadata, lastSeen: now, token };
     const shouldBroadcastPeer =
       !previousPeer || peerAnnouncementKey(previousPeer) !== peerAnnouncementKey(nextPeer);
     peers.set(peerId, nextPeer);
     await this.savePeers(roomId, peers, now);
+    // Host role is bound to a peer's token: only the first claimant of a peerId
+    // (or a re-announce with its token, checked above) can assert host.
     if (isHost && (await this.loadHostPeerId()) !== peerId) {
       await this.saveHostPeerId(peerId);
     }
@@ -1377,6 +1673,7 @@ export class RoomObject extends DurableObject<Env> {
 
     return jsonResponse({
       ok: true,
+      peerToken: token,
       roomAccessKey,
       roomName: roomInfo?.name,
       passwordProtected: roomInfo?.passwordProtected === true,
@@ -1387,21 +1684,20 @@ export class RoomObject extends DurableObject<Env> {
   private async handlePeers(request: Request, roomId: string): Promise<Response> {
     const url = new URL(request.url);
     const peerId = validatePeerId(url.searchParams.get("peerId"));
-    const roomPassword = roomPasswordFromRequest(request, url);
     const peers = await this.loadPeers();
     const changed = this.cleanupPeers(peers);
     if (changed) {
       await this.savePeers(roomId, peers);
     }
-    if (peers.size === 0) {
-      return jsonResponse({ ok: true, peers: [] });
+    // Candidates (peer IP:port) and the room access key are only returned to a
+    // caller that has joined this room and presents its peer token. This stops
+    // anonymous callers from harvesting participants' IPs and the media key.
+    const self = peers.get(peerId);
+    if (!self || !peerTokenMatches(self.token, peerTokenFromRequest(request))) {
+      throw new HttpError(403, "peer_token_invalid",
+        "A valid peer token for a joined peer is required to read room peers.");
     }
     const roomInfo = await this.loadRoomInfo();
-    await requireRoomPassword({
-      peers: [...peers.values()],
-      info: roomInfo,
-      passwordVerifier: await this.loadRoomPasswordVerifier(),
-    }, roomPassword);
     const roomAccessKey = await this.ensureRoomAccessKey();
 
     return jsonResponse({
@@ -1419,10 +1715,13 @@ export class RoomObject extends DurableObject<Env> {
     const now = Date.now();
     const peers = await this.loadPeers();
     this.cleanupPeers(peers, now);
+    // Only the owning peer may refresh its own liveness. Return the same error
+    // whether the peer is absent or the token is wrong, so heartbeat cannot be
+    // used to probe who is in a (locked) room.
     const peer = peers.get(peerId);
-    if (!peer) {
+    if (!peer || !peerTokenMatches(peer.token, peerTokenFromRequest(request))) {
       await this.savePeers(roomId, peers, now);
-      throw new HttpError(404, "peer_not_found", "Peer is not in this room.");
+      throw new HttpError(403, "peer_token_invalid", "A valid peer token is required to heartbeat.");
     }
 
     peer.lastSeen = now;
@@ -1435,6 +1734,14 @@ export class RoomObject extends DurableObject<Env> {
     const body = await readJson<PeerRequest>(request);
     const peerId = validatePeerId(body.peerId);
     const peers = await this.loadPeers();
+    const leaving = peers.get(peerId);
+    // A peer may only remove itself, proven by its token. A missing peer or a
+    // caller without the matching token is a silent no-op success: this blocks
+    // unauthenticated eviction / room teardown (which bypassed the room
+    // password) without revealing whether the peer exists.
+    if (!leaving || !peerTokenMatches(leaving.token, peerTokenFromRequest(request))) {
+      return jsonResponse({ ok: true });
+    }
     const removed = peers.delete(peerId);
     const hostPeerId = await this.loadHostPeerId();
 
@@ -1474,12 +1781,14 @@ export class RoomObject extends DurableObject<Env> {
   }
 }
 
-async function routeRequest(request: Request, env: Env): Promise<Response> {
+async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders() });
+    // CORS headers (including whether one is emitted at all) are added at the
+    // edge in withCors; the preflight body is empty.
+    return new Response(null, { status: 204 });
   }
 
-  applyRateLimit(request);
+  await applyRateLimit(request, env);
 
   const url = new URL(request.url);
   const pathname = normalizePath(url.pathname);
@@ -1489,7 +1798,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (pathname === "/rooms" && request.method === "GET") {
-    return handleRoomList(request, env);
+    return handleRoomList(request, env, ctx);
   }
 
   const match = pathname.match(/^\/rooms\/([^/]+)\/(join|peers|heartbeat|leave|summary|events)$/);
@@ -1500,40 +1809,68 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
   const roomId = validateRoomId(decodeURIComponent(match[1]));
   const action = match[2];
 
-  if (env.ROOM_OBJECTS) {
-    const id = env.ROOM_OBJECTS.idFromName(roomId);
-    return env.ROOM_OBJECTS.get(id).fetch(request);
+  if (!env.ROOM_OBJECTS) {
+    // Per-room state is served only by the authenticated RoomObject Durable
+    // Object. The legacy unauthenticated KV path has been retired, so refuse
+    // rather than fall back to it.
+    throw new HttpError(503, "durable_objects_required",
+      "Room signaling requires the RoomObject Durable Object binding.");
   }
+  void action;
+  const id = env.ROOM_OBJECTS.idFromName(roomId);
+  return env.ROOM_OBJECTS.get(id).fetch(request);
+}
 
-  if (action === "join" && request.method === "POST") {
-    return handleJoin(request, env, roomId);
-  }
-  if (action === "peers" && request.method === "GET") {
-    return handlePeers(request, env, roomId);
-  }
-  if (action === "heartbeat" && request.method === "POST") {
-    return handleHeartbeat(request, env, roomId);
-  }
-  if (action === "leave" && request.method === "POST") {
-    return handleLeave(request, env, roomId);
-  }
-  if (action === "summary" && request.method === "GET") {
-    return handleRoomSummary(env, roomId);
-  }
+// Cross-colo authoritative rate limiter. Sharded per client IP via
+// idFromName(ip): all of one IP's requests, from any colo, land on this single
+// object, so its in-memory fixed-window counter is a global view of that IP.
+// State is intentionally in-memory only — the object stays warm while an IP is
+// active (exactly when limiting matters) and simply resets when idle-evicted,
+// which only ever favors a client that has stopped sending. No storage, so no
+// per-request write cost.
+export class RateLimiterObject extends DurableObject<Env> {
+  private windowStart = 0;
+  private count = 0;
 
-  throw new HttpError(405, "method_not_allowed", "Method not allowed for this endpoint.");
+  async fetch(request: Request): Promise<Response> {
+    let windowMs = RATE_LIMIT_WINDOW_MS;
+    let max = RATE_LIMIT_MAX_REQUESTS;
+    try {
+      const body = await request.json<{ windowMs?: unknown; max?: unknown }>();
+      if (typeof body.windowMs === "number" && Number.isFinite(body.windowMs) && body.windowMs > 0) {
+        windowMs = body.windowMs;
+      }
+      if (typeof body.max === "number" && Number.isFinite(body.max) && body.max > 0) {
+        max = body.max;
+      }
+    } catch {
+      // Fall back to defaults on a malformed body.
+    }
+
+    const now = Date.now();
+    if (now - this.windowStart >= windowMs) {
+      this.windowStart = now;
+      this.count = 1;
+    } else {
+      this.count += 1;
+    }
+    return jsonResponse({ ok: true, limited: this.count > max });
+  }
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    let response: Response;
     try {
-      return await routeRequest(request, env);
+      response = await routeRequest(request, env, ctx);
     } catch (error) {
       if (error instanceof HttpError) {
-        return jsonResponse({ ok: false, error: error.code, message: error.message }, error.status);
+        response = jsonResponse({ ok: false, error: error.code, message: error.message }, error.status);
+      } else {
+        console.error("Unhandled signaling error", error);
+        response = jsonResponse({ ok: false, error: "internal_error", message: "Internal server error." }, 500);
       }
-      console.error("Unhandled signaling error", error);
-      return jsonResponse({ ok: false, error: "internal_error", message: "Internal server error." }, 500);
     }
+    return withCors(response, request, env);
   },
 };

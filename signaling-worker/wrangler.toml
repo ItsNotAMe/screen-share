@@ -14,6 +14,17 @@ class_name = "RoomObject"
 name = "ROOM_DIRECTORY"
 class_name = "RoomDirectoryObject"
 
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterObject"
+
+# Optional: comma-separated browser origins allowed for CORS. Leave unset so no
+# CORS headers are emitted (native clients are unaffected; browsers are blocked
+# by default). Set only if a browser client actually needs cross-origin access,
+# e.g. ALLOWED_ORIGINS = "https://app.example.com".
+# [vars]
+# ALLOWED_ORIGINS = ""
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomObject"]
@@ -21,3 +32,7 @@ new_sqlite_classes = ["RoomObject"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["RoomDirectoryObject"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RateLimiterObject"]

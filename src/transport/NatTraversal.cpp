@@ -287,11 +287,8 @@ NatInviteEndpoint ReadEndpoint(std::span<const std::byte> data, size_t& offset, 
 
 std::array<std::byte, UdpCryptoNonceBytes> GenerateCompactInviteNonce()
 {
-    std::array<std::byte, UdpCryptoNonceBytes> nonce{};
-    AppendUint32(nonce, 0, GenerateUdpCryptoNoncePrefix());
-    AppendUint32(nonce, 4, GenerateUdpCryptoNoncePrefix());
-    AppendUint32(nonce, 8, GenerateUdpCryptoNoncePrefix());
-    return nonce;
+    // One-shot invite encryption: a full 96-bit random nonce.
+    return GenerateUdpCryptoNonce();
 }
 
 std::vector<std::byte> BuildCompactInvitePayload(const NatInvite& invite)

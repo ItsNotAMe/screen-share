@@ -1881,20 +1881,18 @@ void ApplySignalingRoomAccessKey(Options& options, const screenshare::SignalingR
         throw std::runtime_error("Signaling room requires a password");
     }
 
-    const bool mixRoomPassword =
-        response.passwordProtected || !options.signalingRoomPassword.empty();
-    std::string keyMaterial = response.roomAccessKey;
-    if (mixRoomPassword) {
-        keyMaterial += "\npassword:";
-        keyMaterial += options.signalingRoomPassword;
-    }
+    // The room password is purely an access gate: the Worker verifies it before
+    // it will hand back the room access key. It is NOT mixed into the encryption
+    // key -- the key material is the server-issued random room access key alone.
+    // (The Worker only stores a salted verifier, never the password itself.)
+    const std::string& keyMaterial = response.roomAccessKey;
     options.accessCodeFingerprint = screenshare::UdpAccessCodeFingerprint(keyMaterial);
     options.accessCodeKey = screenshare::DeriveUdpCryptoKey(keyMaterial);
     options.accessCodeProvided = true;
     std::cout
         << "signaling_room_encryption=ready"
         << " room=" << options.signalingRoomId
-        << " password=" << (mixRoomPassword ? "yes" : "no")
+        << " password_gate=" << (response.passwordProtected ? "yes" : "no")
         << " source=server\n";
 }
 
@@ -1952,6 +1950,10 @@ public:
         auto state = std::make_shared<State>();
         state->roomId = options.signalingRoomId;
         state->peer = BuildLiveSignalingPeerState(options);
+        // Seed the token issued by the initial (pre-media) join so the live
+        // loop re-announces this peerId with a valid token from the start.
+        state->peerToken = options.signalingPeerToken;
+        state->peerTokenReady = !options.signalingPeerToken.empty();
         state_ = state;
         worker_ = std::thread(&LiveSignalingRuntime::Run, std::move(state), std::move(clientConfig));
 
@@ -2035,6 +2037,10 @@ private:
         std::map<std::string, LiveSignalingPeerCandidate> seenCandidates;
         std::vector<LiveSignalingPeerCandidate> discoveredPeers;
         std::vector<LiveSignalingPeerCandidate> removedPeers;
+        // Server-issued peer token from the first Join; required to re-announce,
+        // read peers, stream events, and leave.
+        std::string peerToken;
+        bool peerTokenReady = false;
         bool refreshRequested = false;
         bool stopRequested = false;
     };
@@ -2053,6 +2059,11 @@ private:
         }
 
         std::lock_guard lock(state->mutex);
+        if (!response.peerToken.empty() && !state->peerTokenReady) {
+            state->peerToken = response.peerToken;
+            state->peerTokenReady = true;
+            state->wake.notify_all(); // unblock the events worker waiting for the token
+        }
         std::map<std::string, LiveSignalingPeerCandidate> latestCandidates;
         for (const auto& peer : response.peers) {
             if (peer.peerId == state->peer.peerId) {
@@ -2121,15 +2132,36 @@ private:
         return state->peer;
     }
 
+    [[nodiscard]] static std::string SnapshotPeerToken(const std::shared_ptr<State>& state)
+    {
+        std::lock_guard lock(state->mutex);
+        return state->peerToken;
+    }
+
+    // Block until the first Join has issued a peer token (or stop is requested),
+    // so the events worker authenticates its stream instead of racing ahead.
+    [[nodiscard]] static std::string WaitForPeerToken(const std::shared_ptr<State>& state)
+    {
+        std::unique_lock lock(state->mutex);
+        state->wake.wait(lock, [&]() { return state->peerTokenReady || state->stopRequested; });
+        return state->peerToken;
+    }
+
     static void RunEvents(std::shared_ptr<State> state, screenshare::SignalingClientConfig clientConfig)
     {
+        // Wait for the first Join (in Run) to obtain the peer token before
+        // opening the authenticated event stream.
+        const std::string peerToken = WaitForPeerToken(state);
+        if (stopRequested(state)) {
+            return;
+        }
         while (!stopRequested(state)) {
             try {
                 screenshare::SignalingClient client(clientConfig);
                 client.ListenRoomEvents(
                     state->roomId,
                     state->peer.peerId,
-                    state->peer.roomPassword,
+                    peerToken,
                     [state](const std::string& message) {
                         const bool roomClosed =
                             message.find("\"type\":\"room_closed\"") != std::string::npos;
@@ -2186,7 +2218,7 @@ private:
 
         while (!stopRequested(state)) {
             try {
-                RecordPeers(state, client.Join(state->roomId, SnapshotPeer(state)));
+                RecordPeers(state, client.Join(state->roomId, SnapshotPeer(state), SnapshotPeerToken(state)));
             } catch (const std::exception& error) {
                 std::cerr
                     << "signaling_live_refresh=error"
@@ -2202,6 +2234,7 @@ private:
         }
 
         const std::string peerId = SnapshotPeer(state).peerId;
+        const std::string peerToken = SnapshotPeerToken(state);
         {
             std::lock_guard lock(state->mutex);
             state->stopRequested = true;
@@ -2209,7 +2242,7 @@ private:
         state->wake.notify_all();
 
         try {
-            client.Leave(state->roomId, peerId);
+            client.Leave(state->roomId, peerId, peerToken);
             std::cout
                 << "signaling_live_leave=ok"
                 << " room=" << state->roomId
@@ -3152,6 +3185,16 @@ void RunCaptureStats(
     screenshare::RemoteInputInjector remoteInputInjector;
     std::string remoteControlEndpoint;   // endpoint of the viewer currently granted control
     uint32_t remoteControlCapabilities = 0;
+    // Rate-limit injected input. A granted viewer that is compromised or buggy
+    // could otherwise stream control packets fast enough to flood SendInput and
+    // make the host unusable (and unable to reach the revoke controls). A token
+    // bucket caps the sustained injection rate while allowing a burst, so smooth
+    // high-frequency mouse control is unaffected but an unbounded flood is not.
+    constexpr double kRemoteInputTokensPerSecond = 1000.0;
+    constexpr double kRemoteInputTokenBurst = 500.0;
+    double remoteInputTokens = kRemoteInputTokenBurst;
+    Clock::time_point remoteInputTokensUpdatedAt = Clock::now();
+    uint64_t remoteInputEventsDropped = 0;
     // A control ack is a single UDP datagram; to survive loss we re-send the
     // latest ack a few times right after each state change. This is a bounded
     // burst, not a perpetual re-assert: a steady-state re-grant would fight an
@@ -3341,10 +3384,25 @@ void RunCaptureStats(
 
         udpSender = std::make_unique<UdpSenderFanout>();
         udpSender->Open(udpConfigs);
-        refreshRemoteControlBounds(config.displayIndex);
+        // Only map injection bounds when sharing a whole display. For a window
+        // share, leave bounds clear so a granted viewer cannot move/click across
+        // the entire monitor (including regions outside the shared window); the
+        // runtime source-change path applies the same rule.
+        if (config.sourceType == screenshare::CaptureSourceType::Display) {
+            refreshRemoteControlBounds(config.displayIndex);
+        } else {
+            remoteInputInjector.SetTargetBounds(0, 0, 0, 0);
+        }
         udpSender->SetControlHandler(
             [&](const std::string& endpoint, const screenshare::udp_protocol::ControlMessage& message) {
                 using Command = screenshare::udp_protocol::ControlCommandType;
+                // Remote control requires an encrypted session. On a plaintext
+                // session a control packet is authenticated only by its source
+                // ip:port, which is trivially spoofable, so honoring it would
+                // allow unauthenticated input injection into the host.
+                if (!options.accessCodeKey.has_value()) {
+                    return;
+                }
                 if (message.command == Command::RequestControl) {
                     std::cout << "remote_control_request endpoint=" << endpoint
                               << " caps=" << message.capabilities << "\n" << std::flush;
@@ -3371,6 +3429,29 @@ void RunCaptureStats(
                     (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityMouse) != 0;
                 const bool keyboardOk =
                     (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityKeyboard) != 0;
+                // Token-bucket rate limit. Every remaining command is an input
+                // command (grant/deny/revoke are host->viewer, request/release
+                // handled above), so each consumes one token; a drained bucket
+                // drops the event rather than injecting it.
+                {
+                    const auto nowInput = Clock::now();
+                    const double elapsedSeconds =
+                        std::chrono::duration<double>(nowInput - remoteInputTokensUpdatedAt).count();
+                    remoteInputTokensUpdatedAt = nowInput;
+                    remoteInputTokens = std::min(
+                        kRemoteInputTokenBurst,
+                        remoteInputTokens + elapsedSeconds * kRemoteInputTokensPerSecond);
+                    if (remoteInputTokens < 1.0) {
+                        ++remoteInputEventsDropped;
+                        // Throttled telemetry: surface a flood without spamming.
+                        if (remoteInputEventsDropped % 500 == 1) {
+                            std::cout << "remote_control_input_throttled endpoint=" << endpoint
+                                      << " dropped=" << remoteInputEventsDropped << "\n" << std::flush;
+                        }
+                        return;
+                    }
+                    remoteInputTokens -= 1.0;
+                }
                 switch (message.command) {
                 case Command::MouseMove:
                     if (mouseOk) {
@@ -3378,7 +3459,9 @@ void RunCaptureStats(
                     }
                     break;
                 case Command::MouseButton:
-                    if (mouseOk) {
+                    if (mouseOk &&
+                        message.button <= static_cast<uint16_t>(
+                            screenshare::udp_protocol::ControlMouseButton::X2)) {
                         remoteInputInjector.InjectMouseButton(
                             static_cast<screenshare::RemoteInputInjector::MouseButton>(message.button),
                             message.pressed,
@@ -4050,7 +4133,9 @@ void RunCaptureStats(
                 if (slice > Clock::duration::zero()) {
                     std::this_thread::sleep_for(slice);
                 }
-                udpSender->ReceiveFeedback(std::chrono::milliseconds(0));
+                // Called only to pump the receive loop so queued control input is
+                // dispatched promptly; the returned feedback snapshot is unused here.
+                static_cast<void>(udpSender->ReceiveFeedback(std::chrono::milliseconds(0)));
             }
         } else {
             std::this_thread::sleep_until(nextFrameAt);
@@ -4061,6 +4146,16 @@ void RunCaptureStats(
 
         // Apply host grant/revoke requests from the UI and acknowledge the viewer.
         while (auto controlRequest = runtimeControl.TakeViewerControlRequest()) {
+            // Remote control is only available on encrypted sessions (see the
+            // control handler above). Refuse to grant on a plaintext session so
+            // the host cannot hand out control that the injection path will not
+            // honor anyway.
+            if (controlRequest->capabilities != 0 && !options.accessCodeKey.has_value()) {
+                std::cout << "remote_control_grant endpoint=" << controlRequest->viewerId
+                          << " caps=" << controlRequest->capabilities
+                          << " sent=no reason=plaintext_session\n" << std::flush;
+                continue;
+            }
             // Single controller: if control moves to a different viewer, revoke
             // the previous one so its UI stops showing "in control".
             if (!remoteControlEndpoint.empty() &&
@@ -4695,6 +4790,9 @@ void PrepareLiveSignaling(Options& options)
     std::map<std::string, screenshare::SignalingPeer> peersById;
     const auto response = client.Join(options.signalingRoomId, peer);
     ApplySignalingRoomAccessKey(options, response);
+    // Remember the issued token so the live signaling loop can re-announce this
+    // same peerId (an unauthenticated re-join would now be rejected).
+    options.signalingPeerToken = response.peerToken;
     MergeSignalingPeers(peersById, response);
     const int polls = 1;
 

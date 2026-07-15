@@ -1,5 +1,10 @@
 # TODO
 
+## Release Readiness
+
+- [ ] Deploy the signaling Worker with the new `RATE_LIMITER` Durable Object binding and migration `v3`, then validate the cross-colo limiter, room-count cap, and directory sweep against the live Cloudflare account.
+- [ ] Exercise an encrypted session through a real NAT rebind before relying on automatic retargeting in the field.
+
 ## Build Work
 
 1. Performance / latency optimization pass (top priority, once the mouse/keyboard remote-control feature is finished).

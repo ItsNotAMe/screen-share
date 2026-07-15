@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative VERSION 0.2.0 LANGUAGES CXX)
+project(ScreenShareNative VERSION 0.2.1 LANGUAGES CXX)
 
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
@@ -83,6 +83,7 @@ add_library(ScreenShareCore STATIC
     src/transport/UdpProtocol.cpp
     src/transport/UdpReceiver.cpp
     src/transport/UdpSender.cpp
+    src/updater/UpdateSignature.cpp
     src/video/Nv12Convert.cpp
 )
 
@@ -197,6 +198,7 @@ screenshare_configure_release_lto_warnings(ScreenShareUpdater)
 
 target_link_libraries(ScreenShareUpdater PRIVATE
     shell32
+    bcrypt
 )
 
 if(MSVC)

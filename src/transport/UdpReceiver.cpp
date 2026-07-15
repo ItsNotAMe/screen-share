@@ -25,6 +25,37 @@
 namespace screenshare {
 namespace {
 
+// Insert byte range [begin, end) into a list of already-received fragment
+// ranges kept sorted by `begin`, rejecting (returning false) if it overlaps an
+// existing range. Because the stored ranges are disjoint and sorted, only the
+// immediate neighbors can overlap, so this is O(log n) (binary search + two
+// neighbor checks) instead of the O(n) linear scan it replaces — bounding the
+// per-frame reassembly cost at O(n log n) rather than O(n^2). Works for both
+// the video and audio pending-fragment structs (identical FragmentRange shape).
+template <typename RangeVec>
+bool InsertDisjointFragmentRange(RangeVec& ranges, uint32_t begin, uint32_t end)
+{
+    // First stored range whose begin is >= the new range's begin.
+    auto next = std::lower_bound(
+        ranges.begin(),
+        ranges.end(),
+        begin,
+        [](const auto& range, uint32_t value) { return range.begin < value; });
+    // Overlap with the successor: the new range extends past its start.
+    if (next != ranges.end() && end > next->begin) {
+        return false;
+    }
+    // Overlap with the predecessor: its end extends past the new range's start.
+    if (next != ranges.begin()) {
+        const auto prev = std::prev(next);
+        if (prev->end > begin) {
+            return false;
+        }
+    }
+    ranges.insert(next, {begin, end});
+    return true;
+}
+
 std::string WinsockErrorDescription(int error)
 {
     switch (error) {
@@ -163,13 +194,14 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
         throw std::invalid_argument("UDP NAT probe interval must be between 50 and 5000 ms");
     }
 
-    std::unique_ptr<UdpAesGcm> crypto;
-    uint32_t feedbackNoncePrefix = 0;
-    uint32_t controlNoncePrefix = 0;
-    if (config.encryptionKey) {
-        crypto = std::make_unique<UdpAesGcm>(*config.encryptionKey);
-        feedbackNoncePrefix = GenerateUdpCryptoNoncePrefix();
-        controlNoncePrefix = GenerateUdpCryptoNoncePrefix();
+    std::unique_ptr<UdpAesGcm> encryptCrypto;
+    UdpCryptoKey master{};
+    UdpCryptoSessionSalt sessionSalt{};
+    const bool encryptionEnabled = config.encryptionKey.has_value();
+    if (encryptionEnabled) {
+        master = *config.encryptionKey;
+        sessionSalt = GenerateUdpCryptoSessionSalt();
+        encryptCrypto = std::make_unique<UdpAesGcm>(DeriveUdpSessionKey(master, sessionSalt));
     }
 
     std::vector<NatProbeTargetAddress> natProbeTargets;
@@ -245,9 +277,11 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
 
     socket_ = static_cast<uintptr_t>(udpSocket);
     config_ = config;
-    crypto_ = std::move(crypto);
-    feedbackNoncePrefix_ = feedbackNoncePrefix;
-    controlNoncePrefix_ = controlNoncePrefix;
+    encryptionEnabled_ = encryptionEnabled;
+    master_ = master;
+    sessionSalt_ = sessionSalt;
+    encryptCrypto_ = std::move(encryptCrypto);
+    peerDecryptCryptos_.clear();
     nextControlSequence_ = 1;
     datagramBuffer_.assign(config_.maxDatagramBytes, std::byte{});
     feedbackAddress_.clear();
@@ -271,9 +305,11 @@ void UdpReceiver::Close()
     }
 
     datagramBuffer_.clear();
-    crypto_.reset();
-    feedbackNoncePrefix_ = 0;
-    controlNoncePrefix_ = 0;
+    encryptionEnabled_ = false;
+    master_ = {};
+    sessionSalt_ = {};
+    encryptCrypto_.reset();
+    peerDecryptCryptos_.clear();
     nextControlSequence_ = 1;
     feedbackAddress_.clear();
     feedbackAddressLength_ = 0;
@@ -637,20 +673,27 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     std::optional<std::vector<std::byte>> decryptedPayload;
     const std::byte* payloadData = datagram + headerBytes;
     if ((flags & udp_protocol::PacketFlagEncrypted) != 0) {
+        UdpCryptoSessionSalt salt{};
+        std::memcpy(salt.data(), header.sessionSalt, salt.size());
+        UdpAesGcm* crypto = DecryptCryptoForSalt(salt);
+        if (crypto == nullptr) {
+            ++stats_.cryptoRejectedDatagrams;
+            return std::nullopt;
+        }
         decryptedPayload = DecryptDatagramPayload(
+            *crypto,
             datagram,
             datagramBytes,
             headerBytes,
             udp_protocol::PacketHeaderAuthenticatedBytes,
             std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
-            std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes),
-            flags);
+            std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes));
         if (!decryptedPayload) {
             ++stats_.cryptoRejectedDatagrams;
             return std::nullopt;
         }
         payloadData = decryptedPayload->data();
-    } else if (crypto_) {
+    } else if (encryptionEnabled_) {
         ++stats_.cryptoRejectedDatagrams;
         return std::nullopt;
     }
@@ -659,13 +702,21 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     auto [it, inserted] = pendingFrames_.try_emplace(frameId);
     PendingFrame& pending = it->second;
     if (inserted) {
-        pending.frameId = frameId;
-        pending.timestamp100ns = timestamp100ns;
-        pending.senderQpc100ns = senderQpc100ns;
-        pending.frameBytes = frameBytes;
-        pending.fragmentCount = fragmentCount;
-        pending.bytes.assign(frameBytes, std::byte{});
-        pending.fragmentReceived.assign(fragmentCount, 0);
+        // Size both buffers before the entry is considered usable. If an
+        // allocation throws, erase the half-built entry so a later fragment
+        // for the same frame id cannot index empty vectors.
+        try {
+            pending.frameId = frameId;
+            pending.timestamp100ns = timestamp100ns;
+            pending.senderQpc100ns = senderQpc100ns;
+            pending.frameBytes = frameBytes;
+            pending.fragmentCount = fragmentCount;
+            pending.bytes.assign(frameBytes, std::byte{});
+            pending.fragmentReceived.assign(fragmentCount, 0);
+        } catch (...) {
+            pendingFrames_.erase(it);
+            throw;
+        }
     } else if (pending.timestamp100ns != timestamp100ns ||
                pending.senderQpc100ns != senderQpc100ns ||
                pending.frameBytes != frameBytes ||
@@ -682,13 +733,13 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     }
 
     const uint32_t fragmentEnd = fragmentOffset + payloadBytes;
-    for (const auto& range : pending.receivedRanges) {
-        if (fragmentOffset < range.end && fragmentEnd > range.begin) {
-            ++stats_.invalidDatagrams;
-            return std::nullopt;
-        }
-    }
     if (payloadBytes > pending.frameBytes - pending.receivedBytes) {
+        ++stats_.invalidDatagrams;
+        return std::nullopt;
+    }
+    // Reject a fragment whose byte range overlaps one already received (a peer
+    // lying about fragmentOffset), recording it in sorted order on success.
+    if (!InsertDisjointFragmentRange(pending.receivedRanges, fragmentOffset, fragmentEnd)) {
         ++stats_.invalidDatagrams;
         return std::nullopt;
     }
@@ -701,7 +752,6 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
 
     std::memcpy(pending.bytes.data() + fragmentOffset, payloadData, payloadBytes);
     pending.fragmentReceived[fragmentIndex] = 1;
-    pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
     ++pending.receivedFragments;
     pending.receivedBytes += payloadBytes;
 
@@ -806,20 +856,27 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     std::optional<std::vector<std::byte>> decryptedPayload;
     const std::byte* payloadData = datagram + headerBytes;
     if ((encryptionFlags & udp_protocol::PacketFlagEncrypted) != 0) {
+        UdpCryptoSessionSalt salt{};
+        std::memcpy(salt.data(), header.sessionSalt, salt.size());
+        UdpAesGcm* crypto = DecryptCryptoForSalt(salt);
+        if (crypto == nullptr) {
+            ++stats_.cryptoRejectedDatagrams;
+            return;
+        }
         decryptedPayload = DecryptDatagramPayload(
+            *crypto,
             datagram,
             datagramBytes,
             headerBytes,
             udp_protocol::AudioPacketHeaderAuthenticatedBytes,
             std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
-            std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes),
-            encryptionFlags);
+            std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes));
         if (!decryptedPayload) {
             ++stats_.cryptoRejectedDatagrams;
             return;
         }
         payloadData = decryptedPayload->data();
-    } else if (crypto_) {
+    } else if (encryptionEnabled_) {
         ++stats_.cryptoRejectedDatagrams;
         return;
     }
@@ -842,21 +899,28 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     auto [it, inserted] = pendingAudioPackets_.try_emplace(packetId);
     PendingAudioPacket& pending = it->second;
     if (inserted) {
-        pending.packetId = packetId;
-        pending.devicePosition = devicePosition;
-        pending.qpcPosition = qpcPosition;
-        pending.sampleRate = sampleRate;
-        pending.channels = channels;
-        pending.bitsPerSample = bitsPerSample;
-        pending.blockAlign = blockAlign;
-        pending.sampleFormat = sampleFormat;
-        pending.codec = codec;
-        pending.audioFrames = audioFrames;
-        pending.packetBytes = packetBytes;
-        pending.flags = flags;
-        pending.fragmentCount = fragmentCount;
-        pending.bytes.assign(packetBytes, std::byte{});
-        pending.fragmentReceived.assign(fragmentCount, 0);
+        // Size both buffers before the entry is considered usable; erase the
+        // half-built entry if an allocation throws (see video path above).
+        try {
+            pending.packetId = packetId;
+            pending.devicePosition = devicePosition;
+            pending.qpcPosition = qpcPosition;
+            pending.sampleRate = sampleRate;
+            pending.channels = channels;
+            pending.bitsPerSample = bitsPerSample;
+            pending.blockAlign = blockAlign;
+            pending.sampleFormat = sampleFormat;
+            pending.codec = codec;
+            pending.audioFrames = audioFrames;
+            pending.packetBytes = packetBytes;
+            pending.flags = flags;
+            pending.fragmentCount = fragmentCount;
+            pending.bytes.assign(packetBytes, std::byte{});
+            pending.fragmentReceived.assign(fragmentCount, 0);
+        } catch (...) {
+            pendingAudioPackets_.erase(it);
+            throw;
+        }
     } else if (pending.devicePosition != devicePosition ||
                pending.qpcPosition != qpcPosition ||
                pending.sampleRate != sampleRate ||
@@ -881,13 +945,13 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     }
 
     const uint32_t fragmentEnd = fragmentOffset + payloadBytes;
-    for (const auto& range : pending.receivedRanges) {
-        if (fragmentOffset < range.end && fragmentEnd > range.begin) {
-            ++stats_.invalidDatagrams;
-            return;
-        }
-    }
     if (payloadBytes > pending.packetBytes - pending.receivedBytes) {
+        ++stats_.invalidDatagrams;
+        return;
+    }
+    // Reject a fragment whose byte range overlaps one already received,
+    // recording it in sorted order on success (O(log n), see the video path).
+    if (!InsertDisjointFragmentRange(pending.receivedRanges, fragmentOffset, fragmentEnd)) {
         ++stats_.invalidDatagrams;
         return;
     }
@@ -900,7 +964,6 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
 
     std::memcpy(pending.bytes.data() + fragmentOffset, payloadData, payloadBytes);
     pending.fragmentReceived[fragmentIndex] = 1;
-    pending.receivedRanges.push_back({fragmentOffset, fragmentEnd});
     ++pending.receivedFragments;
     pending.receivedBytes += payloadBytes;
 
@@ -964,31 +1027,52 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
 }
 
 std::optional<std::vector<std::byte>> UdpReceiver::DecryptDatagramPayload(
+    const UdpAesGcm& crypto,
     const std::byte* datagram,
     int datagramBytes,
     size_t headerBytes,
     size_t authenticatedHeaderBytes,
     std::span<const std::byte, UdpCryptoNonceBytes> nonce,
-    std::span<const std::byte, UdpCryptoTagBytes> tag,
-    uint32_t flags)
+    std::span<const std::byte, UdpCryptoTagBytes> tag)
 {
-    if ((flags & udp_protocol::PacketFlagEncrypted) == 0) {
-        return std::vector<std::byte>(datagram + headerBytes, datagram + datagramBytes);
-    }
-    if (!crypto_ || datagramBytes < static_cast<int>(headerBytes)) {
+    if (datagramBytes < static_cast<int>(headerBytes)) {
         return std::nullopt;
     }
 
-    return crypto_->Decrypt(
+    return crypto.Decrypt(
         nonce,
         std::span<const std::byte>(datagram, authenticatedHeaderBytes),
         std::span<const std::byte>(datagram + headerBytes, static_cast<size_t>(datagramBytes) - headerBytes),
         tag);
 }
 
+UdpAesGcm* UdpReceiver::DecryptCryptoForSalt(const UdpCryptoSessionSalt& salt)
+{
+    // Receive-thread only, so peerDecryptCryptos_ needs no extra locking.
+    if (!encryptionEnabled_) {
+        return nullptr;
+    }
+    for (auto& entry : peerDecryptCryptos_) {
+        if (entry.salt == salt) {
+            return entry.crypto.get();
+        }
+    }
+    // Bound the cache; a spoofed salt just yields a key whose GCM tag check
+    // fails, so evicting the oldest entry is harmless.
+    constexpr size_t MaxPeerDecryptCryptos = 16;
+    if (peerDecryptCryptos_.size() >= MaxPeerDecryptCryptos) {
+        peerDecryptCryptos_.erase(peerDecryptCryptos_.begin());
+    }
+    PeerDecryptCrypto added;
+    added.salt = salt;
+    added.crypto = std::make_unique<UdpAesGcm>(DeriveUdpSessionKey(master_, salt));
+    peerDecryptCryptos_.push_back(std::move(added));
+    return peerDecryptCryptos_.back().crypto.get();
+}
+
 bool UdpReceiver::EncryptFeedbackDatagram(std::vector<std::byte>& datagram)
 {
-    if (!crypto_) {
+    if (!encryptionEnabled_) {
         return false;
     }
     if (datagram.size() != sizeof(udp_protocol::FeedbackPacket)) {
@@ -1000,12 +1084,13 @@ bool UdpReceiver::EncryptFeedbackDatagram(std::vector<std::byte>& datagram)
     packet.flags = udp_protocol::ToNetwork32(udp_protocol::PacketFlagEncrypted);
     WriteUdpCryptoNonce(
         std::span<std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
-        feedbackNoncePrefix_,
+        UdpCryptoRole::Feedback,
         udp_protocol::FromNetwork64(packet.sequence),
         0);
+    std::memcpy(packet.sessionSalt, sessionSalt_.data(), sizeof(packet.sessionSalt));
     std::memcpy(datagram.data(), &packet, sizeof(packet));
 
-    auto ciphertext = crypto_->Encrypt(
+    auto ciphertext = encryptCrypto_->Encrypt(
         std::span<const std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
         std::span<const std::byte>(datagram.data(), udp_protocol::FeedbackPacketAuthenticatedBytes),
         std::span<const std::byte>(
@@ -1023,7 +1108,7 @@ bool UdpReceiver::EncryptFeedbackDatagram(std::vector<std::byte>& datagram)
 
 bool UdpReceiver::EncryptControlDatagram(std::vector<std::byte>& datagram)
 {
-    if (!crypto_) {
+    if (!encryptionEnabled_) {
         return false;
     }
     if (datagram.size() != sizeof(udp_protocol::ControlPacket)) {
@@ -1035,12 +1120,13 @@ bool UdpReceiver::EncryptControlDatagram(std::vector<std::byte>& datagram)
     packet.flags = udp_protocol::ToNetwork32(udp_protocol::PacketFlagEncrypted);
     WriteUdpCryptoNonce(
         std::span<std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
-        controlNoncePrefix_,
+        UdpCryptoRole::Control,
         udp_protocol::FromNetwork64(packet.sequence),
         0);
+    std::memcpy(packet.sessionSalt, sessionSalt_.data(), sizeof(packet.sessionSalt));
     std::memcpy(datagram.data(), &packet, sizeof(packet));
 
-    auto ciphertext = crypto_->Encrypt(
+    auto ciphertext = encryptCrypto_->Encrypt(
         std::span<const std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
         std::span<const std::byte>(datagram.data(), udp_protocol::ControlPacketAuthenticatedBytes),
         std::span<const std::byte>(
@@ -1071,19 +1157,34 @@ void UdpReceiver::ProcessControlDatagram(const std::byte* datagram, int datagram
     // successful AES-GCM decrypt is the only proof the sender holds the room
     // key; without this guard a forged plaintext grant/revoke would be accepted
     // (mirrors the host-side reject in UdpSender::ProcessControlPacket).
-    if ((flags & udp_protocol::PacketFlagEncrypted) == 0 && crypto_) {
+    if ((flags & udp_protocol::PacketFlagEncrypted) == 0 && encryptionEnabled_) {
         ++stats_.cryptoRejectedDatagrams;
         return;
     }
 
-    auto payload = DecryptDatagramPayload(
-        datagram,
-        datagramBytes,
-        udp_protocol::ControlPacketEncryptedPayloadOffset,
-        udp_protocol::ControlPacketAuthenticatedBytes,
-        std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
-        std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes),
-        flags);
+    std::optional<std::vector<std::byte>> payload;
+    if ((flags & udp_protocol::PacketFlagEncrypted) != 0) {
+        UdpCryptoSessionSalt salt{};
+        std::memcpy(salt.data(), header.sessionSalt, salt.size());
+        UdpAesGcm* crypto = DecryptCryptoForSalt(salt);
+        if (crypto == nullptr) {
+            ++stats_.cryptoRejectedDatagrams;
+            return;
+        }
+        payload = DecryptDatagramPayload(
+            *crypto,
+            datagram,
+            datagramBytes,
+            udp_protocol::ControlPacketEncryptedPayloadOffset,
+            udp_protocol::ControlPacketAuthenticatedBytes,
+            std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
+            std::span<const std::byte, UdpCryptoTagBytes>(header.encryptionTag, UdpCryptoTagBytes));
+    } else {
+        // Plaintext session: pass the payload region through unchanged.
+        payload = std::vector<std::byte>(
+            datagram + udp_protocol::ControlPacketEncryptedPayloadOffset,
+            datagram + datagramBytes);
+    }
     if (!payload ||
         payload->size() != sizeof(udp_protocol::ControlPacket) - udp_protocol::ControlPacketEncryptedPayloadOffset) {
         ++stats_.cryptoRejectedDatagrams;
@@ -1185,7 +1286,13 @@ void UdpReceiver::DropExpiredFrames(Clock::time_point now)
 
 void UdpReceiver::EnforcePendingFrameLimit()
 {
-    while (pendingFrames_.size() > config_.maxPendingFrames) {
+    uint64_t totalBytes = 0;
+    for (const auto& entry : pendingFrames_) {
+        totalBytes += entry.second.frameBytes;
+    }
+    while (!pendingFrames_.empty() &&
+           (pendingFrames_.size() > config_.maxPendingFrames ||
+            totalBytes > config_.maxPendingFrameBytes)) {
         auto oldest = pendingFrames_.begin();
         for (auto it = pendingFrames_.begin(); it != pendingFrames_.end(); ++it) {
             if (it->second.lastUpdated < oldest->second.lastUpdated) {
@@ -1193,6 +1300,7 @@ void UdpReceiver::EnforcePendingFrameLimit()
             }
         }
 
+        totalBytes -= oldest->second.frameBytes;
         pendingFrames_.erase(oldest);
         ++stats_.incompleteFramesDropped;
     }
@@ -1200,7 +1308,13 @@ void UdpReceiver::EnforcePendingFrameLimit()
 
 void UdpReceiver::EnforcePendingAudioPacketLimit()
 {
-    while (pendingAudioPackets_.size() > config_.maxPendingAudioPackets) {
+    uint64_t totalBytes = 0;
+    for (const auto& entry : pendingAudioPackets_) {
+        totalBytes += entry.second.packetBytes;
+    }
+    while (!pendingAudioPackets_.empty() &&
+           (pendingAudioPackets_.size() > config_.maxPendingAudioPackets ||
+            totalBytes > config_.maxPendingAudioBytes)) {
         auto oldest = pendingAudioPackets_.begin();
         for (auto it = pendingAudioPackets_.begin(); it != pendingAudioPackets_.end(); ++it) {
             if (it->second.lastUpdated < oldest->second.lastUpdated) {
@@ -1208,6 +1322,7 @@ void UdpReceiver::EnforcePendingAudioPacketLimit()
             }
         }
 
+        totalBytes -= oldest->second.packetBytes;
         pendingAudioPackets_.erase(oldest);
         ++stats_.audioIncompletePacketsDropped;
     }

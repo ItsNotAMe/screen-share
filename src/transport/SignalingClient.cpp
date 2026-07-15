@@ -227,14 +227,12 @@ std::string RoomPath(const std::string& roomId, std::string_view action)
 
 std::string RoomEventsPath(
     const std::string& roomId,
-    const std::string& peerId,
-    const std::string& roomPassword)
+    const std::string& peerId)
 {
-    std::string path = RoomPath(roomId, "events") + "?peerId=" + UrlEncode(peerId);
-    if (!roomPassword.empty()) {
-        path += "&roomPassword=" + UrlEncode(roomPassword);
-    }
-    return path;
+    // The room password is carried in the X-ScreenShare-Room-Password header,
+    // never in the query string: query strings routinely end up in server,
+    // proxy, and CDN access logs even over HTTPS.
+    return RoomPath(roomId, "events") + "?peerId=" + UrlEncode(peerId);
 }
 
 std::string ReadResponseBody(HINTERNET request)
@@ -291,12 +289,31 @@ void ValidateSignalingRoomPassword(const std::string& roomPassword)
     }
 }
 
+void RequireSecureForRoomPassword(
+    const SignalingClient::ParsedUrl& url,
+    const std::string& roomPassword)
+{
+    if (!roomPassword.empty() && !url.secure) {
+        throw std::invalid_argument(
+            "Refusing to send a room password over an insecure http:// signaling URL; use https://");
+    }
+}
+
 std::wstring RoomPasswordHeader(const std::string& roomPassword)
 {
     if (roomPassword.empty()) {
         return {};
     }
     return L"X-ScreenShare-Room-Password: " + Utf8ToWide(UrlEncode(roomPassword)) + L"\r\n";
+}
+
+std::wstring PeerTokenHeader(const std::string& peerToken)
+{
+    if (peerToken.empty()) {
+        return {};
+    }
+    // The token is server-issued base64url; it is header-safe as-is.
+    return L"X-ScreenShare-Peer-Token: " + Utf8ToWide(peerToken) + L"\r\n";
 }
 
 std::string JoinRequestJson(const SignalingPeerState& peer)
@@ -676,6 +693,7 @@ SignalingRoomResponse ParseRoomResponse(const std::string& text)
     const JsonValue* ok = root.Find("ok");
     response.ok = ok != nullptr && ok->type == JsonType::Bool && ok->boolValue;
     response.roomAccessKey = JsonStringOrEmpty(root.Find("roomAccessKey"));
+    response.peerToken = JsonStringOrEmpty(root.Find("peerToken"));
     response.roomName = JsonStringOrEmpty(root.Find("roomName"));
     response.passwordProtected =
         JsonBoolOrFalse(root.Find("passwordProtected")) ||
@@ -812,7 +830,10 @@ void SignalingClient::Health()
     }
 }
 
-SignalingRoomResponse SignalingClient::Join(const std::string& roomId, const SignalingPeerState& peer)
+SignalingRoomResponse SignalingClient::Join(
+    const std::string& roomId,
+    const SignalingPeerState& peer,
+    const std::string& peerToken)
 {
     ValidateSignalingRoomId(roomId);
     ValidateSignalingPeerId(peer.peerId);
@@ -824,38 +845,38 @@ SignalingRoomResponse SignalingClient::Join(const std::string& roomId, const Sig
     }
     ValidateSignalingRoomName(peer.roomName);
     ValidateSignalingRoomPassword(peer.roomPassword);
-    return ParseRoomResponse(Request(L"POST", RoomPath(roomId, "join"), JoinRequestJson(peer)));
+    RequireSecureForRoomPassword(url_, peer.roomPassword);
+    // On a re-announcement the previously issued token proves ownership of this
+    // peerId; on the first join it is empty and the server issues one.
+    return ParseRoomResponse(Request(
+        L"POST", RoomPath(roomId, "join"), JoinRequestJson(peer), PeerTokenHeader(peerToken)));
 }
 
 SignalingRoomResponse SignalingClient::Peers(
     const std::string& roomId,
     const std::string& peerId,
-    const std::string& roomPassword)
+    const std::string& peerToken)
 {
     ValidateSignalingRoomId(roomId);
     ValidateSignalingPeerId(peerId);
-    ValidateSignalingRoomPassword(roomPassword);
-    std::string path = RoomPath(roomId, "peers") + "?peerId=" + UrlEncode(peerId);
-    if (!roomPassword.empty()) {
-        path += "&roomPassword=" + UrlEncode(roomPassword);
-    }
+    // The peer token (from Join) authorizes reading candidates + the room key.
+    const std::string path = RoomPath(roomId, "peers") + "?peerId=" + UrlEncode(peerId);
     return ParseRoomResponse(Request(
         L"GET",
         path,
         std::nullopt,
-        RoomPasswordHeader(roomPassword)));
+        PeerTokenHeader(peerToken)));
 }
 
 void SignalingClient::ListenRoomEvents(
     const std::string& roomId,
     const std::string& peerId,
-    const std::string& roomPassword,
+    const std::string& peerToken,
     const std::function<void(const std::string&)>& onEvent,
     const std::function<bool()>& shouldStop)
 {
     ValidateSignalingRoomId(roomId);
     ValidateSignalingPeerId(peerId);
-    ValidateSignalingRoomPassword(roomPassword);
 
     const WinHttpHandle session(WinHttpOpen(
         L"ScreenShare/0.1",
@@ -881,7 +902,7 @@ void SignalingClient::ListenRoomEvents(
         throw std::runtime_error(WinHttpErrorMessage("WinHttpConnect"));
     }
 
-    const std::wstring path = url_.pathPrefix + Utf8ToWide(RoomEventsPath(roomId, peerId, roomPassword));
+    const std::wstring path = url_.pathPrefix + Utf8ToWide(RoomEventsPath(roomId, peerId));
     const WinHttpHandle request(WinHttpOpenRequest(
         connection.get(),
         L"GET",
@@ -897,7 +918,7 @@ void SignalingClient::ListenRoomEvents(
     if (!WinHttpSetOption(request.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0)) {
         throw std::runtime_error(WinHttpErrorMessage("WinHttpSetOption(websocket)"));
     }
-    const std::wstring extraHeaders = RoomPasswordHeader(roomPassword);
+    const std::wstring extraHeaders = PeerTokenHeader(peerToken);
     const wchar_t* headers = extraHeaders.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : extraHeaders.c_str();
     const DWORD headerBytes = extraHeaders.empty() ? 0 : static_cast<DWORD>(-1);
     if (!WinHttpSendRequest(
@@ -979,11 +1000,12 @@ void SignalingClient::ListenRoomEvents(
         0);
 }
 
-void SignalingClient::Heartbeat(const std::string& roomId, const std::string& peerId)
+void SignalingClient::Heartbeat(const std::string& roomId, const std::string& peerId, const std::string& peerToken)
 {
     ValidateSignalingRoomId(roomId);
     ValidateSignalingPeerId(peerId);
-    const std::string body = Request(L"POST", RoomPath(roomId, "heartbeat"), PeerRequestJson(peerId));
+    const std::string body = Request(
+        L"POST", RoomPath(roomId, "heartbeat"), PeerRequestJson(peerId), PeerTokenHeader(peerToken));
     const JsonValue root = JsonParser(body).Parse();
     const JsonValue* ok = root.Find("ok");
     if (ok == nullptr || ok->type != JsonType::Bool || !ok->boolValue) {
@@ -991,11 +1013,12 @@ void SignalingClient::Heartbeat(const std::string& roomId, const std::string& pe
     }
 }
 
-void SignalingClient::Leave(const std::string& roomId, const std::string& peerId)
+void SignalingClient::Leave(const std::string& roomId, const std::string& peerId, const std::string& peerToken)
 {
     ValidateSignalingRoomId(roomId);
     ValidateSignalingPeerId(peerId);
-    const std::string body = Request(L"POST", RoomPath(roomId, "leave"), PeerRequestJson(peerId));
+    const std::string body = Request(
+        L"POST", RoomPath(roomId, "leave"), PeerRequestJson(peerId), PeerTokenHeader(peerToken));
     const JsonValue root = JsonParser(body).Parse();
     const JsonValue* ok = root.Find("ok");
     if (ok == nullptr || ok->type != JsonType::Bool || !ok->boolValue) {

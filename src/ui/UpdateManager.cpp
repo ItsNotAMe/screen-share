@@ -1,5 +1,7 @@
 #include "ui/UpdateManager.h"
 
+#include "updater/UpdateSignature.h"
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
@@ -33,10 +35,63 @@
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <span>
 
 #ifndef SCREENSHARE_APP_VERSION
 #define SCREENSHARE_APP_VERSION "0.0.0"
 #endif
+
+namespace {
+
+// Pinned ECDSA-P256 public key (raw X||Y, 64 bytes) of the release signing key.
+// The matching private key is retained offline by the release owner. See
+// docs/update-signing.md for the manifest-signing procedure.
+constexpr std::array<unsigned char, 64> kUpdatePublicKeyXy = {
+    0x0c, 0xe2, 0xa1, 0x4e, 0xa2, 0xe5, 0xde, 0x8b,
+    0xd5, 0x17, 0x04, 0x80, 0x19, 0xc1, 0xd5, 0xc2,
+    0x12, 0x50, 0xe9, 0x87, 0x28, 0x02, 0x74, 0xd7,
+    0x3d, 0xf8, 0x9a, 0x35, 0xf2, 0xbc, 0x55, 0x9d,
+    0x25, 0x96, 0xd8, 0xe6, 0xa0, 0x1e, 0x0a, 0x3d,
+    0x84, 0x9e, 0x5f, 0x0f, 0x84, 0x6e, 0x53, 0x49,
+    0x40, 0xf2, 0xfd, 0x07, 0x52, 0x14, 0xc4, 0xd0,
+    0x71, 0x94, 0x79, 0x66, 0x8e, 0x2e, 0xf4, 0xa9,
+};
+
+bool updateSigningConfigured()
+{
+    return std::any_of(kUpdatePublicKeyXy.begin(), kUpdatePublicKeyXy.end(),
+                       [](unsigned char b) { return b != 0; });
+}
+
+// Verify the manifest signature over the security-critical fields before an
+// update is ever offered/downloaded. The signed message is exactly
+// "version\npackageUrl\nsha256"; the signature binds the trusted sha256 (and
+// thus the package) to the pinned release key.
+bool verifyUpdateSignature(
+    const QString& version,
+    const QString& packageUrl,
+    const QString& sha256,
+    const QString& signatureBase64)
+{
+    if (!updateSigningConfigured() || signatureBase64.isEmpty()) {
+        return false;
+    }
+    const QByteArray signature = QByteArray::fromBase64(
+        signatureBase64.toLatin1(),
+        QByteArray::Base64Encoding | QByteArray::AbortOnBase64DecodingErrors);
+    if (signature.size() != 64) {
+        return false;
+    }
+    const QByteArray message = (version + QLatin1Char('\n') + packageUrl + QLatin1Char('\n') + sha256).toUtf8();
+    return screenshare::VerifyUpdateManifestSignatureEcdsaP256(
+        std::as_bytes(std::span<const unsigned char>(kUpdatePublicKeyXy.data(), kUpdatePublicKeyXy.size())),
+        std::as_bytes(std::span<const char>(message.constData(), static_cast<size_t>(message.size()))),
+        std::as_bytes(std::span<const char>(signature.constData(), static_cast<size_t>(signature.size()))));
+}
+
+} // namespace
 
 #ifndef SCREENSHARE_UPDATE_MANIFEST_URL
 #define SCREENSHARE_UPDATE_MANIFEST_URL ""
@@ -307,6 +362,15 @@ void UpdateManager::handleManifestReply(QNetworkReply* reply)
         return;
     }
 
+    // Verify the manifest is signed by the pinned release key BEFORE offering
+    // the update. Without this, a compromised release host/CDN could serve a
+    // matching {malicious package, sha256} pair; the signature binds the
+    // trusted sha256 to a key an attacker does not hold. Fails closed.
+    const QString signatureBase64 = root.value(QStringLiteral("signature")).toString().trimmed();
+    if (!verifyUpdateSignature(update.version, update.packageUrl, update.sha256, signatureBase64)) {
+        return;
+    }
+
     showUpdateDialog(update);
 }
 
@@ -546,7 +610,10 @@ bool UpdateManager::launchUpdater(const UpdateInfo& update, const QString& packa
         << QStringLiteral("--pid") << QString::number(QCoreApplication::applicationPid())
         << QStringLiteral("--package") << packagePath
         << QStringLiteral("--target") << appDir
-        << QStringLiteral("--restart") << QCoreApplication::applicationFilePath();
+        << QStringLiteral("--restart") << QCoreApplication::applicationFilePath()
+        // The helper re-verifies this hash immediately before extraction to
+        // close the TOCTOU window while the app exits.
+        << QStringLiteral("--sha256") << update.sha256;
 
     if (!QProcess::startDetached(tempHelper, arguments, tempUpdateDir())) {
         *errorMessage = QStringLiteral("Could not start the updater helper.");

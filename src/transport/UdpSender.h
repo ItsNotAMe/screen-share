@@ -67,6 +67,7 @@ struct UdpSenderStats {
     uint64_t invalidFeedbackPackets = 0;
     uint64_t feedbackAccessRejected = 0;
     uint64_t feedbackCryptoRejected = 0;
+    uint64_t controlReplayRejected = 0;
     uint64_t natProbePacketsReceived = 0;
     uint64_t natProbeRetargets = 0;
     uint64_t natProbeRetargetRejected = 0;
@@ -175,15 +176,25 @@ private:
         const NatProbeDatagramInfo& probe);
     void RebuildSendAddressesLocked();
     [[nodiscard]] uint32_t EndpointGroupForAddressLocked(const std::vector<std::byte>& address) const;
+    // True if this raw socket address has proven possession of the session key
+    // by delivering a validly-decrypting feedback/control packet (i.e. it is a
+    // known control peer). Used to gate NAT-probe retargeting on encrypted
+    // sessions so an unauthenticated probe cannot redirect the media stream.
+    [[nodiscard]] bool IsVerifiedEndpointLocked(const std::vector<std::byte>& address) const;
     void RescheduleQueueLocked(Clock::time_point now);
     void CheckWorkerErrorLocked() const;
     void UpdatePendingStatsLocked();
     void EncryptDatagramPayload(
+        const UdpAesGcm& crypto,
         std::vector<std::byte>& datagram,
         size_t headerBytes,
         size_t authenticatedHeaderBytes,
         std::span<const std::byte, UdpCryptoNonceBytes> nonce,
         std::span<std::byte, UdpCryptoTagBytes> tag);
+    // Resolve (deriving and caching if needed) the AES-GCM context for an inbound
+    // packet's per-session salt. Returns nullptr when encryption is off. Used for
+    // feedback/control, which arrive from viewers that each carry their own salt.
+    [[nodiscard]] UdpAesGcm* DecryptCryptoForSalt(const UdpCryptoSessionSalt& salt);
     [[nodiscard]] std::optional<std::vector<std::byte>> DecryptFeedbackDatagram(std::span<const std::byte> datagram);
     bool EncryptControlDatagram(std::vector<std::byte>& datagram);
     void ProcessControlPacket(const void* address, int addressLength, std::span<const std::byte> datagram);
@@ -192,6 +203,13 @@ private:
         std::string endpoint;
         std::vector<std::byte> address;
         int addressLength = 0;
+        // Anti-replay: the highest control sequence accepted from this peer
+        // within the current control session. A new session (different
+        // sessionFingerprint) resets the baseline so a legitimate viewer
+        // restart is not mistaken for a replay.
+        uint64_t controlSessionFingerprint = 0;
+        uint64_t lastControlSequence = 0;
+        bool hasControlSequence = false;
     };
 
     uintptr_t socket_ = 0;
@@ -212,10 +230,20 @@ private:
     std::thread worker_;
     Clock::time_point nextSendAt_{};
     std::string workerError_;
-    std::unique_ptr<UdpAesGcm> crypto_;
-    uint32_t videoNoncePrefix_ = 0;
-    uint32_t audioNoncePrefix_ = 0;
-    uint32_t controlNoncePrefix_ = 0;
+    // Encryption: a per-session key derived from the access-code master and a
+    // random salt generated at Open. This sender's outbound video/audio/control
+    // all use encryptCrypto_ and stamp sessionSalt_ into each header. Inbound
+    // feedback/control from viewers each carry the viewer's own salt, so those
+    // keys are derived on demand and cached in peerDecryptCryptos_.
+    bool encryptionEnabled_ = false;
+    UdpCryptoKey master_{};
+    UdpCryptoSessionSalt sessionSalt_{};
+    std::unique_ptr<UdpAesGcm> encryptCrypto_;
+    struct PeerDecryptCrypto {
+        UdpCryptoSessionSalt salt{};
+        std::unique_ptr<UdpAesGcm> crypto;
+    };
+    std::vector<PeerDecryptCrypto> peerDecryptCryptos_;
     uint64_t nextControlSequence_ = 1;
     std::function<void(const std::string& endpoint, const udp_protocol::ControlMessage&)> onControl_;
     std::vector<ControlPeer> controlPeers_;

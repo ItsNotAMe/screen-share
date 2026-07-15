@@ -26,12 +26,21 @@ struct UdpNatProbeTarget {
 struct UdpReceiverConfig {
     uint16_t port = 0;
     uint32_t maxDatagramBytes = 65'507;
-    uint32_t maxFrameBytes = 64 * 1024 * 1024;
+    uint32_t maxFrameBytes = 16 * 1024 * 1024;
     uint32_t socketReceiveBufferBytes = 4 * 1024 * 1024;
     size_t maxPendingFrames = 256;
+    // Aggregate cap on memory held by in-progress (not-yet-complete) video
+    // reassembly. Bounds a memory-exhaustion DoS where a peer opens many
+    // frame ids that each claim a large size but never complete. Independent
+    // of maxPendingFrames so small-frame and large-frame floods are both
+    // bounded.
+    uint64_t maxPendingFrameBytes = 96ull * 1024 * 1024;
     size_t maxPendingAudioPackets = 512;
     size_t maxCompletedAudioPackets = 512;
     uint32_t maxAudioPacketBytes = 2 * 1024 * 1024;
+    // Aggregate cap on memory held by in-progress audio reassembly, same
+    // rationale as maxPendingFrameBytes.
+    uint64_t maxPendingAudioBytes = 32ull * 1024 * 1024;
     std::chrono::milliseconds frameTimeout = std::chrono::seconds(5);
     float simulatedLossPercent = 0.0f;
     std::chrono::milliseconds simulatedJitter = std::chrono::milliseconds(0);
@@ -215,13 +224,17 @@ private:
     void EnforcePendingAudioPacketLimit();
     void EnforceCompletedAudioPacketLimit();
     [[nodiscard]] std::optional<std::vector<std::byte>> DecryptDatagramPayload(
+        const UdpAesGcm& crypto,
         const std::byte* datagram,
         int datagramBytes,
         size_t headerBytes,
         size_t authenticatedHeaderBytes,
         std::span<const std::byte, UdpCryptoNonceBytes> nonce,
-        std::span<const std::byte, UdpCryptoTagBytes> tag,
-        uint32_t flags);
+        std::span<const std::byte, UdpCryptoTagBytes> tag);
+    // Resolve (deriving and caching) the AES-GCM context for an inbound packet's
+    // per-session salt. Returns nullptr when encryption is off. Inbound video/
+    // audio/control-ack all carry the sender's salt.
+    [[nodiscard]] UdpAesGcm* DecryptCryptoForSalt(const UdpCryptoSessionSalt& salt);
     bool EncryptFeedbackDatagram(std::vector<std::byte>& datagram);
     bool EncryptControlDatagram(std::vector<std::byte>& datagram);
     void MaybeSendNatProbes(Clock::time_point now);
@@ -239,9 +252,19 @@ private:
     std::unordered_map<uint64_t, PendingFrame> pendingFrames_;
     std::unordered_map<uint64_t, PendingAudioPacket> pendingAudioPackets_;
     std::mt19937 simulationRng_{1};
-    std::unique_ptr<UdpAesGcm> crypto_;
-    uint32_t feedbackNoncePrefix_ = 0;
-    uint32_t controlNoncePrefix_ = 0;
+    // Encryption: a per-session key derived from the access-code master and a
+    // random salt generated at Open. Outbound feedback/control use encryptCrypto_
+    // and stamp sessionSalt_ into each header; inbound video/audio/control-ack
+    // carry the sender's salt, so those keys are derived on demand and cached.
+    bool encryptionEnabled_ = false;
+    UdpCryptoKey master_{};
+    UdpCryptoSessionSalt sessionSalt_{};
+    std::unique_ptr<UdpAesGcm> encryptCrypto_;
+    struct PeerDecryptCrypto {
+        UdpCryptoSessionSalt salt{};
+        std::unique_ptr<UdpAesGcm> crypto;
+    };
+    std::vector<PeerDecryptCrypto> peerDecryptCryptos_;
     uint64_t nextControlSequence_ = 1;
     std::function<void(const udp_protocol::ControlMessage&)> onControl_;
     Clock::time_point nextNatProbeAt_{};

@@ -52,6 +52,14 @@ QPixmap renderSvgResource(const QString& path, const QSize& size, const QString&
 }
 
 #ifdef _WIN32
+// Global panic-revoke hotkey: Ctrl+Alt+Shift+F12. Chosen for being extremely
+// unlikely to collide with app or OS shortcuts. Registered against the shell
+// window so the host can instantly drop remote control from anywhere — the OS
+// delivers WM_HOTKEY on the UI thread even while a viewer is flooding input.
+constexpr int kPanicHotkeyId = 0xB001;
+constexpr unsigned kPanicHotkeyModifiers = MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT;
+constexpr unsigned kPanicHotkeyVk = VK_F12;
+
 void preferRoundedWindows(HWND hwnd)
 {
     using DwmSetWindowAttributeFn = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
@@ -101,6 +109,18 @@ AppShellWindow::AppShellWindow(QWidget* parent) : QWidget(parent)
     titleBar->raise();
 
     root->addWidget(frame_, 1);
+}
+
+AppShellWindow::~AppShellWindow()
+{
+#ifdef _WIN32
+    unregisterPanicHotkey();
+#endif
+}
+
+void AppShellWindow::setPanicHotkeyHandler(std::function<void()> handler)
+{
+    panicHotkeyHandler_ = std::move(handler);
 }
 
 int AppShellWindow::addPage(QWidget* page)
@@ -251,6 +271,7 @@ void AppShellWindow::showEvent(QShowEvent* event)
     QWidget::showEvent(event);
 #ifdef _WIN32
     applyNativeWindowStyle();
+    registerPanicHotkey();
 #endif
     updateChromeState();
 }
@@ -275,6 +296,35 @@ void AppShellWindow::applyNativeWindowStyle()
         0,
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+}
+
+void AppShellWindow::registerPanicHotkey()
+{
+    if (panicHotkeyRegistered_) {
+        return;
+    }
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd == nullptr) {
+        return;
+    }
+    // Best-effort: if the combination is already taken system-wide, the panic
+    // key is simply unavailable (the in-app revoke toggles still work). Never
+    // fail the session over it.
+    if (RegisterHotKey(hwnd, kPanicHotkeyId, kPanicHotkeyModifiers, kPanicHotkeyVk) != 0) {
+        panicHotkeyRegistered_ = true;
+    }
+}
+
+void AppShellWindow::unregisterPanicHotkey()
+{
+    if (!panicHotkeyRegistered_) {
+        return;
+    }
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd != nullptr) {
+        UnregisterHotKey(hwnd, kPanicHotkeyId);
+    }
+    panicHotkeyRegistered_ = false;
 }
 
 bool AppShellWindow::handleMinMaxInfo(void* message, qintptr* result)
@@ -311,6 +361,15 @@ bool AppShellWindow::nativeEvent(const QByteArray& eventType, void* message, qin
     }
 
     switch (msg->message) {
+    case WM_HOTKEY:
+        if (msg->wParam == kPanicHotkeyId) {
+            if (panicHotkeyHandler_) {
+                panicHotkeyHandler_();
+            }
+            *result = 0;
+            return true;
+        }
+        break;
     case WM_GETMINMAXINFO:
         return handleMinMaxInfo(message, result);
     case WM_NCCALCSIZE:

@@ -42,8 +42,15 @@ std::string ParseSessionId(const char* value)
 std::string ParseAccessCode(const char* value)
 {
     const std::string accessCode = value != nullptr ? value : "";
-    if (accessCode.empty() || accessCode.size() > 64) {
-        throw std::invalid_argument("--access-code must be between 1 and 64 bytes");
+    // Access codes are meant to be app-generated (GenerateUdpAccessCode: 20
+    // random chars, ~100 bits). Because the routing fingerprint is a fast hash
+    // broadcast in the clear, a short/guessable code would be brute-forceable
+    // offline, so enforce a minimum length that a generated code always meets
+    // (23 chars incl. group dashes) while rejecting weak hand-picked codes.
+    constexpr size_t MinAccessCodeBytes = 16;
+    if (accessCode.size() < MinAccessCodeBytes || accessCode.size() > 64) {
+        throw std::invalid_argument(
+            "--access-code must be 16-64 bytes; prefer an app-generated code");
     }
 
     for (const char ch : accessCode) {

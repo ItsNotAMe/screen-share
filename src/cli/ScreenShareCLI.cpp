@@ -488,6 +488,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.signalingRoomId = requireValue("--signal-room");
         } else if (arg == "--signal-peer-id") {
             options.signalingPeerId = requireValue("--signal-peer-id");
+        } else if (arg == "--peer-token") {
+            options.signalingPeerToken = requireValue("--peer-token");
         } else if (arg == "--signal-candidate") {
             options.signalingCandidate = requireValue("--signal-candidate");
         } else if (arg == "--signal-name") {
@@ -1720,21 +1722,28 @@ void RunSignaling(const Options& options)
         peer.roomName = options.signalingRoomName;
         peer.roomPassword = options.signalingRoomPassword;
         peer.passwordProtected = !options.signalingRoomPassword.empty();
-        PrintSignalingPeers(client.Join(options.signalingRoomId, peer));
+        const auto joinResponse = client.Join(
+            options.signalingRoomId, peer, options.signalingPeerToken);
+        // Print the issued peer token so it can be passed to --peer-token on
+        // subsequent --signal-peers/--signal-heartbeat/--signal-leave calls.
+        if (!joinResponse.peerToken.empty()) {
+            std::cout << "signaling_peer_token=" << joinResponse.peerToken << "\n";
+        }
+        PrintSignalingPeers(joinResponse);
         break;
     }
     case SignalingCommand::Peers:
         PrintSignalingPeers(client.Peers(
             options.signalingRoomId,
             options.signalingPeerId,
-            options.signalingRoomPassword));
+            options.signalingPeerToken));
         break;
     case SignalingCommand::Heartbeat:
-        client.Heartbeat(options.signalingRoomId, options.signalingPeerId);
+        client.Heartbeat(options.signalingRoomId, options.signalingPeerId, options.signalingPeerToken);
         std::cout << "signaling_heartbeat=ok\n";
         break;
     case SignalingCommand::Leave:
-        client.Leave(options.signalingRoomId, options.signalingPeerId);
+        client.Leave(options.signalingRoomId, options.signalingPeerId, options.signalingPeerToken);
         std::cout << "signaling_leave=ok\n";
         break;
     case SignalingCommand::None:

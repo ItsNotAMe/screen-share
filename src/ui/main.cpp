@@ -979,6 +979,19 @@ int main(int argc, char** argv)
     AppShellWindow window;
 
     auto* sessionBackend = new QtSessionBackend(&window);
+    // Panic-revoke: the global Ctrl+Alt+Shift+F12 hotkey instantly drops any
+    // remote control the host has granted, even if a viewer is flooding input.
+    window.setPanicHotkeyHandler([sessionBackend, &window] {
+        if (sessionBackend == nullptr) {
+            return;
+        }
+        const std::string controller = sessionBackend->currentStatus().controllerViewerId;
+        if (controller.empty()) {
+            return;
+        }
+        sessionBackend->setViewerControl(controller, 0);
+        window.showToast(QStringLiteral("Remote control revoked (Ctrl+Alt+Shift+F12)"));
+    });
     auto* screenAwakeGuard = new ScreenAwakeGuard(&window);
     HomeWindow* homeWindow = nullptr;
     CreateRoomWindow* createRoomWindow = nullptr;
