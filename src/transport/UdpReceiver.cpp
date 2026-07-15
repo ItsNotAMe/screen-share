@@ -169,7 +169,14 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     if (config.encryptionKey) {
         crypto = std::make_unique<UdpAesGcm>(*config.encryptionKey);
         feedbackNoncePrefix = GenerateUdpCryptoNoncePrefix();
+        // Deduplicate the two prefixes (as the sender does for its channels).
+        // Feedback and control share one key, so equal prefixes would make a
+        // feedback packet and a control packet with the same sequence collide
+        // on the same GCM nonce -- catastrophic for AES-GCM.
         controlNoncePrefix = GenerateUdpCryptoNoncePrefix();
+        while (controlNoncePrefix == feedbackNoncePrefix) {
+            controlNoncePrefix = GenerateUdpCryptoNoncePrefix();
+        }
     }
 
     std::vector<NatProbeTargetAddress> natProbeTargets;
