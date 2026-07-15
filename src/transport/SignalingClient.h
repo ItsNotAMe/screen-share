@@ -43,6 +43,10 @@ struct SignalingRoomResponse {
     std::string roomAccessKey;
     std::string roomName;
     bool passwordProtected = false;
+    // Server-issued secret returned by Join. It must be presented on subsequent
+    // Peers/Heartbeat/Leave/ListenRoomEvents calls to prove ownership of this
+    // peerId and to read candidates/the room key.
+    std::string peerToken;
     std::vector<SignalingPeer> peers;
 };
 
@@ -56,19 +60,27 @@ public:
     explicit SignalingClient(SignalingClientConfig config);
 
     void Health();
-    SignalingRoomResponse Join(const std::string& roomId, const SignalingPeerState& peer);
+    // peerToken is empty on the first join (the server issues one, returned in
+    // the response) and the issued token on subsequent re-announcements of the
+    // same peerId, which the server requires to prove ownership.
+    SignalingRoomResponse Join(
+        const std::string& roomId,
+        const SignalingPeerState& peer,
+        const std::string& peerToken = {});
+    // peerToken is the secret returned by Join; it authorizes reading candidates
+    // and the room key and mutating this peer's state.
     SignalingRoomResponse Peers(
         const std::string& roomId,
         const std::string& peerId,
-        const std::string& roomPassword = {});
+        const std::string& peerToken);
     void ListenRoomEvents(
         const std::string& roomId,
         const std::string& peerId,
-        const std::string& roomPassword,
+        const std::string& peerToken,
         const std::function<void(const std::string&)>& onEvent,
         const std::function<bool()>& shouldStop);
-    void Heartbeat(const std::string& roomId, const std::string& peerId);
-    void Leave(const std::string& roomId, const std::string& peerId);
+    void Heartbeat(const std::string& roomId, const std::string& peerId, const std::string& peerToken);
+    void Leave(const std::string& roomId, const std::string& peerId, const std::string& peerToken);
 
     struct ParsedUrl {
         std::wstring host;

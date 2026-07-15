@@ -26,6 +26,17 @@ interface Peer {
   candidates: Candidate[];
   metadata?: PeerMetadata;
   lastSeen: number;
+  // Server-issued secret proving ownership of this peerId. Never returned to
+  // other peers; required to read candidates/key or mutate this peer's state.
+  token: string;
+}
+
+// A peer as exposed to other members: no token.
+interface PublicPeer {
+  peerId: string;
+  candidates: Candidate[];
+  metadata?: PeerMetadata;
+  lastSeen: number;
 }
 
 interface Room {
@@ -104,6 +115,8 @@ const ROOM_PASSWORD_SALT_BYTES = 16;
 const ROOM_PASSWORD_HASH_BYTES = 32;
 const ROOM_PASSWORD_HASH_ITERATIONS = 100_000;
 const ROOM_PASSWORD_HEADER = "X-ScreenShare-Room-Password";
+const PEER_TOKEN_HEADER = "X-ScreenShare-Peer-Token";
+const PEER_TOKEN_BYTES = 32;
 
 const rateBuckets = new Map<string, { windowStart: number; count: number }>();
 
@@ -173,13 +186,29 @@ function roomDirectoryStorageKey(roomId: string): string {
   return `${ROOM_DIRECTORY_STORAGE_PREFIX}${roomId}`;
 }
 
-function publicPeerForEvent(peer: Peer): Peer {
+function publicPeerForEvent(peer: Peer): PublicPeer {
   return {
     peerId: peer.peerId,
     candidates: peer.candidates,
     metadata: peer.metadata,
     lastSeen: peer.lastSeen,
   };
+}
+
+function generatePeerToken(): string {
+  const bytes = new Uint8Array(PEER_TOKEN_BYTES);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+function peerTokenFromRequest(request: Request): string | undefined {
+  const token = request.headers.get(PEER_TOKEN_HEADER);
+  return token !== null && token.length > 0 ? token : undefined;
+}
+
+// Constant-time comparison of a presented token against a peer's stored token.
+function peerTokenMatches(stored: string, presented: string | undefined): boolean {
+  return presented !== undefined && timingSafeEqual(stored, presented);
 }
 
 function peerAnnouncementKey(peer: Peer): string {
@@ -255,6 +284,51 @@ function isValidIpv4(ip: string): boolean {
 
 function isLikelyIpv6(ip: string): boolean {
   return ip.includes(":") && /^[0-9A-Fa-f:.]{2,45}$/.test(ip);
+}
+
+function isPrivateAddress(ip: string): boolean {
+  if (isValidIpv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||         // link-local
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127)  // CGNAT
+    );
+  }
+  const lower = ip.toLowerCase();
+  return (
+    lower === "::1" ||
+    lower.startsWith("fc") || lower.startsWith("fd") || // ULA
+    lower.startsWith("fe8") || lower.startsWith("fe9") ||
+    lower.startsWith("fea") || lower.startsWith("feb")   // link-local
+  );
+}
+
+function sameIpFamily(a: string, b: string): boolean {
+  return isValidIpv4(a) === isValidIpv4(b);
+}
+
+// Drop candidates that could turn honest peers into a reflected-DDoS source:
+// a srflx (public) candidate must match the caller's own connecting IP, and a
+// host candidate must be a private/local address. Filtering (rather than
+// rejecting the join) avoids hard-failing peers whose STUN egress differs from
+// their TLS egress; they simply lose the offending candidate.
+function filterReflectionCandidates(candidates: Candidate[], connectingIp: string): Candidate[] {
+  return candidates.filter((candidate) => {
+    if (candidate.type === "host") {
+      return isPrivateAddress(candidate.ip);
+    }
+    if (candidate.type === "srflx") {
+      if (!connectingIp || !sameIpFamily(candidate.ip, connectingIp)) {
+        return true;
+      }
+      return candidate.ip === connectingIp;
+    }
+    return true;
+  });
 }
 
 function validateCandidate(candidate: unknown): Candidate {
@@ -650,11 +724,16 @@ function normalizeStoredPeer(value: unknown): Peer | undefined {
   }
 
   const lastSeen = typeof value.lastSeen === "number" && Number.isFinite(value.lastSeen) ? value.lastSeen : 0;
+  // A peer persisted before this field existed has no token; an empty string
+  // never matches a presented token (timing-safe compare), so such a peer must
+  // re-join to obtain one rather than being silently authable.
+  const token = typeof value.token === "string" ? value.token : "";
   return {
     peerId: value.peerId,
     candidates,
     metadata,
     lastSeen,
+    token,
   };
 }
 
@@ -723,8 +802,10 @@ async function cleanupLegacyRoom(env: Env, roomId: string): Promise<void> {
   await env.ROOMS.delete(roomKey(roomId));
 }
 
-function otherPeers(room: Room, peerId: string): Peer[] {
-  return room.peers.filter((peer) => peer.peerId !== peerId);
+function otherPeers(room: Room, peerId: string): PublicPeer[] {
+  return room.peers
+    .filter((peer) => peer.peerId !== peerId)
+    .map(publicPeerForEvent);
 }
 
 function roomSummary(roomId: string, peers: Peer[], info?: RoomInfo, now = Date.now()): RoomSummary | undefined {
@@ -943,12 +1024,6 @@ async function fetchLiveRoomSummary(env: Env, roomId: string): Promise<RoomSumma
   return normalizeRoomSummary(data.room);
 }
 
-async function handleRoomSummary(env: Env, roomId: string): Promise<Response> {
-  const room = await loadRoom(env, roomId);
-  await trySyncRoomDirectory(env, roomId, room.peers, room.info);
-  return jsonResponse({ ok: true, room: roomSummary(roomId, room.peers, room.info) ?? null });
-}
-
 function applyRateLimit(request: Request): void {
   const now = Date.now();
   const ip = request.headers.get("CF-Connecting-IP") ?? request.headers.get("X-Forwarded-For") ?? "unknown";
@@ -971,89 +1046,8 @@ function applyRateLimit(request: Request): void {
   }
 }
 
-async function handleJoin(request: Request, env: Env, roomId: string): Promise<Response> {
-  const body = await readJson<JoinRequest>(request);
-  const peerId = validatePeerId(body.peerId);
-  const candidates = validateCandidates(body.candidates);
-  const metadata = validateMetadata(body.metadata);
-  const roomInfoUpdate = validateRoomInfo(body.room);
-  const now = Date.now();
-  const peer = { peerId, candidates, metadata, lastSeen: now };
-
-  const room = await loadRoom(env, roomId, now);
-  const security = await applyJoinRoomSecurity(room, roomInfoUpdate);
-  room.passwordVerifier = security.passwordVerifier;
-  room.info = mergeRoomInfo(room.info, security.infoUpdate);
-  const roomAccessKey = await ensureRoomAccessKey(env, roomId, room);
-  const nextPeers = [...otherPeers(room, peerId), peer];
-  await savePeer(env, roomId, peer);
-  await saveRoomInfo(env, roomId, room.info);
-  await saveRoomPasswordVerifier(env, roomId, room.passwordVerifier);
-  await cleanupLegacyRoom(env, roomId);
-  await trySyncRoomDirectory(env, roomId, nextPeers, room.info, now);
-
-  return jsonResponse({
-    ok: true,
-    roomAccessKey,
-    roomName: room.info?.name,
-    passwordProtected: room.info?.passwordProtected === true,
-    peers: otherPeers(room, peerId),
-  });
-}
-
-async function handlePeers(request: Request, env: Env, roomId: string): Promise<Response> {
-  const url = new URL(request.url);
-  const peerId = validatePeerId(url.searchParams.get("peerId"));
-  const roomPassword = roomPasswordFromRequest(request, url);
-  const room = await loadRoom(env, roomId);
-  await trySyncRoomDirectory(env, roomId, room.peers, room.info);
-  if (room.peers.length === 0) {
-    return jsonResponse({ ok: true, peers: [] });
-  }
-  await requireRoomPassword(room, roomPassword);
-  const roomAccessKey = await ensureRoomAccessKey(env, roomId, room);
-
-  return jsonResponse({
-    ok: true,
-    roomAccessKey,
-    roomName: room.info?.name,
-    passwordProtected: room.info?.passwordProtected === true,
-    peers: otherPeers(room, peerId),
-  });
-}
-
-async function handleHeartbeat(request: Request, env: Env, roomId: string): Promise<Response> {
-  const body = await readJson<PeerRequest>(request);
-  const peerId = validatePeerId(body.peerId);
-  const now = Date.now();
-  const peer = normalizeStoredPeer(await env.ROOMS.get<unknown>(roomPeerKey(roomId, peerId), "json"));
-  if (!peer) {
-    await deletePeer(env, roomId, peerId);
-    throw new HttpError(404, "peer_not_found", "Peer is not in this room.");
-  }
-  peer.lastSeen = now;
-  await savePeer(env, roomId, peer);
-  const room = await loadRoom(env, roomId, now);
-  await trySyncRoomDirectory(env, roomId, room.peers, room.info, now);
-
-  return jsonResponse({ ok: true });
-}
-
-async function handleLeave(request: Request, env: Env, roomId: string): Promise<Response> {
-  const body = await readJson<PeerRequest>(request);
-  const peerId = validatePeerId(body.peerId);
-  await deletePeer(env, roomId, peerId);
-  await cleanupLegacyRoom(env, roomId);
-  const room = await loadRoom(env, roomId);
-  if (room.peers.length === 0) {
-    await env.ROOMS.delete(roomAccessKeyKey(roomId));
-    await saveRoomInfo(env, roomId, undefined);
-    await saveRoomPasswordVerifier(env, roomId, undefined);
-  }
-  await trySyncRoomDirectory(env, roomId, room.peers, room.info);
-
-  return jsonResponse({ ok: true });
-}
+// Legacy per-room KV handlers removed: all room traffic is served by the
+// authenticated RoomObject Durable Object path (see routeRequest).
 
 export class RoomDirectoryObject extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
@@ -1337,18 +1331,18 @@ export class RoomObject extends DurableObject<Env> {
 
     const url = new URL(request.url);
     const peerId = validatePeerId(url.searchParams.get("peerId"));
-    const roomPassword = roomPasswordFromRequest(request, url);
     const peers = await this.loadPeers();
     const changed = this.cleanupPeers(peers);
     if (changed) {
       await this.savePeers(roomId, peers);
     }
-    const roomInfo = await this.loadRoomInfo();
-    await requireRoomPassword({
-      peers: [...peers.values()],
-      info: roomInfo,
-      passwordVerifier: await this.loadRoomPasswordVerifier(),
-    }, roomPassword);
+    // The event stream carries other peers' candidates, so require the caller to
+    // be a joined member presenting its token (sent as a header on the upgrade).
+    const self = peers.get(peerId);
+    if (!self || !peerTokenMatches(self.token, peerTokenFromRequest(request))) {
+      throw new HttpError(403, "peer_token_invalid",
+        "A valid peer token for a joined peer is required to stream room events.");
+    }
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -1359,7 +1353,7 @@ export class RoomObject extends DurableObject<Env> {
       type: "hello",
       roomId,
       peerId,
-      peers: otherPeers({ peers: [...peers.values()] }, peerId).map(publicPeerForEvent),
+      peers: otherPeers({ peers: [...peers.values()] }, peerId),
     }));
 
     return new Response(null, {
@@ -1371,7 +1365,9 @@ export class RoomObject extends DurableObject<Env> {
   private async handleJoin(request: Request, roomId: string): Promise<Response> {
     const body = await readJson<JoinRequest>(request);
     const peerId = validatePeerId(body.peerId);
-    const candidates = validateCandidates(body.candidates);
+    const candidates = filterReflectionCandidates(
+      validateCandidates(body.candidates),
+      request.headers.get("CF-Connecting-IP") ?? "");
     const metadata = validateMetadata(body.metadata);
     const roomInfoUpdate = validateRoomInfo(body.room);
     const isHost = validateHostFlag(body.host);
@@ -1390,19 +1386,31 @@ export class RoomObject extends DurableObject<Env> {
     const roomInfo = await this.applyRoomInfoUpdate(security.infoUpdate);
     const roomAccessKey = await this.ensureRoomAccessKey();
 
+    const previousPeer = peers.get(peerId);
+    // Updating an existing peerId requires proof of ownership (its token), so a
+    // caller cannot overwrite another peer's candidates and hijack the media
+    // path. A fresh peerId is issued a new server-generated token.
+    const presentedToken = peerTokenFromRequest(request);
+    if (previousPeer && !peerTokenMatches(previousPeer.token, presentedToken)) {
+      throw new HttpError(403, "peer_token_invalid",
+        "This peerId is already claimed; a valid peer token is required to update it.");
+    }
+
     // Bound the number of distinct peers per room. Adding a brand-new peer to
     // an already-full room is rejected; re-announcing an existing peer is
     // always allowed so active members are never locked out.
-    if (!peers.has(peerId) && peers.size >= MAX_PEERS_PER_ROOM) {
+    if (!previousPeer && peers.size >= MAX_PEERS_PER_ROOM) {
       throw new HttpError(409, "room_full", "This room already has the maximum number of participants.");
     }
 
-    const previousPeer = peers.get(peerId);
-    const nextPeer = { peerId, candidates, metadata, lastSeen: now };
+    const token = previousPeer ? previousPeer.token : generatePeerToken();
+    const nextPeer: Peer = { peerId, candidates, metadata, lastSeen: now, token };
     const shouldBroadcastPeer =
       !previousPeer || peerAnnouncementKey(previousPeer) !== peerAnnouncementKey(nextPeer);
     peers.set(peerId, nextPeer);
     await this.savePeers(roomId, peers, now);
+    // Host role is bound to a peer's token: only the first claimant of a peerId
+    // (or a re-announce with its token, checked above) can assert host.
     if (isHost && (await this.loadHostPeerId()) !== peerId) {
       await this.saveHostPeerId(peerId);
     }
@@ -1415,6 +1423,7 @@ export class RoomObject extends DurableObject<Env> {
 
     return jsonResponse({
       ok: true,
+      peerToken: token,
       roomAccessKey,
       roomName: roomInfo?.name,
       passwordProtected: roomInfo?.passwordProtected === true,
@@ -1425,21 +1434,20 @@ export class RoomObject extends DurableObject<Env> {
   private async handlePeers(request: Request, roomId: string): Promise<Response> {
     const url = new URL(request.url);
     const peerId = validatePeerId(url.searchParams.get("peerId"));
-    const roomPassword = roomPasswordFromRequest(request, url);
     const peers = await this.loadPeers();
     const changed = this.cleanupPeers(peers);
     if (changed) {
       await this.savePeers(roomId, peers);
     }
-    if (peers.size === 0) {
-      return jsonResponse({ ok: true, peers: [] });
+    // Candidates (peer IP:port) and the room access key are only returned to a
+    // caller that has joined this room and presents its peer token. This stops
+    // anonymous callers from harvesting participants' IPs and the media key.
+    const self = peers.get(peerId);
+    if (!self || !peerTokenMatches(self.token, peerTokenFromRequest(request))) {
+      throw new HttpError(403, "peer_token_invalid",
+        "A valid peer token for a joined peer is required to read room peers.");
     }
     const roomInfo = await this.loadRoomInfo();
-    await requireRoomPassword({
-      peers: [...peers.values()],
-      info: roomInfo,
-      passwordVerifier: await this.loadRoomPasswordVerifier(),
-    }, roomPassword);
     const roomAccessKey = await this.ensureRoomAccessKey();
 
     return jsonResponse({
@@ -1462,6 +1470,11 @@ export class RoomObject extends DurableObject<Env> {
       await this.savePeers(roomId, peers, now);
       throw new HttpError(404, "peer_not_found", "Peer is not in this room.");
     }
+    // Only the owning peer may refresh its own liveness (prevents a caller from
+    // enumerating or keeping alive peers it does not own).
+    if (!peerTokenMatches(peer.token, peerTokenFromRequest(request))) {
+      throw new HttpError(403, "peer_token_invalid", "A valid peer token is required to heartbeat.");
+    }
 
     peer.lastSeen = now;
     await this.savePeers(roomId, peers, now);
@@ -1473,6 +1486,13 @@ export class RoomObject extends DurableObject<Env> {
     const body = await readJson<PeerRequest>(request);
     const peerId = validatePeerId(body.peerId);
     const peers = await this.loadPeers();
+    const leaving = peers.get(peerId);
+    // A peer may only remove itself, proven by its token. This stops
+    // unauthenticated eviction of other participants and unauthorized room
+    // teardown (which bypassed the room password entirely).
+    if (leaving && !peerTokenMatches(leaving.token, peerTokenFromRequest(request))) {
+      throw new HttpError(403, "peer_token_invalid", "A valid peer token is required to leave.");
+    }
     const removed = peers.delete(peerId);
     const hostPeerId = await this.loadHostPeerId();
 
@@ -1538,28 +1558,16 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
   const roomId = validateRoomId(decodeURIComponent(match[1]));
   const action = match[2];
 
-  if (env.ROOM_OBJECTS) {
-    const id = env.ROOM_OBJECTS.idFromName(roomId);
-    return env.ROOM_OBJECTS.get(id).fetch(request);
+  if (!env.ROOM_OBJECTS) {
+    // Per-room state is served only by the authenticated RoomObject Durable
+    // Object. The legacy unauthenticated KV path has been retired, so refuse
+    // rather than fall back to it.
+    throw new HttpError(503, "durable_objects_required",
+      "Room signaling requires the RoomObject Durable Object binding.");
   }
-
-  if (action === "join" && request.method === "POST") {
-    return handleJoin(request, env, roomId);
-  }
-  if (action === "peers" && request.method === "GET") {
-    return handlePeers(request, env, roomId);
-  }
-  if (action === "heartbeat" && request.method === "POST") {
-    return handleHeartbeat(request, env, roomId);
-  }
-  if (action === "leave" && request.method === "POST") {
-    return handleLeave(request, env, roomId);
-  }
-  if (action === "summary" && request.method === "GET") {
-    return handleRoomSummary(env, roomId);
-  }
-
-  throw new HttpError(405, "method_not_allowed", "Method not allowed for this endpoint.");
+  void action;
+  const id = env.ROOM_OBJECTS.idFromName(roomId);
+  return env.ROOM_OBJECTS.get(id).fetch(request);
 }
 
 export default {

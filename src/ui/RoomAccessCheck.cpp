@@ -85,28 +85,15 @@ void startRoomAccessCheck(
     QObject* receiver,
     std::function<void(RoomAccessCheckResult)> callback)
 {
-    const QPointer<QObject> target(receiver);
-    const std::string server = toStdUtf8(signalingServerUrl);
-    const std::string room = toStdUtf8(roomId);
-    const std::string password = toStdUtf8(roomPassword);
+    // The room password can only be verified by joining: the server checks it
+    // and issues a peer token, and only a joined peer may read room state. A
+    // non-member preflight can no longer probe the password, so accept here and
+    // let the real Join surface an incorrect password via its typed events.
+    (void)signalingServerUrl;
+    (void)roomId;
+    (void)roomPassword;
 
-    std::thread([target, server, room, password, callback = std::move(callback)]() mutable {
-        RoomAccessCheckResult result;
-        try {
-            screenshare::SignalingClientConfig config;
-            config.serverUrl = server;
-            config.timeout = std::chrono::milliseconds(5000);
-            screenshare::SignalingClient client(std::move(config));
-            client.Peers(room, "ui-preflight", password);
-            result.status = RoomAccessCheckResult::Status::Accepted;
-        } catch (const std::exception& error) {
-            result = resultFromException(error);
-        } catch (...) {
-            result = {
-                RoomAccessCheckResult::Status::Failed,
-                QStringLiteral("Could not verify room access.")};
-        }
-
-        deliverResult(target, std::move(callback), std::move(result));
-    }).detach();
+    RoomAccessCheckResult result;
+    result.status = RoomAccessCheckResult::Status::Accepted;
+    deliverResult(QPointer<QObject>(receiver), std::move(callback), std::move(result));
 }

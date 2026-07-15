@@ -1950,6 +1950,10 @@ public:
         auto state = std::make_shared<State>();
         state->roomId = options.signalingRoomId;
         state->peer = BuildLiveSignalingPeerState(options);
+        // Seed the token issued by the initial (pre-media) join so the live
+        // loop re-announces this peerId with a valid token from the start.
+        state->peerToken = options.signalingPeerToken;
+        state->peerTokenReady = !options.signalingPeerToken.empty();
         state_ = state;
         worker_ = std::thread(&LiveSignalingRuntime::Run, std::move(state), std::move(clientConfig));
 
@@ -2033,6 +2037,10 @@ private:
         std::map<std::string, LiveSignalingPeerCandidate> seenCandidates;
         std::vector<LiveSignalingPeerCandidate> discoveredPeers;
         std::vector<LiveSignalingPeerCandidate> removedPeers;
+        // Server-issued peer token from the first Join; required to re-announce,
+        // read peers, stream events, and leave.
+        std::string peerToken;
+        bool peerTokenReady = false;
         bool refreshRequested = false;
         bool stopRequested = false;
     };
@@ -2051,6 +2059,11 @@ private:
         }
 
         std::lock_guard lock(state->mutex);
+        if (!response.peerToken.empty() && !state->peerTokenReady) {
+            state->peerToken = response.peerToken;
+            state->peerTokenReady = true;
+            state->wake.notify_all(); // unblock the events worker waiting for the token
+        }
         std::map<std::string, LiveSignalingPeerCandidate> latestCandidates;
         for (const auto& peer : response.peers) {
             if (peer.peerId == state->peer.peerId) {
@@ -2119,15 +2132,36 @@ private:
         return state->peer;
     }
 
+    [[nodiscard]] static std::string SnapshotPeerToken(const std::shared_ptr<State>& state)
+    {
+        std::lock_guard lock(state->mutex);
+        return state->peerToken;
+    }
+
+    // Block until the first Join has issued a peer token (or stop is requested),
+    // so the events worker authenticates its stream instead of racing ahead.
+    [[nodiscard]] static std::string WaitForPeerToken(const std::shared_ptr<State>& state)
+    {
+        std::unique_lock lock(state->mutex);
+        state->wake.wait(lock, [&]() { return state->peerTokenReady || state->stopRequested; });
+        return state->peerToken;
+    }
+
     static void RunEvents(std::shared_ptr<State> state, screenshare::SignalingClientConfig clientConfig)
     {
+        // Wait for the first Join (in Run) to obtain the peer token before
+        // opening the authenticated event stream.
+        const std::string peerToken = WaitForPeerToken(state);
+        if (stopRequested(state)) {
+            return;
+        }
         while (!stopRequested(state)) {
             try {
                 screenshare::SignalingClient client(clientConfig);
                 client.ListenRoomEvents(
                     state->roomId,
                     state->peer.peerId,
-                    state->peer.roomPassword,
+                    peerToken,
                     [state](const std::string& message) {
                         const bool roomClosed =
                             message.find("\"type\":\"room_closed\"") != std::string::npos;
@@ -2184,7 +2218,7 @@ private:
 
         while (!stopRequested(state)) {
             try {
-                RecordPeers(state, client.Join(state->roomId, SnapshotPeer(state)));
+                RecordPeers(state, client.Join(state->roomId, SnapshotPeer(state), SnapshotPeerToken(state)));
             } catch (const std::exception& error) {
                 std::cerr
                     << "signaling_live_refresh=error"
@@ -2200,6 +2234,7 @@ private:
         }
 
         const std::string peerId = SnapshotPeer(state).peerId;
+        const std::string peerToken = SnapshotPeerToken(state);
         {
             std::lock_guard lock(state->mutex);
             state->stopRequested = true;
@@ -2207,7 +2242,7 @@ private:
         state->wake.notify_all();
 
         try {
-            client.Leave(state->roomId, peerId);
+            client.Leave(state->roomId, peerId, peerToken);
             std::cout
                 << "signaling_live_leave=ok"
                 << " room=" << state->roomId
@@ -4712,6 +4747,9 @@ void PrepareLiveSignaling(Options& options)
     std::map<std::string, screenshare::SignalingPeer> peersById;
     const auto response = client.Join(options.signalingRoomId, peer);
     ApplySignalingRoomAccessKey(options, response);
+    // Remember the issued token so the live signaling loop can re-announce this
+    // same peerId (an unauthenticated re-join would now be rejected).
+    options.signalingPeerToken = response.peerToken;
     MergeSignalingPeers(peersById, response);
     const int polls = 1;
 

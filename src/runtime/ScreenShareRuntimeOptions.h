@@ -191,6 +191,9 @@ struct Options {
     std::string signalingServerUrl;
     std::string signalingRoomId;
     std::string signalingPeerId;
+    // Server-issued peer token from the initial signaling join, threaded into
+    // the live signaling loop so its re-joins/heartbeats/leave authenticate.
+    std::string signalingPeerToken;
     std::string signalingCandidate;
     std::string signalingName;
     std::string signalingPlatform;
