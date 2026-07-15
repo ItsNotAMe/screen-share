@@ -3374,7 +3374,15 @@ void RunCaptureStats(
 
         udpSender = std::make_unique<UdpSenderFanout>();
         udpSender->Open(udpConfigs);
-        refreshRemoteControlBounds(config.displayIndex);
+        // Only map injection bounds when sharing a whole display. For a window
+        // share, leave bounds clear so a granted viewer cannot move/click across
+        // the entire monitor (including regions outside the shared window); the
+        // runtime source-change path applies the same rule.
+        if (config.sourceType == screenshare::CaptureSourceType::Display) {
+            refreshRemoteControlBounds(config.displayIndex);
+        } else {
+            remoteInputInjector.SetTargetBounds(0, 0, 0, 0);
+        }
         udpSender->SetControlHandler(
             [&](const std::string& endpoint, const screenshare::udp_protocol::ControlMessage& message) {
                 using Command = screenshare::udp_protocol::ControlCommandType;
