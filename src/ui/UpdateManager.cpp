@@ -1,5 +1,7 @@
 #include "ui/UpdateManager.h"
 
+#include "updater/UpdateSignature.h"
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
@@ -33,10 +35,55 @@
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <span>
 
 #ifndef SCREENSHARE_APP_VERSION
 #define SCREENSHARE_APP_VERSION "0.0.0"
 #endif
+
+namespace {
+
+// Pinned ECDSA-P256 public key (raw X||Y, 64 bytes) of the release signing key.
+// REPLACE the zeros with your key before shipping (see docs/update-signing.md).
+// All-zero means "not configured", which disables auto-update (fail closed) so
+// an unsigned build can never auto-install anything.
+constexpr std::array<unsigned char, 64> kUpdatePublicKeyXy = {};
+
+bool updateSigningConfigured()
+{
+    return std::any_of(kUpdatePublicKeyXy.begin(), kUpdatePublicKeyXy.end(),
+                       [](unsigned char b) { return b != 0; });
+}
+
+// Verify the manifest signature over the security-critical fields before an
+// update is ever offered/downloaded. The signed message is exactly
+// "version\npackageUrl\nsha256"; the signature binds the trusted sha256 (and
+// thus the package) to the pinned release key.
+bool verifyUpdateSignature(
+    const QString& version,
+    const QString& packageUrl,
+    const QString& sha256,
+    const QString& signatureBase64)
+{
+    if (!updateSigningConfigured() || signatureBase64.isEmpty()) {
+        return false;
+    }
+    const QByteArray signature = QByteArray::fromBase64(
+        signatureBase64.toLatin1(),
+        QByteArray::Base64Encoding | QByteArray::AbortOnBase64DecodingErrors);
+    if (signature.size() != 64) {
+        return false;
+    }
+    const QByteArray message = (version + QLatin1Char('\n') + packageUrl + QLatin1Char('\n') + sha256).toUtf8();
+    return screenshare::VerifyUpdateManifestSignatureEcdsaP256(
+        std::as_bytes(std::span<const unsigned char>(kUpdatePublicKeyXy.data(), kUpdatePublicKeyXy.size())),
+        std::as_bytes(std::span<const char>(message.constData(), static_cast<size_t>(message.size()))),
+        std::as_bytes(std::span<const char>(signature.constData(), static_cast<size_t>(signature.size()))));
+}
+
+} // namespace
 
 #ifndef SCREENSHARE_UPDATE_MANIFEST_URL
 #define SCREENSHARE_UPDATE_MANIFEST_URL ""
@@ -304,6 +351,15 @@ void UpdateManager::handleManifestReply(QNetworkReply* reply)
         !packageUrl.isValid() ||
         packageUrl.scheme() != QLatin1String("https") ||
         !isValidSha256(update.sha256)) {
+        return;
+    }
+
+    // Verify the manifest is signed by the pinned release key BEFORE offering
+    // the update. Without this, a compromised release host/CDN could serve a
+    // matching {malicious package, sha256} pair; the signature binds the
+    // trusted sha256 to a key an attacker does not hold. Fails closed.
+    const QString signatureBase64 = root.value(QStringLiteral("signature")).toString().trimmed();
+    if (!verifyUpdateSignature(update.version, update.packageUrl, update.sha256, signatureBase64)) {
         return;
     }
 

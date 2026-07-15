@@ -83,6 +83,7 @@ add_library(ScreenShareCore STATIC
     src/transport/UdpProtocol.cpp
     src/transport/UdpReceiver.cpp
     src/transport/UdpSender.cpp
+    src/updater/UpdateSignature.cpp
     src/video/Nv12Convert.cpp
 )
 
