@@ -84,13 +84,13 @@ std::wstring powershellLiteral(const fs::path& path)
     return escaped;
 }
 
-bool runProcess(std::wstring commandLine, DWORD timeoutMs)
+bool runProcess(const std::wstring& applicationPath, std::wstring commandLine, DWORD timeoutMs)
 {
     STARTUPINFOW startupInfo = {};
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInfo = {};
     if (!CreateProcessW(
-            nullptr,
+            applicationPath.empty() ? nullptr : applicationPath.c_str(),
             commandLine.data(),
             nullptr,
             nullptr,
@@ -150,13 +150,29 @@ bool extractPackage(const fs::path& packagePath, const fs::path& extractDir)
         return false;
     }
 
+    // Resolve the interpreter by its full System32 path and pass it as the
+    // application name. With a NULL application name and a relative
+    // "powershell.exe", CreateProcessW searches the current/loaded-from
+    // directory first, so a planted powershell.exe in the temp updates
+    // directory (attacker-writable by the same user) could hijack the update.
+    wchar_t systemDir[MAX_PATH] = {};
+    const UINT systemDirLength = GetSystemDirectoryW(systemDir, MAX_PATH);
+    if (systemDirLength == 0 || systemDirLength >= MAX_PATH) {
+        log(L"Could not resolve the system directory for powershell.exe");
+        return false;
+    }
+    const std::wstring powerShellPath =
+        std::wstring(systemDir, systemDirLength) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+
+    // -Command with an inline expression is not governed by the script
+    // execution policy, so -ExecutionPolicy Bypass is unnecessary.
     std::wstring command =
-        L"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath " +
+        L"\"" + powerShellPath + L"\" -NoProfile -Command \"Expand-Archive -LiteralPath " +
         powershellLiteral(packagePath) +
         L" -DestinationPath " +
         powershellLiteral(extractDir) +
         L" -Force\"";
-    return runProcess(std::move(command), 120000);
+    return runProcess(powerShellPath, std::move(command), 120000);
 }
 
 bool moveOrCopyDirectory(const fs::path& source, const fs::path& destination)

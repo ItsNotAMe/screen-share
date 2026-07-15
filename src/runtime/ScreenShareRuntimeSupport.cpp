@@ -11,6 +11,7 @@
 #include <limits>
 #include <mutex>
 #include <random>
+#include <regex>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -366,6 +367,26 @@ std::string ReadTextFile(const std::filesystem::path& path)
 {
     const auto bytes = ReadBinaryFile(path);
     return std::string(bytes.begin(), bytes.end());
+}
+
+// Redact peer/viewer IP addresses from text that is bundled into a shareable
+// report. Live runtime logs print endpoints (viewer_endpoint=, invite
+// endpoint=, media endpoints, ...); those are network metadata that
+// deanonymizes participants when a report zip is handed to support or a
+// tracker. The port is kept (not identifying) so the log still shows which
+// port was in use. The verbatim --log file is left untouched.
+std::string MaskNetworkEndpoints(std::string text)
+{
+    // IPv4 dotted-quad, with or without a trailing :port (the address is
+    // masked, the port left in place). Distinctive enough not to hit C++
+    // identifiers in log messages.
+    static const std::regex ipv4(R"(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)");
+    text = std::regex_replace(text, ipv4, "<ip>");
+    // Bracketed IPv6 literal (the form used when a port follows), e.g.
+    // [2001:db8::1]:5000.
+    static const std::regex ipv6Bracketed(R"(\[[0-9A-Fa-f:]+\])");
+    text = std::regex_replace(text, ipv6Bracketed, "[<ip>]");
+    return text;
 }
 
 std::string JoinCommandLine(int argc, char** argv)
@@ -1186,7 +1207,7 @@ void WriteSavedReport(
     if (consoleLogPath && std::filesystem::exists(*consoleLogPath) && std::filesystem::is_regular_file(*consoleLogPath)) {
         zip.AddFile(
             UniqueArchiveName("logs/console.log", archiveNames),
-            ReadBinaryFile(*consoleLogPath));
+            StringBytes(MaskNetworkEndpoints(ReadTextFile(*consoleLogPath))));
     }
 
     if (performanceReport) {
