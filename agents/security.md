@@ -6,6 +6,8 @@ The `fix/security-hardening` branch addressed every code finding from the public
 
 The token-aware signaling Worker and Durable Object migration `v3` were deployed on 2026-07-15. A live temporary-room check validated peer-token issuance plus authenticated peers, heartbeat, and leave operations before the v0.2.1 release.
 
+The v0.2.2 window-control hotfix maps remote mouse input into the selected window's live client area and accepts it only while that window is visible, not minimized, foreground, and owns the mapped point. Losing focus releases injected mouse buttons immediately. Window-share keyboard input remains disabled because Win32 keyboard injection cannot be confined to a window's coordinates.
+
 ### Critical and high-severity fixes
 
 - UDP encryption derives a unique per-session key with HKDF and uses role-separated monotonic AES-GCM nonces, preventing cross-session nonce reuse.
