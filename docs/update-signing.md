@@ -17,9 +17,24 @@ default).
 
 ## 1. Generate the signing keypair (once)
 
+Run the helper from PowerShell. OpenSSL prompts for a passphrase and writes the
+encrypted private key outside the repository by default:
+
+```powershell
+.\scripts\new-update-signing-key.ps1
+```
+
+Back up `%USERPROFILE%\.screenshare-release\screenshare-update.key` securely and
+store its passphrase in a password manager. Never commit or share the private
+key. The script prints the raw 64-byte public-key initializer to pin in
+`kUpdatePublicKeyXy`.
+
+Equivalent manual OpenSSL commands:
+
 ```sh
-# Private key — keep OFFLINE and SECRET. Never commit it.
-openssl ecparam -genkey -name prime256v1 -noout -out screenshare-update.key
+# Encrypted private key — keep OFFLINE and SECRET. Never commit it.
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+  -aes-256-cbc -out screenshare-update.key
 
 # Raw 64-byte public key (X||Y) as a C initializer to paste into
 # kUpdatePublicKeyXy in src/ui/UpdateManager.cpp:
@@ -38,6 +53,21 @@ manifest):
 ```
 <version>\n<packageUrl>\n<sha256>
 ```
+
+After generating the unsigned intermediate manifest, use the helper to build
+the exact message, prompt for the encrypted key's passphrase, convert OpenSSL's
+DER signature to raw `R||S`, and add the base64 signature to the manifest:
+
+```powershell
+.\scripts\sign-update-manifest.ps1 `
+  -ManifestPath .\build\release\screenshare-update.json `
+  -PrivateKeyPath "$env:USERPROFILE\.screenshare-release\screenshare-update.key" `
+  -PublicKeyPath "$env:USERPROFILE\.screenshare-release\screenshare-update-public.der"
+```
+
+The public-key argument makes the helper verify the signature before updating
+the manifest. The lower-level manual process is retained below for recovery or
+use on a separate signing machine.
 
 ```sh
 # message.txt = the three fields, newline-separated, no trailing newline

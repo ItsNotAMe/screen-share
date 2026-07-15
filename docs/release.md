@@ -16,24 +16,39 @@ cmake --preset release
 cmake --build --preset release
 ```
 
-## Generate Manifest
+## Generate And Sign Manifest
+
+Generate the manifest once to calculate the package URL and SHA-256 signing fields:
 
 ```powershell
 .\scripts\create-update-manifest.ps1 `
-  -Version 0.1.0 `
+  -Version 0.2.1 `
   -ZipPath .\build\release\ScreenShare-release-windows-x64.zip `
   -OutputPath .\build\release\screenshare-update.json `
   -Notes "Auto-update support","Portable Windows package"
 ```
 
+Sign the manifest with the encrypted offline key. The helper constructs the exact
+message, verifies the result against the public key, converts the signature to raw
+`R||S`, and writes its base64 form into the manifest:
+
+```powershell
+.\scripts\sign-update-manifest.ps1 `
+  -ManifestPath .\build\release\screenshare-update.json `
+  -PrivateKeyPath "$env:USERPROFILE\.screenshare-release\screenshare-update.key" `
+  -PublicKeyPath "$env:USERPROFILE\.screenshare-release\screenshare-update-public.der"
+```
+
+Never publish the unsigned intermediate manifest. The desktop updater rejects it by design.
+
 ## Publish
 
 ```powershell
-gh release create v0.1.0 `
+gh release create v0.2.1 `
   .\build\release\ScreenShare-release-windows-x64.zip `
   .\build\release\screenshare-update.json `
-  --title "ScreenShare 0.1.0" `
-  --notes "Initial portable release with auto-update support."
+  --title "ScreenShare 0.2.1" `
+  --notes "Remote control and public-release security hardening."
 ```
 
 For an existing tag/release, replace `create` with `upload --clobber`.

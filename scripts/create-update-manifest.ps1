@@ -11,7 +11,8 @@ param(
     [string]$Channel = "stable",
     [string]$Repository = "ItsNotAMe/screen-share",
     [string]$AssetName,
-    [string[]]$Notes = @("Portable ScreenShare update.")
+    [string[]]$Notes = @("Portable ScreenShare update."),
+    [string]$Signature
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +41,18 @@ $manifest = [ordered]@{
     }
 }
 
+if ($Signature) {
+    try {
+        $signatureBytes = [Convert]::FromBase64String($Signature)
+    } catch {
+        throw "Signature must be valid base64: $($_.Exception.Message)"
+    }
+    if ($signatureBytes.Length -ne 64) {
+        throw "Signature must decode to exactly 64 bytes (raw ECDSA P-256 R||S); got $($signatureBytes.Length)"
+    }
+    $manifest["signature"] = $Signature
+}
+
 $json = $manifest | ConvertTo-Json -Depth 6
 $outputDirectory = Split-Path -Parent $OutputPath
 if ($outputDirectory) {
@@ -48,3 +61,10 @@ if ($outputDirectory) {
 Set-Content -LiteralPath $OutputPath -Value $json -Encoding UTF8
 Write-Host "Wrote $OutputPath"
 Write-Host "SHA256 $hash"
+Write-Host "Signing message fields:"
+Write-Host "  version: $Version"
+Write-Host "  package URL: $downloadUrl"
+Write-Host "  SHA256: $hash"
+if (-not $Signature) {
+    Write-Warning "Manifest is unsigned and must not be published. Sign the three fields above, then rerun with -Signature."
+}
