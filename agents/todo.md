@@ -2,7 +2,7 @@
 
 ## Release Readiness
 
-- [ ] Deploy the signaling Worker with the new `RATE_LIMITER` Durable Object binding and migration `v3`, then validate the cross-colo limiter, room-count cap, and directory sweep against the live Cloudflare account.
+- [ ] Validate the cross-colo rate limiter, global room-count cap, and alarm-based directory sweep under multi-colo/live load.
 - [ ] Exercise an encrypted session through a real NAT rebind before relying on automatic retargeting in the field.
 
 ## Build Work
