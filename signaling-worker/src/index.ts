@@ -92,6 +92,11 @@ const ROOM_DIRECTORY_STORAGE_PREFIX = "room:";
 const MAX_JSON_BYTES = 16 * 1024;
 const MAX_CANDIDATES = 8;
 const MAX_ROOM_LIST_LIMIT = 250;
+// Cap on distinct peers a single room will hold. All peers are persisted as
+// one Durable Object value (~128 KiB limit), so an unbounded peer count both
+// exhausts storage and can break the room; this also bounds the per-request
+// fanout of peer lists. Generous relative to any real screen-share room.
+const MAX_PEERS_PER_ROOM = 64;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 240;
 const ROOM_ACCESS_KEY_BYTES = 32;
@@ -211,6 +216,18 @@ function validateRoomId(roomId: string): string {
   return value;
 }
 
+// Decode a %-encoded room id path segment, turning malformed encodings into a
+// clean 400 instead of an uncaught URIError surfacing as a generic 500.
+function decodeRoomIdSegment(segment: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    throw new HttpError(400, "invalid_room_id", "Room id is not valid percent-encoding.");
+  }
+  return validateRoomId(decoded);
+}
+
 function validatePeerId(peerId: unknown): string {
   if (typeof peerId !== "string") {
     throw new HttpError(400, "invalid_peer_id", "peerId must be a string.");
@@ -281,6 +298,17 @@ function validateCandidates(candidates: unknown): Candidate[] {
   return [...unique.values()];
 }
 
+// Reject C0 control characters. Peer/room display strings are echoed verbatim
+// to every other peer and to the native client, so keep them to plain text.
+function rejectControlChars(value: string, field: string): string {
+  for (const ch of value) {
+    if (ch < " ") {
+      throw new HttpError(400, "invalid_metadata", `${field} must not contain control characters.`);
+    }
+  }
+  return value;
+}
+
 function validateMetadata(metadata: unknown): PeerMetadata | undefined {
   if (metadata === undefined) {
     return undefined;
@@ -294,13 +322,13 @@ function validateMetadata(metadata: unknown): PeerMetadata | undefined {
     if (typeof metadata.name !== "string" || metadata.name.length > 80) {
       throw new HttpError(400, "invalid_metadata", "metadata.name must be a short string.");
     }
-    clean.name = metadata.name.trim();
+    clean.name = rejectControlChars(metadata.name.trim(), "metadata.name");
   }
   if (metadata.platform !== undefined) {
     if (typeof metadata.platform !== "string" || metadata.platform.length > 80) {
       throw new HttpError(400, "invalid_metadata", "metadata.platform must be a short string.");
     }
-    clean.platform = metadata.platform.trim();
+    clean.platform = rejectControlChars(metadata.platform.trim(), "metadata.platform");
   }
   return Object.keys(clean).length > 0 ? clean : undefined;
 }
@@ -1131,7 +1159,7 @@ export class RoomObject extends DurableObject<Env> {
       throw new HttpError(404, "not_found", "Endpoint not found.");
     }
 
-    const roomId = validateRoomId(decodeURIComponent(match[1]));
+    const roomId = decodeRoomIdSegment(match[1]);
     const action = match[2];
     if (action === "join" && request.method === "POST") {
       return this.handleJoin(request, roomId);
@@ -1361,6 +1389,13 @@ export class RoomObject extends DurableObject<Env> {
     await this.saveRoomPasswordVerifier(security.passwordVerifier);
     const roomInfo = await this.applyRoomInfoUpdate(security.infoUpdate);
     const roomAccessKey = await this.ensureRoomAccessKey();
+
+    // Bound the number of distinct peers per room. Adding a brand-new peer to
+    // an already-full room is rejected; re-announcing an existing peer is
+    // always allowed so active members are never locked out.
+    if (!peers.has(peerId) && peers.size >= MAX_PEERS_PER_ROOM) {
+      throw new HttpError(409, "room_full", "This room already has the maximum number of participants.");
+    }
 
     const previousPeer = peers.get(peerId);
     const nextPeer = { peerId, candidates, metadata, lastSeen: now };
