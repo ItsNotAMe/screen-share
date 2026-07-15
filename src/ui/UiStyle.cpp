@@ -701,6 +701,15 @@ QLabel#ActiveTopIdle {
 QLabel#ActiveTopError {
     color: #ff9b94;
 }
+QLabel#ActiveTopControlActive {
+    background: #5a1a1a;
+    color: #ffd7d2;
+    border: 1px solid #ff6a5f;
+    border-radius: 11px;
+    padding: 3px 12px;
+    font-size: 10pt;
+    font-weight: 760;
+}
 QLabel#ActiveHeroTitle {
     background: transparent;
     color: #f4fbf9;

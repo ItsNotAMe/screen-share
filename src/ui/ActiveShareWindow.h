@@ -57,6 +57,10 @@ private:
     void installBackendHandlers();
     void updateElapsed();
     void updateStatus(const screenshare::SessionStatus& status);
+    void updateControlIndicator(const screenshare::SessionStatus& status);
+    // Show a one-time-per-session warning before the host first grants remote
+    // control. Returns true if the host confirmed (or already consented).
+    bool confirmControlConsent();
     void updateViewerList(const screenshare::SessionStatus& status);
     void updateHealth(const screenshare::SessionStatus& status);
     void updateShareSummary();
@@ -85,6 +89,7 @@ private:
 
     QLabel* stateLabel_ = nullptr;
     QLabel* elapsedLabel_ = nullptr;
+    QLabel* controlIndicatorLabel_ = nullptr;
     QLabel* roomLabel_ = nullptr;
     QLabel* shareTitleLabel_ = nullptr;
     QLabel* shareDisplayLabel_ = nullptr;
@@ -118,6 +123,7 @@ private:
     bool updatingSettingsUi_ = false;
     bool hostAudioMuted_ = false;
     bool videoPaused_ = false;
+    bool controlConsentGiven_ = false;
     QString appliedRoomName_;
     QString appliedDisplaySourceValue_;
     QString appliedResolutionValue_;

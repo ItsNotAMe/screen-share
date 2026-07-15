@@ -201,6 +201,16 @@ void RemoteInputInjector::InjectMouseScroll(int wheelDeltaX, int wheelDeltaY)
 
 void RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool down)
 {
+    // Confine keyboard injection to a full-display share. Bounds are set only
+    // when sharing an entire monitor and cleared for a window share, so this is
+    // the same gate the mouse path uses (see InjectMouseMove). Without it a
+    // granted viewer's keystrokes would be delivered to whatever window has
+    // focus on the host, leaking input outside the shared surface. Until a
+    // window share maps its client rect for remote input, keyboard control is
+    // limited to display shares.
+    if (!HasTargetBounds()) {
+        return;
+    }
     INPUT input{};
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = virtualKey;

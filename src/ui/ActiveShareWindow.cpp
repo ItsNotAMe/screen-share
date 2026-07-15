@@ -31,6 +31,7 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLayoutItem>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QScrollBar>
@@ -293,6 +294,8 @@ void ActiveShareWindow::setSession(const ShareSessionUiState& session)
     elapsedTimer_->start();
     sourceRefreshTimer_->start();
     lastViewerSignature_.clear();
+    // Fresh consent required for each new share session.
+    controlConsentGiven_ = false;
     hostAudioMuted_ = session_.config.hostAudioMuted || !session_.config.captureSystemAudio;
     videoPaused_ = session_.config.hostVideoPaused;
     updateElapsed();
@@ -375,6 +378,12 @@ QWidget* ActiveShareWindow::buildTopStatus()
     layout->addWidget(stateLabel_);
     elapsedLabel_ = textLabel("00:00:00", "ActiveTopMuted");
     layout->addWidget(elapsedLabel_);
+    // Persistent, high-visibility indicator shown only while a viewer is
+    // actively controlling this machine. Hidden otherwise.
+    controlIndicatorLabel_ = textLabel(QString(), "ActiveTopControlActive");
+    controlIndicatorLabel_->setWordWrap(false);
+    controlIndicatorLabel_->setVisible(false);
+    layout->addWidget(controlIndicatorLabel_);
     layout->addStretch(1);
     roomLabel_ = textLabel("Room: -", "ActiveTopMuted");
     roomLabel_->setWordWrap(false);
@@ -795,6 +804,14 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
         if (keyboardToggle->isChecked()) {
             capabilities |= screenshare::ControlCapabilityKeyboard;
         }
+        // The first grant of any control this session requires explicit consent:
+        // mouse/keyboard access is effectively full control of the machine. A
+        // revoke (capabilities == 0) never prompts.
+        if (capabilities != 0 && !confirmControlConsent()) {
+            mouseToggle->setChecked(false);
+            keyboardToggle->setChecked(false);
+            return;
+        }
         if (backend_ != nullptr) {
             backend_->setViewerControl(endpoint, capabilities);
         }
@@ -901,8 +918,81 @@ void ActiveShareWindow::updateStatus(const screenshare::SessionStatus& status)
         (status.state == screenshare::SessionState::Live ? "ActiveTopLive" : "ActiveTopIdle"));
     stateLabel_->style()->unpolish(stateLabel_);
     stateLabel_->style()->polish(stateLabel_);
+    updateControlIndicator(status);
     updateViewerList(status);
     updateHealth(status);
+}
+
+void ActiveShareWindow::updateControlIndicator(const screenshare::SessionStatus& status)
+{
+    if (controlIndicatorLabel_ == nullptr) {
+        return;
+    }
+    const bool controlling = !status.controllerViewerId.empty() && status.controlCapabilities != 0;
+    if (!controlling) {
+        controlIndicatorLabel_->setVisible(false);
+        return;
+    }
+
+    // Resolve a friendly name for whoever is controlling (matches the granted
+    // controller by endpoint, then id).
+    QString who;
+    for (const auto& viewer : status.viewers) {
+        if (viewer.endpoint == status.controllerViewerId || viewer.id == status.controllerViewerId) {
+            if (!viewer.name.empty()) {
+                who = QString::fromStdString(viewer.name);
+            } else if (!viewer.id.empty()) {
+                who = QString::fromStdString(viewer.id);
+            }
+            break;
+        }
+    }
+    if (who.isEmpty()) {
+        who = QStringLiteral("A viewer");
+    }
+
+    QStringList kinds;
+    if ((status.controlCapabilities & screenshare::ControlCapabilityMouse) != 0) {
+        kinds << QStringLiteral("mouse");
+    }
+    if ((status.controlCapabilities & screenshare::ControlCapabilityKeyboard) != 0) {
+        kinds << QStringLiteral("keyboard");
+    }
+    const QString kindText = kinds.isEmpty() ? QStringLiteral("input") : kinds.join(QStringLiteral(" + "));
+
+    controlIndicatorLabel_->setText(
+        QStringLiteral("● %1 is controlling your %2 — press Ctrl+Alt+Shift+F12 to revoke")
+            .arg(who, kindText));
+    controlIndicatorLabel_->setVisible(true);
+}
+
+bool ActiveShareWindow::confirmControlConsent()
+{
+    if (controlConsentGiven_) {
+        return true;
+    }
+    QMessageBox box(this);
+    box.setObjectName("ControlConsentDialog");
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Allow remote control?"));
+    box.setText(QStringLiteral(
+        "Granting mouse or keyboard control lets this viewer operate your computer "
+        "as if they were sitting at it."));
+    box.setInformativeText(QStringLiteral(
+        "They will be able to move the pointer, click, and type anything you can. "
+        "Only grant control to people you trust.\n\n"
+        "You can revoke control at any time from this window, or by pressing "
+        "Ctrl+Alt+Shift+F12."));
+    box.setStandardButtons(QMessageBox::Cancel | QMessageBox::Yes);
+    box.setDefaultButton(QMessageBox::Cancel);
+    if (QAbstractButton* allow = box.button(QMessageBox::Yes)) {
+        allow->setText(QStringLiteral("Allow control"));
+    }
+    const bool accepted = box.exec() == QMessageBox::Yes;
+    if (accepted) {
+        controlConsentGiven_ = true;
+    }
+    return accepted;
 }
 
 void ActiveShareWindow::updateViewerList(const screenshare::SessionStatus& status)
