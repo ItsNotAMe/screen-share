@@ -602,7 +602,10 @@ bool UpdateManager::launchUpdater(const UpdateInfo& update, const QString& packa
         << QStringLiteral("--pid") << QString::number(QCoreApplication::applicationPid())
         << QStringLiteral("--package") << packagePath
         << QStringLiteral("--target") << appDir
-        << QStringLiteral("--restart") << QCoreApplication::applicationFilePath();
+        << QStringLiteral("--restart") << QCoreApplication::applicationFilePath()
+        // The helper re-verifies this hash immediately before extraction to
+        // close the TOCTOU window while the app exits.
+        << QStringLiteral("--sha256") << update.sha256;
 
     if (!QProcess::startDetached(tempHelper, arguments, tempUpdateDir())) {
         *errorMessage = QStringLiteral("Could not start the updater helper.");

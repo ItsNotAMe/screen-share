@@ -1,7 +1,10 @@
 #include <windows.h>
+#include <bcrypt.h>
 #include <shellapi.h>
 
+#include <array>
 #include <chrono>
+#include <cwchar>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -285,6 +288,62 @@ void restartApp(const fs::path& restartExe, const fs::path& workingDir)
         SW_SHOWNORMAL);
 }
 
+// Streaming SHA-256 of a file, returned as lowercase hex. Empty on any error.
+std::wstring fileSha256Hex(const fs::path& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        return {};
+    }
+
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) {
+        return {};
+    }
+
+    std::wstring hex;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    if (BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) >= 0) {
+        bool ok = true;
+        std::array<char, 64 * 1024> buffer{};
+        while (file) {
+            file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            const std::streamsize got = file.gcount();
+            if (got > 0 &&
+                BCryptHashData(hash, reinterpret_cast<PUCHAR>(buffer.data()), static_cast<ULONG>(got), 0) < 0) {
+                ok = false;
+                break;
+            }
+        }
+        std::array<unsigned char, 32> digest{};
+        if (ok && !file.bad() &&
+            BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) >= 0) {
+            static const wchar_t* kHex = L"0123456789abcdef";
+            for (const unsigned char byte : digest) {
+                hex.push_back(kHex[byte >> 4]);
+                hex.push_back(kHex[byte & 0x0F]);
+            }
+        }
+        BCryptDestroyHash(hash);
+    }
+
+    BCryptCloseAlgorithmProvider(algorithm, 0);
+    return hex;
+}
+
+bool equalsIgnoreCaseAscii(const std::wstring& a, const std::wstring& b)
+{
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t index = 0; index < a.size(); ++index) {
+        if (std::towlower(a[index]) != std::towlower(b[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
@@ -294,8 +353,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     const fs::path packagePath = argumentValue(arguments, L"--package");
     const fs::path targetDir = argumentValue(arguments, L"--target");
     const fs::path restartExe = argumentValue(arguments, L"--restart");
+    const std::wstring expectedSha256 = argumentValue(arguments, L"--sha256");
 
-    if (packagePath.empty() || targetDir.empty() || restartExe.empty()) {
+    if (packagePath.empty() || targetDir.empty() || restartExe.empty() || expectedSha256.empty()) {
         log(L"Missing required updater arguments");
         return 2;
     }
@@ -307,6 +367,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
     if (!waitForAppExit(processId)) {
         return 3;
+    }
+
+    // Re-verify the package hash here, immediately before extraction. The parent
+    // verified it earlier, but the file sat at a predictable path during the
+    // up-to-60s wait for the app to exit; re-checking closes that TOCTOU window
+    // against a same-user process swapping the package.
+    if (!equalsIgnoreCaseAscii(fileSha256Hex(packagePath), expectedSha256)) {
+        log(L"Package hash mismatch before extraction; aborting update");
+        return 7;
     }
 
     wchar_t tempPath[MAX_PATH] = {};

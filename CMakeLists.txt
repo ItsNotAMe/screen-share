@@ -198,6 +198,7 @@ screenshare_configure_release_lto_warnings(ScreenShareUpdater)
 
 target_link_libraries(ScreenShareUpdater PRIVATE
     shell32
+    bcrypt
 )
 
 if(MSVC)
