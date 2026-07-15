@@ -168,13 +168,18 @@ bool extractPackage(const fs::path& packagePath, const fs::path& extractDir)
         std::wstring(systemDir, systemDirLength) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
 
     // -Command with an inline expression is not governed by the script
-    // execution policy, so -ExecutionPolicy Bypass is unnecessary.
-    std::wstring command =
-        L"\"" + powerShellPath + L"\" -NoProfile -Command \"Expand-Archive -LiteralPath " +
-        powershellLiteral(packagePath) +
-        L" -DestinationPath " +
-        powershellLiteral(extractDir) +
-        L" -Force\"";
+    // execution policy, so -ExecutionPolicy Bypass is unnecessary. Built with
+    // append (not an operator+ chain) to avoid a GCC -Wstringop-overread false
+    // positive on the short leading string literal.
+    std::wstring command;
+    command.reserve(powerShellPath.size() + 128);
+    command += L'\"';
+    command += powerShellPath;
+    command += L"\" -NoProfile -Command \"Expand-Archive -LiteralPath ";
+    command += powershellLiteral(packagePath);
+    command += L" -DestinationPath ";
+    command += powershellLiteral(extractDir);
+    command += L" -Force\"";
     return runProcess(powerShellPath, std::move(command), 120000);
 }
 
