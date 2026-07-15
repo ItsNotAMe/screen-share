@@ -1465,14 +1465,12 @@ export class RoomObject extends DurableObject<Env> {
     const now = Date.now();
     const peers = await this.loadPeers();
     this.cleanupPeers(peers, now);
+    // Only the owning peer may refresh its own liveness. Return the same error
+    // whether the peer is absent or the token is wrong, so heartbeat cannot be
+    // used to probe who is in a (locked) room.
     const peer = peers.get(peerId);
-    if (!peer) {
+    if (!peer || !peerTokenMatches(peer.token, peerTokenFromRequest(request))) {
       await this.savePeers(roomId, peers, now);
-      throw new HttpError(404, "peer_not_found", "Peer is not in this room.");
-    }
-    // Only the owning peer may refresh its own liveness (prevents a caller from
-    // enumerating or keeping alive peers it does not own).
-    if (!peerTokenMatches(peer.token, peerTokenFromRequest(request))) {
       throw new HttpError(403, "peer_token_invalid", "A valid peer token is required to heartbeat.");
     }
 
@@ -1487,11 +1485,12 @@ export class RoomObject extends DurableObject<Env> {
     const peerId = validatePeerId(body.peerId);
     const peers = await this.loadPeers();
     const leaving = peers.get(peerId);
-    // A peer may only remove itself, proven by its token. This stops
-    // unauthenticated eviction of other participants and unauthorized room
-    // teardown (which bypassed the room password entirely).
-    if (leaving && !peerTokenMatches(leaving.token, peerTokenFromRequest(request))) {
-      throw new HttpError(403, "peer_token_invalid", "A valid peer token is required to leave.");
+    // A peer may only remove itself, proven by its token. A missing peer or a
+    // caller without the matching token is a silent no-op success: this blocks
+    // unauthenticated eviction / room teardown (which bypassed the room
+    // password) without revealing whether the peer exists.
+    if (!leaving || !peerTokenMatches(leaving.token, peerTokenFromRequest(request))) {
+      return jsonResponse({ ok: true });
     }
     const removed = peers.delete(peerId);
     const hostPeerId = await this.loadHostPeerId();
