@@ -1004,6 +1004,7 @@ void UdpSender::ProcessControlPacket(const void* address, int addressLength, std
     // reject when the two sides plumb the fingerprint differently.
 
     const std::string endpoint = SocketAddressToString(address, addressLength);
+    bool accepted = false;
     {
         std::lock_guard lock(mutex_);
         auto peer = std::find_if(
@@ -1012,15 +1013,32 @@ void UdpSender::ProcessControlPacket(const void* address, int addressLength, std
             [&](const ControlPeer& candidate) { return candidate.endpoint == endpoint; });
         const auto* addressBytes = static_cast<const std::byte*>(address);
         if (peer == controlPeers_.end()) {
-            ControlPeer added;
-            added.endpoint = endpoint;
-            added.address.assign(addressBytes, addressBytes + addressLength);
-            added.addressLength = addressLength;
-            controlPeers_.push_back(std::move(added));
-        } else {
+            controlPeers_.push_back(ControlPeer{});
+            peer = std::prev(controlPeers_.end());
+            peer->endpoint = endpoint;
+        }
+
+        // Anti-replay. Within one control session (same sessionFingerprint) the
+        // sequence must strictly increase, so a captured control datagram cannot
+        // be replayed to re-inject input. A different sessionFingerprint marks a
+        // new session (e.g. the viewer restarted) and rebaselines the counter.
+        const bool newSession =
+            !peer->hasControlSequence ||
+            message->sessionFingerprint != peer->controlSessionFingerprint;
+        if (newSession || message->sequence > peer->lastControlSequence) {
             peer->address.assign(addressBytes, addressBytes + addressLength);
             peer->addressLength = addressLength;
+            peer->controlSessionFingerprint = message->sessionFingerprint;
+            peer->lastControlSequence = message->sequence;
+            peer->hasControlSequence = true;
+            accepted = true;
+        } else {
+            ++stats_.controlReplayRejected;
         }
+    }
+
+    if (!accepted) {
+        return; // stale or replayed control datagram
     }
 
     if (onControl_) {

@@ -26,12 +26,21 @@ struct UdpNatProbeTarget {
 struct UdpReceiverConfig {
     uint16_t port = 0;
     uint32_t maxDatagramBytes = 65'507;
-    uint32_t maxFrameBytes = 64 * 1024 * 1024;
+    uint32_t maxFrameBytes = 16 * 1024 * 1024;
     uint32_t socketReceiveBufferBytes = 4 * 1024 * 1024;
     size_t maxPendingFrames = 256;
+    // Aggregate cap on memory held by in-progress (not-yet-complete) video
+    // reassembly. Bounds a memory-exhaustion DoS where a peer opens many
+    // frame ids that each claim a large size but never complete. Independent
+    // of maxPendingFrames so small-frame and large-frame floods are both
+    // bounded.
+    uint64_t maxPendingFrameBytes = 96ull * 1024 * 1024;
     size_t maxPendingAudioPackets = 512;
     size_t maxCompletedAudioPackets = 512;
     uint32_t maxAudioPacketBytes = 2 * 1024 * 1024;
+    // Aggregate cap on memory held by in-progress audio reassembly, same
+    // rationale as maxPendingFrameBytes.
+    uint64_t maxPendingAudioBytes = 32ull * 1024 * 1024;
     std::chrono::milliseconds frameTimeout = std::chrono::seconds(5);
     float simulatedLossPercent = 0.0f;
     std::chrono::milliseconds simulatedJitter = std::chrono::milliseconds(0);

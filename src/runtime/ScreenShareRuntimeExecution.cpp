@@ -3345,6 +3345,13 @@ void RunCaptureStats(
         udpSender->SetControlHandler(
             [&](const std::string& endpoint, const screenshare::udp_protocol::ControlMessage& message) {
                 using Command = screenshare::udp_protocol::ControlCommandType;
+                // Remote control requires an encrypted session. On a plaintext
+                // session a control packet is authenticated only by its source
+                // ip:port, which is trivially spoofable, so honoring it would
+                // allow unauthenticated input injection into the host.
+                if (!options.accessCodeKey.has_value()) {
+                    return;
+                }
                 if (message.command == Command::RequestControl) {
                     std::cout << "remote_control_request endpoint=" << endpoint
                               << " caps=" << message.capabilities << "\n" << std::flush;
@@ -3378,7 +3385,9 @@ void RunCaptureStats(
                     }
                     break;
                 case Command::MouseButton:
-                    if (mouseOk) {
+                    if (mouseOk &&
+                        message.button <= static_cast<uint16_t>(
+                            screenshare::udp_protocol::ControlMouseButton::X2)) {
                         remoteInputInjector.InjectMouseButton(
                             static_cast<screenshare::RemoteInputInjector::MouseButton>(message.button),
                             message.pressed,
@@ -4061,6 +4070,16 @@ void RunCaptureStats(
 
         // Apply host grant/revoke requests from the UI and acknowledge the viewer.
         while (auto controlRequest = runtimeControl.TakeViewerControlRequest()) {
+            // Remote control is only available on encrypted sessions (see the
+            // control handler above). Refuse to grant on a plaintext session so
+            // the host cannot hand out control that the injection path will not
+            // honor anyway.
+            if (controlRequest->capabilities != 0 && !options.accessCodeKey.has_value()) {
+                std::cout << "remote_control_grant endpoint=" << controlRequest->viewerId
+                          << " caps=" << controlRequest->capabilities
+                          << " sent=no reason=plaintext_session\n" << std::flush;
+                continue;
+            }
             // Single controller: if control moves to a different viewer, revoke
             // the previous one so its UI stops showing "in control".
             if (!remoteControlEndpoint.empty() &&

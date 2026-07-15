@@ -659,13 +659,21 @@ std::optional<UdpCompletedFrame> UdpReceiver::ProcessDatagram(const std::byte* d
     auto [it, inserted] = pendingFrames_.try_emplace(frameId);
     PendingFrame& pending = it->second;
     if (inserted) {
-        pending.frameId = frameId;
-        pending.timestamp100ns = timestamp100ns;
-        pending.senderQpc100ns = senderQpc100ns;
-        pending.frameBytes = frameBytes;
-        pending.fragmentCount = fragmentCount;
-        pending.bytes.assign(frameBytes, std::byte{});
-        pending.fragmentReceived.assign(fragmentCount, 0);
+        // Size both buffers before the entry is considered usable. If an
+        // allocation throws, erase the half-built entry so a later fragment
+        // for the same frame id cannot index empty vectors.
+        try {
+            pending.frameId = frameId;
+            pending.timestamp100ns = timestamp100ns;
+            pending.senderQpc100ns = senderQpc100ns;
+            pending.frameBytes = frameBytes;
+            pending.fragmentCount = fragmentCount;
+            pending.bytes.assign(frameBytes, std::byte{});
+            pending.fragmentReceived.assign(fragmentCount, 0);
+        } catch (...) {
+            pendingFrames_.erase(it);
+            throw;
+        }
     } else if (pending.timestamp100ns != timestamp100ns ||
                pending.senderQpc100ns != senderQpc100ns ||
                pending.frameBytes != frameBytes ||
@@ -842,21 +850,28 @@ void UdpReceiver::ProcessAudioDatagram(const std::byte* datagram, int datagramBy
     auto [it, inserted] = pendingAudioPackets_.try_emplace(packetId);
     PendingAudioPacket& pending = it->second;
     if (inserted) {
-        pending.packetId = packetId;
-        pending.devicePosition = devicePosition;
-        pending.qpcPosition = qpcPosition;
-        pending.sampleRate = sampleRate;
-        pending.channels = channels;
-        pending.bitsPerSample = bitsPerSample;
-        pending.blockAlign = blockAlign;
-        pending.sampleFormat = sampleFormat;
-        pending.codec = codec;
-        pending.audioFrames = audioFrames;
-        pending.packetBytes = packetBytes;
-        pending.flags = flags;
-        pending.fragmentCount = fragmentCount;
-        pending.bytes.assign(packetBytes, std::byte{});
-        pending.fragmentReceived.assign(fragmentCount, 0);
+        // Size both buffers before the entry is considered usable; erase the
+        // half-built entry if an allocation throws (see video path above).
+        try {
+            pending.packetId = packetId;
+            pending.devicePosition = devicePosition;
+            pending.qpcPosition = qpcPosition;
+            pending.sampleRate = sampleRate;
+            pending.channels = channels;
+            pending.bitsPerSample = bitsPerSample;
+            pending.blockAlign = blockAlign;
+            pending.sampleFormat = sampleFormat;
+            pending.codec = codec;
+            pending.audioFrames = audioFrames;
+            pending.packetBytes = packetBytes;
+            pending.flags = flags;
+            pending.fragmentCount = fragmentCount;
+            pending.bytes.assign(packetBytes, std::byte{});
+            pending.fragmentReceived.assign(fragmentCount, 0);
+        } catch (...) {
+            pendingAudioPackets_.erase(it);
+            throw;
+        }
     } else if (pending.devicePosition != devicePosition ||
                pending.qpcPosition != qpcPosition ||
                pending.sampleRate != sampleRate ||
@@ -1185,7 +1200,13 @@ void UdpReceiver::DropExpiredFrames(Clock::time_point now)
 
 void UdpReceiver::EnforcePendingFrameLimit()
 {
-    while (pendingFrames_.size() > config_.maxPendingFrames) {
+    uint64_t totalBytes = 0;
+    for (const auto& entry : pendingFrames_) {
+        totalBytes += entry.second.frameBytes;
+    }
+    while (!pendingFrames_.empty() &&
+           (pendingFrames_.size() > config_.maxPendingFrames ||
+            totalBytes > config_.maxPendingFrameBytes)) {
         auto oldest = pendingFrames_.begin();
         for (auto it = pendingFrames_.begin(); it != pendingFrames_.end(); ++it) {
             if (it->second.lastUpdated < oldest->second.lastUpdated) {
@@ -1193,6 +1214,7 @@ void UdpReceiver::EnforcePendingFrameLimit()
             }
         }
 
+        totalBytes -= oldest->second.frameBytes;
         pendingFrames_.erase(oldest);
         ++stats_.incompleteFramesDropped;
     }
@@ -1200,7 +1222,13 @@ void UdpReceiver::EnforcePendingFrameLimit()
 
 void UdpReceiver::EnforcePendingAudioPacketLimit()
 {
-    while (pendingAudioPackets_.size() > config_.maxPendingAudioPackets) {
+    uint64_t totalBytes = 0;
+    for (const auto& entry : pendingAudioPackets_) {
+        totalBytes += entry.second.packetBytes;
+    }
+    while (!pendingAudioPackets_.empty() &&
+           (pendingAudioPackets_.size() > config_.maxPendingAudioPackets ||
+            totalBytes > config_.maxPendingAudioBytes)) {
         auto oldest = pendingAudioPackets_.begin();
         for (auto it = pendingAudioPackets_.begin(); it != pendingAudioPackets_.end(); ++it) {
             if (it->second.lastUpdated < oldest->second.lastUpdated) {
@@ -1208,6 +1236,7 @@ void UdpReceiver::EnforcePendingAudioPacketLimit()
             }
         }
 
+        totalBytes -= oldest->second.packetBytes;
         pendingAudioPackets_.erase(oldest);
         ++stats_.audioIncompletePacketsDropped;
     }

@@ -67,6 +67,7 @@ struct UdpSenderStats {
     uint64_t invalidFeedbackPackets = 0;
     uint64_t feedbackAccessRejected = 0;
     uint64_t feedbackCryptoRejected = 0;
+    uint64_t controlReplayRejected = 0;
     uint64_t natProbePacketsReceived = 0;
     uint64_t natProbeRetargets = 0;
     uint64_t natProbeRetargetRejected = 0;
@@ -192,6 +193,13 @@ private:
         std::string endpoint;
         std::vector<std::byte> address;
         int addressLength = 0;
+        // Anti-replay: the highest control sequence accepted from this peer
+        // within the current control session. A new session (different
+        // sessionFingerprint) resets the baseline so a legitimate viewer
+        // restart is not mistaken for a replay.
+        uint64_t controlSessionFingerprint = 0;
+        uint64_t lastControlSequence = 0;
+        bool hasControlSequence = false;
     };
 
     uintptr_t socket_ = 0;
