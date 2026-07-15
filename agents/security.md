@@ -4,6 +4,8 @@
 
 The `fix/security-hardening` branch addressed every code finding from the public-release audit. The CLI and Qt UI build cleanly; a localhost loopback harness validated per-session UDP crypto, and OpenSSL-generated vectors validated the update-signature verifier. Release-owner and live-environment work remains tracked in `agents/todo.md`.
 
+The token-aware signaling Worker and Durable Object migration `v3` were deployed on 2026-07-15. A live temporary-room check validated peer-token issuance plus authenticated peers, heartbeat, and leave operations before the v0.2.1 release.
+
 ### Critical and high-severity fixes
 
 - UDP encryption derives a unique per-session key with HKDF and uses role-separated monotonic AES-GCM nonces, preventing cross-session nonce reuse.
