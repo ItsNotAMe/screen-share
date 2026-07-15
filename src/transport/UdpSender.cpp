@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -181,21 +182,14 @@ void UdpSender::Open(const UdpSenderConfig& config)
         }
     }
 
-    std::unique_ptr<UdpAesGcm> crypto;
-    uint32_t videoNoncePrefix = 0;
-    uint32_t audioNoncePrefix = 0;
-    uint32_t controlNoncePrefix = 0;
-    if (config.encryptionKey) {
-        crypto = std::make_unique<UdpAesGcm>(*config.encryptionKey);
-        videoNoncePrefix = GenerateUdpCryptoNoncePrefix();
-        audioNoncePrefix = GenerateUdpCryptoNoncePrefix();
-        while (audioNoncePrefix == videoNoncePrefix) {
-            audioNoncePrefix = GenerateUdpCryptoNoncePrefix();
-        }
-        controlNoncePrefix = GenerateUdpCryptoNoncePrefix();
-        while (controlNoncePrefix == videoNoncePrefix || controlNoncePrefix == audioNoncePrefix) {
-            controlNoncePrefix = GenerateUdpCryptoNoncePrefix();
-        }
+    std::unique_ptr<UdpAesGcm> encryptCrypto;
+    UdpCryptoKey master{};
+    UdpCryptoSessionSalt sessionSalt{};
+    const bool encryptionEnabled = config.encryptionKey.has_value();
+    if (encryptionEnabled) {
+        master = *config.encryptionKey;
+        sessionSalt = GenerateUdpCryptoSessionSalt();
+        encryptCrypto = std::make_unique<UdpAesGcm>(DeriveUdpSessionKey(master, sessionSalt));
     }
 
     addrinfo hints{};
@@ -268,14 +262,15 @@ void UdpSender::Open(const UdpSenderConfig& config)
         feedbackPeers_.clear();
         config_ = config;
         stats_ = {};
-        stats_.encryptionEnabled = crypto != nullptr;
+        stats_.encryptionEnabled = encryptionEnabled;
         frameId_ = 0;
         audioPacketId_ = 0;
         queue_.clear();
-        crypto_ = std::move(crypto);
-        videoNoncePrefix_ = videoNoncePrefix;
-        audioNoncePrefix_ = audioNoncePrefix;
-        controlNoncePrefix_ = controlNoncePrefix;
+        encryptionEnabled_ = encryptionEnabled;
+        master_ = master;
+        sessionSalt_ = sessionSalt;
+        encryptCrypto_ = std::move(encryptCrypto);
+        peerDecryptCryptos_.clear();
         nextControlSequence_ = 1;
         controlPeers_.clear();
         nextSendAt_ = Clock::now();
@@ -316,10 +311,11 @@ void UdpSender::Close()
         cachedSendAddresses_.reset();
         feedbackPeers_.clear();
         addressLength_ = 0;
-        crypto_.reset();
-        videoNoncePrefix_ = 0;
-        audioNoncePrefix_ = 0;
-        controlNoncePrefix_ = 0;
+        encryptionEnabled_ = false;
+        master_ = {};
+        sessionSalt_ = {};
+        encryptCrypto_.reset();
+        peerDecryptCryptos_.clear();
         nextControlSequence_ = 1;
         controlPeers_.clear();
         workerError_.clear();
@@ -684,7 +680,7 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
             std::memcpy(&packet, receivedDatagram.data(), sizeof(packet));
             const uint32_t flags = udp_protocol::FromNetwork32(packet.flags);
             if ((flags & udp_protocol::PacketFlagEncrypted) != 0) {
-                if (!crypto_) {
+                if (!encryptionEnabled_) {
                     cryptoRejected = true;
                 } else {
                     decryptedFeedbackDatagram = DecryptFeedbackDatagram(receivedDatagram);
@@ -696,10 +692,10 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
                         cryptoRejected = true;
                     }
                 }
-            } else if (crypto_) {
+            } else if (encryptionEnabled_) {
                 cryptoRejected = true;
             }
-        } else if (crypto_) {
+        } else if (encryptionEnabled_) {
             cryptoRejected = true;
         }
 
@@ -795,20 +791,22 @@ std::vector<std::byte> UdpSender::BuildDatagram(
     header.fragmentIndex = udp_protocol::ToNetwork16(fragmentIndex);
     header.fragmentCount = udp_protocol::ToNetwork16(fragmentCount);
     header.payloadBytes = udp_protocol::ToNetwork32(payloadBytes);
-    if (crypto_) {
+    if (encryptionEnabled_) {
         header.flags = udp_protocol::ToNetwork32(udp_protocol::PacketFlagEncrypted);
         WriteUdpCryptoNonce(
             std::span<std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
-            videoNoncePrefix_,
+            UdpCryptoRole::Video,
             frameId,
             fragmentIndex);
+        std::memcpy(header.sessionSalt, sessionSalt_.data(), sizeof(header.sessionSalt));
     }
 
     std::vector<std::byte> datagram(sizeof(udp_protocol::PacketHeader) + payloadBytes);
     std::memcpy(datagram.data(), &header, sizeof(header));
     std::memcpy(datagram.data() + sizeof(header), payload, payloadBytes);
-    if (crypto_) {
+    if (encryptionEnabled_) {
         EncryptDatagramPayload(
+            *encryptCrypto_,
             datagram,
             sizeof(udp_protocol::PacketHeader),
             udp_protocol::PacketHeaderAuthenticatedBytes,
@@ -851,20 +849,22 @@ std::vector<std::byte> UdpSender::BuildAudioDatagram(
     header.fragmentCount = udp_protocol::ToNetwork16(fragmentCount);
     header.payloadBytes = udp_protocol::ToNetwork32(payloadBytes);
     header.flags = udp_protocol::ToNetwork32(packet.flags);
-    if (crypto_) {
+    if (encryptionEnabled_) {
         header.encryptionFlags = udp_protocol::ToNetwork32(udp_protocol::PacketFlagEncrypted);
         WriteUdpCryptoNonce(
             std::span<std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
-            audioNoncePrefix_,
+            UdpCryptoRole::Audio,
             packetId,
             fragmentIndex);
+        std::memcpy(header.sessionSalt, sessionSalt_.data(), sizeof(header.sessionSalt));
     }
 
     std::vector<std::byte> datagram(sizeof(udp_protocol::AudioPacketHeader) + payloadBytes);
     std::memcpy(datagram.data(), &header, sizeof(header));
     std::memcpy(datagram.data() + sizeof(header), payload, payloadBytes);
-    if (crypto_) {
+    if (encryptionEnabled_) {
         EncryptDatagramPayload(
+            *encryptCrypto_,
             datagram,
             sizeof(udp_protocol::AudioPacketHeader),
             udp_protocol::AudioPacketHeaderAuthenticatedBytes,
@@ -878,16 +878,14 @@ std::vector<std::byte> UdpSender::BuildAudioDatagram(
 }
 
 void UdpSender::EncryptDatagramPayload(
+    const UdpAesGcm& crypto,
     std::vector<std::byte>& datagram,
     size_t headerBytes,
     size_t authenticatedHeaderBytes,
     std::span<const std::byte, UdpCryptoNonceBytes> nonce,
     std::span<std::byte, UdpCryptoTagBytes> tag)
 {
-    if (!crypto_) {
-        return;
-    }
-    const auto ciphertext = crypto_->Encrypt(
+    const auto ciphertext = crypto.Encrypt(
         nonce,
         std::span<const std::byte>(datagram.data(), authenticatedHeaderBytes),
         std::span<const std::byte>(datagram.data() + headerBytes, datagram.size() - headerBytes),
@@ -895,9 +893,35 @@ void UdpSender::EncryptDatagramPayload(
     std::memcpy(datagram.data() + headerBytes, ciphertext.data(), ciphertext.size());
 }
 
+UdpAesGcm* UdpSender::DecryptCryptoForSalt(const UdpCryptoSessionSalt& salt)
+{
+    // Worker-thread only (feedback + control both decrypt on the receive loop),
+    // so peerDecryptCryptos_ needs no extra locking.
+    if (!encryptionEnabled_) {
+        return nullptr;
+    }
+    for (auto& entry : peerDecryptCryptos_) {
+        if (entry.salt == salt) {
+            return entry.crypto.get();
+        }
+    }
+    // Bound the cache so a peer that floods distinct (unauthenticated) salts
+    // cannot grow it without limit; a wrong salt just yields a key whose GCM
+    // tag check fails, so eviction is harmless.
+    constexpr size_t MaxPeerDecryptCryptos = 64;
+    if (peerDecryptCryptos_.size() >= MaxPeerDecryptCryptos) {
+        peerDecryptCryptos_.erase(peerDecryptCryptos_.begin());
+    }
+    PeerDecryptCrypto added;
+    added.salt = salt;
+    added.crypto = std::make_unique<UdpAesGcm>(DeriveUdpSessionKey(master_, salt));
+    peerDecryptCryptos_.push_back(std::move(added));
+    return peerDecryptCryptos_.back().crypto.get();
+}
+
 std::optional<std::vector<std::byte>> UdpSender::DecryptFeedbackDatagram(std::span<const std::byte> datagram)
 {
-    if (!crypto_ || datagram.size() != sizeof(udp_protocol::FeedbackPacket)) {
+    if (!encryptionEnabled_ || datagram.size() != sizeof(udp_protocol::FeedbackPacket)) {
         return std::nullopt;
     }
 
@@ -907,7 +931,14 @@ std::optional<std::vector<std::byte>> UdpSender::DecryptFeedbackDatagram(std::sp
         return std::vector<std::byte>(datagram.begin(), datagram.end());
     }
 
-    auto plaintext = crypto_->Decrypt(
+    UdpCryptoSessionSalt salt{};
+    std::memcpy(salt.data(), packet.sessionSalt, salt.size());
+    UdpAesGcm* crypto = DecryptCryptoForSalt(salt);
+    if (crypto == nullptr) {
+        return std::nullopt;
+    }
+
+    auto plaintext = crypto->Decrypt(
         std::span<const std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
         std::span<const std::byte>(datagram.data(), udp_protocol::FeedbackPacketAuthenticatedBytes),
         std::span<const std::byte>(
@@ -934,7 +965,7 @@ void UdpSender::SetControlHandler(
 
 bool UdpSender::EncryptControlDatagram(std::vector<std::byte>& datagram)
 {
-    if (!crypto_) {
+    if (!encryptionEnabled_) {
         return false;
     }
     if (datagram.size() != sizeof(udp_protocol::ControlPacket)) {
@@ -946,12 +977,14 @@ bool UdpSender::EncryptControlDatagram(std::vector<std::byte>& datagram)
     packet.flags = udp_protocol::ToNetwork32(udp_protocol::PacketFlagEncrypted);
     WriteUdpCryptoNonce(
         std::span<std::byte, UdpCryptoNonceBytes>(packet.encryptionNonce, UdpCryptoNonceBytes),
-        controlNoncePrefix_,
+        UdpCryptoRole::Control,
         udp_protocol::FromNetwork64(packet.sequence),
         0);
+    std::memcpy(packet.sessionSalt, sessionSalt_.data(), sizeof(packet.sessionSalt));
     std::memcpy(datagram.data(), &packet, sizeof(packet));
 
     EncryptDatagramPayload(
+        *encryptCrypto_,
         datagram,
         udp_protocol::ControlPacketEncryptedPayloadOffset,
         udp_protocol::ControlPacketAuthenticatedBytes,
@@ -974,10 +1007,16 @@ void UdpSender::ProcessControlPacket(const void* address, int addressLength, std
 
     std::vector<std::byte> reassembled(datagram.begin(), datagram.end());
     if ((flags & udp_protocol::PacketFlagEncrypted) != 0) {
-        if (!crypto_) {
+        if (!encryptionEnabled_) {
             return;
         }
-        auto plaintext = crypto_->Decrypt(
+        UdpCryptoSessionSalt salt{};
+        std::memcpy(salt.data(), header.sessionSalt, salt.size());
+        UdpAesGcm* crypto = DecryptCryptoForSalt(salt);
+        if (crypto == nullptr) {
+            return;
+        }
+        auto plaintext = crypto->Decrypt(
             std::span<const std::byte, UdpCryptoNonceBytes>(header.encryptionNonce, UdpCryptoNonceBytes),
             std::span<const std::byte>(datagram.data(), udp_protocol::ControlPacketAuthenticatedBytes),
             std::span<const std::byte>(
@@ -991,7 +1030,7 @@ void UdpSender::ProcessControlPacket(const void* address, int addressLength, std
             reassembled.data() + udp_protocol::ControlPacketEncryptedPayloadOffset,
             plaintext->data(),
             plaintext->size());
-    } else if (crypto_) {
+    } else if (encryptionEnabled_) {
         return; // reject plaintext control when the session is encrypted
     }
 

@@ -1881,20 +1881,18 @@ void ApplySignalingRoomAccessKey(Options& options, const screenshare::SignalingR
         throw std::runtime_error("Signaling room requires a password");
     }
 
-    const bool mixRoomPassword =
-        response.passwordProtected || !options.signalingRoomPassword.empty();
-    std::string keyMaterial = response.roomAccessKey;
-    if (mixRoomPassword) {
-        keyMaterial += "\npassword:";
-        keyMaterial += options.signalingRoomPassword;
-    }
+    // The room password is purely an access gate: the Worker verifies it before
+    // it will hand back the room access key. It is NOT mixed into the encryption
+    // key -- the key material is the server-issued random room access key alone.
+    // (The Worker only stores a salted verifier, never the password itself.)
+    const std::string& keyMaterial = response.roomAccessKey;
     options.accessCodeFingerprint = screenshare::UdpAccessCodeFingerprint(keyMaterial);
     options.accessCodeKey = screenshare::DeriveUdpCryptoKey(keyMaterial);
     options.accessCodeProvided = true;
     std::cout
         << "signaling_room_encryption=ready"
         << " room=" << options.signalingRoomId
-        << " password=" << (mixRoomPassword ? "yes" : "no")
+        << " password_gate=" << (response.passwordProtected ? "yes" : "no")
         << " source=server\n";
 }
 

@@ -77,6 +77,50 @@ void WriteBigEndian48(std::span<std::byte> bytes, size_t offset, uint64_t value)
     bytes[offset + 5] = static_cast<std::byte>(value & 0xFFU);
 }
 
+std::array<std::byte, 32> HmacSha256(
+    std::span<const std::byte> key,
+    std::span<const std::byte> data)
+{
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    ThrowIfBcryptFailed(
+        "BCryptOpenAlgorithmProvider(SHA256/HMAC)",
+        BCryptOpenAlgorithmProvider(
+            &algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG));
+
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    NTSTATUS status = BCryptCreateHash(
+        algorithm,
+        &hash,
+        nullptr,
+        0,
+        reinterpret_cast<PUCHAR>(const_cast<std::byte*>(key.data())),
+        CheckedUlongSize(key.size(), "HMAC key"),
+        0);
+    if (!BcryptOk(status)) {
+        BCryptCloseAlgorithmProvider(algorithm, 0);
+        ThrowIfBcryptFailed("BCryptCreateHash(HMAC-SHA256)", status);
+    }
+
+    std::array<std::byte, 32> output{};
+    status = BCryptHashData(
+        hash,
+        reinterpret_cast<PUCHAR>(const_cast<std::byte*>(data.data())),
+        CheckedUlongSize(data.size(), "HMAC data"),
+        0);
+    if (BcryptOk(status)) {
+        status = BCryptFinishHash(
+            hash,
+            reinterpret_cast<PUCHAR>(output.data()),
+            CheckedUlongSize(output.size(), "HMAC output"),
+            0);
+    }
+
+    BCryptDestroyHash(hash);
+    BCryptCloseAlgorithmProvider(algorithm, 0);
+    ThrowIfBcryptFailed("BCryptHashData/FinishHash(HMAC-SHA256)", status);
+    return output;
+}
+
 } // namespace
 
 bool UdpCryptoKey::valid() const noexcept
@@ -136,6 +180,63 @@ UdpCryptoKey DeriveUdpCryptoKey(std::string_view accessCode)
     return key;
 }
 
+UdpCryptoKey DeriveUdpSessionKey(
+    const UdpCryptoKey& master,
+    const UdpCryptoSessionSalt& salt)
+{
+    if (!master.valid()) {
+        throw std::invalid_argument("UDP session key derivation requires a valid master key");
+    }
+
+    // HKDF-SHA256 (RFC 5869). Extract with the per-session salt, then a single
+    // expand block (output is 32 bytes = one HMAC block). The sub-streams
+    // (video/audio/feedback/control) share this key but occupy disjoint nonce
+    // spaces via the role byte in the nonce, so no fixed info label is needed.
+    const std::array<std::byte, 32> prk = HmacSha256(
+        std::span<const std::byte>(salt.data(), salt.size()),
+        std::span<const std::byte>(master.bytes.data(), master.bytes.size()));
+
+    constexpr std::string_view info = "screenshare-udp-session-v2\x01";
+    std::array<std::byte, 27> infoBytes{};
+    for (size_t index = 0; index < info.size(); ++index) {
+        infoBytes[index] = static_cast<std::byte>(static_cast<unsigned char>(info[index]));
+    }
+
+    const std::array<std::byte, 32> okm = HmacSha256(
+        std::span<const std::byte>(prk.data(), prk.size()),
+        std::span<const std::byte>(infoBytes.data(), infoBytes.size()));
+
+    UdpCryptoKey key;
+    std::copy(okm.begin(), okm.end(), key.bytes.begin());
+    return key;
+}
+
+UdpCryptoSessionSalt GenerateUdpCryptoSessionSalt()
+{
+    UdpCryptoSessionSalt salt{};
+    ThrowIfBcryptFailed(
+        "BCryptGenRandom",
+        BCryptGenRandom(
+            nullptr,
+            reinterpret_cast<PUCHAR>(salt.data()),
+            CheckedUlongSize(salt.size(), "UDP crypto session salt"),
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG));
+    return salt;
+}
+
+std::array<std::byte, UdpCryptoNonceBytes> GenerateUdpCryptoNonce()
+{
+    std::array<std::byte, UdpCryptoNonceBytes> nonce{};
+    ThrowIfBcryptFailed(
+        "BCryptGenRandom",
+        BCryptGenRandom(
+            nullptr,
+            reinterpret_cast<PUCHAR>(nonce.data()),
+            CheckedUlongSize(nonce.size(), "UDP crypto nonce"),
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG));
+    return nonce;
+}
+
 std::string GenerateUdpAccessCode()
 {
     constexpr std::array<char, 32> Alphabet{
@@ -167,26 +268,17 @@ std::string GenerateUdpAccessCode()
     return code;
 }
 
-uint32_t GenerateUdpCryptoNoncePrefix()
-{
-    uint32_t prefix = 0;
-    ThrowIfBcryptFailed(
-        "BCryptGenRandom",
-        BCryptGenRandom(
-            nullptr,
-            reinterpret_cast<PUCHAR>(&prefix),
-            sizeof(prefix),
-            BCRYPT_USE_SYSTEM_PREFERRED_RNG));
-    return prefix == 0 ? 1U : prefix;
-}
-
 void WriteUdpCryptoNonce(
     std::span<std::byte, UdpCryptoNonceBytes> nonce,
-    uint32_t prefix,
+    UdpCryptoRole role,
     uint64_t mediaId,
     uint16_t fragmentIndex)
 {
-    WriteBigEndian32(nonce, 0, prefix);
+    // [role:1][zero:3][mediaId:6][fragmentIndex:2]. The role byte gives each
+    // sub-stream a disjoint nonce space under the shared per-session key;
+    // uniqueness within a stream comes from the monotonic id + fragment index,
+    // not a random prefix.
+    WriteBigEndian32(nonce, 0, static_cast<uint32_t>(static_cast<uint8_t>(role)) << 24);
     WriteBigEndian48(nonce, 4, mediaId & 0x0000FFFFFFFFFFFFULL);
     WriteBigEndian16(nonce, 10, fragmentIndex);
 }
