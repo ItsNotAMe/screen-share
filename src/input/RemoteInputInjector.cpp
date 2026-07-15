@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <mutex>
 #include <thread>
 
@@ -115,6 +116,45 @@ bool SendAbsoluteMouse(DWORD flags, int absX, int absY, DWORD mouseData)
     return SendInput(1, &input, sizeof(INPUT)) == 1;
 }
 
+bool MouseButtonInput(
+    RemoteInputInjector::MouseButton button,
+    bool down,
+    DWORD& flags,
+    DWORD& mouseData)
+{
+    flags = 0;
+    mouseData = 0;
+    switch (button) {
+    case RemoteInputInjector::MouseButton::Left:
+        flags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+        return true;
+    case RemoteInputInjector::MouseButton::Right:
+        flags = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
+        return true;
+    case RemoteInputInjector::MouseButton::Middle:
+        flags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+        return true;
+    case RemoteInputInjector::MouseButton::X1:
+        flags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+        mouseData = XBUTTON1;
+        return true;
+    case RemoteInputInjector::MouseButton::X2:
+        flags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+        mouseData = XBUTTON2;
+        return true;
+    }
+    return false;
+}
+
+bool SendMouseButtonOnly(DWORD flags, DWORD mouseData)
+{
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = flags;
+    input.mi.mouseData = mouseData;
+    return SendInput(1, &input, sizeof(INPUT)) == 1;
+}
+
 } // namespace
 
 RemoteInputInjector::RemoteInputInjector()
@@ -124,63 +164,197 @@ RemoteInputInjector::RemoteInputInjector()
 
 RemoteInputInjector::~RemoteInputInjector()
 {
+    ReleasePressedMouseButtons();
     StopHostMouseMonitor();
 }
 
 void RemoteInputInjector::SetTargetBounds(int left, int top, int width, int height)
 {
+    ReleasePressedMouseButtons();
     left_ = left;
     top_ = top;
     width_ = std::max(0, width);
     height_ = std::max(0, height);
+    windowHandle_ = 0;
+    hasLastMousePosition_ = false;
+}
+
+void RemoteInputInjector::SetTargetWindow(uint64_t windowHandle)
+{
+    ReleasePressedMouseButtons();
+    left_ = 0;
+    top_ = 0;
+    width_ = 0;
+    height_ = 0;
+    windowHandle_ = windowHandle;
+    hasLastMousePosition_ = false;
+}
+
+bool RemoteInputInjector::IsTargetWindowForeground() const
+{
+    if (!HasTargetWindow()) {
+        return false;
+    }
+    const HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(windowHandle_));
+    if (!IsWindow(window) || !IsWindowVisible(window) || IsIconic(window)) {
+        return false;
+    }
+    HWND targetRoot = GetAncestor(window, GA_ROOT);
+    if (targetRoot == nullptr) {
+        targetRoot = window;
+    }
+    return GetForegroundWindow() == targetRoot;
+}
+
+bool RemoteInputInjector::ResolveMousePoint(float normX, float normY, int& absX, int& absY) const
+{
+    int left = left_;
+    int top = top_;
+    int width = width_;
+    int height = height_;
+    HWND targetRoot = nullptr;
+
+    if (HasTargetWindow()) {
+        if (!IsTargetWindowForeground()) {
+            return false;
+        }
+        const HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(windowHandle_));
+        RECT client{};
+        if (!GetClientRect(window, &client) || client.right <= client.left || client.bottom <= client.top) {
+            return false;
+        }
+        POINT topLeft{client.left, client.top};
+        POINT bottomRight{client.right, client.bottom};
+        if (!ClientToScreen(window, &topLeft) || !ClientToScreen(window, &bottomRight)) {
+            return false;
+        }
+        left = topLeft.x;
+        top = topLeft.y;
+        width = bottomRight.x - topLeft.x;
+        height = bottomRight.y - topLeft.y;
+        targetRoot = GetAncestor(window, GA_ROOT);
+        if (targetRoot == nullptr) {
+            targetRoot = window;
+        }
+    }
+
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    const float x = std::clamp(normX, 0.0f, 1.0f);
+    const float y = std::clamp(normY, 0.0f, 1.0f);
+    absX = left + static_cast<int>(x * static_cast<float>((std::max)(0, width - 1)) + 0.5f);
+    absY = top + static_cast<int>(y * static_cast<float>((std::max)(0, height - 1)) + 0.5f);
+
+    if (targetRoot != nullptr) {
+        const POINT point{absX, absY};
+        HWND pointWindow = WindowFromPoint(point);
+        if (pointWindow == nullptr) {
+            return false;
+        }
+        HWND pointRoot = GetAncestor(pointWindow, GA_ROOT);
+        if (pointRoot == nullptr) {
+            pointRoot = pointWindow;
+        }
+        if (pointRoot != targetRoot) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void RemoteInputInjector::ReleasePressedMouseButtons()
+{
+    for (std::size_t index = 0; index < pressedMouseButtons_.size(); ++index) {
+        if (!pressedMouseButtons_[index]) {
+            continue;
+        }
+        DWORD flags = 0;
+        DWORD mouseData = 0;
+        const auto button = static_cast<MouseButton>(index);
+        if (MouseButtonInput(button, false, flags, mouseData)) {
+            static_cast<void>(SendMouseButtonOnly(flags, mouseData));
+        }
+        pressedMouseButtons_[index] = false;
+    }
+}
+
+void RemoteInputInjector::RefreshTargetState()
+{
+    if (HasTargetWindow() && !IsTargetWindowForeground()) {
+        ReleasePressedMouseButtons();
+    }
 }
 
 void RemoteInputInjector::InjectMouseMove(float normX, float normY)
 {
-    if (!HasTargetBounds() || HostUsingMouseNow()) {
+    lastNormX_ = std::clamp(normX, 0.0f, 1.0f);
+    lastNormY_ = std::clamp(normY, 0.0f, 1.0f);
+    hasLastMousePosition_ = true;
+    int absX = 0;
+    int absY = 0;
+    if (HostUsingMouseNow() || !ResolveMousePoint(lastNormX_, lastNormY_, absX, absY)) {
+        RefreshTargetState();
         return;
     }
-    const int absX = left_ + static_cast<int>(std::clamp(normX, 0.0f, 1.0f) * static_cast<float>(width_));
-    const int absY = top_ + static_cast<int>(std::clamp(normY, 0.0f, 1.0f) * static_cast<float>(height_));
-    SendAbsoluteMouse(MOUSEEVENTF_MOVE, absX, absY, 0);
+    static_cast<void>(SendAbsoluteMouse(MOUSEEVENTF_MOVE, absX, absY, 0));
 }
 
 void RemoteInputInjector::InjectMouseButton(MouseButton button, bool down, float normX, float normY)
 {
-    if (!HasTargetBounds() || HostUsingMouseNow()) {
+    const std::size_t buttonIndex = static_cast<std::size_t>(button);
+    if (buttonIndex >= pressedMouseButtons_.size()) {
         return;
     }
-    // Position the cursor at the click point first so the press lands correctly.
-    const int absX = left_ + static_cast<int>(std::clamp(normX, 0.0f, 1.0f) * static_cast<float>(width_));
-    const int absY = top_ + static_cast<int>(std::clamp(normY, 0.0f, 1.0f) * static_cast<float>(height_));
+    lastNormX_ = std::clamp(normX, 0.0f, 1.0f);
+    lastNormY_ = std::clamp(normY, 0.0f, 1.0f);
+    hasLastMousePosition_ = true;
 
-    DWORD flags = MOUSEEVENTF_MOVE;
+    DWORD flags = 0;
     DWORD mouseData = 0;
-    switch (button) {
-    case MouseButton::Left:
-        flags |= down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
-        break;
-    case MouseButton::Right:
-        flags |= down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
-        break;
-    case MouseButton::Middle:
-        flags |= down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
-        break;
-    case MouseButton::X1:
-        flags |= down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
-        mouseData = XBUTTON1;
-        break;
-    case MouseButton::X2:
-        flags |= down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
-        mouseData = XBUTTON2;
-        break;
+    if (!MouseButtonInput(button, down, flags, mouseData)) {
+        return;
     }
-    SendAbsoluteMouse(flags, absX, absY, mouseData);
+
+    int absX = 0;
+    int absY = 0;
+    const bool canTarget = ResolveMousePoint(lastNormX_, lastNormY_, absX, absY);
+    if (down) {
+        if (HostUsingMouseNow() || !canTarget) {
+            RefreshTargetState();
+            return;
+        }
+        if (SendAbsoluteMouse(MOUSEEVENTF_MOVE | flags, absX, absY, mouseData)) {
+            pressedMouseButtons_[buttonIndex] = true;
+        }
+        return;
+    }
+
+    // A release must never be suppressed after its matching press; otherwise a
+    // focus change or host mouse movement could leave the OS button held down.
+    if (!pressedMouseButtons_[buttonIndex]) {
+        return;
+    }
+    if (!HostUsingMouseNow() && canTarget) {
+        static_cast<void>(SendAbsoluteMouse(MOUSEEVENTF_MOVE | flags, absX, absY, mouseData));
+    } else {
+        static_cast<void>(SendMouseButtonOnly(flags, mouseData));
+    }
+    pressedMouseButtons_[buttonIndex] = false;
 }
 
 void RemoteInputInjector::InjectMouseScroll(int wheelDeltaX, int wheelDeltaY)
 {
-    if (HostUsingMouseNow()) {
+    int absX = 0;
+    int absY = 0;
+    if (HostUsingMouseNow() || !hasLastMousePosition_ ||
+        !ResolveMousePoint(lastNormX_, lastNormY_, absX, absY)) {
+        RefreshTargetState();
+        return;
+    }
+    // Wheel messages are delivered to the window under the cursor. Reposition
+    // first so scrolling follows the viewer's cursor instead of the host's.
+    if (!SendAbsoluteMouse(MOUSEEVENTF_MOVE, absX, absY, 0)) {
         return;
     }
     if (wheelDeltaY != 0) {
@@ -201,13 +375,9 @@ void RemoteInputInjector::InjectMouseScroll(int wheelDeltaX, int wheelDeltaY)
 
 void RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool down)
 {
-    // Confine keyboard injection to a full-display share. Bounds are set only
-    // when sharing an entire monitor and cleared for a window share, so this is
-    // the same gate the mouse path uses (see InjectMouseMove). Without it a
-    // granted viewer's keystrokes would be delivered to whatever window has
-    // focus on the host, leaking input outside the shared surface. Until a
-    // window share maps its client rect for remote input, keyboard control is
-    // limited to display shares.
+    // Keyboard injection remains confined to a full-display share. Window
+    // mouse targeting is coordinate-scoped, but SendInput keyboard events go
+    // only to the foreground thread and cannot be constrained to a client rect.
     if (!HasTargetBounds()) {
         return;
     }

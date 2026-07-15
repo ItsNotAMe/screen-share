@@ -3223,6 +3223,15 @@ void RunCaptureStats(
             }
         }
     };
+    auto refreshRemoteControlTarget = [&]() {
+        if (config.sourceType == screenshare::CaptureSourceType::Display) {
+            refreshRemoteControlBounds(config.displayIndex);
+        } else if (config.windowHandle != 0) {
+            remoteInputInjector.SetTargetWindow(config.windowHandle);
+        } else {
+            remoteInputInjector.SetTargetBounds(0, 0, 0, 0);
+        }
+    };
     std::vector<UdpSendTargetSpec> udpSendTargetSpecs = options.udpSendTargetSpecs;
     std::set<std::string> liveSignalingSendTargets;
     uint64_t audioPacingBitrate = 0;
@@ -3384,15 +3393,11 @@ void RunCaptureStats(
 
         udpSender = std::make_unique<UdpSenderFanout>();
         udpSender->Open(udpConfigs);
-        // Only map injection bounds when sharing a whole display. For a window
-        // share, leave bounds clear so a granted viewer cannot move/click across
-        // the entire monitor (including regions outside the shared window); the
-        // runtime source-change path applies the same rule.
-        if (config.sourceType == screenshare::CaptureSourceType::Display) {
-            refreshRemoteControlBounds(config.displayIndex);
-        } else {
-            remoteInputInjector.SetTargetBounds(0, 0, 0, 0);
-        }
+        // Display shares use fixed monitor bounds. Window shares resolve the
+        // selected HWND's live client rect on every event and require it to be
+        // foreground, so moves/resizes stay accurate and obscuring apps cannot
+        // receive a mapped click.
+        refreshRemoteControlTarget();
         udpSender->SetControlHandler(
             [&](const std::string& endpoint, const screenshare::udp_protocol::ControlMessage& message) {
                 using Command = screenshare::udp_protocol::ControlCommandType;
@@ -3410,6 +3415,7 @@ void RunCaptureStats(
                 }
                 if (message.command == Command::ReleaseControl) {
                     if (endpoint == remoteControlEndpoint) {
+                        refreshRemoteControlTarget();
                         remoteControlEndpoint.clear();
                         remoteControlCapabilities = 0;
                         // The viewer already updated its own UI optimistically;
@@ -3429,11 +3435,13 @@ void RunCaptureStats(
                     (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityMouse) != 0;
                 const bool keyboardOk =
                     (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityKeyboard) != 0;
-                // Token-bucket rate limit. Every remaining command is an input
-                // command (grant/deny/revoke are host->viewer, request/release
-                // handled above), so each consumes one token; a drained bucket
-                // drops the event rather than injecting it.
-                {
+                // Token-bucket rate limit. Button/key releases bypass it so a
+                // burst cannot drop the event that returns host input to the
+                // neutral state.
+                const bool safetyRelease =
+                    (message.command == Command::MouseButton || message.command == Command::KeyEvent) &&
+                    !message.pressed;
+                if (!safetyRelease) {
                     const auto nowInput = Clock::now();
                     const double elapsedSeconds =
                         std::chrono::duration<double>(nowInput - remoteInputTokensUpdatedAt).count();
@@ -3589,6 +3597,7 @@ void RunCaptureStats(
             // viewer that reuses this ip:port can't silently inherit it, and
             // stop any pending ack burst aimed at the dead endpoint.
             if (endpoint == remoteControlEndpoint) {
+                refreshRemoteControlTarget();
                 remoteControlEndpoint.clear();
                 remoteControlCapabilities = 0;
                 controlAckResendsLeft = 0;
@@ -3882,15 +3891,7 @@ void RunCaptureStats(
                 restartCapture = true;
                 adaptiveResolutionTiers.clear();
                 adaptiveResolutionTierIndex = 0;
-                // Keep remote-input bounds in step with the capture source.
-                // Display capture has known monitor bounds; window capture does
-                // not yet (v1), so clear the bounds to disable injection rather
-                // than mapping onto the stale previous monitor rectangle.
-                if (config.sourceType == screenshare::CaptureSourceType::Display) {
-                    refreshRemoteControlBounds(config.displayIndex);
-                } else {
-                    remoteInputInjector.SetTargetBounds(0, 0, 0, 0);
-                }
+                refreshRemoteControlTarget();
                 std::cout << "runtime_capture_source="
                           << (config.sourceType == screenshare::CaptureSourceType::Window ? "window" : "display")
                           << "\n";
@@ -3901,7 +3902,7 @@ void RunCaptureStats(
             restartCapture = true;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
-            refreshRemoteControlBounds(config.displayIndex);
+            refreshRemoteControlTarget();
             std::cout << "runtime_display=" << config.displayIndex << "\n";
         }
         if (request->windowHandle && *request->windowHandle != 0 && config.windowHandle != *request->windowHandle) {
@@ -3909,6 +3910,7 @@ void RunCaptureStats(
             restartCapture = true;
             adaptiveResolutionTiers.clear();
             adaptiveResolutionTierIndex = 0;
+            refreshRemoteControlTarget();
             std::cout << "runtime_window=0x" << std::hex << config.windowHandle << std::dec << "\n";
         }
         bool audioProcessChanged = false;
@@ -4122,6 +4124,7 @@ void RunCaptureStats(
     };
 
     while (keepRunning()) {
+        remoteInputInjector.RefreshTargetState();
         // While a viewer holds control, drain their input during the inter-frame
         // wait so it is injected within a couple of ms instead of once per frame
         // (which would otherwise add up to a full frame interval of input lag).
@@ -4133,6 +4136,7 @@ void RunCaptureStats(
                 if (slice > Clock::duration::zero()) {
                     std::this_thread::sleep_for(slice);
                 }
+                remoteInputInjector.RefreshTargetState();
                 // Called only to pump the receive loop so queued control input is
                 // dispatched promptly; the returned feedback snapshot is unused here.
                 static_cast<void>(udpSender->ReceiveFeedback(std::chrono::milliseconds(0)));
@@ -4167,6 +4171,10 @@ void RunCaptureStats(
                 std::cout << "remote_control_grant endpoint=" << remoteControlEndpoint
                           << " caps=0\n" << std::flush;
             }
+            // Release any injected button before ownership/capabilities change.
+            // Re-applying the current target also clears the viewer's last
+            // mapped cursor point, so a later scroll cannot reuse stale state.
+            refreshRemoteControlTarget();
             remoteControlEndpoint = controlRequest->capabilities != 0 ? controlRequest->viewerId : std::string();
             remoteControlCapabilities = controlRequest->capabilities;
             screenshare::udp_protocol::ControlMessage ack;
