@@ -40,8 +40,8 @@ Generate the manifest once to calculate the package URL and SHA-256 signing fiel
   -ZipPath .\build\release\ScreenShare-release-windows-x64.zip `
   -InstallerPath .\build\release\ScreenShare-Setup-0.3.2-windows-x64.exe `
   -OutputPath .\build\release\screenshare-update.json `
-  -Channel prerelease `
-  -Notes "Start v0.3.2 prerelease testing from the official v0.3.1 baseline"
+  -Channel stable `
+  -Notes "ScreenShare v0.3.2"
 ```
 
 Sign the manifest with the encrypted offline key. The helper constructs the exact
@@ -68,9 +68,9 @@ gh release create v0.3.2 `
   .\build\release\ScreenShare-release-windows-x64.zip `
   .\build\release\ScreenShare-Setup-0.3.2-windows-x64.exe `
   .\build\release\screenshare-update.json `
-  --prerelease `
-  --title "ScreenShare v0.3.2 prerelease" `
-  --notes "Starts v0.3.2 prerelease testing from the official v0.3.1 baseline."
+  --latest `
+  --title "ScreenShare v0.3.2" `
+  --notes "ScreenShare v0.3.2."
 ```
 
 For an existing tag/release, replace `create` with `upload --clobber`.
