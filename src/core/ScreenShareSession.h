@@ -25,6 +25,14 @@ enum class SessionState {
     Failed,
 };
 
+enum class ViewerState {
+    Connecting,
+    Live,
+    Recovering,
+    Degraded,
+    Disconnected,
+};
+
 enum class ShareConnectionMode {
     Room,
     DirectTargets,
@@ -225,7 +233,7 @@ struct SessionViewer {
     std::string name;
     std::string endpoint;
     int group = -1;
-    SessionState state = SessionState::Idle;
+    ViewerState state = ViewerState::Connecting;
     std::string health;
     std::string sessionFingerprint;
     uint64_t feedbackPackets = 0;
@@ -233,6 +241,12 @@ struct SessionViewer {
     uint64_t decodeResyncs = 0;
     uint64_t pendingDatagrams = 0;
     uint64_t queueDelayMs = 0;
+    uint64_t datagramsSent = 0;
+    uint64_t wireBytesSent = 0;
+    uint64_t datagramsDropped = 0;
+    uint64_t socketErrors = 0;
+    uint64_t feedbackAgeMs = 0;
+    uint64_t joinToFirstFrameMs = 0;
     bool hasFeedback = false;
     bool activeNow = false;
     bool requestingControl = false;   // viewer has an outstanding control request

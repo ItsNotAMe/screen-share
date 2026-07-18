@@ -15,28 +15,28 @@ Goal: one encoded 1080p60 stream serves multiple viewers without a slow, lossy, 
 
 #### 1. Reproduce and instrument before changing policy
 
-- [ ] Add a repeatable two/three-viewer release-build harness: one host, two healthy watchers, then variants with artificial loss/jitter, a slow watcher, late join, leave, and rejoin.
-- [ ] Capture stable per-viewer identity and report, at minimum: queue depth/age, datagrams and bytes sent, drops, socket errors, feedback age/health, last completed frame, decoder resyncs, and join-to-first-frame time.
+- [x] Add a repeatable two/three-viewer release-build harness: one host, two healthy watchers, then variants with artificial loss/jitter, a slow watcher, late join, leave, and rejoin.
+- [x] Capture stable per-viewer identity and report, at minimum: queue depth/age, datagrams and bytes sent, drops, socket errors, feedback age/health, last completed frame, decoder resyncs, and join-to-first-frame time.
 - [ ] Reproduce the current 1080p failure for at least 10 minutes and save host plus viewer reports as the baseline. Do not optimize by guesswork before identifying whether the first failure is send coupling, queue growth, feedback/adaptation, keyframe recovery, or receiver state.
 
 #### 2. Isolate every viewer's send lifecycle
 
-- [ ] Replace the signaling-room `additionalTargets` behavior where viewers share one fatal worker/queue outcome with per-viewer send lanes over the shared NAT-bound socket (or an equivalent design that preserves the required source port).
-- [ ] Give each viewer independent queue limits, pacing timestamps, drop counters, health, and failure state. An error sending to one address must retire/retry only that viewer and must never clear another viewer's queued media or stop the shared sender.
-- [ ] Make join/leave/rejoin atomically add, remove, and replace a viewer lane; expire stale endpoints and feedback without leaving duplicate destinations behind.
-- [ ] Keep encode-once fanout. Do not add one encoder per viewer for this release.
+- [x] Replace the signaling-room `additionalTargets` behavior where viewers share one fatal worker/queue outcome with per-viewer send lanes over the shared NAT-bound socket (or an equivalent design that preserves the required source port).
+- [x] Give each viewer independent queue limits, pacing timestamps, drop counters, health, and failure state. An error sending to one address must retire/retry only that viewer and must never clear another viewer's queued media or stop the shared sender.
+- [x] Make join/leave/rejoin atomically add, remove, and replace a viewer lane; expire stale endpoints and feedback without leaving duplicate destinations behind.
+- [x] Keep encode-once fanout. Do not add one encoder per viewer for this release.
 
 #### 3. Make recovery deterministic
 
-- [ ] Force/request an IDR keyframe when a viewer joins, rejoins, reports decoder resync/no completed video, or is reactivated after a stale interval; rate-limit requests so one bad viewer cannot force an IDR storm.
-- [ ] Ensure queue dropping is frame/GOP-aware: discard stale whole frames for one viewer, preserve audio responsiveness, and make the next deliverable video frame decodable.
-- [ ] Separate feedback freshness from the last successful feedback. A stale/bad viewer may reduce its own delivery quality or be retired after a grace period, but must not permanently hold global adaptation at a broken state.
-- [ ] Define the single-encoder congestion policy explicitly: protect healthy viewers, apply a bounded global bitrate reduction only when multiple fresh viewers agree, and surface when one viewer is the outlier.
+- [x] Force/request an IDR keyframe when a viewer joins, rejoins, reports decoder resync/no completed video, or is reactivated after a stale interval; rate-limit requests so one bad viewer cannot force an IDR storm.
+- [x] Ensure queue dropping is frame/GOP-aware: discard stale whole frames for one viewer, preserve audio responsiveness, and make the next deliverable video frame decodable.
+- [x] Separate feedback freshness from the last successful feedback. A stale/bad viewer may reduce its own delivery quality or be retired after a grace period, but must not permanently hold global adaptation at a broken state.
+- [x] Define the single-encoder congestion policy explicitly: protect healthy viewers, apply a bounded global bitrate reduction only when all fresh viewers agree, and surface when one viewer is the outlier.
 
 #### 4. UI and acceptance gate
 
-- [ ] Show each viewer as `connecting`, `live`, `recovering`, `degraded`, or `disconnected`, driven by fresh per-viewer transport/feedback evidence.
-- [ ] Add a host-side action to disconnect one unhealthy viewer without ending the share.
+- [x] Show each viewer as `connecting`, `live`, `recovering`, `degraded`, or `disconnected`, driven by fresh per-viewer transport/feedback evidence.
+- [x] Add a host-side action to disconnect one unhealthy viewer without ending the share.
 - [ ] Pass 30 minutes with two viewers at 1920x1080/60 with audio and no unexplained freezes; host queue age remains bounded and both viewers keep receiving fresh frames.
 - [ ] Pass 15 minutes with three viewers at 1920x1080/60 on the same LAN.
 - [ ] With one viewer under 5% loss plus 200 ms jitter/slow consumption, a healthy viewer remains live and within its normal queue/latency envelope.

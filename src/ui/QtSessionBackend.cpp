@@ -206,6 +206,13 @@ void QtSessionBackend::setViewerControl(const std::string& viewerId, uint32_t ca
     }
 }
 
+void QtSessionBackend::disconnectViewer(const std::string& viewerId)
+{
+    if (running_) {
+        session_.DisconnectViewer(viewerId);
+    }
+}
+
 screenshare::SessionStatus QtSessionBackend::currentStatus() const
 {
     return session_.GetStatus();

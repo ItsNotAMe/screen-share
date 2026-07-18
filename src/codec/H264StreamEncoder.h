@@ -19,6 +19,7 @@ struct EncodedPacket {
     int64_t timestamp100ns = 0;
     int64_t duration100ns = 0;
     int64_t senderQpc100ns = 0;
+    bool isKeyframe = false;
     std::vector<std::byte> bytes;
 };
 
@@ -55,6 +56,7 @@ public:
     std::vector<EncodedPacket> EncodeFrame(const CapturedFrame& frame);
     std::vector<EncodedPacket> Drain();
     bool TryUpdateBitrate(uint32_t bitrate);
+    bool RequestKeyframe();
     void Stop();
 
     [[nodiscard]] bool isRunning() const noexcept { return transform_ != nullptr; }

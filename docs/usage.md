@@ -298,10 +298,23 @@ watcher candidates into UDP send targets, while Watch resolves room candidates i
 targets. Use `--signal-stun HOST[:PORT]` to override the default STUN server. Add
 `--signal-room-password PASSWORD` on both sides for a locked room; the Worker verifies it before
 returning the room's UDP key. After startup, both sides
-open a room event WebSocket for immediate peer-change notifications, with a slower background HTTP
-rejoin kept as heartbeat/fallback. That means Share can start before Watch, Watch can start before
+open a room event WebSocket for immediate peer-change notifications, with authenticated background
+heartbeat and peer reads as fallback. That means Share can start before Watch, Watch can start before
 Share, and late/rejoining watchers can be discovered without restarting the current side or waiting
 for a short polling interval.
+
+For repeatable multi-viewer reliability runs, build Release and use the harness:
+
+```powershell
+.\scripts\run-multiviewer-harness.ps1 -Scenario Healthy -ViewerCount 2 -DurationSeconds 600
+.\scripts\run-multiviewer-harness.ps1 -Scenario SlowConsumer -ViewerCount 2 -DurationSeconds 600
+.\scripts\run-multiviewer-harness.ps1 -Scenario LossJitter -ViewerCount 3 -DurationSeconds 900
+```
+
+The harness also supports `LateJoin`, `LeaveRejoin`, and `Unreachable`. It writes the process logs,
+run reports, manifest, per-viewer CSV, and machine-readable assertions under `build\multiviewer`.
+Use `-Role Host` and `-Role Viewer` with the same room ID for multi-machine runs, then collect each
+machine's output directory with the host artifacts.
 
 For a two-window test on one computer, the two windows cannot both own UDP port `5000`. Use separate
 ports, for example Join room on `5000` and Create room's Internet room port on `5001`, then create a

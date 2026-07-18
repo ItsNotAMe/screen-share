@@ -17,6 +17,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #ifndef SIO_UDP_CONNRESET
 #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
@@ -185,6 +186,9 @@ void UdpReceiver::Open(const UdpReceiverConfig& config)
     }
     if (config.simulatedJitter.count() < 0 || config.simulatedJitter > std::chrono::seconds(5)) {
         throw std::invalid_argument("UDP simulated jitter must be between 0 and 5000 ms");
+    }
+    if (config.simulatedReceiveDelay.count() < 0 || config.simulatedReceiveDelay > std::chrono::milliseconds(100)) {
+        throw std::invalid_argument("UDP simulated receive delay must be between 0 and 100 ms");
     }
     if (config.encryptionKey && config.accessCodeFingerprint == 0) {
         throw std::invalid_argument("UDP encryption requires an access code fingerprint");
@@ -483,6 +487,9 @@ std::optional<UdpCompletedFrame> UdpReceiver::ReceiveDatagram()
     currentDatagramEndpoint_ = SocketAddressToString(&senderAddress, senderAddressLength);
 
     ++stats_.datagramsReceived;
+    if (config_.simulatedReceiveDelay.count() > 0) {
+        std::this_thread::sleep_for(config_.simulatedReceiveDelay);
+    }
     if (ShouldSimulateLoss()) {
         ++stats_.simulatedDatagramsDropped;
         return std::nullopt;

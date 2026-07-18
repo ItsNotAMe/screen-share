@@ -74,6 +74,7 @@ struct UdpSendTargetSpec {
     uint64_t natProbeSessionFingerprint = 0;
     uint32_t group = 0;
     std::string displayName;
+    std::string viewerId;
 };
 
 struct ExtraShareTargetOption {
@@ -146,6 +147,8 @@ struct Options {
     bool simulateLossProvided = false;
     int simulateJitterMs = 0;
     bool simulateJitterProvided = false;
+    int simulateReceiveDelayMs = 0;
+    bool simulateReceiveDelayProvided = false;
     bool audioCapture = false;
     bool videoPaused = false;
     screenshare::AudioCaptureSource audioCaptureSource = screenshare::AudioCaptureSource::SystemOutput;

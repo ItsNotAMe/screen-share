@@ -85,6 +85,7 @@ void PrintHelp()
         << "              [--audio-playback-muted] [--audio-playback-volume PERCENT]\n"
         << "              [--av-sync|--no-av-sync]\n"
         << "              [--simulate-loss-percent P] [--simulate-jitter-ms MS]\n"
+        << "              [--simulate-receive-delay-ms MS]\n"
         << "              [--peer-invite INVITE] [--nat-probe-interval-ms MS]\n"
         << "  ScreenShare [--display N] [--width W --height H] [--fps FPS] [--seconds S]\n"
         << "              [--record PATH] [--stream-encode] [--stream-encoder auto|software|hardware]\n"
@@ -646,6 +647,9 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         } else if (arg == "--simulate-jitter-ms") {
             options.simulateJitterMs = ParseInt(requireValue("--simulate-jitter-ms"), "--simulate-jitter-ms");
             options.simulateJitterProvided = true;
+        } else if (arg == "--simulate-receive-delay-ms") {
+            options.simulateReceiveDelayMs = ParseInt(requireValue("--simulate-receive-delay-ms"), "--simulate-receive-delay-ms");
+            options.simulateReceiveDelayProvided = true;
         } else if (arg == "--bitrate-mbps") {
             options.bitrate = ParseBitrateMbps(requireValue("--bitrate-mbps"));
         } else if (arg == "--keyframe-interval") {
@@ -938,6 +942,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
         options.avSyncDisabled ||
         options.simulateLossProvided ||
         options.simulateJitterProvided ||
+        options.simulateReceiveDelayProvided ||
         options.natProbeIntervalProvided ||
         !options.stopFilePath.empty() ||
         !options.controlFilePath.empty() ||
@@ -1024,7 +1029,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.previewLatencyProvided ||
             options.previewMaxLateProvided ||
             options.simulateLossProvided ||
-            options.simulateJitterProvided) {
+            options.simulateJitterProvided ||
+            options.simulateReceiveDelayProvided) {
             throw std::invalid_argument("--self-test is a standalone diagnostic and can only be combined with --log, --save-report, or --session");
         }
         options.sessionFingerprint = SessionFingerprint(options.sessionId);
@@ -1127,7 +1133,8 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
             options.previewLatencyProvided ||
             options.previewMaxLateProvided ||
             options.simulateLossProvided ||
-            options.simulateJitterProvided) {
+            options.simulateJitterProvided ||
+            options.simulateReceiveDelayProvided) {
             throw std::invalid_argument("--signal-* commands are standalone signaling diagnostics");
         }
         options.sessionFingerprint = SessionFingerprint(options.sessionId);
@@ -1439,8 +1446,12 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
     if (options.simulateJitterMs < 0 || options.simulateJitterMs > 5000) {
         throw std::invalid_argument("--simulate-jitter-ms must be between 0 and 5000");
     }
-    if ((options.simulateLossProvided || options.simulateJitterProvided) && options.udpReceivePort == 0) {
-        throw std::invalid_argument("--simulate-loss-percent and --simulate-jitter-ms require --udp-recv");
+    if (options.simulateReceiveDelayMs < 0 || options.simulateReceiveDelayMs > 100) {
+        throw std::invalid_argument("--simulate-receive-delay-ms must be between 0 and 100");
+    }
+    if ((options.simulateLossProvided || options.simulateJitterProvided || options.simulateReceiveDelayProvided) &&
+        options.udpReceivePort == 0) {
+        throw std::invalid_argument("receiver simulation options require --udp-recv");
     }
     if (options.udpReceivePort != 0 &&
         (options.listDisplays || options.listH264Encoders || options.listAudioDevices || options.audioCapture ||
@@ -1478,7 +1489,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
           options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
           options.audioPlayback || options.audioPlaybackLatencyProvided || options.audioPlaybackMutedProvided ||
           options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled ||
-         options.simulateLossProvided || options.simulateJitterProvided)) {
+         options.simulateLossProvided || options.simulateJitterProvided || options.simulateReceiveDelayProvided)) {
         throw std::invalid_argument("--list-audio-devices cannot be combined with capture, stream, receiver, or video options");
     }
     const bool audioCaptureWithVideoSend = options.audioCapture && (!options.udpSendTarget.empty() || options.shareRoom);
@@ -1494,7 +1505,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
           options.previewWindow || options.previewLatencyProvided || options.previewMaxLateProvided ||
           options.audioPlayback || options.audioPlaybackLatencyProvided || options.audioPlaybackMutedProvided ||
           options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled ||
-         options.simulateLossProvided || options.simulateJitterProvided)) {
+         options.simulateLossProvided || options.simulateJitterProvided || options.simulateReceiveDelayProvided)) {
         throw std::invalid_argument("--audio-capture is currently a standalone diagnostic mode and can only be combined with --seconds, --audio-device-id, --audio-send, --udp-local-port, and --audio-codec");
     }
     if (audioCaptureWithVideoSend &&
@@ -1504,7 +1515,7 @@ Options ParseOptions(int argc, char** argv, std::string defaultSessionId)
          !options.decodedBmpPath.empty() || options.previewWindow || options.previewLatencyProvided ||
          options.previewMaxLateProvided || options.audioPlayback || options.audioPlaybackLatencyProvided ||
          options.audioPlaybackMutedProvided || options.audioPlaybackVolumeProvided || options.avSync || options.avSyncDisabled ||
-         options.simulateLossProvided || options.simulateJitterProvided)) {
+         options.simulateLossProvided || options.simulateJitterProvided || options.simulateReceiveDelayProvided)) {
         throw std::invalid_argument("--audio-capture with --udp-send is only supported for live UDP sending, not receiver, recording, BMP dump, or preview options");
     }
     if (!options.h264DumpPath.empty() && options.udpReceivePort == 0) {

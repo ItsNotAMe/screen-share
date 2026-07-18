@@ -13,7 +13,8 @@ while `ScreenShare.exe` remains available for CLI diagnostics and automation.
 - Join rooms through the built-in Internet signaling Worker flow.
 - Keep media direct over UDP; the Worker coordinates rooms and UDP candidates but does not relay media.
 - Decode and preview video in the Qt UI with a Direct3D/NV12 render path.
-- Support multiple viewers, room passwords, automatic UDP encryption keys, reports, and live stream settings.
+- Support multiple viewers with isolated send lanes, per-viewer health/recovery, host disconnect controls,
+  room passwords, automatic UDP encryption keys, reports, and live stream settings.
 - Build a portable Windows zip with the UI, CLI, runtime DLLs, README, and license.
 - Check GitHub Releases for verified portable updates.
 

@@ -1356,6 +1356,49 @@ bool FeedbackLooksWorse(
     return candidate.sequence > current.sequence;
 }
 
+screenshare::UdpSenderStats ApplyAllViewerFeedbackConsensus(screenshare::UdpSenderStats stats)
+{
+    std::vector<const screenshare::UdpSenderStats::FeedbackPeer*> fresh;
+    for (const auto& peer : stats.feedbackPeers) {
+        if (peer.feedbackAgeMs <= 3000) {
+            fresh.push_back(&peer);
+        }
+    }
+    if (fresh.size() <= 1) {
+        return stats;
+    }
+
+    const auto isStable = [](const auto& feedback) {
+        return feedback.healthState == screenshare::udp_protocol::FeedbackHealthState::Ok;
+    };
+    const auto isPressure = [](const auto& feedback) {
+        using State = screenshare::udp_protocol::FeedbackHealthState;
+        return feedback.healthState == State::Loss ||
+               feedback.healthState == State::Recovering ||
+               feedback.healthState == State::Buffering ||
+               feedback.healthState == State::PreviewDrop;
+    };
+    const bool allStable = std::all_of(fresh.begin(), fresh.end(), [&](const auto* peer) {
+        return isStable(peer->latestFeedback);
+    });
+    const bool allPressure = std::all_of(fresh.begin(), fresh.end(), [&](const auto* peer) {
+        return isPressure(peer->latestFeedback);
+    });
+    if (!allStable && !allPressure) {
+        stats.hasFeedback = false;
+        return stats;
+    }
+
+    stats.hasFeedback = true;
+    stats.latestFeedback = fresh.front()->latestFeedback;
+    for (size_t index = 1; index < fresh.size(); ++index) {
+        if (FeedbackLooksWorse(fresh[index]->latestFeedback, stats.latestFeedback)) {
+            stats.latestFeedback = fresh[index]->latestFeedback;
+        }
+    }
+    return stats;
+}
+
 void MergeReceiverFeedback(
     screenshare::UdpSenderStats& aggregate,
     const screenshare::udp_protocol::FeedbackSnapshot& feedback)
@@ -1414,8 +1457,15 @@ public:
         uint64_t feedbackPacketsReceived = 0;
         uint64_t pendingDatagrams = 0;
         uint64_t pendingQueueDelayMs = 0;
+        uint64_t datagramsSent = 0;
+        uint64_t wireBytesSent = 0;
+        uint64_t datagramsDropped = 0;
+        uint64_t socketErrors = 0;
+        uint64_t feedbackAgeMs = 0;
+        uint64_t joinToFirstFrameMs = 0;
         bool hasFeedback = false;
         std::string displayName;
+        std::string viewerId;
         screenshare::udp_protocol::FeedbackSnapshot latestFeedback{};
     };
 
@@ -1433,9 +1483,12 @@ public:
             target.sender = std::move(sender);
             target.group = config.group;
             target.endpoint = UdpEndpointText(config.host, config.port);
+            endpointGroups_[target.endpoint] = config.group;
             target.additionalEndpoints.reserve(config.additionalTargets.size());
             for (const auto& additional : config.additionalTargets) {
-                target.additionalEndpoints.push_back(UdpEndpointText(additional.host, additional.port));
+                const std::string additionalEndpoint = UdpEndpointText(additional.host, additional.port);
+                target.additionalEndpoints.push_back(additionalEndpoint);
+                endpointGroups_[additionalEndpoint] = additional.group;
             }
             targets_.push_back(std::move(target));
         }
@@ -1444,6 +1497,13 @@ public:
     void Close()
     {
         targets_.clear();
+        suppressedEndpoints_.clear();
+        viewerNames_.clear();
+        viewerIds_.clear();
+        endpointGroups_.clear();
+        retiredViewerGroups_.clear();
+        viewerJoinedAt_.clear();
+        viewerFirstFrameAt_.clear();
     }
 
     bool AddAdditionalTarget(const screenshare::UdpSenderEndpoint& endpoint)
@@ -1458,9 +1518,20 @@ public:
             if (added) {
                 target.additionalEndpoints.push_back(endpointText);
             }
+            endpointGroups_[endpointText] = endpoint.group;
             return added;
         }
         throw std::runtime_error("No active UDP sender target is available for live signaling");
+    }
+
+    [[nodiscard]] uint32_t ReusableViewerGroup(const std::string& endpoint, uint32_t requestedGroup) const
+    {
+        const auto existing = endpointGroups_.find(endpoint);
+        if (existing != endpointGroups_.end() &&
+            retiredViewerGroups_.find(existing->second) != retiredViewerGroups_.end()) {
+            return existing->second;
+        }
+        return requestedGroup;
     }
 
     void SuppressEndpoint(const std::string& endpoint)
@@ -1479,6 +1550,82 @@ public:
             return;
         }
         viewerNames_[group] = std::move(name);
+    }
+
+    void SetViewerIdentity(uint32_t group, std::string viewerId)
+    {
+        if (group != 0 && !viewerId.empty()) {
+            const auto existing = viewerIds_.find(group);
+            if (existing == viewerIds_.end() || existing->second != viewerId ||
+                viewerJoinedAt_.find(group) == viewerJoinedAt_.end()) {
+                viewerJoinedAt_[group] = std::chrono::steady_clock::now();
+                viewerFirstFrameAt_.erase(group);
+            }
+            viewerIds_[group] = std::move(viewerId);
+            retiredViewerGroups_.erase(group);
+        }
+    }
+
+    bool DisconnectViewer(const std::string& viewerId)
+    {
+        const auto identity = std::find_if(viewerIds_.begin(), viewerIds_.end(), [&](const auto& item) {
+            return item.second == viewerId;
+        });
+        if (identity == viewerIds_.end()) {
+            return false;
+        }
+        bool disconnected = false;
+        for (auto& target : targets_) {
+            if (target.sender != nullptr && target.sender->SuspendTargetGroup(identity->first, "host_disconnected")) {
+                disconnected = true;
+            }
+        }
+        return disconnected;
+    }
+
+    bool RetireViewer(const std::string& viewerId)
+    {
+        const auto identity = std::find_if(viewerIds_.begin(), viewerIds_.end(), [&](const auto& item) {
+            return item.second == viewerId;
+        });
+        if (identity == viewerIds_.end()) {
+            return false;
+        }
+        bool retired = false;
+        for (auto& target : targets_) {
+            if (target.sender != nullptr &&
+                target.sender->SuspendTargetGroup(identity->first, "signaling_peer_left", false)) {
+                retired = true;
+            }
+        }
+        viewerJoinedAt_.erase(identity->first);
+        viewerFirstFrameAt_.erase(identity->first);
+        retiredViewerGroups_.insert(identity->first);
+        return retired;
+    }
+
+    [[nodiscard]] std::string EndpointForViewer(const std::string& viewerId) const
+    {
+        for (const auto& viewer : viewerSnapshots()) {
+            if (viewer.viewerId == viewerId) {
+                return viewer.endpoint;
+            }
+        }
+        return viewerId;
+    }
+
+    void SuspendStaleViewers()
+    {
+        for (const auto& viewer : viewerSnapshots()) {
+            if (!viewer.failed && viewer.hasFeedback && viewer.feedbackAgeMs > 10000) {
+                for (auto& target : targets_) {
+                    if (target.sender != nullptr) {
+                        static_cast<void>(target.sender->SuspendTargetGroup(
+                            static_cast<uint32_t>(viewer.group), "feedback_stale", false));
+                    }
+                }
+            }
+        }
     }
 
     [[nodiscard]] size_t targetCount() const noexcept
@@ -1656,6 +1803,8 @@ public:
                     aggregate.feedbackPeers.push_back(peer);
                 } else {
                     existing->packetsReceived += peer.packetsReceived;
+                    existing->group = peer.group;
+                    existing->feedbackAgeMs = std::min(existing->feedbackAgeMs, peer.feedbackAgeMs);
                     existing->latestFeedback = peer.latestFeedback;
                 }
             }
@@ -1670,45 +1819,100 @@ public:
             const screenshare::UdpSenderStats stats =
                 target.sender != nullptr ? target.sender->stats() : screenshare::UdpSenderStats{};
 
-            auto buildSnapshot = [&](const std::string& endpoint) {
+            auto buildSnapshot = [&](const std::string& endpoint, uint32_t group) {
                 ViewerSnapshot snapshot;
-                snapshot.group = target.group;
+                snapshot.group = group;
                 snapshot.endpoint = endpoint;
                 snapshot.failed = target.failed;
                 snapshot.error = target.error;
-                snapshot.pendingDatagrams = stats.pendingDatagrams;
-                snapshot.pendingQueueDelayMs = stats.pendingQueueDelayMs;
+                const auto lane = std::find_if(stats.viewerLanes.begin(), stats.viewerLanes.end(), [&](const auto& item) {
+                    return item.group == group;
+                });
+                if (lane != stats.viewerLanes.end()) {
+                    snapshot.failed = snapshot.failed || lane->failed;
+                    if (snapshot.error.empty()) {
+                        snapshot.error = lane->error;
+                    }
+                    snapshot.pendingDatagrams = lane->pendingDatagrams;
+                    snapshot.pendingQueueDelayMs = lane->pendingQueueDelayMs;
+                    snapshot.datagramsSent = lane->datagramsSent;
+                    snapshot.wireBytesSent = lane->wireBytesSent;
+                    snapshot.datagramsDropped = lane->datagramsDropped;
+                    snapshot.socketErrors = lane->socketErrors;
+                }
                 if (auto name = viewerNames_.find(snapshot.group); name != viewerNames_.end()) {
                     snapshot.displayName = name->second;
+                }
+                if (auto id = viewerIds_.find(snapshot.group); id != viewerIds_.end()) {
+                    snapshot.viewerId = id->second;
+                } else {
+                    snapshot.viewerId = "viewer-" + std::to_string(snapshot.group);
                 }
                 return snapshot;
             };
 
-            if (stats.feedbackPeers.empty()) {
-                if (suppressedEndpoints_.find(target.endpoint) != suppressedEndpoints_.end()) {
+            auto recordFirstFrame = [&](ViewerSnapshot& snapshot) {
+                if (!snapshot.hasFeedback || snapshot.latestFeedback.completedFrames == 0) {
+                    return;
+                }
+                const auto joined = viewerJoinedAt_.find(static_cast<uint32_t>(snapshot.group));
+                if (joined == viewerJoinedAt_.end()) {
+                    return;
+                }
+                const auto [first, inserted] = viewerFirstFrameAt_.try_emplace(
+                    static_cast<uint32_t>(snapshot.group), std::chrono::steady_clock::now());
+                static_cast<void>(inserted);
+                snapshot.joinToFirstFrameMs = static_cast<uint64_t>(std::max<int64_t>(0,
+                    std::chrono::duration_cast<std::chrono::milliseconds>(first->second - joined->second).count()));
+            };
+
+            std::set<uint32_t> emittedGroups;
+            for (const auto& lane : stats.viewerLanes) {
+                if (retiredViewerGroups_.find(lane.group) != retiredViewerGroups_.end()) {
                     continue;
                 }
-                snapshots.push_back(buildSnapshot(target.endpoint));
-                continue;
+                const auto peer = std::find_if(stats.feedbackPeers.begin(), stats.feedbackPeers.end(), [&](const auto& item) {
+                    return item.group == lane.group;
+                });
+                const std::string endpoint = peer != stats.feedbackPeers.end() ? peer->endpoint : lane.endpoint;
+                if (suppressedEndpoints_.find(endpoint) != suppressedEndpoints_.end() ||
+                    !emittedGroups.insert(lane.group).second) {
+                    continue;
+                }
+                ViewerSnapshot snapshot = buildSnapshot(endpoint, lane.group);
+                if (peer != stats.feedbackPeers.end()) {
+                    snapshot.feedbackPacketsReceived = peer->packetsReceived;
+                    snapshot.feedbackAgeMs = peer->feedbackAgeMs;
+                    snapshot.hasFeedback = true;
+                    snapshot.latestFeedback = peer->latestFeedback;
+                }
+                recordFirstFrame(snapshot);
+                snapshots.push_back(std::move(snapshot));
             }
 
-            std::set<std::string> emittedEndpoints;
+            // Feedback may arrive before a dynamically signaled lane has been
+            // installed. Keep it visible so identity and recovery telemetry do
+            // not disappear during that short transition.
             for (const auto& peer : stats.feedbackPeers) {
-                if (suppressedEndpoints_.find(peer.endpoint) != suppressedEndpoints_.end()) {
+                if (retiredViewerGroups_.find(peer.group) != retiredViewerGroups_.end()) {
                     continue;
                 }
-                if (!emittedEndpoints.insert(peer.endpoint).second) {
+                if (suppressedEndpoints_.find(peer.endpoint) != suppressedEndpoints_.end() ||
+                    !emittedGroups.insert(peer.group).second) {
                     continue;
                 }
-                ViewerSnapshot snapshot = buildSnapshot(peer.endpoint);
-                snapshot.group = peer.group;
-                if (auto name = viewerNames_.find(snapshot.group); name != viewerNames_.end()) {
-                    snapshot.displayName = name->second;
-                }
+                ViewerSnapshot snapshot = buildSnapshot(peer.endpoint, peer.group);
                 snapshot.feedbackPacketsReceived = peer.packetsReceived;
+                snapshot.feedbackAgeMs = peer.feedbackAgeMs;
                 snapshot.hasFeedback = true;
                 snapshot.latestFeedback = peer.latestFeedback;
+                recordFirstFrame(snapshot);
                 snapshots.push_back(std::move(snapshot));
+            }
+
+            if (stats.viewerLanes.empty() && stats.feedbackPeers.empty() &&
+                suppressedEndpoints_.find(target.endpoint) == suppressedEndpoints_.end()) {
+                snapshots.push_back(buildSnapshot(target.endpoint, target.group));
             }
         }
         return snapshots;
@@ -1749,6 +1953,11 @@ private:
     std::function<void(const std::string&, const screenshare::udp_protocol::ControlMessage&)> controlHandler_;
     std::set<std::string> suppressedEndpoints_;
     std::map<uint32_t, std::string> viewerNames_;
+    std::map<uint32_t, std::string> viewerIds_;
+    std::map<std::string, uint32_t> endpointGroups_;
+    std::set<uint32_t> retiredViewerGroups_;
+    mutable std::map<uint32_t, std::chrono::steady_clock::time_point> viewerJoinedAt_;
+    mutable std::map<uint32_t, std::chrono::steady_clock::time_point> viewerFirstFrameAt_;
 };
 
 template <typename UdpSenderLike>
@@ -1782,11 +1991,24 @@ void PrintViewerSnapshots(const UdpSenderFanout& udpSender)
     const auto viewers = udpSender.viewerSnapshots();
     for (size_t index = 0; index < viewers.size(); ++index) {
         const auto& viewer = viewers[index];
-        const char* state =
-            viewer.failed ? "failed" :
-            (viewer.hasFeedback ? "feedback" : "waiting");
+        const auto health = viewer.hasFeedback ? viewer.latestFeedback.healthState :
+            screenshare::udp_protocol::FeedbackHealthState::Unknown;
+        const char* state = "connecting";
+        if (viewer.failed || (viewer.hasFeedback && viewer.feedbackAgeMs > 10000)) {
+            state = "disconnected";
+        } else if (viewer.hasFeedback && viewer.latestFeedback.completedFrames > 0) {
+            using Health = screenshare::udp_protocol::FeedbackHealthState;
+            if (viewer.feedbackAgeMs > 3000 || health == Health::Recovering || health == Health::Waiting) {
+                state = "recovering";
+            } else if (health == Health::Loss || health == Health::Buffering || health == Health::PreviewDrop) {
+                state = "degraded";
+            } else {
+                state = "live";
+            }
+        }
         std::cout
             << "viewer_target=" << index
+            << " viewer_id=" << LogTokenEncode(viewer.viewerId)
             << " viewer_group=" << viewer.group
             << " viewer_endpoint=" << (viewer.endpoint.empty() ? "unknown" : viewer.endpoint)
             << " viewer_name=" << (viewer.displayName.empty() ? "none" : LogTokenEncode(viewer.displayName))
@@ -1794,6 +2016,13 @@ void PrintViewerSnapshots(const UdpSenderFanout& udpSender)
             << " viewer_feedback_packets=" << viewer.feedbackPacketsReceived
             << " viewer_pending=" << viewer.pendingDatagrams
             << " viewer_queue_ms=" << viewer.pendingQueueDelayMs
+            << " viewer_datagrams_sent=" << viewer.datagramsSent
+            << " viewer_wire_bytes_sent=" << viewer.wireBytesSent
+            << " viewer_drops=" << viewer.datagramsDropped
+            << " viewer_socket_errors=" << viewer.socketErrors
+            << " viewer_feedback_age_ms=" << (viewer.hasFeedback ? viewer.feedbackAgeMs : 0)
+            << " viewer_join_to_first_frame_ms=" << viewer.joinToFirstFrameMs
+            << " viewer_queue_scope=lane"
             << " viewer_feedback_health="
             << (viewer.hasFeedback ?
                 screenshare::udp_protocol::FeedbackHealthStateName(viewer.latestFeedback.healthState) :
@@ -2019,6 +2248,7 @@ public:
                 return;
             }
             state_->peer.roomName = std::move(roomName);
+            state_->reannounceRequested = true;
             state_->refreshRequested = true;
         }
         state_->wake.notify_all();
@@ -2041,7 +2271,9 @@ private:
         // read peers, stream events, and leave.
         std::string peerToken;
         bool peerTokenReady = false;
+        bool reannounceRequested = false;
         bool refreshRequested = false;
+        bool roomClosed = false;
         bool stopRequested = false;
     };
 
@@ -2091,7 +2323,7 @@ private:
     {
         {
             std::lock_guard lock(state->mutex);
-            if (state->stopRequested) {
+            if (state->stopRequested || state->roomClosed) {
                 return;
             }
             state->refreshRequested = true;
@@ -2103,9 +2335,9 @@ private:
     {
         std::unique_lock lock(state->mutex);
         state->wake.wait_for(lock, FallbackRefreshInterval, [&]() {
-            return state->stopRequested || state->refreshRequested;
+            return state->stopRequested || state->roomClosed || state->refreshRequested;
         });
-        if (state->stopRequested) {
+        if (state->stopRequested || state->roomClosed) {
             return true;
         }
         state->refreshRequested = false;
@@ -2116,14 +2348,14 @@ private:
     {
         std::unique_lock lock(state->mutex);
         return state->wake.wait_for(lock, EventReconnectDelay, [&]() {
-            return state->stopRequested;
+            return state->stopRequested || state->roomClosed;
         });
     }
 
     [[nodiscard]] static bool stopRequested(const std::shared_ptr<State>& state)
     {
         std::lock_guard lock(state->mutex);
-        return state->stopRequested;
+        return state->stopRequested || state->roomClosed;
     }
 
     [[nodiscard]] static screenshare::SignalingPeerState SnapshotPeer(const std::shared_ptr<State>& state)
@@ -2138,12 +2370,22 @@ private:
         return state->peerToken;
     }
 
+    [[nodiscard]] static bool TakeReannounceRequest(const std::shared_ptr<State>& state)
+    {
+        std::lock_guard lock(state->mutex);
+        const bool requested = state->reannounceRequested;
+        state->reannounceRequested = false;
+        return requested;
+    }
+
     // Block until the first Join has issued a peer token (or stop is requested),
     // so the events worker authenticates its stream instead of racing ahead.
     [[nodiscard]] static std::string WaitForPeerToken(const std::shared_ptr<State>& state)
     {
         std::unique_lock lock(state->mutex);
-        state->wake.wait(lock, [&]() { return state->peerTokenReady || state->stopRequested; });
+        state->wake.wait(lock, [&]() {
+            return state->peerTokenReady || state->stopRequested || state->roomClosed;
+        });
         return state->peerToken;
     }
 
@@ -2186,6 +2428,11 @@ private:
                                 << " room=" << state->roomId
                                 << " peer_id=" << state->peer.peerId
                                 << "\n";
+                            {
+                                std::lock_guard lock(state->mutex);
+                                state->roomClosed = true;
+                            }
+                            state->wake.notify_all();
                         }
                         if (shouldRefresh) {
                             RequestRefresh(state);
@@ -2218,14 +2465,39 @@ private:
 
         while (!stopRequested(state)) {
             try {
-                RecordPeers(state, client.Join(state->roomId, SnapshotPeer(state), SnapshotPeerToken(state)));
+                const std::string peerToken = SnapshotPeerToken(state);
+                if (peerToken.empty() || TakeReannounceRequest(state)) {
+                    RecordPeers(state, client.Join(state->roomId, SnapshotPeer(state), peerToken));
+                } else {
+                    // PrepareLiveSignaling already joined and issued the token.
+                    // Keep membership alive with the narrower authenticated
+                    // operations; re-announce only when our metadata changes.
+                    client.Heartbeat(state->roomId, state->peer.peerId, peerToken);
+                    RecordPeers(state, client.Peers(state->roomId, state->peer.peerId, peerToken));
+                }
             } catch (const std::exception& error) {
-                std::cerr
-                    << "signaling_live_refresh=error"
-                    << " room=" << state->roomId
-                    << " peer_id=" << state->peer.peerId
-                    << " error=\"" << error.what() << "\""
-                    << "\n";
+                const bool viewerMembershipExpired =
+                    !state->peer.host &&
+                    std::string_view(error.what()).find("peer_token_invalid") != std::string_view::npos;
+                if (viewerMembershipExpired) {
+                    {
+                        std::lock_guard lock(state->mutex);
+                        state->roomClosed = true;
+                    }
+                    state->wake.notify_all();
+                    std::cout
+                        << "watch_host_left=membership_expired"
+                        << " room=" << state->roomId
+                        << " peer_id=" << state->peer.peerId
+                        << "\n";
+                } else {
+                    std::cerr
+                        << "signaling_live_refresh=error"
+                        << " room=" << state->roomId
+                        << " peer_id=" << state->peer.peerId
+                        << " error=\"" << error.what() << "\""
+                        << "\n";
+                }
             }
 
             if (WaitForNextRefresh(state)) {
@@ -2235,26 +2507,30 @@ private:
 
         const std::string peerId = SnapshotPeer(state).peerId;
         const std::string peerToken = SnapshotPeerToken(state);
+        bool roomClosed = false;
         {
             std::lock_guard lock(state->mutex);
+            roomClosed = state->roomClosed;
             state->stopRequested = true;
         }
         state->wake.notify_all();
 
-        try {
-            client.Leave(state->roomId, peerId, peerToken);
-            std::cout
-                << "signaling_live_leave=ok"
-                << " room=" << state->roomId
-                << " peer_id=" << peerId
-                << "\n" << std::flush;
-        } catch (const std::exception& error) {
-            std::cerr
-                << "signaling_live_leave=error"
-                << " room=" << state->roomId
-                << " peer_id=" << peerId
-                << " error=\"" << error.what() << "\""
-                << "\n";
+        if (!roomClosed) {
+            try {
+                client.Leave(state->roomId, peerId, peerToken);
+                std::cout
+                    << "signaling_live_leave=ok"
+                    << " room=" << state->roomId
+                    << " peer_id=" << peerId
+                    << "\n" << std::flush;
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "signaling_live_leave=error"
+                    << " room=" << state->roomId
+                    << " peer_id=" << peerId
+                    << " error=\"" << error.what() << "\""
+                    << "\n";
+            }
         }
 
         if (eventsWorker.joinable()) {
@@ -2274,7 +2550,8 @@ UdpSendTargetSpec SignalingSendTargetSpec(
     uint16_t localPort,
     uint64_t probeSession,
     uint32_t group,
-    std::string displayName)
+    std::string displayName,
+    std::string viewerId)
 {
     return UdpSendTargetSpec{
         SignalingCandidateEndpoint(candidate),
@@ -2286,7 +2563,8 @@ UdpSendTargetSpec SignalingSendTargetSpec(
         true,
         probeSession,
         group,
-        std::move(displayName)};
+        std::move(displayName),
+        std::move(viewerId)};
 }
 
 class AdaptiveBitrateAdvisor {
@@ -3180,6 +3458,9 @@ void RunCaptureStats(
     std::unique_ptr<UdpSenderFanout> udpSender;
     std::unique_ptr<AudioUdpCaptureWorker> audioCaptureWorker;
     std::unique_ptr<LiveSignalingRuntime> liveSignalingRuntime;
+    bool keyframeRequestPending = false;
+    auto lastForcedKeyframeAt = startedAt - std::chrono::seconds(2);
+    std::map<uint32_t, uint64_t> lastViewerResyncs;
     // Remote control (host side). The control handler runs on this same thread
     // (inside fanout ReceiveFeedback), so plain locals need no extra locking.
     screenshare::RemoteInputInjector remoteInputInjector;
@@ -3233,7 +3514,8 @@ void RunCaptureStats(
         }
     };
     std::vector<UdpSendTargetSpec> udpSendTargetSpecs = options.udpSendTargetSpecs;
-    std::set<std::string> liveSignalingSendTargets;
+    std::map<std::string, std::string> liveSignalingPeerByEndpoint;
+    std::map<std::string, uint32_t> liveSignalingGroupByPeerId;
     uint64_t audioPacingBitrate = 0;
     bool audioPacingApplied = false;
     bool runtimeVideoPaused = options.videoPaused;
@@ -3258,7 +3540,10 @@ void RunCaptureStats(
     screenshare::AudioCaptureSource runtimeAudioSource = selectRuntimeAudioSource();
 
     for (const auto& target : udpSendTargetSpecs) {
-        liveSignalingSendTargets.insert(target.target);
+        if (!target.viewerId.empty()) {
+            liveSignalingPeerByEndpoint[target.target] = target.viewerId;
+            liveSignalingGroupByPeerId[target.viewerId] = target.group;
+        }
     }
     if (options.signalingLive && options.shareRoom) {
         liveSignalingRuntime = std::make_unique<LiveSignalingRuntime>();
@@ -3393,6 +3678,14 @@ void RunCaptureStats(
 
         udpSender = std::make_unique<UdpSenderFanout>();
         udpSender->Open(udpConfigs);
+        for (size_t targetIndex = 0; targetIndex < udpTargets.size(); ++targetIndex) {
+            const uint32_t group = udpTargets[targetIndex].group != 0 ?
+                udpTargets[targetIndex].group : static_cast<uint32_t>(targetIndex + 1);
+            udpSender->SetViewerIdentity(
+                group,
+                udpTargets[targetIndex].viewerId.empty() ?
+                    "direct-" + std::to_string(targetIndex + 1) : udpTargets[targetIndex].viewerId);
+        }
         // Display shares use fixed monitor bounds. Window shares resolve the
         // selected HWND's live client rect on every event and require it to be
         // foreground, so moves/resizes stay accurate and obscuring apps cannot
@@ -3581,17 +3874,30 @@ void RunCaptureStats(
 
         for (const auto& peer : liveSignalingRuntime->DrainRemovedPeers()) {
             const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
-            const bool known = liveSignalingSendTargets.erase(endpoint) > 0;
-            udpSendTargetSpecs.erase(
-                std::remove_if(
-                    udpSendTargetSpecs.begin(),
-                    udpSendTargetSpecs.end(),
-                    [&](const UdpSendTargetSpec& target) {
-                        return target.target == endpoint;
-                    }),
-                udpSendTargetSpecs.end());
-            if (udpSender) {
-                udpSender->SuppressEndpoint(endpoint);
+            const auto owner = liveSignalingPeerByEndpoint.find(endpoint);
+            const bool stillOwnedByRemovedPeer =
+                owner != liveSignalingPeerByEndpoint.end() && owner->second == peer.peerId;
+            if (stillOwnedByRemovedPeer) {
+                liveSignalingPeerByEndpoint.erase(owner);
+                udpSendTargetSpecs.erase(
+                    std::remove_if(
+                        udpSendTargetSpecs.begin(),
+                        udpSendTargetSpecs.end(),
+                        [&](const UdpSendTargetSpec& target) {
+                            return target.target == endpoint && target.viewerId == peer.peerId;
+                        }),
+                    udpSendTargetSpecs.end());
+                if (udpSender) {
+                    udpSender->SuppressEndpoint(endpoint);
+                }
+            }
+            const bool peerHasAnotherCandidate = std::any_of(
+                liveSignalingPeerByEndpoint.begin(),
+                liveSignalingPeerByEndpoint.end(),
+                [&](const auto& candidate) { return candidate.second == peer.peerId; });
+            if (udpSender && !peerHasAnotherCandidate) {
+                static_cast<void>(udpSender->RetireViewer(peer.peerId));
+                liveSignalingGroupByPeerId.erase(peer.peerId);
             }
             // If the departing peer held control, drop the grant so a later
             // viewer that reuses this ip:port can't silently inherit it, and
@@ -3608,16 +3914,21 @@ void RunCaptureStats(
                 << " room=" << options.signalingRoomId
                 << " peer_id=" << peer.peerId
                 << " endpoint=" << endpoint
-                << " active=" << (known ? "suppressed" : "unknown")
+                << " active=" << (stillOwnedByRemovedPeer ? "suppressed" : "replaced")
                 << "\n";
         }
 
         const uint64_t probeSession = NatProbeSessionFingerprint(options);
         for (const auto& peer : liveSignalingRuntime->DrainDiscoveredPeers()) {
             const std::string endpoint = SignalingCandidateEndpoint(peer.candidate);
-            if (!liveSignalingSendTargets.insert(endpoint).second) {
+            const auto currentOwner = liveSignalingPeerByEndpoint.find(endpoint);
+            if (currentOwner != liveSignalingPeerByEndpoint.end() && currentOwner->second == peer.peerId) {
                 continue;
             }
+            if (currentOwner != liveSignalingPeerByEndpoint.end() && udpSender) {
+                static_cast<void>(udpSender->RetireViewer(currentOwner->second));
+            }
+            liveSignalingPeerByEndpoint[endpoint] = peer.peerId;
             if (udpSender) {
                 udpSender->UnsuppressEndpoint(endpoint);
             }
@@ -3627,15 +3938,27 @@ void RunCaptureStats(
                 udpSendTargetSpecs.empty() ? options.udpLocalPort : static_cast<uint16_t>(0),
                 probeSession,
                 SignalingPeerGroup(peer.peerId),
-                peer.displayName);
+                peer.displayName,
+                peer.peerId);
+            const auto existingPeerGroup = liveSignalingGroupByPeerId.find(peer.peerId);
+            if (existingPeerGroup != liveSignalingGroupByPeerId.end()) {
+                target.group = existingPeerGroup->second;
+            } else {
+                if (udpSender) {
+                    target.group = udpSender->ReusableViewerGroup(endpoint, target.group);
+                }
+                liveSignalingGroupByPeerId[peer.peerId] = target.group;
+            }
             udpSendTargetSpecs.push_back(target);
 
             bool active = false;
             if (udpSender) {
                 udpSender->SetViewerName(target.group, target.displayName);
+                udpSender->SetViewerIdentity(target.group, target.viewerId);
                 active = udpSender->AddAdditionalTarget(
                     screenshare::UdpSenderEndpoint{peer.candidate.ip, peer.candidate.port, target.group});
             }
+            keyframeRequestPending = true;
 
             std::cout
                 << "signaling_live_sender_peer=added"
@@ -4148,14 +4471,47 @@ void RunCaptureStats(
         drainLiveSignalingSendTargets();
         applyRuntimeStreamSettingsControl();
 
+        if (keyframeRequestPending && streamEncoder &&
+            Clock::now() - lastForcedKeyframeAt >= std::chrono::seconds(1)) {
+            const bool accepted = streamEncoder->RequestKeyframe();
+            std::cout << "stream_keyframe_request=join_or_recovery accepted="
+                      << (accepted ? "yes" : "no") << "\n" << std::flush;
+            keyframeRequestPending = false;
+            lastForcedKeyframeAt = Clock::now();
+        }
+
+
+        while (auto disconnectRequest = runtimeControl.TakeViewerDisconnectRequest()) {
+            const std::string endpoint = udpSender ?
+                udpSender->EndpointForViewer(disconnectRequest->viewerId) : std::string();
+            if (udpSender && options.accessCodeKey.has_value() && !endpoint.empty()) {
+                screenshare::udp_protocol::ControlMessage disconnect;
+                disconnect.command = screenshare::udp_protocol::ControlCommandType::DisconnectViewer;
+                disconnect.accessCodeFingerprint = options.accessCodeFingerprint;
+                static_cast<void>(udpSender->SendControlTo(endpoint, disconnect));
+            }
+            if (!endpoint.empty() && endpoint == remoteControlEndpoint) {
+                refreshRemoteControlTarget();
+                remoteControlEndpoint.clear();
+                remoteControlCapabilities = 0;
+                controlAckResendsLeft = 0;
+            }
+            const bool disconnected = udpSender && udpSender->DisconnectViewer(disconnectRequest->viewerId);
+            std::cout << "viewer_disconnect id=" << LogTokenEncode(disconnectRequest->viewerId)
+                      << " endpoint=" << (endpoint.empty() ? "unknown" : endpoint)
+                      << " applied=" << (disconnected ? "yes" : "no") << "\n" << std::flush;
+        }
+
         // Apply host grant/revoke requests from the UI and acknowledge the viewer.
         while (auto controlRequest = runtimeControl.TakeViewerControlRequest()) {
+            const std::string controlEndpoint = udpSender ?
+                udpSender->EndpointForViewer(controlRequest->viewerId) : controlRequest->viewerId;
             // Remote control is only available on encrypted sessions (see the
             // control handler above). Refuse to grant on a plaintext session so
             // the host cannot hand out control that the injection path will not
             // honor anyway.
             if (controlRequest->capabilities != 0 && !options.accessCodeKey.has_value()) {
-                std::cout << "remote_control_grant endpoint=" << controlRequest->viewerId
+                std::cout << "remote_control_grant endpoint=" << controlEndpoint
                           << " caps=" << controlRequest->capabilities
                           << " sent=no reason=plaintext_session\n" << std::flush;
                 continue;
@@ -4163,7 +4519,7 @@ void RunCaptureStats(
             // Single controller: if control moves to a different viewer, revoke
             // the previous one so its UI stops showing "in control".
             if (!remoteControlEndpoint.empty() &&
-                remoteControlEndpoint != controlRequest->viewerId && udpSender) {
+                remoteControlEndpoint != controlEndpoint && udpSender) {
                 screenshare::udp_protocol::ControlMessage revoke;
                 revoke.command = screenshare::udp_protocol::ControlCommandType::RevokeControl;
                 revoke.accessCodeFingerprint = options.accessCodeFingerprint;
@@ -4175,7 +4531,7 @@ void RunCaptureStats(
             // Re-applying the current target also clears the viewer's last
             // mapped cursor point, so a later scroll cannot reuse stale state.
             refreshRemoteControlTarget();
-            remoteControlEndpoint = controlRequest->capabilities != 0 ? controlRequest->viewerId : std::string();
+            remoteControlEndpoint = controlRequest->capabilities != 0 ? controlEndpoint : std::string();
             remoteControlCapabilities = controlRequest->capabilities;
             screenshare::udp_protocol::ControlMessage ack;
             ack.command = controlRequest->capabilities != 0
@@ -4183,13 +4539,13 @@ void RunCaptureStats(
                 : screenshare::udp_protocol::ControlCommandType::RevokeControl;
             ack.capabilities = controlRequest->capabilities;
             ack.accessCodeFingerprint = options.accessCodeFingerprint;
-            const bool acked = udpSender && udpSender->SendControlTo(controlRequest->viewerId, ack);
-            std::cout << "remote_control_grant endpoint=" << controlRequest->viewerId
+            const bool acked = udpSender && udpSender->SendControlTo(controlEndpoint, ack);
+            std::cout << "remote_control_grant endpoint=" << controlEndpoint
                       << " caps=" << controlRequest->capabilities
                       << " sent=" << (acked ? "yes" : "no") << "\n" << std::flush;
             // Re-send the ack a few times (below) so a single dropped datagram
             // does not leave the viewer's control state out of sync.
-            scheduleControlAckBurst(controlRequest->viewerId, controlRequest->capabilities);
+            scheduleControlAckBurst(controlEndpoint, controlRequest->capabilities);
         }
 
         // Bounded loss-resilience burst: re-send the latest ack a few times over
@@ -4479,7 +4835,7 @@ void RunCaptureStats(
                 usingAutoHardwareEncoder &&
                 hardwareAutoDropReports >= AutoHardwareDropReportsBeforeSoftwareFallback;
             if (udpSender) {
-                bitrateAdvisor.Update(udpStatsNow);
+                bitrateAdvisor.Update(ApplyAllViewerFeedbackConsensus(udpStatsNow));
                 applyAdaptiveBitrate();
                 applyAdaptiveResolution(udpStatsNow);
             }
@@ -4591,6 +4947,18 @@ void RunCaptureStats(
                 << " bitrate_adaptation_failures=" << bitrateAdaptationFailures
                 << "\n" << std::flush;
             if (udpSender) {
+                udpSender->SuspendStaleViewers();
+                for (const auto& viewer : udpSender->viewerSnapshots()) {
+                    if (!viewer.hasFeedback) {
+                        continue;
+                    }
+                    uint64_t& previousResyncs = lastViewerResyncs[static_cast<uint32_t>(viewer.group)];
+                    if (viewer.latestFeedback.completedFrames == 0 ||
+                        viewer.latestFeedback.decodeResyncs > previousResyncs) {
+                        keyframeRequestPending = true;
+                    }
+                    previousResyncs = viewer.latestFeedback.decodeResyncs;
+                }
                 PrintViewerSnapshots(*udpSender);
                 std::cout << std::flush;
             }
@@ -4649,7 +5017,7 @@ void RunCaptureStats(
         audioCaptureWorker ? audioCaptureWorker->stats() : AudioCaptureWorkerStats{};
     const screenshare::UdpSenderStats udpStats = udpSender ? udpSender->stats() : screenshare::UdpSenderStats{};
     if (udpSender) {
-        bitrateAdvisor.Update(udpStats);
+        bitrateAdvisor.Update(ApplyAllViewerFeedbackConsensus(udpStats));
     }
     if (!options.capturedBmpPath.empty() && hasFrame) {
         WriteCapturedFrameBmp(options.capturedBmpPath, lastFrame);
@@ -4835,7 +5203,8 @@ void PrepareLiveSignaling(Options& options)
                     sendTargets.empty() ? localPort : static_cast<uint16_t>(0),
                     probeSession,
                     SignalingPeerGroup(peerId),
-                    SignalingPeerDisplayName(peerInfo)));
+                SignalingPeerDisplayName(peerInfo),
+                peerId));
             } else {
                 probeTargets.push_back(screenshare::UdpNatProbeTarget{
                     candidate.ip,
@@ -4887,6 +5256,7 @@ void RunUdpReceiverStats(
     config.port = options.udpReceivePort;
     config.simulatedLossPercent = options.simulateLossPercent;
     config.simulatedJitter = std::chrono::milliseconds(options.simulateJitterMs);
+    config.simulatedReceiveDelay = std::chrono::milliseconds(options.simulateReceiveDelayMs);
     config.accessCodeFingerprint = options.accessCodeFingerprint;
     config.encryptionKey = options.accessCodeKey;
     config.natProbeInterval = std::chrono::milliseconds(options.natProbeIntervalMs);
@@ -4914,10 +5284,16 @@ void RunUdpReceiverStats(
         options.signalingNatProbeTargets.begin(),
         options.signalingNatProbeTargets.end());
     receiver.Open(config);
+    bool hostDisconnectRequested = false;
     // Remote control (viewer side): surface host grant/deny/revoke acks so the
     // session API can tell the UI what input types we now hold.
-    receiver.SetControlHandler([](const screenshare::udp_protocol::ControlMessage& message) {
+    receiver.SetControlHandler([&](const screenshare::udp_protocol::ControlMessage& message) {
         using Command = screenshare::udp_protocol::ControlCommandType;
+        if (message.command == Command::DisconnectViewer) {
+            hostDisconnectRequested = true;
+            std::cout << "viewer_disconnected_by_host=1\n" << std::flush;
+            return;
+        }
         uint32_t caps = 0;
         if (message.command == Command::GrantControl) {
             caps = message.capabilities;
@@ -5085,10 +5461,11 @@ void RunUdpReceiverStats(
         }
         std::cout << " every " << options.natProbeIntervalMs << " ms";
     }
-    if (options.simulateLossPercent > 0.0f || options.simulateJitterMs > 0) {
+    if (options.simulateLossPercent > 0.0f || options.simulateJitterMs > 0 || options.simulateReceiveDelayMs > 0) {
         std::cout
             << ", simulating loss " << options.simulateLossPercent << "%"
-            << ", jitter up to " << options.simulateJitterMs << " ms";
+            << ", jitter up to " << options.simulateJitterMs << " ms"
+            << ", receive delay " << options.simulateReceiveDelayMs << " ms/datagram";
     }
     std::cout << ".\n";
 
@@ -5925,6 +6302,9 @@ void RunUdpReceiverStats(
 
     bool previewCloseRequested = false;
     auto shouldContinue = [&]() {
+        if (hostDisconnectRequested) {
+            return false;
+        }
         if (previewWindow && !previewWindow->PumpMessages()) {
             if (!previewCloseRequested) {
                 previewCloseRequested = true;

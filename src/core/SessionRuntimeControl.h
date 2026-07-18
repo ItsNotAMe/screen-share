@@ -61,6 +61,10 @@ struct RuntimeViewerControlRequest {
     uint32_t capabilities = 0;
 };
 
+struct RuntimeViewerDisconnectRequest {
+    std::string viewerId;
+};
+
 class ISessionRuntimeControl {
 public:
     virtual ~ISessionRuntimeControl() = default;
@@ -73,6 +77,7 @@ public:
     // and drain high-frequency input events (separate from the take-once requests
     // above so input is never silently coalesced into a single latest-only slot).
     virtual std::optional<RuntimeViewerControlRequest> TakeViewerControlRequest() = 0;
+    virtual std::optional<RuntimeViewerDisconnectRequest> TakeViewerDisconnectRequest() = 0;
     virtual void EnqueueInput(const RemoteInputEvent& event) = 0;
     virtual std::vector<RemoteInputEvent> DrainInput() = 0;
 };
@@ -83,6 +88,7 @@ public:
     std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
     std::optional<RuntimeAudioPlaybackSettingsRequest> TakeAudioPlaybackSettingsRequest() override;
     std::optional<RuntimeViewerControlRequest> TakeViewerControlRequest() override;
+    std::optional<RuntimeViewerDisconnectRequest> TakeViewerDisconnectRequest() override;
     void EnqueueInput(const RemoteInputEvent& event) override;
     std::vector<RemoteInputEvent> DrainInput() override;
 };
@@ -93,6 +99,7 @@ public:
     std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
     std::optional<RuntimeAudioPlaybackSettingsRequest> TakeAudioPlaybackSettingsRequest() override;
     std::optional<RuntimeViewerControlRequest> TakeViewerControlRequest() override;
+    std::optional<RuntimeViewerDisconnectRequest> TakeViewerDisconnectRequest() override;
     void EnqueueInput(const RemoteInputEvent& event) override;
     std::vector<RemoteInputEvent> DrainInput() override;
 
@@ -101,6 +108,7 @@ public:
     void RequestStreamSettings(RuntimeStreamSettingsRequest request);
     void RequestAudioPlaybackSettings(RuntimeAudioPlaybackSettingsRequest request);
     void RequestViewerControl(RuntimeViewerControlRequest request);
+    void RequestViewerDisconnect(RuntimeViewerDisconnectRequest request);
     void ClearStreamSettingsRequest();
     void Reset();
 
@@ -110,6 +118,7 @@ private:
     std::optional<RuntimeStreamSettingsRequest> streamSettingsRequest_;
     std::optional<RuntimeAudioPlaybackSettingsRequest> audioPlaybackSettingsRequest_;
     std::deque<RuntimeViewerControlRequest> viewerControlRequests_;
+    std::deque<RuntimeViewerDisconnectRequest> viewerDisconnectRequests_;
     std::deque<RemoteInputEvent> inputQueue_;
 };
 
@@ -121,6 +130,7 @@ public:
     std::optional<RuntimeStreamSettingsRequest> TakeStreamSettingsRequest() override;
     std::optional<RuntimeAudioPlaybackSettingsRequest> TakeAudioPlaybackSettingsRequest() override;
     std::optional<RuntimeViewerControlRequest> TakeViewerControlRequest() override;
+    std::optional<RuntimeViewerDisconnectRequest> TakeViewerDisconnectRequest() override;
     void EnqueueInput(const RemoteInputEvent& event) override;
     std::vector<RemoteInputEvent> DrainInput() override;
 

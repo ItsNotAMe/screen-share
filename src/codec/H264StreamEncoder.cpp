@@ -1,5 +1,7 @@
 #include "codec/H264StreamEncoder.h"
 
+#include "codec/H264Bitstream.h"
+
 #include "video/Nv12Convert.h"
 
 #include <Windows.h>
@@ -459,6 +461,7 @@ EncodedPacket PacketFromOutputSample(IMFSample* sample)
     std::memcpy(packet.bytes.data(), source, std::min<DWORD>(totalLength, currentLength));
 
     ThrowIfFailed(buffer->Unlock(), "IMFMediaBuffer::Unlock(output)");
+    packet.isKeyframe = InspectH264AccessUnit(packet.bytes).hasIdrSlice;
     return packet;
 }
 
@@ -728,6 +731,15 @@ bool H264StreamEncoder::TryUpdateBitrate(uint32_t bitrate)
 
     config_.bitrate = bitrate;
     return true;
+}
+
+bool H264StreamEncoder::RequestKeyframe()
+{
+    if (!transform_) {
+        return false;
+    }
+    Microsoft::WRL::ComPtr<ICodecAPI> codecApi = QueryCodecApi(transform_.Get());
+    return codecApi && TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncVideoForceKeyFrame, 1);
 }
 
 void H264StreamEncoder::Stop()

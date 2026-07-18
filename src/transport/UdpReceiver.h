@@ -44,6 +44,10 @@ struct UdpReceiverConfig {
     std::chrono::milliseconds frameTimeout = std::chrono::seconds(5);
     float simulatedLossPercent = 0.0f;
     std::chrono::milliseconds simulatedJitter = std::chrono::milliseconds(0);
+    // Diagnostic-only delay after each socket read. Unlike simulated jitter,
+    // this deliberately slows socket consumption and can exercise receive
+    // buffer pressure in multi-viewer tests.
+    std::chrono::milliseconds simulatedReceiveDelay = std::chrono::milliseconds(0);
     uint32_t simulationSeed = 1;
     uint64_t accessCodeFingerprint = 0;
     std::optional<UdpCryptoKey> encryptionKey;

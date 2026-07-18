@@ -99,6 +99,11 @@ std::optional<RuntimeViewerControlRequest> NullSessionRuntimeControl::TakeViewer
     return std::nullopt;
 }
 
+std::optional<RuntimeViewerDisconnectRequest> NullSessionRuntimeControl::TakeViewerDisconnectRequest()
+{
+    return std::nullopt;
+}
+
 void NullSessionRuntimeControl::EnqueueInput(const RemoteInputEvent&)
 {
 }
@@ -171,6 +176,23 @@ void MemorySessionRuntimeControl::RequestViewerControl(RuntimeViewerControlReque
     viewerControlRequests_.push_back(std::move(request));
 }
 
+std::optional<RuntimeViewerDisconnectRequest> MemorySessionRuntimeControl::TakeViewerDisconnectRequest()
+{
+    std::scoped_lock lock(mutex_);
+    if (viewerDisconnectRequests_.empty()) {
+        return std::nullopt;
+    }
+    auto request = std::move(viewerDisconnectRequests_.front());
+    viewerDisconnectRequests_.pop_front();
+    return request;
+}
+
+void MemorySessionRuntimeControl::RequestViewerDisconnect(RuntimeViewerDisconnectRequest request)
+{
+    std::scoped_lock lock(mutex_);
+    viewerDisconnectRequests_.push_back(std::move(request));
+}
+
 void MemorySessionRuntimeControl::EnqueueInput(const RemoteInputEvent& event)
 {
     constexpr size_t kMaxQueuedInputEvents = 512;
@@ -224,6 +246,7 @@ void MemorySessionRuntimeControl::Reset()
     streamSettingsRequest_.reset();
     audioPlaybackSettingsRequest_.reset();
     viewerControlRequests_.clear();
+    viewerDisconnectRequests_.clear();
     inputQueue_.clear();
 }
 
@@ -278,6 +301,11 @@ std::optional<RuntimeAudioPlaybackSettingsRequest> FileSessionRuntimeControl::Ta
 }
 
 std::optional<RuntimeViewerControlRequest> FileSessionRuntimeControl::TakeViewerControlRequest()
+{
+    return std::nullopt;
+}
+
+std::optional<RuntimeViewerDisconnectRequest> FileSessionRuntimeControl::TakeViewerDisconnectRequest()
 {
     return std::nullopt;
 }

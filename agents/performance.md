@@ -20,6 +20,13 @@ before and after.
 | Cross NAT | Real Internet room behavior. | One host and one watcher on different LANs. |
 | Multi-viewer | Fanout and per-viewer queue behavior. | One host and two watchers, preferably different networks when available. |
 
+The release-build multi-viewer harness automates the local variants and emits a per-viewer summary:
+
+```powershell
+.\scripts\run-multiviewer-harness.ps1 -Scenario Healthy -ViewerCount 2 -DurationSeconds 600
+.\scripts\run-multiviewer-harness.ps1 -Scenario SlowConsumer -ViewerCount 2 -DurationSeconds 600
+```
+
 ## Reading A Report
 
 1. Open the saved report zip from the test run.

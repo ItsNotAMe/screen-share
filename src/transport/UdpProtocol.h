@@ -63,6 +63,7 @@ enum class ControlCommandType : uint16_t {
     GrantControl = 3,
     DenyControl = 4,
     RevokeControl = 5,
+    DisconnectViewer = 6,
     MouseMove = 16,
     MouseButton = 17,
     MouseScroll = 18,

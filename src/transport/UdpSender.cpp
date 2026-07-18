@@ -257,9 +257,11 @@ void UdpSender::Open(const UdpSenderConfig& config)
         socket_ = static_cast<uintptr_t>(udpSocket);
         addressLength_ = static_cast<int>(resolved->ai_addrlen);
         additionalAddresses_ = std::move(additionalAddresses);
+        additionalLanes_.clear();
         natProbeAddresses_.clear();
         cachedSendAddresses_.reset();
         feedbackPeers_.clear();
+        feedbackPeerReceivedAt_.clear();
         config_ = config;
         stats_ = {};
         stats_.encryptionEnabled = encryptionEnabled;
@@ -276,8 +278,18 @@ void UdpSender::Open(const UdpSenderConfig& config)
         nextSendAt_ = Clock::now();
         workerError_.clear();
         stopWorker_ = false;
+        primarySuspended_ = false;
+        primaryHostDisconnected_ = false;
+        primarySuspendReason_.clear();
         datagramInFlight_ = false;
         sendAddressesDirty_ = true;
+        for (const auto& target : additionalAddresses_) {
+            // Multiple candidates for the primary viewer share the primary
+            // queue. Only distinct viewer groups receive their own worker.
+            if (target.group != config_.group) {
+                StartAdditionalLaneLocked(target.group, target.address);
+            }
+        }
     }
 
     freeaddrinfo(resolved);
@@ -286,6 +298,8 @@ void UdpSender::Open(const UdpSenderConfig& config)
 
 void UdpSender::Close()
 {
+    StopAdditionalLanes();
+
     if (worker_.joinable()) {
         {
             std::lock_guard lock(mutex_);
@@ -308,8 +322,10 @@ void UdpSender::Close()
         address_.clear();
         additionalAddresses_.clear();
         natProbeAddresses_.clear();
+        additionalLanes_.clear();
         cachedSendAddresses_.reset();
         feedbackPeers_.clear();
+        feedbackPeerReceivedAt_.clear();
         addressLength_ = 0;
         encryptionEnabled_ = false;
         master_ = {};
@@ -320,6 +336,9 @@ void UdpSender::Close()
         controlPeers_.clear();
         workerError_.clear();
         stopWorker_ = false;
+        primarySuspended_ = false;
+        primaryHostDisconnected_ = false;
+        primarySuspendReason_.clear();
         datagramInFlight_ = false;
         sendAddressesDirty_ = true;
         UpdatePendingStatsLocked();
@@ -343,13 +362,25 @@ bool UdpSender::AddAdditionalTarget(const UdpSenderEndpoint& target)
     const auto matchesAddress = [&](const GroupedAddress& candidate) {
         return candidate.address == address;
     };
-    if (address == address_ ||
+    const bool alreadyKnown = address == address_ ||
         std::find_if(additionalAddresses_.begin(), additionalAddresses_.end(), matchesAddress) != additionalAddresses_.end() ||
-        std::find_if(natProbeAddresses_.begin(), natProbeAddresses_.end(), matchesAddress) != natProbeAddresses_.end()) {
+        std::find_if(natProbeAddresses_.begin(), natProbeAddresses_.end(), matchesAddress) != natProbeAddresses_.end();
+    if (target.group == config_.group) {
+        if (!primaryHostDisconnected_) {
+            primarySuspended_ = false;
+            primarySuspendReason_.clear();
+            queueChanged_.notify_all();
+        }
+    } else if (address != address_) {
+        // Re-adding an already-known endpoint is also the recovery path for a
+        // signaling peer that left and rejoined with the same candidate.
+        StartAdditionalLaneLocked(target.group, address);
+    }
+    if (alreadyKnown) {
         return false;
     }
 
-    additionalAddresses_.push_back(GroupedAddress{std::move(address), target.group});
+    additionalAddresses_.push_back(GroupedAddress{address, target.group});
     config_.additionalTargets.push_back(target);
     sendAddressesDirty_ = true;
     return true;
@@ -383,7 +414,6 @@ void UdpSender::SendFrame(const EncodedPacket& packet)
     uint64_t frameId = 0;
     {
         std::lock_guard lock(mutex_);
-        CheckWorkerErrorLocked();
         frameId = frameId_++;
     }
 
@@ -399,42 +429,52 @@ void UdpSender::SendFrame(const EncodedPacket& packet)
             {},
             PendingDatagramKind::Video,
             frameId,
+            packet.isKeyframe,
         });
     }
+    const std::vector<PendingDatagram> laneDatagrams = datagrams;
 
+    bool primaryQueued = false;
     {
         std::lock_guard lock(mutex_);
-        CheckWorkerErrorLocked();
-
-        const auto now = Clock::now();
-        static_cast<void>(EnforceLiveQueueDelayLocked(now));
-        DropQueuedMediaForCapacityLocked(datagrams.size(), PendingDatagramKind::Video);
-
-        if (queue_.size() + datagrams.size() > config_.maxQueuedDatagrams) {
+        if (primarySuspended_ || !workerError_.empty()) {
             ++stats_.framesDropped;
             stats_.datagramsDropped += datagrams.size();
             UpdatePendingStatsLocked();
-            return;
-        }
+        } else {
+            const auto now = Clock::now();
+            static_cast<void>(EnforceLiveQueueDelayLocked(now));
+            DropQueuedMediaForCapacityLocked(datagrams.size(), PendingDatagramKind::Video);
 
-        if (!config_.pacingEnabled || config_.pacingBitrate == 0 || nextSendAt_ < now) {
-            nextSendAt_ = now;
-        }
+            if (queue_.size() + datagrams.size() > config_.maxQueuedDatagrams) {
+                ++stats_.framesDropped;
+                stats_.datagramsDropped += datagrams.size();
+                UpdatePendingStatsLocked();
+            } else {
+                if (!config_.pacingEnabled || config_.pacingBitrate == 0 || nextSendAt_ < now) {
+                    nextSendAt_ = now;
+                }
 
-        for (auto& datagram : datagrams) {
-            datagram.sendAt = config_.pacingEnabled ? nextSendAt_ : now;
-            if (config_.pacingEnabled) {
-                nextSendAt_ += PacingDelayForBytes(datagram.bytes.size());
+                for (auto& datagram : datagrams) {
+                    datagram.sendAt = config_.pacingEnabled ? nextSendAt_ : now;
+                    if (config_.pacingEnabled) {
+                        nextSendAt_ += PacingDelayForBytes(datagram.bytes.size());
+                    }
+                    queue_.push_back(std::move(datagram));
+                }
+
+                ++stats_.framesSent;
+                stats_.datagramsQueued += datagrams.size();
+                stats_.payloadBytesSent += frameBytes;
+                UpdatePendingStatsLocked();
+                primaryQueued = true;
             }
-            queue_.push_back(std::move(datagram));
         }
-
-        ++stats_.framesSent;
-        stats_.datagramsQueued += datagrams.size();
-        stats_.payloadBytesSent += frameBytes;
-        UpdatePendingStatsLocked();
     }
-    queueChanged_.notify_one();
+    if (primaryQueued) {
+        queueChanged_.notify_one();
+    }
+    QueueAdditionalDatagrams(laneDatagrams, PendingDatagramKind::Video, frameBytes);
 }
 
 void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
@@ -476,7 +516,6 @@ void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
     uint64_t packetId = 0;
     {
         std::lock_guard lock(mutex_);
-        CheckWorkerErrorLocked();
         packetId = audioPacketId_++;
     }
 
@@ -492,45 +531,55 @@ void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
             {},
             PendingDatagramKind::Audio,
             packetId,
+            false,
         });
     }
+    const std::vector<PendingDatagram> laneDatagrams = datagrams;
 
+    bool primaryQueued = false;
     {
         std::lock_guard lock(mutex_);
-        CheckWorkerErrorLocked();
-
-        const auto now = Clock::now();
-        static_cast<void>(EnforceLiveQueueDelayLocked(now));
-        DropQueuedMediaForCapacityLocked(datagrams.size(), PendingDatagramKind::Video);
-
-        if (queue_.size() + datagrams.size() > config_.maxQueuedDatagrams) {
+        if (primarySuspended_ || !workerError_.empty()) {
             ++stats_.audioPacketsDropped;
             stats_.datagramsDropped += datagrams.size();
             UpdatePendingStatsLocked();
-            return;
-        }
+        } else {
+            const auto now = Clock::now();
+            static_cast<void>(EnforceLiveQueueDelayLocked(now));
+            DropQueuedMediaForCapacityLocked(datagrams.size(), PendingDatagramKind::Video);
 
-        if (!config_.pacingEnabled || config_.pacingBitrate == 0 || nextSendAt_ < now) {
-            nextSendAt_ = now;
-        }
+            if (queue_.size() + datagrams.size() > config_.maxQueuedDatagrams) {
+                ++stats_.audioPacketsDropped;
+                stats_.datagramsDropped += datagrams.size();
+                UpdatePendingStatsLocked();
+            } else {
+                if (!config_.pacingEnabled || config_.pacingBitrate == 0 || nextSendAt_ < now) {
+                    nextSendAt_ = now;
+                }
 
-        for (auto& datagram : datagrams) {
-            datagram.sendAt = config_.pacingEnabled ? nextSendAt_ : now;
-            if (config_.pacingEnabled) {
-                nextSendAt_ += PacingDelayForBytes(datagram.bytes.size());
+                for (auto& datagram : datagrams) {
+                    datagram.sendAt = config_.pacingEnabled ? nextSendAt_ : now;
+                    if (config_.pacingEnabled) {
+                        nextSendAt_ += PacingDelayForBytes(datagram.bytes.size());
+                    }
+                    queue_.push_back(std::move(datagram));
+                }
+
+                ++stats_.audioPacketsSent;
+                stats_.audioFramesSent += packet.audioFrames;
+                stats_.audioDatagramsQueued += datagrams.size();
+                stats_.audioPayloadBytesSent += packetBytes;
+                stats_.datagramsQueued += datagrams.size();
+                stats_.payloadBytesSent += packetBytes;
+                UpdatePendingStatsLocked();
+                primaryQueued = true;
             }
-            queue_.push_back(std::move(datagram));
         }
-
-        ++stats_.audioPacketsSent;
-        stats_.audioFramesSent += packet.audioFrames;
-        stats_.audioDatagramsQueued += datagrams.size();
-        stats_.audioPayloadBytesSent += packetBytes;
-        stats_.datagramsQueued += datagrams.size();
-        stats_.payloadBytesSent += packetBytes;
-        UpdatePendingStatsLocked();
     }
-    queueChanged_.notify_one();
+    if (primaryQueued) {
+        queueChanged_.notify_one();
+    }
+    QueueAdditionalDatagrams(laneDatagrams, PendingDatagramKind::Audio, packetBytes);
 }
 
 void UdpSender::SetPacingBitrate(uint32_t bitrate)
@@ -538,7 +587,6 @@ void UdpSender::SetPacingBitrate(uint32_t bitrate)
     bool notify = false;
     {
         std::lock_guard lock(mutex_);
-        CheckWorkerErrorLocked();
         const bool bitrateChanged = config_.pacingBitrate != bitrate;
         config_.pacingBitrate = bitrate;
         const auto now = Clock::now();
@@ -562,7 +610,6 @@ void UdpSender::SetPacingEnabled(bool enabled)
     bool notify = false;
     {
         std::lock_guard lock(mutex_);
-        CheckWorkerErrorLocked();
         if (config_.pacingEnabled == enabled) {
             return;
         }
@@ -592,26 +639,72 @@ UdpSenderStats UdpSender::stats() const
     std::lock_guard lock(mutex_);
     UdpSenderStats snapshot = stats_;
     snapshot.feedbackPeers = feedbackPeers_;
+    const auto now = Clock::now();
+    for (size_t index = 0; index < snapshot.feedbackPeers.size() && index < feedbackPeerReceivedAt_.size(); ++index) {
+        snapshot.feedbackPeers[index].feedbackAgeMs = static_cast<uint64_t>(std::max<int64_t>(
+            0,
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - feedbackPeerReceivedAt_[index]).count()));
+    }
     snapshot.natProbeTargetCount = static_cast<uint64_t>(natProbeAddresses_.size());
     snapshot.pendingDatagrams =
         static_cast<uint64_t>(queue_.size()) + (datagramInFlight_ ? 1ULL : 0ULL);
-    const auto now = Clock::now();
     if (config_.pacingEnabled && !queue_.empty() && nextSendAt_ > now) {
         snapshot.pendingQueueDelayMs = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(nextSendAt_ - now).count());
     } else {
         snapshot.pendingQueueDelayMs = 0;
     }
+    UdpSenderStats::ViewerLane primary;
+    primary.group = config_.group;
+    primary.endpoint = address_.empty() ? std::string() : SocketAddressToString(address_.data(), addressLength_);
+    primary.datagramsSent = stats_.datagramsSent;
+    primary.wireBytesSent = stats_.wireBytesSent;
+    primary.datagramsDropped = stats_.datagramsDropped;
+    primary.pendingDatagrams = snapshot.pendingDatagrams;
+    primary.peakPendingDatagrams = stats_.peakPendingDatagrams;
+    primary.pendingQueueDelayMs = snapshot.pendingQueueDelayMs;
+    primary.peakQueueDelayMs = stats_.peakQueueDelayMs;
+    primary.failed = primarySuspended_ || !workerError_.empty();
+    primary.error = !primarySuspendReason_.empty() ? primarySuspendReason_ : workerError_;
+    snapshot.viewerLanes.push_back(std::move(primary));
+    for (const auto& lane : additionalLanes_) {
+        std::lock_guard laneLock(lane->mutex);
+        auto laneStats = lane->stats;
+        const_cast<UdpSender*>(this)->UpdateAdditionalLaneStatsLocked(*lane, now);
+        laneStats = lane->stats;
+        snapshot.datagramsSent += laneStats.datagramsSent;
+        snapshot.wireBytesSent += laneStats.wireBytesSent;
+        snapshot.datagramsDropped += laneStats.datagramsDropped;
+        snapshot.pendingDatagrams += laneStats.pendingDatagrams;
+        snapshot.peakPendingDatagrams += laneStats.peakPendingDatagrams;
+        snapshot.pendingQueueDelayMs = std::max(snapshot.pendingQueueDelayMs, laneStats.pendingQueueDelayMs);
+        snapshot.peakQueueDelayMs = std::max(snapshot.peakQueueDelayMs, laneStats.peakQueueDelayMs);
+        snapshot.viewerLanes.push_back(std::move(laneStats));
+    }
     return snapshot;
 }
 
 void UdpSender::Flush()
 {
-    std::unique_lock lock(mutex_);
-    queueDrained_.wait(lock, [&] {
-        return !workerError_.empty() || (queue_.empty() && !datagramInFlight_);
-    });
-    CheckWorkerErrorLocked();
+    std::vector<AdditionalLane*> lanes;
+    {
+        std::unique_lock lock(mutex_);
+        queueDrained_.wait(lock, [&] {
+            return !workerError_.empty() || (queue_.empty() && !datagramInFlight_);
+        });
+        for (const auto& lane : additionalLanes_) {
+            lanes.push_back(lane.get());
+        }
+        if (!workerError_.empty() && lanes.empty() && !primarySuspended_) {
+            CheckWorkerErrorLocked();
+        }
+    }
+    for (AdditionalLane* lane : lanes) {
+        std::unique_lock laneLock(lane->mutex);
+        lane->drained.wait(laneLock, [&] {
+            return lane->stop || lane->suspended || (lane->queue.empty() && !lane->inFlight);
+        });
+    }
 }
 
 std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::chrono::milliseconds timeout)
@@ -718,8 +811,44 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
 
         std::vector<std::byte> feedbackAddress(static_cast<size_t>(senderAddressLength));
         std::memcpy(feedbackAddress.data(), &senderAddress, static_cast<size_t>(senderAddressLength));
-        const uint32_t feedbackGroup = EndpointGroupForAddressLocked(feedbackAddress);
+        uint32_t feedbackGroup = EndpointGroupForAddressLocked(feedbackAddress);
+        if (feedbackGroup == 0 && feedback->sessionFingerprint != 0) {
+            const auto previousSession = std::find_if(
+                feedbackPeers_.begin(),
+                feedbackPeers_.end(),
+                [&](const UdpSenderStats::FeedbackPeer& candidate) {
+                    return candidate.latestFeedback.sessionFingerprint == feedback->sessionFingerprint && candidate.group != 0;
+                });
+            if (previousSession != feedbackPeers_.end()) {
+                feedbackGroup = previousSession->group;
+            }
+        }
         const std::string feedbackEndpoint = SocketAddressToString(&senderAddress, senderAddressLength);
+        if (feedbackGroup == config_.group && primarySuspended_ && !primaryHostDisconnected_) {
+            primarySuspended_ = false;
+            primarySuspendReason_.clear();
+            queueChanged_.notify_all();
+        }
+        if (feedbackGroup != 0 && feedbackGroup != config_.group) {
+            auto lane = std::find_if(additionalLanes_.begin(), additionalLanes_.end(), [&](const auto& candidate) {
+                return candidate->group == feedbackGroup;
+            });
+            if (lane != additionalLanes_.end()) {
+                std::lock_guard laneLock((*lane)->mutex);
+                if (std::find((*lane)->natProbeAddresses.begin(), (*lane)->natProbeAddresses.end(), feedbackAddress) ==
+                    (*lane)->natProbeAddresses.end()) {
+                    (*lane)->natProbeAddresses.push_back(feedbackAddress);
+                }
+                if (!(*lane)->hostDisconnected) {
+                    (*lane)->suspended = false;
+                    (*lane)->consecutiveErrors = 0;
+                    (*lane)->stats.failed = false;
+                    (*lane)->stats.error.clear();
+                }
+                (*lane)->stats.endpoint = feedbackEndpoint;
+                (*lane)->changed.notify_all();
+            }
+        }
 
         // Feedback and control arrive from the same viewer socket, so record this
         // endpoint as a control-ack target now. That lets the host send a grant
@@ -756,12 +885,18 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
                 feedbackEndpoint,
                 feedbackGroup,
                 1,
+                0,
                 *feedback,
             });
+            feedbackPeerReceivedAt_.push_back(Clock::now());
         } else {
+            const size_t peerIndex = static_cast<size_t>(std::distance(feedbackPeers_.begin(), peer));
             peer->group = feedbackGroup;
             ++peer->packetsReceived;
             peer->latestFeedback = *feedback;
+            if (peerIndex < feedbackPeerReceivedAt_.size()) {
+                feedbackPeerReceivedAt_[peerIndex] = Clock::now();
+            }
         }
         return feedback;
     }
@@ -1120,6 +1255,303 @@ bool UdpSender::SendControlTo(const std::string& endpoint, const udp_protocol::C
     return sent != SOCKET_ERROR && sent == static_cast<int>(datagram.size());
 }
 
+void UdpSender::StartAdditionalLaneLocked(uint32_t group, const std::vector<std::byte>& address)
+{
+    auto existing = std::find_if(additionalLanes_.begin(), additionalLanes_.end(), [group](const auto& lane) {
+        return lane->group == group;
+    });
+    if (existing != additionalLanes_.end()) {
+        auto& lane = **existing;
+        std::lock_guard laneLock(lane.mutex);
+        if (std::find(lane.staticAddresses.begin(), lane.staticAddresses.end(), address) == lane.staticAddresses.end()) {
+            lane.staticAddresses.push_back(address);
+        }
+        if (!lane.hostDisconnected) {
+            lane.suspended = false;
+            lane.stats.failed = false;
+            lane.stats.error.clear();
+        }
+        lane.changed.notify_all();
+        return;
+    }
+
+    auto lane = std::make_unique<AdditionalLane>();
+    lane->group = group;
+    lane->staticAddresses.push_back(address);
+    lane->nextSendAt = Clock::now();
+    lane->stats.group = group;
+    lane->stats.endpoint = SocketAddressToString(address.data(), static_cast<int>(address.size()));
+    AdditionalLane* rawLane = lane.get();
+    additionalLanes_.push_back(std::move(lane));
+    rawLane->worker = std::thread(&UdpSender::AdditionalWorkerLoop, this, rawLane);
+}
+
+void UdpSender::StopAdditionalLanes()
+{
+    std::vector<std::unique_ptr<AdditionalLane>> lanes;
+    {
+        std::lock_guard lock(mutex_);
+        lanes.swap(additionalLanes_);
+    }
+    for (auto& lane : lanes) {
+        {
+            std::lock_guard laneLock(lane->mutex);
+            lane->stop = true;
+            lane->queue.clear();
+            UpdateAdditionalLaneStatsLocked(*lane, Clock::now());
+        }
+        lane->changed.notify_all();
+        lane->drained.notify_all();
+    }
+    for (auto& lane : lanes) {
+        if (lane->worker.joinable()) {
+            lane->worker.join();
+        }
+    }
+}
+
+void UdpSender::UpdateAdditionalLaneStatsLocked(AdditionalLane& lane, Clock::time_point now)
+{
+    lane.stats.pendingDatagrams = static_cast<uint64_t>(lane.queue.size()) + (lane.inFlight ? 1ULL : 0ULL);
+    lane.stats.peakPendingDatagrams = std::max(lane.stats.peakPendingDatagrams, lane.stats.pendingDatagrams);
+    if (config_.pacingEnabled && !lane.queue.empty() && lane.nextSendAt > now) {
+        lane.stats.pendingQueueDelayMs = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(lane.nextSendAt - now).count());
+    } else {
+        lane.stats.pendingQueueDelayMs = 0;
+    }
+    lane.stats.peakQueueDelayMs = std::max(lane.stats.peakQueueDelayMs, lane.stats.pendingQueueDelayMs);
+}
+
+void UdpSender::QueueAdditionalDatagrams(
+    const std::vector<PendingDatagram>& datagrams,
+    PendingDatagramKind kind,
+    uint64_t)
+{
+    std::lock_guard senderLock(mutex_);
+    const auto now = Clock::now();
+    for (auto& lanePointer : additionalLanes_) {
+        AdditionalLane& lane = *lanePointer;
+        std::lock_guard laneLock(lane.mutex);
+        if (lane.stop || lane.suspended) {
+            continue;
+        }
+
+        auto dropOldestMedia = [&](PendingDatagramKind preferred) {
+            auto first = std::find_if(lane.queue.begin(), lane.queue.end(), [preferred](const PendingDatagram& queued) {
+                return queued.kind == preferred;
+            });
+            if (first == lane.queue.end()) {
+                return false;
+            }
+            const uint64_t mediaId = first->mediaId;
+            size_t removed = 0;
+            for (auto iterator = lane.queue.begin(); iterator != lane.queue.end();) {
+                if (iterator->kind == preferred && iterator->mediaId == mediaId) {
+                    iterator = lane.queue.erase(iterator);
+                    ++removed;
+                } else {
+                    ++iterator;
+                }
+            }
+            lane.stats.datagramsDropped += removed;
+            if (preferred == PendingDatagramKind::Video) {
+                lane.awaitingKeyframe = true;
+            }
+            return true;
+        };
+
+        if (kind == PendingDatagramKind::Video && !datagrams.empty()) {
+            if (lane.awaitingKeyframe && !datagrams.front().keyframe) {
+                lane.stats.datagramsDropped += datagrams.size();
+                UpdateAdditionalLaneStatsLocked(lane, now);
+                continue;
+            }
+            if (lane.awaitingKeyframe && datagrams.front().keyframe) {
+                for (auto iterator = lane.queue.begin(); iterator != lane.queue.end();) {
+                    if (iterator->kind == PendingDatagramKind::Video) {
+                        iterator = lane.queue.erase(iterator);
+                        ++lane.stats.datagramsDropped;
+                    } else {
+                        ++iterator;
+                    }
+                }
+                lane.awaitingKeyframe = false;
+            }
+        }
+
+        while (!lane.queue.empty() && config_.maxQueueDelay.count() > 0 &&
+               lane.nextSendAt > now && lane.nextSendAt - now > config_.maxQueueDelay) {
+            if (!dropOldestMedia(PendingDatagramKind::Video) && !dropOldestMedia(PendingDatagramKind::Audio)) {
+                break;
+            }
+            lane.nextSendAt = now;
+            for (auto& queued : lane.queue) {
+                queued.sendAt = lane.nextSendAt;
+                if (config_.pacingEnabled) {
+                    lane.nextSendAt += PacingDelayForBytes(queued.bytes.size());
+                }
+            }
+        }
+        while (lane.queue.size() + datagrams.size() > config_.maxQueuedDatagrams) {
+            if (!dropOldestMedia(kind) && !dropOldestMedia(
+                    kind == PendingDatagramKind::Video ? PendingDatagramKind::Audio : PendingDatagramKind::Video)) {
+                break;
+            }
+        }
+        if (lane.queue.size() + datagrams.size() > config_.maxQueuedDatagrams) {
+            lane.stats.datagramsDropped += datagrams.size();
+            UpdateAdditionalLaneStatsLocked(lane, now);
+            continue;
+        }
+
+        if (!config_.pacingEnabled || config_.pacingBitrate == 0 || lane.nextSendAt < now) {
+            lane.nextSendAt = now;
+        }
+        for (const auto& source : datagrams) {
+            PendingDatagram queued = source;
+            queued.sendAt = config_.pacingEnabled ? lane.nextSendAt : now;
+            if (config_.pacingEnabled) {
+                lane.nextSendAt += PacingDelayForBytes(queued.bytes.size());
+            }
+            lane.queue.push_back(std::move(queued));
+        }
+        UpdateAdditionalLaneStatsLocked(lane, now);
+        lane.changed.notify_one();
+    }
+}
+
+void UdpSender::AdditionalWorkerLoop(AdditionalLane* lane)
+{
+    for (;;) {
+        std::vector<std::byte> datagram;
+        {
+            std::unique_lock lock(lane->mutex);
+            lane->changed.wait(lock, [&] { return lane->stop || !lane->queue.empty(); });
+            if (lane->stop && lane->queue.empty()) {
+                break;
+            }
+            const auto now = Clock::now();
+            if (lane->queue.front().sendAt > now) {
+                lane->changed.wait_until(lock, lane->queue.front().sendAt, [&] { return lane->stop; });
+                continue;
+            }
+            datagram = std::move(lane->queue.front().bytes);
+            lane->queue.pop_front();
+            lane->inFlight = true;
+            UpdateAdditionalLaneStatsLocked(*lane, now);
+        }
+
+        static_cast<void>(SendAdditionalDatagramBytes(*lane, datagram));
+
+        {
+            std::lock_guard lock(lane->mutex);
+            lane->inFlight = false;
+            UpdateAdditionalLaneStatsLocked(*lane, Clock::now());
+            if (lane->queue.empty()) {
+                lane->drained.notify_all();
+            }
+        }
+    }
+}
+
+bool UdpSender::SendAdditionalDatagramBytes(AdditionalLane& lane, const std::vector<std::byte>& datagram)
+{
+    std::vector<std::vector<std::byte>> addresses;
+    {
+        std::lock_guard lock(lane.mutex);
+        const bool useStatic = !config_.preferNatProbeTargets || lane.natProbeAddresses.empty();
+        if (useStatic) {
+            addresses = lane.staticAddresses;
+        }
+        for (const auto& address : lane.natProbeAddresses) {
+            if (std::find(addresses.begin(), addresses.end(), address) == addresses.end()) {
+                addresses.push_back(address);
+            }
+        }
+    }
+
+    uint64_t sentCount = 0;
+    uint64_t sentBytes = 0;
+    std::string lastError;
+    for (const auto& target : addresses) {
+        const int sent = sendto(
+            AsSocket(socket_),
+            reinterpret_cast<const char*>(datagram.data()),
+            static_cast<int>(datagram.size()),
+            0,
+            reinterpret_cast<const sockaddr*>(target.data()),
+            static_cast<int>(target.size()));
+        if (sent == SOCKET_ERROR) {
+            lastError = WinsockErrorMessage("sendto(viewer lane)");
+            continue;
+        }
+        ++sentCount;
+        sentBytes += static_cast<uint64_t>(sent);
+    }
+
+    std::lock_guard lock(lane.mutex);
+    if (sentCount == 0) {
+        ++lane.stats.socketErrors;
+        ++lane.consecutiveErrors;
+        lane.stats.error = lastError.empty() ? "viewer lane has no usable endpoint" : lastError;
+        if (lane.consecutiveErrors >= 5) {
+            lane.suspended = true;
+            lane.stats.failed = true;
+            lane.queue.clear();
+        }
+        return false;
+    }
+    lane.consecutiveErrors = 0;
+    lane.stats.failed = false;
+    lane.stats.error.clear();
+    lane.stats.datagramsSent += sentCount;
+    lane.stats.wireBytesSent += sentBytes;
+    return true;
+}
+
+bool UdpSender::SuspendTargetGroup(uint32_t group, std::string reason, bool permanent)
+{
+    std::lock_guard lock(mutex_);
+    for (size_t index = 0; index < feedbackPeers_.size();) {
+        if (feedbackPeers_[index].group == group) {
+            feedbackPeers_.erase(feedbackPeers_.begin() + static_cast<std::ptrdiff_t>(index));
+            if (index < feedbackPeerReceivedAt_.size()) {
+                feedbackPeerReceivedAt_.erase(
+                    feedbackPeerReceivedAt_.begin() + static_cast<std::ptrdiff_t>(index));
+            }
+        } else {
+            ++index;
+        }
+    }
+    if (group == config_.group) {
+        primarySuspended_ = true;
+        primaryHostDisconnected_ = permanent;
+        queue_.clear();
+        primarySuspendReason_ = reason.empty() ? "disconnected" : std::move(reason);
+        UpdatePendingStatsLocked();
+        queueChanged_.notify_all();
+        queueDrained_.notify_all();
+        return true;
+    }
+    const auto lane = std::find_if(additionalLanes_.begin(), additionalLanes_.end(), [group](const auto& item) {
+        return item->group == group;
+    });
+    if (lane == additionalLanes_.end()) {
+        return false;
+    }
+    std::lock_guard laneLock((*lane)->mutex);
+    (*lane)->hostDisconnected = permanent;
+    (*lane)->suspended = true;
+    (*lane)->queue.clear();
+    (*lane)->stats.failed = true;
+    (*lane)->stats.error = reason.empty() ? "host_disconnected" : std::move(reason);
+    UpdateAdditionalLaneStatsLocked(**lane, Clock::now());
+    (*lane)->changed.notify_all();
+    (*lane)->drained.notify_all();
+    return true;
+}
+
 void UdpSender::WorkerLoop()
 {
     for (;;) {
@@ -1217,23 +1649,6 @@ void UdpSender::SendDatagramBytes(const std::vector<std::byte>& datagram)
 
 void UdpSender::RebuildSendAddressesLocked()
 {
-    struct SendGroup {
-        uint32_t group = 0;
-        std::vector<std::vector<std::byte>> staticAddresses;
-        std::vector<std::vector<std::byte>> natProbeAddresses;
-    };
-
-    std::vector<SendGroup> groups;
-    auto groupFor = [&](uint32_t groupId) -> SendGroup& {
-        auto existing = std::find_if(groups.begin(), groups.end(), [&](const SendGroup& group) {
-            return group.group == groupId;
-        });
-        if (existing != groups.end()) {
-            return *existing;
-        }
-        groups.push_back(SendGroup{groupId});
-        return groups.back();
-    };
     auto addUnique = [](std::vector<std::vector<std::byte>>& list, const std::vector<std::byte>& address) {
         if (std::find(list.begin(), list.end(), address) == list.end()) {
             list.push_back(address);
@@ -1241,25 +1656,22 @@ void UdpSender::RebuildSendAddressesLocked()
     };
 
     std::vector<std::vector<std::byte>> addresses;
-    groupFor(config_.group).staticAddresses.push_back(address_);
-    for (const auto& address : additionalAddresses_) {
-        addUnique(groupFor(address.group).staticAddresses, address.address);
-    }
+    std::vector<std::vector<std::byte>> primaryNatAddresses;
     for (const auto& address : natProbeAddresses_) {
-        addUnique(groupFor(address.group).natProbeAddresses, address.address);
+        if (address.group == config_.group) {
+            addUnique(primaryNatAddresses, address.address);
+        }
     }
-
-    for (const auto& group : groups) {
-        const bool useStaticTargets =
-            !config_.preferNatProbeTargets || group.natProbeAddresses.empty();
-        if (useStaticTargets) {
-            for (const auto& address : group.staticAddresses) {
-                addUnique(addresses, address);
+    if (!config_.preferNatProbeTargets || primaryNatAddresses.empty()) {
+        addUnique(addresses, address_);
+        for (const auto& candidate : additionalAddresses_) {
+            if (candidate.group == config_.group) {
+                addUnique(addresses, candidate.address);
             }
         }
-        for (const auto& address : group.natProbeAddresses) {
-            addUnique(addresses, address);
-        }
+    }
+    for (const auto& address : primaryNatAddresses) {
+        addUnique(addresses, address);
     }
 
     cachedSendAddresses_ =
@@ -1325,6 +1737,25 @@ void UdpSender::MaybeRetargetFromNatProbe(
                 return;
             }
             natProbeAddresses_.push_back(GroupedAddress{std::move(candidate), group});
+            if (group != 0 && group != config_.group) {
+                const auto lane = std::find_if(additionalLanes_.begin(), additionalLanes_.end(), [group](const auto& item) {
+                    return item->group == group;
+                });
+                if (lane != additionalLanes_.end()) {
+                    std::lock_guard laneLock((*lane)->mutex);
+                    const auto& laneAddress = natProbeAddresses_.back().address;
+                    if (std::find((*lane)->natProbeAddresses.begin(), (*lane)->natProbeAddresses.end(), laneAddress) ==
+                        (*lane)->natProbeAddresses.end()) {
+                        (*lane)->natProbeAddresses.push_back(laneAddress);
+                    }
+                    if (!(*lane)->hostDisconnected) {
+                        (*lane)->suspended = false;
+                        (*lane)->stats.failed = false;
+                        (*lane)->stats.error.clear();
+                    }
+                    (*lane)->changed.notify_all();
+                }
+            }
             sendAddressesDirty_ = true;
             ++stats_.natProbeRetargets;
         }

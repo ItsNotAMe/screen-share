@@ -81,9 +81,25 @@ struct UdpSenderStats {
         std::string endpoint;
         uint32_t group = 0;
         uint64_t packetsReceived = 0;
+        uint64_t feedbackAgeMs = 0;
         udp_protocol::FeedbackSnapshot latestFeedback;
     };
     std::vector<FeedbackPeer> feedbackPeers;
+    struct ViewerLane {
+        uint32_t group = 0;
+        std::string endpoint;
+        uint64_t datagramsSent = 0;
+        uint64_t wireBytesSent = 0;
+        uint64_t datagramsDropped = 0;
+        uint64_t socketErrors = 0;
+        uint64_t pendingDatagrams = 0;
+        uint64_t peakPendingDatagrams = 0;
+        uint64_t pendingQueueDelayMs = 0;
+        uint64_t peakQueueDelayMs = 0;
+        bool failed = false;
+        std::string error;
+    };
+    std::vector<ViewerLane> viewerLanes;
 };
 
 struct UdpAudioPacket {
@@ -111,6 +127,7 @@ public:
     void Open(const UdpSenderConfig& config);
     void Close();
     bool AddAdditionalTarget(const UdpSenderEndpoint& target);
+    bool SuspendTargetGroup(uint32_t group, std::string reason, bool permanent = true);
     void SendFrame(const EncodedPacket& packet);
     void SendAudioPacket(const UdpAudioPacket& packet);
     void SetPacingBitrate(uint32_t bitrate);
@@ -141,11 +158,31 @@ private:
         Clock::time_point sendAt{};
         PendingDatagramKind kind = PendingDatagramKind::Video;
         uint64_t mediaId = 0;
+        bool keyframe = false;
     };
 
     struct GroupedAddress {
         std::vector<std::byte> address;
         uint32_t group = 0;
+    };
+
+    struct AdditionalLane {
+        uint32_t group = 0;
+        std::vector<std::vector<std::byte>> staticAddresses;
+        std::vector<std::vector<std::byte>> natProbeAddresses;
+        std::deque<PendingDatagram> queue;
+        std::mutex mutex;
+        std::condition_variable changed;
+        std::condition_variable drained;
+        std::thread worker;
+        Clock::time_point nextSendAt{};
+        UdpSenderStats::ViewerLane stats;
+        bool stop = false;
+        bool inFlight = false;
+        bool suspended = false;
+        bool hostDisconnected = false;
+        bool awaitingKeyframe = false;
+        uint32_t consecutiveErrors = 0;
     };
 
     std::vector<std::byte> BuildDatagram(
@@ -165,7 +202,16 @@ private:
         uint64_t packetId,
         const UdpAudioPacket& packet);
     void WorkerLoop();
+    void AdditionalWorkerLoop(AdditionalLane* lane);
     void SendDatagramBytes(const std::vector<std::byte>& datagram);
+    bool SendAdditionalDatagramBytes(AdditionalLane& lane, const std::vector<std::byte>& datagram);
+    void StartAdditionalLaneLocked(uint32_t group, const std::vector<std::byte>& address);
+    void StopAdditionalLanes();
+    void QueueAdditionalDatagrams(
+        const std::vector<PendingDatagram>& datagrams,
+        PendingDatagramKind kind,
+        uint64_t payloadBytes);
+    void UpdateAdditionalLaneStatsLocked(AdditionalLane& lane, Clock::time_point now);
     [[nodiscard]] Clock::duration PacingDelayForBytes(uint64_t wireBytes) const;
     bool EnforceLiveQueueDelayLocked(Clock::time_point now);
     bool DropOldestQueuedMediaLocked(PendingDatagramKind kind);
@@ -216,8 +262,10 @@ private:
     std::vector<std::byte> address_;
     std::vector<GroupedAddress> additionalAddresses_;
     std::vector<GroupedAddress> natProbeAddresses_;
+    std::vector<std::unique_ptr<AdditionalLane>> additionalLanes_;
     std::shared_ptr<std::vector<std::vector<std::byte>>> cachedSendAddresses_;
     std::vector<UdpSenderStats::FeedbackPeer> feedbackPeers_;
+    std::vector<Clock::time_point> feedbackPeerReceivedAt_;
     int addressLength_ = 0;
     UdpSenderConfig config_{};
     UdpSenderStats stats_{};
@@ -248,6 +296,9 @@ private:
     std::function<void(const std::string& endpoint, const udp_protocol::ControlMessage&)> onControl_;
     std::vector<ControlPeer> controlPeers_;
     bool stopWorker_ = false;
+    bool primarySuspended_ = false;
+    bool primaryHostDisconnected_ = false;
+    std::string primarySuspendReason_;
     bool datagramInFlight_ = false;
     bool sendAddressesDirty_ = true;
     bool winsockStarted_ = false;

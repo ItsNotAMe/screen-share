@@ -147,6 +147,18 @@ uint64_t windowHandleFromSourceValue(const QString& value)
 
 QString viewerHealthText(const screenshare::SessionViewer& viewer)
 {
+    switch (viewer.state) {
+    case screenshare::ViewerState::Connecting:
+        return QStringLiteral("Connecting");
+    case screenshare::ViewerState::Recovering:
+        return QStringLiteral("Recovering");
+    case screenshare::ViewerState::Degraded:
+        return QStringLiteral("Degraded");
+    case screenshare::ViewerState::Disconnected:
+        return QStringLiteral("Disconnected");
+    case screenshare::ViewerState::Live:
+        break;
+    }
     if (viewer.health.empty()) {
         return viewer.hasFeedback ? QStringLiteral("Good") : QStringLiteral("Connecting");
     }
@@ -161,7 +173,9 @@ QString viewerHealthText(const screenshare::SessionViewer& viewer)
 int activeViewerCount(const std::vector<screenshare::SessionViewer>& viewers)
 {
     return static_cast<int>(std::count_if(viewers.begin(), viewers.end(), [](const screenshare::SessionViewer& viewer) {
-        return viewer.hasFeedback || viewer.activeNow;
+        return viewer.state == screenshare::ViewerState::Live ||
+               viewer.state == screenshare::ViewerState::Recovering ||
+               viewer.state == screenshare::ViewerState::Degraded;
     }));
 }
 
@@ -755,7 +769,9 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
     auto* layout = new QHBoxLayout(row);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(10);
-    layout->addWidget(textLabel(viewer.hasFeedback ? "●" : "○", viewer.hasFeedback ? "ActiveViewerDot" : "ActiveMuted"));
+    const bool connected = viewer.state != screenshare::ViewerState::Connecting &&
+        viewer.state != screenshare::ViewerState::Disconnected;
+    layout->addWidget(textLabel(connected ? "●" : "○", connected ? "ActiveViewerDot" : "ActiveMuted"));
     layout->addWidget(iconLabel("viewers", 22, QStringLiteral("#b7c5c1")));
     const QString name = !viewer.name.empty() ?
         QString::fromStdString(viewer.name) :
@@ -771,7 +787,7 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
     // Per-input-type control toggles. Use clicked() (not toggled()) so that
     // programmatically syncing the checked state during a list rebuild does not
     // re-issue grant requests.
-    const std::string endpoint = viewer.endpoint;
+    const std::string viewerId = viewer.id;
     auto makeControlToggle = [&](const char* iconName, const QString& tooltip, uint32_t bit, bool enabled) {
         auto* toggle = new QPushButton;
         toggle->setObjectName("ViewerControlToggle");
@@ -792,11 +808,11 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
         }
         return toggle;
     };
-    auto* mouseToggle = makeControlToggle("mouse", "Allow mouse control", screenshare::ControlCapabilityMouse, true);
-    auto* keyboardToggle = makeControlToggle("keyboard", "Allow keyboard control", screenshare::ControlCapabilityKeyboard, true);
+    auto* mouseToggle = makeControlToggle("mouse", "Allow mouse control", screenshare::ControlCapabilityMouse, connected);
+    auto* keyboardToggle = makeControlToggle("keyboard", "Allow keyboard control", screenshare::ControlCapabilityKeyboard, connected);
     auto* gamepadToggle = makeControlToggle("gamepad", "Gamepad control is coming in a future version", screenshare::ControlCapabilityGamepad, false);
 
-    auto applyControl = [this, endpoint, mouseToggle, keyboardToggle]() {
+    auto applyControl = [this, viewerId, mouseToggle, keyboardToggle]() {
         uint32_t capabilities = 0;
         if (mouseToggle->isChecked()) {
             capabilities |= screenshare::ControlCapabilityMouse;
@@ -813,7 +829,7 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
             return;
         }
         if (backend_ != nullptr) {
-            backend_->setViewerControl(endpoint, capabilities);
+            backend_->setViewerControl(viewerId, capabilities);
         }
     };
     connect(mouseToggle, &QPushButton::clicked, this, [applyControl](bool) { applyControl(); });
@@ -823,6 +839,22 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
     layout->addWidget(gamepadToggle);
 
     layout->addWidget(textLabel(viewerHealthText(viewer), viewer.hasFeedback ? "ActiveGoodText" : "ActiveMuted"));
+    auto* disconnect = iconButton("", "ActiveSecondaryButton", "remove");
+    disconnect->setFixedSize(34, 28);
+    disconnect->setToolTip(QStringLiteral("Disconnect this viewer"));
+    disconnect->setEnabled(viewer.state != screenshare::ViewerState::Disconnected);
+    connect(disconnect, &QPushButton::clicked, this, [this, viewerId, name] {
+        const QString promptName = name.isEmpty() ? QStringLiteral("this viewer") : name;
+        if (QMessageBox::question(
+                this,
+                QStringLiteral("Disconnect viewer"),
+                QStringLiteral("Disconnect %1 from this share?").arg(promptName),
+                QMessageBox::Yes | QMessageBox::Cancel,
+                QMessageBox::Cancel) == QMessageBox::Yes && backend_ != nullptr) {
+            backend_->disconnectViewer(viewerId);
+        }
+    });
+    layout->addWidget(disconnect);
     return row;
 }
 

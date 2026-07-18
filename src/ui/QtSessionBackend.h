@@ -44,6 +44,7 @@ public:
     void requestControl(uint32_t capabilities);
     void releaseControl();
     void setViewerControl(const std::string& viewerId, uint32_t capabilities);
+    void disconnectViewer(const std::string& viewerId);
     screenshare::SessionStatus currentStatus() const;
     std::vector<screenshare::SessionDisplayInfo> listDisplays(QString* errorMessage = nullptr);
     std::vector<screenshare::SessionWindowInfo> listWindows(QString* errorMessage = nullptr);

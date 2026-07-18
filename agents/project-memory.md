@@ -215,7 +215,9 @@ WGC capture by default
   - Runtime send/feedback/flush errors on one target should mark only that target failed and keep the remaining viewers alive.
   - The Qt UI exposes direct multi-target sharing through Nearby multi-select and Manual comma/space-separated target lists.
   - NAT multi-viewer direction is one shared sharer room invite plus an optional watcher response invite list. Share binds the sharer invite's local port, learns watcher endpoints from valid NAT probes, sends outward to any pasted watcher response invite endpoints, and fans out the encoded stream through the same sender socket. Per-watcher sharer-local invite rows are intentionally not the main UI model.
-  - Remaining multi-viewer work is per-viewer health and optional per-viewer bandwidth policy.
+  - v0.2.3 gives every signaling viewer a stable-ID send lane over the shared NAT-bound socket, with independent queue/pacing/drop/error state, GOP-aware recovery, fresh-feedback state, and host disconnect.
+  - Global bitrate reduction now requires agreement from all fresh viewers; one degraded outlier cannot pull down healthy viewers.
+  - `scripts/run-multiviewer-harness.ps1` covers healthy, loss/jitter, slow-consumer, late-join, leave/rejoin, and unreachable scenarios and writes per-viewer CSV/assertions.
 - Live stream controls direction:
   - User reports native/2K looks sharp, but 1080p stretched to a 2K preview is still blurry after sharper scaling. Do not assume bitrate is the cause; after the revamped UI, investigate whether live resolution changes accidentally alter bitrate, encoder quality, chroma/subsampling behavior, scaler path, or preview upscale behavior.
   - After the revamped UI, add a live settings panel that can change parameters without restarting the room: Quality/Bitrate, FPS/adaptive FPS, resolution, encoder preference/preset, audio device, and audio mute.
@@ -229,11 +231,11 @@ WGC capture by default
   - Optional room passwords are verified by the Worker over HTTPS with a salted verifier stored in the Durable Object, then the native app also mixes the typed password into the hidden room access key before UDP key derivation.
   - Native C++ diagnostic integration started with `src/transport/SignalingClient.*` plus `--signal-health`, `--signal-join`, `--signal-peers`, `--signal-heartbeat`, and `--signal-leave`.
   - Live Share/Watch CLI integration is in progress: `--watch PORT --signal-room ROOM` publishes the watcher candidate and turns returned peers into NAT probe targets; `--share-room PORT --signal-room ROOM` publishes the sharer candidate and turns returned peers into UDP send targets. `--signal-server URL` overrides the built-in Worker.
-  - Runtime live signaling now periodically rejoins the room as heartbeat/polling. Share can start before Watch and wait for peers; Watch can add newly discovered room peers as NAT probe targets; Share can add newly discovered watcher candidates to the active sender socket.
+  - Runtime live signaling uses authenticated heartbeat/peer reads plus WebSocket events; it re-announces only when local metadata changes. Share can start before Watch and wait for peers; Watch can add newly discovered room peers as NAT probe targets; Share can add newly discovered watcher candidates to the active sender socket.
   - The UI default Internet path now uses the built-in Worker `https://screenshare-signaling.bit-yeet.workers.dev`: Share has Room ID, friendly Name, optional Password, and Port, and copies a short `screenshare-room-v1;room=...` link; Watch can pick an active room from `GET /rooms` or paste the link. The engine receives the room access key from signaling during join and uses it as the hidden UDP access code, optionally mixed with the room password.
   - `GET /rooms` returns directory Durable Object-backed active-room summaries for browse/debug views, and verifies each listed room against its room Durable Object so stale entries do not stay visible in the API. `GET /rooms/:roomId/summary` returns one safe summary or `null`.
   - Live signaling publishes a `host` local candidate alongside the `srflx` STUN candidate when available, so same-PC and same-LAN room tests can use the direct local path instead of relying on router hairpin behavior.
   - Manual NAT invite fields still exist behind a fallback checkbox.
   - `ScreenShareUi` runs `windeployqt` through `cmake/RunWindeployQt.cmake`; the script always verifies/copies the current Qt DLLs/plugins and resolved MinGW runtime deps so the release UI does not keep stale mismatched Qt files.
   - Keep the UI runtime consistently UCRT (`C:/msys64/ucrt64/bin`); mixing `mingw64` and `ucrt64` Qt/ICU/libstdc++ DLLs causes Windows entry-point loader errors before the app starts.
-  - Remaining signaling TODO is real multi-computer/multi-viewer validation and per-viewer health.
+  - Remaining signaling TODO is real multi-computer/multi-viewer validation across separate NATs.

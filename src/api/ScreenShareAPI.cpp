@@ -287,18 +287,21 @@ bool CounterAdvanced(uint64_t current, uint64_t previous)
     return current > previous || (current < previous && current > 0);
 }
 
-SessionState ViewerStateFromLog(const std::string& state, bool hasFeedback, bool activeNow)
+ViewerState ViewerStateFromLog(const std::string& state, bool, bool)
 {
-    if (state == "failed") {
-        return SessionState::Failed;
+    if (state == "live") {
+        return ViewerState::Live;
     }
-    if (activeNow) {
-        return SessionState::Live;
+    if (state == "recovering") {
+        return ViewerState::Recovering;
     }
-    if (hasFeedback) {
-        return SessionState::Disconnected;
+    if (state == "degraded") {
+        return ViewerState::Degraded;
     }
-    return SessionState::Connecting;
+    if (state == "disconnected" || state == "failed") {
+        return ViewerState::Disconnected;
+    }
+    return ViewerState::Connecting;
 }
 
 bool LogFieldPositive(const std::string& line, std::string_view field)
@@ -354,6 +357,7 @@ public:
     void RequestControl(uint32_t capabilities);
     void ReleaseControl();
     void SetViewerControl(const std::string& viewerId, uint32_t capabilities);
+    void DisconnectViewer(const std::string& viewerId);
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();
     std::vector<SessionWindowInfo> ListWindows();
@@ -516,6 +520,13 @@ void ScreenShareSession::Impl::ReleaseControl()
 void ScreenShareSession::Impl::SetViewerControl(const std::string& viewerId, uint32_t capabilities)
 {
     runtimeControl_.RequestViewerControl(RuntimeViewerControlRequest{viewerId, capabilities});
+}
+
+void ScreenShareSession::Impl::DisconnectViewer(const std::string& viewerId)
+{
+    if (!viewerId.empty()) {
+        runtimeControl_.RequestViewerDisconnect(RuntimeViewerDisconnectRequest{viewerId});
+    }
 }
 
 SessionStatus ScreenShareSession::Impl::GetStatus() const
@@ -1245,6 +1256,7 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
 
     if (line.find("signaling_live_sender_peer=removed") != std::string::npos) {
         const std::string endpoint = LogFieldValue(line, "endpoint");
+        const std::string peerId = LogTokenDecode(LogFieldValue(line, "peer_id"));
         if (endpoint.empty()) {
             return;
         }
@@ -1255,7 +1267,7 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
             const auto oldSize = viewers_.size();
             viewers_.erase(
                 std::remove_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
-                    return viewer.endpoint == endpoint;
+                    return !peerId.empty() ? viewer.id == peerId : viewer.endpoint == endpoint;
                 }),
                 viewers_.end());
             removed = viewers_.size() != oldSize;
@@ -1279,6 +1291,7 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
     }
 
     const std::string endpoint = LogFieldValue(line, "viewer_endpoint");
+    const std::string viewerId = LogTokenDecode(LogFieldValue(line, "viewer_id"));
     if (endpoint.empty()) {
         return;
     }
@@ -1291,6 +1304,17 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
 
     {
         std::scoped_lock lock(mutex_);
+        if (!viewerId.empty()) {
+            // A restarted viewer commonly reuses the same UDP endpoint with a
+            // new signaling/session ID. One endpoint cannot represent two live
+            // viewers, so replace the stale row even if its delayed leave event
+            // has not reached the API parser yet.
+            viewers_.erase(
+                std::remove_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
+                    return viewer.endpoint == endpoint && viewer.id != viewerId;
+                }),
+                viewers_.end());
+        }
         if (!hasFeedback && group >= 0) {
             const bool groupAlreadyConnected = std::any_of(
                 viewers_.begin(),
@@ -1304,6 +1328,9 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
         }
 
         auto viewerIt = std::find_if(viewers_.begin(), viewers_.end(), [&](const SessionViewer& viewer) {
+            if (!viewerId.empty()) {
+                return viewer.id == viewerId;
+            }
             return viewer.group == group && viewer.endpoint == endpoint;
         });
         if (viewerIt == viewers_.end()) {
@@ -1311,7 +1338,7 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
             viewer.group = group;
             viewer.name = name;
             viewer.endpoint = endpoint;
-            viewer.id = std::to_string(group) + ":" + endpoint;
+            viewer.id = viewerId.empty() ? std::to_string(group) + ":" + endpoint : viewerId;
             viewers_.push_back(std::move(viewer));
             viewerIt = std::prev(viewers_.end());
         }
@@ -1319,6 +1346,11 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
         if (!name.empty()) {
             viewerIt->name = name;
         }
+        if (!viewerId.empty()) {
+            viewerIt->id = viewerId;
+        }
+        viewerIt->group = group;
+        viewerIt->endpoint = endpoint;
         activeNow = CounterAdvanced(feedbackPackets, viewerIt->feedbackPackets);
         viewerIt->feedbackPackets = feedbackPackets;
         viewerIt->hasFeedback = hasFeedback;
@@ -1327,6 +1359,12 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
         viewerIt->sessionFingerprint = LogFieldValue(line, "viewer_feedback_session");
         viewerIt->pendingDatagrams = ParseUint64(LogFieldValue(line, "viewer_pending")).value_or(0);
         viewerIt->queueDelayMs = ParseUint64(LogFieldValue(line, "viewer_queue_ms")).value_or(0);
+        viewerIt->datagramsSent = ParseUint64(LogFieldValue(line, "viewer_datagrams_sent")).value_or(0);
+        viewerIt->wireBytesSent = ParseUint64(LogFieldValue(line, "viewer_wire_bytes_sent")).value_or(0);
+        viewerIt->datagramsDropped = ParseUint64(LogFieldValue(line, "viewer_drops")).value_or(0);
+        viewerIt->socketErrors = ParseUint64(LogFieldValue(line, "viewer_socket_errors")).value_or(0);
+        viewerIt->feedbackAgeMs = ParseUint64(LogFieldValue(line, "viewer_feedback_age_ms")).value_or(0);
+        viewerIt->joinToFirstFrameMs = ParseUint64(LogFieldValue(line, "viewer_join_to_first_frame_ms")).value_or(0);
         viewerIt->completedFrames = ParseUint64(LogFieldValue(line, "viewer_feedback_completed_frames")).value_or(0);
         viewerIt->decodeResyncs = ParseUint64(LogFieldValue(line, "viewer_feedback_resyncs")).value_or(0);
         viewerIt->state = ViewerStateFromLog(LogFieldValue(line, "viewer_state"), hasFeedback, activeNow);
@@ -1576,6 +1614,11 @@ void ScreenShareSession::ReleaseControl()
 void ScreenShareSession::SetViewerControl(const std::string& viewerId, uint32_t capabilities)
 {
     impl_->SetViewerControl(viewerId, capabilities);
+}
+
+void ScreenShareSession::DisconnectViewer(const std::string& viewerId)
+{
+    impl_->DisconnectViewer(viewerId);
 }
 
 SessionStatus ScreenShareSession::GetStatus() const

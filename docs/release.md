@@ -22,7 +22,7 @@ Generate the manifest once to calculate the package URL and SHA-256 signing fiel
 
 ```powershell
 .\scripts\create-update-manifest.ps1 `
-  -Version 0.2.2 `
+  -Version 0.2.3 `
   -ZipPath .\build\release\ScreenShare-release-windows-x64.zip `
   -OutputPath .\build\release\screenshare-update.json `
   -Notes "Auto-update support","Portable Windows package"
@@ -44,11 +44,11 @@ Never publish the unsigned intermediate manifest. The desktop updater rejects it
 ## Publish
 
 ```powershell
-gh release create v0.2.2 `
+gh release create v0.2.3 `
   .\build\release\ScreenShare-release-windows-x64.zip `
   .\build\release\screenshare-update.json `
-  --title "ScreenShare 0.2.2" `
-  --notes "Window-share mouse control now follows the selected window and pauses safely when it loses focus."
+  --title "ScreenShare 0.2.3" `
+  --notes "Multi-viewer rooms now isolate each viewer's send queue, recovery, health, and disconnect lifecycle."
 ```
 
 For an existing tag/release, replace `create` with `upload --clobber`.

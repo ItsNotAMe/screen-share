@@ -31,6 +31,7 @@ public:
     void RequestControl(uint32_t capabilities);
     void ReleaseControl();
     void SetViewerControl(const std::string& viewerId, uint32_t capabilities);
+    void DisconnectViewer(const std::string& viewerId);
 
     SessionStatus GetStatus() const;
     std::vector<SessionDisplayInfo> ListDisplays();

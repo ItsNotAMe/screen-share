@@ -265,6 +265,7 @@ bool IsKnownControlCommand(uint16_t command)
     case ControlCommandType::GrantControl:
     case ControlCommandType::DenyControl:
     case ControlCommandType::RevokeControl:
+    case ControlCommandType::DisconnectViewer:
     case ControlCommandType::MouseMove:
     case ControlCommandType::MouseButton:
     case ControlCommandType::MouseScroll:
@@ -291,6 +292,8 @@ const char* ControlCommandName(ControlCommandType command)
         return "deny_control";
     case ControlCommandType::RevokeControl:
         return "revoke_control";
+    case ControlCommandType::DisconnectViewer:
+        return "disconnect_viewer";
     case ControlCommandType::MouseMove:
         return "mouse_move";
     case ControlCommandType::MouseButton:
