@@ -12,10 +12,12 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <optional>
 
 class QLabel;
 class QPushButton;
 class QSlider;
+class QComboBox;
 class QTimer;
 class QHBoxLayout;
 class QVBoxLayout;
@@ -63,6 +65,9 @@ private:
     void handleHostLeft();
     void exitToHomeAfterHostLeft();
     void handleControlState(uint32_t capabilities);
+    void pollGamepad();
+    void refreshGamepadSlots();
+    void sendNeutralGamepad();
     void toggleControlRequest();
     void leaveRoom();
     void handleFinished(const QtSessionBackend::FinishInfo& info);
@@ -99,6 +104,13 @@ private:
     QWidget* controlStatusRow_ = nullptr;
     QLabel* controlMouseIcon_ = nullptr;
     QLabel* controlKeyboardIcon_ = nullptr;
+    QLabel* controlGamepadIcon_ = nullptr;
+    QComboBox* gamepadSelector_ = nullptr;
+    QTimer* gamepadTimer_ = nullptr;
+    QElapsedTimer gamepadClock_;
+    std::optional<screenshare::RemoteGamepadState> lastGamepadState_;
+    qint64 lastGamepadSentMs_ = -1;
+    int gamepadScanTicks_ = 0;
     uint32_t controlCapabilities_ = 0;
     uint64_t lastBitrateBytes_ = 0;
     qint64 lastBitrateSampleMs_ = -1;

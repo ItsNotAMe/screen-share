@@ -985,12 +985,17 @@ int main(int argc, char** argv)
         if (sessionBackend == nullptr) {
             return;
         }
-        const std::string controller = sessionBackend->currentStatus().controllerViewerId;
-        if (controller.empty()) {
-            return;
+        const auto status = sessionBackend->currentStatus();
+        bool revoked = false;
+        for (const auto& viewer : status.viewers) {
+            if (viewer.grantedCapabilities != 0 && !viewer.id.empty()) {
+                sessionBackend->setViewerControl(viewer.id, 0);
+                revoked = true;
+            }
         }
-        sessionBackend->setViewerControl(controller, 0);
-        window.showToast(QStringLiteral("Remote control revoked (Ctrl+Alt+Shift+F12)"));
+        if (revoked) {
+            window.showToast(QStringLiteral("Remote control revoked (Ctrl+Alt+Shift+F12)"));
+        }
     });
     auto* screenAwakeGuard = new ScreenAwakeGuard(&window);
     HomeWindow* homeWindow = nullptr;

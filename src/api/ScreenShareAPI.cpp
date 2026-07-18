@@ -403,6 +403,11 @@ private:
     std::string natStatus_;
     std::string natHint_;
     std::string controllerViewerId_;        // host: endpoint of the controlling viewer
+    std::string mouseControllerViewerId_;
+    std::string keyboardControllerViewerId_;
+    bool gamepadBackendAvailable_ = false;
+    std::string gamepadBackendMessage_;
+    uint32_t gamepadRemoteCapacity_ = 0;
     uint32_t localControlCapabilities_ = 0;  // viewer: input types the host granted us
     bool previewClosedNotified_ = false;
     bool hostLeftNotified_ = false;
@@ -625,6 +630,13 @@ void ScreenShareSession::Impl::StartRunner(
             watchAudioPackets_ = 0;
             natStatus_.clear();
             natHint_.clear();
+            controllerViewerId_.clear();
+            mouseControllerViewerId_.clear();
+            keyboardControllerViewerId_.clear();
+            gamepadBackendAvailable_ = false;
+            gamepadBackendMessage_.clear();
+            gamepadRemoteCapacity_ = 0;
+            localControlCapabilities_ = 0;
             previewClosedNotified_ = false;
             hostLeftNotified_ = false;
             stopRequested_ = false;
@@ -1216,6 +1228,20 @@ void ScreenShareSession::Impl::HandleDiagnosticLogLine(const std::string& line)
 
 void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
 {
+    if (line.find("gamepad_backend") != std::string::npos) {
+        const bool available = LogFieldValue(line, "available") == "yes";
+        const std::string message = LogTokenDecode(LogFieldValue(line, "message"));
+        const uint32_t capacity = static_cast<uint32_t>(
+            ParseUint64(LogFieldValue(line, "remote_capacity")).value_or(0));
+        {
+            std::scoped_lock lock(mutex_);
+            gamepadBackendAvailable_ = available;
+            gamepadBackendMessage_ = message;
+            gamepadRemoteCapacity_ = capacity;
+        }
+        EmitStatus(SessionEventType::GamepadStatusChanged, "Gamepad backend updated");
+        return;
+    }
     if (line.find("remote_control_request") != std::string::npos) {
         const std::string endpoint = LogFieldValue(line, "endpoint");
         const uint32_t caps = static_cast<uint32_t>(ParseUint64(LogFieldValue(line, "caps")).value_or(0));
@@ -1248,7 +1274,21 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
                 it->requestingControl = false;
                 viewerId = it->id;
             }
-            controllerViewerId_ = caps != 0 ? endpoint : std::string();
+            if ((caps & ControlCapabilityMouse) != 0) {
+                mouseControllerViewerId_ = viewerId;
+            } else if (mouseControllerViewerId_ == viewerId) {
+                mouseControllerViewerId_.clear();
+            }
+            if ((caps & ControlCapabilityKeyboard) != 0) {
+                keyboardControllerViewerId_ = viewerId;
+            } else if (keyboardControllerViewerId_ == viewerId) {
+                keyboardControllerViewerId_.clear();
+            }
+            const auto activeControllers = static_cast<size_t>(std::count_if(
+                viewers_.begin(), viewers_.end(), [](const SessionViewer& viewer) {
+                    return viewer.grantedCapabilities != 0;
+                }));
+            controllerViewerId_ = activeControllers == 1 ? viewerId : std::string();
         }
         EmitControlEvent(SessionEventType::ControlStateChanged, viewerId, caps, "Control updated");
         return;
@@ -1271,8 +1311,14 @@ void ScreenShareSession::Impl::HandleShareLogLine(const std::string& line)
                 }),
                 viewers_.end());
             removed = viewers_.size() != oldSize;
-            if (controllerViewerId_ == endpoint) {
+            if (controllerViewerId_ == endpoint || (!peerId.empty() && controllerViewerId_ == peerId)) {
                 controllerViewerId_.clear();
+            }
+            if (!peerId.empty() && mouseControllerViewerId_ == peerId) {
+                mouseControllerViewerId_.clear();
+            }
+            if (!peerId.empty() && keyboardControllerViewerId_ == peerId) {
+                keyboardControllerViewerId_.clear();
             }
             if (removed && viewers_.empty() && !IsTerminalSessionState(state_) && state_ != SessionState::Stopping) {
                 state_ = SessionState::Connecting;
@@ -1551,6 +1597,16 @@ SessionStatus ScreenShareSession::Impl::BuildStatusLocked() const
     status.natHint = natHint_;
     status.controllerViewerId = controllerViewerId_;
     status.controlCapabilities = localControlCapabilities_;
+    status.mouseControllerViewerId = mouseControllerViewerId_;
+    status.keyboardControllerViewerId = keyboardControllerViewerId_;
+    status.gamepadBackendAvailable = gamepadBackendAvailable_;
+    status.gamepadBackendMessage = gamepadBackendMessage_;
+    status.gamepadRemoteCapacity = gamepadRemoteCapacity_;
+    for (const auto& viewer : viewers_) {
+        if ((viewer.grantedCapabilities & ControlCapabilityGamepad) != 0) {
+            status.gamepadControllerViewerIds.push_back(viewer.id);
+        }
+    }
     return status;
 }
 

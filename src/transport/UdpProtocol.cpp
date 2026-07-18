@@ -270,11 +270,24 @@ bool IsKnownControlCommand(uint16_t command)
     case ControlCommandType::MouseButton:
     case ControlCommandType::MouseScroll:
     case ControlCommandType::KeyEvent:
+    case ControlCommandType::GamepadState:
         return true;
     case ControlCommandType::Unknown:
     default:
         return false;
     }
+}
+
+uint32_t PackSignedPair(int16_t first, int16_t second)
+{
+    return (static_cast<uint32_t>(static_cast<uint16_t>(first)) << 16) |
+        static_cast<uint16_t>(second);
+}
+
+void UnpackSignedPair(uint32_t packed, int16_t& first, int16_t& second)
+{
+    first = static_cast<int16_t>(packed >> 16);
+    second = static_cast<int16_t>(packed & 0xFFFFU);
 }
 
 } // namespace
@@ -302,6 +315,8 @@ const char* ControlCommandName(ControlCommandType command)
         return "mouse_scroll";
     case ControlCommandType::KeyEvent:
         return "key_event";
+    case ControlCommandType::GamepadState:
+        return "gamepad_state";
     case ControlCommandType::Unknown:
     default:
         return "unknown";
@@ -319,16 +334,27 @@ std::vector<std::byte> BuildControlDatagram(const ControlMessage& message)
     packet.sessionFingerprint = ToNetwork64(message.sessionFingerprint);
     packet.accessCodeFingerprint = ToNetwork64(message.accessCodeFingerprint);
     packet.command = ToNetwork16(static_cast<uint16_t>(message.command));
-    packet.button = ToNetwork16(message.button);
-    packet.key = ToNetwork16(message.key);
-    packet.scancode = ToNetwork16(message.scancode);
-    packet.modifiers = ToNetwork16(message.modifiers);
-    packet.capabilities = ToNetwork32(message.capabilities);
-    packet.mouseX = ToNetwork32(EncodeControlNorm(message.mouseX));
-    packet.mouseY = ToNetwork32(EncodeControlNorm(message.mouseY));
-    packet.scrollX = static_cast<int32_t>(ToNetwork32(static_cast<uint32_t>(message.scrollX)));
-    packet.scrollY = static_cast<int32_t>(ToNetwork32(static_cast<uint32_t>(message.scrollY)));
-    packet.pressed = ToNetwork32(message.pressed ? 1U : 0U);
+    if (message.command == ControlCommandType::GamepadState) {
+        packet.button = ToNetwork16(message.gamepad.schemaVersion);
+        packet.key = ToNetwork16(message.gamepad.controllerSlot);
+        packet.scancode = ToNetwork16(message.gamepad.buttons);
+        packet.modifiers = ToNetwork16(
+            (static_cast<uint16_t>(message.gamepad.leftTrigger) << 8) |
+            message.gamepad.rightTrigger);
+        packet.capabilities = ToNetwork32(PackSignedPair(message.gamepad.thumbLX, message.gamepad.thumbLY));
+        packet.mouseX = ToNetwork32(PackSignedPair(message.gamepad.thumbRX, message.gamepad.thumbRY));
+    } else {
+        packet.button = ToNetwork16(message.button);
+        packet.key = ToNetwork16(message.key);
+        packet.scancode = ToNetwork16(message.scancode);
+        packet.modifiers = ToNetwork16(message.modifiers);
+        packet.capabilities = ToNetwork32(message.capabilities);
+        packet.mouseX = ToNetwork32(EncodeControlNorm(message.mouseX));
+        packet.mouseY = ToNetwork32(EncodeControlNorm(message.mouseY));
+        packet.scrollX = static_cast<int32_t>(ToNetwork32(static_cast<uint32_t>(message.scrollX)));
+        packet.scrollY = static_cast<int32_t>(ToNetwork32(static_cast<uint32_t>(message.scrollY)));
+        packet.pressed = ToNetwork32(message.pressed ? 1U : 0U);
+    }
 
     std::vector<std::byte> datagram(sizeof(packet));
     std::memcpy(datagram.data(), &packet, sizeof(packet));
@@ -371,6 +397,32 @@ std::optional<ControlMessage> ParseControlDatagram(std::span<const std::byte> da
     message.scancode = FromNetwork16(packet.scancode);
     message.modifiers = FromNetwork16(packet.modifiers);
     message.pressed = FromNetwork32(packet.pressed) != 0;
+    if (message.command == ControlCommandType::GamepadState) {
+        const uint16_t schemaVersion = FromNetwork16(packet.button);
+        const uint16_t controllerSlot = FromNetwork16(packet.key);
+        const uint16_t buttons = FromNetwork16(packet.scancode);
+        const uint16_t triggers = FromNetwork16(packet.modifiers);
+        if (schemaVersion != GamepadStateSchemaVersion ||
+            controllerSlot > 3 ||
+            (buttons & ~GamepadButtonMask) != 0 ||
+            packet.reserved != 0 ||
+            packet.mouseY != 0 ||
+            packet.scrollX != 0 ||
+            packet.scrollY != 0 ||
+            packet.pressed != 0 ||
+            packet.reserved2 != 0) {
+            return std::nullopt;
+        }
+        message.gamepad.schemaVersion = static_cast<uint8_t>(schemaVersion);
+        message.gamepad.controllerSlot = static_cast<uint8_t>(controllerSlot);
+        message.gamepad.buttons = buttons;
+        message.gamepad.leftTrigger = static_cast<uint8_t>(triggers >> 8);
+        message.gamepad.rightTrigger = static_cast<uint8_t>(triggers & 0xFFU);
+        UnpackSignedPair(
+            FromNetwork32(packet.capabilities), message.gamepad.thumbLX, message.gamepad.thumbLY);
+        UnpackSignedPair(
+            FromNetwork32(packet.mouseX), message.gamepad.thumbRX, message.gamepad.thumbRY);
+    }
     return message;
 }
 

@@ -2,6 +2,7 @@
 #include <bcrypt.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cwchar>
@@ -68,6 +69,12 @@ std::wstring argumentValue(const std::vector<std::wstring>& arguments, std::wstr
         }
     }
     return {};
+}
+
+bool hasArgument(const std::vector<std::wstring>& arguments, std::wstring_view name)
+{
+    return std::find(arguments.begin() + std::min<size_t>(1, arguments.size()), arguments.end(), name) !=
+        arguments.end();
 }
 
 std::wstring powershellLiteral(const fs::path& path)
@@ -293,6 +300,28 @@ void restartApp(const fs::path& restartExe, const fs::path& workingDir)
         SW_SHOWNORMAL);
 }
 
+bool launchInstallerUpdate(const fs::path& packagePath)
+{
+    const std::wstring workingDirectory = packagePath.parent_path().wstring();
+    SHELLEXECUTEINFOW executeInfo = {};
+    executeInfo.cbSize = sizeof(executeInfo);
+    executeInfo.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    executeInfo.lpVerb = L"runas";
+    executeInfo.lpFile = packagePath.c_str();
+    executeInfo.lpParameters =
+        L"/SILENT /NORESTART /CLOSEAPPLICATIONS /RESTARTSCREENSHARE";
+    executeInfo.lpDirectory = workingDirectory.c_str();
+    executeInfo.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&executeInfo)) {
+        log(L"Could not launch the verified ScreenShare Setup");
+        return false;
+    }
+    if (executeInfo.hProcess != nullptr) {
+        CloseHandle(executeInfo.hProcess);
+    }
+    return true;
+}
+
 // Streaming SHA-256 of a file, returned as lowercase hex. Empty on any error.
 std::wstring fileSha256Hex(const fs::path& path)
 {
@@ -359,8 +388,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     const fs::path targetDir = argumentValue(arguments, L"--target");
     const fs::path restartExe = argumentValue(arguments, L"--restart");
     const std::wstring expectedSha256 = argumentValue(arguments, L"--sha256");
+    const bool installerUpdate = hasArgument(arguments, L"--installer");
 
-    if (packagePath.empty() || targetDir.empty() || restartExe.empty() || expectedSha256.empty()) {
+    if (packagePath.empty() || expectedSha256.empty() ||
+        (!installerUpdate && (targetDir.empty() || restartExe.empty()))) {
         log(L"Missing required updater arguments");
         return 2;
     }
@@ -381,6 +412,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     if (!equalsIgnoreCaseAscii(fileSha256Hex(packagePath), expectedSha256)) {
         log(L"Package hash mismatch before extraction; aborting update");
         return 7;
+    }
+
+    if (installerUpdate) {
+        return launchInstallerUpdate(packagePath) ? 0 : 8;
     }
 
     wchar_t tempPath[MAX_PATH] = {};

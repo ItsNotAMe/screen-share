@@ -46,17 +46,16 @@ Paste the emitted bytes into `kUpdatePublicKeyXy` and rebuild.
 
 ## 2. Sign each release manifest
 
-The signed message is exactly these three fields joined by newlines (must match
-`assets.portableZip.url` / `.sha256` and the top-level `version` in the
-manifest):
+Each update asset is signed independently. The signed message is exactly these
+three fields joined by newlines (using the selected asset's `url` and `sha256`):
 
 ```
 <version>\n<packageUrl>\n<sha256>
 ```
 
 After generating the unsigned intermediate manifest, use the helper to build
-the exact message, prompt for the encrypted key's passphrase, convert OpenSSL's
-DER signature to raw `R||S`, and add the base64 signature to the manifest:
+each asset's exact message, prompt for the encrypted key's passphrase, convert
+OpenSSL's DER signatures to raw `R||S`, and add them to the manifest:
 
 ```powershell
 .\scripts\sign-update-manifest.ps1 `
@@ -65,9 +64,10 @@ DER signature to raw `R||S`, and add the base64 signature to the manifest:
   -PublicKeyPath "$env:USERPROFILE\.screenshare-release\screenshare-update-public.der"
 ```
 
-The public-key argument makes the helper verify the signature before updating
+The public-key argument makes the helper verify each signature before updating
 the manifest. The lower-level manual process is retained below for recovery or
-use on a separate signing machine.
+use on a separate signing machine. Repeat it once for `portableZip` and once for
+`windowsInstaller`; the two signatures are intentionally not interchangeable.
 
 ```sh
 # message.txt = the three fields, newline-separated, no trailing newline
@@ -85,16 +85,21 @@ print(base64.b64encode(raw).decode())
 PY
 ```
 
-Put the printed base64 string in the manifest as a top-level `"signature"`
-field:
+Put each printed base64 string in its asset's `"signature"` field:
 
 ```json
 {
   "version": "1.4.2",
-  "assets": { "portableZip": { "url": "https://…/pkg.zip", "sha256": "…", "size": 12345 } },
-  "signature": "<base64 R||S>"
+  "assets": {
+    "portableZip": { "url": "https://…/pkg.zip", "sha256": "…", "size": 12345, "signature": "<base64 R||S>" },
+    "windowsInstaller": { "url": "https://…/setup.exe", "sha256": "…", "size": 23456, "signature": "<base64 R||S>" }
+  }
 }
 ```
 
-The `signature` field itself is not part of the signed message, so adding it to
-the manifest does not invalidate the signature.
+Installed copies select only `windowsInstaller`; portable copies select only
+`portableZip`. A valid signature for one asset can never authorize the other.
+
+For compatibility with ScreenShare 0.2.3 and earlier, the signing helper also
+copies the portable signature to the manifest root. New clients use that field
+only as a legacy fallback for `portableZip`, never `windowsInstaller`.

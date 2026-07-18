@@ -1,0 +1,82 @@
+#define AppStage "@SCREENSHARE_INSTALLER_APP_STAGE@"
+#define ControllerSetup "@SCREENSHARE_CONTROLLER_DRIVER_SETUP_INNO@"
+#define ControllerSetupName "@SCREENSHARE_CONTROLLER_DRIVER_SETUP_NAME@"
+
+[Setup]
+AppId={{D6A07487-5E9D-4F48-BBBA-53EF35E49CF4}
+AppName=ScreenShare
+AppVersion=@PROJECT_VERSION@
+AppPublisher=ScreenShare
+DefaultDirName={autopf}\ScreenShare
+DefaultGroupName=ScreenShare
+DisableProgramGroupPage=yes
+LicenseFile=@SCREENSHARE_INSTALLER_LICENSE@
+OutputDir=@SCREENSHARE_INSTALLER_OUTPUT_DIR@
+OutputBaseFilename=@SCREENSHARE_INSTALLER_OUTPUT_BASENAME@
+SetupIconFile=@SCREENSHARE_INSTALLER_ICON@
+UninstallDisplayIcon={app}\ScreenShareUi.exe
+Compression=lzma2/ultra64
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=admin
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=yes
+RestartApplications=no
+ChangesEnvironment=no
+
+[Files]
+Source: "{#AppStage}\*"; DestDir: "{app}"; Excludes: "ScreenShare-package.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "@CMAKE_CURRENT_SOURCE_DIR@/installer/ScreenShare-installed.marker"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#ControllerSetup}"; Flags: dontcopy
+
+[Icons]
+Name: "{autoprograms}\ScreenShare"; Filename: "{app}\ScreenShareUi.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\ScreenShare"; Filename: "{app}\ScreenShareUi.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
+
+[Run]
+Filename: "{app}\ScreenShareUi.exe"; Description: "Launch ScreenShare"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\ScreenShareUi.exe"; Flags: nowait runasoriginaluser skipifnotsilent; Check: RestartAfterSilentUpdate
+
+[Code]
+function RestartAfterSilentUpdate(): Boolean;
+var
+  Index: Integer;
+begin
+  Result := False;
+  for Index := 1 to ParamCount do
+    if CompareText(ParamStr(Index), '/RESTARTSCREENSHARE') = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  SetupPath: String;
+begin
+  Result := '';
+  ExtractTemporaryFile('{#ControllerSetupName}');
+  SetupPath := ExpandConstant('{tmp}\{#ControllerSetupName}');
+
+  if not Exec(SetupPath, '/qn /norestart', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode) then
+  begin
+    Result := 'ScreenShare could not start the controller support installer.';
+    Exit;
+  end;
+
+  if (ResultCode = 1641) or (ResultCode = 3010) then
+  begin
+    NeedsRestart := True;
+    Exit;
+  end;
+
+  if ResultCode <> 0 then
+    Result := Format('Controller support could not be installed (error %d). ScreenShare Setup made no runtime installation changes.', [ResultCode]);
+end;

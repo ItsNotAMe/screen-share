@@ -28,12 +28,16 @@ endfunction()
 file(GLOB package_executables LIST_DIRECTORIES false
     "${INPUT_DIR}/ScreenShare*.exe"
 )
+list(FILTER package_executables EXCLUDE REGEX "Tests?\\.exe$")
+list(FILTER package_executables EXCLUDE REGEX "ScreenShare-Setup-.*\\.exe$")
 list(SORT package_executables)
 foreach(package_executable IN LISTS package_executables)
     copy_package_file("${package_executable}")
 endforeach()
 copy_package_file("${SOURCE_DIR}/README.md")
 copy_package_file("${SOURCE_DIR}/LICENSE")
+copy_package_file("${SOURCE_DIR}/third_party/ViGEm-NOTICE.txt")
+copy_package_file("${INPUT_DIR}/ViGEmClient-LICENSE.txt")
 
 file(GLOB runtime_files LIST_DIRECTORIES false
     "${INPUT_DIR}/*.dll"
@@ -125,6 +129,7 @@ file(WRITE "${STAGING_DIR}/ScreenShare-package.txt"
     "Run ScreenShareUi.exe for the desktop app, or ScreenShare.exe for the command-line tools.\n"
     "The DLLs and plugin folders beside them are runtime dependencies staged by the build.\n"
     "If Windows reports a loader error, delete the old copied folder on the target machine and unpack this zip again.\n"
+    "Portable builds do not install controller drivers; use ScreenShare Setup for ready-to-use controller hosting.\n"
 )
 
 file(REMOVE "${OUTPUT_ZIP}")

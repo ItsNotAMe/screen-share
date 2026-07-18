@@ -9,6 +9,9 @@ param(
     [Parameter(Mandatory = $true, ParameterSetName = "ExistingSignature")]
     [string]$SignatureDerPath,
 
+    [Parameter(ParameterSetName = "ExistingSignature")]
+    [string]$InstallerSignatureDerPath,
+
     [string]$PublicKeyPath,
     [string]$OpenSslPath = "openssl"
 )
@@ -106,57 +109,92 @@ function Convert-DerEcdsaSignatureToRaw {
 $resolvedManifest = (Resolve-Path -LiteralPath $ManifestPath).Path
 $manifest = Get-Content -Raw -LiteralPath $resolvedManifest | ConvertFrom-Json
 $version = [string]$manifest.version
-$packageUrl = [string]$manifest.assets.portableZip.url
-$sha256 = [string]$manifest.assets.portableZip.sha256
-if (-not $version -or -not $packageUrl -or $sha256 -notmatch '^[0-9a-fA-F]{64}$') {
-    throw "Manifest is missing a valid version, portable package URL, or SHA-256."
+if (-not $version) {
+    throw "Manifest is missing a version."
 }
 
-$message = "$version`n$packageUrl`n$($sha256.ToLowerInvariant())"
-$messagePath = Join-Path ([IO.Path]::GetTempPath()) ("screenshare-update-message-" + [Guid]::NewGuid().ToString("N") + ".txt")
-$temporarySignature = $null
+$assetKeys = @("portableZip", "windowsInstaller")
+$signedAssetCount = 0
+$portableSignatureBase64 = $null
+$openssl = Get-Command $OpenSslPath -ErrorAction Stop
+$resolvedPrivateKey = $null
+$resolvedPublicKey = $null
+if ($PSCmdlet.ParameterSetName -eq "PrivateKey") {
+    $resolvedPrivateKey = (Resolve-Path -LiteralPath $PrivateKeyPath).Path
+}
+if ($PublicKeyPath) {
+    $resolvedPublicKey = (Resolve-Path -LiteralPath $PublicKeyPath).Path
+}
 
-try {
-    [IO.File]::WriteAllText($messagePath, $message, [Text.UTF8Encoding]::new($false))
-
-    if ($PSCmdlet.ParameterSetName -eq "PrivateKey") {
-        $openssl = Get-Command $OpenSslPath -ErrorAction Stop
-        $resolvedPrivateKey = (Resolve-Path -LiteralPath $PrivateKeyPath).Path
-        $temporarySignature = Join-Path ([IO.Path]::GetTempPath()) ("screenshare-update-signature-" + [Guid]::NewGuid().ToString("N") + ".der")
-        Write-Host "Signing manifest for version $version. Enter the private-key passphrase when prompted."
-        & $openssl.Source dgst -sha256 -sign $resolvedPrivateKey -out $temporarySignature $messagePath
-        if ($LASTEXITCODE -ne 0) {
-            throw "OpenSSL failed to sign the update manifest."
-        }
-        $resolvedSignature = $temporarySignature
-    } else {
-        $resolvedSignature = (Resolve-Path -LiteralPath $SignatureDerPath).Path
+foreach ($assetKey in $assetKeys) {
+    $asset = $manifest.assets.$assetKey
+    if (-not $asset) {
+        continue
     }
 
-    if ($PublicKeyPath) {
-        $openssl = Get-Command $OpenSslPath -ErrorAction Stop
-        $resolvedPublicKey = (Resolve-Path -LiteralPath $PublicKeyPath).Path
-        & $openssl.Source dgst -sha256 -verify $resolvedPublicKey -keyform DER -signature $resolvedSignature $messagePath
-        if ($LASTEXITCODE -ne 0) {
-            throw "The signature does not match the manifest and public key."
-        }
+    $packageUrl = [string]$asset.url
+    $sha256 = [string]$asset.sha256
+    if (-not $packageUrl -or $sha256 -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "Manifest asset '$assetKey' is missing a valid URL or SHA-256."
     }
 
-    $signatureDer = [IO.File]::ReadAllBytes($resolvedSignature)
-    [byte[]]$signatureRaw = Convert-DerEcdsaSignatureToRaw -Data $signatureDer
-    $signatureBase64 = [Convert]::ToBase64String($signatureRaw)
+    $message = "$version`n$packageUrl`n$($sha256.ToLowerInvariant())"
+    $messagePath = Join-Path ([IO.Path]::GetTempPath()) ("screenshare-update-message-" + [Guid]::NewGuid().ToString("N") + ".txt")
+    $temporarySignature = $null
+    try {
+        [IO.File]::WriteAllText($messagePath, $message, [Text.UTF8Encoding]::new($false))
 
-    $manifest | Add-Member -NotePropertyName signature -NotePropertyValue $signatureBase64 -Force
-    $json = $manifest | ConvertTo-Json -Depth 6
-    [IO.File]::WriteAllText($resolvedManifest, $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+        if ($PSCmdlet.ParameterSetName -eq "PrivateKey") {
+            $temporarySignature = Join-Path ([IO.Path]::GetTempPath()) ("screenshare-update-signature-" + [Guid]::NewGuid().ToString("N") + ".der")
+            Write-Host "Signing $assetKey for version $version. Enter the private-key passphrase when prompted."
+            & $openssl.Source dgst -sha256 -sign $resolvedPrivateKey -out $temporarySignature $messagePath
+            if ($LASTEXITCODE -ne 0) {
+                throw "OpenSSL failed to sign manifest asset '$assetKey'."
+            }
+            $resolvedSignature = $temporarySignature
+        } else {
+            $providedSignature = if ($assetKey -eq "portableZip") { $SignatureDerPath } else { $InstallerSignatureDerPath }
+            if (-not $providedSignature) {
+                throw "InstallerSignatureDerPath is required when windowsInstaller is present."
+            }
+            $resolvedSignature = (Resolve-Path -LiteralPath $providedSignature).Path
+        }
 
-    Write-Host "Signed and updated $resolvedManifest"
-    Write-Host "Version: $version"
-    Write-Host "Package URL: $packageUrl"
-    Write-Host "SHA256: $($sha256.ToLowerInvariant())"
-} finally {
-    Remove-Item -LiteralPath $messagePath -Force -ErrorAction SilentlyContinue
-    if ($temporarySignature) {
-        Remove-Item -LiteralPath $temporarySignature -Force -ErrorAction SilentlyContinue
+        if ($resolvedPublicKey) {
+            & $openssl.Source dgst -sha256 -verify $resolvedPublicKey -keyform DER -signature $resolvedSignature $messagePath
+            if ($LASTEXITCODE -ne 0) {
+                throw "The signature for '$assetKey' does not match the manifest and public key."
+            }
+        }
+
+        $signatureDer = [IO.File]::ReadAllBytes($resolvedSignature)
+        [byte[]]$signatureRaw = Convert-DerEcdsaSignatureToRaw -Data $signatureDer
+        $signatureBase64 = [Convert]::ToBase64String($signatureRaw)
+        $asset | Add-Member -NotePropertyName signature -NotePropertyValue $signatureBase64 -Force
+        if ($assetKey -eq "portableZip") {
+            $portableSignatureBase64 = $signatureBase64
+        }
+        $signedAssetCount++
+
+        Write-Host "Signed asset: $assetKey"
+        Write-Host "  Package URL: $packageUrl"
+        Write-Host "  SHA256: $($sha256.ToLowerInvariant())"
+    } finally {
+        Remove-Item -LiteralPath $messagePath -Force -ErrorAction SilentlyContinue
+        if ($temporarySignature) {
+            Remove-Item -LiteralPath $temporarySignature -Force -ErrorAction SilentlyContinue
+        }
     }
 }
+
+if ($signedAssetCount -eq 0) {
+    throw "Manifest does not contain a portableZip or windowsInstaller asset."
+}
+if ($portableSignatureBase64) {
+    # Preserve the root signature consumed by ScreenShare 0.2.3 and earlier.
+    # New clients treat it only as a legacy fallback for portableZip.
+    $manifest | Add-Member -NotePropertyName signature -NotePropertyValue $portableSignatureBase64 -Force
+}
+$json = $manifest | ConvertTo-Json -Depth 6
+[IO.File]::WriteAllText($resolvedManifest, $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+Write-Host "Signed and updated $resolvedManifest"

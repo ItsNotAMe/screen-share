@@ -3,6 +3,7 @@
 #include "ui/AppShellWindow.h"
 #include "ui/UiStyle.h"
 #include "ui/VideoFrameWidget.h"
+#include "input/XInputGamepad.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QFile>
@@ -21,6 +22,7 @@
 #include <QtGui/QPixmap>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QFrame>
+#include <QtWidgets/QComboBox>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
@@ -177,6 +179,12 @@ QString controlTypesString(uint32_t capabilities)
         }
         types += QStringLiteral("Keyboard");
     }
+    if ((capabilities & screenshare::ControlCapabilityGamepad) != 0) {
+        if (!types.isEmpty()) {
+            types += QStringLiteral(" + ");
+        }
+        types += QStringLiteral("Gamepad");
+    }
     return types;
 }
 
@@ -204,6 +212,13 @@ ActiveWatchWindow::ActiveWatchWindow(QtSessionBackend* backend, Actions actions,
     connect(elapsedTimer_, &QTimer::timeout, this, [this] {
         updateElapsed();
     });
+
+    gamepadTimer_ = new QTimer(this);
+    gamepadTimer_->setTimerType(Qt::PreciseTimer);
+    gamepadTimer_->setInterval(100);
+    connect(gamepadTimer_, &QTimer::timeout, this, [this] { pollGamepad(); });
+    gamepadClock_.start();
+    gamepadTimer_->start();
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -371,10 +386,22 @@ QWidget* ActiveWatchWindow::buildSideStats()
     };
     controlMouseIcon_ = makeControlIcon("You can control the mouse");
     controlKeyboardIcon_ = makeControlIcon("You can control the keyboard");
+    controlGamepadIcon_ = makeControlIcon("You can control a gamepad");
     iconsLayout->addWidget(controlMouseIcon_);
     iconsLayout->addWidget(controlKeyboardIcon_);
+    iconsLayout->addWidget(controlGamepadIcon_);
     iconsLayout->addStretch(1);
     controlRowLayout->addWidget(iconsRow);
+    gamepadSelector_ = new QComboBox;
+    gamepadSelector_->setObjectName("WatchGamepadSelector");
+    gamepadSelector_->setToolTip("Physical controller sent to the host");
+    gamepadSelector_->addItem("No controller", -1);
+    connect(gamepadSelector_, &QComboBox::currentIndexChanged, this, [this](int) {
+        sendNeutralGamepad();
+        lastGamepadState_.reset();
+        lastGamepadSentMs_ = -1;
+    });
+    controlRowLayout->addWidget(gamepadSelector_);
     controlStatusRow_->setVisible(false);
     layout->addWidget(controlStatusRow_);
     return panel;
@@ -988,11 +1015,21 @@ void ActiveWatchWindow::exitToHomeAfterHostLeft()
 
 void ActiveWatchWindow::handleControlState(uint32_t capabilities)
 {
+    const bool hadGamepad = (controlCapabilities_ & screenshare::ControlCapabilityGamepad) != 0;
+    const bool hasGamepad = (capabilities & screenshare::ControlCapabilityGamepad) != 0;
+    if (hadGamepad && !hasGamepad) {
+        sendNeutralGamepad();
+    }
     controlCapabilities_ = capabilities;
     const bool mouse = (capabilities & screenshare::ControlCapabilityMouse) != 0;
     const bool keyboard = (capabilities & screenshare::ControlCapabilityKeyboard) != 0;
+    const bool gamepad = (capabilities & screenshare::ControlCapabilityGamepad) != 0;
     if (videoFrameWidget_ != nullptr) {
-        videoFrameWidget_->setControlCapture(capabilities != 0, mouse, keyboard);
+        videoFrameWidget_->setControlCapture(mouse || keyboard, mouse, keyboard);
+    }
+    gamepadTimer_->setInterval(gamepad ? 8 : 100);
+    if (gamepad) {
+        refreshGamepadSlots();
     }
     const QString types = controlTypesString(capabilities);
     if (controlButton_ != nullptr) {
@@ -1014,12 +1051,90 @@ void ActiveWatchWindow::handleControlState(uint32_t capabilities)
     };
     applyControlIcon(controlMouseIcon_, "mouse", mouse);
     applyControlIcon(controlKeyboardIcon_, "keyboard", keyboard);
+    applyControlIcon(controlGamepadIcon_, "gamepad", gamepad);
+    if (gamepadSelector_ != nullptr) {
+        gamepadSelector_->setVisible(gamepad);
+    }
     if (controlStatusRow_ != nullptr) {
         controlStatusRow_->setVisible(capabilities != 0);
     }
     if (connectionLabel_ != nullptr && capabilities != 0) {
         connectionLabel_->setText(QStringLiteral("You control: %1").arg(types));
     }
+}
+
+void ActiveWatchWindow::refreshGamepadSlots()
+{
+    if (gamepadSelector_ == nullptr) {
+        return;
+    }
+    const int previousSlot = gamepadSelector_->currentData().toInt();
+    const auto connectedSlots = screenshare::XInputGamepad::ConnectedSlots();
+    QSignalBlocker blocker(gamepadSelector_);
+    gamepadSelector_->clear();
+    if (connectedSlots.empty()) {
+        gamepadSelector_->addItem("No controller", -1);
+        return;
+    }
+    int selectedIndex = 0;
+    for (int slot : connectedSlots) {
+        gamepadSelector_->addItem(QStringLiteral("Controller %1").arg(slot + 1), slot);
+        if (slot == previousSlot) {
+            selectedIndex = gamepadSelector_->count() - 1;
+        }
+    }
+    gamepadSelector_->setCurrentIndex(selectedIndex);
+}
+
+void ActiveWatchWindow::sendNeutralGamepad()
+{
+    if (backend_ == nullptr || (controlCapabilities_ & screenshare::ControlCapabilityGamepad) == 0) {
+        return;
+    }
+    screenshare::RemoteInputEvent input;
+    input.kind = screenshare::RemoteInputKind::GamepadState;
+    input.gamepad.controllerSlot = lastGamepadState_.has_value() ?
+        lastGamepadState_->controllerSlot :
+        static_cast<uint8_t>(std::max(0, gamepadSelector_ != nullptr ? gamepadSelector_->currentData().toInt() : 0));
+    backend_->sendRemoteInput(input);
+}
+
+void ActiveWatchWindow::pollGamepad()
+{
+    if ((controlCapabilities_ & screenshare::ControlCapabilityGamepad) == 0) {
+        if (++gamepadScanTicks_ >= 5) {
+            gamepadScanTicks_ = 0;
+            refreshGamepadSlots();
+        }
+        return;
+    }
+    if (++gamepadScanTicks_ >= 63) {
+        gamepadScanTicks_ = 0;
+        refreshGamepadSlots();
+    }
+    const int slot = gamepadSelector_ != nullptr ? gamepadSelector_->currentData().toInt() : -1;
+    const auto state = screenshare::XInputGamepad::ReadState(slot);
+    if (!state.has_value()) {
+        if (lastGamepadState_.has_value()) {
+            sendNeutralGamepad();
+            lastGamepadState_.reset();
+            lastGamepadSentMs_ = gamepadClock_.elapsed();
+        }
+        return;
+    }
+
+    const qint64 now = gamepadClock_.elapsed();
+    if (state == lastGamepadState_ && lastGamepadSentMs_ >= 0 && now - lastGamepadSentMs_ < 100) {
+        return;
+    }
+    screenshare::RemoteInputEvent input;
+    input.kind = screenshare::RemoteInputKind::GamepadState;
+    input.gamepad = *state;
+    if (backend_ != nullptr) {
+        backend_->sendRemoteInput(input);
+    }
+    lastGamepadState_ = state;
+    lastGamepadSentMs_ = now;
 }
 
 void ActiveWatchWindow::toggleControlRequest()
@@ -1032,7 +1147,10 @@ void ActiveWatchWindow::toggleControlRequest()
         handleControlState(0); // optimistic: the host does not ack our own release
         return;
     }
-    backend_->requestControl(screenshare::ControlCapabilityMouse | screenshare::ControlCapabilityKeyboard);
+    backend_->requestControl(
+        screenshare::ControlCapabilityMouse |
+        screenshare::ControlCapabilityKeyboard |
+        screenshare::ControlCapabilityGamepad);
     if (controlButton_ != nullptr) {
         controlButton_->setText(QStringLiteral("Requesting..."));
     }

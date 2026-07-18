@@ -223,6 +223,10 @@ QString viewerListSignature(const screenshare::SessionStatus& status)
     parts << QStringLiteral("%1/%2")
         .arg(activeViewerCount(status.viewers))
         .arg(static_cast<int>(status.viewers.size()));
+    parts << QStringLiteral("gamepad:%1:%2:%3")
+        .arg(status.gamepadBackendAvailable ? 1 : 0)
+        .arg(QString::fromStdString(status.gamepadBackendMessage))
+        .arg(status.gamepadRemoteCapacity);
     for (const auto& viewer : status.viewers) {
         parts << QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9")
             .arg(QString::fromStdString(viewer.id))
@@ -810,9 +814,24 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
     };
     auto* mouseToggle = makeControlToggle("mouse", "Allow mouse control", screenshare::ControlCapabilityMouse, connected);
     auto* keyboardToggle = makeControlToggle("keyboard", "Allow keyboard control", screenshare::ControlCapabilityKeyboard, connected);
-    auto* gamepadToggle = makeControlToggle("gamepad", "Gamepad control is coming in a future version", screenshare::ControlCapabilityGamepad, false);
+    const auto status = backend_ != nullptr ? backend_->currentStatus() : screenshare::SessionStatus{};
+    const bool alreadyHasGamepad =
+        (viewer.grantedCapabilities & screenshare::ControlCapabilityGamepad) != 0;
+    const bool gamepadCapacityAvailable = alreadyHasGamepad ||
+        status.gamepadControllerViewerIds.size() < status.gamepadRemoteCapacity;
+    auto* gamepadToggle = makeControlToggle(
+        "gamepad",
+        status.gamepadBackendAvailable && gamepadCapacityAvailable ?
+            QStringLiteral("Allow an independent virtual gamepad (%1 remote slots maximum)")
+                .arg(status.gamepadRemoteCapacity) :
+            (!gamepadCapacityAvailable ?
+                QStringLiteral("No remote gamepad slots are available") :
+                QString::fromStdString(status.gamepadBackendMessage.empty() ?
+                    "Controller support is unavailable on this host" : status.gamepadBackendMessage)),
+        screenshare::ControlCapabilityGamepad,
+        connected && status.gamepadBackendAvailable && gamepadCapacityAvailable);
 
-    auto applyControl = [this, viewerId, mouseToggle, keyboardToggle]() {
+    auto applyControl = [this, viewerId, mouseToggle, keyboardToggle, gamepadToggle]() {
         uint32_t capabilities = 0;
         if (mouseToggle->isChecked()) {
             capabilities |= screenshare::ControlCapabilityMouse;
@@ -820,12 +839,16 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
         if (keyboardToggle->isChecked()) {
             capabilities |= screenshare::ControlCapabilityKeyboard;
         }
+        if (gamepadToggle->isChecked()) {
+            capabilities |= screenshare::ControlCapabilityGamepad;
+        }
         // The first grant of any control this session requires explicit consent:
         // mouse/keyboard access is effectively full control of the machine. A
         // revoke (capabilities == 0) never prompts.
         if (capabilities != 0 && !confirmControlConsent()) {
             mouseToggle->setChecked(false);
             keyboardToggle->setChecked(false);
+            gamepadToggle->setChecked(false);
             return;
         }
         if (backend_ != nullptr) {
@@ -834,6 +857,7 @@ QWidget* ActiveShareWindow::buildViewerRow(const screenshare::SessionViewer& vie
     };
     connect(mouseToggle, &QPushButton::clicked, this, [applyControl](bool) { applyControl(); });
     connect(keyboardToggle, &QPushButton::clicked, this, [applyControl](bool) { applyControl(); });
+    connect(gamepadToggle, &QPushButton::clicked, this, [applyControl](bool) { applyControl(); });
     layout->addWidget(mouseToggle);
     layout->addWidget(keyboardToggle);
     layout->addWidget(gamepadToggle);
@@ -960,40 +984,36 @@ void ActiveShareWindow::updateControlIndicator(const screenshare::SessionStatus&
     if (controlIndicatorLabel_ == nullptr) {
         return;
     }
-    const bool controlling = !status.controllerViewerId.empty() && status.controlCapabilities != 0;
-    if (!controlling) {
+    std::vector<const screenshare::SessionViewer*> controllers;
+    for (const auto& viewer : status.viewers) {
+        if (viewer.grantedCapabilities != 0) {
+            controllers.push_back(&viewer);
+        }
+    }
+    if (controllers.empty()) {
         controlIndicatorLabel_->setVisible(false);
         return;
     }
 
-    // Resolve a friendly name for whoever is controlling (matches the granted
-    // controller by endpoint, then id).
-    QString who;
-    for (const auto& viewer : status.viewers) {
-        if (viewer.endpoint == status.controllerViewerId || viewer.id == status.controllerViewerId) {
-            if (!viewer.name.empty()) {
-                who = QString::fromStdString(viewer.name);
-            } else if (!viewer.id.empty()) {
-                who = QString::fromStdString(viewer.id);
-            }
-            break;
-        }
-    }
-    if (who.isEmpty()) {
-        who = QStringLiteral("A viewer");
-    }
-
     QStringList kinds;
-    if ((status.controlCapabilities & screenshare::ControlCapabilityMouse) != 0) {
+    if (!status.mouseControllerViewerId.empty()) {
         kinds << QStringLiteral("mouse");
     }
-    if ((status.controlCapabilities & screenshare::ControlCapabilityKeyboard) != 0) {
+    if (!status.keyboardControllerViewerId.empty()) {
         kinds << QStringLiteral("keyboard");
     }
+    if (!status.gamepadControllerViewerIds.empty()) {
+        kinds << QStringLiteral("%1 gamepad%2")
+            .arg(status.gamepadControllerViewerIds.size())
+            .arg(status.gamepadControllerViewerIds.size() == 1 ? QString() : QStringLiteral("s"));
+    }
     const QString kindText = kinds.isEmpty() ? QStringLiteral("input") : kinds.join(QStringLiteral(" + "));
+    const QString who = controllers.size() == 1 ?
+        QString::fromStdString(!controllers.front()->name.empty() ? controllers.front()->name : controllers.front()->id) :
+        QStringLiteral("%1 viewers").arg(controllers.size());
 
     controlIndicatorLabel_->setText(
-        QStringLiteral("● %1 is controlling your %2 — press Ctrl+Alt+Shift+F12 to revoke")
+        QStringLiteral("● %1 control %2 — press Ctrl+Alt+Shift+F12 to revoke")
             .arg(who, kindText));
     controlIndicatorLabel_->setVisible(true);
 }
@@ -1008,10 +1028,11 @@ bool ActiveShareWindow::confirmControlConsent()
     box.setIcon(QMessageBox::Warning);
     box.setWindowTitle(QStringLiteral("Allow remote control?"));
     box.setText(QStringLiteral(
-        "Granting mouse or keyboard control lets this viewer operate your computer "
-        "as if they were sitting at it."));
+        "Granting control lets this viewer operate the selected input devices "
+        "as if they were connected to your computer."));
     box.setInformativeText(QStringLiteral(
-        "They will be able to move the pointer, click, and type anything you can. "
+        "Mouse and keyboard access can operate your computer. Gamepad access creates "
+        "an independent virtual Xbox controller without intercepting your local controller. "
         "Only grant control to people you trust.\n\n"
         "You can revoke control at any time from this window, or by pressing "
         "Ctrl+Alt+Shift+F12."));

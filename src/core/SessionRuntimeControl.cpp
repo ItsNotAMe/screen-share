@@ -206,6 +206,16 @@ void MemorySessionRuntimeControl::EnqueueInput(const RemoteInputEvent& event)
         inputQueue_.back() = event;
         return;
     }
+    if (event.kind == RemoteInputKind::GamepadState) {
+        const auto stale = std::find_if(
+            inputQueue_.begin(), inputQueue_.end(), [&](const RemoteInputEvent& queued) {
+                return queued.kind == RemoteInputKind::GamepadState &&
+                    queued.gamepad.controllerSlot == event.gamepad.controllerSlot;
+            });
+        if (stale != inputQueue_.end()) {
+            inputQueue_.erase(stale);
+        }
+    }
     if (inputQueue_.size() >= kMaxQueuedInputEvents) {
         // On overflow sacrifice the oldest pointer motion, never a discrete
         // event: dropping a click/key/scroll/control press or release would
@@ -215,7 +225,10 @@ void MemorySessionRuntimeControl::EnqueueInput(const RemoteInputEvent& event)
         auto stale = std::find_if(
             inputQueue_.begin(),
             inputQueue_.end(),
-            [](const RemoteInputEvent& queued) { return queued.kind == RemoteInputKind::MouseMove; });
+            [](const RemoteInputEvent& queued) {
+                return queued.kind == RemoteInputKind::MouseMove ||
+                    queued.kind == RemoteInputKind::GamepadState;
+            });
         if (stale != inputQueue_.end()) {
             inputQueue_.erase(stale);
         } else {

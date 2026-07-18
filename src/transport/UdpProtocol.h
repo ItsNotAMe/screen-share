@@ -68,13 +68,31 @@ enum class ControlCommandType : uint16_t {
     MouseButton = 17,
     MouseScroll = 18,
     KeyEvent = 19,
+    GamepadState = 20,
 };
 
 // Per-input-type permission bitmask. The host grants each independently.
 enum ControlCapabilityFlags : uint32_t {
     ControlCapabilityMouse = 1U << 0,
     ControlCapabilityKeyboard = 1U << 1,
-    ControlCapabilityGamepad = 1U << 2, // reserved for v2 (gamepad injection)
+    ControlCapabilityGamepad = 1U << 2,
+};
+
+inline constexpr uint8_t GamepadStateSchemaVersion = 1;
+inline constexpr uint16_t GamepadButtonMask = 0xF3FFU;
+
+struct GamepadStateV1 {
+    uint8_t schemaVersion = GamepadStateSchemaVersion;
+    uint8_t controllerSlot = 0;
+    uint16_t buttons = 0;
+    uint8_t leftTrigger = 0;
+    uint8_t rightTrigger = 0;
+    int16_t thumbLX = 0;
+    int16_t thumbLY = 0;
+    int16_t thumbRX = 0;
+    int16_t thumbRY = 0;
+
+    bool operator==(const GamepadStateV1&) const = default;
 };
 
 // Mouse button identifiers used by MouseButton commands.
@@ -102,6 +120,7 @@ struct ControlMessage {
     uint16_t scancode = 0;     // hardware scancode for KeyEvent
     uint16_t modifiers = 0;    // reserved modifier bitmask
     bool pressed = false;      // down (true) vs up (false) for button/key
+    GamepadStateV1 gamepad;    // for GamepadState
 };
 
 struct FeedbackSnapshot {

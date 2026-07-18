@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace screenshare {
 
@@ -10,8 +11,7 @@ namespace screenshare {
 // surface; the injector maps them to absolute screen pixels using either a
 // display rectangle or the current client rectangle of a shared window.
 //
-// This is the v1 (mouse + keyboard) injector. Gamepad injection (ViGEm) is a
-// separate v2 component that will sit behind the same runtime gate.
+// Gamepad injection is a separate component behind the same runtime gate.
 //
 // Self-contained and transport-agnostic: the runtime translates decoded control
 // packets into these calls.
@@ -53,11 +53,18 @@ public:
     // Virtual-key code (Windows VK_*) and hardware scancode; either may drive the
     // injection (scancode preferred when non-zero).
     void InjectKey(uint16_t virtualKey, uint16_t scancode, bool down);
+    void ReleaseAllInjectedInput();
 
 private:
     [[nodiscard]] bool IsTargetWindowForeground() const;
     [[nodiscard]] bool ResolveMousePoint(float normX, float normY, int& absX, int& absY) const;
     void ReleasePressedMouseButtons();
+    void ReleasePressedKeys();
+
+    struct PressedKey {
+        uint16_t virtualKey = 0;
+        uint16_t scancode = 0;
+    };
 
     int left_ = 0;
     int top_ = 0;
@@ -68,6 +75,7 @@ private:
     float lastNormY_ = 0.5f;
     bool hasLastMousePosition_ = false;
     std::array<bool, 5> pressedMouseButtons_{};
+    std::vector<PressedKey> pressedKeys_;
 };
 
 } // namespace screenshare

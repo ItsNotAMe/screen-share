@@ -164,13 +164,35 @@ RemoteInputInjector::RemoteInputInjector()
 
 RemoteInputInjector::~RemoteInputInjector()
 {
-    ReleasePressedMouseButtons();
+    ReleaseAllInjectedInput();
     StopHostMouseMonitor();
+}
+
+void RemoteInputInjector::ReleasePressedKeys()
+{
+    for (const auto& key : pressedKeys_) {
+        INPUT input{};
+        input.type = INPUT_KEYBOARD;
+        input.ki.wVk = key.virtualKey;
+        input.ki.wScan = key.scancode;
+        input.ki.dwFlags = KEYEVENTF_KEYUP;
+        if (key.scancode != 0 && key.virtualKey == 0) {
+            input.ki.dwFlags |= KEYEVENTF_SCANCODE;
+        }
+        static_cast<void>(SendInput(1, &input, sizeof(INPUT)));
+    }
+    pressedKeys_.clear();
+}
+
+void RemoteInputInjector::ReleaseAllInjectedInput()
+{
+    ReleasePressedMouseButtons();
+    ReleasePressedKeys();
 }
 
 void RemoteInputInjector::SetTargetBounds(int left, int top, int width, int height)
 {
-    ReleasePressedMouseButtons();
+    ReleaseAllInjectedInput();
     left_ = left;
     top_ = top;
     width_ = std::max(0, width);
@@ -181,7 +203,7 @@ void RemoteInputInjector::SetTargetBounds(int left, int top, int width, int heig
 
 void RemoteInputInjector::SetTargetWindow(uint64_t windowHandle)
 {
-    ReleasePressedMouseButtons();
+    ReleaseAllInjectedInput();
     left_ = 0;
     top_ = 0;
     width_ = 0;
@@ -389,7 +411,19 @@ void RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool
     if (scancode != 0 && virtualKey == 0) {
         input.ki.dwFlags |= KEYEVENTF_SCANCODE;
     }
-    SendInput(1, &input, sizeof(INPUT));
+    if (SendInput(1, &input, sizeof(INPUT)) != 1) {
+        return;
+    }
+    const auto existing = std::find_if(pressedKeys_.begin(), pressedKeys_.end(), [&](const PressedKey& key) {
+        return key.virtualKey == virtualKey && key.scancode == scancode;
+    });
+    if (down) {
+        if (existing == pressedKeys_.end()) {
+            pressedKeys_.push_back(PressedKey{virtualKey, scancode});
+        }
+    } else if (existing != pressedKeys_.end()) {
+        pressedKeys_.erase(existing);
+    }
 }
 
 } // namespace screenshare

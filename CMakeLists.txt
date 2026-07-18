@@ -1,12 +1,30 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative VERSION 0.2.3 LANGUAGES CXX)
+project(ScreenShareNative VERSION 0.3.0 LANGUAGES CXX)
+
+include(CTest)
 
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)
 option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
+option(SCREENSHARE_BUILD_INSTALLER "Create an elevated ScreenShare Setup that provisions controller support" OFF)
 option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets and Svg are available" ON)
 option(SCREENSHARE_ENABLE_RELEASE_LTO "Enable compiler-supported link-time optimization for Release builds" ON)
+option(SCREENSHARE_BUILD_PINNED_VIGEMCLIENT "Build the pinned ViGEm user-mode client from source" ON)
+set(SCREENSHARE_VIGEMCLIENT_DLL "" CACHE FILEPATH
+    "Optional prebuilt ViGEmClient.dll override; normally the pinned client is built from source")
+set(SCREENSHARE_VIGEMCLIENT_LICENSE "" CACHE FILEPATH
+    "License file accompanying a prebuilt SCREENSHARE_VIGEMCLIENT_DLL")
+set(SCREENSHARE_VIGEMCLIENT_SOURCE_DIR "" CACHE PATH
+    "Optional local ViGEmClient v1.16.18.0 source tree; otherwise CMake downloads the hash-pinned source archive")
+set(SCREENSHARE_CONTROLLER_DRIVER_SETUP "" CACHE FILEPATH
+    "Signed controller driver setup embedded in ScreenShare Setup and executed only during installation/update")
+set(SCREENSHARE_CONTROLLER_DRIVER_SETUP_SHA256
+    "89220A7865076B342892F98865F3499FB7C4CFD673159E89D352C360FD014C6A"
+    CACHE STRING
+    "Required SHA-256 of SCREENSHARE_CONTROLLER_DRIVER_SETUP")
+set(SCREENSHARE_INNO_SETUP_COMPILER "" CACHE FILEPATH
+    "Optional path to Inno Setup ISCC.exe used for package-installer")
 set(SCREENSHARE_UPDATE_MANIFEST_URL
     "https://github.com/ItsNotAMe/screen-share/releases/latest/download/screenshare-update.json"
     CACHE STRING
@@ -59,6 +77,64 @@ else()
     set(SCREENSHARE_OPUS_TARGET ScreenShareOpus)
 endif()
 
+if(SCREENSHARE_VIGEMCLIENT_DLL AND SCREENSHARE_BUILD_PINNED_VIGEMCLIENT)
+    message(FATAL_ERROR
+        "Choose either SCREENSHARE_VIGEMCLIENT_DLL or SCREENSHARE_BUILD_PINNED_VIGEMCLIENT, not both")
+endif()
+
+if(SCREENSHARE_BUILD_PINNED_VIGEMCLIENT)
+    if(SCREENSHARE_VIGEMCLIENT_SOURCE_DIR)
+        set(_screenshare_vigemclient_source "${SCREENSHARE_VIGEMCLIENT_SOURCE_DIR}")
+        if(NOT EXISTS "${_screenshare_vigemclient_source}/src/ViGEmClient.cpp" OR
+           NOT EXISTS "${_screenshare_vigemclient_source}/include/ViGEmClient.h")
+            message(FATAL_ERROR
+                "SCREENSHARE_VIGEMCLIENT_SOURCE_DIR is not a ViGEmClient source tree: "
+                "${_screenshare_vigemclient_source}")
+        endif()
+    else()
+        include(FetchContent)
+        FetchContent_Declare(screenshare_vigemclient_source
+            URL "https://github.com/nefarius/ViGEmClient/archive/refs/tags/v1.16.18.0.zip"
+            URL_HASH "SHA256=72256A77B6B68E4D57DF91052A2862BC07FBC6B292E21BD4492225DB21B12ACA"
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        )
+        FetchContent_GetProperties(screenshare_vigemclient_source)
+        if(NOT screenshare_vigemclient_source_POPULATED)
+            FetchContent_Populate(screenshare_vigemclient_source)
+        endif()
+        set(_screenshare_vigemclient_source "${screenshare_vigemclient_source_SOURCE_DIR}")
+    endif()
+
+    add_library(ScreenShareViGEmClient SHARED
+        "${_screenshare_vigemclient_source}/src/ViGEmClient.cpp"
+    )
+    target_compile_features(ScreenShareViGEmClient PRIVATE cxx_std_17)
+    target_compile_definitions(ScreenShareViGEmClient PRIVATE
+        VIGEM_DYNAMIC
+        VIGEM_EXPORTS
+        _LIB
+        NOMINMAX
+    )
+    if(MSVC)
+        target_compile_options(ScreenShareViGEmClient PRIVATE /FIthread)
+    else()
+        target_compile_options(ScreenShareViGEmClient PRIVATE -include thread)
+    endif()
+    target_include_directories(ScreenShareViGEmClient PRIVATE
+        "${_screenshare_vigemclient_source}/include"
+    )
+    target_link_libraries(ScreenShareViGEmClient PRIVATE setupapi)
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
+        target_link_options(ScreenShareViGEmClient PRIVATE -static)
+    endif()
+    set_target_properties(ScreenShareViGEmClient PROPERTIES
+        OUTPUT_NAME ViGEmClient
+        PREFIX ""
+    )
+    set(SCREENSHARE_BUILT_VIGEMCLIENT_LICENSE
+        "${_screenshare_vigemclient_source}/LICENSE")
+endif()
+
 add_library(ScreenShareCore STATIC
     src/audio/OpusCodec.cpp
     src/audio/WasapiCapture.cpp
@@ -73,6 +149,8 @@ add_library(ScreenShareCore STATIC
     src/core/SessionCommand.cpp
     src/core/SessionRuntimeControl.cpp
     src/input/RemoteInputInjector.cpp
+    src/input/VirtualGamepadBackend.cpp
+    src/input/XInputGamepad.cpp
     src/render/Nv12D3D11Presenter.cpp
     src/render/ReceiverPreviewWindow.cpp
     src/transport/NatTraversal.cpp
@@ -155,6 +233,23 @@ target_link_libraries(ScreenShareAPI PUBLIC
     ScreenShareCore
 )
 
+if(BUILD_TESTING)
+    add_executable(ControllerProtocolTests
+        tests/ControllerProtocolTests.cpp
+    )
+    target_compile_features(ControllerProtocolTests PRIVATE cxx_std_20)
+    target_link_libraries(ControllerProtocolTests PRIVATE ScreenShareCore)
+    add_test(NAME controller-protocol COMMAND ControllerProtocolTests)
+    find_program(SCREENSHARE_POWERSHELL_EXECUTABLE NAMES pwsh.exe pwsh powershell.exe powershell)
+    if(SCREENSHARE_POWERSHELL_EXECUTABLE)
+        add_test(NAME update-manifest-script
+            COMMAND "${SCREENSHARE_POWERSHELL_EXECUTABLE}" -NoProfile -File
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/UpdateManifestScriptTests.ps1"
+                -GeneratorScript "${CMAKE_CURRENT_SOURCE_DIR}/scripts/create-update-manifest.ps1"
+        )
+    endif()
+endif()
+
 if(MSVC)
     target_compile_options(ScreenShareAPI PRIVATE /W4 /permissive- /EHsc)
 endif()
@@ -175,6 +270,42 @@ screenshare_configure_release_lto_warnings(ScreenShare)
 target_link_libraries(ScreenShare PRIVATE
     ScreenShareAPI
 )
+
+if(TARGET ScreenShareViGEmClient)
+    add_dependencies(ScreenShare ScreenShareViGEmClient)
+    add_custom_command(TARGET ScreenShare POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ScreenShareViGEmClient>"
+            "$<TARGET_FILE_DIR:ScreenShare>/ViGEmClient.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SCREENSHARE_BUILT_VIGEMCLIENT_LICENSE}"
+            "$<TARGET_FILE_DIR:ScreenShare>/ViGEmClient-LICENSE.txt"
+        COMMENT "Copying the pinned ViGEm user-mode client"
+        VERBATIM
+    )
+elseif(SCREENSHARE_VIGEMCLIENT_DLL)
+    if(NOT EXISTS "${SCREENSHARE_VIGEMCLIENT_DLL}")
+        message(FATAL_ERROR "SCREENSHARE_VIGEMCLIENT_DLL does not exist: ${SCREENSHARE_VIGEMCLIENT_DLL}")
+    endif()
+    add_custom_command(TARGET ScreenShare POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SCREENSHARE_VIGEMCLIENT_DLL}"
+            "$<TARGET_FILE_DIR:ScreenShare>/ViGEmClient.dll"
+        COMMENT "Copying optional ViGEm user-mode client"
+        VERBATIM
+    )
+    if(SCREENSHARE_VIGEMCLIENT_LICENSE)
+        if(NOT EXISTS "${SCREENSHARE_VIGEMCLIENT_LICENSE}")
+            message(FATAL_ERROR "SCREENSHARE_VIGEMCLIENT_LICENSE does not exist: ${SCREENSHARE_VIGEMCLIENT_LICENSE}")
+        endif()
+        add_custom_command(TARGET ScreenShare POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${SCREENSHARE_VIGEMCLIENT_LICENSE}"
+                "$<TARGET_FILE_DIR:ScreenShare>/ViGEmClient-LICENSE.txt"
+            VERBATIM
+        )
+    endif()
+endif()
 
 if(MSVC)
     target_compile_options(ScreenShare PRIVATE /W4 /permissive- /EHsc)
@@ -269,6 +400,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/Toast.cpp
             src/ui/UiStyle.cpp
             src/ui/UpdateManager.cpp
+            src/ui/UpdatePackageSelection.cpp
             src/ui/VideoFrameWidget.cpp
             src/ui/resources.qrc
             ${SCREENSHARE_UI_ICON_RC}
@@ -287,6 +419,19 @@ if(SCREENSHARE_BUILD_QT_UI)
         )
         screenshare_configure_release_lto_warnings(ScreenShareUi)
         add_dependencies(ScreenShareUi ScreenShare)
+
+        if(BUILD_TESTING)
+            add_executable(UpdatePackageSelectionTests
+                tests/UpdatePackageSelectionTests.cpp
+                src/ui/UpdatePackageSelection.cpp
+            )
+            target_compile_features(UpdatePackageSelectionTests PRIVATE cxx_std_20)
+            target_include_directories(UpdatePackageSelectionTests PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/src
+            )
+            target_link_libraries(UpdatePackageSelectionTests PRIVATE Qt6::Core)
+            add_test(NAME update-package-selection COMMAND UpdatePackageSelectionTests)
+        endif()
 
         if(MSVC)
             target_compile_options(ScreenShareUi PRIVATE /W4 /permissive- /EHsc)
@@ -463,6 +608,79 @@ else()
         COMMAND ${CMAKE_COMMAND} ${SCREENSHARE_PACKAGE_ARGS}
         DEPENDS ${SCREENSHARE_PACKAGE_DEPENDS}
         COMMENT "Creating portable ScreenShare zip package"
+        VERBATIM
+    )
+endif()
+
+if(SCREENSHARE_BUILD_INSTALLER)
+    if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "ScreenShare Setup currently supports only 64-bit Windows builds")
+    endif()
+    if(NOT SCREENSHARE_CONTROLLER_DRIVER_SETUP OR
+       NOT EXISTS "${SCREENSHARE_CONTROLLER_DRIVER_SETUP}")
+        message(FATAL_ERROR
+            "SCREENSHARE_BUILD_INSTALLER requires SCREENSHARE_CONTROLLER_DRIVER_SETUP. "
+            "Run scripts/fetch-controller-runtime.ps1 or provide the signed setup explicitly.")
+    endif()
+    string(LENGTH "${SCREENSHARE_CONTROLLER_DRIVER_SETUP_SHA256}"
+        _screenshare_controller_setup_sha256_length)
+    if(NOT _screenshare_controller_setup_sha256_length EQUAL 64 OR
+       NOT SCREENSHARE_CONTROLLER_DRIVER_SETUP_SHA256 MATCHES "^[0-9A-Fa-f]+$")
+        message(FATAL_ERROR "SCREENSHARE_CONTROLLER_DRIVER_SETUP_SHA256 must contain 64 hexadecimal characters")
+    endif()
+    file(SHA256 "${SCREENSHARE_CONTROLLER_DRIVER_SETUP}" _screenshare_controller_setup_sha256)
+    string(TOUPPER "${_screenshare_controller_setup_sha256}" _screenshare_controller_setup_sha256)
+    string(TOUPPER "${SCREENSHARE_CONTROLLER_DRIVER_SETUP_SHA256}" _screenshare_expected_controller_setup_sha256)
+    if(NOT _screenshare_controller_setup_sha256 STREQUAL _screenshare_expected_controller_setup_sha256)
+        message(FATAL_ERROR
+            "Controller driver setup SHA-256 mismatch. Expected "
+            "${_screenshare_expected_controller_setup_sha256}, got ${_screenshare_controller_setup_sha256}")
+    endif()
+
+    if(NOT SCREENSHARE_INNO_SETUP_COMPILER)
+        find_program(SCREENSHARE_INNO_SETUP_COMPILER
+            NAMES ISCC.exe ISCC
+            PATHS
+                "C:/Program Files/Inno Setup 7"
+                "C:/Program Files (x86)/Inno Setup 7"
+                "C:/Program Files (x86)/Inno Setup 6"
+                "C:/Program Files/Inno Setup 6"
+        )
+    endif()
+    if(NOT SCREENSHARE_INNO_SETUP_COMPILER OR
+       NOT EXISTS "${SCREENSHARE_INNO_SETUP_COMPILER}")
+        message(FATAL_ERROR
+            "Inno Setup 6 or 7 is required for SCREENSHARE_BUILD_INSTALLER. "
+            "Set SCREENSHARE_INNO_SETUP_COMPILER to ISCC.exe.")
+    endif()
+
+    get_filename_component(SCREENSHARE_CONTROLLER_DRIVER_SETUP_NAME
+        "${SCREENSHARE_CONTROLLER_DRIVER_SETUP}" NAME)
+    file(TO_CMAKE_PATH "${SCREENSHARE_CONTROLLER_DRIVER_SETUP}"
+        SCREENSHARE_CONTROLLER_DRIVER_SETUP_INNO)
+    file(TO_CMAKE_PATH "${CMAKE_BINARY_DIR}/package/${SCREENSHARE_PACKAGE_BASENAME}"
+        SCREENSHARE_INSTALLER_APP_STAGE)
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/brand/screenshare.ico"
+        SCREENSHARE_INSTALLER_ICON)
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+        SCREENSHARE_INSTALLER_LICENSE)
+    file(TO_CMAKE_PATH "${CMAKE_BINARY_DIR}"
+        SCREENSHARE_INSTALLER_OUTPUT_DIR)
+    set(SCREENSHARE_INSTALLER_OUTPUT_BASENAME
+        "ScreenShare-Setup-${PROJECT_VERSION}-windows-${SCREENSHARE_PACKAGE_ARCH}")
+    set(SCREENSHARE_INSTALLER_SCRIPT
+        "${CMAKE_BINARY_DIR}/installer/ScreenShare.iss")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/installer")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/installer/ScreenShare.iss.in"
+        "${SCREENSHARE_INSTALLER_SCRIPT}"
+        @ONLY
+    )
+
+    add_custom_target(package-installer ALL
+        COMMAND "${SCREENSHARE_INNO_SETUP_COMPILER}" /Qp "${SCREENSHARE_INSTALLER_SCRIPT}"
+        DEPENDS package-portable
+        COMMENT "Creating ScreenShare Setup with install-time controller provisioning"
         VERBATIM
     )
 endif()

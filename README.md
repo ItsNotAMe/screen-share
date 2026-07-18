@@ -15,8 +15,11 @@ while `ScreenShare.exe` remains available for CLI diagnostics and automation.
 - Decode and preview video in the Qt UI with a Direct3D/NV12 render path.
 - Support multiple viewers with isolated send lanes, per-viewer health/recovery, host disconnect controls,
   room passwords, automatic UDP encryption keys, reports, and live stream settings.
+- Let up to three viewers use independent virtual Xbox controllers while the host keeps a local controller;
+  ScreenShare Setup provisions controller support before the application is launched.
 - Build a portable Windows zip with the UI, CLI, runtime DLLs, README, and license.
-- Check GitHub Releases for verified portable updates.
+- Check GitHub Releases for verified updates; installed copies use ScreenShare Setup while portable
+  copies continue using the ZIP updater.
 
 ## Requirements
 
@@ -27,6 +30,7 @@ while `ScreenShare.exe` remains available for CLI diagnostics and automation.
 - Opus development package
 - Qt 6 Network, Svg, and Widgets for `ScreenShareUi.exe`
 - Optional: FFmpeg for inspecting generated media files
+- Inno Setup 6 or 7 when producing the installed prerelease package.
 
 For the common MSYS2 setup, run:
 
@@ -72,6 +76,36 @@ or working around a toolchain issue:
 cmake --preset release -DSCREENSHARE_ENABLE_RELEASE_LTO=OFF
 ```
 
+The normal build compiles a hash-pinned ViGEm user-mode client from source. To use an already fetched
+source tree while developing offline:
+
+```powershell
+cmake --preset release `
+  -DSCREENSHARE_VIGEMCLIENT_SOURCE_DIR=C:\path\to\ViGEmClient-1.16.18.0
+```
+
+To create the test installer, fetch the pinned signed controller runtime and enable installer
+packaging. The runtime is embedded in ScreenShare Setup; it is never downloaded or installed when
+ScreenShare starts:
+
+```powershell
+$driverSetup = .\scripts\fetch-controller-runtime.ps1
+cmake --preset release `
+  -DSCREENSHARE_BUILD_INSTALLER=ON `
+  -DSCREENSHARE_CONTROLLER_DRIVER_SETUP="$driverSetup" `
+  -DSCREENSHARE_INNO_SETUP_COMPILER="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+cmake --build --preset release
+```
+
+This writes `ScreenShare-Setup-0.3.0-windows-x64.exe`. The portable ZIP remains useful for diagnostics,
+but it does not provision a controller driver and therefore does not promise ready-to-use controller
+hosting.
+
+Installed copies contain `ScreenShare-installed.marker`. The auto-updater uses that marker to select
+the independently signed `windowsInstaller` manifest asset, re-verifies its SHA-256 after ScreenShare
+closes, requests UAC, runs Setup silently, and restarts ScreenShare. Normal application startup never
+installs or repairs the controller driver.
+
 ## Run
 
 Start the desktop app:
@@ -116,6 +150,7 @@ Use `--allow-plaintext` only for intentional unencrypted local tests.
 
 - [Detailed usage and CLI reference](docs/usage.md)
 - [Release and update publishing](docs/release.md)
+- [Controller backend and safety model](docs/controller-support.md)
 - [Signaling Worker](signaling-worker/README.md)
 - [Assets and branding](assets/README.md)
 - [Performance tracking](agents/performance.md) and [CSV results](agents/performance.csv)

@@ -1,5 +1,7 @@
 #include "ui/UpdateManager.h"
 
+#include "ui/UpdatePackageSelection.h"
+
 #include "updater/UpdateSignature.h"
 
 #include <QtCore/QCoreApplication>
@@ -282,6 +284,8 @@ struct UpdateManager::UpdateInfo {
     QString channel;
     QString packageUrl;
     QString sha256;
+    QString signatureBase64;
+    screenshare::ui::UpdatePackageKind packageKind = screenshare::ui::UpdatePackageKind::PortableZip;
     qint64 sizeBytes = 0;
     QStringList notes;
 };
@@ -335,15 +339,21 @@ void UpdateManager::handleManifestReply(QNetworkReply* reply)
     }
 
     const QJsonObject root = document.object();
-    const QJsonObject assets = root.value(QStringLiteral("assets")).toObject();
-    const QJsonObject portableZip = assets.value(QStringLiteral("portableZip")).toObject();
+    const bool installedApplication = screenshare::ui::IsInstalledApplicationDirectory(
+        QCoreApplication::applicationDirPath());
+    const auto selectedAsset = screenshare::ui::SelectUpdatePackageAsset(root, installedApplication);
+    if (!selectedAsset) {
+        return;
+    }
 
     UpdateInfo update;
     update.version = root.value(QStringLiteral("version")).toString().trimmed();
     update.channel = root.value(QStringLiteral("channel")).toString(QStringLiteral("stable")).trimmed();
-    update.packageUrl = portableZip.value(QStringLiteral("url")).toString().trimmed();
-    update.sha256 = portableZip.value(QStringLiteral("sha256")).toString().trimmed();
-    update.sizeBytes = portableZip.value(QStringLiteral("size")).toVariant().toLongLong();
+    update.packageUrl = selectedAsset->url;
+    update.sha256 = selectedAsset->sha256;
+    update.signatureBase64 = selectedAsset->signatureBase64;
+    update.packageKind = selectedAsset->kind;
+    update.sizeBytes = selectedAsset->sizeBytes;
 
     const QJsonArray notesArray = root.value(QStringLiteral("notes")).toArray();
     for (const QJsonValue& value : notesArray) {
@@ -366,8 +376,7 @@ void UpdateManager::handleManifestReply(QNetworkReply* reply)
     // the update. Without this, a compromised release host/CDN could serve a
     // matching {malicious package, sha256} pair; the signature binds the
     // trusted sha256 to a key an attacker does not hold. Fails closed.
-    const QString signatureBase64 = root.value(QStringLiteral("signature")).toString().trimmed();
-    if (!verifyUpdateSignature(update.version, update.packageUrl, update.sha256, signatureBase64)) {
+    if (!verifyUpdateSignature(update.version, update.packageUrl, update.sha256, update.signatureBase64)) {
         return;
     }
 
@@ -514,7 +523,8 @@ void UpdateManager::downloadUpdate(
     statusLabel->setText(QStringLiteral("Downloading update..."));
 
     const QString outputDir = tempUpdateDir();
-    const QString outputPath = QDir(outputDir).filePath(QStringLiteral("ScreenShare-%1-update.zip").arg(update.version));
+    const QString outputPath = QDir(outputDir).filePath(
+        screenshare::ui::UpdatePackageFileName(update.version, update.packageKind));
     QFile::remove(outputPath);
 
     auto* output = new QFile(outputPath, this);
@@ -577,7 +587,9 @@ void UpdateManager::downloadUpdate(
         }
 
         installButton->setText(QStringLiteral("Installing..."));
-        statusLabel->setText(QStringLiteral("Installing after ScreenShare closes..."));
+        statusLabel->setText(update.packageKind == screenshare::ui::UpdatePackageKind::WindowsInstaller ?
+            QStringLiteral("ScreenShare will close, then Windows will request approval for Setup...") :
+            QStringLiteral("Installing after ScreenShare closes..."));
         QTimer::singleShot(100, qApp, &QCoreApplication::quit);
     });
 }
@@ -588,7 +600,7 @@ bool UpdateManager::launchUpdater(const UpdateInfo& update, const QString& packa
     const QDir appDirectory(appDir);
     if (QFileInfo::exists(appDirectory.filePath(QStringLiteral("CMakeCache.txt"))) ||
         appDirectory.exists(QStringLiteral("CMakeFiles"))) {
-        *errorMessage = QStringLiteral("Updates cannot be installed from a CMake build folder. Extract the portable zip to a separate app folder and run ScreenShareUi.exe there.");
+        *errorMessage = QStringLiteral("Updates cannot be installed from a CMake build folder. Run the generated Setup or extract the portable package first.");
         return false;
     }
 
@@ -609,11 +621,16 @@ bool UpdateManager::launchUpdater(const UpdateInfo& update, const QString& packa
     arguments
         << QStringLiteral("--pid") << QString::number(QCoreApplication::applicationPid())
         << QStringLiteral("--package") << packagePath
-        << QStringLiteral("--target") << appDir
-        << QStringLiteral("--restart") << QCoreApplication::applicationFilePath()
-        // The helper re-verifies this hash immediately before extraction to
-        // close the TOCTOU window while the app exits.
+        // The helper re-verifies this hash immediately before extraction or
+        // elevation to close the TOCTOU window while the app exits.
         << QStringLiteral("--sha256") << update.sha256;
+    if (update.packageKind == screenshare::ui::UpdatePackageKind::WindowsInstaller) {
+        arguments << QStringLiteral("--installer");
+    } else {
+        arguments
+            << QStringLiteral("--target") << appDir
+            << QStringLiteral("--restart") << QCoreApplication::applicationFilePath();
+    }
 
     if (!QProcess::startDetached(tempHelper, arguments, tempUpdateDir())) {
         *errorMessage = QStringLiteral("Could not start the updater helper.");

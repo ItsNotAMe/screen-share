@@ -10,6 +10,8 @@
 #include "codec/H264StreamEncoder.h"
 #include "core/SessionRuntimeControl.h"
 #include "input/RemoteInputInjector.h"
+#include "input/VirtualGamepadBackend.h"
+#include "input/XInputGamepad.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "transport/NatTraversal.h"
 #include "transport/SignalingClient.h"
@@ -1612,6 +1614,16 @@ public:
             }
         }
         return viewerId;
+    }
+
+    [[nodiscard]] std::string ViewerForEndpoint(const std::string& endpoint) const
+    {
+        for (const auto& viewer : viewerSnapshots()) {
+            if (viewer.endpoint == endpoint) {
+                return viewer.viewerId;
+            }
+        }
+        return endpoint;
     }
 
     void SuspendStaleViewers()
@@ -3464,8 +3476,23 @@ void RunCaptureStats(
     // Remote control (host side). The control handler runs on this same thread
     // (inside fanout ReceiveFeedback), so plain locals need no extra locking.
     screenshare::RemoteInputInjector remoteInputInjector;
-    std::string remoteControlEndpoint;   // endpoint of the viewer currently granted control
-    uint32_t remoteControlCapabilities = 0;
+    auto virtualGamepadBackend = screenshare::CreateVirtualGamepadBackend();
+    const auto virtualGamepadStatus = virtualGamepadBackend->Status();
+    const size_t localGamepadCount = screenshare::XInputGamepad::ConnectedSlots().size();
+    const size_t remoteGamepadCapacity = std::min<size_t>(3, 4 - std::min<size_t>(4, std::max<size_t>(1, localGamepadCount)));
+    struct ControlGrant {
+        std::string viewerId;
+        std::string endpoint;
+        uint32_t capabilities = 0;
+        std::unique_ptr<screenshare::VirtualGamepadDevice> gamepad;
+        Clock::time_point lastGamepadStateAt{};
+        bool hasGamepadState = false;
+        double inputTokens = 500.0;
+        Clock::time_point tokensUpdatedAt = Clock::now();
+    };
+    std::map<std::string, ControlGrant> controlGrants;
+    std::string mouseControlViewerId;
+    std::string keyboardControlViewerId;
     // Rate-limit injected input. A granted viewer that is compromised or buggy
     // could otherwise stream control packets fast enough to flood SendInput and
     // make the host unusable (and unable to reach the revoke controls). A token
@@ -3473,24 +3500,54 @@ void RunCaptureStats(
     // high-frequency mouse control is unaffected but an unbounded flood is not.
     constexpr double kRemoteInputTokensPerSecond = 1000.0;
     constexpr double kRemoteInputTokenBurst = 500.0;
-    double remoteInputTokens = kRemoteInputTokenBurst;
-    Clock::time_point remoteInputTokensUpdatedAt = Clock::now();
     uint64_t remoteInputEventsDropped = 0;
     // A control ack is a single UDP datagram; to survive loss we re-send the
     // latest ack a few times right after each state change. This is a bounded
     // burst, not a perpetual re-assert: a steady-state re-grant would fight an
     // optimistic viewer-side release (re-arming capture the user just dropped)
     // and would keep spamming a controller that has since disconnected.
-    std::string controlAckEndpoint;      // who to (re)send the latest ack to
-    uint32_t controlAckCaps = 0;         // caps of that ack (0 = revoke)
-    int controlAckResendsLeft = 0;
-    Clock::time_point nextControlAckAt = Clock::now();
-    auto scheduleControlAckBurst = [&](std::string endpoint, uint32_t caps) {
-        controlAckEndpoint = std::move(endpoint);
-        controlAckCaps = caps;
-        controlAckResendsLeft = 3;
-        nextControlAckAt = Clock::now() + std::chrono::milliseconds(150);
+    struct ControlAckBurst {
+        uint32_t capabilities = 0;
+        int resendsLeft = 0;
+        Clock::time_point nextAt{};
     };
+    std::map<std::string, ControlAckBurst> controlAckBursts;
+    auto scheduleControlAckBurst = [&](std::string endpoint, uint32_t caps) {
+        controlAckBursts[std::move(endpoint)] = ControlAckBurst{
+            caps, 3, Clock::now() + std::chrono::milliseconds(150)};
+    };
+    auto destroyGamepad = [](ControlGrant& grant) {
+        if (grant.gamepad != nullptr) {
+            grant.gamepad->Neutralize();
+            grant.gamepad->Destroy();
+            grant.gamepad.reset();
+        }
+        grant.hasGamepadState = false;
+    };
+    auto eraseControlGrant = [&](const std::string& viewerId) {
+        const auto grant = controlGrants.find(viewerId);
+        if (grant == controlGrants.end()) {
+            return;
+        }
+        const bool releasedMouse = mouseControlViewerId == viewerId;
+        const bool releasedKeyboard = keyboardControlViewerId == viewerId;
+        destroyGamepad(grant->second);
+        if (mouseControlViewerId == viewerId) {
+            mouseControlViewerId.clear();
+        }
+        if (keyboardControlViewerId == viewerId) {
+            keyboardControlViewerId.clear();
+        }
+        controlAckBursts.erase(grant->second.endpoint);
+        controlGrants.erase(grant);
+        if (releasedMouse || releasedKeyboard) {
+            remoteInputInjector.ReleaseAllInjectedInput();
+        }
+    };
+    std::cout << "gamepad_backend available=" << (virtualGamepadStatus.available ? "yes" : "no")
+              << " local_controllers=" << localGamepadCount
+              << " remote_capacity=" << remoteGamepadCapacity
+              << " message=" << LogTokenEncode(virtualGamepadStatus.message) << "\n" << std::flush;
     auto refreshRemoteControlBounds = [&](int displayIndex) {
         const auto displays = screenshare::DesktopCapturer::EnumerateDisplays();
         for (const auto& display : displays) {
@@ -3707,27 +3764,31 @@ void RunCaptureStats(
                     return;
                 }
                 if (message.command == Command::ReleaseControl) {
-                    if (endpoint == remoteControlEndpoint) {
+                    const std::string viewerId = udpSender->ViewerForEndpoint(endpoint);
+                    if (controlGrants.find(viewerId) != controlGrants.end()) {
+                        eraseControlGrant(viewerId);
                         refreshRemoteControlTarget();
-                        remoteControlEndpoint.clear();
-                        remoteControlCapabilities = 0;
-                        // The viewer already updated its own UI optimistically;
-                        // cancel any in-flight grant burst so it does not re-arm
-                        // the capture the viewer just released.
-                        controlAckResendsLeft = 0;
-                        std::cout << "remote_control_grant endpoint=" << endpoint << " caps=0\n" << std::flush;
+                        std::cout << "remote_control_grant endpoint=" << endpoint
+                                  << " viewer_id=" << LogTokenEncode(viewerId)
+                                  << " caps=0\n" << std::flush;
                     }
                     return;
                 }
-                // Input commands: honor only the single granted controller, and
-                // only the input types currently permitted.
-                if (endpoint != remoteControlEndpoint || remoteControlCapabilities == 0) {
+                const std::string viewerId = udpSender->ViewerForEndpoint(endpoint);
+                auto grantIt = controlGrants.find(viewerId);
+                if (grantIt == controlGrants.end() || grantIt->second.capabilities == 0) {
                     return;
                 }
+                ControlGrant& grant = grantIt->second;
+                grant.endpoint = endpoint;
                 const bool mouseOk =
-                    (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityMouse) != 0;
+                    mouseControlViewerId == viewerId &&
+                    (grant.capabilities & screenshare::udp_protocol::ControlCapabilityMouse) != 0;
                 const bool keyboardOk =
-                    (remoteControlCapabilities & screenshare::udp_protocol::ControlCapabilityKeyboard) != 0;
+                    keyboardControlViewerId == viewerId &&
+                    (grant.capabilities & screenshare::udp_protocol::ControlCapabilityKeyboard) != 0;
+                const bool gamepadOk =
+                    (grant.capabilities & screenshare::udp_protocol::ControlCapabilityGamepad) != 0;
                 // Token-bucket rate limit. Button/key releases bypass it so a
                 // burst cannot drop the event that returns host input to the
                 // neutral state.
@@ -3737,12 +3798,12 @@ void RunCaptureStats(
                 if (!safetyRelease) {
                     const auto nowInput = Clock::now();
                     const double elapsedSeconds =
-                        std::chrono::duration<double>(nowInput - remoteInputTokensUpdatedAt).count();
-                    remoteInputTokensUpdatedAt = nowInput;
-                    remoteInputTokens = std::min(
+                        std::chrono::duration<double>(nowInput - grant.tokensUpdatedAt).count();
+                    grant.tokensUpdatedAt = nowInput;
+                    grant.inputTokens = std::min(
                         kRemoteInputTokenBurst,
-                        remoteInputTokens + elapsedSeconds * kRemoteInputTokensPerSecond);
-                    if (remoteInputTokens < 1.0) {
+                        grant.inputTokens + elapsedSeconds * kRemoteInputTokensPerSecond);
+                    if (grant.inputTokens < 1.0) {
                         ++remoteInputEventsDropped;
                         // Throttled telemetry: surface a flood without spamming.
                         if (remoteInputEventsDropped % 500 == 1) {
@@ -3751,7 +3812,7 @@ void RunCaptureStats(
                         }
                         return;
                     }
-                    remoteInputTokens -= 1.0;
+                    grant.inputTokens -= 1.0;
                 }
                 switch (message.command) {
                 case Command::MouseMove:
@@ -3778,6 +3839,68 @@ void RunCaptureStats(
                 case Command::KeyEvent:
                     if (keyboardOk) {
                         remoteInputInjector.InjectKey(message.key, message.scancode, message.pressed);
+                    }
+                    break;
+                case Command::GamepadState:
+                    if (gamepadOk) {
+                        if (grant.gamepad == nullptr) {
+                            std::string error;
+                            grant.gamepad = virtualGamepadBackend->CreateXbox360(&error);
+                            if (grant.gamepad == nullptr) {
+                                grant.capabilities &= ~screenshare::ControlCapabilityGamepad;
+                                screenshare::udp_protocol::ControlMessage ack;
+                                ack.command = grant.capabilities != 0 ? Command::GrantControl : Command::RevokeControl;
+                                ack.capabilities = grant.capabilities;
+                                ack.accessCodeFingerprint = options.accessCodeFingerprint;
+                                static_cast<void>(udpSender->SendControlTo(endpoint, ack));
+                                const uint32_t remainingCapabilities = grant.capabilities;
+                                std::cout << "gamepad_device_error viewer_id=" << LogTokenEncode(viewerId)
+                                          << " message=" << LogTokenEncode(error) << "\n" << std::flush;
+                                std::cout << "remote_control_grant endpoint=" << endpoint
+                                          << " viewer_id=" << LogTokenEncode(viewerId)
+                                          << " caps=" << remainingCapabilities << "\n" << std::flush;
+                                if (remainingCapabilities == 0) {
+                                    eraseControlGrant(viewerId);
+                                }
+                                scheduleControlAckBurst(endpoint, remainingCapabilities);
+                                break;
+                            }
+                            std::cout << "gamepad_device viewer_id=" << LogTokenEncode(viewerId)
+                                      << " state=created\n" << std::flush;
+                        }
+                        screenshare::RemoteGamepadState state;
+                        state.schemaVersion = message.gamepad.schemaVersion;
+                        state.controllerSlot = message.gamepad.controllerSlot;
+                        state.buttons = message.gamepad.buttons;
+                        state.leftTrigger = message.gamepad.leftTrigger;
+                        state.rightTrigger = message.gamepad.rightTrigger;
+                        state.thumbLX = message.gamepad.thumbLX;
+                        state.thumbLY = message.gamepad.thumbLY;
+                        state.thumbRX = message.gamepad.thumbRX;
+                        state.thumbRY = message.gamepad.thumbRY;
+                        std::string error;
+                        if (!grant.gamepad->SubmitState(state, &error)) {
+                            destroyGamepad(grant);
+                            grant.capabilities &= ~screenshare::ControlCapabilityGamepad;
+                            screenshare::udp_protocol::ControlMessage ack;
+                            ack.command = grant.capabilities != 0 ? Command::GrantControl : Command::RevokeControl;
+                            ack.capabilities = grant.capabilities;
+                            ack.accessCodeFingerprint = options.accessCodeFingerprint;
+                            static_cast<void>(udpSender->SendControlTo(endpoint, ack));
+                            const uint32_t remainingCapabilities = grant.capabilities;
+                            std::cout << "gamepad_device_error viewer_id=" << LogTokenEncode(viewerId)
+                                      << " message=" << LogTokenEncode(error) << "\n" << std::flush;
+                            std::cout << "remote_control_grant endpoint=" << endpoint
+                                      << " viewer_id=" << LogTokenEncode(viewerId)
+                                      << " caps=" << remainingCapabilities << "\n" << std::flush;
+                            if (remainingCapabilities == 0) {
+                                eraseControlGrant(viewerId);
+                            }
+                            scheduleControlAckBurst(endpoint, remainingCapabilities);
+                        } else {
+                            grant.lastGamepadStateAt = Clock::now();
+                            grant.hasGamepadState = true;
+                        }
                     }
                     break;
                 default:
@@ -3898,15 +4021,7 @@ void RunCaptureStats(
             if (udpSender && !peerHasAnotherCandidate) {
                 static_cast<void>(udpSender->RetireViewer(peer.peerId));
                 liveSignalingGroupByPeerId.erase(peer.peerId);
-            }
-            // If the departing peer held control, drop the grant so a later
-            // viewer that reuses this ip:port can't silently inherit it, and
-            // stop any pending ack burst aimed at the dead endpoint.
-            if (endpoint == remoteControlEndpoint) {
-                refreshRemoteControlTarget();
-                remoteControlEndpoint.clear();
-                remoteControlCapabilities = 0;
-                controlAckResendsLeft = 0;
+                eraseControlGrant(peer.peerId);
             }
 
             std::cout
@@ -4451,7 +4566,7 @@ void RunCaptureStats(
         // While a viewer holds control, drain their input during the inter-frame
         // wait so it is injected within a couple of ms instead of once per frame
         // (which would otherwise add up to a full frame interval of input lag).
-        if (!remoteControlEndpoint.empty() && udpSender) {
+        if (!controlGrants.empty() && udpSender) {
             while (Clock::now() < nextFrameAt) {
                 const auto remaining = nextFrameAt - Clock::now();
                 const auto slice = (std::min)(remaining, std::chrono::duration_cast<Clock::duration>(
@@ -4490,12 +4605,7 @@ void RunCaptureStats(
                 disconnect.accessCodeFingerprint = options.accessCodeFingerprint;
                 static_cast<void>(udpSender->SendControlTo(endpoint, disconnect));
             }
-            if (!endpoint.empty() && endpoint == remoteControlEndpoint) {
-                refreshRemoteControlTarget();
-                remoteControlEndpoint.clear();
-                remoteControlCapabilities = 0;
-                controlAckResendsLeft = 0;
-            }
+            eraseControlGrant(disconnectRequest->viewerId);
             const bool disconnected = udpSender && udpSender->DisconnectViewer(disconnectRequest->viewerId);
             std::cout << "viewer_disconnect id=" << LogTokenEncode(disconnectRequest->viewerId)
                       << " endpoint=" << (endpoint.empty() ? "unknown" : endpoint)
@@ -4516,51 +4626,145 @@ void RunCaptureStats(
                           << " sent=no reason=plaintext_session\n" << std::flush;
                 continue;
             }
-            // Single controller: if control moves to a different viewer, revoke
-            // the previous one so its UI stops showing "in control".
-            if (!remoteControlEndpoint.empty() &&
-                remoteControlEndpoint != controlEndpoint && udpSender) {
-                screenshare::udp_protocol::ControlMessage revoke;
-                revoke.command = screenshare::udp_protocol::ControlCommandType::RevokeControl;
-                revoke.accessCodeFingerprint = options.accessCodeFingerprint;
-                udpSender->SendControlTo(remoteControlEndpoint, revoke);
-                std::cout << "remote_control_grant endpoint=" << remoteControlEndpoint
-                          << " caps=0\n" << std::flush;
+            uint32_t requestedCapabilities = controlRequest->capabilities;
+            requestedCapabilities &=
+                screenshare::ControlCapabilityMouse |
+                screenshare::ControlCapabilityKeyboard |
+                screenshare::ControlCapabilityGamepad;
+            if ((requestedCapabilities & screenshare::ControlCapabilityGamepad) != 0) {
+                const size_t gamepadGrantCount = static_cast<size_t>(std::count_if(
+                    controlGrants.begin(), controlGrants.end(), [&](const auto& item) {
+                        return item.first != controlRequest->viewerId &&
+                            (item.second.capabilities & screenshare::ControlCapabilityGamepad) != 0;
+                    }));
+                if (!virtualGamepadStatus.available || gamepadGrantCount >= remoteGamepadCapacity) {
+                    requestedCapabilities &= ~screenshare::ControlCapabilityGamepad;
+                    std::cout << "gamepad_grant_refused viewer_id=" << LogTokenEncode(controlRequest->viewerId)
+                              << " reason=" << (!virtualGamepadStatus.available ? "backend_unavailable" : "capacity")
+                              << "\n" << std::flush;
+                }
             }
-            // Release any injected button before ownership/capabilities change.
-            // Re-applying the current target also clears the viewer's last
-            // mapped cursor point, so a later scroll cannot reuse stale state.
+
+            auto transferExclusiveCapability = [&](uint32_t capability, std::string& ownerViewerId) {
+                if ((requestedCapabilities & capability) == 0 || ownerViewerId.empty() ||
+                    ownerViewerId == controlRequest->viewerId) {
+                    return;
+                }
+                auto previous = controlGrants.find(ownerViewerId);
+                if (previous != controlGrants.end()) {
+                    previous->second.capabilities &= ~capability;
+                    screenshare::udp_protocol::ControlMessage update;
+                    update.command = previous->second.capabilities != 0 ?
+                        screenshare::udp_protocol::ControlCommandType::GrantControl :
+                        screenshare::udp_protocol::ControlCommandType::RevokeControl;
+                    update.capabilities = previous->second.capabilities;
+                    update.accessCodeFingerprint = options.accessCodeFingerprint;
+                    static_cast<void>(udpSender->SendControlTo(previous->second.endpoint, update));
+                    const std::string previousEndpoint = previous->second.endpoint;
+                    const uint32_t previousCapabilities = previous->second.capabilities;
+                    std::cout << "remote_control_grant endpoint=" << previousEndpoint
+                              << " viewer_id=" << LogTokenEncode(previous->first)
+                              << " caps=" << previousCapabilities << "\n" << std::flush;
+                    if (previousCapabilities == 0) {
+                        eraseControlGrant(previous->first);
+                    }
+                    scheduleControlAckBurst(previousEndpoint, previousCapabilities);
+                }
+                ownerViewerId.clear();
+                remoteInputInjector.ReleaseAllInjectedInput();
+            };
+            transferExclusiveCapability(screenshare::ControlCapabilityMouse, mouseControlViewerId);
+            transferExclusiveCapability(screenshare::ControlCapabilityKeyboard, keyboardControlViewerId);
+
+            auto existing = controlGrants.find(controlRequest->viewerId);
+            if (existing != controlGrants.end() &&
+                (existing->second.capabilities & screenshare::ControlCapabilityGamepad) != 0 &&
+                (requestedCapabilities & screenshare::ControlCapabilityGamepad) == 0) {
+                destroyGamepad(existing->second);
+            }
+            if (requestedCapabilities == 0) {
+                eraseControlGrant(controlRequest->viewerId);
+            } else {
+                ControlGrant& grant = controlGrants[controlRequest->viewerId];
+                grant.viewerId = controlRequest->viewerId;
+                grant.endpoint = controlEndpoint;
+                grant.capabilities = requestedCapabilities;
+                if ((requestedCapabilities & screenshare::ControlCapabilityMouse) != 0) {
+                    mouseControlViewerId = controlRequest->viewerId;
+                } else if (mouseControlViewerId == controlRequest->viewerId) {
+                    mouseControlViewerId.clear();
+                    remoteInputInjector.ReleaseAllInjectedInput();
+                }
+                if ((requestedCapabilities & screenshare::ControlCapabilityKeyboard) != 0) {
+                    keyboardControlViewerId = controlRequest->viewerId;
+                } else if (keyboardControlViewerId == controlRequest->viewerId) {
+                    keyboardControlViewerId.clear();
+                    remoteInputInjector.ReleaseAllInjectedInput();
+                }
+            }
             refreshRemoteControlTarget();
-            remoteControlEndpoint = controlRequest->capabilities != 0 ? controlEndpoint : std::string();
-            remoteControlCapabilities = controlRequest->capabilities;
             screenshare::udp_protocol::ControlMessage ack;
-            ack.command = controlRequest->capabilities != 0
+            ack.command = requestedCapabilities != 0
                 ? screenshare::udp_protocol::ControlCommandType::GrantControl
                 : screenshare::udp_protocol::ControlCommandType::RevokeControl;
-            ack.capabilities = controlRequest->capabilities;
+            ack.capabilities = requestedCapabilities;
             ack.accessCodeFingerprint = options.accessCodeFingerprint;
             const bool acked = udpSender && udpSender->SendControlTo(controlEndpoint, ack);
             std::cout << "remote_control_grant endpoint=" << controlEndpoint
-                      << " caps=" << controlRequest->capabilities
+                      << " viewer_id=" << LogTokenEncode(controlRequest->viewerId)
+                      << " caps=" << requestedCapabilities
                       << " sent=" << (acked ? "yes" : "no") << "\n" << std::flush;
             // Re-send the ack a few times (below) so a single dropped datagram
             // does not leave the viewer's control state out of sync.
-            scheduleControlAckBurst(controlEndpoint, controlRequest->capabilities);
+            scheduleControlAckBurst(controlEndpoint, requestedCapabilities);
         }
 
         // Bounded loss-resilience burst: re-send the latest ack a few times over
         // ~0.5s after a state change, then stop. No perpetual re-assert (which
         // would fight an optimistic release or spam a departed controller).
-        if (controlAckResendsLeft > 0 && udpSender && Clock::now() >= nextControlAckAt) {
-            screenshare::udp_protocol::ControlMessage ack;
-            ack.command = controlAckCaps != 0
-                ? screenshare::udp_protocol::ControlCommandType::GrantControl
-                : screenshare::udp_protocol::ControlCommandType::RevokeControl;
-            ack.capabilities = controlAckCaps;
-            ack.accessCodeFingerprint = options.accessCodeFingerprint;
-            udpSender->SendControlTo(controlAckEndpoint, ack);
-            --controlAckResendsLeft;
-            nextControlAckAt = Clock::now() + std::chrono::milliseconds(150);
+        for (auto burst = controlAckBursts.begin(); burst != controlAckBursts.end();) {
+            if (burst->second.resendsLeft > 0 && udpSender && Clock::now() >= burst->second.nextAt) {
+                screenshare::udp_protocol::ControlMessage ack;
+                ack.command = burst->second.capabilities != 0
+                    ? screenshare::udp_protocol::ControlCommandType::GrantControl
+                    : screenshare::udp_protocol::ControlCommandType::RevokeControl;
+                ack.capabilities = burst->second.capabilities;
+                ack.accessCodeFingerprint = options.accessCodeFingerprint;
+                udpSender->SendControlTo(burst->first, ack);
+                --burst->second.resendsLeft;
+                burst->second.nextAt = Clock::now() + std::chrono::milliseconds(150);
+            }
+            if (burst->second.resendsLeft <= 0) {
+                burst = controlAckBursts.erase(burst);
+            } else {
+                ++burst;
+            }
+        }
+
+        for (auto& [viewerId, grant] : controlGrants) {
+            if (grant.gamepad != nullptr && grant.hasGamepadState &&
+                Clock::now() - grant.lastGamepadStateAt > std::chrono::milliseconds(300)) {
+                destroyGamepad(grant);
+                std::cout << "gamepad_watchdog viewer_id=" << LogTokenEncode(viewerId)
+                          << " action=neutralized_destroyed\n" << std::flush;
+            }
+        }
+        if (udpSender) {
+            std::vector<std::string> staleControlViewers;
+            for (const auto& viewer : udpSender->viewerSnapshots()) {
+                if (viewer.hasFeedback && viewer.feedbackAgeMs > 10000 &&
+                    controlGrants.find(viewer.viewerId) != controlGrants.end()) {
+                    staleControlViewers.push_back(viewer.viewerId);
+                }
+            }
+            for (const auto& viewerId : staleControlViewers) {
+                const auto grant = controlGrants.find(viewerId);
+                const std::string endpoint = grant != controlGrants.end() ? grant->second.endpoint : std::string();
+                eraseControlGrant(viewerId);
+                std::cout << "remote_control_grant endpoint=" << endpoint
+                          << " viewer_id=" << LogTokenEncode(viewerId)
+                          << " caps=0 reason=viewer_timeout\n" << std::flush;
+            }
         }
 
         std::optional<screenshare::CapturedFrame> frame;
@@ -6354,6 +6558,18 @@ void RunUdpReceiverStats(
                 message.key = static_cast<uint16_t>(input.key);
                 message.scancode = static_cast<uint16_t>(input.scancode);
                 message.pressed = input.pressed;
+                break;
+            case K::GamepadState:
+                message.command = Command::GamepadState;
+                message.gamepad.schemaVersion = input.gamepad.schemaVersion;
+                message.gamepad.controllerSlot = input.gamepad.controllerSlot;
+                message.gamepad.buttons = input.gamepad.buttons;
+                message.gamepad.leftTrigger = input.gamepad.leftTrigger;
+                message.gamepad.rightTrigger = input.gamepad.rightTrigger;
+                message.gamepad.thumbLX = input.gamepad.thumbLX;
+                message.gamepad.thumbLY = input.gamepad.thumbLY;
+                message.gamepad.thumbRX = input.gamepad.thumbRX;
+                message.gamepad.thumbRY = input.gamepad.thumbRY;
                 break;
             case K::RequestControl:
                 message.command = Command::RequestControl;

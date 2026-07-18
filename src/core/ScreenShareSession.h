@@ -57,6 +57,7 @@ enum class SessionEventType {
     AudioStatusChanged,
     ControlStateChanged,
     ControlRequested,
+    GamepadStatusChanged,
     Issue,
     Error,
 };
@@ -201,7 +202,21 @@ enum ControlCapability : uint32_t {
     ControlCapabilityNone = 0,
     ControlCapabilityMouse = 1U << 0,
     ControlCapabilityKeyboard = 1U << 1,
-    ControlCapabilityGamepad = 1U << 2, // reserved for v2 (gamepad injection)
+    ControlCapabilityGamepad = 1U << 2,
+};
+
+struct RemoteGamepadState {
+    uint8_t schemaVersion = 1;
+    uint8_t controllerSlot = 0;
+    uint16_t buttons = 0;
+    uint8_t leftTrigger = 0;
+    uint8_t rightTrigger = 0;
+    int16_t thumbLX = 0;
+    int16_t thumbLY = 0;
+    int16_t thumbRX = 0;
+    int16_t thumbRY = 0;
+
+    bool operator==(const RemoteGamepadState&) const = default;
 };
 
 enum class RemoteInputKind {
@@ -209,6 +224,7 @@ enum class RemoteInputKind {
     MouseButton,
     MouseScroll,
     Key,
+    GamepadState,
     RequestControl,  // viewer asks the host for control
     ReleaseControl,  // viewer gives control back
 };
@@ -226,6 +242,7 @@ struct RemoteInputEvent {
     int key = 0;        // virtual-key code
     int scancode = 0;
     uint32_t requestedCapabilities = 0; // for RequestControl
+    RemoteGamepadState gamepad;
 };
 
 struct SessionViewer {
@@ -339,11 +356,18 @@ struct SessionStatus {
     uint64_t audioPackets = 0;
     std::string natStatus;
     std::string natHint;
-    // Remote control. On the host: the viewer currently holding control and the
-    // input types granted to it. On the viewer: the input types the host granted
-    // to this client (0 = none / view-only).
+    // Remote control. controllerViewerId is retained for compatibility and is
+    // populated only when exactly one host viewer has any control. Per-viewer
+    // capabilities and the explicit owner/allocation fields describe multi-owner
+    // sessions. On a viewer, controlCapabilities is this client's grant.
     std::string controllerViewerId;
     uint32_t controlCapabilities = 0;
+    std::string mouseControllerViewerId;
+    std::string keyboardControllerViewerId;
+    std::vector<std::string> gamepadControllerViewerIds;
+    bool gamepadBackendAvailable = false;
+    std::string gamepadBackendMessage;
+    uint32_t gamepadRemoteCapacity = 0;
 };
 
 struct SessionEvent {
