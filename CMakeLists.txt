@@ -149,6 +149,7 @@ add_library(ScreenShareCore STATIC
     src/core/SessionCommand.cpp
     src/core/SessionRuntimeControl.cpp
     src/input/RemoteInputInjector.cpp
+    src/input/ViewerGamepad.cpp
     src/input/VirtualGamepadBackend.cpp
     src/input/XInputGamepad.cpp
     src/render/Nv12D3D11Presenter.cpp
@@ -211,6 +212,8 @@ target_link_libraries(ScreenShareCore PUBLIC
     windowsapp
     bcrypt
     iphlpapi
+    hid
+    setupapi
     winhttp
     ws2_32
 )
@@ -240,6 +243,13 @@ if(BUILD_TESTING)
     target_compile_features(ControllerProtocolTests PRIVATE cxx_std_20)
     target_link_libraries(ControllerProtocolTests PRIVATE ScreenShareCore)
     add_test(NAME controller-protocol COMMAND ControllerProtocolTests)
+
+    add_executable(ViewerGamepadReportTests
+        tests/ViewerGamepadReportTests.cpp
+    )
+    target_compile_features(ViewerGamepadReportTests PRIVATE cxx_std_20)
+    target_link_libraries(ViewerGamepadReportTests PRIVATE ScreenShareCore)
+    add_test(NAME viewer-gamepad-reports COMMAND ViewerGamepadReportTests)
     find_program(SCREENSHARE_POWERSHELL_EXECUTABLE NAMES pwsh.exe pwsh powershell.exe powershell)
     if(SCREENSHARE_POWERSHELL_EXECUTABLE)
         add_test(NAME update-manifest-script

@@ -1,9 +1,17 @@
 # Controller support
 
-ScreenShare's controller MVP reads one XInput controller on each granted viewer and creates one
-independent Xbox 360-compatible virtual controller for that viewer on the host. The host's physical
-controller is not intercepted or hidden. Mouse and keyboard remain exclusive capabilities, while
-gamepads may be granted to multiple viewers.
+ScreenShare reads one selected physical controller on each granted viewer and creates one independent
+Xbox 360-compatible virtual controller for that viewer on the host. Viewer capture supports
+Xbox/XInput controllers plus native DualShock 4, DualSense, and DualSense Edge HID input over USB or
+Bluetooth. The PlayStation path uses Windows' built-in HID APIs and requires no DS4Windows, Steam
+Input, or additional driver. The host's physical controller is not intercepted or hidden. Mouse and
+keyboard remain exclusive capabilities, while gamepads may be granted to multiple viewers.
+
+Core PlayStation controls are translated to the equivalent Xbox layout: Cross/Circle/Square/Triangle
+become A/B/X/Y, Share/Create and Options become Back and Start, and sticks, triggers, shoulders,
+stick clicks, and the directional pad retain their usual roles. Touchpad input, the PS button,
+motion sensors, adaptive triggers, controller audio, lightbar control, and rumble remain out of scope.
+Bluetooth input reports are CRC-checked before they are accepted.
 
 ## Installed controller runtime
 

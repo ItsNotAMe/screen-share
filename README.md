@@ -16,7 +16,8 @@ while `ScreenShare.exe` remains available for CLI diagnostics and automation.
 - Support multiple viewers with isolated send lanes, per-viewer health/recovery, host disconnect controls,
   room passwords, automatic UDP encryption keys, reports, and live stream settings.
 - Let up to three viewers use independent virtual Xbox controllers while the host keeps a local controller;
-  ScreenShare Setup provisions controller support before the application is launched.
+  viewers may use Xbox/XInput, DualShock 4, or DualSense controllers, and ScreenShare Setup provisions
+  host controller support before the application is launched.
 - Build a portable Windows zip with the UI, CLI, runtime DLLs, README, and license.
 - Check GitHub Releases for verified updates; installed copies use ScreenShare Setup while portable
   copies continue using the ZIP updater.

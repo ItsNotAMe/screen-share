@@ -3,7 +3,7 @@
 #include "ui/AppShellWindow.h"
 #include "ui/UiStyle.h"
 #include "ui/VideoFrameWidget.h"
-#include "input/XInputGamepad.h"
+#include "input/ViewerGamepad.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QFile>
@@ -394,8 +394,8 @@ QWidget* ActiveWatchWindow::buildSideStats()
     controlRowLayout->addWidget(iconsRow);
     gamepadSelector_ = new QComboBox;
     gamepadSelector_->setObjectName("WatchGamepadSelector");
-    gamepadSelector_->setToolTip("Physical controller sent to the host");
-    gamepadSelector_->addItem("No controller", -1);
+    gamepadSelector_->setToolTip("Xbox or PlayStation controller sent to the host");
+    gamepadSelector_->addItem("No controller", QString());
     connect(gamepadSelector_, &QComboBox::currentIndexChanged, this, [this](int) {
         sendNeutralGamepad();
         lastGamepadState_.reset();
@@ -1068,22 +1068,31 @@ void ActiveWatchWindow::refreshGamepadSlots()
     if (gamepadSelector_ == nullptr) {
         return;
     }
-    const int previousSlot = gamepadSelector_->currentData().toInt();
-    const auto connectedSlots = screenshare::XInputGamepad::ConnectedSlots();
+    const QString previousDeviceId = gamepadSelector_->currentData().toString();
+    const auto connectedDevices = screenshare::ViewerGamepad::ConnectedDevices();
     QSignalBlocker blocker(gamepadSelector_);
     gamepadSelector_->clear();
-    if (connectedSlots.empty()) {
-        gamepadSelector_->addItem("No controller", -1);
+    if (connectedDevices.empty()) {
+        gamepadSelector_->addItem("No controller", QString());
         return;
     }
     int selectedIndex = 0;
-    for (int slot : connectedSlots) {
-        gamepadSelector_->addItem(QStringLiteral("Controller %1").arg(slot + 1), slot);
-        if (slot == previousSlot) {
+    for (const auto& device : connectedDevices) {
+        const QString deviceId = QString::fromUtf8(device.id.data(), static_cast<qsizetype>(device.id.size()));
+        gamepadSelector_->addItem(
+            QString::fromUtf8(device.name.data(), static_cast<qsizetype>(device.name.size())),
+            deviceId);
+        if (deviceId == previousDeviceId) {
             selectedIndex = gamepadSelector_->count() - 1;
         }
     }
     gamepadSelector_->setCurrentIndex(selectedIndex);
+    const QString selectedDeviceId = gamepadSelector_->currentData().toString();
+    if (!previousDeviceId.isEmpty() && selectedDeviceId != previousDeviceId && lastGamepadState_) {
+        sendNeutralGamepad();
+        lastGamepadState_.reset();
+        lastGamepadSentMs_ = -1;
+    }
 }
 
 void ActiveWatchWindow::sendNeutralGamepad()
@@ -1095,7 +1104,7 @@ void ActiveWatchWindow::sendNeutralGamepad()
     input.kind = screenshare::RemoteInputKind::GamepadState;
     input.gamepad.controllerSlot = lastGamepadState_.has_value() ?
         lastGamepadState_->controllerSlot :
-        static_cast<uint8_t>(std::max(0, gamepadSelector_ != nullptr ? gamepadSelector_->currentData().toInt() : 0));
+        0;
     backend_->sendRemoteInput(input);
 }
 
@@ -1112,8 +1121,11 @@ void ActiveWatchWindow::pollGamepad()
         gamepadScanTicks_ = 0;
         refreshGamepadSlots();
     }
-    const int slot = gamepadSelector_ != nullptr ? gamepadSelector_->currentData().toInt() : -1;
-    const auto state = screenshare::XInputGamepad::ReadState(slot);
+    const QByteArray deviceId = gamepadSelector_ != nullptr ?
+        gamepadSelector_->currentData().toString().toUtf8() :
+        QByteArray{};
+    const auto state = screenshare::ViewerGamepad::ReadState(
+        std::string_view(deviceId.constData(), static_cast<size_t>(deviceId.size())));
     if (!state.has_value()) {
         if (lastGamepadState_.has_value()) {
             sendNeutralGamepad();

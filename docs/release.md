@@ -41,7 +41,7 @@ Generate the manifest once to calculate the package URL and SHA-256 signing fiel
   -InstallerPath .\build\release\ScreenShare-Setup-0.3.1-windows-x64.exe `
   -OutputPath .\build\release\screenshare-update.json `
   -Channel prerelease `
-  -Notes "Fix installed UI report paths","Save relative reports under LocalAppData"
+  -Notes "Fix installed UI report paths","Add native DualShock 4 and DualSense viewer capture"
 ```
 
 Sign the manifest with the encrypted offline key. The helper constructs the exact
@@ -70,7 +70,7 @@ gh release create v0.3.1 `
   .\build\release\screenshare-update.json `
   --prerelease `
   --title "ScreenShare 0.3.1 prerelease" `
-  --notes "Fixes room startup from Program Files by saving relative UI reports under LocalAppData."
+  --notes "Fixes installed report paths and adds native DualShock 4 and DualSense viewer capture."
 ```
 
 For an existing tag/release, replace `create` with `upload --clobber`.
