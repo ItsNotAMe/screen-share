@@ -97,7 +97,7 @@ cmake --preset release `
 cmake --build --preset release
 ```
 
-This writes `ScreenShare-Setup-0.3.0-windows-x64.exe`. The portable ZIP remains useful for diagnostics,
+This writes `ScreenShare-Setup-0.3.1-windows-x64.exe`. The portable ZIP remains useful for diagnostics,
 but it does not provision a controller driver and therefore does not promise ready-to-use controller
 hosting.
 
@@ -122,7 +122,9 @@ Typical flow:
 4. If direct UDP cannot connect, use the generated reports from both computers for diagnostics.
 
 Reports are enabled by default in the UI and are the easiest way to debug connection, audio, video,
-or performance issues.
+or performance issues. Relative UI report names are saved under
+`%LOCALAPPDATA%\ScreenShare\reports`, so installed copies never try to write into Program Files.
+An absolute report path entered in the UI is still used as-is.
 
 ## CLI Smoke Test
 

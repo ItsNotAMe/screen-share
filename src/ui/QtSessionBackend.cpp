@@ -1,5 +1,7 @@
 #include "ui/QtSessionBackend.h"
+#include "ui/UiReportPath.h"
 
+#include <QtCore/QByteArray>
 #include <QtCore/QMetaObject>
 
 #include <exception>
@@ -10,7 +12,18 @@ namespace {
 
 QString ToQString(const std::string& text)
 {
-    return QString::fromStdString(text);
+    return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+}
+
+std::string ToStdUtf8(const QString& text)
+{
+    const QByteArray utf8 = text.toUtf8();
+    return std::string(utf8.constData(), static_cast<size_t>(utf8.size()));
+}
+
+std::string ResolveReportPath(const std::string& configuredPath)
+{
+    return ToStdUtf8(ResolveUiReportPath(ToQString(configuredPath)));
 }
 
 } // namespace
@@ -120,7 +133,9 @@ bool QtSessionBackend::startShare(
     }
 
     try {
-        session_.StartShare(config, *this);
+        screenshare::ShareSessionConfig resolvedConfig = config;
+        resolvedConfig.reportPath = ResolveReportPath(config.reportPath);
+        session_.StartShare(resolvedConfig, *this);
     } catch (const std::exception& error) {
         return finishStartWithError(error, errorMessage);
     }
@@ -138,7 +153,9 @@ bool QtSessionBackend::startWatch(
     }
 
     try {
-        session_.StartWatch(config, *this);
+        screenshare::WatchSessionConfig resolvedConfig = config;
+        resolvedConfig.reportPath = ResolveReportPath(config.reportPath);
+        session_.StartWatch(resolvedConfig, *this);
     } catch (const std::exception& error) {
         return finishStartWithError(error, errorMessage);
     }

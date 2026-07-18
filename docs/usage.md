@@ -516,6 +516,11 @@ Use `--save-report PATH` instead of `--log PATH` when you want a zipped report f
 .\build\debug\ScreenShare.exe --share 192.168.1.127:5000 --session game-night --save-report sender-report.zip
 ```
 
+In the desktop UI, relative report names are resolved below
+`%LOCALAPPDATA%\ScreenShare\reports`. This keeps reports writable when ScreenShare is installed in
+Program Files. Absolute report paths remain unchanged. CLI paths continue to resolve relative to
+the command's working directory.
+
 Add `--access-code CODE` on both sides when you want an encrypted local session. The receiver
 rejects senders that do not know the same code:
 

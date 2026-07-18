@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative VERSION 0.3.0 LANGUAGES CXX)
+project(ScreenShareNative VERSION 0.3.1 LANGUAGES CXX)
 
 include(CTest)
 
@@ -401,6 +401,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             src/ui/UiStyle.cpp
             src/ui/UpdateManager.cpp
             src/ui/UpdatePackageSelection.cpp
+            src/ui/UiReportPath.cpp
             src/ui/VideoFrameWidget.cpp
             src/ui/resources.qrc
             ${SCREENSHARE_UI_ICON_RC}
@@ -431,6 +432,17 @@ if(SCREENSHARE_BUILD_QT_UI)
             )
             target_link_libraries(UpdatePackageSelectionTests PRIVATE Qt6::Core)
             add_test(NAME update-package-selection COMMAND UpdatePackageSelectionTests)
+
+            add_executable(UiReportPathTests
+                tests/UiReportPathTests.cpp
+                src/ui/UiReportPath.cpp
+            )
+            target_compile_features(UiReportPathTests PRIVATE cxx_std_20)
+            target_include_directories(UiReportPathTests PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/src
+            )
+            target_link_libraries(UiReportPathTests PRIVATE Qt6::Core)
+            add_test(NAME ui-report-path COMMAND UiReportPathTests)
         endif()
 
         if(MSVC)

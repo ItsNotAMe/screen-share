@@ -3,12 +3,12 @@
 ScreenShare updates are published as GitHub Release assets:
 
 - `ScreenShare-release-windows-x64.zip`
-- `ScreenShare-Setup-0.3.0-windows-x64.exe`
+- `ScreenShare-Setup-0.3.1-windows-x64.exe`
 - `screenshare-update.json`
 
 The desktop app checks the HTTPS manifest from the latest GitHub Release. It only offers an update
-when the manifest version is newer than the compiled app version and the downloaded zip matches the
-manifest SHA-256 hash.
+when the manifest version is newer than the compiled app version and the downloaded package matches
+the manifest SHA-256 hash. Installed copies select the Setup asset; portable copies select the ZIP.
 
 ## Build
 
@@ -36,12 +36,12 @@ Generate the manifest once to calculate the package URL and SHA-256 signing fiel
 
 ```powershell
 .\scripts\create-update-manifest.ps1 `
-  -Version 0.3.0 `
+  -Version 0.3.1 `
   -ZipPath .\build\release\ScreenShare-release-windows-x64.zip `
-  -InstallerPath .\build\release\ScreenShare-Setup-0.3.0-windows-x64.exe `
+  -InstallerPath .\build\release\ScreenShare-Setup-0.3.1-windows-x64.exe `
   -OutputPath .\build\release\screenshare-update.json `
   -Channel prerelease `
-  -Notes "Multi-viewer controller support","Installed updates use ScreenShare Setup"
+  -Notes "Fix installed UI report paths","Save relative reports under LocalAppData"
 ```
 
 Sign the manifest with the encrypted offline key. The helper constructs the exact
@@ -64,13 +64,13 @@ download displays Windows' Unknown Publisher warning.
 ## Publish
 
 ```powershell
-gh release create v0.3.0 `
+gh release create v0.3.1 `
   .\build\release\ScreenShare-release-windows-x64.zip `
-  .\build\release\ScreenShare-Setup-0.3.0-windows-x64.exe `
+  .\build\release\ScreenShare-Setup-0.3.1-windows-x64.exe `
   .\build\release\screenshare-update.json `
   --prerelease `
-  --title "ScreenShare 0.3.0 prerelease" `
-  --notes "Adds host-plus-multi-viewer controller support. Use ScreenShare Setup for controller hosting."
+  --title "ScreenShare 0.3.1 prerelease" `
+  --notes "Fixes room startup from Program Files by saving relative UI reports under LocalAppData."
 ```
 
 For an existing tag/release, replace `create` with `upload --clobber`.
