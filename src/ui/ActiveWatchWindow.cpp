@@ -36,6 +36,10 @@
 #include <cmath>
 #include <utility>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace {
 
 QPixmap renderSvgResource(const QString& path, const QSize& size, const QString& color = QString())
@@ -242,6 +246,7 @@ void ActiveWatchWindow::setSession(const WatchSessionUiState& session)
     audioControlsTouched_ = false;
     receivedVideoFrame_ = false;
     hostLeft_ = false;
+    hostLeftHandled_ = false;
     leaveRequested_ = false;
     // Remote-control grants never carry across sessions: a rejoin must start with
     // no control until the host explicitly re-grants it. Reset the "You control"
@@ -455,12 +460,13 @@ QWidget* ActiveWatchWindow::buildFooter()
     volumeLayout->addWidget(muteButton_);
 
     constexpr int footerControlHeight = 56;
-    // Let the volume panel flex (and the slider shrink) so the footer compresses
-    // gracefully on small windows instead of overlapping the buttons.
     volumePanel->setFixedHeight(footerControlHeight);
-    volumePanel->setMinimumWidth(210);
-    volumePanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    layout->addWidget(volumePanel, 1);
+    volumePanel->setFixedWidth(300);
+    volumePanel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    layout->addWidget(volumePanel);
+    // Keep the volume cluster compact on wide/maximized windows. Extra width
+    // belongs between control groups, not between the icon, slider and value.
+    layout->addStretch(1);
 
     fullscreenButton_ = iconButton("Fullscreen", "ActiveSecondaryButton", "fullscreen");
     connect(fullscreenButton_, &QPushButton::clicked, this, [this] {
@@ -808,7 +814,6 @@ void ActiveWatchWindow::setStreamFullscreen(bool enabled)
     }
 
     QWidget* topLevel = window();
-    auto* shell = dynamic_cast<AppShellWindow*>(topLevel);
     if (enabled) {
         preFullscreenGeometry_ = topLevel != nullptr ? topLevel->geometry() : QRect();
         preFullscreenState_ = topLevel != nullptr ? topLevel->windowState() : Qt::WindowNoState;
@@ -817,6 +822,37 @@ void ActiveWatchWindow::setStreamFullscreen(bool enabled)
     streamFullscreen_ = enabled;
     installFullscreenEventFilter(enabled);
 
+    if (topLevel != nullptr) {
+        if (enabled) {
+            applyStreamFullscreenUi(true);
+            topLevel->showFullScreen();
+            setFocus(Qt::OtherFocusReason);
+            if (videoFrameWidget_ != nullptr) {
+                videoFrameWidget_->setFocus(Qt::OtherFocusReason);
+            }
+        } else {
+            const bool wasMaximized = (preFullscreenState_ & Qt::WindowMaximized) != 0;
+            if (wasMaximized) {
+                topLevel->showMaximized();
+            } else {
+                topLevel->showNormal();
+                if (!preFullscreenGeometry_.isNull()) {
+                    topLevel->setGeometry(preFullscreenGeometry_);
+                }
+            }
+            // Keep the fullscreen layout in place until the native window has
+            // returned to its final geometry. Revealing the normal footer before
+            // showNormal()/setGeometry() lets Qt paint it once at an intermediate
+            // position, leaving the ghost copy seen on some Windows transitions.
+            finishStreamFullscreenExit(topLevel);
+        }
+    } else {
+        applyStreamFullscreenUi(enabled);
+    }
+}
+
+void ActiveWatchWindow::applyStreamFullscreenUi(bool enabled)
+{
     if (topStatusWidget_ != nullptr) {
         topStatusWidget_->setVisible(!enabled);
     }
@@ -838,45 +874,54 @@ void ActiveWatchWindow::setStreamFullscreen(bool enabled)
         previewPanel_->style()->unpolish(previewPanel_);
         previewPanel_->style()->polish(previewPanel_);
     }
-    if (shell != nullptr) {
+    if (auto* shell = dynamic_cast<AppShellWindow*>(window())) {
         shell->setChromeVisible(!enabled);
     }
     if (fullscreenButton_ != nullptr) {
         fullscreenButton_->setText(enabled ? QStringLiteral("Exit Fullscreen") : QStringLiteral("Fullscreen"));
     }
+}
 
-    if (topLevel != nullptr) {
-        if (enabled) {
-            topLevel->showFullScreen();
-            setFocus(Qt::OtherFocusReason);
-            if (videoFrameWidget_ != nullptr) {
-                videoFrameWidget_->setFocus(Qt::OtherFocusReason);
-            }
-        } else {
-            const bool wasMaximized = (preFullscreenState_ & Qt::WindowMaximized) != 0;
-            if (wasMaximized) {
-                topLevel->showMaximized();
-            } else {
-                topLevel->showNormal();
-                if (!preFullscreenGeometry_.isNull()) {
-                    topLevel->setGeometry(preFullscreenGeometry_);
-                }
-            }
-            // The fullscreen->windowed transition on this frameless window can
-            // leave a stale copy of the footer painted. Force a full relayout and
-            // repaint once the window has settled into its new state.
-            QPointer<QWidget> repaintTarget(topLevel);
-            QTimer::singleShot(0, this, [this, repaintTarget] {
-                if (layout() != nullptr) {
-                    layout()->invalidate();
-                    layout()->activate();
-                }
-                if (repaintTarget != nullptr) {
-                    repaintTarget->update();
-                }
-            });
+void ActiveWatchWindow::finishStreamFullscreenExit(QWidget* topLevel)
+{
+    QPointer<QWidget> repaintTarget(topLevel);
+    QTimer::singleShot(0, this, [this, repaintTarget] {
+        if (streamFullscreen_ || repaintTarget == nullptr) {
+            return;
         }
-    }
+
+        applyStreamFullscreenUi(false);
+        QApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+        if (layout() != nullptr) {
+            layout()->invalidate();
+            layout()->activate();
+        }
+        if (repaintTarget->layout() != nullptr) {
+            repaintTarget->layout()->invalidate();
+            repaintTarget->layout()->activate();
+        }
+
+        // Use a second event turn so painting observes the final widget
+        // geometries. A native erase is needed for the frameless top-level plus
+        // D3D child HWND; QWidget::update() alone can leave old backing-store
+        // pixels until the user manually resizes the window.
+        QTimer::singleShot(0, this, [this, repaintTarget] {
+            if (streamFullscreen_ || repaintTarget == nullptr) {
+                return;
+            }
+            repaintTarget->repaint();
+#ifdef _WIN32
+            const HWND hwnd = reinterpret_cast<HWND>(repaintTarget->winId());
+            if (hwnd != nullptr) {
+                RedrawWindow(
+                    hwnd,
+                    nullptr,
+                    nullptr,
+                    RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            }
+#endif
+        });
+    });
 }
 
 void ActiveWatchWindow::updatePresentedFps()

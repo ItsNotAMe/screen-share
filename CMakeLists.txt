@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative VERSION 0.3.2 LANGUAGES CXX)
+project(ScreenShareNative VERSION 0.3.3 LANGUAGES CXX)
 
 include(CTest)
 
@@ -250,6 +250,14 @@ if(BUILD_TESTING)
     target_compile_features(ViewerGamepadReportTests PRIVATE cxx_std_20)
     target_link_libraries(ViewerGamepadReportTests PRIVATE ScreenShareCore)
     add_test(NAME viewer-gamepad-reports COMMAND ViewerGamepadReportTests)
+
+    add_executable(UdpSenderPacingTests
+        tests/UdpSenderPacingTests.cpp
+    )
+    target_compile_features(UdpSenderPacingTests PRIVATE cxx_std_20)
+    target_link_libraries(UdpSenderPacingTests PRIVATE ScreenShareCore)
+    add_test(NAME udp-sender-pacing COMMAND UdpSenderPacingTests)
+
     find_program(SCREENSHARE_POWERSHELL_EXECUTABLE NAMES pwsh.exe pwsh powershell.exe powershell)
     if(SCREENSHARE_POWERSHELL_EXECUTABLE)
         add_test(NAME update-manifest-script

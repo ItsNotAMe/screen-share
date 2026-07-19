@@ -22,6 +22,7 @@ class QPushButton;
 class QScrollArea;
 class QTimer;
 class QVBoxLayout;
+class QResizeEvent;
 class QWidget;
 
 class ActiveShareWindow final : public QWidget {
@@ -36,6 +37,7 @@ public:
 
 private:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
     QWidget* buildShell();
     QWidget* buildTopStatus();
@@ -76,6 +78,7 @@ private:
     screenshare::ShareSessionSettings selectedShareSettings() const;
     void updateSettingsApplyState();
     void showSettingsPanel(bool visible);
+    void updateResponsiveLayout(int availableWidth);
     void handleFinished(const QtSessionBackend::FinishInfo& info);
     QString stateText(const screenshare::SessionStatus& status) const;
     QString healthText(const screenshare::SessionStatus& status) const;
@@ -86,6 +89,7 @@ private:
     QElapsedTimer elapsed_;
     QTimer* elapsedTimer_ = nullptr;
     QTimer* sourceRefreshTimer_ = nullptr;
+    QVBoxLayout* contentLayout_ = nullptr;
 
     QLabel* stateLabel_ = nullptr;
     QLabel* elapsedLabel_ = nullptr;

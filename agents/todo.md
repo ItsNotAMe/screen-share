@@ -7,7 +7,7 @@
 
 ## Next Updates
 
-Controller support is the next major feature. Multi-viewer reliability ships first because signaling-room viewers currently share transport state in ways that can let one unhealthy endpoint disrupt the others; controller ownership and revocation also need stable per-viewer identity. Controller protocol/backend work can start while the multi-viewer failure is being reproduced, but the controller release should build on the transport fix.
+Controller support shipped in v0.3.0 and was expanded in v0.3.1 with native PlayStation controller capture. The active work below now focuses on multi-viewer validation, latency, UI/runtime polish, and the long-term replacement for the retired ViGEm runtime.
 
 ### v0.2.3 — Multi-viewer reliability
 
@@ -43,44 +43,24 @@ Goal: one encoded 1080p60 stream serves multiple viewers without a slow, lossy, 
 - [ ] A late join/rejoin shows decodable video within 2 seconds; leaving one viewer does not interrupt the others; one unreachable endpoint does not fail the sender.
 - [ ] Repeat the two-viewer test across real Internet/NAT paths and attach all sender/viewer reports before releasing v0.2.3.
 
-### v0.3.0 — Controller support
+### v0.3.0-v0.3.1 — Controller support (shipped)
 
-Goal: a viewer can use one physical Windows controller to drive one host-side Xbox-compatible virtual controller, with the same explicit host consent, single-controller ownership, encryption, panic revoke, and disconnect safety as mouse/keyboard control.
+- [x] Add the virtual-gamepad backend and package the pinned host runtime through ScreenShare Setup.
+- [x] Add versioned, encrypted, replay-protected controller-state transport with bounded polling, keepalives, validation, and queue coalescing.
+- [x] Capture Xbox/XInput controllers and native DualShock 4, DualSense, and DualSense Edge devices, including hotplug and controller selection.
+- [x] Add explicit host gamepad grants, stable per-viewer ownership, multi-viewer virtual pads, status/reporting, revoke, and panic-revoke behavior.
+- [x] Neutralize and destroy the affected virtual controller on revoke, timeout, disconnect, unplug, backend failure, and session shutdown.
+- [x] Cover controller report parsing and native PlayStation mappings with automated tests and document the installed/portable runtime behavior.
 
-#### 1. Backend decision and thin vertical slice
+#### Remaining controller follow-ups
 
-- [ ] Introduce a `VirtualGamepadBackend` interface so transport/runtime/UI code is independent of the driver choice.
-- [ ] Implement an optional ViGEmClient backend for the first vertical slice only if ViGEmBus is already installed; do not silently install or bundle the retired driver. Detect missing/incompatible installations and show an actionable host message.
-- [ ] In parallel, scope the maintained long-term backend as a signed KMDF virtual HID source driver using Microsoft's Virtual HID Framework (VHF). Record signing/install/update cost before deciding whether it replaces ViGEm for v0.3.0 or a later release.
-- [ ] First proof: a local fixed controller state creates one virtual Xbox 360-compatible pad, moves both sticks/triggers, presses every button, returns to neutral, and disconnects cleanly.
-
-#### 2. Protocol and viewer capture
-
-- [ ] Add a versioned `GamepadState` control command; the existing gamepad capability bit is only reserved and the wire message does not yet carry controller state.
-- [ ] Carry controller slot/id, buttons, both triggers, and both signed stick axes in fixed-width validated fields. Keep the existing encrypted control channel and anti-replay sequence.
-- [ ] Poll XInput on the viewer at a bounded rate (target 125 Hz), send changed state plus a low-rate keepalive, and coalesce queued states so old stick positions cannot build latency.
-- [ ] Handle controller hotplug and allow the viewer to choose among connected controllers; default to the first active controller without changing mouse/keyboard capture behavior.
-- [ ] Leave rumble, lightbar, gyro, touchpad, controller remapping, and multiple simultaneous virtual pads out of the MVP unless the vertical slice proves they are nearly free.
-
-#### 3. Host authorization and fail-safe behavior
-
-- [ ] Enable the host's existing Gamepad toggle and include it in first-grant consent, the persistent control indicator, status events, reports, and the global panic-revoke path.
-- [ ] Keep one controlling viewer per session initially. A controller request/grant must identify the same stable viewer lane used by multi-viewer transport.
-- [ ] Apply a gamepad-specific input-rate limit and validate every enum/axis/button value before it reaches the backend.
-- [ ] Submit a neutral state and destroy/release the virtual pad on viewer release, host revoke, panic revoke, session end, viewer timeout/disconnect, controller unplug, backend error, or app crash recovery. No button, trigger, or stick may remain held.
-
-#### 4. Controller acceptance gate
-
-- [ ] Unit-test controller-state serialization/parsing, bounds validation, changed-state coalescing, replay rejection, and every neutralization path.
-- [ ] Test Xbox/XInput-compatible and common PlayStation controllers on the viewer (through Windows' XInput mapping where available), including unplug/replug during a session.
-- [ ] Validate the host virtual pad in Windows Game Controllers plus at least two real games, including analog range, diagonals, triggers, simultaneous buttons, and reconnect behavior.
-- [ ] Pass a 60-minute controller session with no stuck input and no unbounded control queue; panic revoke and network loss neutralize the pad immediately.
-- [ ] Validate controller use while two viewers are connected: only the granted viewer controls the pad, switching ownership neutralizes the previous viewer first, and video/audio remain stable.
+- [ ] Replace the retired ViGEm runtime with a maintained signed backend after validating XInput-only game compatibility and driver install/update costs.
+- [ ] Complete and record long-duration controller, network-loss, reconnect, multi-viewer, and real-game acceptance runs across Xbox and supported PlayStation devices.
 
 ## Follow-on Build Work
 
 - [ ] Profile and cut latency + CPU across capture -> encode -> send and receive -> decode -> present after the multi-viewer transport is stable.
-- [ ] Finish low-latency mode follow-ups: update `udpMaxQueueMs` on a live toggle, optionally trim viewer audio buffering, and confirm the encoder never holds frames for lookahead.
+- [ ] Finish the remaining low-latency mode follow-ups: optionally trim viewer audio buffering and confirm the encoder never holds frames for lookahead. Live toggles now update the UDP queue cap and immediately reschedule every viewer lane.
 - [ ] Map known runtime/report states to plain UI messages with actionable next steps, starting with waiting for stream, encryption mismatch, UDP hole-punch failure, host left, and host idle.
 - [ ] Make active-session wording and NAT/feedback summaries freshness-aware and consistent across join, leave, rejoin, and host departure.
 - [ ] Add only the report fields required by these diagnostics; warn about silent/wrong-device audio only when transport is healthy and evidence supports it.
@@ -90,7 +70,7 @@ Goal: a viewer can use one physical Windows controller to drive one host-side Xb
 - [ ] **Lazy mouse hook:** `RemoteInputInjector` installs a system-wide `WH_MOUSE_LL` hook + pump thread for *every* host session, even view-only ones. Construct the injector/monitor lazily only once a mouse capability is first granted.
 - [ ] **Stuck keys/modifiers:** a lost key-up datagram (or releasing control mid-hold) leaves a key logically held on the host. Release all currently-held viewer keys/buttons when control ends or the controller changes.
 - [ ] **"Requesting..." soft-lock:** if the host never answers, the viewer button stays "Requesting..." with no timeout/cancel. Add a timeout back to "Request Control" and let a click cancel a pending request.
-- [ ] **Mid-session low-latency:** the live in-room toggle flips send pacing but not `udpMaxQueueMs` (which room-creation sets to 0 for low latency), so a live toggle doesn't drop already-queued buffer depth the way starting fresh does.
+- [x] **Mid-session low-latency:** live toggles now update the UDP queue cap, reschedule primary and additional viewer lanes, and wake workers so old paced deadlines cannot survive the switch.
 - [ ] **Cleanup:** dedup the control-peer upsert block in `UdpSender` (feedback path vs `ProcessControlPacket`) into one `UpsertControlPeerLocked` helper; input auto-repeat and hi-res-wheel handling for `VideoFrameWidget` (classic mice already correct).
 
 ## Backlog / Not Now
