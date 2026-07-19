@@ -1696,6 +1696,16 @@ public:
         }
     }
 
+    void SetMaxQueueDelay(std::chrono::milliseconds delay)
+    {
+        for (auto& target : targets_) {
+            if (target.failed || target.sender == nullptr) {
+                continue;
+            }
+            target.sender->SetMaxQueueDelay(delay);
+        }
+    }
+
     void Flush()
     {
         for (auto& target : targets_) {
@@ -4419,7 +4429,14 @@ void RunCaptureStats(
         if (request->lowLatency) {
             const bool low = *request->lowLatency;
             if (udpSender) {
-                udpSender->SetPacingEnabled(!low);
+                if (low) {
+                    udpSender->SetPacingEnabled(false);
+                    udpSender->SetMaxQueueDelay(std::chrono::milliseconds(0));
+                } else {
+                    udpSender->SetMaxQueueDelay(
+                        std::chrono::milliseconds(DefaultShareUdpMaxQueueMs));
+                    udpSender->SetPacingEnabled(true);
+                }
             }
             std::cout << "runtime_low_latency=" << (low ? "on" : "off") << "\n" << std::flush;
         }

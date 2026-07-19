@@ -197,12 +197,24 @@ struct Nv12D3D11Presenter::Impl {
     {
         RECT clientRect{};
         if (hwnd == nullptr || GetClientRect(hwnd, &clientRect) == 0) {
-            clientWidth = 1;
-            clientHeight = 1;
+            clientRect.right = 1;
+            clientRect.bottom = 1;
+        }
+        const auto width = ClampDimension(static_cast<std::uint32_t>(clientRect.right - clientRect.left));
+        const auto height = ClampDimension(static_cast<std::uint32_t>(clientRect.bottom - clientRect.top));
+        if (clientWidth == width && clientHeight == height) {
             return;
         }
-        clientWidth = ClampDimension(static_cast<std::uint32_t>(clientRect.right - clientRect.left));
-        clientHeight = ClampDimension(static_cast<std::uint32_t>(clientRect.bottom - clientRect.top));
+        clientWidth = width;
+        clientHeight = height;
+        if (swapChain) {
+            // A native child window can change size while its Qt page is hidden,
+            // without a usable resize notification reaching the presentation
+            // worker. Keep the actual DXGI buffers tied to GetClientRect rather
+            // than treating the cached client dimensions as proof that they
+            // already match.
+            swapChainResizePending = true;
+        }
     }
 
     HRESULT CreateSwapChainWithEffect(DXGI_SWAP_EFFECT swapEffect, UINT bufferCount)

@@ -196,7 +196,11 @@ private:
                     presenter.Resize(work.width, work.height);
                 }
                 if (work.clearPending) {
-                    presenter.Clear();
+                    // Watch pages and their native child HWND are reused across
+                    // rooms. Drop the swap chain at the session boundary so a
+                    // hidden-page resize cannot carry stale buffer dimensions
+                    // into the next room.
+                    presenter.Reset();
                 }
                 if (work.frame) {
                     presenter.Resize(work.width, work.height);

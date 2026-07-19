@@ -585,6 +585,7 @@ void UdpSender::SendAudioPacket(const UdpAudioPacket& packet)
 void UdpSender::SetPacingBitrate(uint32_t bitrate)
 {
     bool notify = false;
+    std::vector<AdditionalLane*> lanesToNotify;
     {
         std::lock_guard lock(mutex_);
         const bool bitrateChanged = config_.pacingBitrate != bitrate;
@@ -599,15 +600,31 @@ void UdpSender::SetPacingBitrate(uint32_t bitrate)
             nextSendAt_ = now;
             UpdatePendingStatsLocked();
         }
+        if (bitrateChanged) {
+            for (const auto& lane : additionalLanes_) {
+                std::lock_guard laneLock(lane->mutex);
+                if (config_.pacingEnabled && !lane->queue.empty()) {
+                    RescheduleAdditionalQueueLocked(*lane, now);
+                    lanesToNotify.push_back(lane.get());
+                } else if (config_.pacingEnabled && lane->nextSendAt < now) {
+                    lane->nextSendAt = now;
+                    UpdateAdditionalLaneStatsLocked(*lane, now);
+                }
+            }
+        }
     }
     if (notify) {
         queueChanged_.notify_one();
+    }
+    for (AdditionalLane* lane : lanesToNotify) {
+        lane->changed.notify_one();
     }
 }
 
 void UdpSender::SetPacingEnabled(bool enabled)
 {
     bool notify = false;
+    std::vector<AdditionalLane*> lanesToNotify;
     {
         std::lock_guard lock(mutex_);
         if (config_.pacingEnabled == enabled) {
@@ -615,18 +632,42 @@ void UdpSender::SetPacingEnabled(bool enabled)
         }
         config_.pacingEnabled = enabled;
         const auto now = Clock::now();
-        if (!enabled) {
-            // Pacing off: release any held datagrams to send immediately.
+        if (!queue_.empty()) {
+            // Disabling pacing releases held datagrams immediately. Enabling it
+            // rebuilds the schedule from now instead of preserving a burst of
+            // timestamps created while pacing was off.
+            RescheduleQueueLocked(now);
+            notify = true;
+        } else {
             nextSendAt_ = now;
-            if (!queue_.empty()) {
-                RescheduleQueueLocked(now);
-                notify = true;
+            UpdatePendingStatsLocked();
+        }
+        for (const auto& lane : additionalLanes_) {
+            std::lock_guard laneLock(lane->mutex);
+            if (!lane->queue.empty()) {
+                RescheduleAdditionalQueueLocked(*lane, now);
+                lanesToNotify.push_back(lane.get());
+            } else {
+                lane->nextSendAt = now;
+                UpdateAdditionalLaneStatsLocked(*lane, now);
             }
         }
     }
     if (notify) {
         queueChanged_.notify_one();
     }
+    for (AdditionalLane* lane : lanesToNotify) {
+        lane->changed.notify_one();
+    }
+}
+
+void UdpSender::SetMaxQueueDelay(std::chrono::milliseconds delay)
+{
+    if (delay < std::chrono::milliseconds(0)) {
+        throw std::invalid_argument("UDP max queue delay must not be negative");
+    }
+    std::lock_guard lock(mutex_);
+    config_.maxQueueDelay = delay;
 }
 
 bool UdpSender::isOpen() const noexcept
@@ -1314,13 +1355,33 @@ void UdpSender::UpdateAdditionalLaneStatsLocked(AdditionalLane& lane, Clock::tim
 {
     lane.stats.pendingDatagrams = static_cast<uint64_t>(lane.queue.size()) + (lane.inFlight ? 1ULL : 0ULL);
     lane.stats.peakPendingDatagrams = std::max(lane.stats.peakPendingDatagrams, lane.stats.pendingDatagrams);
-    if (config_.pacingEnabled && !lane.queue.empty() && lane.nextSendAt > now) {
+    if (!lane.queue.empty() && lane.nextSendAt > now) {
         lane.stats.pendingQueueDelayMs = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(lane.nextSendAt - now).count());
     } else {
         lane.stats.pendingQueueDelayMs = 0;
     }
     lane.stats.peakQueueDelayMs = std::max(lane.stats.peakQueueDelayMs, lane.stats.pendingQueueDelayMs);
+}
+
+void UdpSender::RescheduleAdditionalQueueLocked(AdditionalLane& lane, Clock::time_point now)
+{
+    if (!config_.pacingEnabled || config_.pacingBitrate == 0) {
+        for (auto& datagram : lane.queue) {
+            datagram.sendAt = now;
+        }
+        lane.nextSendAt = now;
+        UpdateAdditionalLaneStatsLocked(lane, now);
+        return;
+    }
+
+    auto sendAt = now;
+    for (auto& datagram : lane.queue) {
+        datagram.sendAt = sendAt;
+        sendAt += PacingDelayForBytes(datagram.bytes.size());
+    }
+    lane.nextSendAt = sendAt;
+    UpdateAdditionalLaneStatsLocked(lane, now);
 }
 
 void UdpSender::QueueAdditionalDatagrams(
@@ -1433,7 +1494,9 @@ void UdpSender::AdditionalWorkerLoop(AdditionalLane* lane)
             }
             const auto now = Clock::now();
             if (lane->queue.front().sendAt > now) {
-                lane->changed.wait_until(lock, lane->queue.front().sendAt, [&] { return lane->stop; });
+                // Re-evaluate the front deadline after every notification. A
+                // runtime Low Latency change can move it from the future to now.
+                lane->changed.wait_until(lock, lane->queue.front().sendAt);
                 continue;
             }
             datagram = std::move(lane->queue.front().bytes);
@@ -1569,9 +1632,9 @@ void UdpSender::WorkerLoop()
             const auto now = Clock::now();
             const auto sendAt = queue_.front().sendAt;
             if (sendAt > now) {
-                queueChanged_.wait_until(lock, sendAt, [&] {
-                    return stopWorker_ || !workerError_.empty();
-                });
+                // Re-evaluate the front deadline after every notification. A
+                // runtime Low Latency change can move it from the future to now.
+                queueChanged_.wait_until(lock, sendAt);
                 continue;
             }
 

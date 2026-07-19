@@ -132,6 +132,7 @@ public:
     void SendAudioPacket(const UdpAudioPacket& packet);
     void SetPacingBitrate(uint32_t bitrate);
     void SetPacingEnabled(bool enabled);
+    void SetMaxQueueDelay(std::chrono::milliseconds delay);
     void Flush();
     [[nodiscard]] std::optional<udp_protocol::FeedbackSnapshot> ReceiveFeedback(std::chrono::milliseconds timeout);
 
@@ -212,6 +213,7 @@ private:
         PendingDatagramKind kind,
         uint64_t payloadBytes);
     void UpdateAdditionalLaneStatsLocked(AdditionalLane& lane, Clock::time_point now);
+    void RescheduleAdditionalQueueLocked(AdditionalLane& lane, Clock::time_point now);
     [[nodiscard]] Clock::duration PacingDelayForBytes(uint64_t wireBytes) const;
     bool EnforceLiveQueueDelayLocked(Clock::time_point now);
     bool DropOldestQueuedMediaLocked(PendingDatagramKind kind);

@@ -24,6 +24,7 @@
 - UI session IDs are automatic; keep manual `--session` as a CLI/reporting diagnostic escape hatch, not a normal UI field.
 - Stage-2 UI code should not grow as one huge file. Split it into logical units: app shell/navigation, shared widgets/styles, room flow screens, active session screens, and small data/adapters where useful.
 - Keep UI code simple and direct. Add abstractions only when they remove real duplication or make screens easier to read.
+- Active Share/Watch layouts stay compact when maximized: Share centers content within a bounded reading width and caps dashboard-card heights; Watch keeps its volume controls grouped instead of stretching their internal spacing. Stream-fullscreen exit restores native geometry before revealing normal controls and forces a final native redraw to prevent stale footer ghosts.
 - When each new screen first runs, pause and ask the user for a screenshot so the screen can be visually validated before moving to the next screen.
 
 ## Implementation Notes

@@ -58,6 +58,8 @@ private:
     void toggleFullscreen();
     void closeStreamFullscreen();
     void setStreamFullscreen(bool enabled);
+    void applyStreamFullscreenUi(bool enabled);
+    void finishStreamFullscreenExit(QWidget* topLevel);
     void updatePresentedFps();
     void refreshFpsLabel(double streamFps);
     void installFullscreenEventFilter(bool installed);

@@ -20,6 +20,7 @@
 #include <QtGui/QPainter>
 #include <QtGui/QPen>
 #include <QtGui/QPixmap>
+#include <QtGui/QResizeEvent>
 #include <QtGui/QWheelEvent>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QAbstractItemView>
@@ -50,6 +51,7 @@ namespace {
 
 constexpr int kSettingsFieldMaxWidth = 286;
 constexpr int kSourceRefreshIntervalMs = 2000;
+constexpr int kActiveContentMaxWidth = 1280;
 
 class SettingsComboBox final : public QComboBox {
 public:
@@ -341,6 +343,12 @@ bool ActiveShareWindow::eventFilter(QObject* watched, QEvent* event)
     return QWidget::eventFilter(watched, event);
 }
 
+void ActiveShareWindow::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    updateResponsiveLayout(event->size().width());
+}
+
 QWidget* ActiveShareWindow::buildShell()
 {
     auto* host = new QWidget;
@@ -352,6 +360,7 @@ QWidget* ActiveShareWindow::buildShell()
     auto* page = new QWidget;
     page->setObjectName("ActiveContentPage");
     auto* root = new QVBoxLayout(page);
+    contentLayout_ = root;
     root->setContentsMargins(20, 14, 20, 20);
     root->setSpacing(14);
     root->addWidget(buildTopStatus());
@@ -372,9 +381,11 @@ QWidget* ActiveShareWindow::buildShell()
     grid->addWidget(buildViewersCard(), 0, 1, 2, 1);
     grid->setColumnStretch(0, 3);
     grid->setColumnStretch(1, 2);
-    grid->setRowStretch(0, 2);
-    grid->setRowStretch(1, 3);
-    mainColumn->addLayout(grid, 1);
+    mainColumn->addLayout(grid);
+    // Keep dashboard cards at useful reading heights when the app is maximized.
+    // The live controls remain anchored at the bottom instead of stretching the
+    // hero and metric rows into large empty slabs.
+    mainColumn->addStretch(1);
     mainColumn->addWidget(buildFooter());
     body->addLayout(mainColumn, 1);
 
@@ -415,6 +426,8 @@ QWidget* ActiveShareWindow::buildShareCard()
 {
     auto* card = new QFrame;
     card->setObjectName("ActiveCard");
+    card->setMinimumHeight(190);
+    card->setMaximumHeight(220);
     auto* layout = new QVBoxLayout(card);
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(16);
@@ -439,15 +452,18 @@ QWidget* ActiveShareWindow::buildShareCard()
     controls->setContentsMargins(0, 0, 0, 0);
     controls->setSpacing(12);
     muteAudioButton_ = iconButton("Mute Audio", "ActiveSecondaryButton", "mute");
+    muteAudioButton_->setMaximumWidth(260);
     connect(muteAudioButton_, &QPushButton::clicked, this, [this] {
         toggleHostAudio();
     });
     controls->addWidget(muteAudioButton_);
     pauseVideoButton_ = iconButton("Pause Video", "ActiveSecondaryButton", "stop");
+    pauseVideoButton_->setMaximumWidth(260);
     connect(pauseVideoButton_, &QPushButton::clicked, this, [this] {
         toggleVideoPause();
     });
     controls->addWidget(pauseVideoButton_);
+    controls->addStretch(1);
     layout->addLayout(controls);
     return card;
 }
@@ -456,6 +472,8 @@ QWidget* ActiveShareWindow::buildViewersCard()
 {
     auto* card = new QFrame;
     card->setObjectName("ActiveCard");
+    card->setMinimumHeight(464);
+    card->setMaximumHeight(554);
     card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* layout = new QGridLayout(card);
     layout->setContentsMargins(18, 12, 18, 12);
@@ -496,6 +514,8 @@ QWidget* ActiveShareWindow::buildHealthCard()
 {
     auto* card = new QFrame;
     card->setObjectName("ActiveCard");
+    card->setMinimumHeight(260);
+    card->setMaximumHeight(320);
     auto* layout = new QVBoxLayout(card);
     layout->setContentsMargins(18, 14, 18, 14);
     layout->setSpacing(10);
@@ -1516,6 +1536,15 @@ void ActiveShareWindow::showSettingsPanel(bool visible)
             settingsOverlay_->raise();
         }
     }
+}
+
+void ActiveShareWindow::updateResponsiveLayout(int availableWidth)
+{
+    if (contentLayout_ == nullptr) {
+        return;
+    }
+    const int horizontalMargin = std::max(20, (availableWidth - kActiveContentMaxWidth) / 2);
+    contentLayout_->setContentsMargins(horizontalMargin, 14, horizontalMargin, 20);
 }
 
 void ActiveShareWindow::handleFinished(const QtSessionBackend::FinishInfo& info)
