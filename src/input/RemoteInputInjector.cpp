@@ -56,6 +56,7 @@ void StartHostMouseMonitor()
 {
     std::lock_guard<std::mutex> lock(g_monitorMutex);
     if (g_monitorRefcount++ == 0) {
+        g_lastPhysicalMouseTick.store(0, std::memory_order_relaxed);
         g_monitorThreadId.store(0, std::memory_order_release);
         g_monitorThread = std::thread(MonitorThreadMain);
     }
@@ -157,15 +158,12 @@ bool SendMouseButtonOnly(DWORD flags, DWORD mouseData)
 
 } // namespace
 
-RemoteInputInjector::RemoteInputInjector()
-{
-    StartHostMouseMonitor();
-}
+RemoteInputInjector::RemoteInputInjector() = default;
 
 RemoteInputInjector::~RemoteInputInjector()
 {
     ReleaseAllInjectedInput();
-    StopHostMouseMonitor();
+    SetMouseMonitoringEnabled(false);
 }
 
 void RemoteInputInjector::ReleasePressedKeys()
@@ -190,6 +188,16 @@ void RemoteInputInjector::ReleaseAllInjectedInput()
     ReleasePressedKeys();
 }
 
+void RemoteInputInjector::ReleaseInjectedMouseButtons()
+{
+    ReleasePressedMouseButtons();
+}
+
+void RemoteInputInjector::ReleaseInjectedKeys()
+{
+    ReleasePressedKeys();
+}
+
 void RemoteInputInjector::SetTargetBounds(int left, int top, int width, int height)
 {
     ReleaseAllInjectedInput();
@@ -210,6 +218,20 @@ void RemoteInputInjector::SetTargetWindow(uint64_t windowHandle)
     height_ = 0;
     windowHandle_ = windowHandle;
     hasLastMousePosition_ = false;
+}
+
+void RemoteInputInjector::SetMouseMonitoringEnabled(bool enabled)
+{
+    if (mouseMonitoringEnabled_ == enabled) {
+        return;
+    }
+    if (enabled) {
+        StartHostMouseMonitor();
+    } else {
+        ReleasePressedMouseButtons();
+        StopHostMouseMonitor();
+    }
+    mouseMonitoringEnabled_ = enabled;
 }
 
 bool RemoteInputInjector::IsTargetWindowForeground() const

@@ -70,6 +70,7 @@ private:
     void pollGamepad();
     void refreshGamepadSlots();
     void sendNeutralGamepad();
+    void setControlRequestPending(bool pending);
     void toggleControlRequest();
     void leaveRoom();
     void handleFinished(const QtSessionBackend::FinishInfo& info);
@@ -109,11 +110,14 @@ private:
     QLabel* controlGamepadIcon_ = nullptr;
     QComboBox* gamepadSelector_ = nullptr;
     QTimer* gamepadTimer_ = nullptr;
+    QTimer* controlRequestTimer_ = nullptr;
     QElapsedTimer gamepadClock_;
     std::optional<screenshare::RemoteGamepadState> lastGamepadState_;
     qint64 lastGamepadSentMs_ = -1;
     int gamepadScanTicks_ = 0;
     uint32_t controlCapabilities_ = 0;
+    bool controlRequestPending_ = false;
+    bool controlRequestCancellationPending_ = false;
     uint64_t lastBitrateBytes_ = 0;
     qint64 lastBitrateSampleMs_ = -1;
     double receiveBitrateMbps_ = 0.0;

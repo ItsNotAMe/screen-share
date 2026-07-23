@@ -13,6 +13,7 @@
 #include "input/VirtualGamepadBackend.h"
 #include "input/XInputGamepad.h"
 #include "render/ReceiverPreviewWindow.h"
+#include "runtime/AvSyncDiagnostics.h"
 #include "transport/NatTraversal.h"
 #include "transport/SignalingClient.h"
 #include "transport/StunClient.h"
@@ -722,169 +723,6 @@ private:
     uint64_t missingPacketsSkipped_ = 0;
     uint64_t renderBackpressure_ = 0;
     uint64_t lastRenderedEndQpc100ns_ = 0;
-};
-
-struct AvSyncSnapshot {
-    bool hasVideo = false;
-    bool hasVideoSenderClock = false;
-    bool hasAudio = false;
-    bool ready = false;
-    bool senderClockReady = false;
-    uint64_t videoFrames = 0;
-    uint64_t audioPackets = 0;
-    uint64_t ignoredAudioPackets = 0;
-    uint64_t firstVideoTimestamp100ns = 0;
-    uint64_t latestVideoTimestamp100ns = 0;
-    uint64_t firstVideoSenderQpc100ns = 0;
-    uint64_t latestVideoSenderQpc100ns = 0;
-    uint64_t firstAudioQpc100ns = 0;
-    uint64_t latestAudioQpc100ns = 0;
-    uint64_t latestVideoFrameId = 0;
-    uint64_t latestAudioPacketId = 0;
-    double videoElapsedMs = 0.0;
-    double audioElapsedMs = 0.0;
-    double audioAheadMs = 0.0;
-    double initialAudioSenderOffsetMs = 0.0;
-    double senderClockAudioAheadMs = 0.0;
-    double senderTimelineAudioAheadMs = 0.0;
-};
-
-class AvSyncDiagnostics {
-public:
-    void Clear()
-    {
-        hasVideo_ = false;
-        hasVideoSenderClock_ = false;
-        hasAudio_ = false;
-        videoFrames_ = 0;
-        audioPackets_ = 0;
-        ignoredAudioPackets_ = 0;
-        firstVideoTimestamp100ns_ = 0;
-        latestVideoTimestamp100ns_ = 0;
-        firstVideoSenderQpc100ns_ = 0;
-        latestVideoSenderQpc100ns_ = 0;
-        firstAudioQpc100ns_ = 0;
-        latestAudioQpc100ns_ = 0;
-        latestVideoFrameId_ = 0;
-        latestAudioPacketId_ = 0;
-    }
-
-    void ObserveVideoFrame(const screenshare::UdpCompletedFrame& frame)
-    {
-        if (!hasVideo_) {
-            firstVideoTimestamp100ns_ = frame.timestamp100ns;
-            hasVideo_ = true;
-        }
-        if (frame.senderQpc100ns != 0) {
-            if (!hasVideoSenderClock_) {
-                firstVideoSenderQpc100ns_ = frame.senderQpc100ns;
-                hasVideoSenderClock_ = true;
-            }
-            latestVideoSenderQpc100ns_ = frame.senderQpc100ns;
-        }
-
-        latestVideoTimestamp100ns_ = frame.timestamp100ns;
-        latestVideoFrameId_ = frame.frameId;
-        ++videoFrames_;
-    }
-
-    void ObserveAudioPacket(const screenshare::UdpCompletedAudioPacket& packet)
-    {
-        const bool timestampError =
-            (packet.flags & screenshare::udp_protocol::AudioPacketFlagTimestampError) != 0;
-        if (timestampError || packet.qpcPosition == 0) {
-            ++ignoredAudioPackets_;
-            return;
-        }
-
-        if (!hasAudio_) {
-            firstAudioQpc100ns_ = packet.qpcPosition;
-            hasAudio_ = true;
-        }
-
-        latestAudioQpc100ns_ = packet.qpcPosition;
-        latestAudioPacketId_ = packet.packetId;
-        ++audioPackets_;
-    }
-
-    [[nodiscard]] AvSyncSnapshot snapshot() const
-    {
-        AvSyncSnapshot snapshot;
-        snapshot.hasVideo = hasVideo_;
-        snapshot.hasVideoSenderClock = hasVideoSenderClock_;
-        snapshot.hasAudio = hasAudio_;
-        snapshot.ready = hasVideo_ && hasAudio_;
-        snapshot.senderClockReady = hasVideoSenderClock_ && hasAudio_;
-        snapshot.videoFrames = videoFrames_;
-        snapshot.audioPackets = audioPackets_;
-        snapshot.ignoredAudioPackets = ignoredAudioPackets_;
-        snapshot.firstVideoTimestamp100ns = firstVideoTimestamp100ns_;
-        snapshot.latestVideoTimestamp100ns = latestVideoTimestamp100ns_;
-        snapshot.firstVideoSenderQpc100ns = firstVideoSenderQpc100ns_;
-        snapshot.latestVideoSenderQpc100ns = latestVideoSenderQpc100ns_;
-        snapshot.firstAudioQpc100ns = firstAudioQpc100ns_;
-        snapshot.latestAudioQpc100ns = latestAudioQpc100ns_;
-        snapshot.latestVideoFrameId = latestVideoFrameId_;
-        snapshot.latestAudioPacketId = latestAudioPacketId_;
-
-        if (snapshot.ready) {
-            const uint64_t videoElapsed100ns =
-                latestVideoTimestamp100ns_ >= firstVideoTimestamp100ns_
-                    ? latestVideoTimestamp100ns_ - firstVideoTimestamp100ns_
-                    : 0;
-            const uint64_t audioElapsed100ns =
-                latestAudioQpc100ns_ >= firstAudioQpc100ns_
-                    ? latestAudioQpc100ns_ - firstAudioQpc100ns_
-                    : 0;
-            snapshot.videoElapsedMs = Ticks100nsToMs(videoElapsed100ns);
-            snapshot.audioElapsedMs = Ticks100nsToMs(audioElapsed100ns);
-            snapshot.audioAheadMs = snapshot.audioElapsedMs - snapshot.videoElapsedMs;
-        }
-        if (snapshot.senderClockReady) {
-            snapshot.initialAudioSenderOffsetMs =
-                SignedTicks100nsToMs(
-                    static_cast<int64_t>(firstAudioQpc100ns_) -
-                    static_cast<int64_t>(firstVideoSenderQpc100ns_));
-            snapshot.senderClockAudioAheadMs =
-                SignedTicks100nsToMs(
-                    static_cast<int64_t>(latestAudioQpc100ns_) -
-                    static_cast<int64_t>(latestVideoSenderQpc100ns_));
-            snapshot.senderTimelineAudioAheadMs =
-                SignedTicks100nsToMs(
-                    static_cast<int64_t>(latestAudioQpc100ns_) -
-                    static_cast<int64_t>(firstVideoSenderQpc100ns_) -
-                    (static_cast<int64_t>(latestVideoTimestamp100ns_) -
-                     static_cast<int64_t>(firstVideoTimestamp100ns_)));
-        }
-
-        return snapshot;
-    }
-
-private:
-    static double Ticks100nsToMs(uint64_t ticks) noexcept
-    {
-        return static_cast<double>(ticks) / 10'000.0;
-    }
-
-    static double SignedTicks100nsToMs(int64_t ticks) noexcept
-    {
-        return static_cast<double>(ticks) / 10'000.0;
-    }
-
-    bool hasVideo_ = false;
-    bool hasVideoSenderClock_ = false;
-    bool hasAudio_ = false;
-    uint64_t videoFrames_ = 0;
-    uint64_t audioPackets_ = 0;
-    uint64_t ignoredAudioPackets_ = 0;
-    uint64_t firstVideoTimestamp100ns_ = 0;
-    uint64_t latestVideoTimestamp100ns_ = 0;
-    uint64_t firstVideoSenderQpc100ns_ = 0;
-    uint64_t latestVideoSenderQpc100ns_ = 0;
-    uint64_t firstAudioQpc100ns_ = 0;
-    uint64_t latestAudioQpc100ns_ = 0;
-    uint64_t latestVideoFrameId_ = 0;
-    uint64_t latestAudioPacketId_ = 0;
 };
 
 struct AudioCaptureWorkerStats {
@@ -3485,7 +3323,13 @@ void RunCaptureStats(
     std::map<uint32_t, uint64_t> lastViewerResyncs;
     // Remote control (host side). The control handler runs on this same thread
     // (inside fanout ReceiveFeedback), so plain locals need no extra locking.
-    screenshare::RemoteInputInjector remoteInputInjector;
+    std::unique_ptr<screenshare::RemoteInputInjector> remoteInputInjector;
+    auto ensureRemoteInputInjector = [&]() -> screenshare::RemoteInputInjector& {
+        if (remoteInputInjector == nullptr) {
+            remoteInputInjector = std::make_unique<screenshare::RemoteInputInjector>();
+        }
+        return *remoteInputInjector;
+    };
     auto virtualGamepadBackend = screenshare::CreateVirtualGamepadBackend();
     const auto virtualGamepadStatus = virtualGamepadBackend->Status();
     const size_t localGamepadCount = screenshare::XInputGamepad::ConnectedSlots().size();
@@ -3534,6 +3378,21 @@ void RunCaptureStats(
         }
         grant.hasGamepadState = false;
     };
+    auto releaseInjectedMouse = [&]() {
+        if (remoteInputInjector != nullptr) {
+            remoteInputInjector->ReleaseInjectedMouseButtons();
+        }
+    };
+    auto releaseInjectedKeyboard = [&]() {
+        if (remoteInputInjector != nullptr) {
+            remoteInputInjector->ReleaseInjectedKeys();
+        }
+    };
+    auto syncMouseMonitoring = [&]() {
+        if (remoteInputInjector != nullptr) {
+            remoteInputInjector->SetMouseMonitoringEnabled(!mouseControlViewerId.empty());
+        }
+    };
     auto eraseControlGrant = [&](const std::string& viewerId) {
         const auto grant = controlGrants.find(viewerId);
         if (grant == controlGrants.end()) {
@@ -3550,19 +3409,26 @@ void RunCaptureStats(
         }
         controlAckBursts.erase(grant->second.endpoint);
         controlGrants.erase(grant);
-        if (releasedMouse || releasedKeyboard) {
-            remoteInputInjector.ReleaseAllInjectedInput();
+        if (releasedMouse) {
+            releaseInjectedMouse();
         }
+        if (releasedKeyboard) {
+            releaseInjectedKeyboard();
+        }
+        syncMouseMonitoring();
     };
     std::cout << "gamepad_backend available=" << (virtualGamepadStatus.available ? "yes" : "no")
               << " local_controllers=" << localGamepadCount
               << " remote_capacity=" << remoteGamepadCapacity
               << " message=" << LogTokenEncode(virtualGamepadStatus.message) << "\n" << std::flush;
     auto refreshRemoteControlBounds = [&](int displayIndex) {
+        if (remoteInputInjector == nullptr) {
+            return;
+        }
         const auto displays = screenshare::DesktopCapturer::EnumerateDisplays();
         for (const auto& display : displays) {
             if (display.index == displayIndex) {
-                remoteInputInjector.SetTargetBounds(
+                remoteInputInjector->SetTargetBounds(
                     static_cast<int>(display.left),
                     static_cast<int>(display.top),
                     static_cast<int>(display.right - display.left),
@@ -3572,12 +3438,15 @@ void RunCaptureStats(
         }
     };
     auto refreshRemoteControlTarget = [&]() {
+        if (remoteInputInjector == nullptr) {
+            return;
+        }
         if (config.sourceType == screenshare::CaptureSourceType::Display) {
             refreshRemoteControlBounds(config.displayIndex);
         } else if (config.windowHandle != 0) {
-            remoteInputInjector.SetTargetWindow(config.windowHandle);
+            remoteInputInjector->SetTargetWindow(config.windowHandle);
         } else {
-            remoteInputInjector.SetTargetBounds(0, 0, 0, 0);
+            remoteInputInjector->SetTargetBounds(0, 0, 0, 0);
         }
     };
     std::vector<UdpSendTargetSpec> udpSendTargetSpecs = options.udpSendTargetSpecs;
@@ -3778,10 +3647,21 @@ void RunCaptureStats(
                     if (controlGrants.find(viewerId) != controlGrants.end()) {
                         eraseControlGrant(viewerId);
                         refreshRemoteControlTarget();
-                        std::cout << "remote_control_grant endpoint=" << endpoint
-                                  << " viewer_id=" << LogTokenEncode(viewerId)
-                                  << " caps=0\n" << std::flush;
                     }
+                    // A viewer may cancel while its request/grant acknowledgement
+                    // is crossing the network. Explicitly acknowledge every
+                    // release, even when no grant exists yet, so a late grant
+                    // cannot leave the viewer capturing input for a host that
+                    // has already discarded ownership.
+                    screenshare::udp_protocol::ControlMessage ack;
+                    ack.command = Command::RevokeControl;
+                    ack.capabilities = 0;
+                    ack.accessCodeFingerprint = options.accessCodeFingerprint;
+                    static_cast<void>(udpSender->SendControlTo(endpoint, ack));
+                    scheduleControlAckBurst(endpoint, 0);
+                    std::cout << "remote_control_grant endpoint=" << endpoint
+                              << " viewer_id=" << LogTokenEncode(viewerId)
+                              << " caps=0 reason=viewer_release\n" << std::flush;
                     return;
                 }
                 const std::string viewerId = udpSender->ViewerForEndpoint(endpoint);
@@ -3826,15 +3706,15 @@ void RunCaptureStats(
                 }
                 switch (message.command) {
                 case Command::MouseMove:
-                    if (mouseOk) {
-                        remoteInputInjector.InjectMouseMove(message.mouseX, message.mouseY);
+                    if (mouseOk && remoteInputInjector != nullptr) {
+                        remoteInputInjector->InjectMouseMove(message.mouseX, message.mouseY);
                     }
                     break;
                 case Command::MouseButton:
-                    if (mouseOk &&
+                    if (mouseOk && remoteInputInjector != nullptr &&
                         message.button <= static_cast<uint16_t>(
                             screenshare::udp_protocol::ControlMouseButton::X2)) {
-                        remoteInputInjector.InjectMouseButton(
+                        remoteInputInjector->InjectMouseButton(
                             static_cast<screenshare::RemoteInputInjector::MouseButton>(message.button),
                             message.pressed,
                             message.mouseX,
@@ -3842,13 +3722,13 @@ void RunCaptureStats(
                     }
                     break;
                 case Command::MouseScroll:
-                    if (mouseOk) {
-                        remoteInputInjector.InjectMouseScroll(message.scrollX, message.scrollY);
+                    if (mouseOk && remoteInputInjector != nullptr) {
+                        remoteInputInjector->InjectMouseScroll(message.scrollX, message.scrollY);
                     }
                     break;
                 case Command::KeyEvent:
-                    if (keyboardOk) {
-                        remoteInputInjector.InjectKey(message.key, message.scancode, message.pressed);
+                    if (keyboardOk && remoteInputInjector != nullptr) {
+                        remoteInputInjector->InjectKey(message.key, message.scancode, message.pressed);
                     }
                     break;
                 case Command::GamepadState:
@@ -4579,7 +4459,9 @@ void RunCaptureStats(
     };
 
     while (keepRunning()) {
-        remoteInputInjector.RefreshTargetState();
+        if (remoteInputInjector != nullptr) {
+            remoteInputInjector->RefreshTargetState();
+        }
         // While a viewer holds control, drain their input during the inter-frame
         // wait so it is injected within a couple of ms instead of once per frame
         // (which would otherwise add up to a full frame interval of input lag).
@@ -4591,7 +4473,9 @@ void RunCaptureStats(
                 if (slice > Clock::duration::zero()) {
                     std::this_thread::sleep_for(slice);
                 }
-                remoteInputInjector.RefreshTargetState();
+                if (remoteInputInjector != nullptr) {
+                    remoteInputInjector->RefreshTargetState();
+                }
                 // Called only to pump the receive loop so queued control input is
                 // dispatched promptly; the returned feedback snapshot is unused here.
                 static_cast<void>(udpSender->ReceiveFeedback(std::chrono::milliseconds(0)));
@@ -4661,6 +4545,10 @@ void RunCaptureStats(
                               << "\n" << std::flush;
                 }
             }
+            if ((requestedCapabilities &
+                    (screenshare::ControlCapabilityMouse | screenshare::ControlCapabilityKeyboard)) != 0) {
+                static_cast<void>(ensureRemoteInputInjector());
+            }
 
             auto transferExclusiveCapability = [&](uint32_t capability, std::string& ownerViewerId) {
                 if ((requestedCapabilities & capability) == 0 || ownerViewerId.empty() ||
@@ -4688,7 +4576,11 @@ void RunCaptureStats(
                     scheduleControlAckBurst(previousEndpoint, previousCapabilities);
                 }
                 ownerViewerId.clear();
-                remoteInputInjector.ReleaseAllInjectedInput();
+                if (capability == screenshare::ControlCapabilityMouse) {
+                    releaseInjectedMouse();
+                } else if (capability == screenshare::ControlCapabilityKeyboard) {
+                    releaseInjectedKeyboard();
+                }
             };
             transferExclusiveCapability(screenshare::ControlCapabilityMouse, mouseControlViewerId);
             transferExclusiveCapability(screenshare::ControlCapabilityKeyboard, keyboardControlViewerId);
@@ -4710,15 +4602,16 @@ void RunCaptureStats(
                     mouseControlViewerId = controlRequest->viewerId;
                 } else if (mouseControlViewerId == controlRequest->viewerId) {
                     mouseControlViewerId.clear();
-                    remoteInputInjector.ReleaseAllInjectedInput();
+                    releaseInjectedMouse();
                 }
                 if ((requestedCapabilities & screenshare::ControlCapabilityKeyboard) != 0) {
                     keyboardControlViewerId = controlRequest->viewerId;
                 } else if (keyboardControlViewerId == controlRequest->viewerId) {
                     keyboardControlViewerId.clear();
-                    remoteInputInjector.ReleaseAllInjectedInput();
+                    releaseInjectedKeyboard();
                 }
             }
+            syncMouseMonitoring();
             refreshRemoteControlTarget();
             screenshare::udp_protocol::ControlMessage ack;
             ack.command = requestedCapabilities != 0
@@ -6091,10 +5984,10 @@ void RunUdpReceiverStats(
     };
 
     auto avSyncStateName = [&](const AvSyncSnapshot& snapshot) {
-        if (snapshot.ready) {
-            return "measuring";
+        if (avSyncVideoOnlyFallback) {
+            return "video-only";
         }
-        return avSyncVideoOnlyFallback ? "video-only" : "waiting";
+        return snapshot.ready ? "measuring" : "waiting";
     };
 
     auto maybeApplyAvSyncCorrection = [&]() {
@@ -6143,26 +6036,58 @@ void RunUdpReceiverStats(
 
     auto maybeAllowVideoOnlyAvSync = [&]() {
         if (!options.avSync ||
-            options.avSyncExplicit ||
-            avSyncCorrectionApplied ||
             avSyncVideoOnlyFallback) {
             return;
         }
 
         const AvSyncSnapshot snapshot = avSync.snapshot();
-        if (!snapshot.hasVideo ||
-            snapshot.hasAudio ||
-            snapshot.videoFrames < AvSyncVideoOnlyFallbackFrames) {
+        if (!snapshot.videoFresh ||
+            snapshot.audioFresh ||
+            (!snapshot.hasAudio &&
+             snapshot.videoFrames < AvSyncVideoOnlyFallbackFrames)) {
             return;
         }
 
         avSyncVideoOnlyFallback = true;
         avSyncCorrectionApplied = true;
-        avSyncCorrectionStatus = "video_only_no_audio";
+        avSyncPlaybackStartAligned = false;
+        avSyncPlaybackStartQpc100ns = 0;
+        avSyncCorrectionStatus =
+            snapshot.hasAudio ? "video_only_audio_stale" : "video_only_no_audio";
         std::cout
-            << "A/V sync continuing video without audio after "
-            << snapshot.videoFrames
-            << " video frames and no audio packets.\n";
+            << "A/V sync continuing video without fresh audio after "
+            << snapshot.videoFrames << " video frames"
+            << " audio_age_ms=" << snapshot.audioAgeMs << ".\n";
+    };
+
+    auto maybeRestoreAudioAvSync = [&]() {
+        if (!options.avSync || !avSyncVideoOnlyFallback) {
+            return;
+        }
+
+        const AvSyncSnapshot snapshot = avSync.snapshot();
+        if (!snapshot.videoFresh || !snapshot.audioFresh) {
+            return;
+        }
+
+        avSyncVideoOnlyFallback = false;
+        if (previewWindow &&
+            previewPlayout.hasPresentedTimestamp() &&
+            previewPlayout.lastPresentedTimestamp100ns() > 0) {
+            avSyncPlaybackStartQpc100ns =
+                static_cast<uint64_t>(previewPlayout.lastPresentedTimestamp100ns());
+            avSyncAudioStartDrops +=
+                audioPlayout.DropBeforeQpc(avSyncPlaybackStartQpc100ns);
+            avSyncPlaybackStartAligned = true;
+        } else {
+            avSyncPlaybackStartQpc100ns = 0;
+            avSyncPlaybackStartAligned = false;
+        }
+        avSyncCorrectionStatus = "resumed_after_audio_gap";
+        std::cout
+            << "A/V sync resumed after fresh audio arrived"
+            << " audio_start_drops=" << avSyncAudioStartDrops
+            << " playback_start_qpc=" << avSyncPlaybackStartQpc100ns << ".\n";
     };
 
     auto drainCompletedAudioPackets = [&]() {
@@ -6190,6 +6115,7 @@ void RunUdpReceiverStats(
         }
         maybeApplyAvSyncCorrection();
         maybeAllowVideoOnlyAvSync();
+        maybeRestoreAudioAvSync();
 
         if (options.audioPlayback && audioRenderer && mediaPlaybackAllowed()) {
             if (avSyncAudioGatingEnabled() && previewWindow) {
@@ -6821,6 +6747,10 @@ void RunUdpReceiverStats(
                 << " audio_render_buffer_full=" << audioRendererStats.bufferFullEvents
                 << " audio_render_padding=" << audioRendererStats.lastPaddingFrames
                 << " av_sync=" << avSyncStateName(avSyncNow)
+                << " av_video_fresh=" << (avSyncNow.videoFresh ? "yes" : "no")
+                << " av_audio_fresh=" << (avSyncNow.audioFresh ? "yes" : "no")
+                << " av_video_age_ms=" << avSyncNow.videoAgeMs
+                << " av_audio_age_ms=" << avSyncNow.audioAgeMs
                 << " av_audio_ahead_ms=" << avSyncNow.audioAheadMs
                 << " av_audio_elapsed_ms=" << avSyncNow.audioElapsedMs
                 << " av_video_elapsed_ms=" << avSyncNow.videoElapsedMs
@@ -6842,6 +6772,7 @@ void RunUdpReceiverStats(
                 << " av_sync_audio_bias_ms=" << avSyncAudioBiasMs
                 << " av_video_frames=" << avSyncNow.videoFrames
                 << " av_audio_packets=" << avSyncNow.audioPackets
+                << " av_ignored_video_frames=" << avSyncNow.ignoredVideoFrames
                 << " av_ignored_audio_packets=" << avSyncNow.ignoredAudioPackets
                 << " av_latest_video_timestamp=" << avSyncNow.latestVideoTimestamp100ns
                 << " av_latest_video_sender_qpc=" << avSyncNow.latestVideoSenderQpc100ns

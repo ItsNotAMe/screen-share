@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative VERSION 0.3.3 LANGUAGES CXX)
+project(ScreenShareNative VERSION 0.3.4 LANGUAGES CXX)
 
 include(CTest)
 
@@ -258,6 +258,13 @@ if(BUILD_TESTING)
     target_link_libraries(UdpSenderPacingTests PRIVATE ScreenShareCore)
     add_test(NAME udp-sender-pacing COMMAND UdpSenderPacingTests)
 
+    add_executable(AvSyncDiagnosticsTests
+        tests/AvSyncDiagnosticsTests.cpp
+    )
+    target_compile_features(AvSyncDiagnosticsTests PRIVATE cxx_std_20)
+    target_link_libraries(AvSyncDiagnosticsTests PRIVATE ScreenShareCore)
+    add_test(NAME av-sync-diagnostics COMMAND AvSyncDiagnosticsTests)
+
     find_program(SCREENSHARE_POWERSHELL_EXECUTABLE NAMES pwsh.exe pwsh powershell.exe powershell)
     if(SCREENSHARE_POWERSHELL_EXECUTABLE)
         add_test(NAME update-manifest-script
@@ -461,6 +468,20 @@ if(SCREENSHARE_BUILD_QT_UI)
             )
             target_link_libraries(UiReportPathTests PRIVATE Qt6::Core)
             add_test(NAME ui-report-path COMMAND UiReportPathTests)
+
+            add_executable(VideoFrameInputTests
+                tests/VideoFrameInputTests.cpp
+                src/ui/VideoFrameWidget.cpp
+            )
+            target_compile_features(VideoFrameInputTests PRIVATE cxx_std_20)
+            target_include_directories(VideoFrameInputTests PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/src
+            )
+            target_link_libraries(VideoFrameInputTests PRIVATE ScreenShareCore Qt6::Widgets)
+            add_test(NAME video-frame-input COMMAND VideoFrameInputTests)
+            set_tests_properties(video-frame-input PROPERTIES
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            )
         endif()
 
         if(MSVC)

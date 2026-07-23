@@ -58,6 +58,7 @@ private:
     void updateD3DTarget();
     [[nodiscard]] bool mapToNormalized(const QPoint& pos, float& normX, float& normY) const;
     void emitMouseButton(QMouseEvent* event, bool pressed);
+    void emitWheel(QWheelEvent* event);
     void emitKey(QKeyEvent* event, bool pressed);
 
     D3DVideoSurface* d3dSurface_ = nullptr;

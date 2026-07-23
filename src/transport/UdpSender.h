@@ -259,6 +259,10 @@ private:
         uint64_t lastControlSequence = 0;
         bool hasControlSequence = false;
     };
+    ControlPeer& UpsertControlPeerLocked(
+        const std::string& endpoint,
+        const void* address,
+        int addressLength);
 
     uintptr_t socket_ = 0;
     std::vector<std::byte> address_;

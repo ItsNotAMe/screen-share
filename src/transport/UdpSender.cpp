@@ -895,22 +895,10 @@ std::optional<udp_protocol::FeedbackSnapshot> UdpSender::ReceiveFeedback(std::ch
         // endpoint as a control-ack target now. That lets the host send a grant
         // (SendControlTo) immediately when it toggles a permission, without
         // waiting for the viewer to first send a "request control" packet.
-        {
-            auto controlPeer = std::find_if(
-                controlPeers_.begin(),
-                controlPeers_.end(),
-                [&](const ControlPeer& candidate) { return candidate.endpoint == feedbackEndpoint; });
-            if (controlPeer == controlPeers_.end()) {
-                ControlPeer added;
-                added.endpoint = feedbackEndpoint;
-                added.address = feedbackAddress;
-                added.addressLength = senderAddressLength;
-                controlPeers_.push_back(std::move(added));
-            } else {
-                controlPeer->address = feedbackAddress;
-                controlPeer->addressLength = senderAddressLength;
-            }
-        }
+        static_cast<void>(UpsertControlPeerLocked(
+            feedbackEndpoint,
+            &senderAddress,
+            senderAddressLength));
 
         ++stats_.feedbackPacketsReceived;
         stats_.hasFeedback = true;
@@ -1171,6 +1159,26 @@ bool UdpSender::EncryptControlDatagram(std::vector<std::byte>& datagram)
     return true;
 }
 
+UdpSender::ControlPeer& UdpSender::UpsertControlPeerLocked(
+    const std::string& endpoint,
+    const void* address,
+    int addressLength)
+{
+    auto peer = std::find_if(
+        controlPeers_.begin(),
+        controlPeers_.end(),
+        [&](const ControlPeer& candidate) { return candidate.endpoint == endpoint; });
+    if (peer == controlPeers_.end()) {
+        controlPeers_.push_back(ControlPeer{});
+        peer = std::prev(controlPeers_.end());
+        peer->endpoint = endpoint;
+    }
+    const auto* addressBytes = static_cast<const std::byte*>(address);
+    peer->address.assign(addressBytes, addressBytes + addressLength);
+    peer->addressLength = addressLength;
+    return *peer;
+}
+
 void UdpSender::ProcessControlPacket(const void* address, int addressLength, std::span<const std::byte> datagram)
 {
     if (datagram.size() != sizeof(udp_protocol::ControlPacket)) {
@@ -1222,30 +1230,24 @@ void UdpSender::ProcessControlPacket(const void* address, int addressLength, std
     bool accepted = false;
     {
         std::lock_guard lock(mutex_);
-        auto peer = std::find_if(
+        const auto peer = std::find_if(
             controlPeers_.begin(),
             controlPeers_.end(),
             [&](const ControlPeer& candidate) { return candidate.endpoint == endpoint; });
-        const auto* addressBytes = static_cast<const std::byte*>(address);
-        if (peer == controlPeers_.end()) {
-            controlPeers_.push_back(ControlPeer{});
-            peer = std::prev(controlPeers_.end());
-            peer->endpoint = endpoint;
-        }
 
         // Anti-replay. Within one control session (same sessionFingerprint) the
         // sequence must strictly increase, so a captured control datagram cannot
         // be replayed to re-inject input. A different sessionFingerprint marks a
         // new session (e.g. the viewer restarted) and rebaselines the counter.
         const bool newSession =
+            peer == controlPeers_.end() ||
             !peer->hasControlSequence ||
             message->sessionFingerprint != peer->controlSessionFingerprint;
         if (newSession || message->sequence > peer->lastControlSequence) {
-            peer->address.assign(addressBytes, addressBytes + addressLength);
-            peer->addressLength = addressLength;
-            peer->controlSessionFingerprint = message->sessionFingerprint;
-            peer->lastControlSequence = message->sequence;
-            peer->hasControlSequence = true;
+            ControlPeer& acceptedPeer = UpsertControlPeerLocked(endpoint, address, addressLength);
+            acceptedPeer.controlSessionFingerprint = message->sessionFingerprint;
+            acceptedPeer.lastControlSequence = message->sequence;
+            acceptedPeer.hasControlSequence = true;
             accepted = true;
         } else {
             ++stats_.controlReplayRejected;
