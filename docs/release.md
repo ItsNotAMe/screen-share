@@ -3,7 +3,7 @@
 ScreenShare updates are published as GitHub Release assets:
 
 - `ScreenShare-release-windows-x64.zip`
-- `ScreenShare-Setup-0.3.3-windows-x64.exe`
+- `ScreenShare-Setup-0.3.4-windows-x64.exe`
 - `screenshare-update.json`
 
 The desktop app checks the HTTPS manifest from the latest GitHub Release. It only offers an update
@@ -36,12 +36,12 @@ Generate the manifest once to calculate the package URL and SHA-256 signing fiel
 
 ```powershell
 .\scripts\create-update-manifest.ps1 `
-  -Version 0.3.3 `
+  -Version 0.3.4 `
   -ZipPath .\build\release\ScreenShare-release-windows-x64.zip `
-  -InstallerPath .\build\release\ScreenShare-Setup-0.3.3-windows-x64.exe `
+  -InstallerPath .\build\release\ScreenShare-Setup-0.3.4-windows-x64.exe `
   -OutputPath .\build\release\screenshare-update.json `
   -Channel stable `
-  -Notes "ScreenShare v0.3.3"
+  -Notes "ScreenShare v0.3.4"
 ```
 
 Sign the manifest with the encrypted offline key. The helper constructs the exact
@@ -64,13 +64,13 @@ download displays Windows' Unknown Publisher warning.
 ## Publish
 
 ```powershell
-gh release create v0.3.3 `
+gh release create v0.3.4 `
   .\build\release\ScreenShare-release-windows-x64.zip `
-  .\build\release\ScreenShare-Setup-0.3.3-windows-x64.exe `
+  .\build\release\ScreenShare-Setup-0.3.4-windows-x64.exe `
   .\build\release\screenshare-update.json `
   --latest `
-  --title "ScreenShare v0.3.3" `
-  --notes "ScreenShare v0.3.3."
+  --title "ScreenShare v0.3.4" `
+  --notes "ScreenShare v0.3.4."
 ```
 
 For an existing tag/release, replace `create` with `upload --clobber`.

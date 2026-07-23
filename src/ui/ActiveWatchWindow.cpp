@@ -42,6 +42,8 @@
 
 namespace {
 
+constexpr int kControlRequestTimeoutMs = 8000;
+
 QPixmap renderSvgResource(const QString& path, const QSize& size, const QString& color = QString())
 {
     QFile file(path);
@@ -168,7 +170,16 @@ QString avSyncText(const screenshare::SessionAudioStatus& audio)
     if (audio.playbackMuted) {
         return QStringLiteral("Muted");
     }
-    return QStringLiteral("%1 ms").arg(audio.avAudioAheadMs);
+    if (!audio.avAudioFresh) {
+        return audio.avSyncState == "video-only"
+            ? QStringLiteral("No audio")
+            : QStringLiteral("Waiting");
+    }
+    if (!audio.avVideoFresh || !audio.avPlayoutReady) {
+        return QStringLiteral("Syncing...");
+    }
+    return QStringLiteral("%1 ms").arg(
+        static_cast<qlonglong>(std::llround(audio.avPlayoutAudioAheadMs)));
 }
 
 QString controlTypesString(uint32_t capabilities)
@@ -223,6 +234,22 @@ ActiveWatchWindow::ActiveWatchWindow(QtSessionBackend* backend, Actions actions,
     connect(gamepadTimer_, &QTimer::timeout, this, [this] { pollGamepad(); });
     gamepadClock_.start();
     gamepadTimer_->start();
+
+    controlRequestTimer_ = new QTimer(this);
+    controlRequestTimer_->setSingleShot(true);
+    controlRequestTimer_->setInterval(kControlRequestTimeoutMs);
+    connect(controlRequestTimer_, &QTimer::timeout, this, [this] {
+        if (!controlRequestPending_) {
+            return;
+        }
+        setControlRequestPending(false);
+        controlRequestCancellationPending_ = true;
+        if (backend_ != nullptr) {
+            // Cancel at the host as well. This also neutralizes a grant that
+            // crossed the timeout response on the network.
+            backend_->releaseControl();
+        }
+    });
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -1060,6 +1087,17 @@ void ActiveWatchWindow::exitToHomeAfterHostLeft()
 
 void ActiveWatchWindow::handleControlState(uint32_t capabilities)
 {
+    if (capabilities != 0 && controlRequestCancellationPending_) {
+        // A grant can arrive after the viewer canceled or timed out. Never
+        // re-arm local capture in that race; reaffirm the release until the
+        // host's explicit revoke acknowledgement arrives.
+        if (backend_ != nullptr) {
+            backend_->releaseControl();
+        }
+        return;
+    }
+    setControlRequestPending(false);
+    controlRequestCancellationPending_ = false;
     const bool hadGamepad = (controlCapabilities_ & screenshare::ControlCapabilityGamepad) != 0;
     const bool hasGamepad = (capabilities & screenshare::ControlCapabilityGamepad) != 0;
     if (hadGamepad && !hasGamepad) {
@@ -1194,6 +1232,23 @@ void ActiveWatchWindow::pollGamepad()
     lastGamepadSentMs_ = now;
 }
 
+void ActiveWatchWindow::setControlRequestPending(bool pending)
+{
+    controlRequestPending_ = pending;
+    if (controlRequestTimer_ != nullptr) {
+        if (pending) {
+            controlRequestTimer_->start();
+        } else {
+            controlRequestTimer_->stop();
+        }
+    }
+    if (controlButton_ != nullptr && controlCapabilities_ == 0) {
+        controlButton_->setText(pending
+            ? QStringLiteral("Cancel Request")
+            : QStringLiteral("Request Control"));
+    }
+}
+
 void ActiveWatchWindow::toggleControlRequest()
 {
     if (backend_ == nullptr) {
@@ -1202,15 +1257,21 @@ void ActiveWatchWindow::toggleControlRequest()
     if (controlCapabilities_ != 0) {
         backend_->releaseControl();
         handleControlState(0); // optimistic: the host does not ack our own release
+        controlRequestCancellationPending_ = true;
         return;
     }
+    if (controlRequestPending_) {
+        backend_->releaseControl();
+        setControlRequestPending(false);
+        controlRequestCancellationPending_ = true;
+        return;
+    }
+    controlRequestCancellationPending_ = false;
     backend_->requestControl(
         screenshare::ControlCapabilityMouse |
         screenshare::ControlCapabilityKeyboard |
         screenshare::ControlCapabilityGamepad);
-    if (controlButton_ != nullptr) {
-        controlButton_->setText(QStringLiteral("Requesting..."));
-    }
+    setControlRequestPending(true);
 }
 
 void ActiveWatchWindow::leaveRoom()
@@ -1230,6 +1291,7 @@ void ActiveWatchWindow::leaveRoom()
 void ActiveWatchWindow::handleFinished(const QtSessionBackend::FinishInfo& info)
 {
     closeStreamFullscreen();
+    handleControlState(0);
     elapsedTimer_->stop();
     leaveButton_->setEnabled(true);
     leaveButton_->setText("Leave Room");

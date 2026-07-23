@@ -10,9 +10,11 @@ Important implementation points:
 - Decoder input samples carry the packet's sender QPC directly so late joins after a GOP boundary do not assign stale timestamps to decoded frames.
 - Synced audio waits for the preview playout clock and schedules packets against the same sender-QPC timeline.
 - Synced audio playback latency should be at least the preview latency.
-- Automatic `--watch` sync falls back to video-only after 30 video frames if no audio packets arrive. This prevents muted/no-device audio failures from wedging preview playout with `av_sync_correction=waiting`.
+- Automatic and explicit sync fall back to video-only after 30 video frames if audio never arrives, or after 750 ms if previously active audio stops. This prevents host mute, device loss, and silence/no-packet capture behavior from wedging preview playout.
 - In video-only fallback, do not use stale or late audio renderer timestamps to gate preview or audio rendering. The fallback must stay video-first so silence/no-audio periods cannot freeze the share.
-- Explicit `--av-sync` stays strict and does not take the video-only fallback.
+- When fresh audio returns, discard audio that predates the currently presented video timestamp before restoring normal synchronized playout.
+- Only accepted, monotonically advancing media timestamps refresh diagnostic clocks. Late UDP packets must not regress or revive a stale clock.
+- Viewer status uses actual playout skew only while audio, video, and playout clocks are all ready. It reports `No audio`, `Waiting`, or `Syncing...` during transitions instead of exposing a stale raw timeline delta.
 - Final `Done` stats can be misleading after the sender stops because video stops before queued audio drains. Judge periodic live lines first.
 
 Current receiver catch-up direction:

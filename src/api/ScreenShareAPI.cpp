@@ -4,6 +4,7 @@
 #include "audio/WasapiCapture.h"
 #include "capture/DesktopCapturer.h"
 #include "core/SessionRuntimeControl.h"
+#include "runtime/DiagnosticParsing.h"
 
 #include <algorithm>
 #include <cctype>
@@ -242,19 +243,7 @@ std::optional<int> ParseInt(const std::string& text)
 
 std::optional<double> ParseDouble(const std::string& text)
 {
-    if (text.empty()) {
-        return std::nullopt;
-    }
-    try {
-        size_t parsed = 0;
-        const double value = std::stod(text, &parsed);
-        if (parsed != text.size()) {
-            return std::nullopt;
-        }
-        return value;
-    } catch (...) {
-        return std::nullopt;
-    }
+    return screenshare_runtime_internal::ParseDiagnosticDouble(text);
 }
 
 std::optional<bool> ParseYesNo(const std::string& text)
@@ -932,10 +921,15 @@ void ScreenShareSession::Impl::HandleAudioLogLine(const std::string& line)
     const auto renderPaddingFrames = ParseUint64(LogFieldValue(line, "audio_render_padding"));
     const std::string avSyncState = LogFieldValue(line, "av_sync");
     const std::string avSyncCorrection = LogFieldValue(line, "av_sync_correction");
-    const auto avAudioAheadMs = ParseInt(LogFieldValue(line, "av_audio_ahead_ms"));
-    const auto avAudioElapsedMs = ParseInt(LogFieldValue(line, "av_audio_elapsed_ms"));
-    const auto avVideoElapsedMs = ParseInt(LogFieldValue(line, "av_video_elapsed_ms"));
-    const auto avPlayoutAudioAheadMs = ParseInt(LogFieldValue(line, "av_playout_audio_ahead_ms"));
+    const auto avVideoFresh = ParseYesNo(LogFieldValue(line, "av_video_fresh"));
+    const auto avAudioFresh = ParseYesNo(LogFieldValue(line, "av_audio_fresh"));
+    const auto avPlayoutReady = ParseYesNo(LogFieldValue(line, "av_playout_ready"));
+    const auto avVideoAgeMs = ParseUint64(LogFieldValue(line, "av_video_age_ms"));
+    const auto avAudioAgeMs = ParseUint64(LogFieldValue(line, "av_audio_age_ms"));
+    const auto avAudioAheadMs = ParseDouble(LogFieldValue(line, "av_audio_ahead_ms"));
+    const auto avAudioElapsedMs = ParseDouble(LogFieldValue(line, "av_audio_elapsed_ms"));
+    const auto avVideoElapsedMs = ParseDouble(LogFieldValue(line, "av_video_elapsed_ms"));
+    const auto avPlayoutAudioAheadMs = ParseDouble(LogFieldValue(line, "av_playout_audio_ahead_ms"));
     const auto avAudioPackets = ParseUint64(LogFieldValue(line, "av_audio_packets"));
     const auto avIgnoredAudioPackets = ParseUint64(LogFieldValue(line, "av_ignored_audio_packets"));
     const auto avVideoFrames = ParseUint64(LogFieldValue(line, "av_video_frames"));
@@ -987,6 +981,11 @@ void ScreenShareSession::Impl::HandleAudioLogLine(const std::string& line)
         renderPaddingFrames ||
         !avSyncState.empty() ||
         !avSyncCorrection.empty() ||
+        avVideoFresh ||
+        avAudioFresh ||
+        avPlayoutReady ||
+        avVideoAgeMs ||
+        avAudioAgeMs ||
         avAudioAheadMs ||
         avAudioElapsedMs ||
         avVideoElapsedMs ||
@@ -1140,6 +1139,21 @@ void ScreenShareSession::Impl::HandleAudioLogLine(const std::string& line)
         }
         if (!avSyncCorrection.empty()) {
             audioStatus_.avSyncCorrection = avSyncCorrection;
+        }
+        if (avVideoFresh) {
+            audioStatus_.avVideoFresh = *avVideoFresh;
+        }
+        if (avAudioFresh) {
+            audioStatus_.avAudioFresh = *avAudioFresh;
+        }
+        if (avPlayoutReady) {
+            audioStatus_.avPlayoutReady = *avPlayoutReady;
+        }
+        if (avVideoAgeMs) {
+            audioStatus_.avVideoAgeMs = *avVideoAgeMs;
+        }
+        if (avAudioAgeMs) {
+            audioStatus_.avAudioAgeMs = *avAudioAgeMs;
         }
         if (avAudioAheadMs) {
             audioStatus_.avAudioAheadMs = *avAudioAheadMs;

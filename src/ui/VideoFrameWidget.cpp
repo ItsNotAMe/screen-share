@@ -521,15 +521,7 @@ bool VideoFrameWidget::eventFilter(QObject* watched, QEvent* event)
         break;
     case QEvent::Wheel:
         if (controlMouse_ && inputHandler_) {
-            auto* wheelEvent = static_cast<QWheelEvent*>(event);
-            const QPoint delta = wheelEvent->angleDelta();
-            if (delta.x() != 0 || delta.y() != 0) {
-                screenshare::RemoteInputEvent input;
-                input.kind = screenshare::RemoteInputKind::MouseScroll;
-                input.scrollX = delta.x();
-                input.scrollY = delta.y();
-                inputHandler_(input);
-            }
+            emitWheel(static_cast<QWheelEvent*>(event));
             return true;
         }
         break;
@@ -622,11 +614,41 @@ void VideoFrameWidget::emitKey(QKeyEvent* event, bool pressed)
     if (!controlKeyboard_ || !inputHandler_) {
         return;
     }
+    // Qt synthesizes auto-repeat as alternating repeat press/release events.
+    // Forward repeat presses so the host repeats at the viewer's configured
+    // rate, but suppress repeat releases so the host retains one tracked key
+    // until the real physical release arrives.
+    if (!pressed && event->isAutoRepeat()) {
+        return;
+    }
     screenshare::RemoteInputEvent input;
     input.kind = screenshare::RemoteInputKind::Key;
     input.key = static_cast<int>(event->nativeVirtualKey());
     input.scancode = static_cast<int>(event->nativeScanCode());
     input.pressed = pressed;
+    inputHandler_(input);
+}
+
+void VideoFrameWidget::emitWheel(QWheelEvent* event)
+{
+    if (!controlMouse_ || !inputHandler_) {
+        return;
+    }
+    QPoint delta = event->angleDelta();
+    if (delta.isNull() && !event->pixelDelta().isNull()) {
+        // Precision touchpads may provide pixelDelta only. Convert the common
+        // Qt ratio of 15 pixels per wheel step into Win32 WHEEL_DELTA units
+        // (120/15 = 8) while preserving sub-step/high-resolution movement.
+        constexpr int kWheelUnitsPerPixel = 8;
+        delta = event->pixelDelta() * kWheelUnitsPerPixel;
+    }
+    if (delta.isNull()) {
+        return;
+    }
+    screenshare::RemoteInputEvent input;
+    input.kind = screenshare::RemoteInputKind::MouseScroll;
+    input.scrollX = delta.x();
+    input.scrollY = delta.y();
     inputHandler_(input);
 }
 
@@ -672,14 +694,7 @@ void VideoFrameWidget::mouseMoveEvent(QMouseEvent* event)
 void VideoFrameWidget::wheelEvent(QWheelEvent* event)
 {
     if (controlMouse_ && inputHandler_) {
-        const QPoint delta = event->angleDelta();
-        if (delta.x() != 0 || delta.y() != 0) {
-            screenshare::RemoteInputEvent input;
-            input.kind = screenshare::RemoteInputKind::MouseScroll;
-            input.scrollX = delta.x();
-            input.scrollY = delta.y();
-            inputHandler_(input);
-        }
+        emitWheel(event);
         event->accept();
         return;
     }

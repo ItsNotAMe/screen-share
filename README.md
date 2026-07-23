@@ -98,7 +98,7 @@ cmake --preset release `
 cmake --build --preset release
 ```
 
-This writes `ScreenShare-Setup-0.3.3-windows-x64.exe`. The portable ZIP remains useful for diagnostics,
+This writes `ScreenShare-Setup-0.3.4-windows-x64.exe`. The portable ZIP remains useful for diagnostics,
 but it does not provision a controller driver and therefore does not promise ready-to-use controller
 hosting.
 

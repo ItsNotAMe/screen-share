@@ -39,6 +39,9 @@ public:
     // only while this window is visible, not minimized, foreground, and owns
     // the mapped screen point. Keyboard injection remains display-only.
     void SetTargetWindow(uint64_t windowHandle);
+    // The physical-mouse arbitration hook is needed only while a viewer owns
+    // mouse control. Keyboard-only and view-only sessions must not install it.
+    void SetMouseMonitoringEnabled(bool enabled);
     // Release any injected mouse buttons as soon as a window target loses
     // focus. Call regularly while a remote-control grant is active.
     void RefreshTargetState();
@@ -53,6 +56,8 @@ public:
     // Virtual-key code (Windows VK_*) and hardware scancode; either may drive the
     // injection (scancode preferred when non-zero).
     void InjectKey(uint16_t virtualKey, uint16_t scancode, bool down);
+    void ReleaseInjectedMouseButtons();
+    void ReleaseInjectedKeys();
     void ReleaseAllInjectedInput();
 
 private:
@@ -74,6 +79,7 @@ private:
     float lastNormX_ = 0.5f;
     float lastNormY_ = 0.5f;
     bool hasLastMousePosition_ = false;
+    bool mouseMonitoringEnabled_ = false;
     std::array<bool, 5> pressedMouseButtons_{};
     std::vector<PressedKey> pressedKeys_;
 };
