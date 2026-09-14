@@ -193,3 +193,5 @@ plays a quiet tone and captures only the test process, tests physical lifecycle,
 and sends process-loopback audio through Opus alongside H.264. The received audio
 is measured without physical replay to avoid feedback. Physical playout is
 tested separately; other capture devices/modes and full A/V timing remain unverified.
+
+Receiver presentation recovery uses `PresentationRecovery.h`: typed DXGI errors, owner-thread resource release, 250 ms drop-only backoff and at most three rebuilds per presenter lifetime. A fourth error is terminal. No failed frame is retained. Initial attachment and explicit Clear failures still propagate; session startup/shutdown must handle them. Capture/encoder recovery remains pending. Policy tests run by default; `PresentationRecoveryTest --gpu` requires a desktop session and tests injected loss with real resource recreation, not actual driver removal.

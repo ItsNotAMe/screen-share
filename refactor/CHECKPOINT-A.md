@@ -320,3 +320,11 @@ those failed runs as history. Gate A still remains open.
 - Still pending: forced HWND reuse stress, actual device removal/recovery,
   remote status integration, long lifecycle/latency checks and remaining Gate A
   build-delivery/protocol evidence. Normal application routing remains legacy.
+
+## Receiver presentation recovery — 2026-09-14
+
+Completed after foundation commit `4ca8318`. The v2 presenter catches typed DXGI device-removed/reset/hung/internal-driver errors, releases its GPU resources on the window thread, drops the failed frame, and rebuilds on a fresh frame after a 250 ms backoff. Three rebuilds are allowed per presenter lifetime; the fourth failure is terminal. Successful frames do not replenish the budget. Other errors propagate. Low-latency queue settings survive recreation. No frame retry queue is added. Capture/encoder recovery and actual driver removal remain open.
+
+`PresentationRecoveryTest` validates backoff, terminal state and error isolation deterministically. Its `--gpu` mode injects a device-loss HRESULT at the render boundary, performs real resource release/recreation on its generated window and requires acceptance of a fresh frame. This is not an actual driver-removal test. Initial restricted desktop runs could recreate resources but could not get an accepted Present; both Debug/Release desktop-session runs passed. The desktop-dependent variant is registered only with `-LiveCapture`.
+
+Validation: 13/13 hardware/audio proof tests in each configuration (`build/webrtc/presentation-recovery-{debug,release}.log`); 8/8 native application tests each (`build/native-{debug,release}-presentation-recovery.log`); separate desktop GPU proofs (`build/webrtc/recovery-desktop-{debug,release}.log`). No physical gaming latency claim. Normal application routing remains legacy. Gate A remains open.

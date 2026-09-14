@@ -242,3 +242,5 @@ WGC capture by default
   - `ScreenShareUi` runs `windeployqt` through `cmake/RunWindeployQt.cmake`; the script always verifies/copies the current Qt DLLs/plugins and resolved MinGW runtime deps so the release UI does not keep stale mismatched Qt files.
   - Keep the UI runtime consistently UCRT (`C:/msys64/ucrt64/bin`); mixing `mingw64` and `ucrt64` Qt/ICU/libstdc++ DLLs causes Windows entry-point loader errors before the app starts.
   - Remaining signaling TODO is real multi-computer/multi-viewer validation across separate NATs.
+
+- Receiver recovery follow-up: v2 presentation now catches typed DXGI device failures, releases resources on the window thread, drops frames during 250 ms backoff and allows three rebuilds per presenter lifetime. Fourth failure is terminal. Debug/Release policy/resource-recreation proofs pass with injected failures; actual driver removal and capture/encoder recovery remain open. Hardware/audio proof suites now pass 13 tests each; application suites pass 8 each. Desktop GPU proof requires `PresentationRecoveryTest --gpu`. Foundation committed as `4ca8318`; continue substantial logical commits.

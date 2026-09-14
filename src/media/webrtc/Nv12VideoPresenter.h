@@ -2,6 +2,7 @@
 #include "api/video/video_frame.h"
 #include "api/video/nv12_buffer.h"
 #include "render/Nv12D3D11Presenter.h"
+#include "PresentationRecovery.h"
 #include "libyuv/planar_functions.h"
 #include <vector>
 #include <stdexcept>
@@ -40,18 +41,21 @@ public:
                 throw std::runtime_error("Presentation plane packing failed");
             data = packed_.data(); ++repacks_;
         }
-        return presenter_.TryPresent({width, height, data, bytes});
+        return recovery_.Present([&] { return presenter_.TryPresent({width, height, data, bytes}); },
+            [&] { presenter_.Reset(); });
     }
     void Clear() { CheckOwner(); presenter_.Clear(); }
     uint64_t presented() const { CheckOwner(); return presenter_.framesPresented(); }
     uint64_t conversions() const { CheckOwner(); return conversions_; }
     uint64_t repacks() const { CheckOwner(); return repacks_; }
+    uint64_t recoveries() const { CheckOwner(); return recovery_.recoveries(); }
     bool hardware() const { CheckOwner(); return presenter_.isHardwareAccelerated(); }
     uint32_t maximumFrameLatency() const { CheckOwner(); return presenter_.maximumFrameLatency(); }
 private:
     void CheckOwner() const { if (GetCurrentThreadId() != owner_) throw std::logic_error("Wrong presentation thread"); }
     DWORD owner_;
     Nv12D3D11Presenter presenter_;
+    PresentationRecovery recovery_;
     std::vector<uint8_t> packed_;
     uint64_t conversions_ = 0, repacks_ = 0;
 };

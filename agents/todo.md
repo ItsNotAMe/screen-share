@@ -7,6 +7,7 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 ### Backend v2 refactor — current work
 
 - [ ] Complete Checkpoint A baseline and pinned native WebRTC codec/audio/build proof before wider migration.
+- [ ] Complete capture/encoder device recovery and actual device-removal validation. Receiver presentation now rebuilds resources with a three-rebuild session budget and 250 ms backoff; injected-error policy and desktop resource-recreation proofs pass.
 - [ ] Add device-loss recovery and forced HWND reuse stress coverage; external process exit, minimize/restore and permanent source closure now pass; GPU presentation of owned CPU NV12, bounded pending frames and receiver resize now pass; WGC shutdown regression and live PeerConnection delivery now pass; WASAPI ADM/Opus, hardware/software MF, bounded submission, missing-output fallback and owned GPU frame proofs now pass. Complete remaining Gate A delivery evidence and broader audio mode/recovery validation.
 - [ ] Continue the ordered implementation and validation in [refactor/TODO.md](../refactor/TODO.md), using [PLAN.md](../refactor/PLAN.md) as the specification.
 

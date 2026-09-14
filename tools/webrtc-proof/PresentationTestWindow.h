@@ -11,9 +11,10 @@ public:
         window_.Invoke([&] {
             SetWindowTextW(window_.handle(), L"ScreenShare received video proof");
             SetWindowPos(window_.handle(), nullptr, 760, 60, 640, 480, SWP_NOZORDER | SWP_NOACTIVATE);
-            presenter_ = std::make_unique<screenshare::media::Nv12VideoPresenter>(window_.handle());
-            if (!presenter_->hardware() || presenter_->maximumFrameLatency() != 1)
+            auto presenter = std::make_unique<screenshare::media::Nv12VideoPresenter>(window_.handle());
+            if (!presenter->hardware() || presenter->maximumFrameLatency() != 1)
                 throw std::runtime_error("GPU presentation or one-frame DXGI limit unavailable");
+            presenter_ = std::move(presenter);
         });
     }
     ~PresentationTestWindow() { window_.Invoke([&] { presenter_.reset(); }); }

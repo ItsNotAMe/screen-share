@@ -4,8 +4,19 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 
 namespace screenshare {
+
+class PresentationError : public std::runtime_error {
+public:
+    PresentationError(HRESULT result, const std::string& message)
+        : std::runtime_error(message), result_(result) {}
+    HRESULT result() const noexcept { return result_; }
+private:
+    HRESULT result_;
+};
 
 class Nv12D3D11Presenter {
 public:

@@ -52,7 +52,7 @@ std::string HResultMessageLocal(HRESULT hr)
 void ThrowIfFailed(HRESULT hr, const char* operation)
 {
     if (FAILED(hr)) {
-        throw std::runtime_error(std::string(operation) + " failed: " + HResultMessageLocal(hr));
+        throw PresentationError(hr, std::string(operation) + " failed: " + HResultMessageLocal(hr));
     }
 }
 
@@ -188,6 +188,8 @@ struct Nv12D3D11Presenter::Impl {
 
     void ResetDevice()
     {
+        if (context) context->ClearState();
+        lastPresented = false;
         maximumFrameLatency = 0;
         ResetSwapChainResources();
         previewConstants.Reset();
@@ -630,6 +632,7 @@ void Nv12D3D11Presenter::Attach(HWND hwnd)
         impl_->hwnd = hwnd;
     }
     impl_->CreateDeviceAndSwapChain();
+    ThrowIfFailed(impl_->device->GetDeviceRemovedReason(), "Presentation device health");
     impl_->EnsurePipeline();
 }
 
@@ -696,6 +699,7 @@ bool Nv12D3D11Presenter::TryPresent(const FrameView& frame)
     }
 
     impl_->CreateDeviceAndSwapChain();
+    ThrowIfFailed(impl_->device->GetDeviceRemovedReason(), "Presentation device health");
     impl_->EnsurePipeline();
     impl_->EnsureFrameTextures(frame.width, frame.height);
 
