@@ -77,9 +77,25 @@ void Run() {
         Require(encoder->Encode(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer)
             .set_timestamp_us(int64_t(i + 1) * 33333).set_rtp_timestamp((i + 1) * 3000).build(), &types) == 0, "Live frame encode failed");
     }
-    encoder->Release();
     Require(resized && sink.count >= 50 && !hardware->quarantined && hardware->hardwareFrames >= 50, "Live resize/hardware output failed");
     Require(device->readbackCount() == validationReadbacks, "Live encoding used CPU readback");
+    // Retire the old device before rebuilding capture. Exercise real WGC/GPU
+    // resource recreation without inducing a system-wide driver reset.
+    hardware->RetireDevice();
+    capture.RebuildWindowDevice();
+    auto recovered = next();
+    Require(recovered.d3dDevice.Get() != first.d3dDevice.Get(), "Capture reused retired GPU device");
+    auto recoveredDevice = std::make_shared<D3dVideoDevice>(recovered.d3dDevice);
+    const auto beforeRecovery = sink.count.load();
+    for (int i = 0; i < 10; ++i) {
+        auto frame = next();
+        Require(encoder->Encode(webrtc::VideoFrame::Builder().set_video_frame_buffer(recoveredDevice->RetainCapture(frame))
+            .set_rtp_timestamp(300000 + i * 3000).build(), nullptr) == 0, "Recovered capture encode rejected");
+    }
+    encoder->Release();
+    Require(sink.count > beforeRecovery && hardware->softwareFallbacks == 1,
+        "Recovered capture did not resume software encoding");
+    Require(device->readbackCount() == validationReadbacks, "Recovery read back retired capture textures");
     std::cerr << "Live encode and resize passed; closing source window\n";
     window.Close();
     bool closed = false;
@@ -90,6 +106,9 @@ void Run() {
     bool stillClosed = false;
     try { capture.TryCaptureFrame(std::chrono::milliseconds(0)); } catch (const std::runtime_error&) { stillClosed = true; }
     Require(stillClosed && capture.sourceState() == CaptureSourceState::Closed, "Replacement window revived the closed source");
+    bool rebuildRejected = false;
+    try { capture.RebuildWindowDevice(); } catch (const std::runtime_error&) { rebuildRejected = true; }
+    Require(rebuildRejected && capture.sourceState() == CaptureSourceState::Closed, "Recovery revived a closed source");
     std::cerr << "Source closure detected; stopping capture\n";
     capture.Stop(); capture.Stop();
     std::cerr << "Capture stopped; checking retained pixels\n";
@@ -100,7 +119,7 @@ void Run() {
     for (int y = 0; y < 360; ++y)
         Require(std::equal(expected->DataY() + y * expected->StrideY(), expected->DataY() + y * expected->StrideY() + 640,
             oldPixels->DataY() + y * oldPixels->StrideY()), "Retained capture pixels changed after reuse/resize/stop");
-    std::cout << "Live selected-window WGC: " << sink.count << " hardware frames; fixed-size resize, closure, retained texture and zero encoder readbacks passed.\n";
+    std::cout << "Live selected-window WGC: " << sink.count << " outputs; fixed-size resize, hardware delivery, device rebuild/software recovery, closure and retained texture passed.\n";
 }
 }
 int main(int argc, char** argv) {

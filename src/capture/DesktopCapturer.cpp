@@ -489,6 +489,16 @@ void DesktopCapturer::Stop()
         try { if (wgc_->framePool) wgc_->framePool.Close(); } catch (const winrt::hresult_error&) {}
     }
     wgc_.reset();
+    ResetGraphicsResources();
+    if (winrtInitialized_) {
+        winrt::clear_factory_cache();
+        RoUninitialize();
+        winrtInitialized_ = false;
+    }
+}
+
+void DesktopCapturer::ResetGraphicsResources()
+{
     duplication_.Reset();
     sourceTexture_.Reset();
     sourceView_.Reset();
@@ -518,12 +528,58 @@ void DesktopCapturer::Stop()
     outputColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     outputHdrActive_ = false;
     lastColorConversionMode_ = 0;
-    if (winrtInitialized_) {
-        // Cached activation factories must not survive a final COM teardown:
-        // the next capture session could otherwise call into an unloaded DLL.
-        winrt::clear_factory_cache();
-        RoUninitialize();
-        winrtInitialized_ = false;
+}
+
+void DesktopCapturer::RebuildWindowDevice()
+{
+    if (!config_.ownedNv12 || config_.sourceType != CaptureSourceType::Window || !wgc_)
+        throw std::logic_error("Device rebuild requires an active owned WGC window source");
+    const auto validateSource = [&] {
+        DWORD process = 0;
+        const auto thread = GetWindowThreadProcessId(reinterpret_cast<HWND>(config_.windowHandle), &process);
+        if (sourceState_ == CaptureSourceState::Closed || wgc_->closed->load() || !thread ||
+            thread != wgc_->sourceThread || process != wgc_->sourceProcess) {
+            sourceState_ = CaptureSourceState::Closed;
+            throw std::runtime_error("Selected capture source closed during recovery");
+        }
+    };
+    validateSource();
+    // Keep item + closure subscription alive throughout. Creating a new item
+    // from the numeric HWND here could accidentally select a replacement window.
+    try {
+        try {
+            for (int i = 0; wgc_->framePool && i < 2; ++i) {
+                auto frame = wgc_->framePool.TryGetNextFrame();
+                if (!frame) break;
+                frame.Close();
+            }
+        } catch (const winrt::hresult_error&) {}
+        if (context_) context_->Flush();
+        try { if (wgc_->session) wgc_->session.Close(); } catch (const winrt::hresult_error&) {}
+        try { if (wgc_->framePool) wgc_->framePool.Close(); } catch (const winrt::hresult_error&) {}
+        wgc_->session = nullptr; wgc_->framePool = nullptr; wgc_->device = nullptr;
+        ResetGraphicsResources();
+        CreateDevice(nullptr);
+        DetectOutputColorSpaceForMonitor(MonitorFromWindow(reinterpret_cast<HWND>(config_.windowHandle), MONITOR_DEFAULTTONEAREST));
+        Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+        ThrowIfFailed(device_.As(&dxgiDevice), "Recovery DXGI device");
+        winrt::com_ptr<IInspectable> inspectable;
+        ThrowIfFailed(CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.Get(), inspectable.put()), "Recovery WGC device");
+        wgc_->device = inspectable.as<direct3d11::IDirect3DDevice>();
+        validateSource();
+        wgc_->size = wgc_->item.Size();
+        if (wgc_->size.Width <= 0 || wgc_->size.Height <= 0) throw std::runtime_error("Recovery source has no capturable area");
+        wgc_->framePool = capture::Direct3D11CaptureFramePool::CreateFreeThreaded(wgc_->device,
+            outputHdrActive_ && config_.hdrToSdr ? directx::DirectXPixelFormat::R16G16B16A16Float :
+                directx::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, wgc_->size);
+        wgc_->session = wgc_->framePool.CreateCaptureSession(wgc_->item);
+        ConfigureWindowsGraphicsCaptureBorder(wgc_->session, config_.wgcBorderRequired);
+        wgc_->session.StartCapture();
+        validateSource();
+        sourceState_ = CaptureSourceState::Active;
+    } catch (...) {
+        Stop(); // Failed reconstruction is terminal; explicit Start is required.
+        throw;
     }
 }
 

@@ -27,7 +27,13 @@ public:
         last = image; ++count; changed.notify_all();
         return Result(Result::OK);
     }
-    void OnFrameDropped(uint32_t, int, bool) override {}
+    void OnFrameDropped(uint32_t, int, bool) override {
+        std::lock_guard lock(mutex); ++dropped; changed.notify_all();
+    }
+    void WaitDropped(unsigned expected) {
+        std::unique_lock lock(mutex);
+        Require(changed.wait_for(lock, std::chrono::seconds(3), [&] { return dropped >= expected; }), "Retired frame drop timeout");
+    }
     void Wait(unsigned expected) {
         std::unique_lock lock(mutex);
         Require(changed.wait_for(lock, std::chrono::seconds(3), [&] { return count >= expected; }), "Hardware/fallback callback timeout");
@@ -36,6 +42,7 @@ public:
     std::condition_variable changed;
     webrtc::EncodedImage last;
     unsigned count = 0;
+    unsigned dropped = 0;
 };
 void Run() {
     using namespace screenshare::media;
@@ -117,6 +124,37 @@ void Run() {
     Require(std::chrono::steady_clock::now() - stopStart < std::chrono::milliseconds(300) && !cancellableEvents->quarantined,
         "Cancellation waited for deadline or quarantined hardware");
     Require(sink.count == 3, "Retired hardware frame delivered a callback");
+    // Device retirement differs from a transform stall: old textures cannot be
+    // read back for fallback. Both viewers must accept a fresh device afterwards.
+    auto retired = std::make_shared<MfHardwareSession>(device);
+    MfVideoEncoderFactory recoveryFactory(retired);
+    auto replacement = std::make_shared<D3dVideoDevice>();
+    auto fresh = replacement->UploadNv12(640, 360, pixels);
+    std::vector<std::unique_ptr<webrtc::VideoEncoder>> viewers;
+    for (int i = 0; i < 2; ++i) {
+        auto viewer = recoveryFactory.Create(webrtc::CreateEnvironment(), recoveryFactory.GetSupportedFormats().front());
+        Require(viewer->InitEncode(&codec, settings) == 0, "Recovery viewer initialization failed");
+        viewer->RegisterEncodeCompleteCallback(&sink);
+        viewers.push_back(std::move(viewer));
+    }
+    retired->RetireDevice();
+    const auto readbacksBeforeRetirement = device->readbackCount();
+    unsigned expectedDrops = sink.dropped;
+    unsigned expectedOutputs = sink.count;
+    for (auto& viewer : viewers) {
+        frame.set_rtp_timestamp(101);
+        Require(viewer->Encode(frame, nullptr) == 0, "Retired input failed synchronously");
+        sink.WaitDropped(++expectedDrops);
+        auto replacementFrame = webrtc::VideoFrame::Builder().set_video_frame_buffer(fresh).set_rtp_timestamp(102).build();
+        Require(viewer->Encode(replacementFrame, nullptr) == 0, "Fresh device input rejected");
+        sink.Wait(++expectedOutputs);
+        Require(sink.last.RtpTimestamp() == 102 && sink.last._frameType == webrtc::VideoFrameType::kVideoFrameKey,
+            "Recovery did not preserve fresh timestamp/IDR");
+        Require(!viewer->GetEncoderInfo().is_hardware_accelerated, "Retired hardware was reused");
+        viewer->Release();
+    }
+    Require(device->readbackCount() == readbacksBeforeRetirement, "Read back a retired device texture");
+    Require(replacement->readbackCount() == 1, "Fresh frame readback was not shared between viewers");
     std::cout << "Hardware fallback, quarantine, retained textures and cached CPU conversion passed; readback_us="
               << device->readbackMicroseconds() << '\n';
     // Isolate the frame lifetime proof from factory/session ownership.

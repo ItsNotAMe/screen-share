@@ -16,6 +16,7 @@
 
 namespace screenshare::media {
 namespace {
+struct RetiredVideoFrame {};
 class MfVideoEncoder final : public webrtc::VideoEncoder {
 public:
     explicit MfVideoEncoder(std::shared_ptr<MfHardwareSession> hardware)
@@ -132,7 +133,10 @@ private:
     EncodedPacket HardwarePacket(const CapturedFrame& raw, uint64_t generation) {
         const int64_t timestamp = ++hardwareSampleId_ * 10'000'000 / config_.fps;
         return WaitForHardwareFrame(timestamp,
-            [&] { return hardware_->PollOutput(*encoder_); },
+            [&] {
+                if (hardware_->DeviceRetired()) throw std::runtime_error("Encoder graphics device retired");
+                return hardware_->PollOutput(*encoder_);
+            },
             [&] { return encoder_->TrySubmitHardwareFrame(raw, timestamp); },
             [&] { return Cancelled(generation); });
     }
@@ -154,7 +158,7 @@ private:
         config_.backend = H264StreamEncoderBackend::Software;
         config_.externalHardwareScheduling = false;
         config_.d3dDevice.Reset();
-        if (hardware_ && hardware_->device && !hardware_->quarantined) {
+        if (hardware_ && hardware_->device && !hardware_->DeviceRetired() && !hardware_->quarantined) {
             try {
                 config_.backend = H264StreamEncoderBackend::Hardware;
                 config_.externalHardwareScheduling = true;
@@ -178,6 +182,7 @@ private:
         encoder_->Start(config_);
     }
     CapturedFrame RawFrame(const webrtc::VideoFrame& frame) {
+        if (IsRetiredFrame(frame)) throw RetiredVideoFrame{};
         if (hardwareActive_) {
             if (auto* native = dynamic_cast<D3dVideoFrameBuffer*>(frame.video_frame_buffer().get())) {
                 auto raw = native->RetainedNv12();
@@ -228,6 +233,11 @@ private:
         std::lock_guard lock(mutex_);
         failed_ = true;
     }
+    bool IsRetiredFrame(const webrtc::VideoFrame& frame) {
+        if (!hardware_ || !hardware_->DeviceRetired()) return false;
+        const auto* native = dynamic_cast<D3dVideoFrameBuffer*>(frame.video_frame_buffer().get());
+        return native && hardware_->device && native->RetainedNv12().d3dDevice.Get() == hardware_->device->device();
+    }
     void Process(uint64_t generation) {
         std::optional<webrtc::VideoFrame> frame;
         bool keyframe;
@@ -243,6 +253,7 @@ private:
         if (frame) {
             try {
                 if (failed) throw std::runtime_error("Encoder requires reinitialization");
+                if (hardwareActive_ && hardware_->DeviceRetired()) SoftwareFallback("Capture device retired");
                 EncodedPacket packet;
                 try { packet = EncodePacket(*frame, keyframe, generation); }
                 catch (const HardwareFrameCancelled&) { throw; }
@@ -252,6 +263,7 @@ private:
                     packet = EncodePacket(*frame, true, generation);
                 }
                 if (Cancelled(generation)) throw HardwareFrameCancelled();
+                if (IsRetiredFrame(*frame)) throw RetiredVideoFrame{};
                 webrtc::EncodedImage image;
                 image.SetEncodedData(webrtc::EncodedImageBuffer::Create(
                     reinterpret_cast<const uint8_t*>(packet.bytes.data()), packet.bytes.size()));
@@ -265,6 +277,11 @@ private:
                 info.codecType = webrtc::kVideoCodecH264;
                 info.codecSpecific.H264.packetization_mode = webrtc::H264PacketizationMode::NonInterleaved;
                 if (callback_) callback_->OnEncodedImage(image, &info);
+            } catch (const RetiredVideoFrame&) {
+                // Keep the encoder alive for fresh input from capture recovery.
+                // Its first output must replace the receiver's old references.
+                { std::lock_guard lock(mutex_); keyframe_ = true; }
+                if (callback_) callback_->OnFrameDropped(frame->rtp_timestamp(), 0, true);
             } catch (const HardwareFrameCancelled&) {
                 // Release/reset owns retirement. Never quarantine a cancelled GPU.
             } catch (const std::exception& error) {

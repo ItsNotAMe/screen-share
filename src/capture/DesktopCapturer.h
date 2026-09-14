@@ -112,6 +112,9 @@ public:
 
     void Start(const CaptureConfig& config);
     void Stop();
+    // Owner thread only. Preserve the original WGC item, never reselect by HWND.
+    // Caller must retire encoders using the old device before invoking this.
+    void RebuildWindowDevice();
 
     [[nodiscard]] std::optional<CapturedFrame> TryCaptureFrame(std::chrono::milliseconds timeout);
     [[nodiscard]] const CaptureConfig& config() const noexcept { return config_; }
@@ -119,6 +122,7 @@ public:
     [[nodiscard]] CaptureSourceState sourceState() const noexcept { return sourceState_; }
 
 private:
+    void ResetGraphicsResources();
     void CreateDevice(IDXGIAdapter* adapter);
     void CreateDuplicationForDisplay(int displayIndex);
     void CreateWindowsGraphicsCaptureForDisplay(int displayIndex);
