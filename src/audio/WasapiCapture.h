@@ -32,6 +32,7 @@ struct AudioCaptureConfig {
     std::wstring deviceId;
     uint32_t processId = 0;
     std::chrono::milliseconds bufferDuration{100};
+    bool pcm48kStereo = false;
 };
 
 struct AudioCaptureFormat {

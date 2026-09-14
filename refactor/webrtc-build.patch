@@ -1,0 +1,24 @@
+diff --git a/config/BUILDCONFIG.gn b/config/BUILDCONFIG.gn
+--- a/config/BUILDCONFIG.gn
++++ b/config/BUILDCONFIG.gn
+@@ -383,6 +383,6 @@ default_compiler_configs = [
+   "//build/config/compiler:default_symbols",
+   "//build/config/compiler:disallow_unstable_features",
+-  "//build/config/compiler:no_exceptions",
++  "//build/config/compiler:exceptions",
+   "//build/config/compiler:no_rtti",
+   "//build/config/compiler:no_unresolved_symbols",
+   "//build/config/compiler:runtime_library",
+diff --git a/config/win/BUILD.gn b/config/win/BUILD.gn
+--- a/config/win/BUILD.gn
++++ b/config/win/BUILD.gn
+@@ -544,7 +544,7 @@ config("default_crt") {
+       configs = [ ":dynamic_crt" ]
+     } else {
+-      # Desktop Windows: static CRT.
+-      configs = [ ":static_crt" ]
++      # ScreenShare embeds WebRTC beside Qt using the same dynamic CRT.
++      configs = [ ":dynamic_crt" ]
+     }
+   }
+ }

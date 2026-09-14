@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 #include <d3d11.h>
@@ -46,6 +47,16 @@ enum class CaptureSourceType {
     Window,
 };
 
+enum class CaptureSourceState { Stopped, Active, Minimized, Closed };
+
+class CaptureDeviceLostError : public std::runtime_error {
+public:
+    explicit CaptureDeviceLostError(HRESULT reason) : std::runtime_error("Capture graphics device lost"), reason_(reason) {}
+    HRESULT reason() const noexcept { return reason_; }
+private:
+    HRESULT reason_;
+};
+
 struct WindowsGraphicsCaptureState;
 
 struct CaptureConfig {
@@ -59,6 +70,8 @@ struct CaptureConfig {
     bool wgcBorderRequired = false;
     bool includeNv12 = false;
     bool includeNv12Readback = true;
+    // Immutable snapshot with producer GPU completion before publication.
+    bool ownedNv12 = false;
     bool includeBgraReadback = true;
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
@@ -83,6 +96,7 @@ struct CapturedFrame {
     Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12Texture;
     uint32_t nv12TextureSubresource = 0;
     bool nv12GeneratedOnGpu = false;
+    bool nv12OwnedAndComplete = false;
 };
 
 class DesktopCapturer {
@@ -101,6 +115,8 @@ public:
 
     [[nodiscard]] std::optional<CapturedFrame> TryCaptureFrame(std::chrono::milliseconds timeout);
     [[nodiscard]] const CaptureConfig& config() const noexcept { return config_; }
+    // Capture-owner thread only. Minimized sources produce no frames.
+    [[nodiscard]] CaptureSourceState sourceState() const noexcept { return sourceState_; }
 
 private:
     void CreateDevice(IDXGIAdapter* adapter);
@@ -126,6 +142,7 @@ private:
     std::optional<CapturedFrame> TryCaptureWindowsGraphicsFrame(std::chrono::milliseconds timeout);
 
     CaptureConfig config_{};
+    CaptureSourceState sourceState_ = CaptureSourceState::Stopped;
     struct Nv12TextureSet {
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> lumaTarget;

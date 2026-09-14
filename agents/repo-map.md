@@ -30,6 +30,9 @@ This is a native Windows C++ screen-sharing prototype. Public code lives under `
 
 ## Build Shape
 
+- Backend v2 build proof adds `native-debug` / `native-release` presets with clang-cl, MSVC Qt and pinned WebRTC/Opus; output is `build/native-debug` / `build/native-release`. Use `scripts/run-webrtc-proof.ps1 -Application -Configuration debug|release` to initialize the correct native tools. See `refactor/BUILD.md`.
+- `tools/webrtc-proof/` contains MF-through-WebRTC video/data-channel, encoder/decoder lifecycle and primitive MF probes. `run-webrtc-proof.ps1 -Hardware` enables GPU input, hardware lifecycle/fallback/quarantine/cancellation and texture/readback tests. Private factories and ownership contracts live in `src/media/webrtc/`. It does not replace application media routing yet.
+
 - Debug preset output: `build/debug/ScreenShare.exe`.
 - Release preset output: `build/release/ScreenShare.exe`.
 - `ScreenShareCore` is a static library target containing the reusable native engine modules.

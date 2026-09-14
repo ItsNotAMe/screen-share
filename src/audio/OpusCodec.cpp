@@ -1,6 +1,6 @@
 #include "audio/OpusCodec.h"
 
-#include <opus/opus.h>
+#include <opus.h>
 
 #include <algorithm>
 #include <cmath>

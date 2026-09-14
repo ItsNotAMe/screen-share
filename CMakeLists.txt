@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.24)
 
 project(ScreenShareNative VERSION 0.3.4 LANGUAGES CXX)
 
+# C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
+set_property(SOURCE src/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
+    "$<$<CXX_COMPILER_ID:Clang>:/clang:-mcx16>")
+
 include(CTest)
 
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
@@ -49,17 +53,27 @@ function(screenshare_configure_release_lto_warnings target_name)
     endif()
 endfunction()
 
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
+include(cmake/WebRTC.cmake)
+if(SCREENSHARE_WEBRTC_ARTIFACT_DIR)
+    screenshare_import_webrtc()
+    # The complete WebRTC archive includes its DEPS-pinned Opus implementation.
+    # The legacy audio adapter uses it during the build proof; v2 uses the ADM.
+    set(SCREENSHARE_OPUS_TARGET ScreenShare::WebRTC)
+elseif(NOT MSVC)
+    find_package(PkgConfig QUIET)
+endif()
+if(NOT SCREENSHARE_OPUS_TARGET AND PkgConfig_FOUND)
     pkg_check_modules(OPUS QUIET IMPORTED_TARGET opus)
 endif()
-if(OPUS_FOUND)
+if(SCREENSHARE_OPUS_TARGET)
+    # Verified native artifact selected above.
+elseif(OPUS_FOUND)
     set(SCREENSHARE_OPUS_TARGET PkgConfig::OPUS)
 else()
     find_path(SCREENSHARE_OPUS_INCLUDE_DIR
-        NAMES opus/opus.h
+        NAMES opus.h
         PATHS ENV OPUS_ROOT
-        PATH_SUFFIXES include
+        PATH_SUFFIXES include/opus include
     )
     find_library(SCREENSHARE_OPUS_LIBRARY
         NAMES opus
@@ -217,6 +231,9 @@ target_link_libraries(ScreenShareCore PUBLIC
     winhttp
     ws2_32
 )
+if(MSVC)
+    target_link_libraries(ScreenShareCore PUBLIC wmcodecdspuuid)
+endif()
 
 add_library(ScreenShareAPI STATIC
     src/api/ScreenShareAPI.cpp
@@ -362,11 +379,15 @@ if(MSVC)
 endif()
 
 if(SCREENSHARE_BUILD_QT_UI)
-    if(WIN32 AND EXISTS "C:/msys64/ucrt64/lib/cmake/Qt6")
+    if(WIN32 AND NOT MSVC AND EXISTS "C:/msys64/ucrt64/lib/cmake/Qt6")
         list(APPEND CMAKE_PREFIX_PATH "C:/msys64/ucrt64")
     endif()
 
-    find_package(Qt6 QUIET COMPONENTS Network Svg Widgets)
+    if(MSVC)
+        find_package(Qt6 REQUIRED COMPONENTS Network WebSockets Svg Widgets)
+    else()
+        find_package(Qt6 QUIET COMPONENTS Network Svg Widgets)
+    endif()
     if(Qt6_FOUND)
         set(SCREENSHARE_UI_ICON_RC)
         if(WIN32)
@@ -479,8 +500,10 @@ if(SCREENSHARE_BUILD_QT_UI)
             )
             target_link_libraries(VideoFrameInputTests PRIVATE ScreenShareCore Qt6::Widgets)
             add_test(NAME video-frame-input COMMAND VideoFrameInputTests)
+            get_filename_component(_screenshare_qt_plugins "${Qt6_DIR}/../../../plugins" ABSOLUTE)
             set_tests_properties(video-frame-input PROPERTIES
-                ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=${_screenshare_qt_plugins}"
+                TIMEOUT 30
             )
         endif()
 

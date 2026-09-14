@@ -528,7 +528,7 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
     std::unique_ptr<WAVEFORMATEX, MixFormatDeleter> mixFormat;
     WAVEFORMATEX processLoopbackFormat{};
     WAVEFORMATEX* activeFormat = nullptr;
-    if (config.source == AudioCaptureSource::ProcessOutput) {
+    if (config.source == AudioCaptureSource::ProcessOutput || config.pcm48kStereo) {
         processLoopbackFormat.wFormatTag = WAVE_FORMAT_PCM;
         processLoopbackFormat.nChannels = 2;
         processLoopbackFormat.nSamplesPerSec = 48'000;
@@ -562,7 +562,7 @@ void WasapiCapture::Start(const AudioCaptureConfig& config)
         config.source == AudioCaptureSource::ProcessOutput) {
         streamFlags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
-    if (config.source == AudioCaptureSource::ProcessOutput) {
+    if (config.source == AudioCaptureSource::ProcessOutput || config.pcm48kStereo) {
         streamFlags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
     }
 

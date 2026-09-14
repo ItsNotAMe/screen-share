@@ -1,5 +1,9 @@
 # Live Pipeline Notes
 
+## Backend v2 capture proof
+
+Opt-in owned NV12 capture snapshots and hardware WebRTC encoder import are implemented under the refactor. This is not normal app routing. Live source resize, retained pixels and hardware PeerConnection delivery pass. Draining queued frames, flushing and closing session before pool resolves the reproduced WGC shutdown regression in repeated runs; external-process exit and device recovery remain unverified. Keep Gate A open; see `refactor/CHECKPOINT-A.md` for exact evidence and resume work.
+
 ## Sender
 
 Capture runs at the requested FPS. WGC is the default backend; DXGI Desktop Duplication is fallback/comparison. Capture can reuse the latest desktop frame when the desktop has not updated, so `output_fps` can stay near 60 while `desktop_update_fps` is lower.

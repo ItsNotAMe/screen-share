@@ -29,7 +29,7 @@ public:
     H264StreamDecoder(const H264StreamDecoder&) = delete;
     H264StreamDecoder& operator=(const H264StreamDecoder&) = delete;
 
-    void Start();
+    void Start(int maxWidth = 16384, int maxHeight = 16384);
     std::vector<DecodedFrameInfo> DecodePacket(const EncodedPacket& packet);
     std::vector<DecodedFrameInfo> Drain();
     void Stop();
@@ -53,6 +53,8 @@ private:
     bool outputTypeConfigured_ = false;
     bool comInitialized_ = false;
     bool mfStarted_ = false;
+    int maxWidth_ = 16384;
+    int maxHeight_ = 16384;
 };
 
 } // namespace screenshare

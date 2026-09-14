@@ -1,5 +1,7 @@
 # Packaging Notes
 
+Backend v2 native builds are documented in `refactor/BUILD.md`. Native Qt/CLI/updater compilation and tests pass, but WebRTC dependency notices, immutable artifact packaging and native portable/installer staging are not yet validated. The native presets disable automatic packaging until those checks are completed; do not release them based only on successful compilation.
+
 MinGW builds need runtime DLLs beside the exe when moved to another computer. Current main/PR history statically links GCC/C++/pthread runtime by default and stages remaining DLLs such as Opus, UCRT redist files, and `d3dcompiler_47.dll` when available.
 
 Portable zip packaging was merged separately from the live-streaming fixes in PR #46.

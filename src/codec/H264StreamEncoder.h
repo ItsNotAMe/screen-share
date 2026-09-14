@@ -39,6 +39,10 @@ struct H264StreamEncoderConfig {
     int fps = 60;
     uint32_t bitrate = 12'000'000;
     uint32_t keyframeIntervalFrames = 0;
+    // H.264 level_idc; zero retains automatic level selection for legacy callers.
+    uint32_t levelIdc = 0;
+    // The caller owns readiness, submission bounds and output deadlines.
+    bool externalHardwareScheduling = false;
     int64_t startFrameIndex = 0;
     H264StreamEncoderBackend backend = H264StreamEncoderBackend::Software;
     Microsoft::WRL::ComPtr<ID3D11Device> d3dDevice;
@@ -57,6 +61,9 @@ public:
     std::vector<EncodedPacket> Drain();
     bool TryUpdateBitrate(uint32_t bitrate);
     bool RequestKeyframe();
+    std::vector<EncodedPacket> PollHardwareOutput();
+    bool HardwareAcceptsInput() const noexcept;
+    bool TrySubmitHardwareFrame(const CapturedFrame& frame, int64_t timestamp100ns);
     void Stop();
 
     [[nodiscard]] bool isRunning() const noexcept { return transform_ != nullptr; }

@@ -1,0 +1,43 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_MAKE_PROGRAM": "${sourceDir}/../../build/webrtc/checkout/src/third_party/ninja/ninja.exe",
+        "CMAKE_CXX_COMPILER": "${sourceDir}/../../build/webrtc/checkout/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe",
+        "CMAKE_LINKER": "${sourceDir}/../../build/webrtc/checkout/src/third_party/llvm-build/Release+Asserts/bin/lld-link.exe"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/../../build/webrtc-proof/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebugDLL",
+        "SCREENSHARE_WEBRTC_ARTIFACT_DIR": "${sourceDir}/../../build/webrtc/checkout/src/out/screenshare-debug"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/../../build/webrtc-proof/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDLL",
+        "SCREENSHARE_WEBRTC_ARTIFACT_DIR": "${sourceDir}/../../build/webrtc/checkout/src/out/screenshare-release"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" }
+  ],
+  "testPresets": [
+    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } }
+  ]
+}

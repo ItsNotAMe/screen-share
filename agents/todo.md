@@ -4,6 +4,14 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ## Active Priorities
 
+### Backend v2 refactor — current work
+
+- [ ] Complete Checkpoint A baseline and pinned native WebRTC codec/audio/build proof before wider migration.
+- [ ] Add device-loss recovery and forced HWND reuse stress coverage; external process exit, minimize/restore and permanent source closure now pass; GPU presentation of owned CPU NV12, bounded pending frames and receiver resize now pass; WGC shutdown regression and live PeerConnection delivery now pass; WASAPI ADM/Opus, hardware/software MF, bounded submission, missing-output fallback and owned GPU frame proofs now pass. Complete remaining Gate A delivery evidence and broader audio mode/recovery validation.
+- [ ] Continue the ordered implementation and validation in [refactor/TODO.md](../refactor/TODO.md), using [PLAN.md](../refactor/PLAN.md) as the specification.
+
+The v2 checklist supersedes legacy transport/adaptation work below where replacement is planned. User authorized removing the uncommitted legacy UDP adaptation/recovery work; it was archived locally and removed on `refactor/backend-v2`.
+
 ### Release infrastructure
 
 - [ ] Validate the cross-colo rate limiter, global room-count cap, and alarm-based directory sweep under multi-colo/live load.

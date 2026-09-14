@@ -2,6 +2,8 @@
 
 #include <Windows.h>
 #include <d3dcompiler.h>
+#include <d3d10.h>
+#include <thread>
 #include <dxgi1_6.h>
 #include <inspectable.h>
 #include <roapi.h>
@@ -14,6 +16,7 @@
 #include <winrt/base.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <iomanip>
@@ -45,6 +48,12 @@ struct WindowsGraphicsCaptureState {
     capture::GraphicsCaptureSession session{nullptr};
     direct3d11::IDirect3DDevice device{nullptr};
     graphics::SizeInt32 size{};
+    std::shared_ptr<std::atomic<bool>> closed = std::make_shared<std::atomic<bool>>(false);
+    capture::GraphicsCaptureItem::Closed_revoker closedRevoker;
+    DWORD sourceProcess = 0, sourceThread = 0;
+    void WatchClosure() {
+        closedRevoker = item.Closed(winrt::auto_revoke, [flag = closed](auto&&, auto&&) { flag->store(true); });
+    }
 };
 
 namespace {
@@ -458,10 +467,27 @@ void DesktopCapturer::Start(const CaptureConfig& config)
     } else {
         CreateDuplicationForDisplay(config.displayIndex);
     }
+    sourceState_ = CaptureSourceState::Active;
 }
 
 void DesktopCapturer::Stop()
 {
+    sourceState_ = CaptureSourceState::Stopped;
+    if (wgc_) {
+        wgc_->closedRevoker.revoke();
+        // Return queued frames and submit outstanding GPU commands before
+        // stopping the producer. Dispose the pool after the session stops.
+        try {
+            if (wgc_->framePool) for (int i = 0; i < 2; ++i) {
+                auto frame = wgc_->framePool.TryGetNextFrame();
+                if (!frame) break;
+                frame.Close();
+            }
+        } catch (const winrt::hresult_error&) {}
+        if (context_) context_->Flush();
+        try { if (wgc_->session) wgc_->session.Close(); } catch (const winrt::hresult_error&) {}
+        try { if (wgc_->framePool) wgc_->framePool.Close(); } catch (const winrt::hresult_error&) {}
+    }
     wgc_.reset();
     duplication_.Reset();
     sourceTexture_.Reset();
@@ -493,6 +519,9 @@ void DesktopCapturer::Stop()
     outputHdrActive_ = false;
     lastColorConversionMode_ = 0;
     if (winrtInitialized_) {
+        // Cached activation factories must not survive a final COM teardown:
+        // the next capture session could otherwise call into an unloaded DLL.
+        winrt::clear_factory_cache();
         RoUninitialize();
         winrtInitialized_ = false;
     }
@@ -500,6 +529,35 @@ void DesktopCapturer::Stop()
 
 std::optional<CapturedFrame> DesktopCapturer::TryCaptureFrame(std::chrono::milliseconds timeout)
 {
+    if (config_.ownedNv12 && device_) {
+        const HRESULT reason = device_->GetDeviceRemovedReason();
+        if (FAILED(reason)) throw CaptureDeviceLostError(reason);
+    }
+    if (wgc_ && config_.ownedNv12) {
+        bool closed = sourceState_ == CaptureSourceState::Closed || wgc_->closed->load();
+        if (config_.sourceType == CaptureSourceType::Window) {
+            const auto window = reinterpret_cast<HWND>(config_.windowHandle);
+            DWORD process = 0;
+            const DWORD thread = GetWindowThreadProcessId(window, &process);
+            closed |= !thread || process != wgc_->sourceProcess || thread != wgc_->sourceThread;
+            if (!closed && IsIconic(window)) {
+                sourceState_ = CaptureSourceState::Minimized;
+                // Return queued frames; never republish the pre-minimize image.
+                for (int i = 0; i < 2; ++i) {
+                    auto frame = wgc_->framePool.TryGetNextFrame();
+                    if (!frame) break;
+                    frame.Close();
+                }
+                if (timeout.count() > 0) std::this_thread::sleep_for(std::min(timeout, std::chrono::milliseconds(10)));
+                return std::nullopt;
+            }
+        }
+        if (closed || sourceState_ == CaptureSourceState::Closed) {
+            sourceState_ = CaptureSourceState::Closed;
+            throw std::runtime_error("Selected capture source closed");
+        }
+        sourceState_ = CaptureSourceState::Active;
+    }
     if (wgc_) {
         return TryCaptureWindowsGraphicsFrame(timeout);
     }
@@ -589,6 +647,11 @@ void DesktopCapturer::CreateDevice(IDXGIAdapter* adapter)
 #endif
 
     ThrowIfFailed(result, "D3D11CreateDevice");
+    if (config_.ownedNv12) {
+        Microsoft::WRL::ComPtr<ID3D10Multithread> protection;
+        ThrowIfFailed(device_.As(&protection), "Capture device protection");
+        protection->SetMultithreadProtected(TRUE);
+    }
 }
 
 void DesktopCapturer::CreateDuplicationForDisplay(int displayIndex)
@@ -738,6 +801,7 @@ void DesktopCapturer::CreateWindowsGraphicsCaptureForDisplay(int displayIndex)
 
                 auto state = std::make_unique<WindowsGraphicsCaptureState>();
                 state->item = item;
+                state->WatchClosure();
                 state->device = d3dDevice;
                 state->size = captureSize;
                 state->framePool = capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
@@ -749,6 +813,7 @@ void DesktopCapturer::CreateWindowsGraphicsCaptureForDisplay(int displayIndex)
                 ConfigureWindowsGraphicsCaptureBorder(state->session, config_.wgcBorderRequired);
                 state->session.StartCapture();
                 wgc_ = std::move(state);
+                sourceState_ = CaptureSourceState::Active;
                 return;
             }
 
@@ -798,6 +863,8 @@ void DesktopCapturer::CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandl
 
     auto state = std::make_unique<WindowsGraphicsCaptureState>();
     state->item = item;
+    state->sourceThread = GetWindowThreadProcessId(hwnd, &state->sourceProcess);
+    state->WatchClosure();
     state->device = d3dDevice;
     state->size = captureSize;
     state->framePool = capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
@@ -811,6 +878,7 @@ void DesktopCapturer::CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandl
     ConfigureWindowsGraphicsCaptureBorder(state->session, config_.wgcBorderRequired);
     state->session.StartCapture();
     wgc_ = std::move(state);
+    sourceState_ = CaptureSourceState::Active;
 }
 
 void DesktopCapturer::DetectOutputColorSpaceForMonitor(HMONITOR monitor)
@@ -1317,7 +1385,7 @@ void DesktopCapturer::EnsureNv12Textures(int width, int height)
     chromaTargetDesc.Format = DXGI_FORMAT_R8G8_UNORM;
     chromaTargetDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
-    constexpr size_t texturePoolSize = 48;
+    const size_t texturePoolSize = config_.ownedNv12 ? 1 : 48;
     nv12Textures_.resize(texturePoolSize);
     for (auto& textureSet : nv12Textures_) {
         ThrowIfFailed(
@@ -1401,6 +1469,33 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
     frame.nv12TextureSubresource = 0;
     frame.nv12GeneratedOnGpu = true;
 
+    if (config_.ownedNv12) {
+        // The conversion target may be reused; the published snapshot may not.
+        auto description = nv12TextureDesc_;
+        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> snapshot;
+        ThrowIfFailed(device_->CreateTexture2D(&description, nullptr, &snapshot), "Owned NV12 texture");
+        context_->CopyResource(snapshot.Get(), textureSet.texture.Get());
+        D3D11_QUERY_DESC queryDescription{D3D11_QUERY_EVENT, 0};
+        Microsoft::WRL::ComPtr<ID3D11Query> completion;
+        ThrowIfFailed(device_->CreateQuery(&queryDescription, &completion), "Capture completion query");
+        context_->End(completion.Get());
+        context_->Flush();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+        for (;;) {
+            BOOL complete = FALSE;
+            const auto status = context_->GetData(completion.Get(), &complete, sizeof(complete), D3D11_ASYNC_GETDATA_DONOTFLUSH);
+            ThrowIfFailed(status, "Capture GPU completion");
+            if (status == S_OK && complete) break;
+            const HRESULT reason = device_->GetDeviceRemovedReason();
+            if (FAILED(reason)) throw CaptureDeviceLostError(reason);
+            if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("Capture GPU completion deadline exceeded");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        frame.nv12Texture = std::move(snapshot);
+        frame.nv12OwnedAndComplete = true;
+    }
+
     if (!config_.includeNv12Readback) {
         context_->Flush();
         return;
@@ -1437,6 +1532,14 @@ std::optional<CapturedFrame> DesktopCapturer::ReadTextureFrame(
     const D3D11_TEXTURE2D_DESC& sourceDesc,
     int64_t presentTimeQpc)
 {
+    // Keep complete shader-state sequences together when MF/readback share
+    // this immediate context. The lock is recursive with D3D protection.
+    Microsoft::WRL::ComPtr<ID3D10Multithread> protection;
+    if (config_.ownedNv12) {
+        ThrowIfFailed(device_.As(&protection), "Capture context protection");
+        protection->Enter();
+    }
+    struct Unlock { ID3D10Multithread* value; ~Unlock() { if (value) value->Leave(); } } unlock{protection.Get()};
     ID3D11Texture2D* outputTexture = ScaleFrameIfNeeded(sourceTexture, sourceDesc);
 
     D3D11_TEXTURE2D_DESC outputDesc{};
@@ -1492,12 +1595,18 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
         }
 
         if (captureFrame) {
+            struct CloseFrame {
+                capture::Direct3D11CaptureFrame& frame;
+                ~CloseFrame() { try { if (frame) frame.Close(); } catch (const winrt::hresult_error&) {} }
+            } closeFrame{captureFrame};
             const graphics::SizeInt32 contentSize = captureFrame.ContentSize();
             if (contentSize.Width <= 0 || contentSize.Height <= 0) {
                 return std::nullopt;
             }
             if (contentSize.Width != wgc_->size.Width || contentSize.Height != wgc_->size.Height) {
                 wgc_->size = contentSize;
+                captureFrame.Close();
+                captureFrame = nullptr;
                 wgc_->framePool.Recreate(
                     wgc_->device,
                     outputHdrActive_ && config_.hdrToSdr
@@ -1505,6 +1614,9 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
                         : directx::DirectXPixelFormat::B8G8R8A8UIntNormalized,
                     2,
                     contentSize);
+                // The resize notification can still carry the old-sized surface.
+                // Wait for a frame produced by the recreated pool.
+                continue;
             }
 
             const auto surface = captureFrame.Surface();
@@ -1524,7 +1636,17 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
 
             D3D11_TEXTURE2D_DESC sourceDesc{};
             frameTexture->GetDesc(&sourceDesc);
-            return ReadTextureFrame(frameTexture.Get(), sourceDesc, 0);
+            auto output = ReadTextureFrame(frameTexture.Get(), sourceDesc, 0);
+            if (config_.ownedNv12 && wgc_->closed->load()) {
+                sourceState_ = CaptureSourceState::Closed;
+                throw std::runtime_error("Selected capture source closed");
+            }
+            if (config_.ownedNv12 && config_.sourceType == CaptureSourceType::Window &&
+                IsIconic(reinterpret_cast<HWND>(config_.windowHandle))) {
+                sourceState_ = CaptureSourceState::Minimized;
+                return std::nullopt;
+            }
+            return output;
         }
 
         if (timeout.count() == 0 || std::chrono::steady_clock::now() >= deadline) {

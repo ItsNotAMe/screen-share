@@ -183,6 +183,9 @@ Microsoft::WRL::ComPtr<IMFMediaType> CreateH264OutputType(const H264StreamEncode
     ThrowIfFailed(outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264), "IMFMediaType::SetGUID(output subtype)");
     ThrowIfFailed(outputType->SetUINT32(MF_MT_AVG_BITRATE, config.bitrate), "IMFMediaType::SetUINT32(output bitrate)");
     ThrowIfFailed(outputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High), "IMFMediaType::SetUINT32(output profile)");
+    if (config.levelIdc != 0) {
+        ThrowIfFailed(outputType->SetUINT32(MF_MT_MPEG2_LEVEL, config.levelIdc), "IMFMediaType::SetUINT32(output level)");
+    }
     ThrowIfFailed(outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "IMFMediaType::SetUINT32(output interlace)");
     SetBt709ColorInfo(outputType.Get());
     SetVideoSize(outputType.Get(), MF_MT_FRAME_SIZE, config.width, config.height);
@@ -641,13 +644,16 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0), "IMFTransform::ProcessMessage(BEGIN_STREAMING)");
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0), "IMFTransform::ProcessMessage(START_OF_STREAM)");
 
-    if (backend_ == H264StreamEncoderBackend::Hardware) {
+    if (backend_ == H264StreamEncoderBackend::Hardware && !config_.externalHardwareScheduling) {
         static_cast<void>(WaitForAsyncInputRequest());
     }
 }
 
 std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& frame)
 {
+    if (config_.externalHardwareScheduling) {
+        throw std::logic_error("Externally scheduled hardware requires explicit submission");
+    }
     if (!transform_) {
         throw std::logic_error("H264StreamEncoder::Start must be called before EncodeFrame");
     }
@@ -740,6 +746,44 @@ bool H264StreamEncoder::RequestKeyframe()
     }
     Microsoft::WRL::ComPtr<ICodecAPI> codecApi = QueryCodecApi(transform_.Get());
     return codecApi && TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncVideoForceKeyFrame, 1);
+}
+
+std::vector<EncodedPacket> H264StreamEncoder::PollHardwareOutput()
+{
+    if (!transform_ || !config_.externalHardwareScheduling || backend_ != H264StreamEncoderBackend::Hardware) {
+        throw std::logic_error("Hardware polling requires an externally scheduled encoder");
+    }
+    return PumpAsyncEvents();
+}
+
+bool H264StreamEncoder::HardwareAcceptsInput() const noexcept
+{
+    return config_.externalHardwareScheduling && transform_ && pendingAsyncInputs_ > 0;
+}
+
+bool H264StreamEncoder::TrySubmitHardwareFrame(const CapturedFrame& frame, int64_t timestamp100ns)
+{
+    if (!HardwareAcceptsInput()) return false;
+    if (frame.width != config_.width || frame.height != config_.height || timestamp100ns < 0) {
+        throw std::invalid_argument("Invalid externally scheduled hardware frame");
+    }
+    const bool gpu = config_.d3dDevice && frame.nv12Texture;
+    if (gpu) {
+        Microsoft::WRL::ComPtr<ID3D11Device> textureDevice;
+        frame.nv12Texture->GetDevice(&textureDevice);
+        if (textureDevice.Get() != config_.d3dDevice.Get()) {
+            throw std::invalid_argument("Hardware input texture belongs to another D3D device");
+        }
+    }
+    auto sample = gpu ? CreateInputSampleFromDxgiTexture(frame, timestamp100ns, frameDuration100ns_) :
+        CreateInputSampleFromMemory(frame, timestamp100ns, frameDuration100ns_);
+    const HRESULT result = transform_->ProcessInput(inputStreamId_, sample.Get(), 0);
+    if (result == MF_E_NOTACCEPTING) { pendingAsyncInputs_ = 0; return false; }
+    ThrowIfFailed(result, "IMFTransform::ProcessInput(external)");
+    --pendingAsyncInputs_;
+    lastInputMode_ = gpu ? H264StreamEncoderInputMode::Direct3D : H264StreamEncoderInputMode::Memory;
+    // No hidden raw queue and no transport timestamp map in this path.
+    return true;
 }
 
 void H264StreamEncoder::Stop()
@@ -922,7 +966,7 @@ std::vector<EncodedPacket> H264StreamEncoder::PumpAsyncEvents()
         return packets;
     }
 
-    while (true) {
+    for (unsigned eventCount = 0; eventCount < 64; ++eventCount) {
         Microsoft::WRL::ComPtr<IMFMediaEvent> event;
         const HRESULT eventResult = eventGenerator_->GetEvent(MF_EVENT_FLAG_NO_WAIT, &event);
         if (eventResult == MF_E_NO_EVENTS_AVAILABLE) {

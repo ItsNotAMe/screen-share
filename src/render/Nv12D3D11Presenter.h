@@ -32,6 +32,11 @@ public:
     void SetScaleMode(ScaleMode mode);
     void SetLinearSampling(bool enabled);
     void Present(const FrameView& frame);
+    // Configure before Attach. Busy/occluded frames are dropped, never retried.
+    void SetLowLatency(bool enabled);
+    bool TryPresent(const FrameView& frame);
+    [[nodiscard]] bool isHardwareAccelerated() const noexcept;
+    [[nodiscard]] std::uint32_t maximumFrameLatency() const noexcept;
     void Clear();
     void Reset();
 

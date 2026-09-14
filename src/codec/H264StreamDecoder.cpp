@@ -223,9 +223,14 @@ H264StreamDecoder::~H264StreamDecoder()
     }
 }
 
-void H264StreamDecoder::Start()
+void H264StreamDecoder::Start(int maxWidth, int maxHeight)
 {
     Stop();
+    if (maxWidth <= 0 || maxHeight <= 0 || maxWidth > 16384 || maxHeight > 16384) {
+        throw std::invalid_argument("Invalid H264 decoder dimension limit");
+    }
+    maxWidth_ = maxWidth;
+    maxHeight_ = maxHeight;
 
     ThrowIfFailed(
         CoCreateInstance(H264DecoderClsid, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform_)),
@@ -367,6 +372,11 @@ bool H264StreamDecoder::TryConfigureOutputType()
         UINT32 width = 0;
         UINT32 height = 0;
         ThrowIfFailed(MFGetAttributeSize(outputType.Get(), MF_MT_FRAME_SIZE, &width, &height), "MFGetAttributeSize(decoder output)");
+        // Validate before allocating output buffers or accepting a remote stream type.
+        if (width == 0 || height == 0 || width > static_cast<UINT32>(maxWidth_) ||
+            height > static_cast<UINT32>(maxHeight_) || width % 2 != 0 || height % 2 != 0) {
+            throw std::runtime_error("H264 decoded dimensions exceed configured limits");
+        }
         ThrowIfFailed(transform_->SetOutputType(outputStreamId_, outputType.Get(), 0), "IMFTransform::SetOutputType(decoder)");
 
         outputWidth_ = static_cast<int>(width);
@@ -395,6 +405,9 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
         ThrowIfFailed(transform_->GetOutputStreamInfo(outputStreamId_, &streamInfo), "IMFTransform::GetOutputStreamInfo(decoder)");
 
         DWORD outputBufferBytes = std::max(outputBufferBytes_, streamInfo.cbSize);
+        if (outputBufferBytes > 128 * 1'048'576) {
+            throw std::runtime_error("H264 decoder requested excessive output storage");
+        }
         if (outputBufferBytes == 0) {
             outputBufferBytes = 16 * 1'048'576;
         }

@@ -149,6 +149,10 @@ struct Nv12D3D11Presenter::Impl {
     std::uint32_t clientHeight = 1;
     bool swapChainResizePending = false;
     bool linearSampling = true;
+    bool lowLatency = false;
+    bool lastPresented = false;
+    bool softwareDevice = false;
+    UINT maximumFrameLatency = 0;
     Nv12D3D11Presenter::ScaleMode scaleMode = Nv12D3D11Presenter::ScaleMode::Fit;
 
     Microsoft::WRL::ComPtr<ID3D11Device> device;
@@ -184,6 +188,7 @@ struct Nv12D3D11Presenter::Impl {
 
     void ResetDevice()
     {
+        maximumFrameLatency = 0;
         ResetSwapChainResources();
         previewConstants.Reset();
         sampler.Reset();
@@ -219,6 +224,7 @@ struct Nv12D3D11Presenter::Impl {
 
     HRESULT CreateSwapChainWithEffect(DXGI_SWAP_EFFECT swapEffect, UINT bufferCount)
     {
+        softwareDevice = false;
         DXGI_SWAP_CHAIN_DESC swapChainDesc{};
         swapChainDesc.BufferDesc.Width = clientWidth;
         swapChainDesc.BufferDesc.Height = clientHeight;
@@ -255,6 +261,7 @@ struct Nv12D3D11Presenter::Impl {
             &context);
 
         if (FAILED(result)) {
+            softwareDevice = true;
             result = D3D11CreateDeviceAndSwapChain(
                 nullptr,
                 D3D_DRIVER_TYPE_WARP,
@@ -286,6 +293,12 @@ struct Nv12D3D11Presenter::Impl {
             result = CreateSwapChainWithEffect(DXGI_SWAP_EFFECT_DISCARD, 1);
         }
         ThrowIfFailed(result, "D3D11CreateDeviceAndSwapChain(embedded preview)");
+        if (lowLatency) {
+            Microsoft::WRL::ComPtr<IDXGIDevice1> queue;
+            ThrowIfFailed(device.As(&queue), "DXGI frame queue interface");
+            ThrowIfFailed(queue->SetMaximumFrameLatency(1), "DXGI frame queue limit");
+            ThrowIfFailed(queue->GetMaximumFrameLatency(&maximumFrameLatency), "DXGI frame queue measurement");
+        }
         DisableDxgiDefaultAltEnter(swapChain.Get(), hwnd);
         SetSwapChainSdrColorSpace(swapChain.Get());
         EnsureRenderTarget();
@@ -528,8 +541,17 @@ float4 ps_main(VertexOut input) : SV_Target
         return viewport;
     }
 
+    void PresentSwapChain()
+    {
+        const auto result = swapChain->Present(0, lowLatency ? DXGI_PRESENT_DO_NOT_WAIT : 0);
+        if (lowLatency && (result == DXGI_ERROR_WAS_STILL_DRAWING || result == DXGI_STATUS_OCCLUDED)) return;
+        ThrowIfFailed(result, "IDXGISwapChain::Present(embedded preview)");
+        lastPresented = result == S_OK;
+    }
+
     void Render()
     {
+        lastPresented = false;
         if (!swapChain || hwnd == nullptr || IsWindow(hwnd) == 0 || IsIconic(hwnd) != FALSE) {
             return;
         }
@@ -542,7 +564,7 @@ float4 ps_main(VertexOut input) : SV_Target
         context->ClearRenderTargetView(renderTarget.Get(), clearColor);
 
         if (!lumaView || !chromaView) {
-            ThrowIfFailed(swapChain->Present(0, 0), "IDXGISwapChain::Present(embedded preview clear)");
+            PresentSwapChain();
             return;
         }
 
@@ -582,7 +604,7 @@ float4 ps_main(VertexOut input) : SV_Target
         context->PSSetConstantBuffers(0, 1, nullConstantBuffers);
         context->OMSetRenderTargets(1, nullRenderTargets, nullptr);
 
-        ThrowIfFailed(swapChain->Present(0, 0), "IDXGISwapChain::Present(embedded preview)");
+        PresentSwapChain();
     }
 };
 
@@ -654,6 +676,20 @@ void Nv12D3D11Presenter::SetLinearSampling(bool enabled)
 
 void Nv12D3D11Presenter::Present(const FrameView& frame)
 {
+    TryPresent(frame);
+}
+
+bool Nv12D3D11Presenter::isHardwareAccelerated() const noexcept { return impl_->device && !impl_->softwareDevice; }
+std::uint32_t Nv12D3D11Presenter::maximumFrameLatency() const noexcept { return impl_->maximumFrameLatency; }
+
+void Nv12D3D11Presenter::SetLowLatency(bool enabled)
+{
+    if (impl_->device) throw std::logic_error("Set latency mode before attaching the presenter");
+    impl_->lowLatency = enabled;
+}
+
+bool Nv12D3D11Presenter::TryPresent(const FrameView& frame)
+{
     ValidateNv12Frame(frame);
     if (impl_->hwnd == nullptr) {
         throw std::runtime_error("Embedded preview presenter has no target window");
@@ -685,7 +721,8 @@ void Nv12D3D11Presenter::Present(const FrameView& frame)
     impl_->frameWidth = frame.width;
     impl_->frameHeight = frame.height;
     impl_->Render();
-    ++framesPresented_;
+    if (impl_->lastPresented) ++framesPresented_;
+    return impl_->lastPresented;
 }
 
 void Nv12D3D11Presenter::Clear()
