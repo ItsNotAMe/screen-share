@@ -1,0 +1,877 @@
+[
+  {
+    "name": "normalized nickname",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": " \tJose\u0301\u3000",
+        "expectedRevision": 3
+      }
+    },
+    "ok": true,
+    "nickname": "Jos\u00e9"
+  },
+  {
+    "name": "emoji",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+        "expectedRevision": 0
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "plain markup",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "<b>A</b>",
+        "expectedRevision": 0
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "ZWJ",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "\ud83d\udc69\u200d\ud83d\udcbb",
+        "expectedRevision": 0
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "duplicate permitted",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "Guest-ab12",
+        "expectedRevision": 0
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "empty",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": " ",
+        "expectedRevision": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "too many codepoints",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expectedRevision": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "emoji overflow",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+        "expectedRevision": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "control",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "a\nb",
+        "expectedRevision": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "bidi",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "a\u202eb",
+        "expectedRevision": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "BOM",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "\ufeffa",
+        "expectedRevision": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "isolated surrogate",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "\ud800",
+        "expectedRevision": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "wrong nickname type",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": 3,
+        "expectedRevision": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "bad revision -1",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "A",
+        "expectedRevision": -1
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "bad revision 1.5",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "A",
+        "expectedRevision": 1.5
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "bad revision 9007199254740992",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "A",
+        "expectedRevision": 9007199254740992
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "bad revision 1",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "A",
+        "expectedRevision": "1"
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "bad revision null",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "A",
+        "expectedRevision": null
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "max safe revision",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "A",
+        "expectedRevision": 9007199254740991
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "room edit",
+    "message": {
+      "v": 2,
+      "type": "room.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "name": " Game ",
+        "visibility": "unlisted",
+        "viewerLimit": 63,
+        "expectedRevision": 5
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "room empty edit",
+    "message": {
+      "v": 2,
+      "type": "room.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "expectedRevision": 5
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "room limit overflow",
+    "message": {
+      "v": 2,
+      "type": "room.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "viewerLimit": 64,
+        "expectedRevision": 5
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "password rotation forbidden",
+    "message": {
+      "v": 2,
+      "type": "room.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "password": "x",
+        "expectedRevision": 5
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "kick",
+    "message": {
+      "v": 2,
+      "type": "peer.disconnect",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "peerId": "viewer-2"
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "leave",
+    "message": {
+      "v": 2,
+      "type": "peer.leave",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {}
+    },
+    "ok": true
+  },
+  {
+    "name": "room resync",
+    "message": {
+      "v": 2,
+      "type": "state.resync",
+      "roomId": "room_1",
+      "payload": {}
+    },
+    "ok": true
+  },
+  {
+    "name": "directory resync",
+    "message": {
+      "v": 2,
+      "type": "state.resync",
+      "payload": {}
+    },
+    "ok": true,
+    "scope": "directory"
+  },
+  {
+    "name": "directory room forbidden",
+    "message": {
+      "v": 2,
+      "type": "state.resync",
+      "roomId": "room_1",
+      "payload": {}
+    },
+    "error": "invalid_envelope",
+    "scope": "directory"
+  },
+  {
+    "name": "signal.offer",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "sdp": "v=0\r\n"
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "signal.answer",
+    "message": {
+      "v": 2,
+      "type": "signal.answer",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "sdp": "v=0\r\n"
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "restart",
+    "message": {
+      "v": 2,
+      "type": "signal.restart_request",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {}
+    },
+    "ok": true
+  },
+  {
+    "name": "candidate",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "candidate:1",
+        "sdpMid": "0",
+        "sdpMLineIndex": 0,
+        "usernameFragment": "abc"
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "end of candidates",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "",
+        "sdpMid": null,
+        "sdpMLineIndex": null
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "bad mline",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "x",
+        "sdpMid": "0",
+        "sdpMLineIndex": 32
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "NUL SDP",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "sdp": "v=0\u0000"
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "spoof sender",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "sdp": "v=0"
+      },
+      "fromPeerId": "host"
+    },
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "signal state revision",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "sdp": "v=0"
+      },
+      "revision": 3
+    },
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "unknown field",
+    "message": {
+      "v": 2,
+      "type": "peer.leave",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {},
+      "token": "secret"
+    },
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "unknown type",
+    "message": {
+      "v": 2,
+      "type": "unknown",
+      "roomId": "room_1",
+      "payload": {}
+    },
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "wrong version",
+    "message": {
+      "v": 1,
+      "type": "peer.leave",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {}
+    },
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "invalid identifier",
+    "message": {
+      "v": 2,
+      "type": "peer.leave",
+      "roomId": "a/b",
+      "requestId": "req_1",
+      "payload": {}
+    },
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "array envelope",
+    "message": [],
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "malformed JSON",
+    "raw": "{",
+    "error": "invalid_json"
+  },
+  {
+    "name": "invalid UTF8",
+    "hex": "7b22ff227d",
+    "error": "invalid_json"
+  },
+  {
+    "name": "SDP limit",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "sdp": "REPEAT"
+      }
+    },
+    "ok": true,
+    "repeat": {
+      "field": "sdp",
+      "text": "a",
+      "count": 61440
+    }
+  },
+  {
+    "name": "SDP overflow",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "sdp": "REPEAT"
+      }
+    },
+    "error": "invalid_payload",
+    "repeat": {
+      "field": "sdp",
+      "text": "a",
+      "count": 61441
+    }
+  },
+  {
+    "name": "candidate overflow",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "REPEAT",
+        "sdpMid": null,
+        "sdpMLineIndex": null
+      }
+    },
+    "error": "invalid_payload",
+    "repeat": {
+      "field": "candidate",
+      "text": "a",
+      "count": 4097
+    }
+  },
+  {
+    "name": "metadata byte overflow",
+    "message": {
+      "v": 2,
+      "type": "profile.update",
+      "roomId": "room_1",
+      "requestId": "req_1",
+      "payload": {
+        "nickname": "REPEAT",
+        "expectedRevision": 0
+      }
+    },
+    "error": "too_large",
+    "repeat": {
+      "field": "nickname",
+      "text": "\u754c",
+      "count": 6000
+    }
+  },
+  {
+    "name": "absolute frame overflow",
+    "raw": "{}",
+    "padding": 65536,
+    "error": "too_large"
+  },
+  {
+    "name": "scalar null",
+    "raw": "null",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "scalar true",
+    "raw": "true",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "scalar 42",
+    "raw": "42",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "scalar \"hello\"",
+    "raw": "\"hello\"",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "bad syntax {} {}",
+    "raw": "{} {}",
+    "error": "invalid_json"
+  },
+  {
+    "name": "bad syntax [",
+    "raw": "[",
+    "error": "invalid_json"
+  },
+  {
+    "name": "bad syntax {\"v\":2,}",
+    "raw": "{\"v\":2,}",
+    "error": "invalid_json"
+  },
+  {
+    "name": "sdpMid NUL",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "x",
+        "sdpMid": "x\u0000y",
+        "sdpMLineIndex": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "usernameFragment NUL",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "x",
+        "sdpMid": "0",
+        "sdpMLineIndex": 0,
+        "usernameFragment": "x\u0000y"
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "sdpMid boundary",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "x",
+        "sdpMid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sdpMLineIndex": 0
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "sdpMid overflow",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "x",
+        "sdpMid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sdpMLineIndex": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "usernameFragment boundary",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "x",
+        "sdpMid": "0",
+        "sdpMLineIndex": 0,
+        "usernameFragment": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "usernameFragment overflow",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "x",
+        "sdpMid": "0",
+        "sdpMLineIndex": 0,
+        "usernameFragment": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "candidate boundary",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sdpMid": "0",
+        "sdpMLineIndex": 0
+      }
+    },
+    "ok": true
+  },
+  {
+    "name": "candidate overflow",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room_1",
+      "connectionId": "ice_1",
+      "toPeerId": "peer_2",
+      "payload": {
+        "candidate": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sdpMid": "0",
+        "sdpMLineIndex": 0
+      }
+    },
+    "error": "invalid_payload"
+  },
+  {
+    "name": "state.resync raw limit 0",
+    "raw": "{\"v\":2,\"type\":\"state.resync\",\"roomId\":\"r\",\"payload\":{}}",
+    "padding": 16329,
+    "ok": true
+  },
+  {
+    "name": "state.resync raw limit 1",
+    "raw": "{\"v\":2,\"type\":\"state.resync\",\"roomId\":\"r\",\"payload\":{}}",
+    "padding": 16330,
+    "error": "too_large"
+  },
+  {
+    "name": "signal.offer raw limit 0",
+    "raw": "{\"v\":2,\"type\":\"signal.offer\",\"roomId\":\"r\",\"payload\":{\"sdp\":\"v=0\"},\"connectionId\":\"c\",\"toPeerId\":\"p\"}",
+    "padding": 65436,
+    "ok": true
+  },
+  {
+    "name": "signal.offer raw limit 1",
+    "raw": "{\"v\":2,\"type\":\"signal.offer\",\"roomId\":\"r\",\"payload\":{\"sdp\":\"v=0\"},\"connectionId\":\"c\",\"toPeerId\":\"p\"}",
+    "padding": 65437,
+    "error": "too_large"
+  },
+  {
+    "name": "truncated UTF8",
+    "hex": "7b7def",
+    "error": "invalid_json"
+  },
+  {
+    "name": "overlong UTF8",
+    "hex": "7b7dc0af",
+    "error": "invalid_json"
+  },
+  {
+    "name": "interior BOM outside string",
+    "hex": "7b7defbbbf",
+    "error": "invalid_json"
+  },
+  {
+    "name": "leading document BOM",
+    "hex": "efbbbf7b2276223a322c2274797065223a2273746174652e726573796e63222c22726f6f6d4964223a2272222c227061796c6f6164223a7b7d7d",
+    "ok": true
+  },
+  {
+    "name": "literal nickname BOM",
+    "raw": "{\"v\":2,\"type\":\"profile.update\",\"roomId\":\"r\",\"requestId\":\"q\",\"payload\":{\"nickname\":\"\ufeffa\",\"expectedRevision\":0}}",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "illegal escaped literal BOM",
+    "raw": "{\"x\":\"\\\ufeff\"}",
+    "error": "invalid_json"
+  }
+]

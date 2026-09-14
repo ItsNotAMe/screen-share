@@ -36,6 +36,9 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [ ] Capture current-backend one-viewer behavior, queue/latency/CPU/GPU data and available multi-viewer results.
 - [x] Record existing validation failures separately from refactor regressions.
 - [ ] Write the v2 architecture/protocol reference and shared message fixtures under the repository's documentation/test structure.
+- [x] Add the room wire/ownership reference, matching native/Worker client-command validators and shared malformed-message/Unicode/byte-boundary fixtures.
+- [x] Validate independent subscription revisions, one resync per gap and stale-callback rejection with a shared native/TypeScript lifecycle trace.
+- [ ] Complete exact server snapshot/delta/acknowledgement schemas and shared outbound fixtures before wiring the room transport.
 
 ### Reproducible native dependencies
 

@@ -366,3 +366,27 @@ Release zip: `build/sdk-app-release/ScreenShare-release-windows-x64.zip`. Extrac
 Lifecycle investigation: LiveCaptureTest now accepts --cycles 1..100 and prints cycle-start/destruction markers. Twenty Release cycles passed under cdb (`capture-stress-release-debugger.log`), then twenty without debugger timing (`capture-stress-release.log` / `capture-stress-release-errors.log`), all reaching destruction. The earlier unexplained failure was not reproduced and is NOT marked fixed. Actual driver removal, complete callback/resource-leak barriers, forced HWND reuse and Gate A remain open.
 
 Reference machine collected with no identifying names/addresses: Windows 11 Pro 10.0.26200; Ryzen 7 9800X3D (8 cores/16 logical processors); 66,157,719,552 bytes RAM. Reported adapters: NVIDIA RTX 5070 Ti driver 32.0.16.1062, AMD Radeon Graphics 32.0.21045.5002, Virtual Desktop Monitor 13.50.53.699. Enumeration does not prove the adapter selected in every probe. Both peers run on this machine against generated 640x360 grayscale content, nominal 30/60 FPS depending on test, 1 Mbps lifecycle tests, stereo 48 kHz Opus and local direct ICE. Full inventory: `build/baseline/native-media-reference/manifest.json`. This is not an external LAN/game latency baseline.
+# Shared room command protocol and revision policy — 2026-09-14
+
+- Added `refactor/ROOM-PROTOCOL.md` for module/thread ownership, exact client-command
+  fields, limits, normalization, subscription ordering and subsequent server work.
+- Native Qt and TypeScript validators execute the same 74 command fixtures, plus
+  a shared subscription lifecycle trace. Coverage includes spoofed sender fields,
+  malformed/truncated UTF-8, literal/escaped BOMs, Unicode names, safe revisions,
+  exact 16/64 KiB wire limits and SDP/candidate limits. Revision tests cover one
+  resync per gap, stale snapshots/callbacks, reconnect, stop and independent streams.
+- Cross-language testing caught Qt accepting a literal leading string BOM. The
+  native decoder now preserves it as an explicit JSON escape, without repairing
+  illegal escapes; stateless UTF-8 decoding also rejects truncated final sequences.
+- Validation: Worker `npm run typecheck` passed; `npm test` passed 75/75. Native
+  Debug and Release CTest passed 10/10, including the new `room-v2-protocol` test.
+  Used existing SDK app build directories via `scripts/run-webrtc-proof.ps1`;
+  final Release rebuild used native CMake's `--build build/sdk-app-release
+  --target RoomProtocolTests`, followed by CTest for the complete application suite.
+- Logs: `build/webrtc/protocol-node-final.log`, `protocol-app-debug.log`, and
+  `protocol-app-release-final.log`. The earlier `protocol-app-release.log` retains
+  the initially failing BOM regression for evidence.
+- Scope: pure wire validation and ordering only. No v1 production routing changed,
+  no service deployed, no authorization or Cloudflare runtime proof claimed.
+  Exact server snapshot/delta/ack schemas and fixtures remain outstanding, as do
+  the existing lifecycle, distribution and external latency Gate A checks.

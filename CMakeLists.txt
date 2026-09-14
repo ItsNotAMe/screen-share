@@ -468,6 +468,17 @@ if(SCREENSHARE_BUILD_QT_UI)
         add_dependencies(ScreenShareUi ScreenShare)
 
         if(BUILD_TESTING)
+            add_executable(RoomProtocolTests
+                tests/RoomProtocolTests.cpp
+                src/room/protocol/RoomProtocol.cpp
+            )
+            target_compile_features(RoomProtocolTests PRIVATE cxx_std_20)
+            target_include_directories(RoomProtocolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+            target_compile_definitions(RoomProtocolTests PRIVATE
+                ROOM_V2_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/room-v2")
+            target_link_libraries(RoomProtocolTests PRIVATE Qt6::Core)
+            add_test(NAME room-v2-protocol COMMAND RoomProtocolTests)
+
             add_executable(UpdatePackageSelectionTests
                 tests/UpdatePackageSelectionTests.cpp
                 src/ui/UpdatePackageSelection.cpp
