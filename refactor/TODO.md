@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint A — device recovery and remaining capture lifecycle stress coverage, and build-delivery evidence.** Software and hardware MF-through-WebRTC, bounded input, missing-output fallback and retained GPU frame tests pass. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
+Current next action: **Checkpoint A — remaining lifecycle failure investigation, architecture/protocol fixtures, baseline latency and installer/distribution evidence.** Verified relocatable Debug/Release SDKs and native Release portable startup now pass. Forty Release capture cycles (20 debugger / 20 normal) did not reproduce the earlier failure; its cause remains unknown. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
 
 ## Planning handoff
 
@@ -32,7 +32,7 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [x] Review applicable instructions, repository memory and current implementation.
 - [x] Inspect/preserve the existing CMake/runtime edits and untracked adaptation/recovery modules/tests.
 - [x] Record the starting commit and relevant dirty-tree changes with the baseline.
-- [ ] Record reference host/viewer hardware, OS, GPU/driver, source, resolution/FPS/bitrate and network conditions.
+- [x] Record the single-machine proof host/viewer hardware, OS, GPU/driver, generated source, resolution/FPS/bitrate and local network conditions; external LAN/game reference remains separate.
 - [ ] Capture current-backend one-viewer behavior, queue/latency/CPU/GPU data and available multi-viewer results.
 - [x] Record existing validation failures separately from refactor regressions.
 - [ ] Write the v2 architecture/protocol reference and shared message fixtures under the repository's documentation/test structure.
@@ -44,11 +44,14 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [x] Record architecture, debug/release GN arguments, compiler, CRT, standard-library, RTTI and exception settings.
 - [x] Produce matching debug/release WebRTC artifacts.
 - [x] Add CMake/Ninja clang-cl presets using MSVC-compatible Qt, including Network and WebSockets.
-- [ ] Add the imported WebRTC target and verified artifact cache identity.
+- [x] Add the imported WebRTC target and verified artifact cache identity, including relocatable headers, generated headers, compiler builtins, and full file inventory.
 - [x] Support an explicit local artifact directory for offline development.
 - [x] Separate application builds from dependency builds; reject mismatched artifacts clearly.
 - [x] Build the UI and CLI with the new toolchain.
 - [ ] Verify dependency notices and portable/installer staging requirements.
+- [x] Generate WebRTC dependency notices including FFmpeg/OpenH264/compiler-rt and bundle them with the SDK and native portable package.
+- [x] Verify native Release portable CLI, UI self-test and Windows GUI startup from an extracted zip with developer paths removed; confirm package-local Qt plugins.
+- [ ] Complete remaining distribution obligations/notices (including Qt), installer staging and a fresh-machine run before release.
 
 ### Integration proof
 

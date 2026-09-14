@@ -25,6 +25,17 @@ function(copy_qt_plugin_dir plugin_root plugin_name destination_dir dependency_f
         file(GLOB plugin_files LIST_DIRECTORIES false "${source_dir}/*.dll")
         foreach(plugin_file IN LISTS plugin_files)
             get_filename_component(plugin_file_name "${plugin_file}" NAME)
+            get_filename_component(plugin_stem "${plugin_file}" NAME_WE)
+            set(plugin_is_debug FALSE)
+            if(plugin_stem MATCHES "d$")
+                string(REGEX REPLACE "d$" "" release_stem "${plugin_stem}")
+                if(EXISTS "${source_dir}/${release_stem}.dll")
+                    set(plugin_is_debug TRUE)
+                endif()
+            endif()
+            if((qt_deploy_debug AND NOT plugin_is_debug) OR (NOT qt_deploy_debug AND plugin_is_debug))
+                continue()
+            endif()
             set(destination_file "${destination_dir}/${plugin_name}/${plugin_file_name}")
             file(COPY_FILE "${plugin_file}" "${destination_file}" ONLY_IF_DIFFERENT)
             list(APPEND local_dependencies "${destination_file}")
@@ -41,14 +52,23 @@ function(repair_qt_runtime_deploy qt_bin_dir)
 
     get_filename_component(qt_prefix "${qt_bin_dir}" DIRECTORY)
     set(qt_plugin_root "${qt_prefix}/share/qt6/plugins")
+    if(EXISTS "${qt_prefix}/plugins")
+        set(qt_plugin_root "${qt_prefix}/plugins")
+    endif()
+    set(qt_deploy_debug FALSE)
+    set(qt_runtime_suffix "")
+    if(WINDEPLOYQT_DEBUG AND EXISTS "${qt_bin_dir}/Qt6Cored.dll")
+        set(qt_deploy_debug TRUE)
+        set(qt_runtime_suffix "d")
+    endif()
     set(runtime_inputs)
     set(copied_core_runtime FALSE)
 
     foreach(runtime_name IN ITEMS
-        Qt6Core.dll
-        Qt6Gui.dll
-        Qt6Svg.dll
-        Qt6Widgets.dll
+        Qt6Core${qt_runtime_suffix}.dll
+        Qt6Gui${qt_runtime_suffix}.dll
+        Qt6Svg${qt_runtime_suffix}.dll
+        Qt6Widgets${qt_runtime_suffix}.dll
     )
         set(runtime_path "${qt_bin_dir}/${runtime_name}")
         copy_if_exists("${runtime_path}" "${target_dir}" copied_core_runtime)
@@ -66,7 +86,7 @@ function(repair_qt_runtime_deploy qt_bin_dir)
         copy_qt_plugin_dir("${qt_plugin_root}" "${plugin_name}" "${target_dir}" runtime_inputs)
     endforeach()
 
-    if(NOT EXISTS "${target_dir}/platforms/qwindows.dll")
+    if(NOT EXISTS "${target_dir}/platforms/qwindows${qt_runtime_suffix}.dll")
         message(WARNING "Qt runtime repair did not find platforms/qwindows.dll; the UI may not open")
     endif()
 

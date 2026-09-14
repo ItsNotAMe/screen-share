@@ -516,15 +516,26 @@ if(SCREENSHARE_BUILD_QT_UI)
             HINTS
                 "C:/msys64/ucrt64/bin"
         )
+        if(MSVC)
+            get_filename_component(_screenshare_native_qt_bin "${Qt6_DIR}/../../../bin" ABSOLUTE)
+            find_program(SCREENSHARE_NATIVE_WINDEPLOYQT_EXECUTABLE NAMES windeployqt6 windeployqt
+                PATHS "${_screenshare_native_qt_bin}" NO_DEFAULT_PATH REQUIRED)
+            set(SCREENSHARE_WINDEPLOYQT_EXECUTABLE "${SCREENSHARE_NATIVE_WINDEPLOYQT_EXECUTABLE}")
+        endif()
         if(WIN32 AND SCREENSHARE_WINDEPLOYQT_EXECUTABLE)
             add_custom_command(TARGET ScreenShareUi POST_BUILD
                 COMMAND "${CMAKE_COMMAND}"
                     "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_WINDEPLOYQT_EXECUTABLE}"
                     "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:ScreenShareUi>"
+                    "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
                 COMMENT "Deploying Qt runtime next to ScreenShareUi.exe"
                 VERBATIM
             )
+        endif()
+        if(BUILD_TESTING)
+            add_test(NAME ui-self-test COMMAND ScreenShareUi --self-test)
+            set_tests_properties(ui-self-test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
         endif()
     else()
         message(WARNING "Qt 6 Network, Svg, and Widgets were not found; ScreenShareUi target will not be built")
@@ -643,6 +654,17 @@ if(CMAKE_BUILD_TYPE)
 else()
     set(SCREENSHARE_PACKAGE_CONFIG build)
 endif()
+if(MSVC)
+    # Qt's deployment helper may not recognize a newer installed MSVC toolset.
+    # Stage the matching redistributable directly, including vcruntime140_1.
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+    include(InstallRequiredSystemLibraries)
+    foreach(runtime_file IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+        add_custom_command(TARGET ScreenShare POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${runtime_file}" "$<TARGET_FILE_DIR:ScreenShare>"
+            VERBATIM)
+    endforeach()
+endif()
 set(SCREENSHARE_PACKAGE_BASENAME
     "ScreenShare-${SCREENSHARE_PACKAGE_CONFIG}-${SCREENSHARE_PACKAGE_SYSTEM}-${SCREENSHARE_PACKAGE_ARCH}"
 )
@@ -651,11 +673,15 @@ if(CMAKE_CXX_COMPILER)
     get_filename_component(SCREENSHARE_PACKAGE_COMPILER_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     list(APPEND SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS "${SCREENSHARE_PACKAGE_COMPILER_BIN_DIR}")
 endif()
-if(WIN32 AND EXISTS "C:/msys64/ucrt64/bin")
+if(WIN32 AND NOT MSVC AND EXISTS "C:/msys64/ucrt64/bin")
     list(APPEND SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS "C:/msys64/ucrt64/bin")
 endif()
 list(REMOVE_DUPLICATES SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS)
 string(REPLACE ";" "|" SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS_ARG "${SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS}")
+get_property(SCREENSHARE_WEBRTC_PACKAGE_NOTICES GLOBAL PROPERTY SCREENSHARE_WEBRTC_NOTICES)
+if(Qt6_DIR)
+    get_filename_component(SCREENSHARE_QT_SBOM_DIR "${Qt6_DIR}/../../../sbom" ABSOLUTE)
+endif()
 set(SCREENSHARE_PACKAGE_ARGS
     -D "INPUT_DIR=$<TARGET_FILE_DIR:ScreenShare>"
     -D "EXECUTABLE_NAME=$<TARGET_FILE_NAME:ScreenShare>"
@@ -663,6 +689,9 @@ set(SCREENSHARE_PACKAGE_ARGS
     -D "STAGING_DIR=${CMAKE_BINARY_DIR}/package/${SCREENSHARE_PACKAGE_BASENAME}"
     -D "OUTPUT_ZIP=${CMAKE_BINARY_DIR}/${SCREENSHARE_PACKAGE_BASENAME}.zip"
     -D "RUNTIME_SEARCH_DIRS=${SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS_ARG}"
+    -D "REQUIRE_NATIVE_NOTICES=${MSVC}"
+    -D "WEBRTC_NOTICES_DIR=${SCREENSHARE_WEBRTC_PACKAGE_NOTICES}"
+    -D "QT_SBOM_DIR=${SCREENSHARE_QT_SBOM_DIR}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PackagePortable.cmake"
 )
 set(SCREENSHARE_PACKAGE_DEPENDS ScreenShare ScreenShareUpdater)

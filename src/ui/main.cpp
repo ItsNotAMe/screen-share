@@ -37,6 +37,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdio>
 #include <cmath>
 #include <mutex>
 #include <stdexcept>
@@ -626,6 +627,9 @@ int main(int argc, char** argv)
             continue;
         }
         if (arg == "--self-test") {
+            // Icon engines and image plugins need an application instance to
+            // discover the plugins beside a relocated executable.
+            QApplication selfTestApplication(argc, argv);
             if (!QFileInfo::exists(enginePath(arguments.front()))) {
                 return 1;
             }
@@ -964,6 +968,17 @@ int main(int argc, char** argv)
                 memoryStopRequested &&
                 memoryControlReset &&
                 typedSessionValidationOk;
+            if (!selfTestOk) {
+                std::fprintf(stderr,
+                    "UI self-test failed: resources=%d direct=%d invite=%d nearby=%d watch=%d rejected=%d "
+                    "roomShare=%d roomWatch=%d runtime=%d memory=%d typedSession=%d peers=%lld rooms=%lld "
+                    "roomLinks=%d/%d/%d\n",
+                    resourcesAvailable, directShareArgumentsOk, inviteShareArgumentsOk, nearbyWatchArgumentsOk,
+                    inviteWatchArgumentsOk, missingDirectShareRejected, shareRoomArgumentsOk, watchRoomArgumentsOk,
+                    runtimeResolutionOk, memoryResolutionOk && memoryStopInitiallyClear && memoryStopRequested && memoryControlReset,
+                    typedSessionValidationOk, static_cast<long long>(peers.size()), static_cast<long long>(activeRooms.size()),
+                    parsedRoomLink, parsedLegacyRoomLink, parsedShortRoomLink);
+            }
             return selfTestOk ? 0 : 2;
         }
     }

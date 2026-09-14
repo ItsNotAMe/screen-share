@@ -4,10 +4,18 @@ param(
     [switch]$Application,
     [switch]$Hardware,
     [switch]$AudioDevice,
-    [switch]$LiveCapture
+    [switch]$LiveCapture,
+    [string]$ArtifactDirectory,
+    [string]$BuildDirectory,
+    [string]$ViGEmSourceDirectory,
+    [switch]$Package
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+function Resolve-RepoPath([string]$Value) {
+    if ([IO.Path]::IsPathRooted($Value)) { return [IO.Path]::GetFullPath($Value) }
+    return [IO.Path]::GetFullPath((Join-Path $repoRoot $Value))
+}
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 $vsRoot = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsRoot) { throw 'MSVC x64 build tools are required.' }
@@ -37,14 +45,31 @@ try {
     $preset = if ($Application) { "native-$Configuration" } else { $Configuration }
     Push-Location $projectDirectory
     try {
-        if ($Application) { & $cmake --preset $preset }
-        else { & $cmake --preset $preset "-DSCREENSHARE_TEST_HARDWARE=$($Hardware.IsPresent.ToString().ToUpperInvariant())" "-DSCREENSHARE_TEST_AUDIO_DEVICE=$($AudioDevice.IsPresent.ToString().ToUpperInvariant())" "-DSCREENSHARE_TEST_LIVE_CAPTURE=$($LiveCapture.IsPresent.ToString().ToUpperInvariant())" }
+        $configureArguments = @('--preset', $preset)
+        if ($ArtifactDirectory) { $configureArguments += "-DSCREENSHARE_WEBRTC_ARTIFACT_DIR=$(Resolve-RepoPath $ArtifactDirectory)" }
+        if ($ViGEmSourceDirectory) { $configureArguments += "-DSCREENSHARE_VIGEMCLIENT_SOURCE_DIR=$(Resolve-RepoPath $ViGEmSourceDirectory)" }
+        if ($BuildDirectory) {
+            $BuildDirectory = Resolve-RepoPath $BuildDirectory
+            $configureArguments += @('-B', $BuildDirectory)
+        }
+        if (-not $Application) {
+            $configureArguments += @("-DSCREENSHARE_TEST_HARDWARE=$($Hardware.IsPresent.ToString().ToUpperInvariant())", "-DSCREENSHARE_TEST_AUDIO_DEVICE=$($AudioDevice.IsPresent.ToString().ToUpperInvariant())", "-DSCREENSHARE_TEST_LIVE_CAPTURE=$($LiveCapture.IsPresent.ToString().ToUpperInvariant())")
+        }
+        & $cmake @configureArguments
         if ($LASTEXITCODE -ne 0) { throw 'Proof configuration failed' }
-        & $cmake --build --preset $preset
+        if ($BuildDirectory) { & $cmake --build $BuildDirectory --parallel 8 }
+        else { & $cmake --build --preset $preset }
         if ($LASTEXITCODE -ne 0) { throw 'Proof build failed' }
-        if ($Application) { & $ctest --test-dir "build/native-$Configuration" --output-on-failure }
+        if ($BuildDirectory) { & $ctest --test-dir $BuildDirectory --output-on-failure }
+        elseif ($Application) { & $ctest --test-dir "build/native-$Configuration" --output-on-failure }
         else { & $ctest --preset $Configuration }
         if ($LASTEXITCODE -ne 0) { throw 'Proof test failed' }
+        if ($Package) {
+            if (-not $Application) { throw '-Package requires -Application' }
+            if ($BuildDirectory) { & $cmake --build $BuildDirectory --target package-portable }
+            else { & $cmake --build --preset $preset --target package-portable }
+            if ($LASTEXITCODE -ne 0) { throw 'Native packaging failed' }
+        }
     } finally { Pop-Location }
 } finally {
     foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }

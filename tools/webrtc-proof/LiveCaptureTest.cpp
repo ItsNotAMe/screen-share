@@ -124,8 +124,14 @@ void Run() {
 }
 int main(int argc, char** argv) {
     try {
-        const int cycles = argc == 2 && std::string(argv[1]) == "--repeat" ? 3 : 1;
-        for (int cycle = 0; cycle < cycles; ++cycle) Run();
+        const int cycles = argc == 3 && std::string(argv[1]) == "--cycles" ? std::stoi(argv[2]) :
+            (argc == 2 && std::string(argv[1]) == "--repeat" ? 3 : 1);
+        Require(cycles >= 1 && cycles <= 100, "Cycle count must be between 1 and 100");
+        for (int cycle = 0; cycle < cycles; ++cycle) {
+            std::cerr << "Capture cycle " << cycle + 1 << " starting\n";
+            Run();
+            std::cerr << "Capture cycle " << cycle + 1 << " destroyed\n";
+        }
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

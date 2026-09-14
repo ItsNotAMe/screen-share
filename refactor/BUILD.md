@@ -1,6 +1,29 @@
 # Native dependency and application build
 
-The working branch is `refactor/backend-v2`. Gate A remains open: the new builds work, but media is still routed through the existing backend.
+The working branch is `refactor/backend-v2`. Gate A remains open: the new builds work, but normal application media is still routed through the existing backend.
+
+## Current verified SDK and portable workflow
+
+Python 3.11+ is required for SDK export and verification. Export happens separately from application configuration and uses no network. Run `build-webrtc.ps1 -SkipHooks` for each configuration first so metadata includes the selected MSVC toolset and Windows SDK.
+
+```powershell
+python scripts/webrtc-sdk.py export build/webrtc/checkout/src/out/screenshare-release build/webrtc-sdk-cache
+python scripts/webrtc-sdk.py export build/webrtc/checkout/src/out/screenshare-debug build/webrtc-sdk-cache
+python scripts/webrtc-sdk.py verify <sdk-directory>
+python tests/WebRtcSdkTests.py
+./scripts/run-webrtc-proof.ps1 -Configuration release -Hardware -AudioDevice -ArtifactDirectory <sdk-directory> -BuildDirectory build/sdk-proof-release
+./scripts/run-webrtc-proof.ps1 -Application -Configuration release -ArtifactDirectory <sdk-directory> -BuildDirectory build/sdk-app-release -ViGEmSourceDirectory <existing-vigem-source> -Package
+```
+
+Paths may be absolute or relative to the repository. The existing local ViGEm source is `build/native-release/_deps/screenshare_vigemclient_source-src`; supplying it prevents a fresh application build from attempting a download. Qt, Vulkan headers, the exact Clang binary, MSVC and Windows SDK remain separately installed prerequisites; the SDK bundles WebRTC headers/libraries, not those toolchains.
+
+SDK directories are named by a SHA-256 identity over metadata and a complete file-hash inventory. Export refuses to replace an existing identity and verifies it instead. Configuration verifies the inventory (including unexpected files), ABI, compiler hash, MSVC/SDK versions, GN arguments and build patch. These checks detect changed local artifacts; they are not a signature/authentication mechanism for untrusted downloads. `--resume <export-directory-name>` resumes an interrupted staging directory under the cache; files are rechecked against source before reuse. Staging is preserved after failures.
+
+Verified exports each contain 40,835 files. Release identity: `1046901babf6f5dfb2c2284b929e0a189a8735c398cf307c7a5b8cda69f2f92a` (moved to `build/sdk-relocation/Release` for the relocation proof). Debug identity: `f17c9176316e5d40ac0accdbda1c18cf6a79e34f259827e93379672277888027` under `build/webrtc-sdk-cache`.
+
+Current validation: 14/14 hardware/audio proof tests and 9/9 application tests per configuration. The relocated Release SDK also passes 14/14. The native portable zip is `build/sdk-app-release/ScreenShare-release-windows-x64.zip`. Extracted CLI `--help`, UI `--self-test` (offscreen) and `--gui-smoke-test` (Windows) pass with PATH reduced to Windows system directories and no QT_PLUGIN_PATH. Plugin logs confirm loading from the extracted package. Native packages now require WebRTC notices, stage the matching MSVC runtime, choose native Qt deployment tools/plugins, and reject unresolved dependencies.
+
+This validates local portable staging/startup, not a release: installer/fresh-machine checks, remaining distribution obligations (including Qt), real device loss and latency evidence remain open. The older chronological build notes below describe the initial local-artifact phase; use this section for current commands/status.
 
 ## Prerequisites and pinned inputs
 

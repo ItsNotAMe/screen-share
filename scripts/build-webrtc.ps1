@@ -78,6 +78,8 @@ try {
                 sourceRevision = $lock.commit
                 configuration = $Configuration
                 architecture = 'x64'
+                msvcToolset = (Get-Content (Join-Path $vsRoot 'VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt') -Raw).Trim()
+                windowsSdk = '10.0.28000.0'
                 runtime = $runtime
                 standardLibrary = 'msvc'
                 sourceDirectory = $sourceRoot.Replace('\', '/')

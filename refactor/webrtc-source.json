@@ -8,5 +8,5 @@
   "resolvedOn": "2026-09-14",
   "clangPackage": "llvmorg-24-init-7747-g62397f8b-27",
   "validatedMsvcToolset": "14.50.35717",
-  "status": "Debug/Release artifacts and direct data-channel probes validated; MF/ADM media integration pending"
+  "status": "Debug/Release relocatable SDKs, MF/ADM media proofs and native portable startup validated locally; Gate A remains open"
 }
