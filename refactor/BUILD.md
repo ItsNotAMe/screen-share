@@ -111,3 +111,5 @@ minimize/restore and permanent closure after a replacement window is created.
 Actual forced HWND reuse, device removal and automatic recovery remain separate.
 
 Receiver presentation recovery proof: run `build/webrtc-proof/<configuration>/PresentationRecoveryTest.exe --gpu` in a desktop session. This creates only a diagnostic window and injects a failure at the rendering boundary; it does not reset the desktop GPU. The default proof suite now has 13 tests with `-Hardware -AudioDevice`; `-LiveCapture` also registers this desktop-dependent recovery test.
+
+Automatic capture recovery: `CaptureRecoveryTest --live` exercises three replacement generations and terminal exhaustion on a generated window. `CaptureRecoveryTest` alone tests retry/generation policy. Hardware/audio suites now contain 14 tests per configuration. The live variant is included by `-LiveCapture` and requires a desktop session.

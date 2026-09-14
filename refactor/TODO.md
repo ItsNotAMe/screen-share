@@ -63,6 +63,8 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [x] Correct queued-frame draining and session-before-pool shutdown; verify the reproduced WGC closure regression.
 - [x] Validate external source-process exit, minimize/restore and permanent closure with replacement windows.
 - [ ] Validate forced HWND reuse and device-loss recovery.
+- [x] Add automatic proof capture recovery with a three-rebuild budget, cancellable backoff and per-device retirement across replacement generations; verify injected losses and terminal exhaustion.
+- [ ] Investigate intermittent Release LiveCaptureTest repeat-cycle failure observed during automatic recovery validation; standalone rerun and debugger rerun passed, so the failure is not resolved.
 - [x] Prove original-window WGC device reconstruction, shared encoder-device retirement and fresh-device software IDR recovery without reading retired textures (explicit reconstruction/invalidation; automatic session recovery and real driver removal remain pending).
 - [x] Add bounded receiver presentation recovery and verify policy plus GPU resource recreation with injected device-loss HRESULTs (actual driver removal and capture/encoder recovery remain untested).
 - [x] Prove owned live WGC capture through hardware H.264 PeerConnections alongside Opus and data channels.

@@ -1,5 +1,6 @@
 #pragma once
 #include "media/webrtc/D3dVideoFrameBuffer.h"
+#include "media/capture/CaptureRecovery.h"
 #include <future>
 #include <functional>
 #include <thread>
@@ -24,20 +25,46 @@ public:
                 config.includeNv12Readback = config.includeBgraReadback = false;
                 capture.Start(config);
                 std::shared_ptr<screenshare::media::D3dVideoDevice> device;
-                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                screenshare::media::CaptureRecovery recovery;
+                bool awaitingFrame = true;
                 while (!stop.stop_requested()) {
-                    auto frame = capture.TryCaptureFrame(std::chrono::milliseconds(10));
+                    if (!recovery.Poll([&] {
+                        capture.RebuildWindowDevice();
+                        device.reset();
+                        awaitingFrame = true;
+                        deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                    })) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        continue;
+                    }
+                    std::optional<screenshare::CapturedFrame> frame;
+                    try {
+                        if (injectLoss_.exchange(false)) throw screenshare::CaptureDeviceLostError(DXGI_ERROR_DEVICE_REMOVED);
+                        frame = capture.TryCaptureFrame(std::chrono::milliseconds(10));
+                    } catch (const screenshare::CaptureDeviceLostError&) {
+                        recovery.Lost([&] { if (device) device->Retire(); });
+                        continue;
+                    }
                     if (!frame) {
-                        if (!announced && std::chrono::steady_clock::now() >= deadline)
+                        if (awaitingFrame && std::chrono::steady_clock::now() >= deadline)
                             throw std::runtime_error("Live source startup frame timed out");
                         continue;
                     }
                     if (!device) {
                         device = std::make_shared<screenshare::media::D3dVideoDevice>(frame->d3dDevice);
-                        announced = true; ready.set_value(device);
+                        if (!announced) { announced = true; ready.set_value(device); }
                     }
+                    awaitingFrame = false;
+                    generation = recovery.generation();
                     if (enabled_) {
-                        deliver(device->RetainCapture(*frame));
+                        webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer> buffer;
+                        try { buffer = device->RetainCapture(*frame); }
+                        catch (const screenshare::CaptureDeviceLostError&) {
+                            recovery.Lost([&] { device->Retire(); });
+                            continue;
+                        }
+                        deliver(std::move(buffer));
                         ++frames;
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -52,11 +79,15 @@ public:
     }
     ~LiveCaptureSource() { Stop(); }
     void StartDelivery() { enabled_ = true; }
+    // Diagnostic only: inject the same error boundary as capture device loss.
+    void InjectDeviceLoss() { injectLoss_ = true; }
     void Stop() { worker_.request_stop(); if (worker_.joinable()) worker_.join(); }
     std::shared_ptr<screenshare::media::D3dVideoDevice> device() const { return device_; }
     std::atomic<bool> failed{false};
     std::atomic<unsigned> frames{0};
+    std::atomic<uint64_t> generation{1};
 private:
+    std::atomic<bool> injectLoss_{false};
     std::atomic<bool> enabled_{false};
     std::shared_ptr<screenshare::media::D3dVideoDevice> device_;
     std::jthread worker_;

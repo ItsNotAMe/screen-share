@@ -79,6 +79,11 @@ void Run() {
     }
     Require(resized && sink.count >= 50 && !hardware->quarantined && hardware->hardwareFrames >= 50, "Live resize/hardware output failed");
     Require(device->readbackCount() == validationReadbacks, "Live encoding used CPU readback");
+    auto oldPixels = retained->ToI420();
+    Require(oldPixels != nullptr, "Retained capture texture unavailable before retirement");
+    for (int y = 0; y < 360; ++y)
+        Require(std::equal(expected->DataY() + y * expected->StrideY(), expected->DataY() + y * expected->StrideY() + 640,
+            oldPixels->DataY() + y * oldPixels->StrideY()), "Retained capture pixels changed after reuse/resize");
     // Retire the old device before rebuilding capture. Exercise real WGC/GPU
     // resource recreation without inducing a system-wide driver reset.
     hardware->RetireDevice();
@@ -95,7 +100,7 @@ void Run() {
     encoder->Release();
     Require(sink.count > beforeRecovery && hardware->softwareFallbacks == 1,
         "Recovered capture did not resume software encoding");
-    Require(device->readbackCount() == validationReadbacks, "Recovery read back retired capture textures");
+    Require(device->readbackCount() == validationReadbacks + 1, "Recovery read back retired capture textures");
     std::cerr << "Live encode and resize passed; closing source window\n";
     window.Close();
     bool closed = false;
@@ -112,13 +117,8 @@ void Run() {
     std::cerr << "Source closure detected; stopping capture\n";
     capture.Stop(); capture.Stop();
     std::cerr << "Capture stopped; checking retained pixels\n";
-    // Read only after many writes, resize and capture destruction: this cannot
-    // pass by returning an I420 cache populated before the texture was reused.
-    auto oldPixels = retained->ToI420();
-    Require(oldPixels && oldPixels->DataY()[oldPixels->StrideY() * 180 + 320] > 30, "Retained capture texture lost after stop");
-    for (int y = 0; y < 360; ++y)
-        Require(std::equal(expected->DataY() + y * expected->StrideY(), expected->DataY() + y * expected->StrideY() + 640,
-            oldPixels->DataY() + y * oldPixels->StrideY()), "Retained capture pixels changed after reuse/resize/stop");
+    // Retirement must also suppress a CPU cache populated while still healthy.
+    Require(!retained->ToI420(), "Retired frame exposed stale cached pixels");
     std::cout << "Live selected-window WGC: " << sink.count << " outputs; fixed-size resize, hardware delivery, device rebuild/software recovery, closure and retained texture passed.\n";
 }
 }

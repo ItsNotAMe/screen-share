@@ -21,6 +21,11 @@ public:
     webrtc::scoped_refptr<D3dVideoFrameBuffer> UploadNv12(int width, int height, std::span<const uint8_t> pixels);
     webrtc::scoped_refptr<D3dVideoFrameBuffer> RetainCapture(const CapturedFrame&);
     ID3D11Device* device() const noexcept { return device_.Get(); }
+    void Retire() noexcept { retired_ = true; }
+    bool retired() noexcept {
+        if (!retired_ && FAILED(device_->GetDeviceRemovedReason())) retired_ = true;
+        return retired_;
+    }
     uint64_t readbackCount() const noexcept { return readbackCount_; }
     uint64_t readbackMicroseconds() const noexcept { return readbackMicroseconds_; }
 private:
@@ -30,6 +35,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     std::atomic<uint64_t> readbackCount_{0}, readbackMicroseconds_{0};
+    std::atomic<bool> retired_{false};
 };
 
 class D3dVideoFrameBuffer : public webrtc::VideoFrameBuffer {
@@ -41,6 +47,7 @@ public:
     webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override;
     webrtc::scoped_refptr<webrtc::VideoFrameBuffer> GetMappedFrameBuffer(std::span<Type>) override;
     CapturedFrame RetainedNv12() const;
+    bool retired() const noexcept { return owner_->retired(); }
 private:
     std::shared_ptr<D3dVideoDevice> owner_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture_;

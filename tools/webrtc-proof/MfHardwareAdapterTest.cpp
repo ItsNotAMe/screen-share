@@ -151,10 +151,24 @@ void Run() {
         Require(sink.last.RtpTimestamp() == 102 && sink.last._frameType == webrtc::VideoFrameType::kVideoFrameKey,
             "Recovery did not preserve fresh timestamp/IDR");
         Require(!viewer->GetEncoderInfo().is_hardware_accelerated, "Retired hardware was reused");
-        viewer->Release();
     }
     Require(device->readbackCount() == readbacksBeforeRetirement, "Read back a retired device texture");
     Require(replacement->readbackCount() == 1, "Fresh frame readback was not shared between viewers");
+    replacement->Retire();
+    auto thirdDevice = std::make_shared<D3dVideoDevice>();
+    auto thirdFrame = thirdDevice->UploadNv12(640, 360, pixels);
+    for (auto& viewer : viewers) {
+        auto stale = webrtc::VideoFrame::Builder().set_video_frame_buffer(fresh).set_rtp_timestamp(103).build();
+        Require(viewer->Encode(stale, nullptr) == 0, "Later retired generation input failed");
+        sink.WaitDropped(++expectedDrops);
+        auto next = webrtc::VideoFrame::Builder().set_video_frame_buffer(thirdFrame).set_rtp_timestamp(104).build();
+        Require(viewer->Encode(next, nullptr) == 0, "Third generation rejected");
+        sink.Wait(++expectedOutputs);
+        Require(sink.last.RtpTimestamp() == 104 && sink.last._frameType == webrtc::VideoFrameType::kVideoFrameKey,
+            "Later generation did not resume with IDR");
+        viewer->Release();
+    }
+    Require(!fresh->ToI420() && replacement->readbackCount() == 1, "Retired generation exposed cached/readback pixels");
     std::cout << "Hardware fallback, quarantine, retained textures and cached CPU conversion passed; readback_us="
               << device->readbackMicroseconds() << '\n';
     // Isolate the frame lifetime proof from factory/session ownership.

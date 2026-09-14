@@ -234,9 +234,8 @@ private:
         failed_ = true;
     }
     bool IsRetiredFrame(const webrtc::VideoFrame& frame) {
-        if (!hardware_ || !hardware_->DeviceRetired()) return false;
         const auto* native = dynamic_cast<D3dVideoFrameBuffer*>(frame.video_frame_buffer().get());
-        return native && hardware_->device && native->RetainedNv12().d3dDevice.Get() == hardware_->device->device();
+        return native && native->retired();
     }
     void Process(uint64_t generation) {
         std::optional<webrtc::VideoFrame> frame;
@@ -285,7 +284,9 @@ private:
             } catch (const HardwareFrameCancelled&) {
                 // Release/reset owns retirement. Never quarantine a cancelled GPU.
             } catch (const std::exception& error) {
-                Fail(error.what());
+                if (IsRetiredFrame(*frame)) {
+                    std::lock_guard lock(mutex_); keyframe_ = true;
+                } else Fail(error.what());
                 if (callback_) callback_->OnFrameDropped(frame->rtp_timestamp(), 0, true);
             }
         }

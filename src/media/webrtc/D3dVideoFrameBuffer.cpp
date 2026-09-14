@@ -50,6 +50,7 @@ D3dVideoDevice::D3dVideoDevice(Microsoft::WRL::ComPtr<ID3D11Device> captureDevic
     });
 }
 webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::RetainCapture(const CapturedFrame& frame) {
+    if (retired()) throw CaptureDeviceLostError(DXGI_ERROR_DEVICE_REMOVED);
     if (!frame.nv12OwnedAndComplete || frame.nv12TextureSubresource != 0 || frame.d3dDevice.Get() != device_.Get())
         throw std::invalid_argument("Capture frame is not completed/owned by this device");
     return webrtc::make_ref_counted<D3dVideoFrameBuffer>(shared_from_this(), frame.nv12Texture, frame.width, frame.height);
@@ -79,6 +80,7 @@ webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::UploadNv12(int width,
 }
 webrtc::scoped_refptr<webrtc::I420BufferInterface> D3dVideoDevice::Readback(ID3D11Texture2D* texture, int width, int height) {
     return OnOwner(*owner_, [&]() -> webrtc::scoped_refptr<webrtc::I420BufferInterface> {
+        if (retired()) return nullptr;
         const auto start = std::chrono::steady_clock::now();
         D3D11_TEXTURE2D_DESC description;
         texture->GetDesc(&description);
@@ -117,11 +119,12 @@ D3dVideoFrameBuffer::D3dVideoFrameBuffer(std::shared_ptr<D3dVideoDevice> owner,
 }
 webrtc::scoped_refptr<webrtc::I420BufferInterface> D3dVideoFrameBuffer::ToI420() {
     std::lock_guard lock(mutex_);
+    if (retired()) return nullptr;
     if (!cached_) {
         try { cached_ = owner_->Readback(texture_.Get(), width_, height_); }
         catch (...) { return nullptr; }
     }
-    return cached_;
+    return retired() ? nullptr : cached_;
 }
 webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3dVideoFrameBuffer::GetMappedFrameBuffer(std::span<Type> types) {
     if (std::find(types.begin(), types.end(), Type::kI420) == types.end()) return nullptr;

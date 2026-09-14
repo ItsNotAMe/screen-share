@@ -15,9 +15,9 @@ struct MfHardwareSession {
     // Capture recovery calls this before publishing textures from a replacement
     // device. Retirement is permanent; retained old textures stay owned but must
     // never be submitted or read back, including by other viewers.
-    void RetireDevice() noexcept { retired_ = true; quarantined = true; }
+    void RetireDevice() noexcept { if (device) device->Retire(); retired_ = true; quarantined = true; }
     bool DeviceRetired() noexcept {
-        if (!retired_ && device && FAILED(device->device()->GetDeviceRemovedReason())) RetireDevice();
+        if (!retired_ && device && device->retired()) RetireDevice();
         return retired_;
     }
     const std::shared_ptr<D3dVideoDevice> device;
