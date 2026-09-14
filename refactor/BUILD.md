@@ -160,9 +160,9 @@ it is not a replacement for the full proof. Both print markers after resource
 destruction and private-memory/working-set/handle/GDI/USER counts per cycle.
 These samples include OS/driver caches; successful cycles alone do not prove
 absence of leaks or completion of the production session lifecycle gate.
-The `--close-source-first` variant retains a known rapid-shutdown hang and is
-expected to fail by watchdog on the current reference machine; do not hide it in
-the passing capture-only result or run it without a timeout.
+The `--close-source-first` variant retains the former rapid-shutdown regression.
+Dispatcher integration now completes its recorded 100-cycle runs, but resource
+acceptance remains failed. Keep the watchdog and separate open/closed results.
 
 The Windows capture adapter now pins the system `GraphicsCapture.dll` once per
 process to mitigate the reproduced callback into unloaded module code during
@@ -187,3 +187,22 @@ Encoder-only runs print lifecycle samples but do not use the capture runner's
 completion markers. Each encoder outer cycle performs three reset cycles.
 Hardware enumeration uses adapter-filtered `MFTEnum2` (Windows 10 version 1803
 or later), consistent with the modern Windows capture requirement.
+
+### Capture dispatcher integration
+
+Keep Start, frame acquisition, Stop and destruction on one dedicated capture
+thread: WGC now services that thread's messages. Caller queues are borrowed;
+owned queues shut down before COM uninitialization. CoreMessaging.lib is supplied
+by the Windows SDK. The former rapid-close timeout now completes in recorded
+100-cycle runs, but source-close resource checks still fail.
+
+Additional diagnostic controls (the result records the exact child command):
+
+```powershell
+python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/resize-new --cycles 20 --capture-only --resize-source --max-handle-growth 8
+python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/readback-new --cycles 20 --capture-only --rebuild-device --gpu-readback --max-handle-growth 8
+python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/duration-new --cycles 20 --capture-only --capture-frames 80 --max-handle-growth 8
+python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/hardware-new --cycles 20 --hardware-only --max-handle-growth 8
+python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/owner-new --cycles 20 --capture-only --close-source-first --fresh-owner-thread --max-handle-growth 8
+build/sdk-proof-debug/MfEncoderAdapterTest.exe --hardware --gpu-input --cycles 20
+```

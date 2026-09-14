@@ -99,6 +99,9 @@ struct CapturedFrame {
     bool nv12OwnedAndComplete = false;
 };
 
+class WindowsCaptureDispatcher;
+// Start, frame acquisition, Stop and destruction must run on the same thread.
+// WGC operations dispatch that thread's messages; use a dedicated capture owner.
 class DesktopCapturer {
 public:
     DesktopCapturer();
@@ -122,6 +125,7 @@ public:
     [[nodiscard]] CaptureSourceState sourceState() const noexcept { return sourceState_; }
 
 private:
+    std::unique_ptr<WindowsCaptureDispatcher> dispatcher_;
     void ResetGraphicsResources();
     void CreateDevice(IDXGIAdapter* adapter);
     void CreateDuplicationForDisplay(int displayIndex);

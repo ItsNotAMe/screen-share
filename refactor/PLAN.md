@@ -674,3 +674,22 @@ Record, without implementing in this refactor:
 - Live room-password rotation.
 - Additional codecs after H.264/Opus performance is established.
 - Optional relay support only if the direct-only/free requirement changes.
+## Capture-owner implementation note (Gate A evidence, 2026-09-15)
+
+WGC requires capture-item message delivery even with a free-threaded frame pool.
+Keep the Windows capture owner thread and its COM apartment alive through frame,
+session and owned-dispatcher cleanup. `WindowsCaptureDispatcher` now creates a
+current-thread queue only when necessary, borrows existing caller queues, pumps
+bounded message batches and preserves WM_QUIT. Owned queues complete asynchronous
+shutdown before COM uninitialization. Do not move these calls to the UI thread;
+capture methods and destruction must stay on their dedicated owner thread.
+
+For vanished/replaced sources, Stop pumps the actual Closed notification with a
+250 ms deadline before revoking the handler. This is not a fixed active-capture
+delay or a hard deadline on native RPC/driver calls; retain process watchdogs.
+The GraphicsCapture.dll pin remains until separate evidence permits removal.
+
+Recorded rapid-close and full hardware/recovery cycles complete without the old
+hang, but approximately one event per source-close cycle remains. Gate A resource
+acceptance is still open. Use CHECKPOINT-A.md and the diagnostic command variants
+in BUILD.md before changing capture/encoder ownership or declaring cutover ready.

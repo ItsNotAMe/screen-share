@@ -17,7 +17,13 @@ public:
     void OnFrameDropped(uint32_t, int, bool) override {}
     std::atomic<unsigned> count{0};
 };
-void Run(bool captureOnly, bool closeSourceFirst, bool rebuildDevice) {
+struct Options {
+    bool captureOnly = false, closeSourceFirst = false, rebuildDevice = false;
+    bool resizeSource = false, readback = false, hardwareOnly = false;
+    int captureFrames = 0;
+};
+void Run(const Options& options) {
+    const auto& [captureOnly, closeSourceFirst, rebuildDevice, resizeSource, readback, hardwareOnly, captureFrames] = options;
     using namespace screenshare;
     using namespace screenshare::media;
     proof::TeardownMarker windowDestroyed{"source window"};
@@ -47,10 +53,28 @@ void Run(bool captureOnly, bool closeSourceFirst, bool rebuildDevice) {
     Require(capture.sourceState() == CaptureSourceState::Active && restored.width == 640 && restored.height == 360,
         "Restored source did not resume capture");
     if (captureOnly) {
+        for (int i = 0; i < captureFrames; ++i) static_cast<void>(next());
+        if (resizeSource) {
+            window.Invoke([&] { SetWindowPos(window.handle(), nullptr, 0, 0, 800, 480,
+                SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER); });
+            bool resized = false;
+            for (int i = 0; i < 30 && !resized; ++i) {
+                auto frame = next();
+                resized = frame.sourceWidth != first.sourceWidth || frame.sourceHeight != first.sourceHeight;
+            }
+            Require(resized, "Capture-only resize did not arrive");
+        }
+        auto inspect = [&](const CapturedFrame& frame) {
+            if (!readback) return;
+            auto owner = std::make_shared<D3dVideoDevice>(frame.d3dDevice);
+            Require(owner->RetainCapture(frame)->ToI420() != nullptr, "Capture-only GPU readback failed");
+        };
+        inspect(first);
         if (rebuildDevice) {
             capture.RebuildWindowDevice();
             auto recovered = next();
             Require(recovered.d3dDevice.Get() != first.d3dDevice.Get(), "Capture-only rebuild reused device");
+            inspect(recovered);
         }
         if (closeSourceFirst) window.Close();
         std::cerr << "Capture-only: stopping; source " << (closeSourceFirst ? "closed" : "open") << '\n';
@@ -103,21 +127,26 @@ void Run(bool captureOnly, bool closeSourceFirst, bool rebuildDevice) {
             oldPixels->DataY() + y * oldPixels->StrideY()), "Retained capture pixels changed after reuse/resize");
     // Retire the old device before rebuilding capture. Exercise real WGC/GPU
     // resource recreation without inducing a system-wide driver reset.
-    hardware->RetireDevice();
-    capture.RebuildWindowDevice();
-    auto recovered = next();
-    Require(recovered.d3dDevice.Get() != first.d3dDevice.Get(), "Capture reused retired GPU device");
-    auto recoveredDevice = std::make_shared<D3dVideoDevice>(recovered.d3dDevice);
-    const auto beforeRecovery = sink.count.load();
-    for (int i = 0; i < 10; ++i) {
-        auto frame = next();
-        Require(encoder->Encode(webrtc::VideoFrame::Builder().set_video_frame_buffer(recoveredDevice->RetainCapture(frame))
-            .set_rtp_timestamp(300000 + i * 3000).build(), nullptr) == 0, "Recovered capture encode rejected");
+    if (!hardwareOnly) {
+        hardware->RetireDevice();
+        capture.RebuildWindowDevice();
+        auto recovered = next();
+        Require(recovered.d3dDevice.Get() != first.d3dDevice.Get(), "Capture reused retired GPU device");
+        auto recoveredDevice = std::make_shared<D3dVideoDevice>(recovered.d3dDevice);
+        const auto beforeRecovery = sink.count.load();
+        for (int i = 0; i < 10; ++i) {
+            auto frame = next();
+            Require(encoder->Encode(webrtc::VideoFrame::Builder().set_video_frame_buffer(recoveredDevice->RetainCapture(frame))
+                .set_rtp_timestamp(300000 + i * 3000).build(), nullptr) == 0, "Recovered capture encode rejected");
+        }
+        encoder->Release();
+        Require(sink.count > beforeRecovery && hardware->softwareFallbacks == 1,
+            "Recovered capture did not resume software encoding");
+        Require(device->readbackCount() == validationReadbacks + 1, "Recovery read back retired capture textures");
+    } else {
+        encoder->Release();
+        Require(hardware->softwareFallbacks == 0, "Hardware-only test fell back to software");
     }
-    encoder->Release();
-    Require(sink.count > beforeRecovery && hardware->softwareFallbacks == 1,
-        "Recovered capture did not resume software encoding");
-    Require(device->readbackCount() == validationReadbacks + 1, "Recovery read back retired capture textures");
     std::cerr << "Live encode and resize passed; closing source window\n";
     window.Close();
     bool closed = false;
@@ -135,8 +164,9 @@ void Run(bool captureOnly, bool closeSourceFirst, bool rebuildDevice) {
     capture.Stop(); capture.Stop();
     std::cerr << "Capture stopped; checking retained pixels\n";
     // Retirement must also suppress a CPU cache populated while still healthy.
-    Require(!retained->ToI420(), "Retired frame exposed stale cached pixels");
-    std::cout << "Live selected-window WGC: " << sink.count << " outputs; fixed-size resize, hardware delivery, device rebuild/software recovery, closure and retained texture passed.\n";
+    if (!hardwareOnly) Require(!retained->ToI420(), "Retired frame exposed stale cached pixels");
+    std::cout << "Live selected-window WGC: " << sink.count << " outputs; fixed-size resize, hardware delivery, "
+        << (hardwareOnly ? "hardware-only isolation" : "device rebuild/software recovery") << ", closure and retained texture passed.\n";
 }
 }
 int main(int argc, char** argv) {
@@ -144,29 +174,42 @@ int main(int argc, char** argv) {
     SetUnhandledExceptionFilter(proof::ReportUnhandledException);
     try {
         int cycles = 1;
-        bool captureOnly = false;
-        bool closeSourceFirst = false;
-        bool rebuildDevice = false;
+        bool freshOwner = false;
+        Options options;
+        auto& [captureOnly, closeSourceFirst, rebuildDevice, resizeSource, readback, hardwareOnly, captureFrames] = options;
         for (int i = 1; i < argc; ++i) {
             const std::string option = argv[i];
-            if (option == "--capture-only") captureOnly = true;
+            if (option == "--fresh-owner-thread") freshOwner = true;
+            else if (option == "--capture-only") captureOnly = true;
             else if (option == "--close-source-first") closeSourceFirst = true;
             else if (option == "--rebuild-device") rebuildDevice = true;
+            else if (option == "--resize-source") resizeSource = true;
+            else if (option == "--gpu-readback") readback = true;
+            else if (option == "--hardware-only") hardwareOnly = true;
+            else if (option == "--capture-frames" && i + 1 < argc) {
+                const std::string count = argv[++i]; size_t consumed = 0;
+                captureFrames = std::stoi(count, &consumed);
+                Require(consumed == count.size() && captureFrames >= 1 && captureFrames <= 300, "Invalid capture frame count");
+            }
             else if (option == "--repeat") cycles = 3;
             else if (option == "--cycles" && i + 1 < argc) {
                 const std::string count = argv[++i]; size_t consumed = 0;
                 cycles = std::stoi(count, &consumed);
                 Require(consumed == count.size(), "Invalid cycle count");
-            } else throw std::runtime_error("Usage: LiveCaptureTest [--repeat | --cycles 1..100] [--capture-only [--close-source-first] [--rebuild-device]]");
+            } else throw std::runtime_error("Usage: LiveCaptureTest [--repeat | --cycles 1..100] [--fresh-owner-thread] [--hardware-only | --capture-only [--close-source-first] [--rebuild-device] [--resize-source] [--gpu-readback] [--capture-frames 1..300]]");
         }
         Require(!closeSourceFirst || captureOnly, "--close-source-first requires --capture-only");
         Require(!rebuildDevice || captureOnly, "--rebuild-device requires --capture-only");
+        Require(!(resizeSource || readback) || captureOnly, "--resize-source/--gpu-readback require --capture-only");
+        Require(captureFrames == 0 || captureOnly, "--capture-frames requires --capture-only");
+        Require(!hardwareOnly || !captureOnly, "--hardware-only cannot be combined with --capture-only");
         Require(cycles >= 1 && cycles <= 100, "Cycle count must be between 1 and 100");
         proof::LifecycleSample(0, 0);
         for (int cycle = 0; cycle < cycles; ++cycle) {
             const auto start = std::chrono::steady_clock::now();
             std::cerr << "Capture cycle " << cycle + 1 << " starting\n";
-            Run(captureOnly, closeSourceFirst, rebuildDevice);
+            if (freshOwner) std::async(std::launch::async, [&] { Run(options); }).get();
+            else Run(options);
             std::cerr << "Capture cycle " << cycle + 1 << " destroyed\n";
             proof::LifecycleSample(cycle + 1, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
         }

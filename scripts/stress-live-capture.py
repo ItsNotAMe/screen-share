@@ -61,7 +61,12 @@ def main():
     parser.add_argument("--capture-only", action="store_true", help="Isolate capture teardown from hardware encoder/device-recovery work")
     parser.add_argument("--close-source-first", action="store_true", help="Capture-only regression case: close source immediately before stopping capture")
     parser.add_argument("--rebuild-device", action="store_true", help="Capture-only isolation: rebuild the WGC device once each cycle")
+    parser.add_argument("--resize-source", action="store_true", help="Capture-only isolation: resize the generated source")
+    parser.add_argument("--gpu-readback", action="store_true", help="Capture-only isolation: retain and read back GPU frames")
+    parser.add_argument("--hardware-only", action="store_true", help="Full capture and encode without device retirement/software recovery")
     parser.add_argument("--max-handle-growth", type=int, help="Require median handle growth <= this limit; compares cycles 6–10 with the final five cycles")
+    parser.add_argument("--capture-frames", type=int, choices=range(1, 301), metavar="1..300", help="Capture-only isolation: consume additional frames before teardown")
+    parser.add_argument("--fresh-owner-thread", action="store_true", help="Create and join a capture owner thread for each complete cycle")
     args = parser.parse_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("timeout must be finite and positive")
@@ -69,6 +74,12 @@ def main():
         parser.error("--close-source-first requires --capture-only")
     if args.rebuild_device and not args.capture_only:
         parser.error("--rebuild-device requires --capture-only")
+    if (args.resize_source or args.gpu_readback) and not args.capture_only:
+        parser.error("--resize-source/--gpu-readback require --capture-only")
+    if args.capture_frames and not args.capture_only:
+        parser.error("--capture-frames requires --capture-only")
+    if args.hardware_only and args.capture_only:
+        parser.error("--hardware-only cannot be combined with --capture-only")
     if args.max_handle_growth is not None and (args.max_handle_growth < 0 or args.cycles < 20):
         parser.error("handle-growth checking requires a nonnegative limit and at least 20 cycles")
     executable = args.executable.resolve(strict=True)
@@ -79,12 +90,22 @@ def main():
     timed_out = False
     with (args.output / "stdout.log").open("wb") as stdout, (args.output / "stderr.log").open("wb") as stderr:
         command = [str(executable), "--cycles", str(args.cycles)]
+        if args.fresh_owner_thread:
+            command.append("--fresh-owner-thread")
         if args.capture_only:
             command.append("--capture-only")
         if args.close_source_first:
             command.append("--close-source-first")
         if args.rebuild_device:
             command.append("--rebuild-device")
+        if args.resize_source:
+            command.append("--resize-source")
+        if args.gpu_readback:
+            command.append("--gpu-readback")
+        if args.capture_frames:
+            command.extend(["--capture-frames", str(args.capture_frames)])
+        if args.hardware_only:
+            command.append("--hardware-only")
         process = subprocess.Popen(command, stdout=stdout, stderr=stderr)
         try:
             code = process.wait(timeout=args.timeout)
@@ -97,8 +118,12 @@ def main():
             process.wait()
             raise
     result = summarize((args.output / "stderr.log").read_text(encoding="utf-8", errors="replace"), args.cycles, code, timed_out, args.max_handle_growth)
-    result.update(executableSha256=identity, elapsedSeconds=time.monotonic() - started,
-                  mode=("capture-only" + ("-rebuild" if args.rebuild_device else "") + ("-source-closed" if args.close_source_first else "-source-open")) if args.capture_only else "hardware-recovery")
+    mode = "hardware-only" if args.hardware_only else "hardware-recovery"
+    if args.capture_only:
+        mode = "capture-only" + ("-rebuild" if args.rebuild_device else "")
+        mode += "-source-closed" if args.close_source_first else "-source-open"
+    result.update(executableSha256=identity, command=command,
+                  elapsedSeconds=time.monotonic() - started, mode=mode)
     (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: result[key] for key in ("passed", "timedOut", "exitCodeHex", "expectedCycles", "elapsedSeconds")}))
     return 0 if result["passed"] else 1

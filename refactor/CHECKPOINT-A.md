@@ -527,3 +527,82 @@ with exit code zero, but the resource check correctly failed: median handles
 `build/webrtc/capture-adapter-ownership-final-live-release/result.json`, including
 binary SHA-256. The first desktop-restricted attempt failed before capturing;
 the interactive generated-window run above is the applicable lifecycle result.
+
+## Capture dispatcher / rapid-close mitigation — 2026-09-15
+
+`WindowsCaptureDispatcher` supplies a current-thread dispatcher when none exists,
+services messages during capture and source-close teardown, and pumps owned queue
+shutdown before COM uninitialization. Caller queues are borrowed, never shut
+down. WM_QUIT is preserved; message batches are bounded. All capture operations
+and destruction must remain on one dedicated capture-owner thread.
+
+For a vanished/replaced source, Stop services its actual Closed notification for
+up to 250 ms before revoking the handler. Active capture has no fixed additional
+delay. Native Close and dispatcher shutdown still need an external watchdog;
+this is not a guarantee against arbitrary OS/driver hangs. The module pin remains.
+This follows Microsoft's [dispatcher lifecycle contract](https://learn.microsoft.com/en-us/windows/win32/api/dispatcherqueue/nf-dispatcherqueue-createdispatcherqueuecontroller)
+and [completed async-action cleanup contract](https://learn.microsoft.com/en-us/windows/win32/api/asyncinfo/nf-asyncinfo-iasyncinfo-close).
+
+Diagnosis artifacts under `build/webrtc/`:
+
+| Probe | Result |
+|---|---|
+| `isolate-resize-20/` | Capture-only resize: median handle growth 0 |
+| `isolate-readback-20/` | Capture rebuild + GPU readback: growth 1 |
+| `isolate-duration-20/` | 80 frames/cycle without encoding: 20 cycles pass resource bound in 55.55 s |
+| `encoder-fps-restart-20.log`, `encoder-gpu-input-20.log` | 20 outer cycles × three resets; both stable at 305 handles |
+| `isolate-hardware-20/` | No recovery/fallback: 20 cycles complete in 59.86 s, but growth +20; recovery is not required to reproduce |
+| `hardware-handle-types.log` | Six additional Event handles over three cycles; other type counts unchanged |
+| `hardware-event-returns.log` | Retained 0x7e0 and 0xb80 correlated with `combase!OXIDEntry::Initialize` and `GraphicsCapture!ServerGraphicsCaptureItem` construction |
+| `isolate-delayed-source-close-20/` | Old implementation hangs on cycle one after 80 frames and resize, without encoding; 90 s watchdog |
+| `dispatcher-rapid-close-100-debug/` | Production dispatcher completes all 100 rapid-close cycles in 28.00 s; resource check still fails, roughly one event/cycle |
+| `dispatcher-final-rapid-100-debug/` | Fresh Debug repeat of the rapid-close regression |
+| `dispatcher-open-20-debug/` | Open-source teardown still passes the resource bound |
+
+The retained-event stacks implicate capture/remoting allocations, not encoder
+allocation. They do not establish the cause of the residual event after this fix.
+The former encoder-only hardware test used CPU-memory inputs; the added
+`--gpu-input` test exercises owned GPU textures and FPS-triggered restarts and is
+now included in hardware-enabled CTest. A separate dispatcher test covers owned
+and borrowed queues, callback delivery, repeated shutdown, deadlines and WM_QUIT.
+
+Rejected experiments are retained only as evidence: extending COM apartment
+lifetime (`isolate-apartment-lifetime-release-20/`) still grew handles; waiting
+without dispatch (`closure-notification-wait-20/`) completed but grew +20; one
+queue drain (`closure-message-pump-100/`) hung on cycle one. A dispatcher-backed
+proof with fixed post-close pumping (`closure-dispatcher-probe-20/`) was stable,
+but its delay and queue-lifetime shortcut were removed for production integration.
+Removing the module pin (`dispatcher-unpinned-rapid-100-release/`) still grew +90
+over 100 completed cycles, so the pin was restored. Explicit async-action Close
+and joining a fresh capture-owner thread did not eliminate residual growth
+(`dispatcher-action-close-20-debug/`, `dispatcher-fresh-owner-20-debug/`).
+
+Gate A remains open for residual resources, external latency, distribution and
+production session integration. Do not equate completed cycles with resource
+acceptance. No debugger/global settings were changed: optional stack-recording
+configuration was rejected by automatic review; ordinary read-only breakpoints
+provided the allocation evidence instead.
+
+Final validation for this milestone:
+
+- 100 full Release hardware/recovery cycles completed in 337.86 s without crash
+  or hang (`dispatcher-full-100-release/`). Resource acceptance failed: median
+  handles 338 → 437 (+99). This binary preceded explicit shutdown-action Close.
+- Final Release binary: 20 full cycles completed in 67.48 s; resource acceptance
+  still failed at 349 → 359 (+10), in `dispatcher-final-full-20-release/`.
+- Final Debug binary: 100 rapid-close cycles completed in 28.55 s; resource
+  acceptance failed at 326 → 416 (+90), in `dispatcher-verified-rapid-100-debug/`.
+  Each result includes its exact command and binary SHA-256.
+- Rebuilt Debug/Release media suites: 16/16 each. Rebuilt application suites:
+  10/10 each. Logs: `dispatcher-verified-sdk-{proof,app}-{debug,release}.log`.
+  A final zero-readback assertion in the GPU-input test passed all three encoder
+  lifecycle tests again in both configurations. Eight Python stress tests pass.
+- Final generated-source process-exit checks pass three cycles per configuration;
+  live WGC/WebRTC peers also pass in Debug and Release. Logs:
+  `dispatcher-final-process-exit-{debug,release}.log` and
+  `dispatcher-final-live-peer-{debug,release}.log`.
+
+Next investigation: identify the remaining source-close event with the same
+handle-return correlation technique, including dispatcher and COM shutdown.
+Do not resume arbitrary encoder cleanup changes: no-recovery live capture also
+reproduces the old growth, while isolated hardware GPU inputs remain stable.

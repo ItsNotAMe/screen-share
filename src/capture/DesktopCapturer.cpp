@@ -1,4 +1,5 @@
 #include "capture/DesktopCapturer.h"
+#include "capture/WindowsCaptureDispatcher.h"
 
 #include <Windows.h>
 #include <d3dcompiler.h>
@@ -474,6 +475,14 @@ void DesktopCapturer::Stop()
 {
     sourceState_ = CaptureSourceState::Stopped;
     if (wgc_) {
+        WindowsCaptureDispatcher::Pump();
+        if (config_.sourceType == CaptureSourceType::Window && !wgc_->closed->load()) {
+            DWORD process = 0;
+            const DWORD thread = GetWindowThreadProcessId(reinterpret_cast<HWND>(config_.windowHandle), &process);
+            if (!thread || thread != wgc_->sourceThread || process != wgc_->sourceProcess)
+                WindowsCaptureDispatcher::Wait([&] { return wgc_->closed->load(); },
+                    std::chrono::steady_clock::now() + std::chrono::milliseconds(250));
+        }
         wgc_->closedRevoker.revoke();
         // Return queued frames and submit outstanding GPU commands before
         // stopping the producer. Dispose the pool after the session stops.
@@ -490,6 +499,7 @@ void DesktopCapturer::Stop()
     }
     wgc_.reset();
     ResetGraphicsResources();
+    dispatcher_.reset();
     if (winrtInitialized_) {
         winrt::clear_factory_cache();
         RoUninitialize();
@@ -585,6 +595,7 @@ void DesktopCapturer::RebuildWindowDevice()
 
 std::optional<CapturedFrame> DesktopCapturer::TryCaptureFrame(std::chrono::milliseconds timeout)
 {
+    if (wgc_) WindowsCaptureDispatcher::Pump();
     if (config_.ownedNv12 && device_) {
         const HRESULT reason = device_->GetDeviceRemovedReason();
         if (FAILED(reason)) throw CaptureDeviceLostError(reason);
@@ -806,9 +817,11 @@ void DesktopCapturer::InitializeWinRt()
     const HRESULT result = RoInitialize(RO_INIT_MULTITHREADED);
     if (SUCCEEDED(result)) {
         winrtInitialized_ = true;
+        dispatcher_ = std::make_unique<WindowsCaptureDispatcher>();
         return;
     }
     if (result == RPC_E_CHANGED_MODE) {
+        dispatcher_ = std::make_unique<WindowsCaptureDispatcher>();
         return;
     }
 

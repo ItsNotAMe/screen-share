@@ -44,11 +44,20 @@ webrtc::VideoFrame Frame(uint32_t timestamp) {
 void Rate(webrtc::VideoEncoder& encoder, uint32_t bitrate) {
     webrtc::VideoBitrateAllocation allocation;
     allocation.SetBitrate(0, 0, bitrate);
-    encoder.SetRates({allocation, bitrate ? 60.0 : 0.0});
+    // Exercise an FPS-driven transform restart as well as bitrate assignment.
+    encoder.SetRates({allocation, bitrate ? 30.0 : 0.0});
 }
-void Run(bool useHardware) {
+void Run(bool useHardware, bool gpuInput) {
     auto hardware = useHardware ? std::make_shared<screenshare::media::MfHardwareSession>(
         std::make_shared<screenshare::media::D3dVideoDevice>()) : nullptr;
+    auto makeFrame = [&](uint32_t timestamp) {
+        if (!gpuInput) return Frame(timestamp);
+        std::vector<uint8_t> pixels(640 * 360 * 3 / 2, 128);
+        return webrtc::VideoFrame::Builder()
+            .set_video_frame_buffer(hardware->device->UploadNv12(640, 360, pixels))
+            .set_rtp_timestamp(timestamp).set_timestamp_us(int64_t(timestamp) * 1000)
+            .set_ntp_time_ms(123456).build();
+    };
     screenshare::media::MfVideoEncoderFactory factory(hardware);
     auto lowerLevel = factory.GetSupportedFormats().front();
     lowerLevel.parameters["profile-level-id"] = "64001f";
@@ -68,14 +77,14 @@ void Run(bool useHardware) {
         Require(!useHardware || encoder->GetEncoderInfo().is_hardware_accelerated, "Hardware lifecycle test fell back");
         encoder->RegisterEncodeCompleteCallback(&sink);
         const auto before = sink.images.size();
-        Require(encoder->Encode(Frame(1), nullptr) == 0, "First encode failed");
+        Require(encoder->Encode(makeFrame(1), nullptr) == 0, "First encode failed");
         sink.Wait(before + 1);
         Rate(*encoder, 0); // Also a worker barrier.
-        for (unsigned i = 0; i < 30; ++i) Require(encoder->Encode(Frame(2 + i), nullptr) == 0, "Suspended input rejected");
+        for (unsigned i = 0; i < 30; ++i) Require(encoder->Encode(makeFrame(2 + i), nullptr) == 0, "Suspended input rejected");
         Rate(*encoder, 400'000);
         Require(sink.images.size() == before + 1, "Zero-rate suspension emitted video");
         const std::vector types{webrtc::VideoFrameType::kVideoFrameKey};
-        Require(encoder->Encode(Frame(100), &types) == 0, "Resume encode failed");
+        Require(encoder->Encode(makeFrame(100), &types) == 0, "Resume encode failed");
         sink.Wait(before + 2);
         Rate(*encoder, 400'000);
         Require(sink.images.back()._frameType == webrtc::VideoFrameType::kVideoFrameKey, "Keyframe request lost");
@@ -95,9 +104,9 @@ void Run(bool useHardware) {
             std::lock_guard lock(sink.mutex);
             sink.hold = true;
         }
-        Require(encoder->Encode(Frame(200), nullptr) == 0, "Burst initial encode failed");
+        Require(encoder->Encode(makeFrame(200), nullptr) == 0, "Burst initial encode failed");
         sink.Wait(before + 3); // Worker blocked in callback; all following input must coalesce.
-        for (unsigned i = 201; i <= 300; ++i) Require(encoder->Encode(Frame(i), nullptr) == 0, "Burst input rejected");
+        for (unsigned i = 201; i <= 300; ++i) Require(encoder->Encode(makeFrame(i), nullptr) == 0, "Burst input rejected");
         {
             std::lock_guard lock(sink.mutex);
             sink.hold = false;
@@ -109,30 +118,33 @@ void Run(bool useHardware) {
             "Pending raw frame backlog was replayed");
         encoder->Release();
         encoder->Release();
-        Require(encoder->Encode(Frame(400), nullptr) == WEBRTC_VIDEO_CODEC_UNINITIALIZED, "Encoder active after release");
+        Require(encoder->Encode(makeFrame(400), nullptr) == WEBRTC_VIDEO_CODEC_UNINITIALIZED, "Encoder active after release");
     }
     Require(!sink.timedOut && sink.dropped == 3 * (30 + 99), "Dropped-frame accounting or callback gate failed");
     Require(!hardware || (!hardware->quarantined && hardware->hardwareFrames == 12), "Hardware lifecycle lost frames or failed");
+    Require(!gpuInput || hardware->device->readbackCount() == 0, "Owned GPU encoding performed CPU readback");
     std::cout << "MF encoder: zero-rate/resume, keyframe, 100-frame burst coalescing and three reset/release cycles passed.\n";
 }
 }
 int main(int argc, char** argv) {
     try {
-        bool hardware = false;
+        bool hardware = false, gpuInput = false;
         int cycles = 1;
         for (int i = 1; i < argc; ++i) {
             const std::string option = argv[i];
             if (option == "--hardware") hardware = true;
+            else if (option == "--gpu-input") gpuInput = true;
             else if (option == "--cycles" && i + 1 < argc) {
                 const std::string count = argv[++i]; size_t consumed = 0;
                 cycles = std::stoi(count, &consumed);
                 Require(consumed == count.size() && cycles >= 1 && cycles <= 100, "Invalid cycle count");
-            } else throw std::runtime_error("Usage: MfEncoderAdapterTest [--hardware] [--cycles 1..100]");
+            } else throw std::runtime_error("Usage: MfEncoderAdapterTest [--hardware [--gpu-input]] [--cycles 1..100]");
         }
+        Require(!gpuInput || hardware, "--gpu-input requires --hardware");
         proof::LifecycleSample(0, 0);
         for (int cycle = 1; cycle <= cycles; ++cycle) {
             const auto started = std::chrono::steady_clock::now();
-            Run(hardware);
+            Run(hardware, gpuInput);
             proof::LifecycleSample(cycle, std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
         }
         return 0;

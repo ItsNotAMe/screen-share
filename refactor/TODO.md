@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint A — rapid source-close shutdown hang, hardware/recovery handle growth, baseline latency and installer/distribution evidence. Room v2 command/event contracts and native state-cache validation are covered.** Verified relocatable Debug/Release SDKs and native Release portable startup now pass. The earlier access violation was reproduced in unloaded GraphicsCapture.dll and mitigated by a process-lifetime module pin; 100 full Release cycles now pass. Rapid source-close Stop still hangs, and hardware/recovery handles grow; keep lifecycle acceptance open. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
+Current next action: **Checkpoint A � residual source-close event growth, production capture-owner/session integration, baseline latency and installer/distribution evidence.** Room v2 command/event contracts and native state-cache validation are covered. SDK relocation and portable startup pass. Capture-owner dispatcher integration completes 100 rapid-close and 100 full hardware/recovery cycles without the previous hang, but resource acceptance still fails at approximately one event per cycle. The GraphicsCapture.dll module pin remains. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
 
 ## Planning handoff
 
@@ -72,7 +72,7 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [ ] Validate forced HWND reuse and device-loss recovery.
 - [x] Add automatic proof capture recovery with a three-rebuild budget, cancellable backoff and per-device retirement across replacement generations; verify injected losses and terminal exhaustion.
 - [x] Reproduce and diagnose the intermittent Release access violation in unloaded GraphicsCapture.dll; add a process-lifetime system-module pin and verify 100 full Release cycles.
-- [ ] Resolve rapid source closure followed immediately by Stop hanging in GraphicsCaptureSession::Close/StopCapture; retain --capture-only --close-source-first watchdog regression.
+- [x] Mitigate rapid source-close StopCapture hang with capture-owner dispatch; complete 100 rapid-close cycles and retain the watchdog regression. Resource acceptance remains separate.
 - [ ] Investigate hardware/recovery handle growth (382 to 1180 across 100 cycles); capture-only Stop with source open stays at 329–331 handles. Do not claim leak-free teardown.
 - [x] Prove original-window WGC device reconstruction, shared encoder-device retirement and fresh-device software IDR recovery without reading retired textures (explicit reconstruction/invalidation; automatic session recovery and real driver removal remain pending).
 - [x] Add bounded receiver presentation recovery and verify policy plus GPU resource recreation with injected device-loss HRESULTs (actual driver removal and capture/encoder recovery remain untested).
@@ -378,6 +378,15 @@ At each checkpoint handoff, record:
 - [x] Select hardware MFTs on the actual input adapter and retain activation shutdown ownership.
 - [x] Add optional handle-growth acceptance and isolated encoder/device-rebuild probes.
 - [ ] Resolve remaining combined capture/encoder recovery growth (about two handles per cycle after adapter filtering; isolated probes are stable).
-- [ ] Resolve rapid source-close StopCapture hang; tested close-order/state-release alternatives failed and were reverted.
+- [x] Mitigate rapid source-close StopCapture hang with dispatcher integration; earlier close-order/state-release alternatives failed and were reverted.
 
 See the latest CHECKPOINT-A.md section for the 100-cycle result and exact artifacts.
+
+### Dispatcher milestone — 2026-09-15
+
+- [x] Trace retained events to capture-item/COM creation; distinguish CPU-memory hardware tests from owned-GPU-input tests.
+- [x] Add capture-owner dispatcher creation, message delivery and owned-queue shutdown; preserve caller queues and WM_QUIT.
+- [x] Complete 100 rapid source-close cycles without the prior StopCapture hang on the reference machine.
+- [x] Extend automated coverage for dispatcher lifecycle and hardware GPU input with FPS restarts.
+- [ ] Resolve residual source-close event growth (approximately one per cycle); resource acceptance remains failed.
+- [ ] Preserve native-call watchdog coverage and validate production capture-owner/session integration before claiming Gate A complete.

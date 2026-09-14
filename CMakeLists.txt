@@ -224,6 +224,7 @@ target_link_libraries(ScreenShareCore PUBLIC
     user32
     uuid
     windowsapp
+    CoreMessaging
     bcrypt
     iphlpapi
     hid
