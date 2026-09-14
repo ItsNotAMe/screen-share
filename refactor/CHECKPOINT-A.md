@@ -417,3 +417,65 @@ Reference machine collected with no identifying names/addresses: Windows 11 Pro 
   and distribution evidence. Authenticated dispatch, HTTP admission, hibernating
   sockets, runtime security tests and live push behavior remain Checkpoint C work.
   No service deployment or production media cutover occurred.
+# Capture teardown crash reproduced and mitigated — 2026-09-15
+
+The previously unexplained Release failure is now a confirmed native access
+violation. `capture-stress-100-release/result.json` records `0xC0000005` on cycle 2,
+after capture Stop but before frame/device/encoder resources finished destruction.
+The debugger reproduced it on cycle 15 in
+`build/webrtc/capture-stress-100-debugger.log`: the faulting thread was executing
+`<Unloaded_GraphicsCapture.dll>+0x1115c`; the main thread was destroying a D3D11
+device and waiting inside the NVIDIA driver. This identifies the unload failure
+mode; it does not identify every Windows-internal callback ownership defect.
+
+`DesktopCapturer::InitializeWinRt` now loads GraphicsCapture.dll using the system32
+search restriction and pins that exact module by address once per process.
+Session/pool/frame/device cleanup and COM initialization balancing are unchanged.
+The module intentionally remains mapped until process exit, a bounded platform
+workaround rather than a sleep or retained capture session. The documented
+[module pin contract](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandleexw)
+supports this lifetime. An independent [WGC sample issue](https://github.com/robmikh/Win32CaptureSample/issues/99)
+reports crashes around RoUninitialize/module unloading with similar sensitivity
+to debugger timing; that report is corroboration, not proof of our internal cause.
+
+Validation and diagnostics:
+
+- Patched Release full hardware/recovery proof passed 100/100 cycles in 378.75 s,
+  including owned capture, resize, source closure, device reconstruction and
+  software fallback. Evidence: `build/webrtc/capture-stress-100-release-pinned/`.
+  The runner stores the exact executable SHA-256; later diagnostic-mode additions
+  changed the executable, and the final binary also passed its three-cycle test.
+- Capture-only Stop with the source open passed 100 Debug cycles in 28.00 s;
+  handles ranged 329–331. Evidence: `capture-only-open-100-debug/`.
+  The same Release isolation passed 100 cycles in 27.69 s with handles 322–326
+  (`capture-only-open-100-release/`), controlling for build configuration.
+- Full Debug/Release media suites passed 14/14 each, application suites 10/10 each;
+  final three-cycle live capture and external-source-exit checks passed in both
+  configurations. Logs: `capture-lifetime-proof-{debug,release}.log`,
+  `capture-lifetime-app-{debug,release}.log`, `capture-lifetime-live-*.log`,
+  `capture-lifetime-process-exit-*.log`, all under `build/webrtc/`.
+- Added teardown markers and per-cycle private/working-set memory, handle, GDI and
+  USER counts. `scripts/stress-live-capture.py` requires complete ordered cycle
+  markers and samples, enforces a child-process watchdog, preserves hex exit codes
+  and rejects truncated evidence. Its five unit tests pass.
+
+Two separate lifecycle problems remain open:
+
+1. Rapid source closure immediately before Stop hangs in the synchronous
+   `GraphicsCaptureSession::Close` / server `StopCapture` RPC. Captured stacks are
+   in `capture-only-hang-stacks.log`; the first diagnostic process was stopped
+   after inspection. The isolated current regression mode
+   `--capture-only --close-source-first` reproduced the hang and failed its
+   15-second watchdog in `capture-only-closed-repro-debug/`. This is retained as
+   an explicit failing case, not replaced by the passing open-source case.
+2. Full hardware/recovery handles grow by approximately eight per cycle: 382 after
+   cycle 1 to 1180 after cycle 100. This trend also appears before the module pin
+   (debugger samples 388 to 491 over cycles 1–14). Full-run private bytes ranged
+   96,899,072–145,838,080; GDI/USER ended at 10/5. The isolated open-source Debug
+   capture test has stable handles but its memory also warms up; no leak-free or
+   complete resource-release claim is made. Investigate encoder enumeration,
+   recovery and platform resource ownership separately.
+
+These are generated-window, single-machine lifecycle results, not production
+session, driver-removal, latency or soak acceptance. Gate A remains open. No
+deployment, driver reset or changes to other applications were performed.

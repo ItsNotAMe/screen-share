@@ -1,4 +1,5 @@
 #include "CaptureTestWindow.h"
+#include "LifecycleDiagnostics.h"
 #include "media/webrtc/MfHardwareSession.h"
 #include "media/webrtc/MfVideoEncoderFactory.h"
 #include "api/environment/environment_factory.h"
@@ -16,11 +17,14 @@ public:
     void OnFrameDropped(uint32_t, int, bool) override {}
     std::atomic<unsigned> count{0};
 };
-void Run() {
+void Run(bool captureOnly, bool closeSourceFirst) {
     using namespace screenshare;
     using namespace screenshare::media;
+    proof::TeardownMarker windowDestroyed{"source window"};
     proof::TestWindow window;
+    proof::TeardownMarker captureDestroyed{"capture object"};
     DesktopCapturer capture;
+    proof::TeardownMarker framesDestroyed{"frame/device/encoder resources"};
     CaptureConfig config; config.sourceType = CaptureSourceType::Window;
     config.windowHandle = reinterpret_cast<uint64_t>(window.handle());
     config.targetWidth = 640; config.targetHeight = 360;
@@ -42,6 +46,13 @@ void Run() {
     auto restored = next();
     Require(capture.sourceState() == CaptureSourceState::Active && restored.width == 640 && restored.height == 360,
         "Restored source did not resume capture");
+    if (captureOnly) {
+        if (closeSourceFirst) window.Close();
+        std::cerr << "Capture-only: stopping; source " << (closeSourceFirst ? "closed" : "open") << '\n';
+        capture.Stop(); capture.Stop();
+        window.Close();
+        return;
+    }
     Require(first.pixels.empty() && first.nv12Pixels.empty(), "Capture performed CPU readback");
     auto device = std::make_shared<D3dVideoDevice>(first.d3dDevice);
     auto retained = device->RetainCapture(first);
@@ -54,6 +65,7 @@ void Run() {
     bool rejected = false;
     try { device->RetainCapture(borrowed); } catch (const std::invalid_argument&) { rejected = true; }
     Require(rejected, "Borrowed capture texture accepted");
+    proof::TeardownMarker encoderDestroyed{"encoder and hardware session"};
     auto hardware = std::make_shared<MfHardwareSession>(device);
     MfVideoEncoderFactory factory(hardware);
     auto encoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
@@ -104,12 +116,12 @@ void Run() {
     std::cerr << "Live encode and resize passed; closing source window\n";
     window.Close();
     bool closed = false;
-    try { capture.TryCaptureFrame(std::chrono::milliseconds(20)); } catch (const std::runtime_error&) { closed = true; }
+    try { static_cast<void>(capture.TryCaptureFrame(std::chrono::milliseconds(20))); } catch (const std::runtime_error&) { closed = true; }
     Require(closed, "Closed selected window was not reported");
     Require(capture.sourceState() == CaptureSourceState::Closed, "Closed source status missing");
     proof::TestWindow replacement;
     bool stillClosed = false;
-    try { capture.TryCaptureFrame(std::chrono::milliseconds(0)); } catch (const std::runtime_error&) { stillClosed = true; }
+    try { static_cast<void>(capture.TryCaptureFrame(std::chrono::milliseconds(0))); } catch (const std::runtime_error&) { stillClosed = true; }
     Require(stillClosed && capture.sourceState() == CaptureSourceState::Closed, "Replacement window revived the closed source");
     bool rebuildRejected = false;
     try { capture.RebuildWindowDevice(); } catch (const std::runtime_error&) { rebuildRejected = true; }
@@ -123,14 +135,32 @@ void Run() {
 }
 }
 int main(int argc, char** argv) {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    SetUnhandledExceptionFilter(proof::ReportUnhandledException);
     try {
-        const int cycles = argc == 3 && std::string(argv[1]) == "--cycles" ? std::stoi(argv[2]) :
-            (argc == 2 && std::string(argv[1]) == "--repeat" ? 3 : 1);
+        int cycles = 1;
+        bool captureOnly = false;
+        bool closeSourceFirst = false;
+        for (int i = 1; i < argc; ++i) {
+            const std::string option = argv[i];
+            if (option == "--capture-only") captureOnly = true;
+            else if (option == "--close-source-first") closeSourceFirst = true;
+            else if (option == "--repeat") cycles = 3;
+            else if (option == "--cycles" && i + 1 < argc) {
+                const std::string count = argv[++i]; size_t consumed = 0;
+                cycles = std::stoi(count, &consumed);
+                Require(consumed == count.size(), "Invalid cycle count");
+            } else throw std::runtime_error("Usage: LiveCaptureTest [--repeat | --cycles 1..100] [--capture-only [--close-source-first]]");
+        }
+        Require(!closeSourceFirst || captureOnly, "--close-source-first requires --capture-only");
         Require(cycles >= 1 && cycles <= 100, "Cycle count must be between 1 and 100");
+        proof::LifecycleSample(0, 0);
         for (int cycle = 0; cycle < cycles; ++cycle) {
+            const auto start = std::chrono::steady_clock::now();
             std::cerr << "Capture cycle " << cycle + 1 << " starting\n";
-            Run();
+            Run(captureOnly, closeSourceFirst);
             std::cerr << "Capture cycle " << cycle + 1 << " destroyed\n";
+            proof::LifecycleSample(cycle + 1, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
         }
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

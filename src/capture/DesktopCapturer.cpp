@@ -786,6 +786,23 @@ void DesktopCapturer::CreateDuplicationForDisplay(int displayIndex)
 
 void DesktopCapturer::InitializeWinRt()
 {
+    // WGC may leave a background callback running after session/pool Close and
+    // RoUninitialize. Our repeat proof caught execution in unloaded
+    // GraphicsCapture.dll during D3D device destruction (see CHECKPOINT-A.md).
+    // Pin only the system module once per process; session/device resources and
+    // COM initialization are still released normally. No timing-based sleeps.
+    static const bool modulePinned = [] {
+        HMODULE module = LoadLibraryExW(L"GraphicsCapture.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!module) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "Load system GraphicsCapture.dll");
+        HMODULE pinned = nullptr;
+        const BOOL ok = GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            reinterpret_cast<LPCWSTR>(module), &pinned);
+        const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+        FreeLibrary(module); // Balance LoadLibraryEx; the OS pin lasts to exit.
+        ThrowIfFailed(HRESULT_FROM_WIN32(error), "Pin system GraphicsCapture.dll");
+        return true;
+    }();
+    static_cast<void>(modulePinned);
     const HRESULT result = RoInitialize(RO_INIT_MULTITHREADED);
     if (SUCCEEDED(result)) {
         winrtInitialized_ = true;

@@ -136,3 +136,37 @@ Actual forced HWND reuse, device removal and automatic recovery remain separate.
 Receiver presentation recovery proof: run `build/webrtc-proof/<configuration>/PresentationRecoveryTest.exe --gpu` in a desktop session. This creates only a diagnostic window and injects a failure at the rendering boundary; it does not reset the desktop GPU. The default proof suite now has 13 tests with `-Hardware -AudioDevice`; `-LiveCapture` also registers this desktop-dependent recovery test.
 
 Automatic capture recovery: `CaptureRecoveryTest --live` exercises three replacement generations and terminal exhaustion on a generated window. `CaptureRecoveryTest` alone tests retry/generation policy. Hardware/audio suites now contain 14 tests per configuration. The live variant is included by `-LiveCapture` and requires a desktop session.
+# Capture lifecycle stress diagnostics
+
+Run from an interactive Windows desktop after building the native proof:
+
+```powershell
+python scripts/stress-live-capture.py build/sdk-proof-release/LiveCaptureTest.exe build/webrtc/capture-stress-new --cycles 100 --timeout 1200
+python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/capture-only-new --cycles 100 --capture-only --timeout 300
+python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/capture-close-regression-new --cycles 1 --capture-only --close-source-first --timeout 15
+python tests/LiveCaptureStressTests.py
+```
+
+Each output directory must be new. The runner records separate stdout/stderr,
+binary SHA-256, numeric/hex exit code, deadline outcome and every completed-cycle
+resource sample in `result.json`. It kills only its own proof child on timeout.
+Interrupted or malformed final samples are preserved as failed evidence.
+The generated source windows are the only capture targets.
+
+The full mode exercises owned WGC capture, minimize/restore, resize, hardware
+encoding, device reconstruction, software fallback and permanent source closure.
+Capture-only stops while the source is still open and omits encoder/device-recovery work for isolating resource growth;
+it is not a replacement for the full proof. Both print markers after resource
+destruction and private-memory/working-set/handle/GDI/USER counts per cycle.
+These samples include OS/driver caches; successful cycles alone do not prove
+absence of leaks or completion of the production session lifecycle gate.
+The `--close-source-first` variant retains a known rapid-shutdown hang and is
+expected to fail by watchdog on the current reference machine; do not hide it in
+the passing capture-only result or run it without a timeout.
+
+The Windows capture adapter now pins the system `GraphicsCapture.dll` once per
+process to mitigate the reproduced callback into unloaded module code during
+teardown. Session/pool/device destruction and balanced COM initialization remain
+in place. The module pin intentionally remains until process exit. See the latest
+`CHECKPOINT-A.md` evidence before removing this workaround; timing sleeps are not
+a substitute for module lifetime.

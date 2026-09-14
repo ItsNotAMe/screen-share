@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint A — remaining lifecycle failure investigation, baseline latency and installer/distribution evidence. Room v2 command/event contracts and native state-cache validation are now covered.** Verified relocatable Debug/Release SDKs and native Release portable startup now pass. Forty Release capture cycles (20 debugger / 20 normal) did not reproduce the earlier failure; its cause remains unknown. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
+Current next action: **Checkpoint A — rapid source-close shutdown hang, hardware/recovery handle growth, baseline latency and installer/distribution evidence. Room v2 command/event contracts and native state-cache validation are covered.** Verified relocatable Debug/Release SDKs and native Release portable startup now pass. The earlier access violation was reproduced in unloaded GraphicsCapture.dll and mitigated by a process-lifetime module pin; 100 full Release cycles now pass. Rapid source-close Stop still hangs, and hardware/recovery handles grow; keep lifecycle acceptance open. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
 
 ## Planning handoff
 
@@ -71,7 +71,9 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [x] Validate external source-process exit, minimize/restore and permanent closure with replacement windows.
 - [ ] Validate forced HWND reuse and device-loss recovery.
 - [x] Add automatic proof capture recovery with a three-rebuild budget, cancellable backoff and per-device retirement across replacement generations; verify injected losses and terminal exhaustion.
-- [ ] Investigate intermittent Release LiveCaptureTest repeat-cycle failure observed during automatic recovery validation; standalone rerun and debugger rerun passed, so the failure is not resolved.
+- [x] Reproduce and diagnose the intermittent Release access violation in unloaded GraphicsCapture.dll; add a process-lifetime system-module pin and verify 100 full Release cycles.
+- [ ] Resolve rapid source closure followed immediately by Stop hanging in GraphicsCaptureSession::Close/StopCapture; retain --capture-only --close-source-first watchdog regression.
+- [ ] Investigate hardware/recovery handle growth (382 to 1180 across 100 cycles); capture-only Stop with source open stays at 329–331 handles. Do not claim leak-free teardown.
 - [x] Prove original-window WGC device reconstruction, shared encoder-device retirement and fresh-device software IDR recovery without reading retired textures (explicit reconstruction/invalidation; automatic session recovery and real driver removal remain pending).
 - [x] Add bounded receiver presentation recovery and verify policy plus GPU resource recreation with injected device-loss HRESULTs (actual driver removal and capture/encoder recovery remain untested).
 - [x] Prove owned live WGC capture through hardware H.264 PeerConnections alongside Opus and data channels.
