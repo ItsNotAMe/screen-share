@@ -479,3 +479,51 @@ Two separate lifecycle problems remain open:
 These are generated-window, single-machine lifecycle results, not production
 session, driver-removal, latency or soak acceptance. Gate A remains open. No
 deployment, driver reset or changes to other applications were performed.
+
+## Adapter selection and resource isolation — 2026-09-15
+
+Hardware encoder discovery now uses `MFTEnum2` with the input D3D device's
+adapter LUID. It no longer activates encoders on unrelated adapters and then
+rejects their device managers. Successful and failed activations retain an
+explicit owner that calls `IMFActivate::ShutdownObject`; software transforms
+retain their direct shutdown path. This follows Microsoft's
+[MFTEnum2 contract](https://learn.microsoft.com/en-us/windows/win32/api/mfapi/nf-mfapi-mftenum2)
+and [activation shutdown contract](https://learn.microsoft.com/en-us/windows/win32/api/mfobjects/nf-mfobjects-imfactivate-shutdownobject).
+
+Evidence under `build/webrtc/`:
+
+- Adapter-filter-only Release build: 100 full cycles completed in 341.69 seconds
+  (`capture-hardware-adapter-filter-100/`). Handles went from 333 to 537,
+  approximately two per cycle versus eight in the preceding unfiltered run.
+  This is partial improvement, not leak-free acceptance or a latency benchmark.
+- Explicit activation ownership: 20 Debug full cycles completed, but the new
+  resource-growth assertion failed (`capture-activation-owner-20-debug/`).
+  That run preceded removal of redundant direct shutdown for activated objects.
+- Encoder-only Debug probes: 20 outer cycles, each containing three resets,
+  held handles at 154 for software and 291 for hardware. Logs:
+  `encoder-only-software-20-debug.log`, `encoder-only-hardware-20-debug.log`.
+- Capture-only device reconstruction: 20 Debug cycles passed in 8.75 seconds;
+  handles stayed at 329 (`capture-rebuild-only-20-debug/`). Neither isolated
+  encoder lifetime nor isolated capture reconstruction reproduces the remaining
+  combined-path growth. Narrow that interaction next; do not assign a driver
+  leak as the cause without allocation evidence.
+- Eight stress-summary unit tests pass. Final Debug/Release media suites pass
+  14/14 each; rebuilt application suites pass 10/10 each.
+
+Rapid source-close shutdown remains unresolved. Closing the pool first timed
+out; clearing/flushing D3D state passed three cycles but hung on cycle two of
+its longer run; releasing capture graphics resources before session closure
+also timed out. These experiments were reverted. No timing sleep or shutdown
+bypass was retained. Evidence directories: `capture-close-pool-first/`,
+`capture-close-clear-100-debug/`, `capture-close-resources-first/`.
+
+The stress runner now supports an explicit `--max-handle-growth` acceptance
+bound and capture-only `--rebuild-device` isolation. A successful encode/teardown
+exit can therefore still fail resource acceptance. Gate A remains open.
+
+Final Release binary validation: all 20 full cycles completed in 67.30 seconds
+with exit code zero, but the resource check correctly failed: median handles
+349 to 368 (+19 versus the configured +16 bound). Artifact:
+`build/webrtc/capture-adapter-ownership-final-live-release/result.json`, including
+binary SHA-256. The first desktop-restricted attempt failed before capturing;
+the interactive generated-window run above is the applicable lifecycle result.

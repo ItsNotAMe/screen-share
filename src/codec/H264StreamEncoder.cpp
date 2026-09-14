@@ -243,7 +243,7 @@ void ConfigureEncoderTypes(
     ThrowIfFailed(transform->SetInputType(inputStreamId, inputType.Get(), 0), "IMFTransform::SetInputType");
 }
 
-Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> CreateDxgiDeviceManager(ID3D11Device* preferredDevice)
+Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> CreateDxgiDeviceManager(ID3D11Device* preferredDevice, LUID& adapterLuid)
 {
     Microsoft::WRL::ComPtr<ID3D11Device> device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
@@ -279,6 +279,14 @@ Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> CreateDxgiDeviceManager(ID3D11Devic
     }
 
     UINT resetToken = 0;
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+    Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+    DXGI_ADAPTER_DESC description{};
+    ThrowIfFailed(device.As(&dxgiDevice), "Query encoder DXGI device");
+    ThrowIfFailed(dxgiDevice->GetAdapter(&adapter), "Get encoder adapter");
+    ThrowIfFailed(adapter->GetDesc(&description), "Get encoder adapter description");
+    adapterLuid = description.AdapterLuid;
+
     Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> deviceManager;
     ThrowIfFailed(MFCreateDXGIDeviceManager(&resetToken, &deviceManager), "MFCreateDXGIDeviceManager");
     ThrowIfFailed(deviceManager->ResetDevice(device.Get(), resetToken), "IMFDXGIDeviceManager::ResetDevice");
@@ -312,6 +320,7 @@ private:
 };
 
 struct HardwareEncoderSelection {
+    std::shared_ptr<IMFActivate> activation;
     Microsoft::WRL::ComPtr<IMFTransform> transform;
     Microsoft::WRL::ComPtr<IMFMediaEventGenerator> eventGenerator;
     Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> dxgiDeviceManager;
@@ -330,20 +339,29 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
     outputInfo.guidMajorType = MFMediaType_Video;
     outputInfo.guidSubtype = MFVideoFormat_H264;
 
+    // Enumerate only transforms belonging to the device used for input. Probing
+    // another adapter's MFT can initialize incompatible driver state before its
+    // device-manager rejection; unfiltered probes showed handle growth in the proof.
+    LUID adapterLuid{};
+    auto deviceManager = CreateDxgiDeviceManager(config.d3dDevice.Get(), adapterLuid);
+    Microsoft::WRL::ComPtr<IMFAttributes> enumeration;
+    ThrowIfFailed(MFCreateAttributes(&enumeration, 1), "Create encoder enumeration attributes");
+    ThrowIfFailed(enumeration->SetBlob(MFT_ENUM_ADAPTER_LUID,
+        reinterpret_cast<const UINT8*>(&adapterLuid), sizeof(adapterLuid)), "Set encoder adapter LUID");
     ActivateList activates;
-    const HRESULT enumResult = MFTEnumEx(
+    const HRESULT enumResult = MFTEnum2(
         MFT_CATEGORY_VIDEO_ENCODER,
         MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER,
         &inputInfo,
         &outputInfo,
+        enumeration.Get(),
         activates.put(),
         activates.countPut());
+    if (enumResult != MF_E_NOT_FOUND) ThrowIfFailed(enumResult, "MFTEnum2(adapter H.264 encoders)");
     if (enumResult == MF_E_NOT_FOUND || activates.count() == 0) {
-        throw std::runtime_error("No hardware H.264 encoder MFTs were found");
+        throw std::runtime_error("No hardware H.264 encoder MFTs were found for the selected adapter");
     }
-    ThrowIfFailed(enumResult, "MFTEnumEx(hardware H.264 encoders)");
 
-    auto deviceManager = CreateDxgiDeviceManager(config.d3dDevice.Get());
     std::string failures;
 
     for (UINT32 i = 0; i < activates.count(); ++i) {
@@ -351,6 +369,13 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
         const std::string name = GetAllocatedString(activate, MFT_FRIENDLY_NAME_Attribute);
         const std::string label = name.empty() ? "(unnamed hardware encoder)" : name;
 
+        // Every attempted activation must be shut down, including partial
+        // failures. Successful activation ownership follows the selected encoder.
+        activate->AddRef();
+        auto activation = std::shared_ptr<IMFActivate>(activate, [](IMFActivate* value) {
+            static_cast<void>(value->ShutdownObject());
+            value->Release();
+        });
         Microsoft::WRL::ComPtr<IMFTransform> transform;
         HRESULT result = activate->ActivateObject(IID_PPV_ARGS(&transform));
         if (FAILED(result)) {
@@ -368,7 +393,6 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
                 result = attributes->SetUINT32(MF_TRANSFORM_ASYNC_UNLOCK, TRUE);
                 if (FAILED(result)) {
                     failures += "\n  " + label + ": async unlock failed: " + HResultMessage(result);
-                    static_cast<void>(activate->ShutdownObject());
                     continue;
                 }
             }
@@ -376,12 +400,10 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
 
         if (!async) {
             failures += "\n  " + label + ": hardware encoder is not asynchronous";
-            static_cast<void>(activate->ShutdownObject());
             continue;
         }
         if (!d3d11Aware) {
             failures += "\n  " + label + ": hardware encoder is not D3D11-aware";
-            static_cast<void>(activate->ShutdownObject());
             continue;
         }
 
@@ -392,7 +414,6 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
             reinterpret_cast<ULONG_PTR>(deviceManager.Get()));
         if (FAILED(result)) {
             failures += "\n  " + label + ": D3D manager rejected: " + HResultMessage(result);
-            static_cast<void>(activate->ShutdownObject());
             continue;
         }
 
@@ -402,7 +423,6 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
             ConfigureEncoderTypes(transform.Get(), config, inputStreamId, outputStreamId);
         } catch (const std::exception& error) {
             failures += "\n  " + label + ": stream type setup failed: " + error.what();
-            static_cast<void>(activate->ShutdownObject());
             continue;
         }
 
@@ -410,11 +430,11 @@ HardwareEncoderSelection CreateHardwareEncoder(const H264StreamEncoderConfig& co
         result = transform.As(&eventGenerator);
         if (FAILED(result) || !eventGenerator) {
             failures += "\n  " + label + ": async event interface unavailable: " + HResultMessage(result);
-            static_cast<void>(activate->ShutdownObject());
             continue;
         }
 
         HardwareEncoderSelection selected;
+        selected.activation = std::move(activation);
         selected.transform = std::move(transform);
         selected.eventGenerator = std::move(eventGenerator);
         selected.dxgiDeviceManager = std::move(deviceManager);
@@ -629,6 +649,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
 
     if (backend_ == H264StreamEncoderBackend::Hardware) {
         auto hardware = CreateHardwareEncoder(config_);
+        activation_ = std::move(hardware.activation);
         transform_ = std::move(hardware.transform);
         eventGenerator_ = std::move(hardware.eventGenerator);
         dxgiDeviceManager_ = std::move(hardware.dxgiDeviceManager);
@@ -790,11 +811,14 @@ void H264StreamEncoder::Stop()
 {
     if (transform_) {
         static_cast<void>(transform_->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0));
-        Microsoft::WRL::ComPtr<IMFShutdown> shutdown;
-        if (SUCCEEDED(transform_.As(&shutdown)) && shutdown) {
-            static_cast<void>(shutdown->Shutdown());
+        if (!activation_) {
+            Microsoft::WRL::ComPtr<IMFShutdown> shutdown;
+            if (SUCCEEDED(transform_.As(&shutdown)) && shutdown) {
+                static_cast<void>(shutdown->Shutdown());
+            }
         }
     }
+    activation_.reset();
     eventGenerator_.Reset();
     transform_.Reset();
     dxgiDeviceManager_.Reset();

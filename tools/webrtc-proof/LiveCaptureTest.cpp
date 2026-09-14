@@ -17,7 +17,7 @@ public:
     void OnFrameDropped(uint32_t, int, bool) override {}
     std::atomic<unsigned> count{0};
 };
-void Run(bool captureOnly, bool closeSourceFirst) {
+void Run(bool captureOnly, bool closeSourceFirst, bool rebuildDevice) {
     using namespace screenshare;
     using namespace screenshare::media;
     proof::TeardownMarker windowDestroyed{"source window"};
@@ -47,6 +47,11 @@ void Run(bool captureOnly, bool closeSourceFirst) {
     Require(capture.sourceState() == CaptureSourceState::Active && restored.width == 640 && restored.height == 360,
         "Restored source did not resume capture");
     if (captureOnly) {
+        if (rebuildDevice) {
+            capture.RebuildWindowDevice();
+            auto recovered = next();
+            Require(recovered.d3dDevice.Get() != first.d3dDevice.Get(), "Capture-only rebuild reused device");
+        }
         if (closeSourceFirst) window.Close();
         std::cerr << "Capture-only: stopping; source " << (closeSourceFirst ? "closed" : "open") << '\n';
         capture.Stop(); capture.Stop();
@@ -141,24 +146,27 @@ int main(int argc, char** argv) {
         int cycles = 1;
         bool captureOnly = false;
         bool closeSourceFirst = false;
+        bool rebuildDevice = false;
         for (int i = 1; i < argc; ++i) {
             const std::string option = argv[i];
             if (option == "--capture-only") captureOnly = true;
             else if (option == "--close-source-first") closeSourceFirst = true;
+            else if (option == "--rebuild-device") rebuildDevice = true;
             else if (option == "--repeat") cycles = 3;
             else if (option == "--cycles" && i + 1 < argc) {
                 const std::string count = argv[++i]; size_t consumed = 0;
                 cycles = std::stoi(count, &consumed);
                 Require(consumed == count.size(), "Invalid cycle count");
-            } else throw std::runtime_error("Usage: LiveCaptureTest [--repeat | --cycles 1..100] [--capture-only [--close-source-first]]");
+            } else throw std::runtime_error("Usage: LiveCaptureTest [--repeat | --cycles 1..100] [--capture-only [--close-source-first] [--rebuild-device]]");
         }
         Require(!closeSourceFirst || captureOnly, "--close-source-first requires --capture-only");
+        Require(!rebuildDevice || captureOnly, "--rebuild-device requires --capture-only");
         Require(cycles >= 1 && cycles <= 100, "Cycle count must be between 1 and 100");
         proof::LifecycleSample(0, 0);
         for (int cycle = 0; cycle < cycles; ++cycle) {
             const auto start = std::chrono::steady_clock::now();
             std::cerr << "Capture cycle " << cycle + 1 << " starting\n";
-            Run(captureOnly, closeSourceFirst);
+            Run(captureOnly, closeSourceFirst, rebuildDevice);
             std::cerr << "Capture cycle " << cycle + 1 << " destroyed\n";
             proof::LifecycleSample(cycle + 1, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
         }

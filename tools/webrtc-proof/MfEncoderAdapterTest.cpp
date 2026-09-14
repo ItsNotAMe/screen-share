@@ -1,3 +1,4 @@
+#include "LifecycleDiagnostics.h"
 #include "media/webrtc/MfVideoEncoderFactory.h"
 #include "media/webrtc/MfHardwareSession.h"
 #include "api/environment/environment_factory.h"
@@ -116,6 +117,25 @@ void Run(bool useHardware) {
 }
 }
 int main(int argc, char** argv) {
-    try { Run(argc == 2 && std::string(argv[1]) == "--hardware"); return 0; }
+    try {
+        bool hardware = false;
+        int cycles = 1;
+        for (int i = 1; i < argc; ++i) {
+            const std::string option = argv[i];
+            if (option == "--hardware") hardware = true;
+            else if (option == "--cycles" && i + 1 < argc) {
+                const std::string count = argv[++i]; size_t consumed = 0;
+                cycles = std::stoi(count, &consumed);
+                Require(consumed == count.size() && cycles >= 1 && cycles <= 100, "Invalid cycle count");
+            } else throw std::runtime_error("Usage: MfEncoderAdapterTest [--hardware] [--cycles 1..100]");
+        }
+        proof::LifecycleSample(0, 0);
+        for (int cycle = 1; cycle <= cycles; ++cycle) {
+            const auto started = std::chrono::steady_clock::now();
+            Run(hardware);
+            proof::LifecycleSample(cycle, std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
+        }
+        return 0;
+    }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

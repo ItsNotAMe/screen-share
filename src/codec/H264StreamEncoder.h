@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 
 #include "capture/DesktopCapturer.h"
 
@@ -90,6 +91,8 @@ private:
     H264StreamEncoderBackend backend_ = H264StreamEncoderBackend::Software;
     H264StreamEncoderInputMode lastInputMode_ = H264StreamEncoderInputMode::Memory;
     std::string encoderName_;
+    // Activation shutdown is distinct from releasing the transform interfaces.
+    std::shared_ptr<IMFActivate> activation_;
     Microsoft::WRL::ComPtr<IMFTransform> transform_;
     Microsoft::WRL::ComPtr<IMFMediaEventGenerator> eventGenerator_;
     Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> dxgiDeviceManager_;

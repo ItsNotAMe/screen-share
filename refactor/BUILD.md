@@ -170,3 +170,20 @@ teardown. Session/pool/device destruction and balanced COM initialization remain
 in place. The module pin intentionally remains until process exit. See the latest
 `CHECKPOINT-A.md` evidence before removing this workaround; timing sleeps are not
 a substitute for module lifetime.
+
+### Resource-growth checks and isolation
+
+```powershell
+python scripts/stress-live-capture.py build/sdk-proof-release/LiveCaptureTest.exe build/webrtc/full-resources-new --cycles 100 --timeout 1200 --max-handle-growth 16
+python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/rebuild-resources-new --cycles 20 --capture-only --rebuild-device --timeout 90 --max-handle-growth 16
+build/sdk-proof-debug/MfEncoderAdapterTest.exe --cycles 20
+build/sdk-proof-debug/MfEncoderAdapterTest.exe --hardware --cycles 20
+```
+
+The optional bound compares median handles in cycles 6–10 with the final five
+cycles; it requires at least 20 cycles and fails if measurements are missing.
+It is a diagnostic threshold, not proof that every resource was released.
+Encoder-only runs print lifecycle samples but do not use the capture runner's
+completion markers. Each encoder outer cycle performs three reset cycles.
+Hardware enumeration uses adapter-filtered `MFTEnum2` (Windows 10 version 1803
+or later), consistent with the modern Windows capture requirement.

@@ -10,10 +10,11 @@ import math
 from pathlib import Path
 import re
 import subprocess
+import statistics
 import time
 
 
-def summarize(stderr, expected, exit_code, timed_out):
+def summarize(stderr, expected, exit_code, timed_out, max_handle_growth=None):
     completed = [int(n) for n in re.findall(r"^Capture cycle (\d+) destroyed$", stderr, re.M)]
     samples = []
     malformed_samples = 0
@@ -28,8 +29,16 @@ def summarize(stderr, expected, exit_code, timed_out):
         except (ValueError, TypeError):
             malformed_samples += 1
     valid_samples = not malformed_samples and [sample["cycle"] for sample in samples] == list(range(expected + 1))
+    trend = None
+    if valid_samples and expected >= 20:
+        baseline = [s.get("handles") for s in samples[6:11]]
+        final = [s.get("handles") for s in samples[-5:]]
+        if all(type(value) is int and value >= 0 for value in baseline + final):
+            trend = {"baselineMedian": statistics.median(baseline), "finalMedian": statistics.median(final)}
+            trend["growth"] = trend["finalMedian"] - trend["baselineMedian"]
+    resources_pass = max_handle_growth is None or (trend is not None and trend["growth"] <= max_handle_growth)
     return {
-        "passed": not timed_out and exit_code == 0 and completed == list(range(1, expected + 1)) and valid_samples,
+        "passed": not timed_out and exit_code == 0 and completed == list(range(1, expected + 1)) and valid_samples and resources_pass,
         "timedOut": timed_out,
         "exitCode": exit_code,
         "exitCodeHex": f"0x{exit_code & 0xffffffff:08X}",
@@ -37,6 +46,8 @@ def summarize(stderr, expected, exit_code, timed_out):
         "completedCycles": completed,
         "samples": samples,
         "malformedSamples": malformed_samples,
+        "handleTrend": trend,
+        "maxHandleGrowth": max_handle_growth,
         "lastDiagnosticLines": stderr.splitlines()[-20:],
     }
 
@@ -49,11 +60,17 @@ def main():
     parser.add_argument("--timeout", type=float, default=1200, help="Total run deadline in seconds")
     parser.add_argument("--capture-only", action="store_true", help="Isolate capture teardown from hardware encoder/device-recovery work")
     parser.add_argument("--close-source-first", action="store_true", help="Capture-only regression case: close source immediately before stopping capture")
+    parser.add_argument("--rebuild-device", action="store_true", help="Capture-only isolation: rebuild the WGC device once each cycle")
+    parser.add_argument("--max-handle-growth", type=int, help="Require median handle growth <= this limit; compares cycles 6–10 with the final five cycles")
     args = parser.parse_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("timeout must be finite and positive")
     if args.close_source_first and not args.capture_only:
         parser.error("--close-source-first requires --capture-only")
+    if args.rebuild_device and not args.capture_only:
+        parser.error("--rebuild-device requires --capture-only")
+    if args.max_handle_growth is not None and (args.max_handle_growth < 0 or args.cycles < 20):
+        parser.error("handle-growth checking requires a nonnegative limit and at least 20 cycles")
     executable = args.executable.resolve(strict=True)
     args.output.mkdir(parents=True, exist_ok=False)
     with executable.open("rb") as binary:
@@ -66,6 +83,8 @@ def main():
             command.append("--capture-only")
         if args.close_source_first:
             command.append("--close-source-first")
+        if args.rebuild_device:
+            command.append("--rebuild-device")
         process = subprocess.Popen(command, stdout=stdout, stderr=stderr)
         try:
             code = process.wait(timeout=args.timeout)
@@ -77,9 +96,9 @@ def main():
             process.kill()
             process.wait()
             raise
-    result = summarize((args.output / "stderr.log").read_text(encoding="utf-8", errors="replace"), args.cycles, code, timed_out)
+    result = summarize((args.output / "stderr.log").read_text(encoding="utf-8", errors="replace"), args.cycles, code, timed_out, args.max_handle_growth)
     result.update(executableSha256=identity, elapsedSeconds=time.monotonic() - started,
-                  mode="capture-only-source-closed" if args.close_source_first else "capture-only-source-open" if args.capture_only else "hardware-recovery")
+                  mode=("capture-only" + ("-rebuild" if args.rebuild_device else "") + ("-source-closed" if args.close_source_first else "-source-open")) if args.capture_only else "hardware-recovery")
     (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: result[key] for key in ("passed", "timedOut", "exitCodeHex", "expectedCycles", "elapsedSeconds")}))
     return 0 if result["passed"] else 1

@@ -372,3 +372,12 @@ At each checkpoint handoff, record:
 - Failed or unrun tests and why.
 - Any measured tuning changes and corresponding plan updates.
 - The exact next unfinished task.
+
+### Latest lifecycle continuation — 2026-09-15
+
+- [x] Select hardware MFTs on the actual input adapter and retain activation shutdown ownership.
+- [x] Add optional handle-growth acceptance and isolated encoder/device-rebuild probes.
+- [ ] Resolve remaining combined capture/encoder recovery growth (about two handles per cycle after adapter filtering; isolated probes are stable).
+- [ ] Resolve rapid source-close StopCapture hang; tested close-order/state-release alternatives failed and were reverted.
+
+See the latest CHECKPOINT-A.md section for the 100-cycle result and exact artifacts.

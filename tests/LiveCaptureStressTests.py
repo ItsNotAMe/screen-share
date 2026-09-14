@@ -38,6 +38,23 @@ class StressEvidenceTests(unittest.TestCase):
             self.assertEqual(result['malformedSamples'], 1)
             self.assertEqual(result['completedCycles'], [1])
 
+    def resource_log(self, growth):
+        lines = ['LIFECYCLE ' + json.dumps({'cycle': 0, 'handles': 100})]
+        for cycle in range(1, 101):
+            lines += [f'Capture cycle {cycle} destroyed', 'LIFECYCLE ' + json.dumps({'cycle': cycle, 'handles': 350 + cycle * growth})]
+        return '\n'.join(lines)
+
+    def test_handle_growth_fails_even_with_complete_cycles(self):
+        result = stress.summarize(self.resource_log(8), 100, 0, False, 16)
+        self.assertFalse(result['passed'])
+        self.assertEqual(result['handleTrend']['growth'], 720)
+
+    def test_stable_handles_pass(self):
+        self.assertTrue(stress.summarize(self.resource_log(0), 100, 0, False, 16)['passed'])
+
+    def test_unknown_handles_do_not_pass_resource_check(self):
+        self.assertFalse(stress.summarize(self.log(range(1, 101)), 100, 0, False, 16)['passed'])
+
 
 if __name__ == '__main__':
     unittest.main()
