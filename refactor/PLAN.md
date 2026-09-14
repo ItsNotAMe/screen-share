@@ -689,7 +689,11 @@ For vanished/replaced sources, Stop pumps the actual Closed notification with a
 delay or a hard deadline on native RPC/driver calls; retain process watchdogs.
 The GraphicsCapture.dll pin remains until separate evidence permits removal.
 
-Recorded rapid-close and full hardware/recovery cycles complete without the old
-hang, but approximately one event per source-close cycle remains. Gate A resource
-acceptance is still open. Use CHECKPOINT-A.md and the diagnostic command variants
-in BUILD.md before changing capture/encoder ownership or declaring cutover ready.
+The application must also retain WindowsMediaRuntime across capture sessions
+and joined worker restarts. Create it after the UI STA/QApplication, check its
+HRESULT, and destroy all sessions before releasing it. Do not use static
+process-shutdown ownership. This balanced MTA usage lease eliminates the
+reproduced linear COM remoting event growth: 100-cycle full and rapid-close
+handle bounds pass. Complete resource teardown, external latency and production
+session integration remain open. Use CHECKPOINT-A.md and BUILD.md for evidence
+and the embedding contract before declaring cutover ready.

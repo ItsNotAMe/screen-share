@@ -606,3 +606,44 @@ Next investigation: identify the remaining source-close event with the same
 handle-return correlation technique, including dispatcher and COM shutdown.
 Do not resume arbitrary encoder cleanup changes: no-recovery live capture also
 reproduces the old growth, while isolated hardware GPU inputs remain stable.
+
+## Application COM lifetime — 2026-09-15
+
+Read-only event-return correlation now identifies the remaining retained event
+as `combase!OXIDEntry::Initialize`, reached through apartment remoting setup.
+The earlier capture-item event is gone after dispatcher integration. Evidence:
+`build/webrtc/dispatcher-residual-events.log` and its console log. Revoking the
+Closed subscription inside its callback did not fix growth (20 cycles in
+`closure-revoke-in-handler-20/`); that experiment was reverted.
+
+Keeping MTA support alive across capture cycles, rather than allowing COM to
+tear it down between cycles, removes the reproduced linear event growth.
+`WindowsMediaRuntime` now owns a scoped, balanced CoIncrementMTAUsage lease in
+the GUI, CLI and lifecycle proof. GUI initialization precedes the lease so its
+STA is preserved; window/session destruction and worker joins precede release.
+Standalone API embedders must retain the same runtime owner across sessions.
+No global COM static or shutdown callback was added. Capture-thread apartments,
+dispatcher cleanup and the GraphicsCapture.dll pin remain required.
+
+Final-binary evidence under `build/webrtc/` (each stress result records binary
+SHA-256, exact command and all cycle samples):
+
+- `mta-runtime-rapid-100-debug/`: 100 rapid source closures, 29.17 s, exit 0,
+  median handles 330 → 330; resource bound 8 passes.
+- `mta-runtime-fresh-owner-100-debug/`: 100 rapid closures with a new joined
+  capture thread each cycle, 28.76 s, exit 0, handles 330 → 330; bound 8 passes.
+- `mta-runtime-full-100-release/`: 100 full hardware/recovery cycles, 339.22 s,
+  exit 0, median handles 380 → 379; bound 8 passes. Final GDI/USER counts are
+  3/5. Private memory reaches about 140 MB at cycle 100 and may include
+  driver/runtime caches; its ownership still needs separate accounting. This
+  is handle-growth acceptance, not a blanket proof that all memory, callbacks
+  or native resources were released.
+- Debug/Release media suites: 16/16 each, including STA preservation across
+  twenty nested-runtime worker restarts (`mta-proof-{debug,release}.log`).
+- Debug/Release application builds and suites: 10/10 each
+  (`mta-app-{debug,release}.log`); both GUI smoke tests exit 0 through the new
+  runtime initialization/destruction path. Eight Python stress-runner tests pass.
+
+This bounded handle check does not establish actual driver-removal behavior,
+external gaming input/image latency, or production v2 session integration.
+Gate A and the wider media cutover remain open.

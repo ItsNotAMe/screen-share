@@ -8,6 +8,9 @@
 
 namespace screenshare {
 
+// Embedders must hold a WindowsMediaRuntime (core/WindowsMediaRuntime.h) across
+// session lifetimes, after initializing any UI STA, and destroy sessions before
+// that runtime. The shipped GUI and CLI own this lease at application scope.
 class ScreenShareSession final {
 public:
     ScreenShareSession();

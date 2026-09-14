@@ -1,5 +1,6 @@
 #include "CaptureTestWindow.h"
 #include "LifecycleDiagnostics.h"
+#include "core/WindowsMediaRuntime.h"
 #include "media/webrtc/MfHardwareSession.h"
 #include "media/webrtc/MfVideoEncoderFactory.h"
 #include "api/environment/environment_factory.h"
@@ -204,6 +205,8 @@ int main(int argc, char** argv) {
         Require(captureFrames == 0 || captureOnly, "--capture-frames requires --capture-only");
         Require(!hardwareOnly || !captureOnly, "--hardware-only cannot be combined with --capture-only");
         Require(cycles >= 1 && cycles <= 100, "Cycle count must be between 1 and 100");
+        screenshare::WindowsMediaRuntime mediaRuntime;
+        Require(SUCCEEDED(mediaRuntime.result()), "MTA lifetime initialization failed");
         proof::LifecycleSample(0, 0);
         for (int cycle = 0; cycle < cycles; ++cycle) {
             const auto start = std::chrono::steady_clock::now();

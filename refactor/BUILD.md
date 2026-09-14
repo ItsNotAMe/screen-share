@@ -161,8 +161,9 @@ destruction and private-memory/working-set/handle/GDI/USER counts per cycle.
 These samples include OS/driver caches; successful cycles alone do not prove
 absence of leaks or completion of the production session lifecycle gate.
 The `--close-source-first` variant retains the former rapid-shutdown regression.
-Dispatcher integration now completes its recorded 100-cycle runs, but resource
-acceptance remains failed. Keep the watchdog and separate open/closed results.
+Dispatcher integration completes its recorded 100-cycle runs. The application
+runtime now also retains COM MTA support across cycles; see CHECKPOINT-A.md for
+resource acceptance evidence. Keep the watchdog and separate open/closed results.
 
 The Windows capture adapter now pins the system `GraphicsCapture.dll` once per
 process to mitigate the reproduced callback into unloaded module code during
@@ -194,7 +195,8 @@ Keep Start, frame acquisition, Stop and destruction on one dedicated capture
 thread: WGC now services that thread's messages. Caller queues are borrowed;
 owned queues shut down before COM uninitialization. CoreMessaging.lib is supplied
 by the Windows SDK. The former rapid-close timeout now completes in recorded
-100-cycle runs, but source-close resource checks still fail.
+100-cycle runs. Capture-thread COM balancing alone is insufficient: retain the
+application's WindowsMediaRuntime across sessions as described below.
 
 Additional diagnostic controls (the result records the exact child command):
 
@@ -206,3 +208,22 @@ python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe 
 python scripts/stress-live-capture.py build/sdk-proof-debug/LiveCaptureTest.exe build/webrtc/owner-new --cycles 20 --capture-only --close-source-first --fresh-owner-thread --max-handle-growth 8
 build/sdk-proof-debug/MfEncoderAdapterTest.exe --hardware --gpu-input --cycles 20
 ```
+
+### Application COM lifetime
+
+`core/WindowsMediaRuntime.h` owns a balanced `CoIncrementMTAUsage` lease. Keep one
+alive across session creation, capture-owner shutdown and worker restarts, and
+check its initialization HRESULT before creating sessions. The shipped CLI and
+GUI own it in main; embedders of ScreenShareSession must do the same. Destroy all
+sessions and join their workers before releasing the lease. Do not use a global
+static, DllMain or a process-exit callback for this ownership.
+
+Create the GUI's QApplication/STA first: a usage lease preserves an existing
+apartment but makes an otherwise uninitialized calling thread implicitly MTA.
+Capture workers still initialize/uninitialize their own apartments normally.
+The lease does not replace their dispatcher, object cleanup or module pin.
+
+The dispatcher lifecycle test now verifies STA preservation across nested leases
+and twenty joined worker restarts. LiveCaptureTest uses the production runtime
+owner across all cycles, including `--fresh-owner-thread` runs. See Microsoft's
+[MTA usage contract](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-coincrementmtausage).

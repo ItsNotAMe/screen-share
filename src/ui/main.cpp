@@ -1,5 +1,6 @@
 #include "core/SessionCommand.h"
 #include "core/SessionRuntimeControl.h"
+#include "core/WindowsMediaRuntime.h"
 #include "transport/UdpCrypto.h"
 #include "ui/ActiveShareWindow.h"
 #include "ui/ActiveWatchWindow.h"
@@ -984,6 +985,12 @@ int main(int argc, char** argv)
     }
 
     QApplication app(argc, argv);
+    screenshare::WindowsMediaRuntime mediaRuntime;
+    if (FAILED(mediaRuntime.result())) {
+        qCritical("Failed to initialize the Windows media runtime: 0x%08lx",
+            static_cast<unsigned long>(mediaRuntime.result()));
+        return 1;
+    }
     QApplication::setStyle("Fusion");
     app.setWindowIcon(appIcon());
 

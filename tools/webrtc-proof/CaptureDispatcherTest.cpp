@@ -1,9 +1,36 @@
 #include "capture/WindowsCaptureDispatcher.h"
+#include "core/WindowsMediaRuntime.h"
+#include <future>
 #include <stdexcept>
 #include <iostream>
 
 namespace {
 void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+void RunStaRuntime() {
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+    struct Apartment { ~Apartment() { winrt::uninit_apartment(); } } apartment;
+    const auto requireSta = [] {
+        APTTYPE type{};
+        APTTYPEQUALIFIER qualifier{};
+        Require(SUCCEEDED(CoGetApartmentType(&type, &qualifier)) &&
+            (type == APTTYPE_STA || type == APTTYPE_MAINSTA), "Media runtime changed the UI apartment");
+    };
+    {
+        screenshare::WindowsMediaRuntime runtime;
+        Require(SUCCEEDED(runtime.result()), "Media runtime initialization failed");
+        requireSta();
+        for (int cycle = 0; cycle < 20; ++cycle) {
+            std::async(std::launch::async, [] {
+                winrt::init_apartment(winrt::apartment_type::multi_threaded);
+                struct Apartment { ~Apartment() { winrt::uninit_apartment(); } } apartment;
+                screenshare::WindowsMediaRuntime nested;
+                Require(SUCCEEDED(nested.result()), "Nested media runtime initialization failed");
+            }).get();
+        }
+        requireSta();
+    }
+    requireSta();
+}
 void Run() {
     using screenshare::WindowsCaptureDispatcher;
     using winrt::Windows::System::DispatcherQueue;
@@ -33,6 +60,6 @@ void Run() {
 }
 }
 int main() {
-    try { Run(); std::cout << "Capture dispatcher ownership, delivery, quit preservation and deadlines passed.\n"; }
+    try { RunStaRuntime(); Run(); std::cout << "Media runtime STA compatibility and worker restarts; capture dispatcher ownership, delivery, quit preservation and deadlines passed.\n"; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
