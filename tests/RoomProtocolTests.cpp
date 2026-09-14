@@ -1,5 +1,6 @@
 #include "room/protocol/RoomProtocol.h"
 #include "room/protocol/RevisionTracker.h"
+#include "room/protocol/StateSubscription.h"
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -19,7 +20,7 @@ int main() {
     auto check = [&](bool ok, const QString& name) {
         if (!ok) { ++failures; std::cerr << name.toStdString() << '\n'; }
     };
-    for (auto entry : Fixtures("commands")) {
+    for (const auto* file : {"commands", "events"}) for (auto entry : Fixtures(file)) {
         auto f = entry.toObject();
         auto m = f["message"].toObject();
         if (f.contains("repeat")) {
@@ -32,7 +33,7 @@ int main() {
         else if (f["message"].isArray()) bytes = QJsonDocument(f["message"].toArray()).toJson(QJsonDocument::Compact);
         else bytes = QJsonDocument(m).toJson(QJsonDocument::Compact);
         bytes += QByteArray(f["padding"].toInt(), ' ');
-        auto result = ValidateClientCommand(bytes, f["scope"] == "directory");
+        auto result = QString(file) == "commands" ? ValidateClientCommand(bytes, f["scope"] == "directory") : ValidateServerEvent(bytes, f["scope"] == "directory");
         const auto name = f["name"].toString();
         check(result.ok == f["ok"].toBool(), name + " acceptance: " + result.error);
         if (f.contains("error")) check(result.error == f["error"].toString(), name + " error: " + result.error);
@@ -56,6 +57,23 @@ int main() {
     RevisionTracker independent;
     independent.Start(); independent.Snapshot(1, 0);
     check(independent.Delta(1, 1) == RevisionTracker::Decision::Apply && tracker.Revision() == RevisionTracker::MaxRevision, "independent streams");
-    std::cout << Fixtures("commands").size() << " command fixtures and subscription trace; " << failures << " failures\n";
+    for (auto trace : Fixtures("state-cache")) {
+        auto t = trace.toObject(); StateSubscription cache(t["directory"].toBool());
+        check(cache.Start("room", "viewer") == 1, "cache start");
+        for (auto step : t["steps"].toArray()) {
+            auto s = step.toObject();
+            auto result = cache.Receive(static_cast<std::uint64_t>(s["generation"].toDouble()), QJsonDocument(s["message"].toObject()).toJson(QJsonDocument::Compact));
+            const QStringList names{"ignore", "applied", "resync", "invalid", "closed"};
+            check(names[static_cast<int>(result)] == s["result"], "cache decision " + s["result"].toString());
+            check(cache.Payload() == s["payload"].toObject(), "cache atomic payload");
+            check(s["revision"].isNull() ? !cache.Revision() : cache.Revision() == static_cast<std::uint64_t>(s["revision"].toDouble()), "cache revision");
+        }
+        cache.Stop();
+        check(cache.Payload().isEmpty() && !cache.Revision(), "cache stop clears state");
+        check(cache.Receive(1, "{") == StateSubscription::Result::Ignore, "stale callback ignored before parsing");
+        check(cache.Start("room", "viewer") > 1, "cache reconnect generation");
+    }
+    std::cout << Fixtures("commands").size() << " command fixtures, " << Fixtures("events").size()
+        << " event fixtures and revision/state-cache traces; " << failures << " failures\n";
     return failures ? 1 : 0;
 }

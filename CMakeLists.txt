@@ -471,6 +471,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             add_executable(RoomProtocolTests
                 tests/RoomProtocolTests.cpp
                 src/room/protocol/RoomProtocol.cpp
+                src/room/protocol/StateSubscription.cpp
             )
             target_compile_features(RoomProtocolTests PRIVATE cxx_std_20)
             target_include_directories(RoomProtocolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

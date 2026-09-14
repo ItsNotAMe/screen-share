@@ -2,8 +2,9 @@
 
 Status: Checkpoint A contract foundation. `PLAN.md` remains authoritative. The
 command validators and subscription ordering tests exist; the running application
-and deployed Worker still use v1. Server event decoding, authenticated dispatch,
-HTTP admission and Durable Object runtime tests remain Checkpoint C work.
+and deployed Worker still use v1. Server event validation and native atomic state caches are also implemented.
+Authenticated dispatch, HTTP admission, live transport and Durable Object runtime
+tests remain Checkpoint C work.
 
 ## Ownership and threading
 
@@ -63,23 +64,80 @@ Errors are `too_large`, `invalid_json`, `invalid_envelope`, `invalid_payload`;
 never echo submitted secrets or SDP in errors/logs. Duplicate JSON keys follow
 the parsers' last-value behavior; this boundary does not claim to reject them.
 
-## Server output and admission (implementation contract; not implemented)
+## Server output (implemented validation)
 
-Keep server decoders distinct from client-command validation. Server-only sender
-identity must never become a permitted client key. Add shared fixtures before
-wiring these output types into the client:
+Server event validation is a separate entry point; it never permits sender identity
+in a client command. All events require exact `v:2`, `type`, `payload` keys. Room
+scope adds `roomId`; directory scope forbids it. Only state snapshot/delta events
+carry an envelope revision. Names arriving from the server must already be
+canonical (NFC, trimmed and validated); the client rejects rather than repairs them.
 
-- `state.snapshot`: v, type, revision, payload; add roomId for room state.
-  Room payload contains current policy and authoritative member roster, including
-  own peer identity and roles. Directory payload contains safe summaries only.
-- `state.delta`: same envelope, a typed change payload. Publish only actual state
-  changes; room and directory each have their own revision sequence. Specify
-  exact change payload schemas with snapshot schemas during server implementation.
-- Command acknowledgements carry requestId and typed success/conflict/error;
-  they must not advance the state revision independently of a state mutation.
-- Relayed signals carry authenticated `fromPeerId`, roomId, connectionId and
-  target. They carry no state revision. Only host/viewer pairs may exchange them;
-  the host offers and the viewer answers/requests restart.
+| Type | Additional envelope keys | Exact payload |
+|---|---|---|
+| state.snapshot (room) | revision | selfPeerId, policy, status, members |
+| state.snapshot (directory) | revision | rooms |
+| state.delta (room) | revision | One room change below |
+| state.delta (directory) | revision | op: upsert + room, or op: remove + roomId |
+| command.result | requestId | status: ok; or status: conflict + currentRevision; or status: error + code |
+| room.closed | none | reason |
+| signal.offer/answer/candidate/restart_request | connectionId, fromPeerId, toPeerId | Same payload as matching client command |
+
+Nested objects have exact keys:
+
+- Policy: `name`, `visibility` (public/unlisted), `viewerLimit` (1–63),
+  `passwordProtected` (boolean).
+- Member: `peerId`, `nickname`, `role` (host/viewer), `status`
+  (connected/reconnecting). A room snapshot has 1–64 unique members, exactly one
+  host and a selfPeerId present in the roster. Room status is open/reconnecting;
+  it must agree with the host's connected/reconnecting status. Occupancy may exceed
+  a lowered viewer limit without evicting existing members.
+- Directory room summary: `roomId`, `name`, `viewerCount` (0–63), `viewerLimit`
+  (1–63), `passwordProtected`, `status` (open/full/reconnecting), `summaryVersion`,
+  `leaseExpiresAt` (Unix epoch milliseconds). Both version and expiry are safe
+  nonnegative integers. Unless reconnecting, full means count >= limit and open
+  means count < limit. A snapshot has at most 500 unique rooms.
+
+Room deltas each carry one atomic operation:
+
+- `{op: "policy", policy}` replaces the complete policy.
+- `{op: "member.upsert", member}` adds/replaces one member, preserving existing role.
+- `{op: "member.remove", peerId}` removes a viewer other than the receiver itself.
+- `{op: "host.status", status}` changes room status and host member status together.
+
+A host departure closes subscriptions; it never elects another host. Send
+`room.closed` to the departing/kicked viewer rather than removing its own identity
+from its roster. Closed reasons are host_left, host_expired, kicked, server_shutdown.
+Result error codes are forbidden, not_found, invalid_state, rate_limited,
+invalid_command. Results and signals never consume state revisions. Signals must
+have different sender and target IDs; authenticated target/role/generation checks
+still belong to the dispatcher.
+
+Directory snapshots permit 256 KiB; other metadata events permit 16 KiB; signals
+permit 64 KiB. Enforce serialized output bounds before publication/admission, not
+only when decoding. Use 128-bit random base64url room/peer IDs (22 characters) for
+server-generated identities so maximum rosters fit the metadata budget. The wire
+identifier ceiling remains 128 characters for compatibility with request and
+connection IDs. Do not broadcast credentials, addresses or rosters in summaries.
+
+## Native state application (implemented pure cache)
+
+`StateSubscription` binds to one subscription generation and, for rooms, expected
+room/self identity. It rejects old callbacks before parsing. A validated snapshot
+replaces state only after ordering and identity checks. Each delta is applied to
+an isolated copy; the resulting snapshot must pass all schema, roster and size
+invariants before both payload and revision commit. Consumers receive a Qt value
+copy, not a mutable reference to accepted state.
+
+Missing removals, role changes, invalid host/self removal, capacity overflow and
+non-increasing summary versions produce one resync and preserve the last accepted
+state. Later deltas are suppressed until a valid snapshot arrives. Host status is
+updated atomically with room status. Close/stop clears state and invalidates old
+callbacks. A malformed current event returns Invalid without changing state; the
+future transport must close/recover that socket instead of repeatedly processing
+bad events. Signals/results return Ignore from this state-only cache and must be
+routed separately after target/connection-generation validation.
+
+## Admission (implementation contract; not implemented)
 
 POST create/join returns server-generated peer ID and 256-bit membership token
 over HTTPS. Store only the token hash server-side, retain the token only in client
@@ -128,7 +186,9 @@ the deployed runtime before claiming the plan's request/storage headroom.
 
 ## Validation
 
-`tests/fixtures/room-v2/commands.json` is executed by the Qt C++ test and Node test.
+`tests/fixtures/room-v2/commands.json` and `events.json` are executed by the Qt
+C++ test and Node test. Native `state-cache.json` traces assert complete payload
+and accepted revision after every event, including failed transitions.
 Fixtures may supply a message, exact raw string, hex bytes, padding, or a compact
 payload-field repeat descriptor for byte-boundary cases. `revisions.json` is an
 ordered trace: event, callback generation, incoming revision, expected decision,

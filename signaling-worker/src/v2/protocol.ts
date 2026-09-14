@@ -84,3 +84,74 @@ export function validateClientCommand(bytes: Uint8Array, scope: "room" | "direct
   }
   return valid ? { ok: true, message } : fail("invalid_payload");
 }
+
+
+// Server output is canonical: do not silently repair server-supplied names.
+function canonicalName(v: unknown, points = 32, bytes = 128): boolean {
+  return typeof v === "string" && normalizeName(v, points, bytes) === v;
+}
+function policy(v: unknown): boolean {
+  return object(v) && keys(v, ["name", "visibility", "viewerLimit", "passwordProtected"]) &&
+    canonicalName(v.name, 64, 256) && ["public", "unlisted"].includes(v.visibility as string) &&
+    integer(v.viewerLimit, 1, 63) && typeof v.passwordProtected === "boolean";
+}
+function member(v: unknown): v is WireObject {
+  return object(v) && keys(v, ["peerId", "nickname", "role", "status"]) && identifier(v.peerId) &&
+    canonicalName(v.nickname) && ["host", "viewer"].includes(v.role as string) &&
+    ["connected", "reconnecting"].includes(v.status as string);
+}
+function summary(v: unknown): v is WireObject {
+  return object(v) && keys(v, ["roomId", "name", "viewerCount", "viewerLimit", "passwordProtected", "status", "summaryVersion", "leaseExpiresAt"]) &&
+    identifier(v.roomId) && canonicalName(v.name, 64, 256) && integer(v.viewerCount, 0, 63) &&
+    integer(v.viewerLimit, 1, 63) && typeof v.passwordProtected === "boolean" &&
+    ["open", "full", "reconnecting"].includes(v.status as string) && integer(v.summaryVersion) && integer(v.leaseExpiresAt) &&
+    (v.status === "reconnecting" || (v.status === "full") === ((v.viewerCount as number) >= (v.viewerLimit as number)));
+}
+function roomState(p: WireObject): boolean {
+  if (!keys(p, ["selfPeerId", "policy", "status", "members"]) || !identifier(p.selfPeerId) || !policy(p.policy) ||
+      !["open", "reconnecting"].includes(p.status as string) || !Array.isArray(p.members) || p.members.length < 1 || p.members.length > 64 || !p.members.every(member)) return false;
+  const ids = new Set(p.members.map(m => m.peerId));
+  const hosts = p.members.filter(m => m.role === "host");
+  return ids.size === p.members.length && ids.has(p.selfPeerId) && hosts.length === 1 &&
+    ((p.status === "reconnecting") === (hosts[0].status === "reconnecting"));
+}
+export function validateServerEvent(bytes: Uint8Array, scope: "room" | "directory" = "room"): Validation {
+  const fail = (error: string): Validation => ({ ok: false, error });
+  if (bytes.byteLength > (scope === "directory" ? 256 : 64) * 1024) return fail("too_large");
+  let m: unknown;
+  try { m = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)); }
+  catch { return fail("invalid_json"); }
+  if (!object(m) || m.v !== 2 || typeof m.type !== "string" || !object(m.payload)) return fail("invalid_envelope");
+  const state = m.type === "state.snapshot" || m.type === "state.delta";
+  const signal = ["signal.offer", "signal.answer", "signal.candidate", "signal.restart_request"].includes(m.type);
+  if ((!state && !signal && m.type !== "command.result" && m.type !== "room.closed") || (scope === "directory" && !state)) return fail("invalid_envelope");
+  if (!signal && !(scope === "directory" && m.type === "state.snapshot") && bytes.byteLength > metadataLimit) return fail("too_large");
+  const required = ["v", "type", "payload", ...(scope === "room" ? ["roomId"] : []),
+    ...(state ? ["revision"] : []), ...(signal ? ["connectionId", "fromPeerId", "toPeerId"] : []), ...(m.type === "command.result" ? ["requestId"] : [])];
+  if (!keys(m, required) || required.filter(k => k.endsWith("Id")).some(k => !identifier(m[k])) || (state && !integer(m.revision))) return fail("invalid_envelope");
+  const p = m.payload;
+  let valid = false;
+  if (signal) {
+    if (m.fromPeerId === m.toPeerId) return fail("invalid_payload");
+    const { fromPeerId, ...command } = m;
+    const validated = validateClientCommand(utf8.encode(JSON.stringify(command)));
+    return validated.ok ? { ok: true, message: m } : fail("invalid_payload");
+  }
+  if (m.type === "command.result") {
+    valid = p.status === "ok" ? keys(p, ["status"]) : p.status === "conflict" ? keys(p, ["status", "currentRevision"]) && integer(p.currentRevision) :
+      p.status === "error" && keys(p, ["status", "code"]) && ["forbidden", "not_found", "invalid_state", "rate_limited", "invalid_command"].includes(p.code as string);
+  } else if (m.type === "room.closed") {
+    valid = keys(p, ["reason"]) && ["host_left", "host_expired", "kicked", "server_shutdown"].includes(p.reason as string);
+  } else if (m.type === "state.snapshot") {
+    if (scope === "room") valid = roomState(p);
+    else valid = keys(p, ["rooms"]) && Array.isArray(p.rooms) && p.rooms.length <= 500 && p.rooms.every(summary) && new Set(p.rooms.map(r => r.roomId)).size === p.rooms.length;
+  } else if (scope === "directory") {
+    valid = p.op === "upsert" ? keys(p, ["op", "room"]) && summary(p.room) : p.op === "remove" && keys(p, ["op", "roomId"]) && identifier(p.roomId);
+  } else {
+    valid = p.op === "policy" ? keys(p, ["op", "policy"]) && policy(p.policy) :
+      p.op === "member.upsert" ? keys(p, ["op", "member"]) && member(p.member) :
+      p.op === "member.remove" ? keys(p, ["op", "peerId"]) && identifier(p.peerId) :
+      p.op === "host.status" && keys(p, ["op", "status"]) && ["open", "reconnecting"].includes(p.status as string);
+  }
+  return valid ? { ok: true, message: m } : fail("invalid_payload");
+}

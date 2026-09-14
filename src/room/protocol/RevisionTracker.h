@@ -21,6 +21,10 @@ public:
         revision_ = revision; return Decision::Apply;
     }
     std::optional<std::uint64_t> Revision() const { return revision_; }
+    Decision RequestResync(std::uint64_t generation) {
+        if (!active_ || generation != generation_ || pending_) return Decision::Ignore;
+        pending_ = true; return Decision::Resync;
+    }
 private:
     void Advance() {
         if (generation_ == MaxRevision) throw std::overflow_error("Subscription generation exhausted");

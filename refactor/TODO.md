@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint A — remaining lifecycle failure investigation, architecture/protocol fixtures, baseline latency and installer/distribution evidence.** Verified relocatable Debug/Release SDKs and native Release portable startup now pass. Forty Release capture cycles (20 debugger / 20 normal) did not reproduce the earlier failure; its cause remains unknown. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
+Current next action: **Checkpoint A — remaining lifecycle failure investigation, baseline latency and installer/distribution evidence. Room v2 command/event contracts and native state-cache validation are now covered.** Verified relocatable Debug/Release SDKs and native Release portable startup now pass. Forty Release capture cycles (20 debugger / 20 normal) did not reproduce the earlier failure; its cause remains unknown. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
 
 ## Planning handoff
 
@@ -35,10 +35,11 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [x] Record the single-machine proof host/viewer hardware, OS, GPU/driver, generated source, resolution/FPS/bitrate and local network conditions; external LAN/game reference remains separate.
 - [ ] Capture current-backend one-viewer behavior, queue/latency/CPU/GPU data and available multi-viewer results.
 - [x] Record existing validation failures separately from refactor regressions.
-- [ ] Write the v2 architecture/protocol reference and shared message fixtures under the repository's documentation/test structure.
+- [x] Write the v2 architecture/protocol reference and shared message fixtures under the repository's documentation/test structure.
 - [x] Add the room wire/ownership reference, matching native/Worker client-command validators and shared malformed-message/Unicode/byte-boundary fixtures.
 - [x] Validate independent subscription revisions, one resync per gap and stale-callback rejection with a shared native/TypeScript lifecycle trace.
-- [ ] Complete exact server snapshot/delta/acknowledgement schemas and shared outbound fixtures before wiring the room transport.
+- [x] Complete exact server snapshot/delta/acknowledgement schemas and shared outbound fixtures before wiring the room transport.
+- [x] Add atomic native room/directory state caches with bound identities, generation checks, full-state validation and one resync for inconsistent deltas.
 
 ### Reproducible native dependencies
 

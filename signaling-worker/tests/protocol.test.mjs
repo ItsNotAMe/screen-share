@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateClientCommand } from '../src/v2/protocol.ts';
+import { validateClientCommand, validateServerEvent } from '../src/v2/protocol.ts';
 import { RevisionTracker } from '../src/v2/revision-tracker.ts';
 const fixtures = name => JSON.parse(readFileSync(new URL(`../../tests/fixtures/room-v2/${name}.json`, import.meta.url), 'utf8'));
-for (const fixture of fixtures('commands')) test(fixture.name, () => {
+for (const file of ['commands', 'events']) for (const fixture of fixtures(file)) test(`${file}: ${fixture.name}`, () => {
   const m = structuredClone(fixture.message);
   if (fixture.repeat) m.payload[fixture.repeat.field] = fixture.repeat.text.repeat(fixture.repeat.count);
   const bytes = fixture.hex ? Buffer.from(fixture.hex, 'hex') : Buffer.from((fixture.raw ?? JSON.stringify(m)) + ' '.repeat(fixture.padding ?? 0));
-  const result = validateClientCommand(bytes, fixture.scope);
+  const result = (file === 'commands' ? validateClientCommand : validateServerEvent)(bytes, fixture.scope);
   assert.equal(result.ok, fixture.ok ?? false);
   if (fixture.error) assert.equal(result.error, fixture.error);
   if (fixture.nickname) assert.equal(result.message.payload.nickname, fixture.nickname);

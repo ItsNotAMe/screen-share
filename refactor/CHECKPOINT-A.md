@@ -390,3 +390,30 @@ Reference machine collected with no identifying names/addresses: Windows 11 Pro 
   no service deployed, no authorization or Cloudflare runtime proof claimed.
   Exact server snapshot/delta/ack schemas and fixtures remain outstanding, as do
   the existing lifecycle, distribution and external latency Gate A checks.
+# Server event contracts and atomic state caches — 2026-09-14
+
+- Completed exact room/directory snapshot, typed delta, command result, closure
+  and targeted signal schemas in `refactor/ROOM-PROTOCOL.md`, with matching native
+  and TypeScript validation. Canonical server names, unique rosters, one host,
+  safe directory summaries, independent revisions and raw frame limits are checked.
+- Added native `StateSubscription`: bound room/self identity and callback generation,
+  isolated candidate state, full snapshot validation before committing payload and
+  revision, one resync for inconsistent deltas, and state clearing on stop/closure.
+  It performs no network I/O and is not yet wired to the production room transport.
+- Shared wire fixtures: 74 client commands and 116 server events. Native cache
+  traces additionally assert complete state after host reconnect, join/removal,
+  lowered limits, wrong room/self identity, closure, stale callbacks, gaps and
+  directory summary-version conflicts. The initial generated cache fixture reused
+  a mutable delta object, changing earlier revisions; corrected the fixture and
+  reran both builds. No failing expectations were removed.
+- Validation: TypeScript typecheck passed; Node tests 191/191; complete application
+  CTest 10/10 in Debug and Release. Used `run-webrtc-proof.ps1 -Application` with
+  the existing SDK artifacts/build directories, then native CMake target rebuilds
+  and full CTest after extending/fixing the cache traces.
+- Final logs: `build/webrtc/server-protocol-node.log`,
+  `server-protocol-debug-final.log`, `server-protocol-release-final.log`.
+- Gate A's architecture/protocol reference and fixture task is complete. Remaining
+  Gate A work includes the unexplained lifecycle failure, external latency baseline
+  and distribution evidence. Authenticated dispatch, HTTP admission, hibernating
+  sockets, runtime security tests and live push behavior remain Checkpoint C work.
+  No service deployment or production media cutover occurred.

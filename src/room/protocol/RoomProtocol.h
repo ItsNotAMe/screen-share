@@ -11,4 +11,5 @@ struct Validation {
     QJsonObject message;
 };
 Validation ValidateClientCommand(const QByteArray& bytes, bool directory = false);
+Validation ValidateServerEvent(const QByteArray& bytes, bool directory = false);
 }
