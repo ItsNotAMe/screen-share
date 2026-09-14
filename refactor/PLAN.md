@@ -697,3 +697,33 @@ reproduced linear COM remoting event growth: 100-cycle full and rapid-close
 handle bounds pass. Complete resource teardown, external latency and production
 session integration remain open. Use CHECKPOINT-A.md and BUILD.md for evidence
 and the embedding contract before declaring cutover ready.
+
+## Headless live-session testing requirement — 2026-09-15
+
+User requirement for subsequent implementation: provide an easy, documented,
+single-command way to exercise the program in realistic real-time sessions
+without manual mouse/keyboard interaction. Build this alongside production
+session integration so future changes can be validated autonomously.
+
+- Drive the production session API and media/control paths from a CLI scenario
+  runner; avoid a separate mock engine that can pass while the application fails.
+- Provide a fully headless mode with paced synthetic video/audio, local host and
+  viewer processes, and an offscreen receiver. Cover start/stop, reconnect,
+  settings changes, fixed/auto bitrate, multiple viewers and recovery.
+- Add an unattended Windows hardware mode using a generated capture target for
+  WGC/encoder/presentation coverage. Explicitly report when an interactive desktop
+  or GPU is required; a synthetic headless pass does not prove WGC coverage.
+- Exercise gaming control with scripted protocol events and a test-owned input
+  sink/target; require no physical input and do not inject into unrelated apps.
+  Test grant/revoke, stale-event rejection and input-to-frame response timing.
+- Support deterministic scenario configuration, timeouts, process cleanup and
+  nonzero failure exits. Save machine-readable results plus diagnostic logs:
+  frame delivery, queue age, latency distributions, bitrate/FPS, drops, recovery
+  and resource growth. Redact credentials and sensitive signaling data.
+- Include repeatable constrained-network scenarios and document which timing
+  measurements are internal estimates. Keep actual display/input latency and
+  external-network acceptance separate from headless checks.
+
+Reuse existing proof/stress tooling where practical. Document one quick smoke
+command and one longer regression command with prerequisites and artifact paths.
+This requirement is saved for the next continuation; implementation is paused.

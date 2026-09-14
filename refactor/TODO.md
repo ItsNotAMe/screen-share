@@ -19,6 +19,10 @@ Current next action: **Checkpoint A — production capture-owner/session integra
 
 ## Planning handoff
 
+- [ ] On continuation, implement headless live-session scenario tooling alongside production integration: one-command smoke/regression runs, paced media, scripted test-owned control events, network constraints, machine-readable metrics and watchdog cleanup. See PLAN.md's headless testing requirement. Distinguish fully headless coverage from unattended WGC tests requiring a desktop/GPU.
+
+Paused at user request on 2026-09-15; resume implementation only when requested.
+
 - [x] Save the complete approved implementation plan in this folder.
 - [x] Save the ordered implementation, testing, acceptance and deferred-work checklist.
 - [x] Synchronize the project roadmap with this refactor when implementation begins.

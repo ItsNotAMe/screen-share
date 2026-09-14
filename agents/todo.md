@@ -6,6 +6,8 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
+- [ ] Add easy, one-command headless testing of realistic live sessions through production APIs, without manual mouse/keyboard input. Include paced media, scripted control to a test-owned sink, network/recovery scenarios, metrics and watchdog cleanup; distinguish synthetic headless from desktop/GPU-dependent capture checks. Full requirement: refactor/PLAN.md. User paused implementation on 2026-09-15 until the next continuation.
+
 - [ ] Complete Checkpoint A baseline and pinned native WebRTC codec/audio/build proof before wider migration.
 - [ ] Finish Gate A external latency baseline and installer/distribution evidence. Shared v2 command/event validation now exists in native C++ and TypeScript; native room/directory caches validate complete state atomically with generation/revision traces; see refactor/ROOM-PROTOCOL.md. Content-addressed Debug/Release SDK exports, relocated SDK consumers and native portable launch pass. The unloaded-GraphicsCapture.dll crash now has a module-lifetime mitigation with 100 full Release cycles passing; capture-owner dispatch now completes 100 rapid-close cycles without the old hang; scoped application MTA ownership now passes full and rapid-close 100-cycle handle bounds.
 - [ ] Complete capture/encoder device recovery and actual device-removal validation. Receiver presentation now rebuilds resources with a three-rebuild session budget and 250 ms backoff; injected-error policy and desktop resource-recreation proofs pass.
