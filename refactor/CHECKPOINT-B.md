@@ -1,5 +1,35 @@
 # Checkpoint B evidence
 
+## Connection-scoped capture cleanup - 2026-09-15
+
+Capture subscriptions previously validated only the host-session generation.
+A delayed cleanup for a departed connection could therefore remove a replacement
+subscription with the same viewer ID. HostMediaSession now requires a connection
+generation for AddViewer and RemoveViewer, retains that identity in subscription
+snapshots and reports it with subscriber failures. Admission uses strictly
+increasing generations within the host session, matching the peer registry;
+retired attachments cannot resurrect a subscription after removal. Removing an
+absent subscriber remains idempotent, while a mismatched live connection is
+rejected before changing delivery.
+
+The coordinator test replaces a subscriber, rejects an old attachment/removal
+and waits for new frames. The real four-peer rejoin proof uses actual connection
+generations and rejects delayed capture cleanup before checking continued
+decoding. This fixes a prerequisite for automatic peer-failure cleanup; the
+application executor/room adapter integration remains open.
+
+Validation: Debug and Release media suites pass **24/24** each, and application
+builds/suites pass **10/10** each. Logs are
+`build/webrtc/connection-guard-sdk-proof-debug.log`,
+`build/webrtc/connection-guard-sdk-proof-release.log`,
+`build/webrtc/connection-guard-sdk-app-debug.log` and
+`build/webrtc/connection-guard-sdk-app-release.log`.
+
+Headless Debug smoke passes **9/9** runs and Release regression passes **30/30**.
+Reports (including hashes and watchdog outcomes):
+`build/webrtc/connection-guard-headless-debug/result.json` and
+`build/webrtc/connection-guard-headless-release/result.json`.
+
 ## Host capture/membership coordinator — 2026-09-15
 
 `src/media/HostMediaSession` now owns CaptureSession and CaptureDistributor on

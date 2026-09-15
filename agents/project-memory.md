@@ -2,6 +2,8 @@
 
 ## User Preferences
 
+- Use the patch editing tool for source/document changes so edits are reviewable in Codex; do not use PowerShell/Python file rewrites. Continue committing at logical milestones. Committed work can be reviewed using the commit or branch diff rather than only unstaged changes.
+
 - Build a native Windows C++ screen-sharing app for friends.
 - No web app, no C#.
 - Use local `git` and `gh` for GitHub work; do not use the GitHub connector for this repo.

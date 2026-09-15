@@ -26,6 +26,11 @@ WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
 
+- Capture subscription commands carry both host-session and viewer-connection
+  generations. The coordinator test rejects retired attachment and cleanup
+  commands after viewer replacement; the real four-peer rejoin scenario sends
+  stale capture removal and verifies that the replacement keeps decoding.
+
 - `HostPeerRegistry` owns peers behind `IMediaPeer`, dispatches lifecycle restart
   and close actions, retains failure snapshots and rejects retired-generation
   requests. The real four-peer scenario uses this owner for restart, removal,

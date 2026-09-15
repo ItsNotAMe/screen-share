@@ -15,6 +15,7 @@ struct HostOperationResult {
 struct HostViewerSnapshot {
     uint64_t viewer = 0;
     CaptureDeliveryStats delivery;
+    uint64_t connectionGeneration = 0;
 };
 struct HostMediaSnapshot {
     HostMediaState state = HostMediaState::Idle;
@@ -23,6 +24,7 @@ struct HostMediaSnapshot {
     uint64_t lastFailedViewer = 0;
     std::vector<HostViewerSnapshot> viewers;
     uint64_t activeOperation = 0;
+    uint64_t lastFailedConnectionGeneration = 0;
 };
 // Host capture/membership lifecycle, independent of Qt and WebRTC. Peer creation
 // and signaling remain the next integration layer. Lifecycle commands execute
@@ -36,8 +38,12 @@ public:
     HostMediaSession(const HostMediaSession&) = delete;
     HostMediaSession& operator=(const HostMediaSession&) = delete;
     std::future<HostOperationResult> Start(CaptureSession::Factory);
-    std::future<HostOperationResult> AddViewer(uint64_t generation, uint64_t viewer, CaptureSession::Deliver);
-    std::future<HostOperationResult> RemoveViewer(uint64_t generation, uint64_t viewer);
+    // Admit connections in increasing generation order, matching HostPeerRegistry.
+    // Removal is scoped to both host session and viewer connection incarnation.
+    std::future<HostOperationResult> AddViewer(uint64_t generation, uint64_t viewer,
+                                             uint64_t connectionGeneration, CaptureSession::Deliver);
+    std::future<HostOperationResult> RemoveViewer(uint64_t generation, uint64_t viewer,
+                                                uint64_t connectionGeneration);
     std::future<HostOperationResult> Stop(uint64_t generation);
     HostMediaSnapshot snapshot() const;
 private:

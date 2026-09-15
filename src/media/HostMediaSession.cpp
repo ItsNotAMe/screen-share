@@ -22,7 +22,8 @@ struct HostMediaSession::Impl {
     HostMediaSnapshot current;
     std::unique_ptr<CaptureDistributor> distribution;
     std::unique_ptr<CaptureSession> capture;
-    std::map<uint64_t, bool> viewers;
+    std::map<uint64_t, uint64_t> viewers;
+    uint64_t lastConnectionGeneration = 0;
     std::thread worker;
 
     Impl() : worker([this] { Run(); }) {}
@@ -90,8 +91,9 @@ struct HostMediaSession::Impl {
                 const auto stats = distribution->stats(it->first);
                 if (stats.failed) {
                     current.lastFailedViewer = it->first;
+                    current.lastFailedConnectionGeneration = it->second;
                     distribution->Remove(it->first); it = viewers.erase(it);
-                } else { current.viewers.push_back({it->first, stats}); ++it; }
+                } else { current.viewers.push_back({it->first, stats, it->second}); ++it; }
             }
             current.viewerCount = viewers.size();
             if (current.state == HostMediaState::Running && viewers.empty()) current.state = HostMediaState::WaitingForViewers;
@@ -138,6 +140,7 @@ std::future<HostOperationResult> HostMediaSession::Start(CaptureSession::Factory
         if (!factory || owner->capture) return HostOperationError::InvalidState;
         const auto generation = owner->current.generation + 1;
         owner->current = {HostMediaState::Starting, generation};
+        owner->lastConnectionGeneration = 0;
         owner->Publish();
         owner->distribution = std::make_unique<CaptureDistributor>(generation);
         auto* distribution = owner->distribution.get();
@@ -147,21 +150,29 @@ std::future<HostOperationResult> HostMediaSession::Start(CaptureSession::Factory
         return HostOperationError::None;
     });
 }
-std::future<HostOperationResult> HostMediaSession::AddViewer(uint64_t generation, uint64_t viewer, CaptureSession::Deliver deliver) {
-    return impl_->Submit([owner = impl_.get(), generation, viewer, deliver = std::move(deliver)]() mutable {
+std::future<HostOperationResult> HostMediaSession::AddViewer(uint64_t generation, uint64_t viewer,
+                                                         uint64_t connectionGeneration, CaptureSession::Deliver deliver) {
+    return impl_->Submit([owner = impl_.get(), generation, viewer, connectionGeneration, deliver = std::move(deliver)]() mutable {
         if (generation != owner->current.generation) return HostOperationError::StaleGeneration;
         if (!owner->capture) return HostOperationError::InvalidState;
         if (!viewer || !deliver || owner->viewers.contains(viewer)) return HostOperationError::InvalidViewer;
+        if (!connectionGeneration || connectionGeneration <= owner->lastConnectionGeneration)
+            return HostOperationError::StaleGeneration;
         if (owner->viewers.size() >= 63) return HostOperationError::Capacity;
         owner->distribution->Add(viewer, std::move(deliver));
-        owner->viewers.emplace(viewer, true);
+        owner->viewers.emplace(viewer, connectionGeneration);
+        owner->lastConnectionGeneration = connectionGeneration;
         owner->current.viewerCount = owner->viewers.size();
         return HostOperationError::None;
     });
 }
-std::future<HostOperationResult> HostMediaSession::RemoveViewer(uint64_t generation, uint64_t viewer) {
-    return impl_->Submit([owner = impl_.get(), generation, viewer] {
+std::future<HostOperationResult> HostMediaSession::RemoveViewer(uint64_t generation, uint64_t viewer,
+                                                            uint64_t connectionGeneration) {
+    return impl_->Submit([owner = impl_.get(), generation, viewer, connectionGeneration] {
         if (generation != owner->current.generation) return HostOperationError::StaleGeneration;
+        const auto existing = owner->viewers.find(viewer);
+        if (existing != owner->viewers.end() && existing->second != connectionGeneration)
+            return HostOperationError::StaleGeneration;
         if (owner->distribution) owner->distribution->Remove(viewer);
         owner->viewers.erase(viewer); owner->current.viewerCount = owner->viewers.size();
         return HostOperationError::None;

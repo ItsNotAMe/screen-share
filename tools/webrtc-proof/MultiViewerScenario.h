@@ -127,7 +127,7 @@ void RunMultiViewer() {
         throw std::runtime_error("Missing coordinator viewer");
     };
     for (size_t i = 0; i < links.size(); ++i) {
-        auto added = session.AddViewer(generation, i + 1, [source = links[i]->source, &slow, i](auto sample) {
+        auto added = session.AddViewer(generation, i + 1, links[i]->host.lifecycle.generation(), [source = links[i]->source, &slow, i](auto sample) {
             if (i == 3 && slow) std::this_thread::sleep_for(std::chrono::milliseconds(100));
             source->Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
         }).get();
@@ -205,17 +205,19 @@ void RunMultiViewer() {
 
     // Tear down one complete pair, then attach a fresh connection/source while
     // the other three continue to receive the same capture session.
-    Require(session.RemoveViewer(generation, 4).get().error == HostOperationError::None, "Coordinator viewer removal failed");
     const auto retiredGeneration = links[3]->host.lifecycle.generation();
+    Require(session.RemoveViewer(generation, 4, retiredGeneration).get().error == HostOperationError::None, "Coordinator viewer removal failed");
     Require(peers.Remove(4, retiredGeneration), "Peer owner removal failed");
     const auto beforeRejoin = links[0]->viewer.decodedFrames.load();
     attach(3);
     Require(!peers.RequestRestart(4, retiredGeneration, PeerConnectionLifecycle::Clock::now()),
             "Retired peer request affected replacement");
-    auto rejoined = session.AddViewer(generation, 4, [source = links[3]->source](auto sample) {
+    auto rejoined = session.AddViewer(generation, 4, links[3]->host.lifecycle.generation(), [source = links[3]->source](auto sample) {
         source->Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
     }).get();
     Require(rejoined.error == HostOperationError::None, "Coordinator viewer rejoin failed");
+    Require(session.RemoveViewer(generation, 4, retiredGeneration).get().error == HostOperationError::StaleGeneration,
+            "Delayed capture cleanup detached the replacement peer");
     Wait([&] { return links[3]->viewer.decodedFrames >= 30 && links[0]->viewer.decodedFrames >= beforeRejoin + 30; },
          "Viewer rejoin interrupted healthy media");
     for (size_t i = 0; i < links.size(); ++i)

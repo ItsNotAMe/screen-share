@@ -39,7 +39,7 @@ int main() try {
                 "Session/operation identities were reused");
         const auto generation = started.generation;
         auto frames = std::make_shared<std::atomic<unsigned>>(0);
-        auto added = session.AddViewer(generation, 1, [&, generation, frames](auto sample) {
+        auto added = session.AddViewer(generation, 1, 1, [&, generation, frames](auto sample) {
             if (sample.session != generation) wrongThread = true;
             ++*frames;
         }).get();
@@ -55,16 +55,27 @@ int main() try {
     Require(session.Stop(previousGeneration).get().error == HostOperationError::StaleGeneration,
             "Old stop affected a new session");
     Wait([&] { return session.snapshot().state == HostMediaState::WaitingForViewers; });
-    Require(session.AddViewer(previousGeneration, 1, [](auto) {}).get().error == HostOperationError::StaleGeneration,
+    Require(session.AddViewer(previousGeneration, 1, 1, [](auto) {}).get().error == HostOperationError::StaleGeneration,
             "Old viewer operation affected a new session");
     auto healthy = std::make_shared<std::atomic<int>>(0);
-    Require(session.AddViewer(generation, 7, [](auto) { throw std::runtime_error("Viewer failed"); }).get().error == HostOperationError::None,
+    Require(session.AddViewer(generation, 7, 7, [](auto) { throw std::runtime_error("Viewer failed"); }).get().error == HostOperationError::None,
             "Failure test subscriber was not accepted");
-    Require(session.AddViewer(generation, 8, [healthy](auto) { ++*healthy; }).get().error == HostOperationError::None,
+    Require(session.AddViewer(generation, 8, 8, [healthy](auto) { ++*healthy; }).get().error == HostOperationError::None,
             "Healthy subscriber was not accepted");
     Wait([&] { return *healthy >= 5 && session.snapshot().lastFailedViewer == 7; });
     Require(session.snapshot().state == HostMediaState::Running && session.snapshot().viewerCount == 1,
             "Viewer failure stopped healthy media");
+    Require(session.snapshot().lastFailedConnectionGeneration == 7, "Failure lost its connection identity");
+    Require(session.RemoveViewer(generation, 8, 8).get().error == HostOperationError::None, "Removal failed");
+    Require(session.AddViewer(generation, 8, 8, [](auto) {}).get().error == HostOperationError::StaleGeneration,
+            "Retired attach resurrected a connection");
+    Require(session.AddViewer(generation, 8, 9, [healthy](auto) { ++*healthy; }).get().error == HostOperationError::None,
+            "Replacement attach failed");
+    const auto beforeStaleRemoval = healthy->load();
+    Require(session.RemoveViewer(generation, 8, 8).get().error == HostOperationError::StaleGeneration,
+            "Delayed cleanup removed the replacement");
+    Wait([&] { return *healthy >= beforeStaleRemoval + 3; });
+    Require(session.snapshot().viewers.front().connectionGeneration == 9, "Snapshot has stale connection identity");
     session.Stop(generation).get();
     auto failed = session.Start([]() -> std::unique_ptr<ICaptureSource> { throw std::runtime_error("Startup failure"); }).get();
     Wait([&] { return session.snapshot().state == HostMediaState::Failed; });
@@ -83,12 +94,12 @@ int main() try {
         uint64_t generation;
         ~Unblock() { try { release.set_value(); } catch (...) {} session.Stop(generation).get(); }
     } cleanup{release, session, generation};
-    auto attached = session.AddViewer(generation, 1, [&](auto) { entered = true; released.wait(); }).get();
+    auto attached = session.AddViewer(generation, 1, 1, [&](auto) { entered = true; released.wait(); }).get();
     Wait([&] { return entered.load(); });
-    auto removing = session.RemoveViewer(generation, 1);
+    auto removing = session.RemoveViewer(generation, 1, 1);
     Wait([&] { return session.snapshot().activeOperation == attached.operation + 1; });
     std::vector<std::future<HostOperationResult>> queued;
-    for (int i = 0; i < 80; ++i) queued.push_back(session.AddViewer(generation, i + 2, [](auto) {}));
+    for (int i = 0; i < 80; ++i) queued.push_back(session.AddViewer(generation, i + 2, i + 2, [](auto) {}));
     auto stopping = session.Stop(generation);
     release.set_value();
     Require(removing.get().error == HostOperationError::None && stopping.get().error == HostOperationError::None,

@@ -95,6 +95,8 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 ### Interfaces, ownership and lifecycle
 
+- [x] Scope capture attachment/removal and failure snapshots to the viewer connection generation; reject retired attachments and delayed removals after same-viewer rejoin.
+
 - [x] Add a portable owning peer registry with restart/close dispatch, terminal failure snapshots, bounded membership and generation validation; drive actual four-peer ownership through it.
 - [ ] Connect the peer owner to the application signaling executor and capture-membership failure cleanup. Real-peer proof integration does not yet replace the UI/CLI facade.
 
