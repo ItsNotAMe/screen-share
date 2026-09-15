@@ -1,6 +1,7 @@
 import { AdmissionError, failure, json, randomId, readAdmission, tokenHash } from './admission';
 import type { RoomEnv } from './room';
 export { V2Room } from './room';
+export { V2Directory } from './directory';
 interface Env extends RoomEnv { ALLOWED_ORIGINS?: string; }
 
 // One object per hashed IP for admission budgets; one named object for the
@@ -59,13 +60,16 @@ export default {
       if (url.protocol !== 'https:' || url.search || url.username || url.password) throw new AdmissionError(400, 'invalid_request');
       const origin = request.headers.get('Origin');
       if (origin && !(env.ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean).includes(origin)) throw new AdmissionError(403, 'forbidden');
-      if (!env.V2_ROOMS || !env.V2_CONTROL) throw new Error('missing_binding');
+      if (!env.V2_ROOMS || !env.V2_CONTROL || !env.V2_DIRECTORY) throw new Error('missing_binding');
       const create = url.pathname === '/v2/rooms' && request.method === 'POST';
       const match = url.pathname.match(/^\/v2\/rooms\/([A-Za-z0-9_-]{1,128})\/(join|events)$/);
       const join = match?.[2] === 'join' && request.method === 'POST';
       const events = match?.[2] === 'events' && request.method === 'GET';
       const health = url.pathname === '/v2/health' && request.method === 'GET';
-      if (!create && !join && !events && !health) throw new AdmissionError(404, 'not_found');
+      const listing = url.pathname === '/v2/rooms' && request.method === 'GET';
+      const directoryEvents = url.pathname === '/v2/directory/events' && request.method === 'GET';
+      if (!create && !join && !events && !health && !listing && !directoryEvents) throw new AdmissionError(404, 'not_found');
+      if ((events || directoryEvents) && request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') throw new AdmissionError(400, 'invalid_request');
       const ip = request.headers.get('CF-Connecting-IP');
       if (!ip) throw new AdmissionError(403, 'forbidden');
       const limiter = env.V2_CONTROL.get(env.V2_CONTROL.idFromName('ip-' + await tokenHash(ip)));
@@ -73,6 +77,11 @@ export default {
       if (allowed.status === 429) throw new AdmissionError(429, 'rate_limited');
       if (!allowed.ok) throw new Error('limiter_unavailable');
       if (health) return json({ v: 2, status: 'ok' });
+      if (listing || directoryEvents) {
+        if (request.headers.has('Authorization')) throw new AdmissionError(400, 'invalid_request');
+        return await env.V2_DIRECTORY.get(env.V2_DIRECTORY.idFromName('directory')).fetch('https://internal/' + (listing ? 'snapshot' : 'events'), {
+          headers: directoryEvents ? { Upgrade: request.headers.get('Upgrade') ?? '' } : {} });
+      }
       if (create) {
         // Validate before reserving capacity. Forward only a canonical bounded
         // body and a server-generated ID; never trust client internal headers.

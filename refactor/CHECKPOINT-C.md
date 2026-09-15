@@ -1,5 +1,62 @@
 # Checkpoint C evidence
 
+## Directory publication and live subscriptions — 2026-09-15
+
+The isolated v2 service now implements all six HTTP/WebSocket endpoints. A separate
+SQLite V2Directory object owns directory revisions, explicit HTTP snapshots, initial
+WebSocket snapshots, pushed upsert/remove deltas and bounded resync. Listing reads
+only that object; there are no per-room verification calls. Public directory routes
+reject membership Authorization headers. Event routes require an actual upgrade.
+The default v1 service/config and normal UI/CLI remain unchanged; nothing deployed.
+
+Room state now includes a versioned pending directory publication committed with
+the room change. Only public rooms with an attached host publish. Counts include
+provisional admissions because they reserve viewer capacity; cleanup updates the
+summary. Host disconnect/reconnect, name/limit changes, visibility changes and
+membership removal update the summary as needed. Nickname-only changes do not
+change the directory. No roster, credentials, SDP or peer addresses are published.
+
+Publication retries are idempotent by summary version; same-version conflicting
+content rejects and older versions are ignored. Directory rows and their visible
+revision commit in one storage transaction before notification. A removal keeps a
+short-lived version fence so delayed older updates cannot undo it. Public summaries
+renew every 60 seconds with 180-second leases. Lease-only renewal has no visible
+revision or delta. Cleanup uses a 60-second alarm and also sweeps before directory
+reads. Capacity renewals now occur every 60 seconds instead of every room alarm.
+
+Failed publication remains pending for the room's next alarm. Closure retains a
+tombstone until directory removal and capacity release succeed; expired directory
+leases are the fallback for an unavailable room. Publication requests have a
+five-second abort deadline. They currently execute within room operation handling;
+slow/failing directory calls can delay subsequent control traffic, so decoupled
+outbox delivery is still required before production responsiveness acceptance.
+Media bytes never go through this path. No failure-injection pass establishes
+remote deadline enforcement or service availability.
+
+Directory sockets use the automatic heartbeat pair and timestamp-based idle cleanup,
+six resyncs per minute, and a 512-subscriber development cap. Runtime outbound queue
+pressure and free-tier sizing remain unvalidated. The server keeps no retry queue
+of outgoing events; reconnect/resync obtains current state. Room lifecycle deltas
+and closure notifications now also follow persistence, fixing the earlier ordering.
+
+Typecheck and 194/194 Worker tests passed. Actual workerd tests cover publication
+failure before commit, lost acknowledgement after commit, retry without duplicate
+revision, provisional hiding/full/open cleanup, reconnecting/recovery, visibility,
+stale resurrection rejection, renewal without revision changes, expired leases,
+closure tombstones/retry, no listing fanout, unchanged directory rows after automatic
+pong, contiguous pushed revisions, resync/flood handling and 500 maximum-length
+summaries within the 256 KiB protocol limit. Expiry/renewal deadlines are injected
+through test-only entry points; real scheduling and eviction are not claimed.
+Evidence: `build/webrtc/v2-directory-tests.log`.
+Wrangler's isolated configuration also passed a dry-run build with all three
+Durable Object bindings; artifacts: `build/webrtc/v2-directory-bundle` and
+`build/webrtc/v2-directory-dry-run.log`. This did not deploy the service.
+
+Next: decouple directory I/O from room control dispatch, validate native clients
+against workerd, then connect the production media/session facade. Real hibernation,
+outbound pressure, remote TLS/NAT, cost, comparative latency and resource acceptance
+remain open. This is not completion of Checkpoint B/C or the backend cutover.
+
 ## Authenticated signaling relay — 2026-09-15
 
 Added a separate signaling authorization policy and actual room-socket dispatch.

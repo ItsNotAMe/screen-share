@@ -8,7 +8,7 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
   // Inspection/expiry injection exists only in this generated test entry point.
   // Production routing cannot access storage or invoke these test endpoints.
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
-    export { default, V2Control } from './src/v2/worker.ts';
+    export { default, V2Control, V2Directory } from './src/v2/worker.ts';
     import { V2Room as Room } from './src/v2/room.ts';
     export class V2Room extends Room {
       constructor(ctx, env) { super(ctx, env); this.testState = ctx; }
@@ -27,7 +27,7 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
     }
   ` }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022' });
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-05-21',
-    durableObjects: { V2_ROOMS: { className: 'V2Room', useSQLite: true }, V2_CONTROL: { className: 'V2Control', useSQLite: true } } });
+    durableObjects: { V2_ROOMS: { className: 'V2Room', useSQLite: true }, V2_CONTROL: { className: 'V2Control', useSQLite: true }, V2_DIRECTORY: { className: 'V2Directory', useSQLite: true } } });
   t.after(() => mf.dispose());
   const request = (path, body, extra = {}) => mf.dispatchFetch('https://test' + path, { method: body === undefined ? 'GET' : 'POST',
     headers: { 'CF-Connecting-IP': '192.0.2.1', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...extra },

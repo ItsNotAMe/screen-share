@@ -5,9 +5,10 @@ command validators and subscription ordering tests exist; the running applicatio
 and deployed Worker still use v1. Server event validation and native atomic state caches are also implemented.
 The native Qt WebSocket transport now has real local I/O tests; see
 [CHECKPOINT-C.md](CHECKPOINT-C.md). Server authenticated dispatch, HTTP handlers,
-application/media integration remain open. An isolated v2 Worker now implements
-admission, room attachment/resync and membership alarms, with local Durable Object
-runtime tests; directory and authenticated command dispatch remain unfinished.
+application/media integration remain open. The isolated v2 Worker now implements
+all six endpoints, authenticated mutations/signaling, membership alarms and the
+directory, with local Durable Object runtime tests. Production cutover and service
+responsiveness/load/hibernation acceptance remain unfinished.
 
 ## Ownership and threading
 

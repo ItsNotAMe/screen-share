@@ -207,6 +207,13 @@ callback, so native-call watchdogs remain necessary. The current admission
 ceiling is 63 subscriptions, matching the planned service abuse ceiling.
 # Local v2 service runtime tests
 
+Directory coverage now includes real pushed snapshots/deltas, publication failures
+before and after commit, closure retry, version fences, lease expiry/renewal,
+provisional capacity and host reconnecting, no per-room listing calls, resync floods,
+and a 500-room maximum-name snapshot. `tests/directory.test.mjs` injects faults and
+deadlines only in its in-memory test entry. See CHECKPOINT-C.md for remaining
+real-time scheduling, hibernation, queue-pressure and native integration limits.
+
 From `signaling-worker`, run `npm run typecheck` then `npm test`. The suite bundles
 the production v2 Worker into an isolated Miniflare/workerd instance with SQLite
 Durable Objects and real HTTP/WebSocket traffic. It needs no account, deployment,

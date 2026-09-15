@@ -208,42 +208,43 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [x] Add shared native Qt room/directory transport independent of Widgets: authenticated headers, schema/identity/direction checks, bounded writes, snapshot readiness and stale-socket rejection. Validate live I/O on a dedicated networking thread; see [CHECKPOINT-C.md](CHECKPOINT-C.md).
 - [x] Add live local socket tests and optional integration with the headless media runner. Local Cloudflare and media connection-generation dispatch remain separate requirements.
 
-- [ ] Implement the six documented v2 HTTP/WebSocket endpoints.
-- [ ] Implement create/join credentials, provisional membership expiry and publish-after-host-attach.
+- [x] Implement the six documented v2 HTTP/WebSocket endpoints in the isolated service.
+- [x] Implement create/join credentials, provisional membership expiry and publish-after-host-attach.
 - [ ] Use one Qt-backed native networking event loop for UI and CLI.
-- [ ] Implement all documented socket commands and typed errors.
-- [ ] Implement authoritative sender identity, targeted signaling and generation checks.
-- [ ] Implement separate room/directory revisions; exclude directed signaling from state revisions.
-- [ ] Implement duplicate suppression, one-shot gap resync, expected-revision conflicts and reconnect snapshots.
+- [x] Implement all documented socket commands and typed errors in the isolated service.
+- [x] Implement authoritative sender identity, targeted signaling and generation checks.
+- [x] Implement separate room/directory revisions; exclude directed signaling from state revisions.
+- [x] Implement bounded duplicate suppression, one-shot gap resync, expected-revision conflicts and reconnect snapshots; native/service components tested separately.
 - [ ] Enforce message-byte limits, candidate limits and bounded queues.
 - [ ] Add shared client/server protocol fixture tests.
 
 ### Persistence, hibernation and directory
 
-- [ ] Add separate SQLite Durable Object room/directory namespaces for v2.
+- [x] Add separate SQLite Durable Object room/directory namespaces for v2.
 - [x] Implement socket attachments and replacement-generation handling; local workerd replacement/reconnect passes. Hibernation reconstruction still requires coverage.
-- [ ] Implement automatic ping/pong and auto-response timestamp liveness.
+- [x] Implement automatic ping/pong and auto-response timestamp liveness; real hibernation reconstruction still needs validation.
 - [x] Implement native client ping/pong deadlines, one-shot resync and jittered reconnect backoff; exercise actual timeout/reconnect locally. Normal UI/CLI adoption remains pending.
-- [ ] Implement provisional/membership expiry and immediate leave/kick.
-- [ ] Handle host reconnecting/expiry without host election or new joins during disconnection.
-- [ ] Implement safe directory summaries and snapshot/delta subscriptions.
-- [ ] Remove per-room listing verification and automatic HTTP polling from v2.
-- [ ] Implement 60-second lease renewals, 180-second expiry and directory cleanup.
-- [ ] Avoid visible updates for lease-only renewals.
-- [ ] Persist pending directory updates; retry failures and closure removal safely.
-- [ ] Enforce summary versions and fail-closed reservations/admission.
+- [x] Implement provisional/membership expiry and immediate leave/kick.
+- [x] Handle host reconnecting/expiry without host election or new joins during disconnection.
+- [x] Implement safe directory summaries and snapshot/delta subscriptions.
+- [x] Remove per-room listing verification and automatic HTTP polling from v2; normal application remains v1.
+- [x] Implement 60-second lease renewals, 180-second expiry and directory cleanup; real alarm timing still needs validation.
+- [x] Avoid visible updates for lease-only renewals.
+- [x] Persist pending directory updates; retry failures and closure removal safely.
+- [ ] Decouple directory publication I/O from room control dispatch; current five-second publication deadline can delay subsequent commands during directory failures.
+- [x] Enforce summary versions and fail-closed reservations/admission.
 
 ### Profile and authorization
 
 - [ ] Persist local nickname/preferences; use random Guest defaults rather than OS identity.
-- [ ] Validate nickname normalization, code points/UTF-8 size and forbidden controls.
+- [x] Validate nickname normalization, code points/UTF-8 size and forbidden controls.
 - [ ] Implement duplicate-name disambiguation with peer IDs.
 - [ ] Implement public/unlisted rooms, creation password and live name/visibility/viewer-limit edits.
 - [x] Preserve existing viewers when the limit is lowered; block new admissions.
 - [ ] Implement v2 room links without secrets.
-- [ ] Issue 256-bit membership tokens, store hashes and enforce role/target/socket authorization.
-- [ ] Preserve versioned salted PBKDF2 work factor and HTTPS-only secret handling.
-- [ ] Add admission and per-socket rate limits without cross-object checks for every message.
+- [x] Issue 256-bit membership tokens, store hashes and enforce role/target/socket authorization.
+- [x] Preserve versioned salted PBKDF2 work factor and HTTPS-only secret handling.
+- [x] Add admission and per-socket rate limits without cross-object checks for every message; load tuning remains pending.
 - [ ] Preserve configurable room/participant caps, CORS restrictions and certificate validation.
 - [x] Implement kick invalidation and avoid claims of permanent accountless bans.
 
@@ -254,7 +255,7 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [ ] Test passwords, invalid/expired tokens, replay and unauthorized commands.
 - [ ] Test old-socket close after replacement and hibernation heartbeat freshness.
 - [ ] Test duplicate/gapped revisions and stale connection candidates.
-- [ ] Test directory write/removal failures, retries and leases.
+- [x] Test directory write/removal failures, retries and leases in actual workerd with injected failures/deadlines.
 - [ ] Test host crash/leave, public/unlisted visibility and viewer-limit changes.
 - [ ] Test malformed/oversized messages, Unicode handling and signaling floods.
 - [ ] Verify listing has zero per-room fanout and heartbeat has zero per-peer storage writes.

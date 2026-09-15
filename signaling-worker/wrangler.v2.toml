@@ -11,6 +11,14 @@ class_name = "V2Room"
 name = "V2_CONTROL"
 class_name = "V2Control"
 
+[[durable_objects.bindings]]
+name = "V2_DIRECTORY"
+class_name = "V2Directory"
+
 [[migrations]]
 tag = "v2-initial"
 new_sqlite_classes = ["V2Room", "V2Control"]
+
+[[migrations]]
+tag = "v2-directory"
+new_sqlite_classes = ["V2Directory"]
