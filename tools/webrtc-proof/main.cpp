@@ -94,7 +94,9 @@ void Run(bool useHardware, bool useWasapi, bool useLiveCapture) {
     Require(host.connection->AddTrack(audioTrack, {"proof-stream"}).ok(), "Audio track creation failed");
     TransferDescription(host, viewer, true);
     TransferDescription(viewer, host, false);
-    Wait([&] {
+    WaitForPeer(host, [&] {
+        if (host.lifecycle.state() != screenshare::media::PeerLifecycleState::Connected ||
+            viewer.lifecycle.state() != screenshare::media::PeerLifecycleState::Connected) return false;
         if (viewer.channels.size() != 3) return false;
         for (const auto& channel : host.channels)
             if (channel->channel->state() != webrtc::DataChannelInterface::kOpen) return false;

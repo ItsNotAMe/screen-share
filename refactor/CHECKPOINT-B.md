@@ -99,3 +99,59 @@ Headless Debug smoke passes **7/7** child runs; Release regression passes
 Artifacts: `build/webrtc/trickle-headless-debug/result.json` and
 `build/webrtc/trickle-headless-release/result.json`. Both include executable
 hashes, watchdog outcomes and component metrics. No manual input was needed.
+
+## Connection lifecycle and real ICE restart - 2026-09-15
+
+Added portable `PeerConnectionLifecycle` with a 20-second initial deadline,
+typed direct-connect/remote-close/restart-limit failures and stale connection
+event rejection. Disconnections use 500 ms/1 s/2 s backoff and at most three
+restart attempts per rolling minute. Repeated notifications do not postpone
+backoff; successful reconnection does not reset the rate budget. Transient
+recovery before backoff expires avoids a restart. Restart attempts each have a
+20-second deadline; expiry reschedules within the rolling budget. This is a
+rate bound, not a maximum lifetime attempt count for a long-lived connection.
+
+The proof feeds standards-compliant ICE state callbacks into the policy, checks
+initial deadlines throughout description negotiation, and closes the policy
+before peer teardown. One four-peer viewer receives an explicit restart request;
+the host creates an ICE-restart offer and the viewer answers using fresh
+credentials and fresh candidate handoffs. Candidates from retired local
+credentials are filtered. The scenario verifies old handoff rejection, unchanged
+200 kbps viewer settings, resumed frame delivery and continued healthy viewers,
+then performs the existing full leave/rejoin. Credentials are never logged.
+
+The deterministic policy test covers deadline boundaries, late/stale success,
+duplicate disconnection, backoff, rolling-budget exhaustion/expiry, attempt
+timeout, transient recovery, remote close and isolation from a healthy peer.
+
+Timing investigation: the first combined state/media assertion took about
+16 seconds despite negotiation finishing in about 0.6 seconds. Splitting the
+assertion showed the 20-frame media check passed at 0.66 seconds while ICE state
+confirmation arrived around 16.3 seconds. These are local scenario checks, not
+an outage duration or external input/display measurement. The final proof uses
+`OnStandardizedIceConnectionChange` instead of the legacy combined ICE/DTLS
+callback documented in the pinned header. Keep negotiation, media-check and
+state-check timings separate in JSON; do not gate frame delivery on state UI.
+
+Production peer ownership/action dispatch, authenticated restart requests,
+remote wire-generation binding, STUN/NAT and real outage/interface-change tests
+remain open. This proof explicitly requests recovery; it does not simulate a
+network outage or implement automatic application reconnection. Native handle
+growth and external latency acceptance are unchanged. Application binaries were
+not rebuilt because the new portable header is currently integrated in the proof
+path; normal UI/CLI behavior remains legacy.
+
+Final Debug and Release native media suites pass **23/23** each. Logs:
+`build/webrtc/peer-lifecycle-final-debug.log` and
+`build/webrtc/peer-lifecycle-final-release.log`. The final standardized-callback
+Debug smoke measured 578 ms negotiation, 648 ms for the frame-count check and
+16,283 ms for state confirmation. Switching callback did not remove the state
+confirmation delay; its cause remains open, and it must not be described as a
+16-second video outage. Existing AutoThread deprecation warnings are unchanged.
+
+Final headless Debug smoke passes **8/8** runs; Release regression passes
+**29/29**, including three complete four-peer restart/rejoin scenarios. Artifacts:
+`build/webrtc/peer-lifecycle-final-headless-debug/result.json` and
+`build/webrtc/peer-lifecycle-final-headless-release/result.json`. Executable
+hashes and watchdog results are retained. Earlier timing runs remain historical
+artifacts; use these final paths for the committed implementation.

@@ -10,6 +10,7 @@
 #include <thread>
 #include "media/audio/WasapiPcmEndpoint.h"
 #include "media/IceCandidateHandoff.h"
+#include "media/PeerConnectionLifecycle.h"
 
 #include "api/audio/audio_device.h"
 #include "api/audio/create_audio_device_module.h"
@@ -94,7 +95,21 @@ using SyntheticVideo = screenshare::media::CaptureVideoSource;
 
 class Peer : public webrtc::PeerConnectionObserver, public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
+    Peer() : lifecycle(++nextConnectionGeneration, screenshare::media::PeerConnectionLifecycle::Clock::now()) {}
+    inline static uint64_t nextConnectionGeneration = 0; // Signaling executor only.
+    screenshare::media::PeerConnectionLifecycle lifecycle;
+    std::string localIceUsername;
+    void OnStandardizedIceConnectionChange(webrtc::PeerConnectionInterface::IceConnectionState state) override {
+        using Clock = screenshare::media::PeerConnectionLifecycle::Clock;
+        const auto generation = lifecycle.generation();
+        if (state == webrtc::PeerConnectionInterface::kIceConnectionConnected ||
+            state == webrtc::PeerConnectionInterface::kIceConnectionCompleted) lifecycle.Connected(generation, Clock::now());
+        else if (state == webrtc::PeerConnectionInterface::kIceConnectionDisconnected ||
+                 state == webrtc::PeerConnectionInterface::kIceConnectionFailed) lifecycle.Disconnected(generation, Clock::now());
+        else if (state == webrtc::PeerConnectionInterface::kIceConnectionClosed) lifecycle.RemoteClosed(generation);
+    }
     ~Peer() override {
+        lifecycle.Close();
         if (outgoingIce) outgoingIce->Close();
         if (incomingIce) incomingIce->Close();
         if (video) video->RemoveSink(this);
@@ -105,6 +120,8 @@ public:
     void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState) override {}
     void OnIceCandidate(const webrtc::IceCandidate* candidate) override {
         if (!outgoingIce) return;
+        // Ignore delayed candidates from credentials retired by an ICE restart.
+        if (candidate->candidate().username() != localIceUsername) return;
         screenshare::media::IceCandidateMessage message;
         if (!candidate->ToString(&message.candidate)) { outgoingIce->Close(); return; }
         message.mid = candidate->sdp_mid(); message.line = candidate->sdp_mline_index();
@@ -146,7 +163,17 @@ public:
     screenshare::media::LatestVideoFrameSink* presentationSink = nullptr;
 };
 
-void TransferDescription(Peer& from, Peer& to, bool offer) {
+template<class Predicate>
+void WaitForPeer(Peer& peer, Predicate predicate, const char* failure) {
+    Wait([&] {
+        using namespace screenshare::media;
+        Require(peer.lifecycle.Tick(PeerConnectionLifecycle::Clock::now()) != PeerLifecycleAction::Close,
+                "Direct connection lifecycle failed");
+        return predicate();
+    }, failure);
+}
+
+void TransferDescription(Peer& from, Peer& to, bool offer, bool restart = false) {
     using namespace screenshare::media;
     static uint64_t nextGeneration = 0; // Proof signaling executor only.
     const auto generation = ++nextGeneration;
@@ -161,28 +188,35 @@ void TransferDescription(Peer& from, Peer& to, bool offer) {
     from.iceGeneration = generation;
     auto created = webrtc::make_ref_counted<CreatedDescription>();
     webrtc::PeerConnectionInterface::RTCOfferAnswerOptions options;
+    options.ice_restart = offer && restart;
     if (offer) from.connection->CreateOffer(created.get(), options);
     else from.connection->CreateAnswer(created.get(), options);
-    Wait([&] { return created->done; }, "SDP creation timed out");
+    WaitForPeer(from, [&] { return created->done; }, "SDP creation timed out");
     Require(created->description != nullptr, "SDP creation failed");
     // Serialize before SetLocalDescription starts gathering: SDP must contain
     // no bundled candidates, so successful connectivity exercises trickle ICE.
     std::string sdp;
     Require(created->description->ToString(&sdp), "SDP serialization failed");
     Require(sdp.find("a=candidate:") == std::string::npos, "Unexpected bundled ICE");
+    const auto ufragStart = sdp.find("a=ice-ufrag:");
+    Require(ufragStart != std::string::npos, "Missing ICE credentials");
+    const auto ufragEnd = sdp.find("\r\n", ufragStart);
+    const auto username = sdp.substr(ufragStart + 12, ufragEnd - ufragStart - 12);
+    if (restart) Require(username != from.localIceUsername, "ICE restart reused credentials");
+    from.localIceUsername = username;
     auto applied = webrtc::make_ref_counted<AppliedDescription>();
     from.connection->SetLocalDescription(applied.get(), created->description.release());
-    Wait([&] { return applied->done; }, "Local description timed out");
+    WaitForPeer(from, [&] { return applied->done; }, "Local description timed out");
     Require(applied->success, "Local description failed");
     Require(handoff->LocalDescriptionReady(generation) == IceHandoffError::None, "Local ICE handoff failed");
     auto remote = webrtc::CreateSessionDescription(offer ? webrtc::SdpType::kOffer : webrtc::SdpType::kAnswer, sdp);
     Require(remote != nullptr, "SDP parsing failed");
     auto received = webrtc::make_ref_counted<AppliedDescription>();
     to.connection->SetRemoteDescription(received.get(), remote.release());
-    Wait([&] { return received->done; }, "Remote description timed out");
+    WaitForPeer(from, [&] { return received->done; }, "Remote description timed out");
     Require(received->success, "Remote description failed");
     Require(handoff->RemoteDescriptionReady(generation) == IceHandoffError::None, "Remote ICE handoff failed");
-    Wait([&] { return handoff->error() != IceHandoffError::None || handoff->delivered() > 0; },
+    WaitForPeer(from, [&] { return handoff->error() != IceHandoffError::None || handoff->delivered() > 0; },
          "Trickle ICE delivery timed out");
     Require(handoff->error() == IceHandoffError::None, "Trickle ICE rejected");
 }

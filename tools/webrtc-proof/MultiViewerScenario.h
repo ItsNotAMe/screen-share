@@ -34,7 +34,9 @@ std::unique_ptr<MediaLink> ConnectViewer(webrtc::PeerConnectionFactoryInterface&
     Require(link->host.connection->AddTrack(audio, {"shared-stream"}).ok(), "Multi-viewer audio track failed");
     TransferDescription(link->host, link->viewer, true);
     TransferDescription(link->viewer, link->host, false);
-    Wait([&] {
+    WaitForPeer(link->host, [&] {
+        if (link->host.lifecycle.state() != screenshare::media::PeerLifecycleState::Connected ||
+            link->viewer.lifecycle.state() != screenshare::media::PeerLifecycleState::Connected) return false;
         if (link->viewer.channels.size() != 3) return false;
         for (const auto& channel : link->host.channels)
             if (channel->channel->state() != webrtc::DataChannelInterface::kOpen) return false;
@@ -149,6 +151,35 @@ void RunMultiViewer() {
     const auto replaced = deliveryStats(4).replaced;
     Require(links[3]->viewer.invalidFrames == 0, "Limited viewer changed dimensions or produced invalid pixels");
 
+    // Explicit recovery request exercises real host-offered ICE restart. This
+    // does not simulate a broken network; the other viewers keep streaming.
+    auto& restarting = *links[3];
+    const auto restartStartedAt = std::chrono::steady_clock::now();
+    const auto restartFrames = restarting.viewer.decodedFrames.load();
+    const auto healthyFrames = links[0]->viewer.decodedFrames.load();
+    const auto oldHandoff = restarting.host.outgoingIce;
+    const auto oldIceGeneration = restarting.host.iceGeneration;
+    const auto oldUsername = restarting.host.localIceUsername;
+    restarting.host.lifecycle.RequestRestart(restarting.host.lifecycle.generation(), PeerConnectionLifecycle::Clock::now());
+    Wait([&] { return restarting.host.lifecycle.Tick(PeerConnectionLifecycle::Clock::now()) == PeerLifecycleAction::RestartIce; },
+         "Restart backoff did not expire");
+    TransferDescription(restarting.host, restarting.viewer, true, true);
+    TransferDescription(restarting.viewer, restarting.host, false, true);
+    const auto restartNegotiatedAt = std::chrono::steady_clock::now();
+    WaitForPeer(restarting.host, [&] {
+        return restarting.viewer.decodedFrames >= restartFrames + 20 && links[0]->viewer.decodedFrames >= healthyFrames + 20;
+    }, "ICE restart interrupted media");
+    const auto restartRecoveredAt = std::chrono::steady_clock::now();
+    WaitForPeer(restarting.host, [&] { return restarting.host.lifecycle.state() == PeerLifecycleState::Connected; },
+                "ICE restart did not confirm connectivity");
+    const auto restartConnectedAt = std::chrono::steady_clock::now();
+    Require(restarting.host.localIceUsername != oldUsername && restarting.host.lifecycle.restartRevision() == 1,
+            "Restart did not replace credentials");
+    Require(oldHandoff->Push(oldIceGeneration, {"retired", "0", 0}) == IceHandoffError::Closed,
+            "Retired negotiation accepted candidates");
+    Require(restarting.sender->GetParameters().encodings[0].max_bitrate_bps == 200000,
+            "ICE restart reset viewer settings");
+
     // Tear down one complete pair, then attach a fresh connection/source while
     // the other three continue to receive the same capture session.
     Require(session.RemoveViewer(generation, 4).get().error == HostOperationError::None, "Coordinator viewer removal failed");
@@ -167,8 +198,11 @@ void RunMultiViewer() {
             "Coordinator shutdown failed");
     Require(audioEvidence->audibleBlocks >= 30 && audioDiagnostics->captureErrors == 0 && audioDiagnostics->playoutErrors == 0,
             "Multi-viewer shared audio failed");
-    std::cout << "{\"passed\":true,\"mode\":\"four-peer-headless\",\"viewers\":4,\"rejoins\":1,"
-              << "\"slow_pending_replacements\":" << replaced << ",\"decoded_frames\":[";
+    std::cout << "{\"passed\":true,\"mode\":\"four-peer-headless\",\"viewers\":4,\"rejoins\":1,\"ice_restarts\":1,"
+              << "\"restart_negotiation_ms\":" << std::chrono::duration_cast<std::chrono::milliseconds>(restartNegotiatedAt - restartStartedAt).count()
+              << ",\"restart_media_check_ms\":" << std::chrono::duration_cast<std::chrono::milliseconds>(restartRecoveredAt - restartStartedAt).count()
+              << ",\"restart_state_check_ms\":" << std::chrono::duration_cast<std::chrono::milliseconds>(restartConnectedAt - restartStartedAt).count()
+              << ",\"slow_pending_replacements\":" << replaced << ",\"decoded_frames\":[";
     for (size_t i = 0; i < links.size(); ++i) {
         Require(links[i]->viewer.invalidFrames == 0, "Viewer media failed");
         if (i) std::cout << ',';

@@ -136,3 +136,8 @@ add_executable(IceCandidateHandoffTest IceCandidateHandoffTest.cpp)
 target_link_libraries(IceCandidateHandoffTest PRIVATE MfWebRTCCodecs)
 add_test(NAME ice-candidate-handoff COMMAND IceCandidateHandoffTest)
 set_tests_properties(ice-candidate-handoff PROPERTIES TIMEOUT 10)
+
+add_executable(PeerConnectionLifecycleTest PeerConnectionLifecycleTest.cpp)
+target_link_libraries(PeerConnectionLifecycleTest PRIVATE MfWebRTCCodecs)
+add_test(NAME peer-connection-lifecycle COMMAND PeerConnectionLifecycleTest)
+set_tests_properties(peer-connection-lifecycle PROPERTIES TIMEOUT 10)

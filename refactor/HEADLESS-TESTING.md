@@ -4,7 +4,7 @@ Build the proof targets using [BUILD.md](BUILD.md), then run from the repository
 root. No mouse, keyboard, window, audio device or GPU is required for these two
 commands; the Windows software Media Foundation codec must be available.
 
-Quick smoke (roughly 15 seconds on the reference machine):
+Quick smoke (includes a real ICE restart; allow up to the per-process watchdog):
 
 ```powershell
 python scripts/test-headless-media.py build/sdk-proof-release build/webrtc/headless-smoke
@@ -26,6 +26,16 @@ WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
 
+- `PeerConnectionLifecycle` enforces the initial 20-second connection deadline,
+  stale connection-event rejection and a rolling three-restarts-per-minute
+  budget. Deterministic tests cover deadlines, duplicate disconnects, transient
+  recovery, backoff, budget expiry and close without sleeping. Actual peer ICE
+  state callbacks feed the policy; the four-peer scenario requests a real
+  host-offered ICE restart with fresh credentials, preserves viewer settings
+  and checks continued media on that viewer and healthy peers. JSON includes
+  restart negotiation and media-check elapsed time; these are local scenario
+  timings, not display latency or network-outage recovery acceptance.
+
 - ICE candidates travel separately from SDP through the reusable bounded
   `IceCandidateHandoff`. Each direction waits for successful local and remote
   description application, rejects stale generations and closes its callback
@@ -39,8 +49,8 @@ Current coverage:
   100 restarts, stale commands, isolated callback failure, startup failure and
   cancellation despite a full command queue. The four-peer proof now uses this
   coordinator for capture and subscriber lifetime. Peer creation/signaling and
-  the application facade remain outside it. Smoke runs seven child processes;
-  regression runs 28. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
+  the application facade remain outside it. Smoke runs eight child processes;
+  regression runs 29. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
 - [COMPARISON.md](COMPARISON.md) defines the matched before/after scorecard.
   These checks establish regression coverage, not superior end-to-end latency.
 

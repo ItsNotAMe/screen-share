@@ -19,6 +19,8 @@
 
 ## Current State
 
+- Checkpoint B now includes a portable per-connection deadline/recovery policy and a real four-peer ICE restart scenario: fresh credentials, retired-candidate filtering, preserved settings and media isolation. Production action dispatch/room integration remains open. Restart JSON separates negotiation, frame-check and ICE-state-confirmation timing; early evidence showed prompt frames but delayed state notification, so do not report the latter as a media outage. See `refactor/CHECKPOINT-B.md`.
+
 - Real native media proofs now use separately trickled ICE through portable `IceCandidateHandoff`, with description readiness barriers, stale-generation rejection, bounded candidates and callback release on close/failure. Debug/Release media suites pass 22/22. Authenticated room integration, connection deadlines/restarts and STUN/NAT tests remain open; normal application media is unchanged. See `refactor/CHECKPOINT-B.md`.
 
 - Checkpoint B host capture/membership coordinator is implemented: serialized bounded commands, operation/session IDs, stale rejection, priority queued cancellation, subscriber isolation and joined workers. Four-peer proof uses it; peer/signaling ownership and the shared application facade remain next. Debug/Release media suites pass 21/21, applications 10/10, headless Debug smoke 6/6 and Release regression 27/27. See `refactor/CHECKPOINT-B.md`. Before/after claims require matched evidence under `refactor/COMPARISON.md`; native handle-growth failure remains open.

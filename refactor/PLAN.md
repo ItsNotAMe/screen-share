@@ -769,3 +769,19 @@ cycles completed without crash/timeout, but median handle growth was +76 and
 resource acceptance is resolved. Preserve existing MTA/dispatcher/module-pin
 mitigations; investigate the discrepancy under B before production cutover.
 Gate A passing authorizes wider implementation, not deployment or release.
+
+## Peer recovery policy implementation note - 2026-09-15
+
+The portable per-connection policy uses the specified 20-second initial deadline
+and three restart attempts in a rolling minute. Initial backoff defaults are
+500 ms, 1 second and 2 seconds according to recent attempts; duplicate failure
+notifications cannot extend the wait. A reconnect preserves the recent-attempt
+budget. Each restart has a 20-second attempt deadline before rescheduling within
+that budget. These backoff values are initial implementation defaults, not tuned
+performance claims. A closed/failed instance cannot be revived; a replacement
+connection needs a fresh generation and instance.
+
+The four-peer proof now exercises an explicit host-offered restart and reports
+elapsed negotiation/media-check times. Automatic production action dispatch,
+authenticated restart requests and actual outage/interface-change validation
+remain required. The local proof does not establish NAT or outage recovery time.
