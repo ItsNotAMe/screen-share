@@ -1,5 +1,13 @@
 # Native dependency and application build
 
+Native MSVC backend builds now require Qt Core, Network and WebSockets even when
+Widgets/UI is disabled. For a separate CLI-only validation directory, use
+`scripts/run-webrtc-proof.ps1 -Application -NoUi` with the usual configuration,
+artifact, ViGEm source and build-directory arguments. Do not reuse a UI build
+directory: `-NoUi` persists that directory's UI-off CMake option. RoomSocketTests
+stages its three Qt DLLs so it also runs in this configuration. See
+[CHECKPOINT-C.md](CHECKPOINT-C.md) and [HEADLESS-TESTING.md](HEADLESS-TESTING.md).
+
 The working branch is `refactor/backend-v2`. Gate A passed its native integration/build criterion; see CLOSEOUT-A.md for current evidence and failed resource bounds. Normal application media remains on the existing backend pending validated integration.
 
 ## Current verified SDK and portable workflow

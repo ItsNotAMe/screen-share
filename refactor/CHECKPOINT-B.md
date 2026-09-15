@@ -1,5 +1,10 @@
 # Checkpoint B evidence
 
+The native room/directory WebSocket transport now exists in the shared backend
+build. Its live tests and remaining service/media-generation integration boundary
+are recorded in [CHECKPOINT-C.md](CHECKPOINT-C.md). It is not yet wired into the
+normal UI/CLI session facade or the media peer adapter.
+
 ## Scheduled peer ownership and concurrent negotiation - 2026-09-15
 
 HostPeerOwner now binds the capture-aware registry to SignalingExecutor in the

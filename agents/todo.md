@@ -6,6 +6,8 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
+- [ ] Integrate shared RoomSocket with admission and media connection-generation dispatch, then implement/test the v2 service in the local Cloudflare runtime. Header attachment, snapshot/resync, heartbeat/reconnect and bounded socket I/O now have live native tests; they do not establish server authentication or deployment readiness. See refactor/CHECKPOINT-C.md.
+
 - [ ] Add easy, one-command headless testing of realistic live sessions through production APIs, without manual mouse/keyboard input. Include paced media, scripted control to a test-owned sink, network/recovery scenarios, metrics and watchdog cleanup; distinguish synthetic headless from desktop/GPU-dependent capture checks. Full requirement: refactor/PLAN.md. Implementation resumed: shared capture ownership, bounded independent viewer delivery, paced synthetic media, four real peer connections with slow-handoff/rejoin coverage and one-command headless smoke/regression now exist (refactor/HEADLESS-TESTING.md); Auto/Manual source/RTP settings and revision validation now exist; complete facade, separate processes, input and network scenarios remain.
 
 - [ ] Embed scheduled HostPeerOwner in the shared UI/CLI facade and supply a room-backed peer adapter. The shared signaling executor now drives deadlines, completion polling, restart and capture cleanup automatically; real four-peer setup/restart/rejoin uses it. Preserve the rolling restart budget and investigate measured restart timing before claiming responsive outage recovery.

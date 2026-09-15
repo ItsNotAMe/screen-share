@@ -3,8 +3,9 @@
 Status: Checkpoint A contract foundation. `PLAN.md` remains authoritative. The
 command validators and subscription ordering tests exist; the running application
 and deployed Worker still use v1. Server event validation and native atomic state caches are also implemented.
-Authenticated dispatch, HTTP admission, live transport and Durable Object runtime
-tests remain Checkpoint C work.
+The native Qt WebSocket transport now has real local I/O tests; see
+[CHECKPOINT-C.md](CHECKPOINT-C.md). Server authenticated dispatch, HTTP admission,
+application/media integration and Durable Object runtime tests remain open.
 
 ## Ownership and threading
 
@@ -167,6 +168,12 @@ No tracker operation performs I/O. Close the directory subscription when hidden;
 explicit refresh may GET a snapshot, but there is no periodic HTTP fallback.
 
 ## Low-request service design
+
+The native transport's exact auto-response pair is `v2:ping` / `v2:pong`.
+Configure room and directory objects with this pair. Pings occur at 29–31 seconds;
+handshake/snapshot/resync deadlines are 10 seconds. Outgoing Qt buffered bytes are
+capped at 256 KiB; pressure causes reconnect. These are implementation defaults,
+not service-cost or latency claims.
 
 Use hibernating sockets with fixed automatic ping/pong responses (30-second ping,
 10-second timeout), 1/2/4/8/16/30-second reconnect backoff with jitter, and a room

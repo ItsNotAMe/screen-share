@@ -17,6 +17,16 @@ python scripts/test-headless-media.py build/sdk-proof-release build/webrtc/headl
 ```
 
 Use a fresh output directory each time. Both commands return nonzero on failure.
+To include native room/directory WebSocket checks, also build application tests:
+
+```powershell
+python scripts/test-headless-media.py build/sdk-proof-release build/webrtc/media-and-room-smoke --room-build-directory build/sdk-app-release
+```
+
+The optional room check uses a real local server and a separate networking thread,
+including the actual 30-second heartbeat and 10-second missing-pong timeout. It
+has a 75-second watchdog. No deployed service or credentials are needed.
+
 Each child has a 45-second watchdog, or 60 seconds for a four-viewer scenario;
 a timed-out child is killed and reaped. These
 executables do not spawn descendants. Results include executable SHA-256, exit
@@ -25,6 +35,11 @@ code, elapsed time, timeout status, logs and capture timing percentiles in
 WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
+
+- Optional `RoomSocketTests`: authorization headers, snapshot readiness, pushed
+  state/signals, room/self/role checks, one-shot resync, heartbeat/reconnect,
+  directory lifecycle and saturated writes. This tests native transport, not
+  server authorization, media connection-ID routing or Cloudflare cost.
 
 - `HostPeerOwnerTest` exercises automatic deadlines/restart, failed-completion
   isolation, capture detachment, healthy media progress, stale requests and 25

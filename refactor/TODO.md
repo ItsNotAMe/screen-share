@@ -197,6 +197,9 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Protocol and native client
 
+- [x] Add shared native Qt room/directory transport independent of Widgets: authenticated headers, schema/identity/direction checks, bounded writes, snapshot readiness and stale-socket rejection. Validate live I/O on a dedicated networking thread; see [CHECKPOINT-C.md](CHECKPOINT-C.md).
+- [x] Add live local socket tests and optional integration with the headless media runner. Local Cloudflare and media connection-generation dispatch remain separate requirements.
+
 - [ ] Implement the six documented v2 HTTP/WebSocket endpoints.
 - [ ] Implement create/join credentials, provisional membership expiry and publish-after-host-attach.
 - [ ] Use one Qt-backed native networking event loop for UI and CLI.
@@ -212,7 +215,7 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [ ] Add separate SQLite Durable Object room/directory namespaces for v2.
 - [ ] Implement socket attachments and replacement-generation handling.
 - [ ] Implement automatic ping/pong and auto-response timestamp liveness.
-- [ ] Implement documented client ping/pong deadlines and jittered reconnect backoff.
+- [x] Implement native client ping/pong deadlines, one-shot resync and jittered reconnect backoff; exercise actual timeout/reconnect locally. Normal UI/CLI adoption remains pending.
 - [ ] Implement provisional/membership expiry and immediate leave/kick.
 - [ ] Handle host reconnecting/expiry without host election or new joins during disconnection.
 - [ ] Implement safe directory summaries and snapshot/delta subscriptions.

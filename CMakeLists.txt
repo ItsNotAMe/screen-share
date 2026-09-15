@@ -242,6 +242,29 @@ endif()
 if(TARGET ScreenShareNegotiation)
     target_link_libraries(ScreenShareCore PRIVATE ScreenShareNegotiation)
 endif()
+if(MSVC)
+    # Room transport is a backend dependency, including CLI-only builds.
+    find_package(Qt6 REQUIRED COMPONENTS Core Network WebSockets)
+    add_library(ScreenShareRoom STATIC
+        src/room/protocol/RoomProtocol.cpp
+        src/room/protocol/StateSubscription.cpp
+        src/room/qt/RoomSocket.cpp)
+    target_compile_features(ScreenShareRoom PUBLIC cxx_std_20)
+    target_include_directories(ScreenShareRoom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(ScreenShareRoom PUBLIC Qt6::Core Qt6::Network Qt6::WebSockets)
+    target_link_libraries(ScreenShareCore PRIVATE ScreenShareRoom)
+    if(BUILD_TESTING)
+        add_executable(RoomSocketTests tests/RoomSocketTests.cpp)
+        target_link_libraries(RoomSocketTests PRIVATE ScreenShareRoom)
+        add_custom_command(TARGET RoomSocketTests POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>"
+                "$<TARGET_FILE_DIR:RoomSocketTests>"
+            VERBATIM)
+        add_test(NAME room-v2-live-socket COMMAND RoomSocketTests)
+        set_tests_properties(room-v2-live-socket PROPERTIES TIMEOUT 75)
+    endif()
+endif()
 
 add_library(ScreenShareAPI STATIC
     src/api/ScreenShareAPI.cpp
@@ -478,9 +501,13 @@ if(SCREENSHARE_BUILD_QT_UI)
         if(BUILD_TESTING)
             add_executable(RoomProtocolTests
                 tests/RoomProtocolTests.cpp
-                src/room/protocol/RoomProtocol.cpp
-                src/room/protocol/StateSubscription.cpp
             )
+            if(TARGET ScreenShareRoom)
+                target_link_libraries(RoomProtocolTests PRIVATE ScreenShareRoom)
+            else()
+                target_sources(RoomProtocolTests PRIVATE
+                    src/room/protocol/RoomProtocol.cpp src/room/protocol/StateSubscription.cpp)
+            endif()
             target_compile_features(RoomProtocolTests PRIVATE cxx_std_20)
             target_include_directories(RoomProtocolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
             target_compile_definitions(RoomProtocolTests PRIVATE

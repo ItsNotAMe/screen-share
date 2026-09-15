@@ -2,6 +2,7 @@
 param(
     [ValidateSet('debug', 'release')][string]$Configuration = 'debug',
     [switch]$Application,
+    [switch]$NoUi,
     [switch]$Hardware,
     [switch]$AudioDevice,
     [switch]$LiveCapture,
@@ -11,6 +12,7 @@ param(
     [switch]$Package
 )
 $ErrorActionPreference = 'Stop'
+if ($NoUi -and -not $Application) { throw '-NoUi requires -Application.' }
 $repoRoot = Split-Path -Parent $PSScriptRoot
 function Resolve-RepoPath([string]$Value) {
     if ([IO.Path]::IsPathRooted($Value)) { return [IO.Path]::GetFullPath($Value) }
@@ -46,6 +48,7 @@ try {
     Push-Location $projectDirectory
     try {
         $configureArguments = @('--preset', $preset)
+        if ($NoUi) { $configureArguments += '-DSCREENSHARE_BUILD_QT_UI=OFF' }
         if ($ArtifactDirectory) { $configureArguments += "-DSCREENSHARE_WEBRTC_ARTIFACT_DIR=$(Resolve-RepoPath $ArtifactDirectory)" }
         if ($ViGEmSourceDirectory) { $configureArguments += "-DSCREENSHARE_VIGEMCLIENT_SOURCE_DIR=$(Resolve-RepoPath $ViGEmSourceDirectory)" }
         if ($BuildDirectory) {

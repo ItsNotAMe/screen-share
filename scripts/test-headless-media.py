@@ -13,26 +13,32 @@ def main():
     parser.add_argument("build_directory", type=Path)
     parser.add_argument("output_directory", type=Path)
     parser.add_argument("--regression", action="store_true", help="Repeat media teardown 20 times")
+    parser.add_argument("--room-build-directory", type=Path, help="Also exercise the real native room WebSocket client against a local server")
     args = parser.parse_args()
     programs = [args.build_directory.resolve() / name for name in
                 ("CaptureSessionTest.exe", "CaptureDistributorTest.exe", "StreamSettingsTest.exe", "HostMediaSessionTest.exe", "IceCandidateHandoffTest.exe", "PeerConnectionLifecycleTest.exe", "HostPeerRegistryTest.exe", "SignalingExecutorTest.exe", "HostPeerOwnerTest.exe", "WebRTCProof.exe")]
     for program in programs:
         if not program.is_file():
             parser.error(f"Build the proof targets first: missing {program.name}")
+    room_program = args.room_build_directory.resolve() / "RoomSocketTests.exe" if args.room_build_directory else None
+    if room_program and not room_program.is_file():
+        parser.error(f"Build the native application tests first: missing {room_program}")
     # Refuse to overwrite previous evidence.
     args.output_directory.mkdir(parents=True, exist_ok=False)
     report = {"schema": 1, "mode": "headless-local-media", "passed": False,
               "limitations": ["Local peers share one process", "No WGC or physical audio/display",
-                               "No room service, input injection or network impairment",
+                               "No Cloudflare service, input injection or network impairment",
                                "Internal timing is not capture-to-display latency"], "runs": []}
     sequence = [(program, []) for program in programs[:-1]]
+    if room_program:
+        sequence.append((room_program, []))
     sequence += [(programs[-1], ["--negotiation-only"])]
     sequence += [(programs[-1], [])] * (20 if args.regression else 1)
     sequence += [(programs[-1], ["--multi-viewer"])] * (3 if args.regression else 1)
     try:
         for index, (program, arguments) in enumerate(sequence):
             log = args.output_directory / f"{index:02d}-{program.stem}.log"
-            timeout = 60 if arguments else 45
+            timeout = 75 if program == room_program else (60 if arguments else 45)
             run = {"executable": program.name, "arguments": arguments,
                    "sha256": hashlib.sha256(program.read_bytes()).hexdigest(),
                    "timeout_seconds": timeout, "timed_out": False, "log": log.name}
