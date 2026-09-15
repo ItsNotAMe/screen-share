@@ -248,13 +248,20 @@ if(MSVC)
     add_library(ScreenShareRoom STATIC
         src/room/protocol/RoomProtocol.cpp
         src/room/protocol/StateSubscription.cpp
-        src/room/qt/RoomSocket.cpp)
+        src/room/qt/RoomSocket.cpp
+        src/room/qt/RoomAdmission.cpp)
     target_compile_features(ScreenShareRoom PUBLIC cxx_std_20)
     target_include_directories(ScreenShareRoom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(ScreenShareRoom PUBLIC Qt6::Core Qt6::Network Qt6::WebSockets)
     target_link_libraries(ScreenShareCore PRIVATE ScreenShareRoom)
     if(BUILD_TESTING)
         add_executable(RoomSocketTests tests/RoomSocketTests.cpp)
+        add_executable(RoomAdmissionTests tests/RoomAdmissionTests.cpp)
+        target_link_libraries(RoomAdmissionTests PRIVATE ScreenShareRoom)
+        add_test(NAME room-v2-admission COMMAND RoomAdmissionTests)
+        set_tests_properties(room-v2-admission PROPERTIES TIMEOUT 30)
+        # RoomSocketTests stages Qt DLLs into the shared test output directory.
+        add_dependencies(RoomAdmissionTests RoomSocketTests)
         target_link_libraries(RoomSocketTests PRIVATE ScreenShareRoom)
         add_custom_command(TARGET RoomSocketTests POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different

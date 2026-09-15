@@ -73,10 +73,13 @@ int main(int argc, char** argv) {
             RoomSocket::Config config;
             config.origin = QUrl("ws://127.0.0.1:" + QString::number(server.serverPort()));
             config.roomId = "room"; config.selfPeerId = "viewer"; config.token = QByteArray(43, 'x');
+            config.expectedRole = "viewer";
             run([&] {
                 auto invalid = config; invalid.origin = QUrl("ws://example.com");
                 Check(!client->Start(invalid));
                 invalid = config; invalid.token = "bad\r\nheader";
+                Check(!client->Start(invalid));
+                invalid = config; invalid.expectedRole.clear();
                 Check(!client->Start(invalid));
                 Check(client->Start(config));
                 Check(client->Send("{}") == RoomSocket::SendResult::NotReady);
@@ -151,6 +154,20 @@ int main(int argc, char** argv) {
             Wait([&] { return peers.size() == 4; });
             peers[3]->sendTextMessage(QString::fromUtf8(Bytes(Snapshot())));
             Wait([&] { return count(RoomSocket::EventKind::Snapshot) == callbacks + 1; });
+            const auto roleErrors = count(RoomSocket::EventKind::Error);
+            auto changedRole = Snapshot(2);
+            auto rolePayload = changedRole["payload"].toObject();
+            auto members = rolePayload["members"].toArray();
+            auto formerHost = members[0].toObject(); formerHost["role"] = "viewer"; members[0] = formerHost;
+            auto promotedSelf = members[1].toObject(); promotedSelf["role"] = "host"; members[1] = promotedSelf;
+            rolePayload["members"] = members; changedRole["payload"] = rolePayload;
+            peers[3]->sendTextMessage(QString::fromUtf8(Bytes(changedRole)));
+            Wait([&] { return count(RoomSocket::EventKind::Error) > roleErrors; });
+            Check(count(RoomSocket::EventKind::Snapshot) == callbacks + 1);
+            run([&] { Check(client->Start(config)); });
+            Wait([&] { return peers.size() == 5; });
+            peers[4]->sendTextMessage(QString::fromUtf8(Bytes(Snapshot())));
+            Wait([&] { return count(RoomSocket::EventKind::Snapshot) == callbacks + 2; });
             run([&] {
                 auto large = signal;
                 large.remove("fromPeerId"); large["type"] = "signal.answer"; large["toPeerId"] = "host";

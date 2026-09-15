@@ -18,6 +18,7 @@ public:
     struct Config {
         QUrl origin;
         QString roomId, selfPeerId;
+        QString expectedRole; // Required for room sockets; supplied by admission.
         QByteArray token;
         bool directory = false;
     };

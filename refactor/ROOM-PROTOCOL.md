@@ -4,7 +4,7 @@ Status: Checkpoint A contract foundation. `PLAN.md` remains authoritative. The
 command validators and subscription ordering tests exist; the running application
 and deployed Worker still use v1. Server event validation and native atomic state caches are also implemented.
 The native Qt WebSocket transport now has real local I/O tests; see
-[CHECKPOINT-C.md](CHECKPOINT-C.md). Server authenticated dispatch, HTTP admission,
+[CHECKPOINT-C.md](CHECKPOINT-C.md). Server authenticated dispatch, HTTP handlers,
 application/media integration and Durable Object runtime tests remain open.
 
 ## Ownership and threading
@@ -138,7 +138,36 @@ future transport must close/recover that socket instead of repeatedly processing
 bad events. Signals/results return Ignore from this state-only cache and must be
 routed separately after target/connection-generation validation.
 
-## Admission (implementation contract; not implemented)
+## Admission (native client implemented; service pending)
+
+Native `RoomAdmission` executes one request at a time on networking and returns
+a typed future. The contract for the new service is:
+
+- Create: `POST /v2/rooms`, exact body `{v:2,nickname,password,policy}`;
+  policy has `name`, `visibility`, `viewerLimit`.
+- Join: `POST /v2/rooms/:id/join`, exact body `{v:2,nickname,password}`.
+- Names use the same canonicalization as socket commands. Password is an exact
+  unnormalized UTF-8 string, empty for no password, maximum 128 bytes, without
+  ASCII control characters/DEL or invalid Unicode. This preserves the existing
+  native byte ceiling; the v2 service must use the same UTF-8 bound.
+- Success is HTTP 201 for create or 200 for join, JSON with exact keys
+  `{v:2,roomId,peerId,role,token}`. Role is host for create/viewer for join.
+  Token is canonical unpadded base64url of 32 cryptographically random bytes
+  (43 characters). The client validates shape, not entropy. Join binds roomId.
+- Defined rejections have exact `{v:2,error}`: 400 invalid_request, 403 forbidden,
+  404 not_found, 409 full/closed, 429 rate_limited. Do not echo secrets.
+- Responses require application/json, are capped at 16 KiB, and expire after
+  10 seconds. Redirects are never followed. Cookie load/save, authentication
+  reuse and HTTP caching are disabled. Remote origins require HTTPS.
+- Invalid/ambiguous responses, unknown failures, 5xx and timeouts are Unconfirmed.
+  Cancellation is also marked outcomeUnconfirmed. Neither is automatically
+  retried by application code; aborting does not undo a server transaction.
+- Success produces a RoomSocket config on the same origin with HTTPS→WSS,
+  bound room/peer/token and expectedRole. Socket snapshots cannot silently change
+  that role. Callers must discard stale admission results and attach promptly.
+
+See [CHECKPOINT-C.md](CHECKPOINT-C.md) for native HTTP test evidence. This is not
+yet wired to a v2 Durable Object implementation or the normal UI/CLI workflow.
 
 POST create/join returns server-generated peer ID and 256-bit membership token
 over HTTPS. Store only the token hash server-side, retain the token only in client

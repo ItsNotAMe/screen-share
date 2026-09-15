@@ -197,6 +197,8 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Protocol and native client
 
+- [x] Implement native create/join HTTP admission with canonical requests, exact response/token/identity validation, typed futures, cancellation and unconfirmed outcomes without application retries. Bind the resulting socket to the admitted role; validate real HTTP failures and role-conflicting snapshots locally.
+
 - [x] Add shared native Qt room/directory transport independent of Widgets: authenticated headers, schema/identity/direction checks, bounded writes, snapshot readiness and stale-socket rejection. Validate live I/O on a dedicated networking thread; see [CHECKPOINT-C.md](CHECKPOINT-C.md).
 - [x] Add live local socket tests and optional integration with the headless media runner. Local Cloudflare and media connection-generation dispatch remain separate requirements.
 

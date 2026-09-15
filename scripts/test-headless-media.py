@@ -21,8 +21,11 @@ def main():
         if not program.is_file():
             parser.error(f"Build the proof targets first: missing {program.name}")
     room_program = args.room_build_directory.resolve() / "RoomSocketTests.exe" if args.room_build_directory else None
+    admission_program = args.room_build_directory.resolve() / "RoomAdmissionTests.exe" if args.room_build_directory else None
     if room_program and not room_program.is_file():
         parser.error(f"Build the native application tests first: missing {room_program}")
+    if admission_program and not admission_program.is_file():
+        parser.error(f"Build the native application tests first: missing {admission_program}")
     # Refuse to overwrite previous evidence.
     args.output_directory.mkdir(parents=True, exist_ok=False)
     report = {"schema": 1, "mode": "headless-local-media", "passed": False,
@@ -31,6 +34,7 @@ def main():
                                "Internal timing is not capture-to-display latency"], "runs": []}
     sequence = [(program, []) for program in programs[:-1]]
     if room_program:
+        sequence.append((admission_program, []))
         sequence.append((room_program, []))
     sequence += [(programs[-1], ["--negotiation-only"])]
     sequence += [(programs[-1], [])] * (20 if args.regression else 1)

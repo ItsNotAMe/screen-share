@@ -23,7 +23,7 @@ To include native room/directory WebSocket checks, also build application tests:
 python scripts/test-headless-media.py build/sdk-proof-release build/webrtc/media-and-room-smoke --room-build-directory build/sdk-app-release
 ```
 
-The optional room check uses a real local server and a separate networking thread,
+The optional room checks include native HTTP admission plus a real socket server and a separate networking thread,
 including the actual 30-second heartbeat and 10-second missing-pong timeout. It
 has a 75-second watchdog. No deployed service or credentials are needed.
 
@@ -40,6 +40,9 @@ Current coverage:
   state/signals, room/self/role checks, one-shot resync, heartbeat/reconnect,
   directory lifecycle and saturated writes. This tests native transport, not
   server authorization, media connection-ID routing or Cloudflare cost.
+- Optional `RoomAdmissionTests`: create/join bodies, typed rejection, identity/token
+  validation, redirect/cookie suppression, bounded responses, cancellation and
+  the real ten-second timeout. Socket tests also verify admission role binding.
 
 - `HostPeerOwnerTest` exercises automatic deadlines/restart, failed-completion
   isolation, capture detachment, healthy media progress, stale requests and 25

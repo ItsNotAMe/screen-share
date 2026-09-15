@@ -44,9 +44,10 @@ bool RoomSocket::Start(Config config) {
     const bool secure = url.scheme() == "wss" || (allowPlainLoopback_ && loopback && url.scheme() == "ws");
     bool valid = secure && url.isValid() && !url.host().isEmpty() && url.userInfo().isEmpty() &&
         !url.hasQuery() && !url.hasFragment() && (url.path().isEmpty() || url.path() == "/");
-    if (config.directory) valid = valid && config.token.isEmpty() && config.roomId.isEmpty() && config.selfPeerId.isEmpty();
+    if (config.directory) valid = valid && config.token.isEmpty() && config.roomId.isEmpty() && config.selfPeerId.isEmpty() && config.expectedRole.isEmpty();
     else {
         valid = valid && Identifier(config.roomId) && Identifier(config.selfPeerId) &&
+            (config.expectedRole == "host" || config.expectedRole == "viewer") &&
             !config.token.isEmpty() && config.token.size() <= 512;
         for (auto c : config.token) valid = valid && c >= 33 && c <= 126;
     }
@@ -180,6 +181,14 @@ void RoomSocket::Receive(uint64_t generation, const QString& text) {
         return;
     }
     if (result == wire::StateSubscription::Result::Applied) {
+        if (!config_.expectedRole.isEmpty()) {
+            for (auto member : cache_.Payload()["members"].toArray()) {
+                const auto item = member.toObject();
+                if (item["peerId"] == config_.selfPeerId && item["role"] != config_.expectedRole) {
+                    Drop(Error::Protocol, true); return;
+                }
+            }
+        }
         ready_ = true;
         if (type == "state.snapshot") {
             retries_ = 0; awaitingPong_ = false; deadline_.stop();

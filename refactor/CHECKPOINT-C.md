@@ -1,5 +1,40 @@
 # Checkpoint C evidence
 
+## Native create/join admission - 2026-09-15
+
+RoomAdmission now shares the networking library with RoomSocket. It returns typed
+futures, permits one in-flight request, canonicalizes names through the existing
+validators and validates returned identity, role and 256-bit token encoding.
+Successful results directly provide a socket configuration on the same origin.
+RoomSocket now requires expectedRole for room sockets and rejects conflicting snapshots;
+admission always supplies this binding.
+
+Create/join requests use HTTPS bodies. No redirects, cookie reuse/storage or HTTP
+caching are permitted. Responses are limited to 16 KiB and a ten-second deadline.
+Known structured rejections return typed errors. Cancellation, malformed or
+mismatched responses, unknown errors and timeouts are explicitly unconfirmed;
+application code never retries them automatically. A cancelled request may have
+committed server-side. Provisional expiry remains a service responsibility.
+
+The exact request/response contract is now recorded in ROOM-PROTOCOL.md. Native
+tests use a real local HTTP server and exercise create/join normalization, identity
+and role binding, invalid tokens, exact-key validation, typed rejection, redirects,
+oversized responses, cookie suppression, busy admission, cancellation/replacement,
+and the actual timeout. Live socket tests also reject a role-conflicting snapshot.
+Submitted passwords and raw server error bodies are not emitted in errors/logs;
+successful membership credentials are explicit in-memory values for attachment.
+
+Final evidence: `build/webrtc/admission-verified-sdk-app-{debug,release}.log`,
+`admission-verified-sdk-room-cli-release.log`, and
+`admission-verified-headless-release/result.json`. Earlier optional-role runs
+are retained under `admission-final-*` and `admission-headless-release`.
+Final application suites passed 12/12 each in Debug/Release, CLI-only Release
+passed 7/7, and the combined Release admission/socket/media headless run passed
+14/14. All test processes completed within their watchdogs.
+The headless runner's room option now runs admission plus socket tests. Service
+handlers, membership expiry, permission enforcement and media connection-generation
+dispatch remain open, along with normal application adoption and remote TLS tests.
+
 ## Native WebSocket transport - 2026-09-15
 
 ScreenShareRoom shares the existing validators/cache and the new private Qt
