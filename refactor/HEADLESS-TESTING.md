@@ -205,3 +205,13 @@ the sample generation and honor retired GPU resources. Slow callbacks cannot
 block other delivery workers, but removal/shutdown must wait for an in-flight
 callback, so native-call watchdogs remain necessary. The current admission
 ceiling is 63 subscriptions, matching the planned service abuse ceiling.
+# Local v2 service runtime tests
+
+From `signaling-worker`, run `npm run typecheck` then `npm test`. The suite bundles
+the production v2 Worker into an isolated Miniflare/workerd instance with SQLite
+Durable Objects and real HTTP/WebSocket traffic. It needs no account, deployment,
+physical input or desktop capture. The runtime test has a 60-second watchdog and
+disposes sockets/runtime on completion. It tests concurrent admission, credentials,
+socket replacement/reconnect, automatic pong and global capacity. Expiry is injected
+through a test-only entry point and exercises the production alarm handler; actual
+hibernation/alarm timing and native-client/media integration remain separate work.

@@ -1,0 +1,16 @@
+# Isolated development service. The default v1 entry/config is unchanged.
+name = "screenshare-signaling-v2"
+main = "src/v2/worker.ts"
+compatibility_date = "2026-05-21"
+
+[[durable_objects.bindings]]
+name = "V2_ROOMS"
+class_name = "V2Room"
+
+[[durable_objects.bindings]]
+name = "V2_CONTROL"
+class_name = "V2Control"
+
+[[migrations]]
+tag = "v2-initial"
+new_sqlite_classes = ["V2Room", "V2Control"]

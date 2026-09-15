@@ -21,6 +21,8 @@
 
 ## Current State
 
+- Isolated v2 Worker admission and socket membership now live under signaling-worker/src/v2 with wrangler.v2.toml. Real Miniflare/workerd tests cover credentials, serialized joins, provisional alarm cleanup, socket replacement/reconnect, automatic pong and the global 500-room cap. Default v1 remains active and nothing is deployed. Directory, command/signaling authorization, per-socket bounds, native/media integration and real hibernation scheduling remain open; see refactor/CHECKPOINT-C.md.
+
 - Native RoomAdmission now implements single-flight asynchronous create/join with HTTPS origin validation, bounded responses, no redirects/cookies/cache, exact credentials/role checks and unconfirmed cancellation/failure results without application retries. Success returns a same-origin RoomSocket config with expectedRole; conflicting snapshots reject. Actual HTTP and role-mismatch socket tests are in the application/headless suite. The exact future v2 service contract is in `refactor/ROOM-PROTOCOL.md`; service handlers/expiry, media routing and normal UI/CLI adoption remain open.
 
 - ScreenShareRoom now shares validators/cache and private Qt RoomSocket across backend builds, including CLI-only builds. Live tests on a separate QThread cover headers, snapshot/resync, target/role checks, actual heartbeat/reconnect, directory lifecycle and write pressure. Remote endpoints require wss; plaintext is an explicit numeric-loopback diagnostic option. Normal UI/CLI, admission, media connection-ID dispatch and v2 Worker integration remain open. See `refactor/CHECKPOINT-C.md`. `--room-build-directory` adds this test to the headless runner; `run-webrtc-proof.ps1 -Application -NoUi` supports separate CLI-only validation.

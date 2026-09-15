@@ -197,6 +197,8 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Protocol and native client
 
+- [x] Add isolated v2 Worker admission/room socket membership with hashed credentials, serialized capacity checks, provisional cleanup and actual local workerd tests. Partial service scope and remaining endpoints are recorded in CHECKPOINT-C.md.
+
 - [x] Implement native create/join HTTP admission with canonical requests, exact response/token/identity validation, typed futures, cancellation and unconfirmed outcomes without application retries. Bind the resulting socket to the admitted role; validate real HTTP failures and role-conflicting snapshots locally.
 
 - [x] Add shared native Qt room/directory transport independent of Widgets: authenticated headers, schema/identity/direction checks, bounded writes, snapshot readiness and stale-socket rejection. Validate live I/O on a dedicated networking thread; see [CHECKPOINT-C.md](CHECKPOINT-C.md).
@@ -215,7 +217,7 @@ Plan references: Section 3 and 5 / Checkpoint C.
 ### Persistence, hibernation and directory
 
 - [ ] Add separate SQLite Durable Object room/directory namespaces for v2.
-- [ ] Implement socket attachments and replacement-generation handling.
+- [x] Implement socket attachments and replacement-generation handling; local workerd replacement/reconnect passes. Hibernation reconstruction still requires coverage.
 - [ ] Implement automatic ping/pong and auto-response timestamp liveness.
 - [x] Implement native client ping/pong deadlines, one-shot resync and jittered reconnect backoff; exercise actual timeout/reconnect locally. Normal UI/CLI adoption remains pending.
 - [ ] Implement provisional/membership expiry and immediate leave/kick.
@@ -243,8 +245,8 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Worker/native integration tests
 
-- [ ] Add Worker typecheck/test scripts and execute tests in the local Cloudflare runtime.
-- [ ] Test simultaneous joins, provisional expiry and capacity races.
+- [x] Add Worker typecheck/test scripts and execute tests in the local Cloudflare runtime.
+- [x] Test simultaneous joins, provisional expiry and capacity races; expiry uses injected persisted deadlines with the actual alarm handler.
 - [ ] Test passwords, invalid/expired tokens, replay and unauthorized commands.
 - [ ] Test old-socket close after replacement and hibernation heartbeat freshness.
 - [ ] Test duplicate/gapped revisions and stale connection candidates.

@@ -1,5 +1,57 @@
 # Checkpoint C evidence
 
+## Isolated Worker admission and socket membership — 2026-09-15
+
+`signaling-worker/wrangler.v2.toml` now selects a separate v2 entry point and
+SQLite room/control objects. The default v1 entry/config and normal application
+remain unchanged; nothing was deployed. This is a service prerequisite, not a
+completed v2 service or Checkpoint C.
+
+Implemented HTTPS create/join, health and authenticated room-event attachment.
+Admission consumes at most 16 KiB before acquiring the room mutation gate, checks
+exact fields, normalizes names and bounds exact password UTF-8 to 128 bytes.
+Tokens are 32 random bytes; storage contains only SHA-256 token hashes. Passwords
+use independent random salts and versioned PBKDF2-SHA256 at 100,000 iterations.
+Provisional membership lasts 30 seconds and counts against capacity. Concurrent
+password verification/admission is serialized, so joins cannot overbook a room.
+
+Room sockets use hibernation attachments with peer identity and increasing socket
+generation. Replacement closes old sockets; their later close cannot mutate the
+replacement. The first event is an identity-bound snapshot. Resync is supported.
+The exact automatic ping/pong pair is configured, and alarms consult automatic
+response timestamps for 90-second membership expiry. Host disconnect broadcasts
+reconnecting and blocks joins; reconnect preserves membership. Host expiry closes
+the room and releases capacity, retaining a closure tombstone if release fails.
+No SDP or candidate history is stored. Other commands currently fail explicitly;
+signaling is not forwarded without its future authorization/generation dispatcher.
+
+The required control binding enforces 240 recognized HTTP requests/minute/IP,
+10 creates/minute/IP, 30 joins/password attempts/minute/IP, and an authoritative
+500-room reservation cap. IP keys are hashed. Reservations have 180-second leases,
+currently renewed by each 30-second room alarm. Closed-by-default Origin checks,
+no-store JSON responses and rejection of URL queries apply. Directory publication,
+60-second summary renewal, configurable caps and full CORS/preflight support remain
+unfinished. This development configuration is not ready for production cutover.
+
+`npm run typecheck` and `npm test` in signaling-worker validate the service.
+Final typecheck passed and tests passed 192/192; evidence is
+`build/webrtc/v2-service-tests.log`. Wrangler's v2-config dry-run bundle also passed
+without deployment (`build/webrtc/v2-worker-bundle`, `v2-worker-dry-run.log`).
+The test bundles the production entry and runs actual workerd/SQLite Durable
+Objects through Miniflare, with real HTTP and WebSocket traffic. Test-only storage
+inspection and expiry injection are added by an in-memory test entry, never the
+production bundle. Coverage includes hashed-only credential storage, normalization,
+wrong passwords/tokens, eight simultaneous joins for one slot, provisional expiry
+and readmission, abandoned-host cleanup, authenticated replacement, first snapshot,
+auto pong, resync, reconnecting/recovery, closed Origin policy, query-secret rejection,
+admission throttling, and 501 concurrent reservations against the 500-room cap.
+
+Expiry tests inject persisted deadlines and call the real alarm handler; they do
+not prove real alarm scheduling, hibernation eviction/reconstruction, cross-colo
+behavior or free-tier cost. Directory updates, mutations/deduplication, targeted
+signaling, per-socket rate/queue limits, native-to-Worker end-to-end tests and media
+adoption remain open. Existing resource and gaming latency acceptance is unchanged.
+
 ## Native create/join admission - 2026-09-15
 
 RoomAdmission now shares the networking library with RoomSocket. It returns typed
