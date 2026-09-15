@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--regression", action="store_true", help="Repeat media teardown 20 times")
     args = parser.parse_args()
     programs = [args.build_directory.resolve() / name for name in
-                ("CaptureSessionTest.exe", "CaptureDistributorTest.exe", "StreamSettingsTest.exe", "HostMediaSessionTest.exe", "IceCandidateHandoffTest.exe", "PeerConnectionLifecycleTest.exe", "HostPeerRegistryTest.exe", "WebRTCProof.exe")]
+                ("CaptureSessionTest.exe", "CaptureDistributorTest.exe", "StreamSettingsTest.exe", "HostMediaSessionTest.exe", "IceCandidateHandoffTest.exe", "PeerConnectionLifecycleTest.exe", "HostPeerRegistryTest.exe", "SignalingExecutorTest.exe", "WebRTCProof.exe")]
     for program in programs:
         if not program.is_file():
             parser.error(f"Build the proof targets first: missing {program.name}")

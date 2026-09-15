@@ -26,6 +26,14 @@ WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
 
+- The shared `SignalingExecutor` owns the WebRTC event loop for all media
+  scenarios. Its headless test covers FIFO execution, native event callbacks,
+  task failure, 64-command pressure, cancellation, closure destruction on the
+  owner thread and repeated/self-requested shutdown. `--negotiation-only` also
+  completes actual offer/answer operations using external future waits, without
+  manually pumping messages. Other media diagnostics retain nested waits on
+  the owned thread; those waits are not the application integration pattern.
+
 - `PeerNegotiation` is built as the same library in the application and proof.
   Real offer/answer/restart paths now use its asynchronous operations. A dedicated
   `WebRTCProof --negotiation-only` scenario cancels 25 pending offers, destroys

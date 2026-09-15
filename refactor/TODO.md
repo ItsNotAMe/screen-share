@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint B — asynchronous WebRTC/room adapter and application executor integration, then the shared UI/CLI facade.** The owning peer registry now binds to capture cleanup and the four-peer headless path; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
+Current next action: **Checkpoint B — application peer owner and asynchronous room delivery, then the shared UI/CLI facade.** The shared owned signaling executor now runs real media proofs and supports negotiation without caller message pumping; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -121,7 +121,8 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 ### PeerConnections
 
 - [x] Move asynchronous SDP create/local-apply/remote-apply into a shared application/proof library with typed operation results, cancellation, weak callbacks, single-operation admission and SDP bounds; remove the proof's old description observers.
-- [ ] Connect negotiation futures to the application signaling executor and authenticated room messages. The proof still pumps its local signaling loop while waiting; the backend adapter itself never pumps or waits.
+- [x] Provide an owned signaling event loop in the shared application/proof library with bounded admission, typed completion/cancellation and joined shutdown; run real media proofs on it and verify SDP negotiation without caller message pumping.
+- [ ] Connect negotiation futures to the application peer owner and authenticated room messages. The diagnostic media scenarios still use nested waits; application commands must initiate async work and return.
 
 - [x] Implement a portable per-connection deadline/recovery policy with typed failures, stale-event rejection, 500 ms/1 s/2 s backoff and rolling three-per-minute restart budget.
 - [x] Feed real peer ICE state into the policy and exercise a host-requested ICE restart with new credentials, settings preservation and four-peer media continuity.

@@ -68,7 +68,6 @@ struct ManagedMediaLink final : screenshare::media::IMediaPeer {
 };
 void RunMultiViewer(bool negotiationOnly = false) {
     using namespace screenshare::media;
-    webrtc::AutoThread mainThread;
     // The source bridge must not erase queue/conversion age by stamping frames
     // at delivery, and must preserve each wrapper's independent dimensions.
     struct SourceSink : webrtc::VideoSinkInterface<webrtc::VideoFrame> {

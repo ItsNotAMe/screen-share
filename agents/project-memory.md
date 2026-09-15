@@ -21,6 +21,8 @@
 
 ## Current State
 
+- SignalingExecutor now owns the native WebRTC event loop in the shared application/proof library. It admits 64 pending commands, reports typed outcomes, cancels queued work on stop and joins externally; accepted closures are destroyed on signaling. Real single/four-peer media proofs use it, and a separate offer/answer test proves progress without manual pumping. The application peer owner, room transport and UI/CLI facade remain next. Close/destroy peers on the executor before stopping; never join it from its own thread. See `refactor/CHECKPOINT-B.md`.
+
 - PeerNegotiation now implements asynchronous SDP creation/application with typed futures, weak callback cancellation and one in-flight operation, in a shared application/proof library. The old proof description observers are removed; real media/restart tests use the adapter. Application executor and authenticated room delivery remain next; UI/CLI media has not switched. See `refactor/CHECKPOINT-B.md`.
 
 - HostPeerRegistry now optionally binds HostMediaSession for automatic asynchronous failure/removal cleanup. Tick retries queue pressure, snapshots expose pending/error state, and bound Remove is accepted asynchronously (wait for row disappearance before reuse). Full Stop joins capture first; capture must outlive the registry. The four-peer proof covers terminal failure cleanup/rejoin; application executor and room adapter integration remain open.

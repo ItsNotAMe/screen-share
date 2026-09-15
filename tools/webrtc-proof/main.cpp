@@ -1,10 +1,11 @@
 #include "ProofPeer.h"
 #include "MultiViewerScenario.h"
+#include "media/SignalingExecutor.h"
+#include "OwnedNegotiationScenario.h"
 using namespace proofmedia;
 
 namespace {
 void Run(bool useHardware, bool useWasapi, bool useLiveCapture) {
-    webrtc::AutoThread mainThread;
     auto network = webrtc::Thread::CreateWithSocketServer();
     auto worker = webrtc::Thread::Create();
     Require(network->Start() && worker->Start(), "Thread startup failed");
@@ -183,15 +184,27 @@ int main(int argc, char** argv) {
     if (!webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
+        screenshare::media::SignalingExecutor executor;
         const std::string mode = argc == 2 ? argv[1] : "";
-        if (mode == "--multi-viewer") RunMultiViewer();
-        else if (mode == "--negotiation-only") RunMultiViewer(true);
-        else {
-            Require(mode.empty() || mode == "--hardware" || mode == "--live-capture" || mode == "--wasapi",
-                    "Unknown proof mode");
-            Require(argc <= 2, "Unexpected proof arguments");
-            Run(mode == "--hardware" || mode == "--live-capture", mode == "--wasapi", mode == "--live-capture");
-        }
+        if (mode == "--negotiation-only") CheckOwnedNegotiation(executor);
+        // The diagnostic pumps nested waits inside the task. Production
+        // negotiation initiates async work and returns to this event loop.
+        std::exception_ptr failure;
+        auto execution = executor.Post([&] {
+            try {
+                if (mode == "--multi-viewer") RunMultiViewer();
+                else if (mode == "--negotiation-only") RunMultiViewer(true);
+                else {
+                    Require(mode.empty() || mode == "--hardware" || mode == "--live-capture" || mode == "--wasapi",
+                            "Unknown proof mode");
+                    Require(argc <= 2, "Unexpected proof arguments");
+                    Run(mode == "--hardware" || mode == "--live-capture", mode == "--wasapi", mode == "--live-capture");
+                }
+            } catch (...) { failure = std::current_exception(); }
+        });
+        Require(execution.get().error == screenshare::media::ExecutorError::None, "Signaling execution failed");
+        executor.Stop();
+        if (failure) std::rethrow_exception(failure);
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL();

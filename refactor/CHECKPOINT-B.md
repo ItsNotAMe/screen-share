@@ -1,5 +1,54 @@
 # Checkpoint B evidence
 
+## Owned signaling event loop - 2026-09-15
+
+SignalingExecutor is now part of the shared ScreenShareNegotiation library.
+Its portable header exposes commands/futures and typed operation results; the
+implementation owns a native WebRTC thread. All single-peer, hardware/audio and
+four-peer media scenarios run on that executor instead of wrapping main in an
+AutoThread. The proof's registry and native peer lifetimes remain inside the
+executor task. The normal application facade has not switched backends.
+
+At most 64 commands may wait behind the running command. Capacity, invalid,
+closed, cancelled and task-failure results are explicit. Exceptions are contained
+without exposing arbitrary exception text. Only one application command is
+posted to the native queue at a time, allowing native callbacks between commands
+and avoiding an unbounded native queue of application work.
+
+Shutdown/embedding contract:
+
+- Post initiates work; production commands return without waiting on later
+  executor commands or native completion. Complete pending negotiation through
+  asynchronous owner dispatch, not the diagnostic's nested message waits.
+- RequestStop is nonblocking, rejects new commands and cancels pending commands
+  after the active command returns. Accepted closures, including cancelled ones,
+  are destroyed on signaling before their future completes. Rejected closures
+  are destroyed on the submitting thread and must be safe there.
+- Stop joins from an external owner and may be repeated/concurrently called.
+  Self-join rejects; a task may call RequestStop but may not destroy the executor.
+- Close/destroy native peers, negotiation adapters and factories on signaling
+  before stopping the executor. Keep SSL/Winsock alive until it joins. Stop does
+  not preempt an active native call or implicitly close independently owned peers;
+  retain a process watchdog for a hung native/driver call.
+
+The dedicated executor test verifies ordering, current-thread identity, ordinary
+native callback progress, exception containment, full-queue rejection, 64 pending
+cancellations, owner-thread closure release and shutdown behavior. The
+negotiation-only scenario additionally creates two native peers, exchanges and
+applies offer/answer SDP across separate commands, waits only from the external
+caller, then destroys all native state on signaling. No manual message pumping
+is used in that scenario. Existing media diagnostics still use nested waits.
+
+Validation evidence is recorded in `build/webrtc/executor-final-{debug,release}.log`,
+`executor-app-{debug,release}.log` and `executor-headless-{debug,release}/result.json`.
+Debug and Release media suites passed 26/26 each; application suites passed
+10/10 each. Debug headless smoke passed 11/11 and Release regression passed
+32/32, including 20 single-viewer and three four-viewer runs. The only later
+source edit reformatted the diagnostic dispatch indentation without changing code.
+Application ownership/completion dispatch, authenticated room messages, actual
+network impairment and UI/CLI cutover remain open. This change makes no new
+latency/resource-growth acceptance claim.
+
 ## Shared asynchronous SDP negotiation - 2026-09-15
 
 Added PeerNegotiation in the private WebRTC implementation module and the shared
