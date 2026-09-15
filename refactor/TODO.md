@@ -197,6 +197,8 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Protocol and native client
 
+- [x] Add authenticated directed signaling with host/viewer permissions, socket/offer generations, stale-ID rejection, candidate and recovery bounds, separate message/byte budgets and local workerd relay/rejection tests. Native media mapping and outbound queue-pressure acceptance remain open.
+
 - [x] Implement authenticated profile/policy mutations, leave/kick, bounded per-generation deduplication, revision conflicts and a local socket message budget; validate authorization and removal through actual workerd sockets. Signaling/directory dispatch remain open.
 
 - [x] Add isolated v2 Worker admission/room socket membership with hashed credentials, serialized capacity checks, provisional cleanup and actual local workerd tests. Partial service scope and remaining endpoints are recorded in CHECKPOINT-C.md.

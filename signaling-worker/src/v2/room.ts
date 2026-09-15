@@ -3,11 +3,13 @@ import type { Policy, Verifier } from './admission';
 import { validateClientCommand } from './protocol';
 import { decideMutation } from './mutations';
 import type { Result } from './mutations';
+import { authorizeSignal } from './signaling';
+import type { SignalSession } from './signaling';
 
 type Member = { peerId: string; nickname: string; role: 'host' | 'viewer'; hash: string; generation: number; expires: number; attached: boolean;
   recent?: { id: string; digest: string; result: Result }[] };
 type State = { roomId: string; policy: Policy; verifier?: Verifier; revision: number; members: Member[]; closed: boolean; closeReason?: string };
-type Attachment = { peerId: string; generation: number; connectedAt: number; window?: number; count?: number };
+type Attachment = { peerId: string; generation: number; connectedAt: number; window?: number; count?: number; signals?: number; signalBytes?: number };
 export interface RoomEnv { V2_ROOMS: DurableObjectNamespace; V2_CONTROL: DurableObjectNamespace; }
 
 // All admission/attachment/expiry mutations share one input gate, including
@@ -109,16 +111,33 @@ export class V2Room {
       const member = state?.members.find(m => m.peerId === attachment.peerId && m.generation === attachment.generation);
       if (!state || state.closed || !member) { ws.close(1008, 'stale_membership'); return; }
       const window = Math.floor(Date.now() / 60000);
-      attachment.count = attachment.window === window ? (attachment.count ?? 0) + 1 : 1;
-      attachment.window = window;
-      ws.serializeAttachment(attachment);
-      if (attachment.count > 120) { ws.close(1008, 'rate_limited'); return; }
-      const validation = validateClientCommand(typeof raw === 'string' ? new TextEncoder().encode(raw) : new Uint8Array(raw));
+      const bytes = typeof raw === 'string' ? new TextEncoder().encode(raw) : new Uint8Array(raw);
+      const validation = validateClientCommand(bytes);
       if (!validation.ok || validation.message.roomId !== state.roomId) { ws.close(1008, 'invalid_command'); return; }
       const message = validation.message;
+      if (attachment.window !== window) { attachment.count = 0; attachment.signals = 0; attachment.signalBytes = 0; }
+      attachment.window = window;
+      const signal = (message.type as string).startsWith('signal.');
+      if (signal) { attachment.signals = (attachment.signals ?? 0) + 1; attachment.signalBytes = (attachment.signalBytes ?? 0) + bytes.length; }
+      else attachment.count = (attachment.count ?? 0) + 1;
+      ws.serializeAttachment(attachment);
+      if ((attachment.count ?? 0) > 120 || (attachment.signals ?? 0) > (member.role === 'host' ? 4096 : 256) ||
+          (attachment.signalBytes ?? 0) > (member.role === 'host' ? 16 : 1) * 1024 * 1024) { ws.close(1008, 'rate_limited'); return; }
       if (message.type === 'state.resync') { this.snapshot(ws, state, member); return; }
-      // Signaling remains disabled until connection-generation ownership lands.
-      if (!message.requestId) { ws.close(1008, 'unsupported_command'); return; }
+      if (signal) {
+        const target = state.members.find(peer => peer.peerId === message.toPeerId && peer.attached);
+        if (!target || !this.sockets(target).length) { ws.close(1008, 'target_unavailable'); return; }
+        const viewer = member.role === 'viewer' ? member : target;
+        const key = 'signal:' + viewer.peerId;
+        const current = await this.ctx.storage.get<SignalSession>(key);
+        const decision = authorizeSignal(message, member, target, current, await tokenHash(message.connectionId as string), Date.now());
+        if (!decision.ok) { ws.close(1008, decision.reason); return; }
+        // Persist only identity/counters/digests, never SDP or ICE contents.
+        // Direct delivery has no retry queue and does not change room revision.
+        await this.ctx.storage.put(key, decision.session);
+        for (const destination of this.sockets(target)) this.send(destination, { ...message, fromPeerId: member.peerId });
+        return;
+      }
       const reply = (payload: Result) => this.send(ws, { v: 2, type: 'command.result', roomId: state.roomId, requestId: message.requestId, payload });
       const digest = await tokenHash(JSON.stringify(message));
       const prior = member.recent?.find(item => item.id === message.requestId);
@@ -134,6 +153,7 @@ export class V2Room {
       if (change) ++state.revision;
       if (decision.close) { state.closed = true; state.closeReason = 'host_left'; }
       await this.save(state);
+      if (removed) await this.ctx.storage.delete('signal:' + removed.peerId);
       reply(decision.result);
       if (change) for (const peer of state.members) for (const target of this.sockets(peer)) this.send(target, {
         v: 2, type: 'state.delta', roomId: state.roomId, revision: state.revision, payload: change });
@@ -172,6 +192,7 @@ export class V2Room {
       for (const member of state.members.slice(1)) if (member.expires <= now) {
         for (const ws of this.sockets(member)) { try { ws.close(1008, 'membership_expired'); } catch {} }
         state.members = state.members.filter(m => m !== member);
+        await this.ctx.storage.delete('signal:' + member.peerId);
         if (member.attached) this.delta(state, { op: 'member.remove', peerId: member.peerId });
       }
       await this.save(state);

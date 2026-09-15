@@ -184,6 +184,29 @@ queues; byte validators alone do not prevent floods.
 
 ## Subscription ordering (implemented pure policy)
 
+The Worker signaling dispatcher now treats connectionId as an offer/answer/ICE
+generation: the host must choose a fresh ID for each offer, including ICE restart.
+The underlying PeerConnection can remain the same. Both peers send candidates only
+after their local description message has been sent (offer for host, answer for
+viewer). Socket replacement invalidates the prior generation; the next exchange
+requires a fresh host offer. The native media adapter must supply this mapping.
+
+Only host-to-viewer offers, viewer-to-host answers/restart requests, and candidates
+between that pair are relayed. Unknown/offline targets, stale IDs, duplicate answers,
+wrong roles and more than 64 candidates per sender/generation close the sender's
+socket. A rolling minute permits four offers per viewer (initial plus three recovery
+attempts). Each viewer membership retains at most 1024 used-ID digests; exhausting
+this hard bound requires leave/readmission. IDs are never evicted to permit reuse.
+Signaling records contain counters/identity/digests, never SDP or candidate contents.
+The server does not parse SDP or establish ICE validity; the media layer must do so.
+
+Metadata retains its 120-message/minute socket budget. Signaling has independent
+fixed-minute count/byte budgets: host 4096 messages/16 MiB, viewer 256 messages/1 MiB.
+These are development defaults requiring load/cost validation. Delivery is direct,
+without retries or room revision changes; a WebSocket send is not acknowledgement
+that the remote media layer applied the description. Runtime outbound buffering
+and admission fanout still need production queue-pressure validation.
+
 Use independent `RevisionTracker` instances for room and directory. Every start
 or stop advances the local callback generation; start clears state while awaiting
 the server's authoritative snapshot. Reject old generations even if their revision

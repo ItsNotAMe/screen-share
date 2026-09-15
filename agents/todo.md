@@ -6,6 +6,8 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
+- [ ] Integrate the implemented v2 signaling relay with native media negotiation: fresh wire connection ID for every offer/restart, local description before candidates, and socket generation barriers. Add directory service and validate outbound pressure, hibernation reconstruction and cost/load; relay-only tests do not establish production media sessions.
+
 - [ ] Follow the implemented room mutation path with directory publication/retry and targeted signaling authorization. Preserve commit-before-notify, bounded per-generation deduplication and earliest alarm deadlines; add signaling-specific budgets rather than reusing the current metadata budget.
 
 - [ ] Complete v2 Worker directory snapshots/deltas and durable retry/lease publication, authenticated mutation/signaling dispatcher with deduplication/generation/queue/rate bounds, configurable caps and native-client runtime integration. Isolated admission/room socket membership and local workerd tests now exist; do not deploy or cut over the partial service. Validate hibernation reconstruction and real alarm timing beyond injected expiry tests.

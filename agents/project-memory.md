@@ -21,6 +21,8 @@
 
 ## Current State
 
+- V2 directed signaling now enforces pair roles, current socket generations, fresh per-offer connection IDs (including restart), candidate limits and bounded recovery/history. Workerd tests relay offer/answer/ICE/restart without room revision changes and reject stale/cross-viewer traffic. Native media adapter must map its negotiation generations to fresh wire IDs; directory, production queue pressure and cost acceptance remain pending.
+
 - V2 room mutations now enforce socket-derived host/viewer permissions, expected revisions, last-32 request deduplication and a 120-message/minute metadata budget. Live workerd tests cover profile/policy updates, reduced capacity without eviction, kick/leave token invalidation and host closure. Saves preserve earlier alarm deadlines. Directory/signaling and normal application integration remain open.
 
 - Isolated v2 Worker admission and socket membership now live under signaling-worker/src/v2 with wrangler.v2.toml. Real Miniflare/workerd tests cover credentials, serialized joins, provisional alarm cleanup, socket replacement/reconnect, automatic pong and the global 500-room cap. Default v1 remains active and nothing is deployed. Directory, command/signaling authorization, per-socket bounds, native/media integration and real hibernation scheduling remain open; see refactor/CHECKPOINT-C.md.

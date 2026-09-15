@@ -72,7 +72,7 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
   await room.fetch('https://internal/test/expire-provisional');
   assert.equal((await request(path + '/events', undefined, { Upgrade: 'websocket', Authorization: 'Bearer ' + viewer.token })).status, 403);
   const readmitted = await (await request(path + '/join', { v: 2, nickname: 'Viewer', password: 'secret' })).json();
-  const viewing = await attach(readmitted);
+  let viewing = await attach(readmitted);
   assert.equal(viewing.snapshot.payload.members.length, 2);
   const replacement = await attach(host);
   replacement.ws.send('v2:ping');
@@ -85,6 +85,33 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
   assert.equal((await request(path + '/join', { v: 2, nickname: 'Viewer', password: 'secret' })).status, 409);
   const recovered = await attach(host);
   assert.equal(recovered.snapshot.payload.status, 'open');
+  const beforeSignals = (await (await room.fetch('https://internal/test/state')).json()).revision;
+  async function signal(source, destination, type, connectionId, payload) {
+    const start = destination.messages.length;
+    const from = source === recovered ? host : readmitted;
+    const to = source === recovered ? readmitted : host;
+    source.ws.send(JSON.stringify({ v: 2, type, roomId: host.roomId, connectionId, toPeerId: to.peerId, payload }));
+    await until(() => destination.messages.slice(start).some(raw => JSON.parse(raw).type === type));
+    const delivered = JSON.parse(destination.messages.slice(start).find(raw => JSON.parse(raw).type === type));
+    assert.equal(delivered.fromPeerId, from.peerId);
+    assert.equal(validateServerEvent(new TextEncoder().encode(JSON.stringify(delivered))).ok, true);
+    return delivered;
+  }
+  await signal(recovered, viewing, 'signal.offer', 'media1', { sdp: 'v=0\r\n' });
+  await signal(viewing, recovered, 'signal.answer', 'media1', { sdp: 'v=0\r\n' });
+  await signal(recovered, viewing, 'signal.candidate', 'media1', { candidate: 'candidate:test', sdpMid: '0', sdpMLineIndex: 0 });
+  await signal(viewing, recovered, 'signal.restart_request', 'media1', {});
+  await signal(recovered, viewing, 'signal.offer', 'media2', { sdp: 'v=0\r\n' });
+  await signal(viewing, recovered, 'signal.answer', 'media2', { sdp: 'v=0\r\n' });
+  assert.equal((await (await room.fetch('https://internal/test/state')).json()).revision, beforeSignals);
+  let staleClosed = false;
+  viewing.ws.addEventListener('close', () => { staleClosed = true; });
+  const hostMessages = recovered.messages.length;
+  viewing.ws.send(JSON.stringify({ v: 2, type: 'signal.candidate', roomId: host.roomId, connectionId: 'media1', toPeerId: host.peerId,
+    payload: { candidate: 'stale-marker', sdpMid: '0', sdpMLineIndex: 0 } }));
+  await until(() => staleClosed);
+  assert.equal(recovered.messages.slice(hostMessages).some(raw => JSON.parse(raw).payload?.candidate === 'stale-marker'), false);
+  viewing = await attach(readmitted);
   assert.equal((await request('/v2/rooms', { ...input, role: 'host' })).status, 400);
   assert.equal((await request('/v2/rooms', { ...input, password: '😀'.repeat(33) })).status, 400);
   assert.equal((await request('/v2/rooms', input, { Origin: 'https://evil.test' })).status, 403);
@@ -127,7 +154,13 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
   revision = (await stateNow()).revision;
   assert.deepEqual(await command(recovered, 'room.update', 'expand', { expectedRevision: revision, viewerLimit: 2, visibility: 'unlisted' }), { status: 'ok' });
   const secondViewer = await (await request(path + '/join', { v: 2, nickname: 'Second', password: 'secret' })).json();
-  const secondSocket = await attach(secondViewer);
+  let secondSocket = await attach(secondViewer);
+  let forbiddenClosed = false;
+  secondSocket.ws.addEventListener('close', () => { forbiddenClosed = true; });
+  secondSocket.ws.send(JSON.stringify({ v: 2, type: 'signal.offer', roomId: host.roomId, connectionId: 'forbidden-offer', toPeerId: readmitted.peerId, payload: { sdp: 'v=0\r\n' } }));
+  await until(() => forbiddenClosed);
+  assert.equal(viewing.messages.some(raw => JSON.parse(raw).connectionId === 'forbidden-offer'), false);
+  secondSocket = await attach(secondViewer);
   revision = (await stateNow()).revision;
   await command(recovered, 'room.update', 'shrink', { expectedRevision: revision, viewerLimit: 1 });
   assert.equal((await stateNow()).members.length, 3);

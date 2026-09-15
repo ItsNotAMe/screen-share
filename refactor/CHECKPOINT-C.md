@@ -1,5 +1,33 @@
 # Checkpoint C evidence
 
+## Authenticated signaling relay — 2026-09-15
+
+Added a separate signaling authorization policy and actual room-socket dispatch.
+The service supplies fromPeerId from the current authenticated socket, restricts
+messages to host/viewer pairs, binds exchanges to both socket generations, and
+requires fresh connection IDs for offers/restarts. It rejects stale IDs, duplicate
+answers, wrong directions and candidates beyond 64 per sender/generation. Recovery
+offers have a rolling budget; used-ID digests have a documented lifetime bound.
+See ROOM-PROTOCOL.md for exact limits and the native adapter's required mapping.
+
+Signal records use separate per-viewer storage keys and contain only IDs, socket
+generations, counters and digests. No SDP/candidate history or retry queue is stored.
+Removal/expiry deletes the viewer record, closure deletes all records. Signals do
+not alter room revision. Independent metadata/signaling count and byte budgets
+live in socket attachments, without cross-object limiter requests per message.
+
+Typecheck and 193/193 Worker tests pass. Expanded actual workerd coverage relays
+offers, answers, candidates and restart requests, verifies authoritative sender and
+unchanged room revision, rejects a stale candidate after restart, and rejects
+viewer-to-viewer offers without forwarding. Pure policy coverage exercises socket
+replacement generations, candidate limits, replay, duplicate answers, recovery
+budgets and bounded history. Evidence: build/webrtc/v2-signaling-tests.log.
+
+This does not complete Checkpoint C: directory publication/subscriptions, native
+media dispatch, real hibernation reconstruction, outbound queue-pressure behavior,
+load/free-tier costs, remote NAT and gaming latency remain open. No deployment or
+normal application cutover occurred.
+
 ## Authorized room mutations — 2026-09-15
 
 Room sockets now execute profile.update, room.update, peer.disconnect and peer.leave
