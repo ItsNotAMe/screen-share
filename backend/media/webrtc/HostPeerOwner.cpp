@@ -7,6 +7,12 @@ struct HostPeerOwner::State : std::enable_shared_from_this<State> {
     SignalingExecutor& executor;
     HostPeerRegistry peers;
     bool stopped = false;
+    std::shared_ptr<std::promise<HostOperationError>> stopPromise;
+    std::shared_future<HostOperationError> stopFuture;
+    void CompleteStop() {
+        if (!stopPromise || (!peers.stopped() && peers.stopError() == HostOperationError::None)) return;
+        stopPromise->set_value(peers.stopError()); stopPromise.reset(); stopped = peers.stopped();
+    }
     State(SignalingExecutor& thread, HostMediaSession& capture, uint64_t generation)
         : executor(thread), peers(capture, generation) {}
     void CheckThread() const {
@@ -16,7 +22,8 @@ struct HostPeerOwner::State : std::enable_shared_from_this<State> {
         webrtc::Thread::Current()->PostDelayedTask([weak = weak_from_this()] {
             if (auto state = weak.lock(); state && !state->stopped) {
                 state->peers.Tick(PeerConnectionLifecycle::Clock::now());
-                state->Schedule();
+                state->CompleteStop();
+                if (!state->stopped) state->Schedule();
             }
         }, webrtc::TimeDelta::Millis(20));
     }
@@ -50,6 +57,16 @@ void HostPeerOwner::Stop() {
     // Stop capture and close peers before retiring the scheduler. Pending
     // delayed callbacks hold weak state and cannot revive this owner.
     state_->peers.Stop();
+    state_->CompleteStop();
     state_->stopped = true;
+}
+std::shared_future<HostOperationError> HostPeerOwner::BeginStop() {
+    state_->CheckThread();
+    if (!state_->stopFuture.valid()) {
+        state_->stopPromise = std::make_shared<std::promise<HostOperationError>>();
+        state_->stopFuture = state_->stopPromise->get_future().share();
+        state_->peers.BeginStop(); state_->CompleteStop();
+    }
+    return state_->stopFuture;
 }
 }

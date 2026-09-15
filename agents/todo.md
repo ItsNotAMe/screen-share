@@ -12,6 +12,11 @@ its own completion/deadline work. RoomNetwork owns the dedicated networking loop
 RoomPeerRoster now drives actual media membership in the authenticated proof.
 Continue with automatic cross-executor dispatch, asynchronous capture cleanup,
 recovery budgets and public events in the normal shared facade.
+
+RoomManagedPeer now connects attachment, retirement and restart policy in the
+real-room proof. HostPeerOwner.BeginStop drains capture asynchronously; runtime
+commands must use it and await completion before owner destruction. Finish normal
+facade dispatch/public events rather than rebuilding these completed primitives.
 The checks below are implementation details within those batches, not individual
 turn goals. Preserve all original checks in [DETAIL-CHECKS.md](../refactor/DETAIL-CHECKS.md).
 

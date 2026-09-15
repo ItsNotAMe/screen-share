@@ -84,6 +84,33 @@ int main() {
             Check(capture.snapshot().state == HostMediaState::Stopped);
             Check(failed.closed == 1 && failed.destroyed == 1 && expired.closed == 1 && expired.destroyed == 1);
             const auto polls = healthy.polls.load();
+            // Hold delivery open while starting shutdown. A command on the
+            // signaling executor must still run before the delivery is released.
+            auto draining = capture.Start([] { return std::make_unique<SyntheticCaptureSource>(64, 36, 30); }).get();
+            Check(draining.error == HostOperationError::None);
+            Evidence drainingPeer;
+            std::promise<void> releaseDelivery;
+            auto deliveryGate = releaseDelivery.get_future().share();
+            std::atomic<bool> deliveryEntered{false};
+            run([&] {
+                owner = std::make_unique<HostPeerOwner>(executor, capture, draining.generation);
+                Check(owner->Add(1, std::make_unique<TestPeer>(executor, drainingPeer, 100)));
+            });
+            Check(capture.AddViewer(draining.generation, 1, 100, [&](auto) {
+                deliveryEntered = true; deliveryGate.wait();
+            }).get().error == HostOperationError::None);
+            Wait([&] { return deliveryEntered.load(); });
+            std::shared_future<HostOperationError> shutdown, repeatedShutdown;
+            run([&] { shutdown = owner->BeginStop(); repeatedShutdown = owner->BeginStop(); });
+            Check(shutdown.wait_for(0ms) != std::future_status::ready);
+            run([&] {
+                Check(!owner->RequestRestart(1, 100));
+                Check(drainingPeer.destroyed == 0);
+            });
+            releaseDelivery.set_value();
+            Check(shutdown.wait_for(4s) == std::future_status::ready && shutdown.get() == HostOperationError::None);
+            Check(repeatedShutdown.get() == HostOperationError::None && drainingPeer.destroyed == 1);
+            run([&] { owner.reset(); });
             // Restart owners while old weak timers are still queued.
             for (int i = 0; i < 25; ++i) {
                 auto start = capture.Start([] { return std::make_unique<SyntheticCaptureSource>(64, 36, 30); }).get();

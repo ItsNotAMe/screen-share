@@ -259,6 +259,12 @@ through a test-only entry point and exercises the production alarm handler; actu
 hibernation/alarm timing and native-client/media integration remain separate work.
 # Authenticated four-viewer media (2026-09-16)
 
+Managed room peers now exercise HostPeerOwner's scheduled restart budget and
+asynchronous capture retirement. The initial offer waits for capture attachment;
+capture startup and final stop are awaited outside signaling. The
+`scheduled-peer-owner` test holds a delivery callback open during BeginStop and
+checks that signaling remains responsive until shutdown completes.
+
 RoomNetwork now owns the Qt networking loop; the scenario never calls
 QCoreApplication::processEvents. RoomPeerRoster drives peer creation/removal from
 authenticated host snapshots, including socket disconnect/reconnect, kick/rejoin

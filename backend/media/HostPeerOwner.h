@@ -17,6 +17,11 @@ public:
     bool RequestRestart(uint64_t viewer, uint64_t generation);
     bool Remove(uint64_t viewer, uint64_t generation);
     std::optional<ManagedPeerSnapshot> snapshot(uint64_t viewer) const;
+    // Runtime shutdown: returns immediately, remains scheduled until capture
+    // callbacks are joined and peers released. Repeated requests share completion.
+    std::shared_future<HostOperationError> BeginStop();
+    // Final teardown fallback. Runtime commands use BeginStop instead; destroy
+    // only after its completion to avoid joining capture on signaling.
     void Stop();
 private:
     struct State;

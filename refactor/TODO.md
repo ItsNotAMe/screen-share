@@ -48,6 +48,12 @@ kick/rejoin and close; it no longer pumps Qt events or manually attaches each pe
 Remaining facade work includes automatic cross-executor dispatch, asynchronous
 capture-cleanup barriers, recovery budget integration and public session events.
 
+The authenticated proof now uses RoomManagedPeer and HostPeerOwner for deferred
+capture attachment, cleanup barriers and budgeted ICE restarts. BeginStop keeps
+signaling responsive while capture callbacks drain; startup and shutdown waits
+belong to the outer diagnostic, not signaling commands. Carry these integrated
+owners into the normal facade and replace the remaining diagnostic dispatch.
+
 - [ ] Complete the integrated media-session deliverable and headless scenarios.
 
 ## 2. Complete user experience (B + D)

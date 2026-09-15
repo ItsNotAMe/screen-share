@@ -1,5 +1,39 @@
 # Checkpoint B evidence
 
+## Managed room peers and asynchronous capture shutdown — 2026-09-16
+
+RoomManagedPeer connects authenticated room negotiation to HostPeerOwner's
+scheduled lifecycle, restart budget and capture-aware retirement. The initial
+offer waits for successful asynchronous capture attachment; failed attachment
+is handled as a peer operation failure. Restart IDs include the peer incarnation
+and restart revision. Room membership removal initiates capture cleanup without
+waiting on signaling, and native peer resources remain retained until cleanup
+completes.
+
+HostPeerOwner.BeginStop returns a shared completion future. The registry starts
+capture shutdown, rejects new peers/restarts/removals while stopping, and polls
+completion without blocking signaling. It closes/releases remaining peers only
+after capture callbacks have joined. Repeated stop requests share completion;
+capture errors are returned rather than leaving the future pending. Synchronous
+Stop remains a final-teardown fallback; runtime coordinators must await BeginStop
+before destroying the owner.
+
+RoomMediaProof now uses the shared managed adapter for four real room-backed
+peers, scheduled ICE restart, socket loss/reconnect and kick/rejoin. Capture
+startup waits outside signaling; per-viewer attachment/removal no longer call
+future.get on signaling. Normal shutdown also awaits the asynchronous owner.
+HostPeerOwnerTest deliberately holds capture delivery open and verifies that
+signaling commands still run and peer resources remain retained until release.
+
+Normal UI/CLI facade adoption and automatic cross-executor event dispatch remain
+unfinished. This does not establish external latency or capture resource gates.
+
+Validation: full media suites 29/29 in Debug and Release; application 13/13 and
+CLI-only 8/8 in Release. Final capture-startup placement is verified by the
+room-backed media and scheduled-owner tests in both configurations. Evidence logs:
+build/webrtc/managed-room-{debug,release,app,cli}.log and
+build/webrtc/managed-room-verified-{debug,release}.log.
+
 ## Owned room networking and roster integration — 2026-09-16
 
 RoomNetwork owns a dedicated Qt event loop shared by admission and up to 64 room

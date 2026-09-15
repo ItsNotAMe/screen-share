@@ -2,6 +2,12 @@
 
 ## Current integration evidence — 2026-09-16
 
+RoomManagedPeer now joins authenticated negotiation to HostPeerOwner's scheduled
+recovery and capture-cleanup barriers in the four-peer scenario. Capture attachment
+and retirement are asynchronous on signaling. BeginStop shares completion across
+requests and drains capture without blocking signaling; use it before destruction.
+Normal UI/CLI facade dispatch is still unfinished. See CHECKPOINT-B.
+
 RoomNetwork now owns one Qt network loop for admission/room sockets, asynchronous
 commands/cancellation, bounded queues and terminal overflow. RoomPeerRoster drives
 actual media lifecycle from authenticated snapshots in RoomMediaProof, including

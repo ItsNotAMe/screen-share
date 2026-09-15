@@ -26,6 +26,11 @@ Current next action: **Complete the grouped room-backed session milestone and sh
 - [ ] Integrate those owners into automatic normal-facade dispatch with asynchronous
   capture cleanup, media recovery budgets and public operation/status events.
 
+- [x] RoomManagedPeer integrates capture-attachment futures, scheduled recovery
+  and asynchronous retirement in the real-room scenario. HostPeerOwner.BeginStop
+  keeps signaling responsive while capture drains; a held-callback test validates
+  retention and repeated completion. Normal facade adoption remains the open item.
+
 - [ ] On continuation, implement headless live-session scenario tooling alongside production integration: one-command smoke/regression runs, paced media, scripted test-owned control events, network constraints, machine-readable metrics and watchdog cleanup. See PLAN.md's headless testing requirement. Distinguish fully headless coverage from unattended WGC tests requiring a desktop/GPU.
 
 Resumed at user request on 2026-09-15. See [HEADLESS-TESTING.md](HEADLESS-TESTING.md) for the first runnable headless smoke/regression commands.

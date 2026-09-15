@@ -1,6 +1,8 @@
 #include "MultiViewerScenario.h"
 #include "media/webrtc/RoomPeerNegotiation.h"
 #include "media/RoomPeerRoster.h"
+#include "media/HostPeerOwner.h"
+#include "media/webrtc/RoomManagedPeer.h"
 #include "room/qt/RoomNetwork.h"
 #include <QCoreApplication>
 #include <QJsonDocument>
@@ -34,12 +36,15 @@ struct Context {
     std::unique_ptr<MediaLink> unansweredLink;
     std::unique_ptr<RoomPeerNegotiation> unansweredPeer;
     HostMediaSession capture;
+    std::unique_ptr<HostPeerOwner> owner;
     std::unique_ptr<RoomPeerRoster> membership;
     std::map<std::string, size_t> peerSlots;
     std::array<unsigned, 4> incarnations{};
+    std::array<std::atomic<bool>, 4> retired{};
     uint64_t captureGeneration = 0;
     void Close() {
         membership.reset();
+        if (owner) { owner->Stop(); owner.reset(); }
         if (captureGeneration) { capture.Stop(captureGeneration).get(); captureGeneration = 0; }
         for (auto& p : hosts) p.reset();
         for (auto& p : viewers) p.reset();
@@ -123,6 +128,9 @@ void Run(const QUrl& origin) {
                 if (sockets[i] && sockets[i]->id == event.socket) receive(event.value, false, i);
         }
         if (context) execute([&] {
+            for (size_t i = 0; i < 4; ++i) if (context->retired[i].exchange(false)) {
+                context->hosts[i].reset(); context->viewers[i].reset(); context->links[i].reset();
+            }
             if (context->membership && rosterLost) {
                 context->membership->TransportLost(rosterLostGeneration); rosterLost = false;
             }
@@ -138,7 +146,10 @@ void Run(const QUrl& origin) {
                 if (target) Require(target->Receive(std::move(packet.message)), "Authenticated negotiation message rejected");
             }
             incoming.clear();
-            for (size_t i = 0; i < 4; ++i) if (context->hosts[i]) Require(!context->hosts[i]->closed() && !context->viewers[i]->closed(), "Asynchronous negotiation failed");
+            for (size_t i = 0; i < 4; ++i) if (context->hosts[i]) {
+                const auto status = context->owner->snapshot(i + 1);
+                if (status && !status->peerClosed) Require(!context->hosts[i]->closed() && !context->viewers[i]->closed(), "Asynchronous negotiation failed");
+            }
         });
         Require(!transportFailed, "Room transport failed");
         std::deque<Packet> packets;
@@ -182,7 +193,14 @@ void Run(const QUrl& origin) {
             Require(context->factory != nullptr, "Media factory failed");
             webrtc::AudioOptions options; options.echo_cancellation = options.auto_gain_control = options.noise_suppression = false;
             auto source = context->factory->CreateAudioSource(options); context->audio = context->factory->CreateAudioTrack("room-audio", source.get());
-            context->captureGeneration = context->capture.Start([] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); }).get().generation;
+        });
+        auto captureStarted = context->capture.Start([] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); });
+        wait([&] { return captureStarted.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }, "Capture startup timed out");
+        const auto captureResult = captureStarted.get();
+        Require(captureResult.error == HostOperationError::None, "Capture startup failed");
+        execute([&] {
+            context->captureGeneration = captureResult.generation;
+            context->owner = std::make_unique<HostPeerOwner>(executor, context->capture, context->captureGeneration);
             attachMedia = [&](size_t i, std::string id) {
                 context->links[i] = CreateViewer(*context->factory, context->audio);
                 auto& link = *context->links[i];
@@ -197,11 +215,14 @@ void Run(const QUrl& origin) {
                 context->viewers[i] = std::make_unique<RoomPeerNegotiation>(link.viewer.connection, link.viewer.Negotiation(), link.viewer.lifecycle.generation(), false, send(false));
                 link.host.candidateObserver = [&, i](auto* c) { if (context && context->hosts[i]) context->hosts[i]->LocalCandidate(c); };
                 link.viewer.candidateObserver = [&, i](auto* c) { if (context && context->viewers[i]) context->viewers[i]->LocalCandidate(c); };
-                Require(context->capture.AddViewer(context->captureGeneration, i + 1, link.host.lifecycle.generation(), [source = link.source, &slow, i](auto sample) {
+                auto attachment = context->capture.AddViewer(context->captureGeneration, i + 1, link.host.lifecycle.generation(), [source = link.source, &slow, i](auto sample) {
                     if (i == 3 && slow) std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     source->Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
-                }).get().error == HostOperationError::None, "Capture subscription failed");
-                Require(context->hosts[i]->Offer(std::move(id)), "Offer startup failed");
+                });
+                Require(context->owner->Add(i + 1, std::make_unique<RoomManagedPeer>(link.host.lifecycle, *context->hosts[i],
+                    std::move(attachment), std::move(id),
+                    [i, generation = link.host.lifecycle.generation()](uint64_t revision) { return "room_media_" + std::to_string(i) + "_g" + std::to_string(generation) + "_restart_" + std::to_string(revision); },
+                    [state = context.get(), i] { state->retired[i] = true; })), "Scheduled peer ownership failed");
             };
             context->membership = std::make_unique<RoomPeerRoster>([&](const std::string& peer) {
                 for (size_t i = 0; i < configs.size(); ++i) if (configs[i].selfPeerId.toStdString() == peer) {
@@ -213,8 +234,8 @@ void Run(const QUrl& origin) {
                 const auto slot = state->peerSlots.find(peer);
                 if (slot == state->peerSlots.end()) return;
                 const auto i = slot->second;
-                state->capture.RemoveViewer(state->captureGeneration, i + 1, state->links[i]->host.lifecycle.generation()).get();
-                state->hosts[i].reset(); state->viewers[i].reset(); state->links[i].reset(); state->peerSlots.erase(slot);
+                state->owner->Remove(i + 1, state->links[i]->host.lifecycle.generation());
+                state->peerSlots.erase(slot);
             });
             rosterDirty = true;
         });
@@ -237,16 +258,17 @@ void Run(const QUrl& origin) {
         Require(sockets[3]->Start(configs[3]), "Socket reconnect failed");
         wait([&] { return ready[3] && context->links[3] && context->links[3]->viewer.decodedFrames >= 30; }, "Socket reconnect did not rebuild media");
         unsigned before = context->links[3]->viewer.decodedFrames, healthyBefore = context->links[0]->viewer.decodedFrames;
-        execute([&] { Require(context->hosts[3]->Offer("room_media_3_restart", true), "Restart rejected"); });
+        const auto expectedRestartId = "room_media_3_g" + std::to_string(context->links[3]->host.lifecycle.generation()) + "_restart_1";
+        execute([&] { Require(context->owner->RequestRestart(4, context->links[3]->host.lifecycle.generation()), "Restart rejected"); });
         wait([&] { return context->links[3]->viewer.decodedFrames >= before + 30 && context->links[0]->viewer.decodedFrames >= healthyBefore + 30; }, "Media did not continue through restart");
         bool restartReady = false;
-        wait([&] { execute([&] { restartReady = context->hosts[3]->ready() && context->viewers[3]->ready() && context->viewers[3]->connectionId() == "room_media_3_restart"; }); return restartReady; }, "Restart negotiation incomplete");
+        wait([&] { execute([&] { restartReady = context->hosts[3]->ready() && context->viewers[3]->ready() && context->viewers[3]->connectionId() == expectedRestartId; }); return restartReady; }, "Restart negotiation incomplete");
         execute([&] {
             Require(context->viewers[3]->Receive({RoomPeerSignal::Kind::Candidate, "room_media_3_1", {}, {"retired-invalid-candidate", "0", 0}}), "Retired candidate did not drop safely");
-            Require(context->viewers[3]->ready() && !context->hosts[3]->Offer("room_media_3_restart", true), "Retired/reused generation changed active negotiation");
+            Require(context->viewers[3]->ready() && !context->hosts[3]->Offer(expectedRestartId, true), "Retired/reused generation changed active negotiation");
         });
         Require(host.Send(QJsonDocument(QJsonObject{{"v", 2}, {"type", "peer.disconnect"}, {"roomId", hostConfig.roomId}, {"requestId", "media-kick"}, {"payload", QJsonObject{{"peerId", configs[3].selfPeerId}}}}).toJson(QJsonDocument::Compact)) == RoomSocket::SendResult::Sent, "Kick failed");
-        wait([&] { return closed[3] && roster["members"].toArray().size() == 4; }, "Kick not observed");
+        wait([&] { return closed[3] && roster["members"].toArray().size() == 4 && !context->links[3]; }, "Kick not observed");
         execute([&] {
             Require(!context->links[3] && context->membership->activeCount() == 3, "Roster did not remove kicked media");
         });
@@ -284,6 +306,9 @@ void Run(const QUrl& origin) {
         wait([&] { return roomClosed && std::all_of(closed.begin(), closed.end(), [](bool v) { return v; }); }, "Room closure failed");
         execute([&] { Require(context->membership->activeCount() == 0 && context->peerSlots.empty(), "Room close retained media peers"); });
         for (auto& socket : sockets) socket->Stop(); host.Stop();
+        std::shared_future<HostOperationError> mediaStopped;
+        execute([&] { mediaStopped = context->owner->BeginStop(); });
+        Require(mediaStopped.wait_for(std::chrono::seconds(10)) == std::future_status::ready && mediaStopped.get() == HostOperationError::None, "Asynchronous media shutdown failed");
         execute([&] { context.reset(); }); executor.Stop();
         Require(candidatesSent > 0, "Room signaling did not exercise trickle ICE");
         std::cout << "{\"passed\":true,\"room_backed_media\":true,\"viewers\":4,\"decoded_frames\":" << total << ",\"opus_audible_blocks\":" << audioBlocks
