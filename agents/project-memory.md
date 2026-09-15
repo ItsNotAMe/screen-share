@@ -21,7 +21,9 @@
 
 ## Current State
 
-- V2 directory now completes the isolated service's six endpoints: SQLite snapshot/pushed deltas, no per-room listing fanout, publish-after-host-attach, persisted versioned retries, closure tombstones, 60s renewals/180s leases and silent lease-only updates. Actual workerd tests cover failures/retry, lifecycle/visibility, expiry and 500 max-name rows. Directory publication still runs within room control handling with a 5s abort deadline; decouple this before responsiveness acceptance. Native/media adoption, hibernation/load/queue pressure and production cutover remain open.
+- Directory/capacity delivery is now a bounded background outbox outside room input/state gates. A shared state serializer and version-matching acknowledgements protect newer changes and closure; the latest pending value survives failures for alarm retry. Actual workerd tests cover stalled service with concurrent control/signaling, late ACKs, close races and the real 5s abort. Normal native/media integration and production hibernation/load/queue acceptance remain pending.
+
+- V2 directory completes the isolated service's six endpoints: SQLite snapshot/pushed deltas, no per-room listing fanout, publish-after-host-attach, persisted versioned retries, closure tombstones, 60s renewals/180s leases and silent lease-only updates. Actual workerd tests cover failures/retry, lifecycle/visibility, expiry and 500 max-name rows. Native/media adoption, hibernation/load/queue pressure and production cutover remain open.
 
 - V2 directed signaling now enforces pair roles, current socket generations, fresh per-offer connection IDs (including restart), candidate limits and bounded recovery/history. Workerd tests relay offer/answer/ICE/restart without room revision changes and reject stale/cross-viewer traffic. Native media adapter must map its negotiation generations to fresh wire IDs; directory, production queue pressure and cost acceptance remain pending.
 

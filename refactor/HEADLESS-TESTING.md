@@ -207,6 +207,13 @@ callback, so native-call watchdogs remain necessary. The current admission
 ceiling is 63 subscriptions, matching the planned service abuse ceiling.
 # Local v2 service runtime tests
 
+Background-delivery coverage now deliberately holds a directory request while
+admission, attachment, resync, edits and signaling execute. It tests newer updates
+and host closure racing with the old acknowledgement, plus the actual five-second
+fetch abort and eventual retry. The 1.5-second control-operation watchdog is a
+regression bound, not a gaming-latency measurement. Expiry injection and observations
+respect the production state serializer and asynchronous cleanup semantics.
+
 Directory coverage now includes real pushed snapshots/deltas, publication failures
 before and after commit, closure retry, version fences, lease expiry/renewal,
 provisional capacity and host reconnecting, no per-room listing calls, resync floods,

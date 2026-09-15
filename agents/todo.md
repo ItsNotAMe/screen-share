@@ -6,7 +6,7 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
-- [ ] Decouple persisted directory outbox delivery from room control dispatch, then test native RoomAdmission/RoomSocket against the complete local workerd service and integrate the shared media facade. Directory publication/subscriptions now pass actual runtime lifecycle/failure/lease tests; production hibernation, load, queue pressure and latency acceptance remain open.
+- [ ] Test native RoomAdmission/RoomSocket against the complete local workerd service and integrate the shared media facade. Directory/capacity background delivery now passes stalled-service, timeout/retry and late-acknowledgement race tests; production hibernation, load, queue pressure and latency acceptance remain open.
 
 - [ ] Integrate the implemented v2 signaling relay with native media negotiation: fresh wire connection ID for every offer/restart, local description before candidates, and socket generation barriers. Validate outbound pressure, hibernation reconstruction and cost/load; relay-only tests do not establish production media sessions.
 

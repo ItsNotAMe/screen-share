@@ -231,7 +231,7 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [x] Implement 60-second lease renewals, 180-second expiry and directory cleanup; real alarm timing still needs validation.
 - [x] Avoid visible updates for lease-only renewals.
 - [x] Persist pending directory updates; retry failures and closure removal safely.
-- [ ] Decouple directory publication I/O from room control dispatch; current five-second publication deadline can delay subsequent commands during directory failures.
+- [x] Decouple directory publication and capacity I/O from room control dispatch; validate stalled delivery, real abort/retry and late-acknowledgement races in workerd.
 - [x] Enforce summary versions and fail-closed reservations/admission.
 
 ### Profile and authorization

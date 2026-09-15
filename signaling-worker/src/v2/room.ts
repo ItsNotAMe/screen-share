@@ -6,6 +6,7 @@ import type { Result } from './mutations';
 import { authorizeSignal } from './signaling';
 import type { SignalSession } from './signaling';
 import type { Publication, Summary } from './directory';
+import { BackgroundOutbox, SerializedState } from './background-outbox';
 
 type Member = { peerId: string; nickname: string; role: 'host' | 'viewer'; hash: string; generation: number; expires: number; attached: boolean;
   recent?: { id: string; digest: string; result: Result }[] };
@@ -13,12 +14,19 @@ type State = { roomId: string; policy: Policy; verifier?: Verifier; revision: nu
   directory?: { version: number; signature: string; nextRenew: number; pending?: Publication }; capacityRenew?: number };
 type Attachment = { peerId: string; generation: number; connectedAt: number; window?: number; count?: number; signals?: number; signalBytes?: number };
 export interface RoomEnv { V2_ROOMS: DurableObjectNamespace; V2_CONTROL: DurableObjectNamespace; V2_DIRECTORY: DurableObjectNamespace; }
+type Delivery = { kind: 'publish'; roomId: string; publication: Publication } | { kind: 'renew' | 'release'; roomId: string };
 
 // All admission/attachment/expiry mutations share one input gate, including
 // asynchronous password derivation. An overlapping join cannot overbook a room.
 export class V2Room {
+  private stateLane = new SerializedState();
+  private outbox: BackgroundOutbox<Delivery>;
   constructor(private ctx: DurableObjectState, private env: RoomEnv) {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('v2:ping', 'v2:pong'));
+    this.outbox = new BackgroundOutbox(work => ctx.waitUntil(work), () => this.nextDelivery(), job => this.deliver(job));
+  }
+  private operation<T>(action: () => Promise<T>): Promise<T> {
+    return this.ctx.blockConcurrencyWhile(() => this.stateLane.run(action)).finally(() => this.outbox.start());
   }
   private sockets(member: Member): WebSocket[] {
     return this.ctx.getWebSockets(member.peerId).filter(ws => ws.deserializeAttachment()?.generation === member.generation && ws.readyState === 1);
@@ -55,19 +63,53 @@ export class V2Room {
     const alarm = await this.ctx.storage.getAlarm();
     // Frequent commands must not defer expiry or capacity renewal indefinitely.
     if (alarm === null || alarm <= Date.now() || alarm > deadline) await this.ctx.storage.setAlarm(deadline);
+    if (state.closed || directory.pending || (state.capacityRenew ?? 0) <= Date.now()) this.outbox.request();
   }
-  private async publish(state: State): Promise<boolean> {
-    const directory = state.directory;
-    if (!directory?.pending) return true;
-    directory.pending.leaseExpiresAt = Date.now() + 180000;
-    await this.ctx.storage.put('state', state);
+  private nextDelivery(): Promise<Delivery | undefined> {
+    return this.stateLane.run(async () => {
+      const state = await this.ctx.storage.get<State>('state');
+      if (!state) return undefined;
+      if (!state.closed && (state.capacityRenew ?? 0) <= Date.now()) return { kind: 'renew', roomId: state.roomId };
+      const pending = state.directory?.pending;
+      if (pending) {
+        pending.leaseExpiresAt = Date.now() + 180000;
+        await this.ctx.storage.put('state', state);
+        return { kind: 'publish', roomId: state.roomId, publication: structuredClone(pending) };
+      }
+      return state.closed ? { kind: 'release', roomId: state.roomId } : undefined;
+    });
+  }
+  private async deliver(job: Delivery): Promise<boolean> {
     try {
-      const response = await this.env.V2_DIRECTORY.get(this.env.V2_DIRECTORY.idFromName('directory')).fetch('https://internal/publish', {
-        method: 'POST', body: JSON.stringify(directory.pending), signal: AbortSignal.timeout(5000) });
+      const namespace = job.kind === 'publish' ? this.env.V2_DIRECTORY : this.env.V2_CONTROL;
+      const target = namespace.get(namespace.idFromName(job.kind === 'publish' ? 'directory' : 'capacity'));
+      const response = await target.fetch('https://internal/' + job.kind, {
+        method: 'POST', body: job.kind === 'publish' ? JSON.stringify(job.publication) : job.roomId, signal: AbortSignal.timeout(5000) });
+      if (job.kind === 'renew' && response.status === 409) {
+        await this.stateLane.run(async () => {
+          const state = await this.ctx.storage.get<State>('state');
+          if (state && !state.closed) await this.close(state, 'server_shutdown');
+        });
+        return true;
+      }
       if (!response.ok) return false;
-      directory.pending = undefined;
-      directory.nextRenew = Date.now() + 60000;
-      await this.ctx.storage.put('state', state);
+      await this.stateLane.run(async () => {
+        // Never write back the pre-network room snapshot: commands may have
+        // changed it while the request was in flight.
+        const state = await this.ctx.storage.get<State>('state');
+        if (!state || state.roomId !== job.roomId) return;
+        if (job.kind === 'publish') {
+          if (state.directory?.pending?.version !== job.publication.version) return;
+          state.directory.pending = undefined;
+          state.directory.nextRenew = Date.now() + 60000;
+        } else if (job.kind === 'release') {
+          if (!state.closed || state.directory?.pending) return;
+          await this.ctx.storage.deleteAll();
+          await this.ctx.storage.deleteAlarm();
+          return;
+        } else state.capacityRenew = Date.now() + 60000;
+        await this.ctx.storage.put('state', state);
+      });
       return true;
     } catch { return false; }
   }
@@ -79,15 +121,11 @@ export class V2Room {
       this.send(ws, { v: 2, type: 'room.closed', roomId: state.roomId, payload: { reason } });
       try { ws.close(1000, 'room_closed'); } catch {}
     }
-    // Retain a tombstone until the control-object release is acknowledged.
-    if (!await this.publish(state)) return;
-    const response = await this.env.V2_CONTROL.get(this.env.V2_CONTROL.idFromName('capacity')).fetch('https://internal/release', { method: 'POST', body: state.roomId });
-    if (!response.ok) throw new Error('release_failed');
-    await this.ctx.storage.deleteAll();
-    await this.ctx.storage.deleteAlarm();
+    // Background delivery retains this tombstone until directory removal and
+    // capacity release are acknowledged. Control never waits on either service.
   }
   async fetch(request: Request): Promise<Response> {
-    try { return await this.ctx.blockConcurrencyWhile(async () => { try {
+    try { return await this.operation(async () => { try {
       const url = new URL(request.url);
       let state = await this.ctx.storage.get<State>('state');
       if (url.pathname === '/create' && request.method === 'POST') {
@@ -96,7 +134,7 @@ export class V2Room {
         const roomId = request.headers.get('X-Room-Id')!;
         const token = randomId(32);
         const host: Member = { peerId: randomId(), nickname: input.nickname, role: 'host', hash: await tokenHash(token), generation: 0, expires: Date.now() + 30000, attached: false };
-        state = { roomId, policy: input.policy!, verifier: await passwordVerifier(input.password), revision: 0, members: [host], closed: false };
+        state = { roomId, policy: input.policy!, verifier: await passwordVerifier(input.password), revision: 0, members: [host], closed: false, capacityRenew: Date.now() + 60000 };
         await this.save(state);
         return json({ v: 2, roomId, peerId: host.peerId, role: 'host', token }, 201);
       }
@@ -113,7 +151,6 @@ export class V2Room {
         const member: Member = { peerId: randomId(), nickname: input.nickname, role: 'viewer', hash: await tokenHash(token), generation: 0, expires: Date.now() + 30000, attached: false };
         state.members.push(member);
         await this.save(state);
-        await this.publish(state);
         return json({ v: 2, roomId: state.roomId, peerId: member.peerId, role: 'viewer', token });
       }
       if (url.pathname !== '/events' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') throw new AdmissionError(400, 'invalid_request');
@@ -133,12 +170,11 @@ export class V2Room {
       for (const ws of previous) { try { ws.close(1000, 'replaced'); } catch {} }
       await this.delta(state, member.role === 'host' ? { op: 'host.status', status: 'open' } : { op: 'member.upsert', member: this.view(member) }, pair[1]);
       this.snapshot(pair[1], state, member);
-      await this.publish(state);
       return new Response(null, { status: 101, webSocket: pair[0] });
     } catch (error) { return failure(error); } }); } catch (error) { return failure(error); }
   }
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
-    await this.ctx.blockConcurrencyWhile(async () => {
+    await this.operation(async () => {
       const state = await this.ctx.storage.get<State>('state');
       const attachment = ws.deserializeAttachment() as Attachment;
       const member = state?.members.find(m => m.peerId === attachment.peerId && m.generation === attachment.generation);
@@ -195,24 +231,22 @@ export class V2Room {
         try { target.close(1000, 'membership_removed'); } catch {}
       }
       if (decision.close) await this.close(state, 'host_left');
-      else await this.publish(state);
     });
   }
   async webSocketClose(ws: WebSocket): Promise<void> { await this.disconnected(ws); }
   async webSocketError(ws: WebSocket): Promise<void> { try { ws.close(1011, 'socket_error'); } catch {} await this.disconnected(ws); }
   private async disconnected(ws: WebSocket): Promise<void> {
-    await this.ctx.blockConcurrencyWhile(async () => {
+    await this.operation(async () => {
       const state = await this.ctx.storage.get<State>('state');
       const attachment = ws.deserializeAttachment() as Attachment;
       const member = state?.members.find(m => m.peerId === attachment.peerId && m.generation === attachment.generation);
       if (!state || state.closed || !member || this.sockets(member).length) return;
       member.expires = Date.now() + 90000;
       await this.delta(state, member.role === 'host' ? { op: 'host.status', status: 'reconnecting' } : { op: 'member.upsert', member: this.view(member) });
-      await this.publish(state);
     });
   }
   async alarm(): Promise<void> {
-    await this.ctx.blockConcurrencyWhile(async () => {
+    await this.operation(async () => {
       const state = await this.ctx.storage.get<State>('state');
       if (!state) return;
       if (state.closed) { await this.close(state, state.closeReason ?? 'host_expired'); return; }
@@ -230,12 +264,6 @@ export class V2Room {
         if (member.attached) await this.delta(state, { op: 'member.remove', peerId: member.peerId });
       }
       await this.save(state);
-      await this.publish(state);
-      if ((state.capacityRenew ?? 0) <= now) {
-        const response = await this.env.V2_CONTROL.get(this.env.V2_CONTROL.idFromName('capacity')).fetch('https://internal/renew', { method: 'POST', body: state.roomId });
-        if (!response.ok) await this.close(state, 'server_shutdown');
-        else { state.capacityRenew = now + 60000; await this.ctx.storage.put('state', state); }
-      }
     });
   }
 }

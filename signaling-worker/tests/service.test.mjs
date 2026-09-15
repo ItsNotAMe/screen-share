@@ -16,9 +16,11 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
         const path = new URL(request.url).pathname;
         if (path === '/test/state') return Response.json(await this.testState.storage.get('state') ?? null);
         if (path === '/test/expire-provisional') {
+          await this.stateLane.run(async () => {
           const state = await this.testState.storage.get('state');
           for (const member of state.members) if (!member.attached) member.expires = 0;
           await this.testState.storage.put('state', state);
+          });
           await this.alarm();
           return new Response(null, { status: 204 });
         }
@@ -119,6 +121,7 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
   const abandoned = await (await request('/v2/rooms', input)).json();
   const abandonedRoom = rooms.get(rooms.idFromName(abandoned.roomId));
   await abandonedRoom.fetch('https://internal/test/expire-provisional');
+  await until(async () => await (await abandonedRoom.fetch('https://internal/test/state')).json() === null);
   assert.equal(await (await abandonedRoom.fetch('https://internal/test/state')).json(), null);
   assert.equal((await request(`/v2/rooms/${abandoned.roomId}/events`, undefined, { Upgrade: 'websocket', Authorization: 'Bearer ' + abandoned.token })).status, 404);
   for (let i = 0; i < 11; ++i) await request('/v2/rooms', input, { 'CF-Connecting-IP': '192.0.2.2' });
@@ -180,10 +183,11 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
   await until(() => floodClosed);
   assert.deepEqual(await command(recovered, 'peer.leave', 'close', {}), { status: 'ok' });
   await until(() => recovered.messages.some(raw => JSON.parse(raw).type === 'room.closed'));
+  await until(async () => await stateNow() === null);
   assert.equal((await request(path + '/join', { v: 2, nickname: 'Late', password: 'secret' })).status, 404);
 });
 
 async function until(predicate) {
   const end = Date.now() + 5000;
-  while (!predicate()) { if (Date.now() > end) throw new Error('event deadline exceeded'); await new Promise(resolve => setTimeout(resolve, 10)); }
+  while (!await predicate()) { if (Date.now() > end) throw new Error('event deadline exceeded'); await new Promise(resolve => setTimeout(resolve, 10)); }
 }

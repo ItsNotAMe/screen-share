@@ -1,5 +1,39 @@
 # Checkpoint C evidence
 
+## Background directory and capacity delivery — 2026-09-15
+
+Directory publication, capacity renewal and capacity release now run outside the
+room input gate and state serializer. Room commands persist their changes/pending
+publication and return without awaiting those services. One background delivery
+loop per room coalesces wakeups, runs at most four jobs per drain, and leaves failed
+or remaining work for the existing persisted alarm or a later mutation. No outgoing
+event or publication history queue was added; only the latest pending summary is
+retained. A five-second fetch abort bounds each client-side network wait.
+
+State phases use an explicit serializer shared by input handling and background
+acknowledgements. Network awaits never hold that serializer. Each acknowledgement
+reloads current state and clears only the matching publication version, so a late
+reply cannot restore an old roster/policy or erase a newer removal. Closure remains
+persisted until directory removal and capacity release acknowledge. A confirmed
+missing capacity reservation closes the room; transient failures preserve retry
+state. This supersedes the earlier directory-control blocking limitation below.
+
+Actual workerd tests hold a publication open while admission, socket attachment,
+resync, policy edits and offer/answer relay complete within a 1.5-second test
+watchdog. They then release the older request and verify the latest summary and
+roster survive. Additional coverage holds an upsert across host closure, exercises
+the real five-second abort and subsequent retry, and verifies bounded drain/single
+client-flight behavior plus state-serializer rejection recovery. Test-only expiry
+injection now uses the same state serializer; tests await eventual cleanup rather
+than assuming remote acknowledgement is synchronous.
+
+Typecheck and 196/196 Worker tests passed; evidence:
+`build/webrtc/v2-outbox-tests.log`. These are control-path concurrency/timeout tests,
+not gaming-latency or remote service availability measurements. An aborted request
+can still execute remotely; versions and tombstones provide convergence after that
+ambiguous outcome. Real hibernation reconstruction, queue pressure, free-tier load,
+native-to-workerd/media integration and normal application cutover remain open.
+
 ## Directory publication and live subscriptions — 2026-09-15
 
 The isolated v2 service now implements all six HTTP/WebSocket endpoints. A separate

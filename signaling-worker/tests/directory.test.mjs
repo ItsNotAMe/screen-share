@@ -16,17 +16,22 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
       async fetch(request) {
         const path = new URL(request.url).pathname;
         if (path === '/test/state') return Response.json(await this.testCtx.storage.get('state') ?? null);
+        if (path === '/test/delivery') return Response.json({ running: this.outbox.running });
         if (path === '/test/calls') return Response.json(this.calls);
         if (path === '/test/expire-provisional') {
+          await this.stateLane.run(async () => {
           const state = await this.testCtx.storage.get('state');
           for (const member of state.members) if (!member.attached) member.expires = 0;
           await this.testCtx.storage.put('state', state);
+          });
           await this.alarm(); return new Response(null, { status: 204 });
         }
         if (path === '/test/alarm' || path === '/test/renew') {
           if (path === '/test/renew') {
+            await this.stateLane.run(async () => {
             const state = await this.testCtx.storage.get('state'); state.directory.nextRenew = 0;
             await this.testCtx.storage.put('state', state);
+            });
           }
           await this.alarm(); return new Response(null, { status: 204 });
         }
@@ -34,10 +39,12 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
       }
     }
     export class V2Directory extends Directory {
-      constructor(ctx) { super(ctx); this.testCtx = ctx; this.fault = ''; }
+      constructor(ctx) { super(ctx); this.testCtx = ctx; this.fault = ''; this.holds = []; this.active = 0; this.maximum = 0; }
       async fetch(request) {
         const path = new URL(request.url).pathname;
         if (path === '/test/fault') { this.fault = await request.text(); return new Response(null, { status: 204 }); }
+        if (path === '/test/inflight') return Response.json({ active: this.active, maximum: this.maximum });
+        if (path === '/test/release') { this.fault = ''; for (const resolve of this.holds.splice(0)) resolve(); return new Response(null, { status: 204 }); }
         if (path === '/test/expire') {
           const rows = await this.testCtx.storage.list({ prefix: 'room:' });
           for (const [key, row] of rows) { row.leaseExpiresAt = 0; await this.testCtx.storage.put(key, row); }
@@ -45,6 +52,11 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
         }
         if (path === '/test/rows') return Response.json([...await this.testCtx.storage.list({ prefix: 'room:' })]);
         if (path === '/publish' && this.fault === 'before') return new Response(null, { status: 503 });
+        if (path === '/publish' && this.fault === 'hold') {
+          ++this.active; this.maximum = Math.max(this.maximum, this.active);
+          await new Promise(resolve => this.holds.push(resolve));
+          --this.active;
+        }
         const response = await super.fetch(request);
         if (path === '/publish' && this.fault === 'after') return new Response(null, { status: 503 });
         return response;
@@ -80,10 +92,12 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
   const rooms = await mf.getDurableObjectNamespace('V2_ROOMS');
   const room = rooms.get(rooms.idFromName(host.roomId));
   const state = async () => (await room.fetch('https://internal/test/state')).json();
+  const idle = () => until(async () => !(await room.fetch('https://internal/test/delivery').then(r => r.json())).running);
   await fault('before');
   let hosting = await socket(`/v2/rooms/${host.roomId}/events`, host.token);
   assert.equal((await list()).payload.rooms.length, 0);
   assert.ok((await state()).directory.pending);
+  await idle();
   await fault(''); await room.fetch('https://internal/test/alarm');
   await until(() => subscription.messages.some(m => m.payload?.op === 'upsert'));
   const listed = await list();
@@ -118,9 +132,39 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
     await until(() => hosting.messages.some(m => m.requestId === requestId));
     assert.equal(hosting.messages.find(m => m.requestId === requestId).payload.status, 'ok');
   }
+  await fault('hold');
+  await update({ name: 'BlockedOld' });
+  await until(async () => (await directory.fetch('https://internal/test/inflight').then(r => r.json())).active === 1);
+  const heldVersion = (await state()).directory.pending.version;
+  // Each operation must finish while the directory request is still held.
+  // The bound is a test watchdog, not a gaming-latency measurement.
+  const deadline = async work => {
+    let timer;
+    try { return await Promise.race([work, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('room control blocked by directory')), 1500); })]); }
+    finally { clearTimeout(timer); }
+  };
+  const duringStall = await deadline(request(`/v2/rooms/${host.roomId}/join`, { v: 2, nickname: 'DuringStall', password: 'secret' }).then(r => r.json()));
+  const watching = await deadline(socket(`/v2/rooms/${host.roomId}/events`, duringStall.token));
+  const snapshots = hosting.messages.filter(m => m.type === 'state.snapshot').length;
+  hosting.ws.send(JSON.stringify({ v: 2, type: 'state.resync', roomId: host.roomId, payload: {} }));
+  await deadline(until(() => hosting.messages.filter(m => m.type === 'state.snapshot').length > snapshots));
+  hosting.ws.send(JSON.stringify({ v: 2, type: 'signal.offer', roomId: host.roomId, connectionId: 'heldDirectoryOffer', toPeerId: duringStall.peerId, payload: { sdp: 'v=0\r\n' } }));
+  await deadline(until(() => watching.messages.some(m => m.type === 'signal.offer')));
+  watching.ws.send(JSON.stringify({ v: 2, type: 'signal.answer', roomId: host.roomId, connectionId: 'heldDirectoryOffer', toPeerId: host.peerId, payload: { sdp: 'v=0\r\n' } }));
+  await deadline(until(() => hosting.messages.some(m => m.type === 'signal.answer')));
+  await deadline(update({ name: 'LatestWhileBlocked' }));
+  assert.ok((await state()).directory.pending.version > heldVersion);
+  assert.equal((await state()).policy.name, 'LatestWhileBlocked');
+  assert.deepEqual(await directory.fetch('https://internal/test/inflight').then(r => r.json()), { active: 1, maximum: 1 });
+  await directory.fetch('https://internal/test/release');
+  await until(async () => (await list()).payload.rooms[0].name === 'LatestWhileBlocked' && !(await state()).directory.pending);
+  assert.equal((await state()).members.length, 2); // late ACK did not restore an older roster
+  watching.ws.send(JSON.stringify({ v: 2, type: 'peer.leave', roomId: host.roomId, requestId: 'stall-viewer-leave', payload: {} }));
+  await until(async () => (await list()).payload.rooms[0].viewerCount === 0);
   await fault('after'); await update({ name: 'Renamed' });
   await until(async () => (await state()).directory.pending !== undefined);
   const renamed = await list(); assert.equal(renamed.payload.rooms[0].name, 'Renamed');
+  await idle();
   await fault(''); await room.fetch('https://internal/test/alarm');
   assert.equal((await list()).revision, renamed.revision); // lost ACK retry is idempotent
   const old = (await directory.fetch('https://internal/test/rows').then(r => r.json()))[0][1];
@@ -134,14 +178,39 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
   assert.equal((await list()).payload.rooms.length, 0);
   await room.fetch('https://internal/test/renew');
   assert.equal((await list()).payload.rooms.length, 1);
+  await idle();
+  // Exercise the real five-second fetch abort, then retry the persisted value.
+  await fault('hold'); await update({ name: 'TimeoutRetry' });
+  await until(async () => (await directory.fetch('https://internal/test/inflight').then(r => r.json())).active === 1);
+  await until(async () => !(await room.fetch('https://internal/test/delivery').then(r => r.json())).running, 8000);
+  assert.ok((await state()).directory.pending);
+  await directory.fetch('https://internal/test/release');
+  await room.fetch('https://internal/test/alarm');
+  await until(async () => !(await state()).directory.pending && (await list()).payload.rooms[0].name === 'TimeoutRetry');
+  await idle();
+  // A late successful public upsert must not clear a newer closure tombstone.
+  const closingHost = await (await request('/v2/rooms', { v: 2, nickname: 'Closing', password: '', policy: { name: 'CloseDuringDelivery', visibility: 'public', viewerLimit: 1 } })).json();
+  const closingRoom = rooms.get(rooms.idFromName(closingHost.roomId));
+  const closingState = async () => closingRoom.fetch('https://internal/test/state').then(r => r.json());
+  await fault('hold');
+  const closingSocket = await socket(`/v2/rooms/${closingHost.roomId}/events`, closingHost.token);
+  await until(async () => (await directory.fetch('https://internal/test/inflight').then(r => r.json())).active === 1);
+  closingSocket.ws.send(JSON.stringify({ v: 2, type: 'peer.leave', roomId: closingHost.roomId, requestId: 'close-in-flight', payload: {} }));
+  await until(() => closingSocket.messages.some(m => m.type === 'room.closed'));
+  assert.equal((await closingState()).directory.pending.room, null);
+  await directory.fetch('https://internal/test/release');
+  await until(async () => await closingState() === null);
+  assert.equal((await list()).payload.rooms.some(r => r.roomId === closingHost.roomId), false);
   subscription.ws.send(JSON.stringify({ v: 2, type: 'state.resync', payload: {} }));
   await until(() => subscription.messages.filter(m => m.type === 'state.snapshot').length === 2);
   await fault('before');
   hosting.ws.send(JSON.stringify({ v: 2, type: 'peer.leave', roomId: host.roomId, requestId: 'close', payload: {} }));
   await until(() => hosting.messages.some(m => m.type === 'room.closed'));
   assert.equal((await state()).closed, true);
+  await idle();
   assert.equal((await list()).payload.rooms.length, 1); // eventual removal while directory unavailable
   await fault(''); await room.fetch('https://internal/test/alarm');
+  await until(async () => await state() === null);
   assert.equal(await state(), null);
   assert.equal((await list()).payload.rooms.length, 0);
   for (const event of subscription.messages.filter(m => m !== 'v2:pong'))
@@ -167,7 +236,7 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
   await until(() => flooded);
 });
 
-async function until(predicate) {
-  const end = Date.now() + 5000;
+async function until(predicate, timeout = 5000) {
+  const end = Date.now() + timeout;
   while (!await predicate()) { if (Date.now() > end) throw new Error('event deadline exceeded'); await new Promise(resolve => setTimeout(resolve, 10)); }
 }
