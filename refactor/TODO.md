@@ -21,7 +21,7 @@ Current next action: **Checkpoint A — production capture-owner/session integra
 
 - [ ] On continuation, implement headless live-session scenario tooling alongside production integration: one-command smoke/regression runs, paced media, scripted test-owned control events, network constraints, machine-readable metrics and watchdog cleanup. See PLAN.md's headless testing requirement. Distinguish fully headless coverage from unattended WGC tests requiring a desktop/GPU.
 
-Paused at user request on 2026-09-15; resume implementation only when requested.
+Resumed at user request on 2026-09-15. See [HEADLESS-TESTING.md](HEADLESS-TESTING.md) for the first runnable headless smoke/regression commands.
 
 - [x] Save the complete approved implementation plan in this folder.
 - [x] Save the ordered implementation, testing, acceptance and deferred-work checklist.
@@ -394,3 +394,13 @@ See the latest CHECKPOINT-A.md section for the 100-cycle result and exact artifa
 - [x] Extend automated coverage for dispatcher lifecycle and hardware GPU input with FPS restarts.
 - [x] Resolve residual source-close COM event growth with scoped application MTA ownership; 100 rapid-close cycles and 100 fresh-owner-thread cycles both show zero handle growth.
 - [ ] Preserve native-call watchdog coverage and validate production capture-owner/session integration before claiming Gate A complete.
+
+### Shared capture session and headless media — 2026-09-15
+
+- [x] Move capture-worker ownership and recovery from the proof into a portable production CaptureSession, with session/device generations, typed terminal failures and joined callback teardown.
+- [x] Route WGC recovery/live PeerConnection proofs and paced synthetic PeerConnection video through that same owner.
+- [x] Add headless 100-restart, recovery, slow-consumer, callback-failure, startup-timeout and cancellation scenarios.
+- [x] Add one-command headless smoke/regression with watchdogs, executable hashes, JSON timing/results and preserved failure logs.
+- [ ] Extend the runner to the complete production session facade, separate host/viewer processes, settings, multi-viewer isolation, scripted authorized input and simulated network conditions. The current harness does not claim these features.
+
+See HEADLESS-TESTING.md and the latest CHECKPOINT-A.md evidence. Gate A remains open.

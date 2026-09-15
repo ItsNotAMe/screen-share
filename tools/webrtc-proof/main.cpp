@@ -36,6 +36,7 @@
 #include "SyntheticAudio.h"
 #include "CaptureTestWindow.h"
 #include "LiveCaptureSource.h"
+#include "media/capture/SyntheticCaptureSource.h"
 #include "PresentationTestWindow.h"
 
 namespace {
@@ -94,10 +95,10 @@ public:
     }
     explicit SyntheticVideo(std::shared_ptr<screenshare::media::D3dVideoDevice> device = {})
         : VideoTrackSource(false), device_(std::move(device)) {}
-    void Push(int index) {
+    void Push(const screenshare::media::SyntheticCaptureResource& frame) {
         if (device_) {
             std::vector<uint8_t> pixels(640 * 360 * 3 / 2, 128);
-            std::fill_n(pixels.begin(), 640 * 360, uint8_t(50 + index % 100));
+            std::copy(frame.luma.begin(), frame.luma.end(), pixels.begin());
             auto buffer = device_->UploadNv12(640, 360, pixels);
             broadcaster_.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer)
                 .set_timestamp_us(webrtc::TimeMicros()).build());
@@ -105,7 +106,7 @@ public:
         }
         auto buffer = webrtc::I420Buffer::Create(640, 360);
         for (int y = 0; y < 360; ++y)
-            std::fill_n(buffer->MutableDataY() + y * buffer->StrideY(), 640, uint8_t(50 + index % 100));
+            std::copy_n(frame.luma.data() + y * 640, 640, buffer->MutableDataY() + y * buffer->StrideY());
         for (int y = 0; y < 180; ++y) {
             std::fill_n(buffer->MutableDataU() + y * buffer->StrideU(), 320, uint8_t(128));
             std::fill_n(buffer->MutableDataV() + y * buffer->StrideV(), 320, uint8_t(128));
@@ -291,24 +292,22 @@ void Run(bool useHardware, bool useWasapi, bool useLiveCapture) {
     // Capture must not block the WebRTC signaling thread on D3D work.
     std::atomic<bool> captureFailed{false};
     if (live) live->StartDelivery();
-    std::jthread capture([source, &captureFailed, &live](std::stop_token stop) {
-        if (live) return;
-        try {
-            int index = 0;
-            auto next = std::chrono::steady_clock::now();
-            while (!stop.stop_requested()) {
-                source->Push(index++);
-                next += std::chrono::milliseconds(33);
-                std::this_thread::sleep_until(next);
-            }
-        } catch (...) { captureFailed = true; }
-    });
+    std::unique_ptr<screenshare::media::CaptureSession> capture;
+    if (!live) {
+        capture = std::make_unique<screenshare::media::CaptureSession>(1,
+            [] { return std::make_unique<screenshare::media::SyntheticCaptureSource>(640, 360, 30); },
+            [source](auto sample) {
+                source->Push(*std::static_pointer_cast<screenshare::media::SyntheticCaptureResource>(sample.resource));
+            });
+        capture->EnableDelivery();
+    }
     bool presentationResized = false;
     try { Wait([&] {
         if (presentation && !presentationResized && viewer.decodedFrames >= 25) {
             presentation->Resize(); presentationResized = true;
         }
         if (presentation) presentation->Drain(presentationSink);
+        captureFailed = capture && capture->status().state == screenshare::media::CaptureState::Failed;
         return captureFailed || (viewer.decodedFrames.load() >= 60 && audioEvidence->audibleBlocks >= 30 &&
             (!presentation || presentation->presented >= 30));
     }, "Audio/video media delivery timed out"); }
@@ -318,11 +317,10 @@ void Run(bool useHardware, bool useWasapi, bool useLiveCapture) {
                   << " capture_errors=" << audioDiagnostics->captureErrors << " playout_errors=" << audioDiagnostics->playoutErrors << '\n';
         throw;
     }
-    capture.request_stop();
-    capture.join();
+    if (capture) capture->Stop();
     if (live) {
         live->Stop();
-        Require(!live->failed && live->frames >= 60, "Live capture source failed");
+        Require(!live->HasFailed() && live->frames >= 60, "Live capture source failed");
     }
     Require(!captureFailed, "Synthetic capture failed");
     Require(!toneFailed, "Physical source tone failed");

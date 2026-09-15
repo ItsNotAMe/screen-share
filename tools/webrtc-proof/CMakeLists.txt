@@ -13,6 +13,7 @@ set(nativeRoot "${CMAKE_CURRENT_LIST_DIR}/../../src")
 set_property(SOURCE "${nativeRoot}/capture/DesktopCapturer.cpp" APPEND PROPERTY COMPILE_OPTIONS
     "$<$<CXX_COMPILER_ID:Clang>:/clang:-mcx16>")
 add_library(MfWebRTCCodecs STATIC
+    "${nativeRoot}/media/capture/CaptureSession.cpp"
     "${nativeRoot}/render/Nv12D3D11Presenter.cpp"
     "${nativeRoot}/media/webrtc/PcmAudioDeviceModule.cpp"
     "${nativeRoot}/media/audio/WasapiPcmEndpoint.cpp"
@@ -29,6 +30,10 @@ target_include_directories(MfWebRTCCodecs PUBLIC "${nativeRoot}")
 target_link_libraries(MfWebRTCCodecs PUBLIC ScreenShare::WebRTC
     d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging)
 target_link_libraries(WebRTCProof PRIVATE MfWebRTCCodecs)
+add_executable(CaptureSessionTest CaptureSessionTest.cpp)
+target_link_libraries(CaptureSessionTest PRIVATE MfWebRTCCodecs)
+add_test(NAME capture-session-headless COMMAND CaptureSessionTest)
+set_tests_properties(capture-session-headless PROPERTIES TIMEOUT 20)
 add_executable(MfDecoderAdapterTest MfDecoderAdapterTest.cpp)
 target_link_libraries(MfDecoderAdapterTest PRIVATE MfWebRTCCodecs)
 add_test(NAME mf-webrtc-decoder-lifecycle COMMAND MfDecoderAdapterTest)

@@ -726,4 +726,6 @@ session integration so future changes can be validated autonomously.
 
 Reuse existing proof/stress tooling where practical. Document one quick smoke
 command and one longer regression command with prerequisites and artifact paths.
-This requirement is saved for the next continuation; implementation is paused.
+Implementation resumed on 2026-09-15. The first shared capture-session and
+headless media runner are implemented; see HEADLESS-TESTING.md for commands,
+coverage and remaining production-facade/input/network integration.

@@ -1,95 +1,64 @@
 #pragma once
-#include "media/webrtc/D3dVideoFrameBuffer.h"
-#include "media/capture/CaptureRecovery.h"
+#include "media/capture/WindowsCaptureSource.h"
+#include "core/WindowsMediaRuntime.h"
 #include <future>
-#include <functional>
-#include <thread>
 
 namespace proof {
-// Proof-only source: all WGC/COM lifecycle calls stay on this capture worker.
+// Only test setup/fault injection lives here. Production owns the capture loop.
 class LiveCaptureSource {
 public:
     using Deliver = std::function<void(webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer>)>;
     LiveCaptureSource(HWND window, Deliver deliver) {
-        std::promise<std::shared_ptr<screenshare::media::D3dVideoDevice>> ready;
-        auto started = ready.get_future();
-        worker_ = std::jthread([this, window, deliver = std::move(deliver), ready = std::move(ready)](std::stop_token stop) mutable {
-            bool announced = false;
-            try {
-                screenshare::DesktopCapturer capture;
-                screenshare::CaptureConfig config;
-                config.sourceType = screenshare::CaptureSourceType::Window;
-                config.windowHandle = reinterpret_cast<uint64_t>(window);
-                config.targetWidth = 640; config.targetHeight = 360;
-                config.includeNv12 = config.ownedNv12 = true;
-                config.includeNv12Readback = config.includeBgraReadback = false;
-                capture.Start(config);
-                std::shared_ptr<screenshare::media::D3dVideoDevice> device;
-                auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-                screenshare::media::CaptureRecovery recovery;
-                bool awaitingFrame = true;
-                while (!stop.stop_requested()) {
-                    if (!recovery.Poll([&] {
-                        capture.RebuildWindowDevice();
-                        device.reset();
-                        awaitingFrame = true;
-                        deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-                    })) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                        continue;
-                    }
-                    std::optional<screenshare::CapturedFrame> frame;
-                    try {
-                        if (injectLoss_.exchange(false)) throw screenshare::CaptureDeviceLostError(DXGI_ERROR_DEVICE_REMOVED);
-                        frame = capture.TryCaptureFrame(std::chrono::milliseconds(10));
-                    } catch (const screenshare::CaptureDeviceLostError&) {
-                        recovery.Lost([&] { if (device) device->Retire(); });
-                        continue;
-                    }
-                    if (!frame) {
-                        if (awaitingFrame && std::chrono::steady_clock::now() >= deadline)
-                            throw std::runtime_error("Live source startup frame timed out");
-                        continue;
-                    }
-                    if (!device) {
-                        device = std::make_shared<screenshare::media::D3dVideoDevice>(frame->d3dDevice);
-                        if (!announced) { announced = true; ready.set_value(device); }
-                    }
-                    awaitingFrame = false;
-                    generation = recovery.generation();
-                    if (enabled_) {
-                        webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer> buffer;
-                        try { buffer = device->RetainCapture(*frame); }
-                        catch (const screenshare::CaptureDeviceLostError&) {
-                            recovery.Lost([&] { device->Retire(); });
-                            continue;
-                        }
-                        deliver(std::move(buffer));
-                        ++frames;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-                }
-                capture.Stop();
-            } catch (...) {
-                failed = true;
-                if (!announced) ready.set_exception(std::current_exception());
-            }
-        });
+        if (FAILED(runtime_.result())) throw std::runtime_error("MTA lease failed");
+        auto ready = std::make_shared<std::promise<std::shared_ptr<screenshare::media::D3dVideoDevice>>>();
+        auto started = ready->get_future();
+        screenshare::CaptureConfig config;
+        config.sourceType = screenshare::CaptureSourceType::Window;
+        config.windowHandle = reinterpret_cast<uint64_t>(window);
+        config.targetWidth = 640; config.targetHeight = 360;
+        session_ = std::make_unique<screenshare::media::CaptureSession>(1,
+            [this, config] { return std::make_unique<FaultSource>(config, injectLoss_); },
+            [this, ready, deliver = std::move(deliver), announced = false](auto sample) mutable {
+                auto resource = std::static_pointer_cast<screenshare::media::WindowsCaptureResource>(sample.resource);
+                if (!announced) { ready->set_value(resource->device); announced = true; }
+                generation = sample.generation;
+                if (enabled_) { deliver(resource->buffer); ++frames; }
+            });
+        session_->EnableDelivery();
+        while (started.wait_for(std::chrono::milliseconds(5)) != std::future_status::ready) {
+            auto state = session_->status().state;
+            if (state == screenshare::media::CaptureState::Failed || state == screenshare::media::CaptureState::Closed)
+                throw std::runtime_error("Live capture startup failed");
+        }
         device_ = started.get();
     }
     ~LiveCaptureSource() { Stop(); }
     void StartDelivery() { enabled_ = true; }
-    // Diagnostic only: inject the same error boundary as capture device loss.
     void InjectDeviceLoss() { injectLoss_ = true; }
-    void Stop() { worker_.request_stop(); if (worker_.joinable()) worker_.join(); }
+    void Stop() { if (session_) session_->Stop(); }
+    bool HasFailed() const { return session_->status().state == screenshare::media::CaptureState::Failed; }
     std::shared_ptr<screenshare::media::D3dVideoDevice> device() const { return device_; }
-    std::atomic<bool> failed{false};
     std::atomic<unsigned> frames{0};
     std::atomic<uint64_t> generation{1};
 private:
-    std::atomic<bool> injectLoss_{false};
-    std::atomic<bool> enabled_{false};
+    class FaultSource final : public screenshare::media::ICaptureSource {
+    public:
+        FaultSource(screenshare::CaptureConfig config, std::atomic<bool>& loss) : source_(config), loss_(loss) {}
+        void Start() override { source_.Start(); }
+        std::optional<screenshare::media::CaptureSample> Poll() override {
+            if (loss_.exchange(false)) throw screenshare::media::CaptureLost();
+            return source_.Poll();
+        }
+        bool Closed() const override { return source_.Closed(); }
+        void Retire() noexcept override { source_.Retire(); }
+        void Rebuild() override { source_.Rebuild(); }
+    private:
+        screenshare::media::WindowsCaptureSource source_;
+        std::atomic<bool>& loss_;
+    };
+    screenshare::WindowsMediaRuntime runtime_;
+    std::atomic<bool> injectLoss_{false}, enabled_{false};
     std::shared_ptr<screenshare::media::D3dVideoDevice> device_;
-    std::jthread worker_;
+    std::unique_ptr<screenshare::media::CaptureSession> session_;
 };
 }

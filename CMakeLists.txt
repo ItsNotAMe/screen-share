@@ -150,6 +150,7 @@ if(SCREENSHARE_BUILD_PINNED_VIGEMCLIENT)
 endif()
 
 add_library(ScreenShareCore STATIC
+    src/media/capture/CaptureSession.cpp
     src/audio/OpusCodec.cpp
     src/audio/WasapiCapture.cpp
     src/audio/WasapiRenderer.cpp

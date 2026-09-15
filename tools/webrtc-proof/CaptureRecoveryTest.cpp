@@ -1,4 +1,5 @@
 #include "LiveCaptureSource.h"
+#include "media/capture/CaptureRecovery.h"
 #include "CaptureTestWindow.h"
 #include <iostream>
 #include <mutex>
@@ -42,12 +43,12 @@ int main(int argc, char** argv) try {
             { std::lock_guard lock(mutex); old = latest; }
             Require(old && old->ToI420(), "Current generation pixels unavailable");
             source.InjectDeviceLoss();
-            Wait([&] { return source.generation == uint64_t(i + 2) && !source.failed; });
+            Wait([&] { return source.generation == uint64_t(i + 2) && !source.HasFailed(); });
             Require(old->retired() && !old->ToI420(), "Retired generation exposed cached pixels");
             Wait([&] { std::lock_guard lock(mutex); return latest && !latest->retired(); });
         }
         source.InjectDeviceLoss();
-        Wait([&] { return source.failed.load(); });
+        Wait([&] { return source.HasFailed(); });
         source.Stop(); source.Stop();
         Require(source.generation == 4, "Terminal failure rebuilt again");
         // Stop during backoff must not wait for the 250 ms retry timer.

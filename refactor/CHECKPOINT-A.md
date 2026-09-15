@@ -647,3 +647,45 @@ SHA-256, exact command and all cycle samples):
 This bounded handle check does not establish actual driver-removal behavior,
 external gaming input/image latency, or production v2 session integration.
 Gate A and the wider media cutover remain open.
+# Shared capture owner and headless media continuation — 2026-09-15
+
+Implemented a portable production `CaptureSession` owning source creation,
+acquisition, recovery and destruction on one joined worker. It tags samples with
+session/device generation and sequence, exposes typed failures, permits callback
+cancellation, and preserves already-owned frames on normal stop. Windows device
+loss retires the old device before the existing three-rebuild recovery policy.
+The coordinator must serialize owner calls and reject obsolete IDs downstream.
+
+The WGC proof now delegates to `WindowsCaptureSource` and this shared session;
+only fault injection and test setup remain in `LiveCaptureSource`. Its scoped
+Windows MTA lease outlives joined capture work. The synthetic PeerConnection
+proof uses the same session with owned, paced CPU pixels and skips missed frame
+opportunities instead of catching up with stale frames.
+
+Validation:
+
+- Debug and Release media suites: **17/17 each**. Debug initially exposed a
+  missing direct CaptureRecovery include after extraction; corrected and rebuilt
+  before rerunning. Logs: `build/webrtc/capture-session-debug-rebuild.log`,
+  `capture-session-debug-tests.log` and `capture-session-release.log`.
+- Debug and Release application builds/tests: **10/10 each**. Logs:
+  `build/webrtc/capture-session-app-debug.log` and `capture-session-app-release.log`.
+- Headless Debug smoke: passed, with hashes and metrics in
+  `build/webrtc/headless-session-debug/result.json`.
+- Headless Release regression: **100 capture restarts and 20 complete local
+  H.264/Opus/DTLS media runs passed**, with hashes, watchdog outcomes, timing
+  distributions and individual logs in `build/webrtc/headless-session-release/`.
+- Generated-window recovery and live PeerConnection/presentation checks passed
+  in both configurations. Debug received 61 frames; Release received 60; both
+  had zero sender GPU readbacks. Logs: `capture-session-live-debug.log`,
+  `capture-session-live-peers-debug.log`, `capture-session-live-release.log`
+  under `build/webrtc/`. Native live peers and Release recovery were run under
+  45-second process watchdogs.
+
+Commands and remaining coverage are in [HEADLESS-TESTING.md](HEADLESS-TESTING.md).
+This does not complete the headless requirement or Gate A: the full session
+facade, separate host/viewer processes, scripted authorized gaming controls,
+settings, multi-viewer and impairment scenarios remain. Normal UI/CLI media is
+still legacy. Capture-to-callback timing is an internal measurement, not gaming
+input/display latency. Broader resource accounting, actual device removal,
+forced HWND reuse, external latency and remaining distribution evidence stay open.
