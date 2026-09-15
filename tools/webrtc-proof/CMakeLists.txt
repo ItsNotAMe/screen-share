@@ -141,3 +141,8 @@ add_executable(PeerConnectionLifecycleTest PeerConnectionLifecycleTest.cpp)
 target_link_libraries(PeerConnectionLifecycleTest PRIVATE MfWebRTCCodecs)
 add_test(NAME peer-connection-lifecycle COMMAND PeerConnectionLifecycleTest)
 set_tests_properties(peer-connection-lifecycle PROPERTIES TIMEOUT 10)
+
+add_executable(HostPeerRegistryTest HostPeerRegistryTest.cpp)
+target_link_libraries(HostPeerRegistryTest PRIVATE MfWebRTCCodecs)
+add_test(NAME host-peer-ownership COMMAND HostPeerRegistryTest)
+set_tests_properties(host-peer-ownership PROPERTIES TIMEOUT 10)

@@ -108,7 +108,10 @@ public:
                  state == webrtc::PeerConnectionInterface::kIceConnectionFailed) lifecycle.Disconnected(generation, Clock::now());
         else if (state == webrtc::PeerConnectionInterface::kIceConnectionClosed) lifecycle.RemoteClosed(generation);
     }
-    ~Peer() override {
+    ~Peer() override { Shutdown(); }
+    void Shutdown() noexcept {
+        if (shutDown) return;
+        shutDown = true;
         lifecycle.Close();
         if (outgoingIce) outgoingIce->Close();
         if (incomingIce) incomingIce->Close();
@@ -127,6 +130,7 @@ public:
         message.mid = candidate->sdp_mid(); message.line = candidate->sdp_mline_index();
         outgoingIce->Push(iceGeneration, std::move(message));
     }
+    bool shutDown = false;
     uint64_t iceGeneration = 0;
     std::shared_ptr<screenshare::media::IceCandidateHandoff> outgoingIce, incomingIce;
     void OnTrack(webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override {

@@ -26,6 +26,14 @@ WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
 
+- `HostPeerRegistry` owns peers behind `IMediaPeer`, dispatches lifecycle restart
+  and close actions, retains failure snapshots and rejects retired-generation
+  requests. The real four-peer scenario uses this owner for restart, removal,
+  replacement and stop. A deterministic test covers dispatch failure isolation,
+  timed-out close, stale/reused generations and exactly-once close/destruction.
+  The proof adapter queues restart work for its local SDP driver; authenticated
+  room delivery and the application event loop remain integration work.
+
 - `PeerConnectionLifecycle` enforces the initial 20-second connection deadline,
   stale connection-event rejection and a rolling three-restarts-per-minute
   budget. Deterministic tests cover deadlines, duplicate disconnects, transient
@@ -49,8 +57,8 @@ Current coverage:
   100 restarts, stale commands, isolated callback failure, startup failure and
   cancellation despite a full command queue. The four-peer proof now uses this
   coordinator for capture and subscriber lifetime. Peer creation/signaling and
-  the application facade remain outside it. Smoke runs eight child processes;
-  regression runs 29. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
+  the application facade remain outside it. Smoke runs nine child processes;
+  regression runs 30. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
 - [COMPARISON.md](COMPARISON.md) defines the matched before/after scorecard.
   These checks establish regression coverage, not superior end-to-end latency.
 

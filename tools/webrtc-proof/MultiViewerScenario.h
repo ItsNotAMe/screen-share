@@ -1,6 +1,7 @@
 #pragma once
 #include "ProofPeer.h"
 #include "media/HostMediaSession.h"
+#include "media/HostPeerRegistry.h"
 #include "media/webrtc/ViewerStreamSettings.h"
 
 namespace proofmedia {
@@ -51,6 +52,19 @@ std::unique_ptr<MediaLink> ConnectViewer(webrtc::PeerConnectionFactoryInterface&
     }, "Multi-viewer channel delivery failed");
     return link;
 }
+// The production owner calls only the portable interface. This local adapter
+// queues restart work; the scenario delivers SDP outside the registry Tick.
+struct ManagedMediaLink final : screenshare::media::IMediaPeer {
+    std::unique_ptr<MediaLink> link;
+    bool restartPending = false;
+    explicit ManagedMediaLink(std::unique_ptr<MediaLink> value) : link(std::move(value)) {}
+    screenshare::media::PeerConnectionLifecycle& lifecycle() noexcept override { return link->host.lifecycle; }
+    bool RequestIceRestart(uint64_t) override { restartPending = true; return true; }
+    void Close() noexcept override {
+        restartPending = false;
+        link->host.Shutdown(); link->viewer.Shutdown();
+    }
+};
 void RunMultiViewer() {
     using namespace screenshare::media;
     webrtc::AutoThread mainThread;
@@ -94,8 +108,15 @@ void RunMultiViewer() {
     options.echo_cancellation = options.auto_gain_control = options.noise_suppression = false;
     auto audioSource = factory->CreateAudioSource(options);
     auto audioTrack = factory->CreateAudioTrack("shared-audio", audioSource.get());
-    std::array<std::unique_ptr<MediaLink>, 4> links;
-    for (auto& link : links) link = ConnectViewer(*factory, audioTrack);
+    HostPeerRegistry peers;
+    std::array<MediaLink*, 4> links{}; // Borrowed; ownership is in peers.
+    std::array<ManagedMediaLink*, 4> managed{};
+    auto attach = [&](size_t index) {
+        auto peer = std::make_unique<ManagedMediaLink>(ConnectViewer(*factory, audioTrack));
+        links[index] = peer->link.get(); managed[index] = peer.get();
+        Require(peers.Add(index + 1, std::move(peer)), "Peer owner rejected connection");
+    };
+    for (size_t i = 0; i < links.size(); ++i) attach(i);
     std::atomic<bool> slow{true};
     HostMediaSession session;
     auto started = session.Start([] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); }).get();
@@ -160,9 +181,11 @@ void RunMultiViewer() {
     const auto oldHandoff = restarting.host.outgoingIce;
     const auto oldIceGeneration = restarting.host.iceGeneration;
     const auto oldUsername = restarting.host.localIceUsername;
-    restarting.host.lifecycle.RequestRestart(restarting.host.lifecycle.generation(), PeerConnectionLifecycle::Clock::now());
-    Wait([&] { return restarting.host.lifecycle.Tick(PeerConnectionLifecycle::Clock::now()) == PeerLifecycleAction::RestartIce; },
-         "Restart backoff did not expire");
+    Require(peers.RequestRestart(4, restarting.host.lifecycle.generation(), PeerConnectionLifecycle::Clock::now()),
+            "Peer owner rejected restart");
+    Wait([&] { peers.Tick(PeerConnectionLifecycle::Clock::now()); return managed[3]->restartPending; },
+         "Peer owner did not dispatch restart");
+    managed[3]->restartPending = false;
     TransferDescription(restarting.host, restarting.viewer, true, true);
     TransferDescription(restarting.viewer, restarting.host, false, true);
     const auto restartNegotiatedAt = std::chrono::steady_clock::now();
@@ -183,9 +206,12 @@ void RunMultiViewer() {
     // Tear down one complete pair, then attach a fresh connection/source while
     // the other three continue to receive the same capture session.
     Require(session.RemoveViewer(generation, 4).get().error == HostOperationError::None, "Coordinator viewer removal failed");
-    links[3].reset();
+    const auto retiredGeneration = links[3]->host.lifecycle.generation();
+    Require(peers.Remove(4, retiredGeneration), "Peer owner removal failed");
     const auto beforeRejoin = links[0]->viewer.decodedFrames.load();
-    links[3] = ConnectViewer(*factory, audioTrack);
+    attach(3);
+    Require(!peers.RequestRestart(4, retiredGeneration, PeerConnectionLifecycle::Clock::now()),
+            "Retired peer request affected replacement");
     auto rejoined = session.AddViewer(generation, 4, [source = links[3]->source](auto sample) {
         source->Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
     }).get();
@@ -208,6 +234,8 @@ void RunMultiViewer() {
         if (i) std::cout << ',';
         std::cout << links[i]->viewer.decodedFrames.load();
     }
+    peers.Stop();
+    Require(!peers.snapshot(1).has_value(), "Peer stop retained membership");
     std::cout << "],\"limited_viewer_bps\":200000,\"audible_blocks\":" << audioEvidence->audibleBlocks.load() << "}\n";
 }
 }

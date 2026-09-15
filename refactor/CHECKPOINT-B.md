@@ -155,3 +155,52 @@ Final headless Debug smoke passes **8/8** runs; Release regression passes
 `build/webrtc/peer-lifecycle-final-headless-release/result.json`. Executable
 hashes and watchdog results are retained. Earlier timing runs remain historical
 artifacts; use these final paths for the committed implementation.
+
+## Owning peer registry and recovery dispatch - 2026-09-15
+
+Added portable `IMediaPeer` and `HostPeerRegistry`. The registry owns at most
+63 peer objects on one signaling/control executor, drives lifecycle actions,
+queues asynchronous ICE restart requests and closes timed-out or failed peers.
+A failed dispatch closes only that peer and records a distinct dispatch-failure
+flag. Terminal snapshots retain their failure reason after native Close changes
+the lifecycle state. Remove/Stop/destruction close each accepted peer once and
+release ownership; rejected admission closes the supplied peer too.
+
+Admission requires fresh, strictly increasing connection generations. Admit
+peers in generation order before starting asynchronous negotiation in the
+production adapter; do not order admission by asynchronous completion. This
+keeps retired-generation rejection bounded without an ever-growing tombstone
+history. Stop is terminal for that registry; a new host session needs a new
+registry. Failed rows count toward capacity until removed. Implementations must
+keep their lifecycle object alive through Close, cancel queued work on Close,
+and never synchronously reenter registry methods from restart/close callbacks.
+
+The four-peer proof now transfers actual peer-pair ownership into this registry.
+Its adapter queues a restart; the existing local SDP driver consumes that work
+outside Tick, preserving the nonblocking registry contract. The scenario removes
+and replaces a peer through the owner, rejects a restart targeting the retired
+incarnation and stops capture before releasing all peers. Peer shutdown is
+idempotent to support explicit Close followed by object destruction.
+
+Dedicated deterministic coverage checks one-shot restart dispatch, stale
+requests/removal, rejected reused generations, throwing dispatch isolation,
+initial timeout, repeated stop and close/destruction counts. The fake adapter
+in that unit test is separate from the real media scenario.
+
+Remaining: application signaling-executor scheduling, full asynchronous WebRTC
+adapter/room delivery, automatic capture subscription cleanup on peer failure,
+and UI/CLI facade integration. This does not establish remote network recovery,
+resolve the native handle-growth defect or prove better external latency.
+
+Debug and Release media builds/suites pass **24/24** each. Evidence:
+`build/webrtc/peer-owner-debug.log` and `build/webrtc/peer-owner-release.log`.
+The new owner currently enters the proof build through its portable header;
+application binaries were not rebuilt and normal application behavior is
+unchanged. Existing AutoThread deprecation warnings remain.
+
+Headless Debug smoke passes **9/9** runs; Release regression passes **30/30**,
+including 20 single-peer processes and three four-peer restart/rejoin scenarios.
+Artifacts: `build/webrtc/peer-owner-headless-debug/result.json` and
+`build/webrtc/peer-owner-headless-release/result.json`. Reports retain executable
+hashes, watchdog outcomes and restart timing diagnostics. No manual input was
+required. The existing delayed ICE-state confirmation remains unchanged.

@@ -95,6 +95,9 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 ### Interfaces, ownership and lifecycle
 
+- [x] Add a portable owning peer registry with restart/close dispatch, terminal failure snapshots, bounded membership and generation validation; drive actual four-peer ownership through it.
+- [ ] Connect the peer owner to the application signaling executor and capture-membership failure cleanup. Real-peer proof integration does not yet replace the UI/CLI facade.
+
 - [x] Implement portable host capture/membership coordinator with operation IDs, session generations, bounded command queue, priority cancellation, isolated failed subscribers and joined capture/delivery teardown.
 - [x] Route four-peer headless capture membership through the coordinator; test 100 restarts, stale operations and stop under queue pressure.
 - [ ] Extend coordinator ownership to peer/signaling generations, settings/events, audio and the production facade. The host capture subset does not complete the broader lifecycle tasks below.
