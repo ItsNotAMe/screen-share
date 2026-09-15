@@ -35,7 +35,10 @@ int main(int argc, char** argv) try {
         proof::TestWindow window;
         std::mutex mutex;
         webrtc::scoped_refptr<D3dVideoFrameBuffer> latest;
-        proof::LiveCaptureSource source(window.handle(), [&](auto frame) { std::lock_guard lock(mutex); latest = frame; });
+        proof::LiveCaptureSource source(window.handle(), [&](auto sample) {
+            auto resource = std::static_pointer_cast<WindowsCaptureResource>(sample.resource);
+            std::lock_guard lock(mutex); latest = resource->buffer;
+        });
         source.StartDelivery();
         Wait([&] { return source.frames > 2; });
         for (int i = 0; i < 3; ++i) {

@@ -7,6 +7,8 @@ add_executable(WebRTCProof main.cpp)
 target_link_libraries(WebRTCProof PRIVATE ScreenShare::WebRTC)
 add_test(NAME webrtc-direct-h264-and-data COMMAND WebRTCProof)
 set_tests_properties(webrtc-direct-h264-and-data PROPERTIES TIMEOUT 45)
+add_test(NAME webrtc-four-viewer-isolation COMMAND WebRTCProof --multi-viewer)
+set_tests_properties(webrtc-four-viewer-isolation PROPERTIES TIMEOUT 60)
 
 # Probe existing Windows primitives independently before adapting them to WebRTC.
 set(nativeRoot "${CMAKE_CURRENT_LIST_DIR}/../../src")

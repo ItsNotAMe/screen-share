@@ -726,3 +726,46 @@ This proves bounded capture delivery isolation, not independent resolution,
 congestion or encoder behavior across four actual PeerConnections. Those checks,
 full facade integration, scripted gaming input, external latency and the other
 open Gate A requirements remain. Normal UI/CLI media remains legacy.
+## Four-peer media and reusable source wrapper — 2026-09-15
+
+Extracted `CaptureVideoSource` into the media implementation module and shared
+PeerConnection proof helpers into `ProofPeer.h`. Both one-viewer and four-viewer
+proofs use the same source wrapper. CPU input validates dimensions/storage,
+owned GPU buffers remain supported, and acquisition time is translated between
+local monotonic clocks by age rather than overwritten at delivery. The wrapper
+declares screen content and no denoising. Automatic adaptation mapping remains
+pending; this change preserves input dimensions.
+
+The new `WebRTCProof --multi-viewer` scenario creates four real host/viewer
+PeerConnection pairs, each with an independent source wrapper/video sender and
+three data channels. A shared capture session/distributor feeds them. It slows
+the fourth source handoff, verifies healthy decoding, applies a 200 kbps sender
+limit exclusively to that viewer, resumes its delivery, then destroys/recreates
+that connection while the other three continue. A bridge check also verifies
+320x180 input and preservation of a 100 ms-old acquisition timestamp.
+
+Validation (artifacts under `build/webrtc/`):
+
+- Debug/Release full media suites: **19/19 each**, approximately 28 seconds:
+  `multipeer-debug-tests.log`, `multipeer-release-tests.log`.
+- Debug headless smoke: all four scenarios passed, including the four-peer run:
+  `multipeer-headless-debug/result.json`.
+- Release regression: **25 successful child runs**, including 100 capture
+  restarts, distributor isolation, 20 one-viewer media runs and three four-viewer
+  isolation/rejoin runs: `multipeer-headless-release/result.json`. Every child
+  has executable hash, arguments, timeout/exit status and a separate log; the
+  four-peer runs include parsed JSON counters.
+- Debug/Release generated-window recovery and WGC media/presentation passed
+  under 45-second per-process watchdogs: `multipeer-live.log`. Debug decoded
+  60 frames and Release 61; both retained zero sender GPU readbacks.
+- Initial compile failures were an explicit scoped-refptr requirement at
+  AddTrack and a Windows `small` macro collision in a test variable. Both were
+  corrected before successful builds and test execution.
+
+Limitations: peers still share one process/factory and audio is measured at an
+aggregate playout sink. Slow source handoff is not slow decoding or network
+impairment. Sender parameter independence and fixed-size decoded frames do not
+prove measured wire-rate compliance or congestion adaptation. Full facade,
+Auto/Manual settings, scripted gaming input, device/network acceptance and other
+Gate A items remain open. Normal application media is still legacy; no
+application target changed in this milestone.

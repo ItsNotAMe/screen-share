@@ -4,20 +4,21 @@ Build the proof targets using [BUILD.md](BUILD.md), then run from the repository
 root. No mouse, keyboard, window, audio device or GPU is required for these two
 commands; the Windows software Media Foundation codec must be available.
 
-Quick smoke (about eight seconds on the reference machine):
+Quick smoke (roughly 15 seconds on the reference machine):
 
 ```powershell
 python scripts/test-headless-media.py build/sdk-proof-release build/webrtc/headless-smoke
 ```
 
-Longer regression (100 capture restarts plus 20 complete local media runs):
+Longer regression (100 capture restarts, 20 one-viewer runs and three four-viewer runs):
 
 ```powershell
 python scripts/test-headless-media.py build/sdk-proof-release build/webrtc/headless-regression --regression
 ```
 
 Use a fresh output directory each time. Both commands return nonzero on failure.
-Each child has a 45-second watchdog; a timed-out child is killed and reaped. These
+Each child has a 45-second watchdog, or 60 seconds for a four-viewer scenario;
+a timed-out child is killed and reaped. These
 executables do not spawn descendants. Results include executable SHA-256, exit
 code, elapsed time, timeout status, logs and capture timing percentiles in
 `result.json`. The runner stops on the first failure and preserves its evidence.
@@ -41,6 +42,17 @@ Current coverage:
   pixels, actual H.264/Opus PeerConnections, offscreen decoding and three DTLS
   data channels. The longer command repeats complete media-process teardown.
   Both synthetic and WGC media proofs now deliver through the distributor.
+- The four-viewer scenario creates four real host-to-viewer PeerConnection
+  pairs with independent source wrappers, video senders, H.264 and three data
+  channels per connection. It slows the fourth source handoff, checks continued
+  healthy decoding, applies a 200 kbps WebRTC sender limit only to that viewer,
+  resumes its delivery and replaces its complete connection while the others
+  continue. Results include per-viewer decoded counts, pending replacements and
+  successful rejoin. Opus is shared and checked at the aggregate playout sink.
+- The production `CaptureVideoSource` wrapper preserves owned input dimensions
+  and acquisition timestamps across handoff/conversion, and declares screen
+  content with denoising disabled. The scenario includes a small-frame and
+  delayed-timestamp check of that bridge.
 
 Capture-to-callback percentiles use one local monotonic clock and include pixel
 generation. They do not measure encode, network, decode, display or gaming input
@@ -58,9 +70,13 @@ native driver/RPC hang cannot be preempted by the capture session stop token.
 This is the first shared production component, not the complete session runner.
 The normal UI/CLI still uses legacy media pending Gate A. Local proof peers share
 one process. Separate host/viewer processes, production session-facade routing,
-settings changes, multi-viewer isolation, scripted authorized gaming input,
+complete settings behavior, adaptive multi-viewer isolation, scripted authorized gaming input,
 network impairment and resource-growth reports remain to be implemented.
 Synthetic success does not satisfy WGC, Internet or external latency acceptance.
+The four-viewer delay acts at the source handoff, not the decoder or network.
+The sender-limit check verifies parameter independence and continued fixed-size
+decoding; it does not prove congestion recovery, actual wire-rate limits or
+Auto/Manual product semantics. Four software encoders require sufficient CPU.
 
 Coordinator contract: assign a fresh nonzero session ID, serialize owner calls,
 keep frame callbacks short, reject obsolete IDs downstream, and join before

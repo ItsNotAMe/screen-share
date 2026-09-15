@@ -25,20 +25,24 @@ def main():
               "limitations": ["Local peers share one process", "No WGC or physical audio/display",
                                "No room service, input injection or network impairment",
                                "Internal timing is not capture-to-display latency"], "runs": []}
-    sequence = programs[:2] + [programs[2]] * (20 if args.regression else 1)
+    sequence = [(program, []) for program in programs[:2]]
+    sequence += [(programs[2], [])] * (20 if args.regression else 1)
+    sequence += [(programs[2], ["--multi-viewer"])] * (3 if args.regression else 1)
     try:
-        for index, program in enumerate(sequence):
+        for index, (program, arguments) in enumerate(sequence):
             log = args.output_directory / f"{index:02d}-{program.stem}.log"
-            run = {"executable": program.name, "sha256": hashlib.sha256(program.read_bytes()).hexdigest(),
-                   "timeout_seconds": 45, "timed_out": False, "log": log.name}
+            timeout = 60 if arguments else 45
+            run = {"executable": program.name, "arguments": arguments,
+                   "sha256": hashlib.sha256(program.read_bytes()).hexdigest(),
+                   "timeout_seconds": timeout, "timed_out": False, "log": log.name}
             report["runs"].append(run)
             started = time.monotonic()
             # These tools own threads, not child processes. subprocess.run kills
             # and waits for the sole process on timeout. No desktop interaction.
             with log.open("wb") as output:
                 try:
-                    completed = subprocess.run([str(program)], stdout=output, stderr=subprocess.STDOUT,
-                                               timeout=45, check=False)
+                    completed = subprocess.run([str(program), *arguments], stdout=output, stderr=subprocess.STDOUT,
+                                               timeout=timeout, check=False)
                     run["exit_code"] = completed.returncode
                 except subprocess.TimeoutExpired:
                     run["timed_out"] = True
@@ -46,7 +50,7 @@ def main():
             run["elapsed_seconds"] = round(time.monotonic() - started, 3)
             if run["timed_out"] or run["exit_code"] != 0:
                 break
-            if program in programs[:2]:
+            if program in programs[:2] or arguments:
                 run["metrics"] = json.loads(log.read_text())
             print(f"Passed {program.name} ({index + 1}/{len(sequence)})", flush=True)
         report["passed"] = len(report["runs"]) == len(sequence) and all(

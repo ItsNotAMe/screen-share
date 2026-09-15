@@ -8,12 +8,11 @@ namespace proof {
 // Only test setup/fault injection lives here. Production owns the capture loop.
 class LiveCaptureSource {
 public:
-    using Deliver = std::function<void(webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer>)>;
+    using Deliver = screenshare::media::CaptureSession::Deliver;
     LiveCaptureSource(HWND window, Deliver deliver) {
         if (FAILED(runtime_.result())) throw std::runtime_error("MTA lease failed");
         distributor_.Add(1, [this, deliver = std::move(deliver)](auto sample) {
-            auto resource = std::static_pointer_cast<screenshare::media::WindowsCaptureResource>(sample.resource);
-            deliver(resource->buffer); ++frames;
+            deliver(std::move(sample)); ++frames;
         });
         auto ready = std::make_shared<std::promise<std::shared_ptr<screenshare::media::D3dVideoDevice>>>();
         auto started = ready->get_future();

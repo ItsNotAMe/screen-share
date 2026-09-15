@@ -412,3 +412,11 @@ See HEADLESS-TESTING.md and the latest CHECKPOINT-A.md evidence. Gate A remains 
 - [x] Route synthetic and WGC media proofs through the shared distributor.
 - [x] Test four consumers, slow/failing viewer isolation, removal during acquisition and pending-frame replacement under deterministic blocking.
 - [ ] Validate isolation through four actual PeerConnections with independent source restrictions and encoders; four capture consumers alone do not satisfy this requirement.
+
+### Four-peer headless media — 2026-09-15
+
+- [x] Extract the reusable per-viewer WebRTC capture source, preserving acquisition timestamps and owned dimensions and declaring screen-content metadata.
+- [x] Exercise four actual host/viewer PeerConnection pairs from one capture session with separate source wrappers and video senders.
+- [x] Verify slow source-handoff isolation, per-viewer sender-limit independence, recovery and full connection leave/rejoin while healthy peers continue.
+- [x] Include one four-peer scenario in headless smoke and three in the longer regression, with JSON results and a 60-second process watchdog.
+- [ ] Add production Auto/Manual adaptation mapping, per-viewer receive-audio evidence, decoder/network impairment and actual rate/latency acceptance. The current sender-parameter check is not wire-rate or congestion proof.
