@@ -1,17 +1,32 @@
 #include "RoomPeerNegotiation.h"
 #include "api/jsep.h"
+#include "rtc_base/thread.h"
+#include "api/units/time_delta.h"
 #include <algorithm>
 
 namespace screenshare::media {
 RoomPeerNegotiation::RoomPeerNegotiation(webrtc::scoped_refptr<webrtc::PeerConnectionInterface> peer,
     PeerNegotiation& negotiation, uint64_t generation, bool host, Send send)
-    : peer_(std::move(peer)), negotiation_(negotiation), peerGeneration_(generation), host_(host), send_(std::move(send)) {}
+    : peer_(std::move(peer)), negotiation_(negotiation), peerGeneration_(generation), host_(host), send_(std::move(send)) {
+    if (!webrtc::Thread::Current() || !peer_ || !generation || !send_)
+        throw std::logic_error("Room negotiation requires a signaling thread and live peer");
+}
 RoomPeerNegotiation::~RoomPeerNegotiation() { Close(); }
 bool RoomPeerNegotiation::ready() const { return stage_ == Stage::Ready; }
 bool RoomPeerNegotiation::Fail() { Close(); return false; }
+void RoomPeerNegotiation::Schedule() {
+    webrtc::Thread::Current()->PostDelayedTask([this, weak = std::weak_ptr<int>(scheduleLifetime_)] {
+        // Destruction, close and replacement generations invalidate queued work.
+        if (weak.expired()) return;
+        try {
+            if (Poll() && stage_ != Stage::Idle && stage_ != Stage::Ready) Schedule();
+        } catch (...) { Fail(); }
+    }, webrtc::TimeDelta::Millis(20));
+}
 void RoomPeerNegotiation::Close() {
     if (stage_ == Stage::Closed) return;
     stage_ = Stage::Closed;
+    scheduleLifetime_.reset();
     if (incoming_) incoming_->Close();
     if (outgoing_) outgoing_->Close();
     negotiation_.Close(); peer_->Close(); send_ = {};
@@ -33,6 +48,8 @@ bool RoomPeerNegotiation::Begin(std::string id) {
     });
     incoming_->LocalDescriptionReady(iceGeneration_); // Only remote apply gates native candidate insertion.
     outgoing_->RemoteDescriptionReady(iceGeneration_); // Only local SDP send gates outbound trickle.
+    scheduleLifetime_ = std::make_shared<int>(0);
+    Schedule();
     return true;
 }
 bool RoomPeerNegotiation::Offer(std::string id, bool restart) {

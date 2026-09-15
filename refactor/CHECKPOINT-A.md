@@ -59,7 +59,7 @@ avoid saving ICE credentials/addresses; explicit test results remain available.
 
 ## Software MF codec integration — 2026-09-14
 
-Added private factories under `src/media/webrtc`, with dedicated COM workers,
+Added private factories under `backend/media/webrtc`, with dedicated COM workers,
 generation-scoped encoder jobs and a single replaceable pending raw frame. Real
 PeerConnections now transmit synthetic H.264 through MF at both ends. The CPU
 fallback is explicit; there is no hardware/GPU claim.
@@ -91,7 +91,7 @@ The software adapter currently supports up to 1080p60, CPU conversion and a
 post-call 500 ms failure check. It cannot interrupt a hung transform. Hardware
 event/submission ownership, watchdog/fallback/quarantine, GPU lifetime and WASAPI
 ADM/Opus transmission remain required before Gate A. Normal app routing remains
-legacy. See `src/media/webrtc/README.md` for exact ownership contracts.
+legacy. See `backend/media/webrtc/README.md` for exact ownership contracts.
 
 ## Current results — native build and primitive probes
 

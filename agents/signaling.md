@@ -29,7 +29,7 @@
 
 ## Implementation Notes
 
-- Native diagnostics use `src/transport/SignalingClient.*` and WinHTTP.
+- Native diagnostics use `backend/transport/SignalingClient.*` and WinHTTP.
 - Current CLI checks:
   - `--signal-health URL`
   - `--signal-join URL --signal-room ROOM --signal-peer-id PEER --signal-candidate IP:PORT`

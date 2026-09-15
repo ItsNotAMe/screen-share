@@ -6,6 +6,10 @@ checks are implementation details, **not separate user turns**.
 
 ## Working agreement
 
+Native code is organized into root-level `backend/` and `frontend/`; the room
+service remains `signaling-worker/`. Backend targets must not depend on frontend
+headers. Folder organization does not imply the legacy runtime has been replaced.
+
 - Continue through an end-to-end deliverable, including integration, meaningful
   failure tests, documentation and logical commits.
 - A helper, interface, isolated test or successful build is not a stopping point.
@@ -30,6 +34,8 @@ Actual authenticated four-viewer H.264/Opus negotiation now also passes against
 local workerd, including slow-viewer isolation, twelve encrypted data channels,
 ICE restart, kick/rejoin and room shutdown. The reusable RoomPeerNegotiation
 adapter enforces candidate ordering and connection-generation barriers.
+Negotiation completions and deadlines now run automatically on its signaling
+thread, with cancellation-safe delayed callbacks and no recurring idle timer.
 **Remaining:** embed this composition in the shared automatically scheduled session
 facade, including roster-driven peer ownership and transport-failure recovery.
 The diagnostic still owns orchestration; normal UI/CLI sessions remain legacy.

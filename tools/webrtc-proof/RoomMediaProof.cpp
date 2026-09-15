@@ -19,12 +19,15 @@ struct Context {
     std::shared_ptr<proof::AudioEvidence> audioEvidence = std::make_shared<proof::AudioEvidence>();
     std::array<std::unique_ptr<MediaLink>, 4> links;
     std::array<std::unique_ptr<RoomPeerNegotiation>, 4> hosts, viewers;
+    std::unique_ptr<MediaLink> unansweredLink;
+    std::unique_ptr<RoomPeerNegotiation> unansweredPeer;
     HostMediaSession capture;
     uint64_t captureGeneration = 0;
     void Close() {
         if (captureGeneration) { capture.Stop(captureGeneration).get(); captureGeneration = 0; }
         for (auto& p : hosts) p.reset();
         for (auto& p : viewers) p.reset();
+        unansweredPeer.reset(); unansweredLink.reset();
         for (auto& p : links) p.reset();
         audio = nullptr; factory = nullptr;
     }
@@ -98,7 +101,7 @@ void Run(const QUrl& origin) {
                 if (target) Require(target->Receive(std::move(packet.message)), "Authenticated negotiation message rejected");
             }
             incoming.clear();
-            for (size_t i = 0; i < 4; ++i) if (context->hosts[i]) Require(context->hosts[i]->Poll() && context->viewers[i]->Poll(), "Asynchronous negotiation failed");
+            for (size_t i = 0; i < 4; ++i) if (context->hosts[i]) Require(!context->hosts[i]->closed() && !context->viewers[i]->closed(), "Asynchronous negotiation failed");
         });
         std::deque<Packet> packets;
         { std::lock_guard lock(mutex); packets.swap(outgoing); queuedBytes = 0; }
@@ -109,7 +112,7 @@ void Run(const QUrl& origin) {
         }
     };
     auto wait = [&](auto predicate, const char* failure) {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
         while (!predicate()) { Require(std::chrono::steady_clock::now() < deadline, failure); pump(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
     };
     RoomAdmission admission(true);
@@ -201,6 +204,27 @@ void Run(const QUrl& origin) {
         unsigned total = 0;
         for (auto& link : context->links) { total += link->viewer.decodedFrames; Require(link->viewer.invalidFrames == 0, "Decoded media invalid"); }
         const auto audioBlocks = context->audioEvidence->audibleBlocks.load();
+        // No caller polls this adapter: its own signaling timer must close a
+        // peer whose answer never arrives, while the established peers continue.
+        const auto unansweredStarted = std::chrono::steady_clock::now();
+        execute([&] {
+            auto cancelledLink = CreateViewer(*context->factory, context->audio);
+            auto cancelled = std::make_unique<RoomPeerNegotiation>(cancelledLink->host.connection,
+                cancelledLink->host.Negotiation(), cancelledLink->host.lifecycle.generation(), true,
+                [](RoomPeerSignal) { return true; });
+            Require(cancelled->Offer("cancelled_before_tick"), "Cancelled offer failed");
+            cancelled.reset(); // A queued scheduler callback must not touch freed state.
+            context->unansweredLink = CreateViewer(*context->factory, context->audio);
+            auto& orphan = context->unansweredLink->host;
+            context->unansweredPeer = std::make_unique<RoomPeerNegotiation>(orphan.connection,
+                orphan.Negotiation(), orphan.lifecycle.generation(), true, [](RoomPeerSignal) { return true; });
+            Require(context->unansweredPeer->Offer("unanswered_offer"), "Unanswered offer failed");
+        });
+        bool automaticallyClosed = false;
+        healthyBefore = context->links[0]->viewer.decodedFrames;
+        wait([&] { execute([&] { automaticallyClosed = context->unansweredPeer->closed(); }); return automaticallyClosed; }, "Automatic negotiation timeout failed");
+        Require(std::chrono::steady_clock::now() - unansweredStarted >= std::chrono::seconds(20), "Unanswered peer failed before its negotiation deadline");
+        Require(context->links[0]->viewer.decodedFrames > healthyBefore + 30, "Unanswered peer blocked healthy media");
         Require(host.Send(QJsonDocument(QJsonObject{{"v", 2}, {"type", "peer.leave"}, {"roomId", hostConfig.roomId}, {"requestId", "media-close"}, {"payload", QJsonObject{}}}).toJson(QJsonDocument::Compact)) == RoomSocket::SendResult::Sent, "Room close failed");
         wait([&] { return roomClosed && std::all_of(closed.begin(), closed.end(), [](bool v) { return v; }); }, "Room closure failed");
         for (auto& socket : sockets) socket->Stop(); host.Stop();
@@ -208,7 +232,7 @@ void Run(const QUrl& origin) {
         Require(candidatesSent > 0, "Room signaling did not exercise trickle ICE");
         std::cout << "{\"passed\":true,\"room_backed_media\":true,\"viewers\":4,\"decoded_frames\":" << total << ",\"opus_audible_blocks\":" << audioBlocks
                   << ",\"ice_candidates_sent\":" << candidatesSent << ",\"peak_signaling_queue_bytes\":" << peakQueuedBytes << ",\"peak_signaling_queue_messages\":" << peakQueuedMessages
-                  << ",\"ice_restart\":true,\"kick_rejoin\":true,\"data_channels\":12}\n";
+                  << ",\"ice_restart\":true,\"kick_rejoin\":true,\"automatic_timeout\":true,\"cancel_before_tick\":true,\"data_channels\":12}\n";
     } catch (...) {
         for (auto& socket : sockets) if (socket) socket->Stop(); host.Stop();
         execute([&] { context.reset(); }); executor.Stop(); throw;

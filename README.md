@@ -6,6 +6,11 @@ Screen Share captures a display or application window, encodes video with H.264,
 WASAPI/Opus, and sends media directly over UDP. The desktop UI uses the native backend in-process,
 while `ScreenShare.exe` remains available for CLI diagnostics and automation.
 
+Native sources are split into [backend/](backend/README.md) (shared API, media,
+rooms and platform services) and [frontend/](frontend/README.md) (desktop UI,
+CLI and updater). The room server remains in `signaling-worker/`. The v2 refactor
+and its remaining cutover gates are tracked in [refactor/TODO.md](refactor/TODO.md).
+
 ## Current Capabilities
 
 - Share a full display or selected application window.

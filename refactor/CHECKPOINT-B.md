@@ -1,5 +1,25 @@
 # Checkpoint B evidence
 
+## Source ownership and autonomous negotiation — 2026-09-16
+
+Native sources now live in backend/ and frontend/; CMake and proof consumers use
+their respective include roots. The room Worker stays independently deployable.
+This is an ownership cleanup, not a claim that legacy UI/CLI routing has changed.
+
+RoomPeerNegotiation now schedules completion/deadline processing on its signaling
+thread while negotiation is active. Ready/idle peers have no recurring timer.
+Close, destruction and a new negotiation generation invalidate delayed callbacks.
+The real-room proof no longer calls Poll. It additionally destroys a peer before
+its first tick and withholds an answer from another peer, checking that its 20s
+deadline closes it automatically while established media continues.
+
+Validation after relocating all 161 sources: full Debug and Release media suites
+28/28 each; full Debug and Release application suites 13/13 each; Release CLI-only
+8/8. Logs are build/webrtc/layout-{proof,app}-{debug,release}.log and
+build/webrtc/layout-cli-release.log. All moved file contents match the previous
+commit except the two intentional RoomPeerNegotiation implementation/header edits.
+UI assets compile and deploy through their unchanged repository-relative paths.
+
 ## Authenticated four-viewer media — 2026-09-16
 
 RoomPeerNegotiation now connects native asynchronous SDP operations and bounded
@@ -263,7 +283,7 @@ Reports (including hashes and watchdog outcomes):
 
 ## Host capture/membership coordinator — 2026-09-15
 
-`src/media/HostMediaSession` now owns CaptureSession and CaptureDistributor on
+`backend/media/HostMediaSession` now owns CaptureSession and CaptureDistributor on
 a serialized control worker. Public futures return operation IDs, session
 generations and typed errors; snapshots expose capture state, device generation,
 active operation and per-viewer delivery counters. Capture and delivery stay

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 project(ScreenShareNative VERSION 0.3.4 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
-set_property(SOURCE src/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
+set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
     "$<$<CXX_COMPILER_ID:Clang>:/clang:-mcx16>")
 
 include(CTest)
@@ -151,43 +151,43 @@ if(SCREENSHARE_BUILD_PINNED_VIGEMCLIENT)
 endif()
 
 add_library(ScreenShareCore STATIC
-    src/media/HostMediaSession.cpp
-    src/media/capture/CaptureSession.cpp
-    src/media/capture/CaptureDistributor.cpp
-    src/audio/OpusCodec.cpp
-    src/audio/WasapiCapture.cpp
-    src/audio/WasapiRenderer.cpp
-    src/capture/DesktopCapturer.cpp
-    src/codec/H264Bitstream.cpp
-    src/codec/H264FileEncoder.cpp
-    src/codec/H264EncoderProbe.cpp
-    src/codec/H264StreamDecoder.cpp
-    src/codec/H264StreamEncoder.cpp
-    src/core/ScreenShareSession.cpp
-    src/core/SessionCommand.cpp
-    src/core/SessionRuntimeControl.cpp
-    src/input/RemoteInputInjector.cpp
-    src/input/ViewerGamepad.cpp
-    src/input/VirtualGamepadBackend.cpp
-    src/input/XInputGamepad.cpp
-    src/render/Nv12D3D11Presenter.cpp
-    src/render/ReceiverPreviewWindow.cpp
-    src/transport/NatTraversal.cpp
-    src/transport/SignalingClient.cpp
-    src/transport/StunClient.cpp
-    src/transport/UdpCrypto.cpp
-    src/transport/LanDiscovery.cpp
-    src/transport/UdpProtocol.cpp
-    src/transport/UdpReceiver.cpp
-    src/transport/UdpSender.cpp
-    src/updater/UpdateSignature.cpp
-    src/video/Nv12Convert.cpp
+    backend/media/HostMediaSession.cpp
+    backend/media/capture/CaptureSession.cpp
+    backend/media/capture/CaptureDistributor.cpp
+    backend/audio/OpusCodec.cpp
+    backend/audio/WasapiCapture.cpp
+    backend/audio/WasapiRenderer.cpp
+    backend/capture/DesktopCapturer.cpp
+    backend/codec/H264Bitstream.cpp
+    backend/codec/H264FileEncoder.cpp
+    backend/codec/H264EncoderProbe.cpp
+    backend/codec/H264StreamDecoder.cpp
+    backend/codec/H264StreamEncoder.cpp
+    backend/core/ScreenShareSession.cpp
+    backend/core/SessionCommand.cpp
+    backend/core/SessionRuntimeControl.cpp
+    backend/input/RemoteInputInjector.cpp
+    backend/input/ViewerGamepad.cpp
+    backend/input/VirtualGamepadBackend.cpp
+    backend/input/XInputGamepad.cpp
+    backend/render/Nv12D3D11Presenter.cpp
+    backend/render/ReceiverPreviewWindow.cpp
+    backend/transport/NatTraversal.cpp
+    backend/transport/SignalingClient.cpp
+    backend/transport/StunClient.cpp
+    backend/transport/UdpCrypto.cpp
+    backend/transport/LanDiscovery.cpp
+    backend/transport/UdpProtocol.cpp
+    backend/transport/UdpReceiver.cpp
+    backend/transport/UdpSender.cpp
+    backend/updater/UpdateSignature.cpp
+    backend/video/Nv12Convert.cpp
 )
 
 target_compile_features(ScreenShareCore PUBLIC cxx_std_20)
 
 target_include_directories(ScreenShareCore PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend
 )
 
 if(WIN32)
@@ -278,17 +278,17 @@ if(MSVC)
 endif()
 
 add_library(ScreenShareAPI STATIC
-    src/api/ScreenShareAPI.cpp
-    src/runtime/ScreenShareRuntimeExecution.cpp
-    src/runtime/ScreenShareRuntimeSupport.cpp
-    src/runtime/ScreenShareSessionOptions.cpp
-    src/runtime/ScreenShareSessionRunner.cpp
+    backend/api/ScreenShareAPI.cpp
+    backend/runtime/ScreenShareRuntimeExecution.cpp
+    backend/runtime/ScreenShareRuntimeSupport.cpp
+    backend/runtime/ScreenShareSessionOptions.cpp
+    backend/runtime/ScreenShareSessionRunner.cpp
 )
 
 target_compile_features(ScreenShareAPI PUBLIC cxx_std_20)
 
 target_include_directories(ScreenShareAPI PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend
 )
 
 target_link_libraries(ScreenShareAPI PUBLIC
@@ -339,11 +339,12 @@ if(MSVC)
 endif()
 
 add_executable(ScreenShare
-    src/cli/ScreenShareMain.cpp
-    src/cli/ScreenShareCLI.cpp
+    frontend/cli/ScreenShareMain.cpp
+    frontend/cli/ScreenShareCLI.cpp
 )
 
 target_compile_features(ScreenShare PRIVATE cxx_std_20)
+target_include_directories(ScreenShare PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
     target_link_options(ScreenShare PRIVATE -static)
@@ -396,7 +397,7 @@ if(MSVC)
 endif()
 
 add_executable(ScreenShareUpdater WIN32
-    src/updater/ScreenShareUpdater.cpp
+    frontend/updater/ScreenShareUpdater.cpp
 )
 
 target_compile_features(ScreenShareUpdater PRIVATE cxx_std_20)
@@ -436,7 +437,7 @@ if(SCREENSHARE_BUILD_QT_UI)
             set(SCREENSHARE_UI_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/assets/brand/screenshare.ico")
             set(SCREENSHARE_UI_ICON_RC "${CMAKE_CURRENT_BINARY_DIR}/ScreenShareUiIcon.rc")
             configure_file(
-                "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ScreenShareUiIcon.rc.in"
+                "${CMAKE_CURRENT_SOURCE_DIR}/frontend/ui/ScreenShareUiIcon.rc.in"
                 "${SCREENSHARE_UI_ICON_RC}"
                 @ONLY
             )
@@ -475,29 +476,29 @@ if(SCREENSHARE_BUILD_QT_UI)
         endif()
 
         add_executable(ScreenShareUi WIN32
-            src/ui/main.cpp
-            src/ui/QtSessionBackend.cpp
-            src/ui/ActiveShareWindow.cpp
-            src/ui/ActiveWatchWindow.cpp
-            src/ui/AppShellWindow.cpp
-            src/ui/CreateRoomWindow.cpp
-            src/ui/HomeWindow.cpp
-            src/ui/JoinRoomWindow.cpp
-            src/ui/RoomAccessCheck.cpp
-            src/ui/ScreenAwakeGuard.cpp
-            src/ui/Toast.cpp
-            src/ui/UiStyle.cpp
-            src/ui/UpdateManager.cpp
-            src/ui/UpdatePackageSelection.cpp
-            src/ui/UiReportPath.cpp
-            src/ui/VideoFrameWidget.cpp
-            src/ui/resources.qrc
+            frontend/ui/main.cpp
+            frontend/ui/QtSessionBackend.cpp
+            frontend/ui/ActiveShareWindow.cpp
+            frontend/ui/ActiveWatchWindow.cpp
+            frontend/ui/AppShellWindow.cpp
+            frontend/ui/CreateRoomWindow.cpp
+            frontend/ui/HomeWindow.cpp
+            frontend/ui/JoinRoomWindow.cpp
+            frontend/ui/RoomAccessCheck.cpp
+            frontend/ui/ScreenAwakeGuard.cpp
+            frontend/ui/Toast.cpp
+            frontend/ui/UiStyle.cpp
+            frontend/ui/UpdateManager.cpp
+            frontend/ui/UpdatePackageSelection.cpp
+            frontend/ui/UiReportPath.cpp
+            frontend/ui/VideoFrameWidget.cpp
+            frontend/ui/resources.qrc
             ${SCREENSHARE_UI_ICON_RC}
         )
         set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)
         target_compile_features(ScreenShareUi PRIVATE cxx_std_20)
         target_include_directories(ScreenShareUi PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/frontend
         )
         target_link_libraries(ScreenShareUi PRIVATE ScreenShareAPI Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         target_compile_definitions(ScreenShareUi PRIVATE
@@ -517,10 +518,10 @@ if(SCREENSHARE_BUILD_QT_UI)
                 target_link_libraries(RoomProtocolTests PRIVATE ScreenShareRoom)
             else()
                 target_sources(RoomProtocolTests PRIVATE
-                    src/room/protocol/RoomProtocol.cpp src/room/protocol/StateSubscription.cpp)
+                    backend/room/protocol/RoomProtocol.cpp backend/room/protocol/StateSubscription.cpp)
             endif()
             target_compile_features(RoomProtocolTests PRIVATE cxx_std_20)
-            target_include_directories(RoomProtocolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+            target_include_directories(RoomProtocolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/backend)
             target_compile_definitions(RoomProtocolTests PRIVATE
                 ROOM_V2_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/room-v2")
             target_link_libraries(RoomProtocolTests PRIVATE Qt6::Core)
@@ -528,33 +529,33 @@ if(SCREENSHARE_BUILD_QT_UI)
 
             add_executable(UpdatePackageSelectionTests
                 tests/UpdatePackageSelectionTests.cpp
-                src/ui/UpdatePackageSelection.cpp
+                frontend/ui/UpdatePackageSelection.cpp
             )
             target_compile_features(UpdatePackageSelectionTests PRIVATE cxx_std_20)
             target_include_directories(UpdatePackageSelectionTests PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/src
+                ${CMAKE_CURRENT_SOURCE_DIR}/frontend
             )
             target_link_libraries(UpdatePackageSelectionTests PRIVATE Qt6::Core)
             add_test(NAME update-package-selection COMMAND UpdatePackageSelectionTests)
 
             add_executable(UiReportPathTests
                 tests/UiReportPathTests.cpp
-                src/ui/UiReportPath.cpp
+                frontend/ui/UiReportPath.cpp
             )
             target_compile_features(UiReportPathTests PRIVATE cxx_std_20)
             target_include_directories(UiReportPathTests PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/src
+                ${CMAKE_CURRENT_SOURCE_DIR}/frontend
             )
             target_link_libraries(UiReportPathTests PRIVATE Qt6::Core)
             add_test(NAME ui-report-path COMMAND UiReportPathTests)
 
             add_executable(VideoFrameInputTests
                 tests/VideoFrameInputTests.cpp
-                src/ui/VideoFrameWidget.cpp
+                frontend/ui/VideoFrameWidget.cpp
             )
             target_compile_features(VideoFrameInputTests PRIVATE cxx_std_20)
             target_include_directories(VideoFrameInputTests PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/src
+                ${CMAKE_CURRENT_SOURCE_DIR}/frontend
             )
             target_link_libraries(VideoFrameInputTests PRIVATE ScreenShareCore Qt6::Widgets)
             add_test(NAME video-frame-input COMMAND VideoFrameInputTests)

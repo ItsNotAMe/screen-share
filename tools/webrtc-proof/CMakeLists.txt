@@ -18,7 +18,7 @@ add_test(NAME webrtc-negotiation-lifecycle COMMAND WebRTCProof --negotiation-onl
 set_tests_properties(webrtc-negotiation-lifecycle PROPERTIES TIMEOUT 20)
 
 # Probe existing Windows primitives independently before adapting them to WebRTC.
-set(nativeRoot "${CMAKE_CURRENT_LIST_DIR}/../../src")
+set(nativeRoot "${CMAKE_CURRENT_LIST_DIR}/../../backend")
 set_property(SOURCE "${nativeRoot}/capture/DesktopCapturer.cpp" APPEND PROPERTY COMPILE_OPTIONS
     "$<$<CXX_COMPILER_ID:Clang>:/clang:-mcx16>")
 add_library(MfWebRTCCodecs STATIC

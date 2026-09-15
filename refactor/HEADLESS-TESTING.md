@@ -259,6 +259,12 @@ through a test-only entry point and exercises the production alarm handler; actu
 hibernation/alarm timing and native-client/media integration remain separate work.
 # Authenticated four-viewer media (2026-09-16)
 
+The backend now schedules negotiation itself; the diagnostic does not poll native
+negotiation futures. Additional coverage cancels before the first scheduled tick
+and lets an unanswered peer hit its automatic 20-second deadline while healthy
+media continues. Expect roughly 30 seconds for this scenario. Source relocation
+to backend/ and frontend/ does not change the command below.
+
 After building the hardware/audio-enabled WebRTC proof preset (requires the pinned
 Qt 6.10.3 Core, Network and WebSockets installation), run from the repository root:
 

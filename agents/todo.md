@@ -7,6 +7,9 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 ### Backend v2 refactor — current work
 
 Execute the grouped delivery milestones in [refactor/TODO.md](../refactor/TODO.md).
+Native source roots are now backend/ and frontend/. RoomPeerNegotiation schedules
+its own completion/deadline work; headless callers no longer poll it. Continue with
+roster-driven session ownership and transport-failure handling in the shared facade.
 The checks below are implementation details within those batches, not individual
 turn goals. Preserve all original checks in [DETAIL-CHECKS.md](../refactor/DETAIL-CHECKS.md).
 

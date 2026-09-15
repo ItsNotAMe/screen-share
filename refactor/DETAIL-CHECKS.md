@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint B — room-backed peer adapter and shared UI/CLI facade integration.** HostPeerOwner now schedules lifecycle/recovery/completion/cleanup on the shared signaling executor; four real peers negotiate concurrently through its nonblocking completion hook. Authenticated room delivery and the normal application facade remain open; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
+Current next action: **Complete the grouped room-backed session milestone and shared UI/CLI facade integration.** Authenticated four-viewer media now uses RoomPeerNegotiation with automatic signaling-thread completion/deadline scheduling. Backend and frontend sources are split into root-level folders. Automatic roster ownership, transport-failure recovery and the normal application facade remain open; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
