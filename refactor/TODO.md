@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint B — integrate PeerConnection/signaling ownership with the host coordinator, then the shared UI/CLI facade.** Host capture/membership commands and the four-peer headless path now use the serialized coordinator; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
+Current next action: **Checkpoint B — asynchronous WebRTC/room adapter and application executor integration, then the shared UI/CLI facade.** The owning peer registry now binds to capture cleanup and the four-peer headless path; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -98,7 +98,8 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [x] Scope capture attachment/removal and failure snapshots to the viewer connection generation; reject retired attachments and delayed removals after same-viewer rejoin.
 
 - [x] Add a portable owning peer registry with restart/close dispatch, terminal failure snapshots, bounded membership and generation validation; drive actual four-peer ownership through it.
-- [ ] Connect the peer owner to the application signaling executor and capture-membership failure cleanup. Real-peer proof integration does not yet replace the UI/CLI facade.
+- [x] Bind peer failure/removal to asynchronous capture cleanup, retry queue pressure, retain the connection identity until cleanup completes, and join capture before full peer-owner shutdown.
+- [ ] Connect the bound peer owner to the application signaling executor. Real-peer proof integration does not yet replace the UI/CLI facade.
 
 - [x] Implement portable host capture/membership coordinator with operation IDs, session generations, bounded command queue, priority cancellation, isolated failed subscribers and joined capture/delivery teardown.
 - [x] Route four-peer headless capture membership through the coordinator; test 100 restarts, stale operations and stop under queue pressure.

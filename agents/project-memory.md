@@ -21,6 +21,8 @@
 
 ## Current State
 
+- HostPeerRegistry now optionally binds HostMediaSession for automatic asynchronous failure/removal cleanup. Tick retries queue pressure, snapshots expose pending/error state, and bound Remove is accepted asynchronously (wait for row disappearance before reuse). Full Stop joins capture first; capture must outlive the registry. The four-peer proof covers terminal failure cleanup/rejoin; application executor and room adapter integration remain open.
+
 - HostPeerRegistry/IMediaPeer now own real four-peer proof connections and dispatch queued restart/close actions with generation validation and retained terminal snapshots. Adapter shutdown is idempotent; capture stops before peer release. Application signaling scheduling, room delivery and capture cleanup on peer failure remain open. Admission is in strictly increasing generation order; see `refactor/CHECKPOINT-B.md` for the embedding contract.
 
 - Checkpoint B now includes a portable per-connection deadline/recovery policy and a real four-peer ICE restart scenario: fresh credentials, retired-candidate filtering, preserved settings and media isolation. Production action dispatch/room integration remains open. Restart JSON separates negotiation, frame-check and ICE-state-confirmation timing; early evidence showed prompt frames but delayed state notification, so do not report the latter as a media outage. See `refactor/CHECKPOINT-B.md`.

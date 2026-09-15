@@ -26,6 +26,14 @@ WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
 
+- A capture-bound peer registry automatically removes subscriptions on terminal
+  failure and explicit removal. Cleanup futures are polled without waiting on
+  signaling; queue-pressure/cancellation errors retry on later ticks. A blocked
+  delivery/filled-command-queue test checks pending status, retry, healthy frame
+  progress and exactly-once close. The four-peer scenario injects a terminal
+  peer failure and verifies capture detachment before rejoin. This is a lifecycle
+  fault injection, not an actual network failure.
+
 - Capture subscription commands carry both host-session and viewer-connection
   generations. The coordinator test rejects retired attachment and cleanup
   commands after viewer replacement; the real four-peer rejoin scenario sends

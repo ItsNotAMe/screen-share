@@ -108,7 +108,12 @@ void RunMultiViewer() {
     options.echo_cancellation = options.auto_gain_control = options.noise_suppression = false;
     auto audioSource = factory->CreateAudioSource(options);
     auto audioTrack = factory->CreateAudioTrack("shared-audio", audioSource.get());
-    HostPeerRegistry peers;
+    std::atomic<bool> slow{true};
+    HostMediaSession session;
+    auto started = session.Start([] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); }).get();
+    Require(started.error == HostOperationError::None, "Host coordinator failed to start");
+    const auto generation = started.generation;
+    HostPeerRegistry peers(session, generation);
     std::array<MediaLink*, 4> links{}; // Borrowed; ownership is in peers.
     std::array<ManagedMediaLink*, 4> managed{};
     auto attach = [&](size_t index) {
@@ -117,11 +122,6 @@ void RunMultiViewer() {
         Require(peers.Add(index + 1, std::move(peer)), "Peer owner rejected connection");
     };
     for (size_t i = 0; i < links.size(); ++i) attach(i);
-    std::atomic<bool> slow{true};
-    HostMediaSession session;
-    auto started = session.Start([] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); }).get();
-    Require(started.error == HostOperationError::None, "Host coordinator failed to start");
-    const auto generation = started.generation;
     auto deliveryStats = [&](uint64_t viewer) {
         for (const auto& item : session.snapshot().viewers) if (item.viewer == viewer) return item.delivery;
         throw std::runtime_error("Missing coordinator viewer");
@@ -206,7 +206,14 @@ void RunMultiViewer() {
     // Tear down one complete pair, then attach a fresh connection/source while
     // the other three continue to receive the same capture session.
     const auto retiredGeneration = links[3]->host.lifecycle.generation();
-    Require(session.RemoveViewer(generation, 4, retiredGeneration).get().error == HostOperationError::None, "Coordinator viewer removal failed");
+    // Exercise terminal peer failure: cleanup must detach capture on its own.
+    links[3]->host.lifecycle.RemoteClosed(retiredGeneration);
+    Wait([&] {
+        peers.Tick(PeerConnectionLifecycle::Clock::now());
+        return !peers.snapshot(4)->captureCleanupPending;
+    }, "Failed peer capture cleanup timed out");
+    Require(session.snapshot().viewerCount == 3 && peers.snapshot(4)->failure == PeerLifecycleFailure::RemoteClosed,
+            "Failed peer retained capture or lost its failure reason");
     Require(peers.Remove(4, retiredGeneration), "Peer owner removal failed");
     const auto beforeRejoin = links[0]->viewer.decodedFrames.load();
     attach(3);

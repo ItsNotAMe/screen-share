@@ -1,5 +1,49 @@
 # Checkpoint B evidence
 
+## Automatic peer-failure capture cleanup - 2026-09-15
+
+HostPeerRegistry can now bind to HostMediaSession and its host generation.
+Terminal peer failure and explicit removal enqueue connection-scoped capture
+removal. Tick polls the future without waiting; Capacity/Cancelled results stay
+pending and retry on subsequent ticks. None/StaleGeneration completes cleanup,
+because a stale host/connection must never remove a newer subscription.
+
+Snapshots expose cleanup-pending and the last cleanup error while preserving
+the original peer failure. Remove returning true means accepted; with capture
+bound, callers tick until the row disappears before reusing that viewer slot.
+Failed rows remain available for diagnosis until explicitly removed. Retained
+cleanup futures stay bounded by the registry's 63-peer admission cap.
+
+Full Stop joins bound capture through its priority stop command before closing
+and releasing remaining peers. The capture owner must outlive the registry;
+declare it first. Stop may report an unexpected capture-stop operation failure;
+the owning executor must serialize shutdown and must not race competing stop
+commands. Existing process watchdogs remain necessary for native calls. Peer
+Close cancels its network callbacks while retained capture source references
+remain valid until asynchronous delivery cleanup joins them.
+
+The deterministic owner test blocks one viewer callback, verifies healthy frame
+progress, fills the capture command queue, observes Capacity on another removal
+and verifies eventual cleanup after release. The real four-peer proof injects
+a terminal peer failure, waits for automatic detachment, retains the failure
+reason and rejoins with a fresh connection generation.
+
+Application executor scheduling, asynchronous room/WebRTC adapter integration,
+UI/CLI replacement and field/network validation remain open. No legacy path is
+kept as a permanent alternate backend. Native handle-growth and measured gaming
+latency acceptance are unchanged.
+
+Debug and Release media suites pass **24/24** each; logs:
+`build/webrtc/peer-cleanup-debug.log` and `build/webrtc/peer-cleanup-release.log`.
+Application binaries were not rebuilt: the changed registry header currently
+enters the proof path, and normal UI/CLI behavior is unchanged.
+
+Headless Debug smoke passes **9/9** and Release regression passes **30/30**,
+including three four-peer terminal-failure cleanup/rejoin runs. Reports with
+binary hashes, watchdog outcomes and timing:
+`build/webrtc/peer-cleanup-headless-debug/result.json` and
+`build/webrtc/peer-cleanup-headless-release/result.json`.
+
 ## Connection-scoped capture cleanup - 2026-09-15
 
 Capture subscriptions previously validated only the host-session generation.
