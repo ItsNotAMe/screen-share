@@ -106,6 +106,48 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
   assert.equal(reservations.filter(r => r.status === 409).length, 1);
   await capacity.fetch('https://internal/release', { method: 'POST', body: '0'.repeat(22) });
   assert.equal((await reserve('X'.repeat(22))).status, 204);
+  const stateNow = async () => (await room.fetch('https://internal/test/state')).json();
+  async function command(socket, type, requestId, payload) {
+    const start = socket.messages.length;
+    socket.ws.send(JSON.stringify({ v: 2, type, roomId: host.roomId, requestId, payload }));
+    await until(() => socket.messages.slice(start).some(raw => JSON.parse(raw).requestId === requestId));
+    const result = JSON.parse(socket.messages.slice(start).find(raw => JSON.parse(raw).requestId === requestId));
+    assert.equal(validateServerEvent(new TextEncoder().encode(JSON.stringify(result))).ok, true);
+    return result.payload;
+  }
+  let revision = (await stateNow()).revision;
+  assert.deepEqual(await command(viewing, 'room.update', 'forbidden', { expectedRevision: revision, name: 'Stolen' }), { status: 'error', code: 'forbidden' });
+  const edit = { expectedRevision: revision, nickname: ' New Viewer ' };
+  assert.deepEqual(await command(viewing, 'profile.update', 'rename', edit), { status: 'ok' });
+  assert.equal((await stateNow()).members.find(m => m.peerId === readmitted.peerId).nickname, 'New Viewer');
+  assert.deepEqual(await command(viewing, 'profile.update', 'rename', edit), { status: 'ok' });
+  assert.equal((await stateNow()).revision, revision + 1);
+  assert.deepEqual(await command(viewing, 'profile.update', 'rename', { ...edit, nickname: 'Different' }), { status: 'error', code: 'invalid_command' });
+  assert.deepEqual(await command(recovered, 'room.update', 'stale', { expectedRevision: revision, name: 'Stale' }), { status: 'conflict', currentRevision: revision + 1 });
+  revision = (await stateNow()).revision;
+  assert.deepEqual(await command(recovered, 'room.update', 'expand', { expectedRevision: revision, viewerLimit: 2, visibility: 'unlisted' }), { status: 'ok' });
+  const secondViewer = await (await request(path + '/join', { v: 2, nickname: 'Second', password: 'secret' })).json();
+  const secondSocket = await attach(secondViewer);
+  revision = (await stateNow()).revision;
+  await command(recovered, 'room.update', 'shrink', { expectedRevision: revision, viewerLimit: 1 });
+  assert.equal((await stateNow()).members.length, 3);
+  assert.equal((await request(path + '/join', { v: 2, nickname: 'Overflow', password: 'secret' })).status, 409);
+  assert.deepEqual(await command(viewing, 'peer.disconnect', 'no-kick', { peerId: secondViewer.peerId }), { status: 'error', code: 'forbidden' });
+  assert.deepEqual(await command(recovered, 'peer.disconnect', 'kick', { peerId: readmitted.peerId }), { status: 'ok' });
+  await until(() => viewing.messages.some(raw => JSON.parse(raw).type === 'room.closed'));
+  assert.equal((await request(path + '/events', undefined, { Upgrade: 'websocket', Authorization: 'Bearer ' + readmitted.token })).status, 403);
+  assert.deepEqual(await command(secondSocket, 'peer.leave', 'leave', {}), { status: 'ok' });
+  assert.equal((await stateNow()).members.length, 1);
+  assert.equal((await request(path + '/events', undefined, { Upgrade: 'websocket', Authorization: 'Bearer ' + secondViewer.token })).status, 403);
+  const floodingMember = await (await request(path + '/join', { v: 2, nickname: 'Flood', password: 'secret' })).json();
+  const flooding = await attach(floodingMember);
+  let floodClosed = false;
+  flooding.ws.addEventListener('close', () => { floodClosed = true; });
+  for (let i = 0; i < 121; ++i) flooding.ws.send(JSON.stringify({ v: 2, type: 'state.resync', roomId: host.roomId, payload: {} }));
+  await until(() => floodClosed);
+  assert.deepEqual(await command(recovered, 'peer.leave', 'close', {}), { status: 'ok' });
+  await until(() => recovered.messages.some(raw => JSON.parse(raw).type === 'room.closed'));
+  assert.equal((await request(path + '/join', { v: 2, nickname: 'Late', password: 'secret' })).status, 404);
 });
 
 async function until(predicate) {

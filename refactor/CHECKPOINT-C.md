@@ -1,5 +1,37 @@
 # Checkpoint C evidence
 
+## Authorized room mutations — 2026-09-15
+
+Room sockets now execute profile.update, room.update, peer.disconnect and peer.leave
+through a separate pure authorization/decision module. Identity comes only from
+the active socket generation. Viewers can edit their own nickname or leave; only
+hosts edit policy or kick viewers. A host leaving closes the room without election.
+Lowering viewerLimit preserves existing viewers and blocks further admission.
+Removed members immediately lose their stored token hash and cannot reattach.
+
+Profile/policy changes check expectedRevision. Mutation state and its result cache
+commit before acknowledgement/delta delivery. The last 32 request IDs, canonical
+command digests and results are persisted per socket generation: identical retries
+return the original result without another mutation; conflicting reuse rejects.
+Replacement starts a fresh cache. This is bounded deduplication, not indefinite
+exactly-once delivery. A lost acknowledgement after removal still requires the
+client's existing unconfirmed-outcome handling.
+
+Socket attachments enforce 120 application messages per fixed minute; overflow
+closes that socket, without a cross-object rate check. Automatic ping/pong bypasses
+application dispatch. This preliminary metadata budget will need a separate
+signaling budget when signaling is enabled. Save now preserves an earlier alarm
+deadline so frequent mutations cannot postpone expiry/capacity renewal. Closure
+tombstones retain their reason for retry.
+
+Typecheck and the 192-test Worker suite pass, including expanded actual workerd
+coverage for unauthorized edits/kicks, normalized profile updates, duplicate and
+conflicting request IDs, stale revisions, live policy edits, lower-limit behavior,
+kick/leave token invalidation, host closure and a resync flood. Evidence:
+`build/webrtc/v2-mutations-tests.log`. Directory publication, targeted signaling,
+native/media integration, hibernation reconstruction and service cost/latency
+acceptance remain unfinished. No deployment or application cutover occurred.
+
 ## Isolated Worker admission and socket membership — 2026-09-15
 
 `signaling-worker/wrangler.v2.toml` now selects a separate v2 entry point and

@@ -1,10 +1,13 @@
 import { AdmissionError, constantEqual, failure, json, passwordVerifier, randomId, readAdmission, tokenHash, validToken, verifyPassword } from './admission';
 import type { Policy, Verifier } from './admission';
 import { validateClientCommand } from './protocol';
+import { decideMutation } from './mutations';
+import type { Result } from './mutations';
 
-type Member = { peerId: string; nickname: string; role: 'host' | 'viewer'; hash: string; generation: number; expires: number; attached: boolean };
-type State = { roomId: string; policy: Policy; verifier?: Verifier; revision: number; members: Member[]; closed: boolean };
-type Attachment = { peerId: string; generation: number; connectedAt: number };
+type Member = { peerId: string; nickname: string; role: 'host' | 'viewer'; hash: string; generation: number; expires: number; attached: boolean;
+  recent?: { id: string; digest: string; result: Result }[] };
+type State = { roomId: string; policy: Policy; verifier?: Verifier; revision: number; members: Member[]; closed: boolean; closeReason?: string };
+type Attachment = { peerId: string; generation: number; connectedAt: number; window?: number; count?: number };
 export interface RoomEnv { V2_ROOMS: DurableObjectNamespace; V2_CONTROL: DurableObjectNamespace; }
 
 // All admission/attachment/expiry mutations share one input gate, including
@@ -28,9 +31,16 @@ export class V2Room {
     ++state.revision;
     for (const member of state.members) for (const ws of this.sockets(member)) if (ws !== exclude) this.send(ws, { v: 2, type: 'state.delta', roomId: state.roomId, revision: state.revision, payload });
   }
-  private async save(state: State): Promise<void> { await this.ctx.storage.put('state', state); await this.ctx.storage.setAlarm(Date.now() + 30000); }
+  private async save(state: State): Promise<void> {
+    await this.ctx.storage.put('state', state);
+    const deadline = Date.now() + 30000;
+    const alarm = await this.ctx.storage.getAlarm();
+    // Frequent commands must not defer expiry or capacity renewal indefinitely.
+    if (alarm === null || alarm <= Date.now() || alarm > deadline) await this.ctx.storage.setAlarm(deadline);
+  }
   private async close(state: State, reason: string): Promise<void> {
     state.closed = true;
+    state.closeReason = reason;
     for (const ws of this.ctx.getWebSockets()) {
       this.send(ws, { v: 2, type: 'room.closed', roomId: state.roomId, payload: { reason } });
       try { ws.close(1000, 'room_closed'); } catch {}
@@ -79,6 +89,7 @@ export class V2Room {
       if (!member || member.expires <= Date.now() && !this.sockets(member).length) throw new AdmissionError(403, 'forbidden');
       const previous = this.ctx.getWebSockets(member.peerId);
       ++member.generation;
+      member.recent = [];
       member.attached = true;
       member.expires = Date.now() + 90000;
       const pair = new WebSocketPair();
@@ -97,14 +108,40 @@ export class V2Room {
       const attachment = ws.deserializeAttachment() as Attachment;
       const member = state?.members.find(m => m.peerId === attachment.peerId && m.generation === attachment.generation);
       if (!state || state.closed || !member) { ws.close(1008, 'stale_membership'); return; }
+      const window = Math.floor(Date.now() / 60000);
+      attachment.count = attachment.window === window ? (attachment.count ?? 0) + 1 : 1;
+      attachment.window = window;
+      ws.serializeAttachment(attachment);
+      if (attachment.count > 120) { ws.close(1008, 'rate_limited'); return; }
       const validation = validateClientCommand(typeof raw === 'string' ? new TextEncoder().encode(raw) : new Uint8Array(raw));
       if (!validation.ok || validation.message.roomId !== state.roomId) { ws.close(1008, 'invalid_command'); return; }
       const message = validation.message;
       if (message.type === 'state.resync') { this.snapshot(ws, state, member); return; }
-      // Unsupported commands fail explicitly until the authenticated dispatcher
-      // lands; never forward signaling without connection-generation ownership.
-      if (message.requestId) this.send(ws, { v: 2, type: 'command.result', roomId: state.roomId, requestId: message.requestId, payload: { status: 'error', code: 'invalid_state' } });
-      else ws.close(1008, 'unsupported_command');
+      // Signaling remains disabled until connection-generation ownership lands.
+      if (!message.requestId) { ws.close(1008, 'unsupported_command'); return; }
+      const reply = (payload: Result) => this.send(ws, { v: 2, type: 'command.result', roomId: state.roomId, requestId: message.requestId, payload });
+      const digest = await tokenHash(JSON.stringify(message));
+      const prior = member.recent?.find(item => item.id === message.requestId);
+      if (prior) { reply(prior.digest === digest ? prior.result : { status: 'error', code: 'invalid_command' }); return; }
+      const decision = decideMutation(message, member, state);
+      const removed = state.members.find(m => m.peerId === decision.remove);
+      const removedSockets = removed ? this.sockets(removed) : [];
+      let change: unknown;
+      if (decision.nickname !== undefined) { member.nickname = decision.nickname; change = { op: 'member.upsert', member: this.view(member) }; }
+      if (decision.policy) { state.policy = decision.policy; change = { op: 'policy', policy: { ...state.policy, passwordProtected: !!state.verifier } }; }
+      if (removed) { state.members = state.members.filter(m => m !== removed); if (removed.attached) change = { op: 'member.remove', peerId: removed.peerId }; }
+      member.recent = [...(member.recent ?? []), { id: message.requestId as string, digest, result: decision.result }].slice(-32);
+      if (change) ++state.revision;
+      if (decision.close) { state.closed = true; state.closeReason = 'host_left'; }
+      await this.save(state);
+      reply(decision.result);
+      if (change) for (const peer of state.members) for (const target of this.sockets(peer)) this.send(target, {
+        v: 2, type: 'state.delta', roomId: state.roomId, revision: state.revision, payload: change });
+      for (const target of removedSockets) {
+        if (removed?.peerId !== member.peerId) this.send(target, { v: 2, type: 'room.closed', roomId: state.roomId, payload: { reason: 'kicked' } });
+        try { target.close(1000, 'membership_removed'); } catch {}
+      }
+      if (decision.close) await this.close(state, 'host_left');
     });
   }
   async webSocketClose(ws: WebSocket): Promise<void> { await this.disconnected(ws); }
@@ -124,7 +161,7 @@ export class V2Room {
     await this.ctx.blockConcurrencyWhile(async () => {
       const state = await this.ctx.storage.get<State>('state');
       if (!state) return;
-      if (state.closed) { await this.close(state, 'host_expired'); return; }
+      if (state.closed) { await this.close(state, state.closeReason ?? 'host_expired'); return; }
       const now = Date.now();
       for (const member of state.members) for (const ws of this.sockets(member)) {
         const attached = ws.deserializeAttachment() as Attachment;

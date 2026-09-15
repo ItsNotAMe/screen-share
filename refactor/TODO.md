@@ -197,6 +197,8 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Protocol and native client
 
+- [x] Implement authenticated profile/policy mutations, leave/kick, bounded per-generation deduplication, revision conflicts and a local socket message budget; validate authorization and removal through actual workerd sockets. Signaling/directory dispatch remain open.
+
 - [x] Add isolated v2 Worker admission/room socket membership with hashed credentials, serialized capacity checks, provisional cleanup and actual local workerd tests. Partial service scope and remaining endpoints are recorded in CHECKPOINT-C.md.
 
 - [x] Implement native create/join HTTP admission with canonical requests, exact response/token/identity validation, typed futures, cancellation and unconfirmed outcomes without application retries. Bind the resulting socket to the admitted role; validate real HTTP failures and role-conflicting snapshots locally.
@@ -235,13 +237,13 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [ ] Validate nickname normalization, code points/UTF-8 size and forbidden controls.
 - [ ] Implement duplicate-name disambiguation with peer IDs.
 - [ ] Implement public/unlisted rooms, creation password and live name/visibility/viewer-limit edits.
-- [ ] Preserve existing viewers when the limit is lowered; block new admissions.
+- [x] Preserve existing viewers when the limit is lowered; block new admissions.
 - [ ] Implement v2 room links without secrets.
 - [ ] Issue 256-bit membership tokens, store hashes and enforce role/target/socket authorization.
 - [ ] Preserve versioned salted PBKDF2 work factor and HTTPS-only secret handling.
 - [ ] Add admission and per-socket rate limits without cross-object checks for every message.
 - [ ] Preserve configurable room/participant caps, CORS restrictions and certificate validation.
-- [ ] Implement kick invalidation and avoid claims of permanent accountless bans.
+- [x] Implement kick invalidation and avoid claims of permanent accountless bans.
 
 ### Worker/native integration tests
 

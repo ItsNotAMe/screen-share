@@ -6,6 +6,8 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
+- [ ] Follow the implemented room mutation path with directory publication/retry and targeted signaling authorization. Preserve commit-before-notify, bounded per-generation deduplication and earliest alarm deadlines; add signaling-specific budgets rather than reusing the current metadata budget.
+
 - [ ] Complete v2 Worker directory snapshots/deltas and durable retry/lease publication, authenticated mutation/signaling dispatcher with deduplication/generation/queue/rate bounds, configurable caps and native-client runtime integration. Isolated admission/room socket membership and local workerd tests now exist; do not deploy or cut over the partial service. Validate hibernation reconstruction and real alarm timing beyond injected expiry tests.
 
 - [ ] Adopt RoomAdmission/RoomSocket in the application coordinator, connect media connection-generation dispatch, and implement/test the matching service in the local Cloudflare runtime. Native create/join futures now produce role-bound socket configs, with live HTTP and WebSocket failure tests. Server authorization, provisional expiry and normal UI/CLI adoption remain open. See refactor/CHECKPOINT-C.md.

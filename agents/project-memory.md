@@ -21,6 +21,8 @@
 
 ## Current State
 
+- V2 room mutations now enforce socket-derived host/viewer permissions, expected revisions, last-32 request deduplication and a 120-message/minute metadata budget. Live workerd tests cover profile/policy updates, reduced capacity without eviction, kick/leave token invalidation and host closure. Saves preserve earlier alarm deadlines. Directory/signaling and normal application integration remain open.
+
 - Isolated v2 Worker admission and socket membership now live under signaling-worker/src/v2 with wrangler.v2.toml. Real Miniflare/workerd tests cover credentials, serialized joins, provisional alarm cleanup, socket replacement/reconnect, automatic pong and the global 500-room cap. Default v1 remains active and nothing is deployed. Directory, command/signaling authorization, per-socket bounds, native/media integration and real hibernation scheduling remain open; see refactor/CHECKPOINT-C.md.
 
 - Native RoomAdmission now implements single-flight asynchronous create/join with HTTPS origin validation, bounded responses, no redirects/cookies/cache, exact credentials/role checks and unconfirmed cancellation/failure results without application retries. Success returns a same-origin RoomSocket config with expectedRole; conflicting snapshots reject. Actual HTTP and role-mismatch socket tests are in the application/headless suite. The exact future v2 service contract is in `refactor/ROOM-PROTOCOL.md`; service handlers/expiry, media routing and normal UI/CLI adoption remain open.
