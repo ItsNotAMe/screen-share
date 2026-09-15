@@ -21,6 +21,8 @@
 
 ## Current State
 
+- Compiled Qt RoomAdmission/RoomSocket now have a one-command workerd integration harness (signaling-worker/tests/run-native-service.mjs), also registered with CTest when dependencies exist. Snapshot events carry accepted revisions for safe edits. Coverage joins native/service admission, directory push/resync, edits/conflicts, synthetic signaling, reconnect, visibility and closure. The actual application coordinator/media facade still needs adoption; remote TLS and media latency are not established.
+
 - Directory/capacity delivery is now a bounded background outbox outside room input/state gates. A shared state serializer and version-matching acknowledgements protect newer changes and closure; the latest pending value survives failures for alarm retry. Actual workerd tests cover stalled service with concurrent control/signaling, late ACKs, close races and the real 5s abort. Normal native/media integration and production hibernation/load/queue acceptance remain pending.
 
 - V2 directory completes the isolated service's six endpoints: SQLite snapshot/pushed deltas, no per-room listing fanout, publish-after-host-attach, persisted versioned retries, closure tombstones, 60s renewals/180s leases and silent lease-only updates. Actual workerd tests cover failures/retry, lifecycle/visibility, expiry and 500 max-name rows. Native/media adoption, hibernation/load/queue pressure and production cutover remain open.

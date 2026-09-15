@@ -12,6 +12,11 @@ responsiveness/load/hibernation acceptance remain unfinished.
 
 ## Ownership and threading
 
+Native RoomSocket snapshot events include an optional accepted revision together
+with the immutable state payload and transport generation. Use that revision for
+expectedRevision mutations; non-snapshot events carry no state revision. Never
+query changing network-thread state from a UI/signaling consumer to recover it.
+
 The session coordinator owns session/viewer generations and cancellation on one
 control executor. It consumes immutable room snapshots and directs one WebRTC
 PeerConnection per viewer. It does not parse JSON or run codec loops.

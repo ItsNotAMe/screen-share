@@ -207,6 +207,34 @@ callback, so native-call watchdogs remain necessary. The current admission
 ceiling is 63 subscriptions, matching the planned service abuse ceiling.
 # Local v2 service runtime tests
 
+## Compiled native client against workerd
+
+After installing the signaling-worker npm dependencies and building application
+tests (UI optional), run from the repository root:
+
+```powershell
+node signaling-worker/tests/run-native-service.mjs build/sdk-app-release/RoomServiceTests.exe build/webrtc/native-worker-evidence
+```
+
+CMake also registers `room-v2-native-worker` when Node and Miniflare are available;
+it prints an explicit status message if prerequisites are missing. The executable
+is built independently of that registration. This test launches an isolated local
+workerd/SQLite service and exercises the production Qt admission/socket clients.
+It covers directory push/resync, create/join, passwords/capacity, revision-bound
+edits/conflicts, signaling, host reconnect, visibility, kick and closure. It does
+not instantiate a media PeerConnection; SDP/ICE payloads are synthetic.
+
+The harness binds only numeric loopback and uses the clients' explicit plaintext
+diagnostic opt-in. A test-only entry supplies the HTTPS URL and trusted edge IP
+normally provided by Cloudflare; production HTTPS checks are unchanged. Remote TLS
+and actual edge deployment are not covered. The native process has a 60-second
+watchdog; sockets/runtime are disposed after it exits. Each run creates a unique
+artifact directory with executable/Worker-bundle hashes, timing, exit status,
+limitations, result JSON and a bounded native log. No physical input is required.
+
+Snapshot events now include their accepted revision alongside the copied payload,
+so a consumer can issue expectedRevision edits without reading live network state.
+
 Background-delivery coverage now deliberately holds a directory request while
 admission, attachment, resync, edits and signaling execute. It tests newer updates
 and host closure racing with the old acknowledgement, plus the actual five-second

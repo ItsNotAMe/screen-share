@@ -6,13 +6,13 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
-- [ ] Test native RoomAdmission/RoomSocket against the complete local workerd service and integrate the shared media facade. Directory/capacity background delivery now passes stalled-service, timeout/retry and late-acknowledgement race tests; production hibernation, load, queue pressure and latency acceptance remain open.
+- [ ] Integrate the shared media facade with native RoomAdmission/RoomSocket. Compiled native clients now exercise actual local workerd end-to-end, including mutation revisions, signaling and room/directory lifecycle; media payloads remain synthetic. Production hibernation, load, queue pressure and latency acceptance remain open.
 
 - [ ] Integrate the implemented v2 signaling relay with native media negotiation: fresh wire connection ID for every offer/restart, local description before candidates, and socket generation barriers. Validate outbound pressure, hibernation reconstruction and cost/load; relay-only tests do not establish production media sessions.
 
 - [ ] Finish configurable service caps and browser CORS/preflight support if needed; retain closed-by-default Origin handling and required bindings. Validate hibernation reconstruction and real alarm timing beyond injected expiry tests before deployment/cutover.
 
-- [ ] Adopt RoomAdmission/RoomSocket in the application coordinator and connect media connection-generation dispatch. Both native components and the matching service now have local tests; combined native-to-workerd validation and normal UI/CLI adoption remain open. See refactor/CHECKPOINT-C.md.
+- [ ] Adopt RoomAdmission/RoomSocket in the application coordinator and connect media connection-generation dispatch. Combined native-to-workerd validation now exists; normal UI/CLI adoption remains open. See refactor/CHECKPOINT-C.md.
 
 - [ ] Add easy, one-command headless testing of realistic live sessions through production APIs, without manual mouse/keyboard input. Include paced media, scripted control to a test-owned sink, network/recovery scenarios, metrics and watchdog cleanup; distinguish synthetic headless from desktop/GPU-dependent capture checks. Full requirement: refactor/PLAN.md. Implementation resumed: shared capture ownership, bounded independent viewer delivery, paced synthetic media, four real peer connections with slow-handoff/rejoin coverage and one-command headless smoke/regression now exist (refactor/HEADLESS-TESTING.md); Auto/Manual source/RTP settings and revision validation now exist; complete facade, separate processes, input and network scenarios remain.
 

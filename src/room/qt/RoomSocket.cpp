@@ -35,7 +35,7 @@ void RoomSocket::CheckThread() const {
     if (QThread::currentThread() != thread()) throw std::logic_error("Room socket requires its networking thread");
 }
 void RoomSocket::Emit(EventKind kind, Error error, QJsonObject value) {
-    if (notify_) notify_({kind, generation_, error, std::move(value)});
+    if (notify_) notify_({kind, generation_, error, std::move(value), kind == EventKind::Snapshot ? cache_.Revision() : std::nullopt});
 }
 bool RoomSocket::Start(Config config) {
     CheckThread(); Stop();

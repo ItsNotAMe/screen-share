@@ -4,6 +4,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <functional>
+#include <optional>
 class QWebSocket;
 
 namespace screenshare::room::qt {
@@ -14,7 +15,8 @@ class RoomSocket final : public QObject {
 public:
     enum class EventKind { Connecting, Connected, Snapshot, Signal, Result, Closed, Reconnecting, Error };
     enum class Error { None, Configuration, Transport, Protocol, Backpressure, Timeout };
-    struct Event { EventKind kind; uint64_t generation; Error error = Error::None; QJsonObject value; };
+    struct Event { EventKind kind; uint64_t generation; Error error = Error::None; QJsonObject value;
+        std::optional<uint64_t> revision; }; // Snapshot revision travels with the immutable payload.
     struct Config {
         QUrl origin;
         QString roomId, selfPeerId;

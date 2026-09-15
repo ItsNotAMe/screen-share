@@ -1,5 +1,41 @@
 # Checkpoint C evidence
 
+## Compiled native clients against workerd — 2026-09-15
+
+RoomServiceTests now exercises the production Qt RoomAdmission and RoomSocket
+against the actual isolated Worker/SQLite Durable Objects. The one-command Node
+harness starts a numeric-loopback service, launches the compiled native process
+with a 60-second watchdog, disposes the runtime and saves unique hashed/timed
+artifacts. CMake registers the test when Node/Miniflare are installed, independently
+of Widgets; missing prerequisites are reported during configuration.
+
+The combined path covers directory subscription/resync, create/join with names and
+passwords, capacity rejection, member updates, profile edits and stale-revision
+conflicts, directed offer/answer/candidate/restart-request relay, host disconnect and
+reattachment, blocked joins during disconnection, public/unlisted visibility, kick
+and host closure. Tests require no mouse/keyboard or physical capture/audio device.
+Integration exposed that snapshot events lacked the accepted revision: it now
+travels with the immutable payload/generation for safe expectedRevision edits.
+
+Application suites passed 13/13 each in Debug and Release, and CLI-only Release
+passed 8/8. After extending reconnect/resync coverage, the final native-service
+target was rebuilt and passed again in all three configurations. Worker typecheck
+and 196/196 tests also passed. Evidence:
+
+- `build/webrtc/native-worker-app-{debug,release}.log`
+- `build/webrtc/native-worker-cli-release.log`
+- `build/webrtc/native-worker-final-sdk-{app-debug,app-release,room-cli-release}.log`
+- `build/webrtc/native-worker-worker-tests.log`
+- Each build's `room-service-evidence/native-service-*/result.json` and `native.log`
+
+The harness uses the native clients' explicit plaintext loopback diagnostic mode
+and a test-only entry supplying the HTTPS URL/trusted edge IP normally supplied by
+Cloudflare. Production transport policy is unchanged. This proves client/service
+protocol integration, not remote TLS, deployment or real media negotiation: the
+SDP/ICE payloads are synthetic. The shared UI/CLI media facade, native connection-ID
+mapping, hibernation/load/queue acceptance, gaming latency and normal cutover remain
+open. The old backend still handles normal sessions; nothing was deployed.
+
 ## Background directory and capacity delivery — 2026-09-15
 
 Directory publication, capacity renewal and capacity release now run outside the

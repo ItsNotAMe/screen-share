@@ -250,6 +250,8 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Worker/native integration tests
 
+- [x] Exercise the compiled Qt admission/socket clients against actual local workerd: directory state, admission, revision-bound mutations, directed signaling, reconnect, visibility, kick and closure. Add one-command execution with watchdogs and hashed artifacts, including CLI-only builds. Payloads are synthetic signaling; production media integration remains open.
+
 - [x] Add Worker typecheck/test scripts and execute tests in the local Cloudflare runtime.
 - [x] Test simultaneous joins, provisional expiry and capacity races; expiry uses injected persisted deadlines with the actual alarm handler.
 - [ ] Test passwords, invalid/expired tokens, replay and unauthorized commands.
