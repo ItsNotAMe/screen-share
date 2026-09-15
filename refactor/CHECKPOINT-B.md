@@ -61,3 +61,41 @@ remain open; these synthetic lifecycle tests do not resolve them. See
 No comparative performance improvement is claimed. Matched workloads, external
 gaming image/input latency, quality and room-service cost checks are specified
 in [COMPARISON.md](COMPARISON.md).
+
+## Trickle ICE candidate handoff — 2026-09-15
+
+Added portable `IceCandidateHandoff`, used by the actual WebRTC media proofs.
+Candidates are buffered until local and remote description application succeeds,
+then delivered in order without waiting for ICE gathering to complete. The proof
+serializes SDP before gathering and asserts it contains no candidate lines.
+Thus successful H.264/Opus/data connectivity now depends on separate candidate
+handoff, rather than the previous bundled-SDP shortcut.
+
+Each directional handoff has a fresh negotiation identity; stale pushes and
+readiness notifications cannot mutate it. Limit each handoff to 64 accepted
+candidates over its entire lifetime, with 4096-byte candidate and 64-byte MID
+bounds and NUL/index validation. Overflow, malformed data and application failure
+close delivery and release queued candidates/callback ownership. Teardown closes
+both directions before closing the PeerConnection. All calls stay on the proof
+signaling executor; the class is not a thread-safe room transport. The room
+adapter must map authenticated connection identities and validate wire messages
+before using it. Negotiation failure requires a fresh handoff.
+
+Debug and Release media suites pass **22/22** (`build/webrtc/trickle-debug.log`
+and `build/webrtc/trickle-release.log`). Dedicated coverage includes ordering,
+readiness barriers, stale/closed callbacks, the 64-candidate bound, invalid
+fields and throwing delivery callbacks. Application binaries were not rebuilt:
+this milestone changes the reusable header and proof integration, not the
+current application path.
+
+This is still local in-process signaling without STUN configuration. Production
+peer ownership, authenticated room routing, end-of-candidates wire mapping,
+connection deadlines, bounded ICE restart/backoff and actual NAT/network tests
+remain open. Native handle-growth failures and comparative latency acceptance
+are unchanged. Do not mark the full PeerConnections checklist complete.
+
+Headless Debug smoke passes **7/7** child runs; Release regression passes
+**28/28**, including 20 single-peer processes and three four-peer/rejoin runs.
+Artifacts: `build/webrtc/trickle-headless-debug/result.json` and
+`build/webrtc/trickle-headless-release/result.json`. Both include executable
+hashes, watchdog outcomes and component metrics. No manual input was needed.

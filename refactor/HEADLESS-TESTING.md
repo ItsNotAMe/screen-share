@@ -26,13 +26,21 @@ WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
 
+- ICE candidates travel separately from SDP through the reusable bounded
+  `IceCandidateHandoff`. Each direction waits for successful local and remote
+  description application, rejects stale generations and closes its callback
+  on teardown. SDP is asserted to contain no candidates. The dedicated test
+  covers ordering, stale/closed delivery, overflow, invalid fields and delivery
+  failure; real single/four-peer media tests exercise the handoff. This remains
+  in-process signaling, without STUN/NAT or room-service transport coverage.
+
 - Production `HostMediaSession` serializes capture/membership commands, assigns
   operation/session IDs and joins workers on stop. Its headless test covers
   100 restarts, stale commands, isolated callback failure, startup failure and
   cancellation despite a full command queue. The four-peer proof now uses this
   coordinator for capture and subscriber lifetime. Peer creation/signaling and
-  the application facade remain outside it. Smoke runs six child processes;
-  regression runs 27. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
+  the application facade remain outside it. Smoke runs seven child processes;
+  regression runs 28. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
 - [COMPARISON.md](COMPARISON.md) defines the matched before/after scorecard.
   These checks establish regression coverage, not superior end-to-end latency.
 

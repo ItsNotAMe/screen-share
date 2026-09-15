@@ -9,6 +9,7 @@
 #include <vector>
 #include <thread>
 #include "media/audio/WasapiPcmEndpoint.h"
+#include "media/IceCandidateHandoff.h"
 
 #include "api/audio/audio_device.h"
 #include "api/audio/create_audio_device_module.h"
@@ -94,13 +95,23 @@ using SyntheticVideo = screenshare::media::CaptureVideoSource;
 class Peer : public webrtc::PeerConnectionObserver, public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
     ~Peer() override {
+        if (outgoingIce) outgoingIce->Close();
+        if (incomingIce) incomingIce->Close();
         if (video) video->RemoveSink(this);
         channels.clear();
         if (connection) connection->Close();
     }
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState) override {}
     void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState) override {}
-    void OnIceCandidate(const webrtc::IceCandidate*) override {}
+    void OnIceCandidate(const webrtc::IceCandidate* candidate) override {
+        if (!outgoingIce) return;
+        screenshare::media::IceCandidateMessage message;
+        if (!candidate->ToString(&message.candidate)) { outgoingIce->Close(); return; }
+        message.mid = candidate->sdp_mid(); message.line = candidate->sdp_mline_index();
+        outgoingIce->Push(iceGeneration, std::move(message));
+    }
+    uint64_t iceGeneration = 0;
+    std::shared_ptr<screenshare::media::IceCandidateHandoff> outgoingIce, incomingIce;
     void OnTrack(webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override {
         auto track = transceiver->receiver()->track();
         if (track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind) {
@@ -136,27 +147,44 @@ public:
 };
 
 void TransferDescription(Peer& from, Peer& to, bool offer) {
+    using namespace screenshare::media;
+    static uint64_t nextGeneration = 0; // Proof signaling executor only.
+    const auto generation = ++nextGeneration;
+    if (from.outgoingIce) from.outgoingIce->Close();
+    auto handoff = std::make_shared<IceCandidateHandoff>(generation,
+        [connection = to.connection](const IceCandidateMessage& message) {
+            std::unique_ptr<webrtc::IceCandidate> candidate(
+                webrtc::CreateIceCandidate(message.mid, message.line, message.candidate, nullptr));
+            return candidate && connection->AddIceCandidate(candidate.get());
+        });
+    from.outgoingIce = to.incomingIce = handoff;
+    from.iceGeneration = generation;
     auto created = webrtc::make_ref_counted<CreatedDescription>();
     webrtc::PeerConnectionInterface::RTCOfferAnswerOptions options;
     if (offer) from.connection->CreateOffer(created.get(), options);
     else from.connection->CreateAnswer(created.get(), options);
     Wait([&] { return created->done; }, "SDP creation timed out");
     Require(created->description != nullptr, "SDP creation failed");
+    // Serialize before SetLocalDescription starts gathering: SDP must contain
+    // no bundled candidates, so successful connectivity exercises trickle ICE.
+    std::string sdp;
+    Require(created->description->ToString(&sdp), "SDP serialization failed");
+    Require(sdp.find("a=candidate:") == std::string::npos, "Unexpected bundled ICE");
     auto applied = webrtc::make_ref_counted<AppliedDescription>();
     from.connection->SetLocalDescription(applied.get(), created->description.release());
     Wait([&] { return applied->done; }, "Local description timed out");
     Require(applied->success, "Local description failed");
-    // This local proof bundles candidates in SDP. Production uses targeted trickle ICE.
-    Wait([&] { return from.connection->ice_gathering_state() ==
-        webrtc::PeerConnectionInterface::kIceGatheringComplete; }, "ICE gathering timed out");
-    std::string sdp;
-    Require(from.connection->local_description()->ToString(&sdp), "SDP serialization failed");
+    Require(handoff->LocalDescriptionReady(generation) == IceHandoffError::None, "Local ICE handoff failed");
     auto remote = webrtc::CreateSessionDescription(offer ? webrtc::SdpType::kOffer : webrtc::SdpType::kAnswer, sdp);
     Require(remote != nullptr, "SDP parsing failed");
     auto received = webrtc::make_ref_counted<AppliedDescription>();
     to.connection->SetRemoteDescription(received.get(), remote.release());
     Wait([&] { return received->done; }, "Remote description timed out");
     Require(received->success, "Remote description failed");
+    Require(handoff->RemoteDescriptionReady(generation) == IceHandoffError::None, "Remote ICE handoff failed");
+    Wait([&] { return handoff->error() != IceHandoffError::None || handoff->delivered() > 0; },
+         "Trickle ICE delivery timed out");
+    Require(handoff->error() == IceHandoffError::None, "Trickle ICE rejected");
 }
 
 } // namespace proofmedia

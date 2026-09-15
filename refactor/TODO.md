@@ -114,6 +114,9 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 ### PeerConnections
 
+- [x] Add bounded generation-scoped candidate handoff and replace bundled-SDP gathering in real media proofs with trickle ICE, gated on successful description application.
+- [ ] Integrate candidate handoff into authenticated room signaling and full peer ownership; test STUN/NAT, restart generations and connection deadlines. Local proof delivery does not complete these tasks.
+
 - [ ] Implement one host-to-viewer PeerConnection, separate track/source adaptation wrapper and encoder per viewer.
 - [ ] Share source capture/audio without sharing viewer adaptation restrictions.
 - [ ] Use host-offerer Unified Plan, one-way audio/video and bundled transport/data.

@@ -131,3 +131,8 @@ target_compile_options(MfCodecProbe PRIVATE /EHsc /GR)
 target_link_libraries(MfCodecProbe PRIVATE d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging)
 add_test(NAME mf-software-codec COMMAND MfCodecProbe)
 set_tests_properties(mf-software-codec PROPERTIES TIMEOUT 30)
+
+add_executable(IceCandidateHandoffTest IceCandidateHandoffTest.cpp)
+target_link_libraries(IceCandidateHandoffTest PRIVATE MfWebRTCCodecs)
+add_test(NAME ice-candidate-handoff COMMAND IceCandidateHandoffTest)
+set_tests_properties(ice-candidate-handoff PROPERTIES TIMEOUT 10)
