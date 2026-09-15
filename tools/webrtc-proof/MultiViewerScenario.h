@@ -1,5 +1,6 @@
 #pragma once
 #include "ProofPeer.h"
+#include "NegotiationScenario.h"
 #include "media/HostMediaSession.h"
 #include "media/HostPeerRegistry.h"
 #include "media/webrtc/ViewerStreamSettings.h"
@@ -65,7 +66,7 @@ struct ManagedMediaLink final : screenshare::media::IMediaPeer {
         link->host.Shutdown(); link->viewer.Shutdown();
     }
 };
-void RunMultiViewer() {
+void RunMultiViewer(bool negotiationOnly = false) {
     using namespace screenshare::media;
     webrtc::AutoThread mainThread;
     // The source bridge must not erase queue/conversion age by stamping frames
@@ -104,6 +105,11 @@ void RunMultiViewer() {
     webrtc::EnableMedia(dependencies);
     auto factory = webrtc::CreateModularPeerConnectionFactory(std::move(dependencies));
     Require(factory != nullptr, "Multi-viewer factory failed");
+    CheckNegotiation(*factory);
+    if (negotiationOnly) {
+        std::cout << "{\"passed\":true,\"mode\":\"async-peer-negotiation\",\"cancelled_offers\":25}\n";
+        return;
+    }
     webrtc::AudioOptions options;
     options.echo_cancellation = options.auto_gain_control = options.noise_suppression = false;
     auto audioSource = factory->CreateAudioSource(options);

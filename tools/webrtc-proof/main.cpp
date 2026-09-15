@@ -185,6 +185,7 @@ int main(int argc, char** argv) {
     try {
         const std::string mode = argc == 2 ? argv[1] : "";
         if (mode == "--multi-viewer") RunMultiViewer();
+        else if (mode == "--negotiation-only") RunMultiViewer(true);
         else {
             Require(mode.empty() || mode == "--hardware" || mode == "--live-capture" || mode == "--wasapi",
                     "Unknown proof mode");

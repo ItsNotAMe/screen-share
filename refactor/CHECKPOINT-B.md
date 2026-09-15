@@ -1,5 +1,58 @@
 # Checkpoint B evidence
 
+## Shared asynchronous SDP negotiation - 2026-09-15
+
+Added PeerNegotiation in the private WebRTC implementation module and the shared
+ScreenShareNegotiation CMake target. Application and proof builds compile the
+same implementation. The proof's CreatedDescription/AppliedDescription helpers
+are removed; single-peer, hardware/Opus and four-peer ICE-restart paths now use
+the shared adapter for local offer/answer creation/application and remote SDP.
+
+Operations return futures immediately, carry operation/connection identities
+and allow only one in-flight request per adapter. Overlap returns Busy instead
+of accumulating a queue. Wrong generations reject before native mutation.
+SDP is bounded to 60 KiB and rejects empty/NUL-containing data, matching the
+room protocol's payload bound; the room transport must still validate the full
+serialized envelope. Native error descriptions are not echoed with credentials.
+
+Local SDP is serialized before gathering, but a successful future is delivered
+only after SetLocalDescription succeeds. Local ICE credentials become available
+before native candidate callbacks, preserving the existing retired-credential
+filter. Creation/application observers hold weak state and operation identities.
+Close resolves an outstanding future as Cancelled and rejects further work;
+late callbacks cannot apply a cancelled created description or complete a newer
+operation. Cancellation does not roll back an already-issued native SDP apply;
+the peer owner closes the native connection during lifetime cancellation.
+
+All adapter methods/destruction belong to the peer's signaling executor. There
+is no message pumping, blocking wait or internal thread in this component. The
+local diagnostic driver still pumps its event loop to observe futures; wiring
+the application executor and room transport remains open. This milestone builds
+the library into the application dependency graph without switching UI/CLI media.
+
+The dedicated negotiation scenario uses actual PeerConnections: 25 pending
+offer cancellations and owner destructions, bounded overlapping requests, stale
+remote requests, malformed/oversized/NUL SDP, failed answer creation, successful
+replacement negotiation after late callbacks, and remote application on a closed
+native connection. Existing encrypted media, restart, settings, failure cleanup
+and rejoin checks now run through the same adapter. No private signaling is logged.
+
+Debug/Release media suites pass **25/25** each and application builds/suites
+pass **10/10** each. Evidence logs:
+`build/webrtc/async-negotiation-sdk-proof-debug.log`,
+`build/webrtc/async-negotiation-sdk-proof-release.log`,
+`build/webrtc/async-negotiation-sdk-app-debug.log` and
+`build/webrtc/async-negotiation-sdk-app-release.log`.
+Use the existing run-webrtc-proof helper when CMake regenerates so the pinned
+MSVC/Windows SDK environment is initialized. Existing AutoThread warnings remain.
+
+Headless Debug smoke passes **10/10** runs and Release regression **31/31**,
+including the dedicated cancellation test, 20 single-peer lifecycles and three
+four-peer restart/failure-cleanup/rejoin scenarios. Reports with executable
+hashes and watchdog outcomes:
+`build/webrtc/async-negotiation-headless-debug/result.json` and
+`build/webrtc/async-negotiation-headless-release/result.json`.
+
 ## Automatic peer-failure capture cleanup - 2026-09-15
 
 HostPeerRegistry can now bind to HostMediaSession and its host generation.

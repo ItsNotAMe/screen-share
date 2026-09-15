@@ -26,6 +26,13 @@ WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
 
+- `PeerNegotiation` is built as the same library in the application and proof.
+  Real offer/answer/restart paths now use its asynchronous operations. A dedicated
+  `WebRTCProof --negotiation-only` scenario cancels 25 pending offers, destroys
+  their owners, pumps late callbacks, verifies a fresh negotiation succeeds,
+  and checks busy/stale requests, malformed/oversized SDP and native failures.
+  It runs once in smoke/regression and also before the four-peer scenarios.
+
 - A capture-bound peer registry automatically removes subscriptions on terminal
   failure and explicit removal. Cleanup futures are polled without waiting on
   signaling; queue-pressure/cancellation errors retry on later ticks. A blocked
@@ -70,8 +77,8 @@ Current coverage:
   100 restarts, stale commands, isolated callback failure, startup failure and
   cancellation despite a full command queue. The four-peer proof now uses this
   coordinator for capture and subscriber lifetime. Peer creation/signaling and
-  the application facade remain outside it. Smoke runs nine child processes;
-  regression runs 30. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
+  the application facade remain outside it. Smoke runs ten child processes;
+  regression runs 31. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
 - [COMPARISON.md](COMPARISON.md) defines the matched before/after scorecard.
   These checks establish regression coverage, not superior end-to-end latency.
 

@@ -56,6 +56,7 @@ endfunction()
 include(cmake/WebRTC.cmake)
 if(SCREENSHARE_WEBRTC_ARTIFACT_DIR)
     screenshare_import_webrtc()
+    include(cmake/MediaNegotiation.cmake)
     # The complete WebRTC archive includes its DEPS-pinned Opus implementation.
     # The legacy audio adapter uses it during the build proof; v2 uses the ADM.
     set(SCREENSHARE_OPUS_TARGET ScreenShare::WebRTC)
@@ -237,6 +238,9 @@ target_link_libraries(ScreenShareCore PUBLIC
 )
 if(MSVC)
     target_link_libraries(ScreenShareCore PUBLIC wmcodecdspuuid)
+endif()
+if(TARGET ScreenShareNegotiation)
+    target_link_libraries(ScreenShareCore PRIVATE ScreenShareNegotiation)
 endif()
 
 add_library(ScreenShareAPI STATIC

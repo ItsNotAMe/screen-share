@@ -21,6 +21,8 @@
 
 ## Current State
 
+- PeerNegotiation now implements asynchronous SDP creation/application with typed futures, weak callback cancellation and one in-flight operation, in a shared application/proof library. The old proof description observers are removed; real media/restart tests use the adapter. Application executor and authenticated room delivery remain next; UI/CLI media has not switched. See `refactor/CHECKPOINT-B.md`.
+
 - HostPeerRegistry now optionally binds HostMediaSession for automatic asynchronous failure/removal cleanup. Tick retries queue pressure, snapshots expose pending/error state, and bound Remove is accepted asynchronously (wait for row disappearance before reuse). Full Stop joins capture first; capture must outlive the registry. The four-peer proof covers terminal failure cleanup/rejoin; application executor and room adapter integration remain open.
 
 - HostPeerRegistry/IMediaPeer now own real four-peer proof connections and dispatch queued restart/close actions with generation validation and retained terminal snapshots. Adapter shutdown is idempotent; capture stops before peer release. Application signaling scheduling, room delivery and capture cleanup on peer failure remain open. Admission is in strictly increasing generation order; see `refactor/CHECKPOINT-B.md` for the embedding contract.

@@ -120,6 +120,9 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 ### PeerConnections
 
+- [x] Move asynchronous SDP create/local-apply/remote-apply into a shared application/proof library with typed operation results, cancellation, weak callbacks, single-operation admission and SDP bounds; remove the proof's old description observers.
+- [ ] Connect negotiation futures to the application signaling executor and authenticated room messages. The proof still pumps its local signaling loop while waiting; the backend adapter itself never pumps or waits.
+
 - [x] Implement a portable per-connection deadline/recovery policy with typed failures, stale-event rejection, 500 ms/1 s/2 s backoff and rolling three-per-minute restart budget.
 - [x] Feed real peer ICE state into the policy and exercise a host-requested ICE restart with new credentials, settings preservation and four-peer media continuity.
 - [ ] Wire autonomous restart/close actions through production peer ownership and authenticated room signaling. Validate real network loss/interface changes; an explicit local restart request is not impairment evidence.

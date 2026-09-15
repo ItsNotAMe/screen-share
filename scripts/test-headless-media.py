@@ -26,6 +26,7 @@ def main():
                                "No room service, input injection or network impairment",
                                "Internal timing is not capture-to-display latency"], "runs": []}
     sequence = [(program, []) for program in programs[:-1]]
+    sequence += [(programs[-1], ["--negotiation-only"])]
     sequence += [(programs[-1], [])] * (20 if args.regression else 1)
     sequence += [(programs[-1], ["--multi-viewer"])] * (3 if args.regression else 1)
     try:
