@@ -420,3 +420,13 @@ See HEADLESS-TESTING.md and the latest CHECKPOINT-A.md evidence. Gate A remains 
 - [x] Verify slow source-handoff isolation, per-viewer sender-limit independence, recovery and full connection leave/rejoin while healthy peers continue.
 - [x] Include one four-peer scenario in headless smoke and three in the longer regression, with JSON results and a 60-second process watchdog.
 - [ ] Add production Auto/Manual adaptation mapping, per-viewer receive-audio evidence, decoder/network impairment and actual rate/latency acceptance. The current sender-parameter check is not wire-rate or congestion proof.
+
+### Stream settings core — 2026-09-15
+
+- [x] Implement validated Auto/Manual preferences and Gaming/Quality degradation mapping; calculate default bitrate ceiling and conservative initial rate without a bitrate floor.
+- [x] Apply single-viewer RTP limits and source settings with monotonically increasing revisions; reject invalid/stale updates before mutation.
+- [x] Adapt each source independently through WebRTC VideoAdapter; preserve fixed canvases, native dimensions, aspect ratio and bounded FPS dropping.
+- [x] Test fixed/manual versus adaptive sink requests, upward recovery, letterbox pixels and settings propagation through real PeerConnections.
+- [x] Report and test GPU resize readback fallback and native-frame preservation at matching dimensions.
+- [ ] Wire initial bandwidth settings, aggregate upload allocation, full coordinator/UI settings events, capability failure recovery and remote applied-state reporting.
+- [ ] Verify real congestion-driven adaptation and GPU scaling performance; controlled sink requests alone do not satisfy impairment/latency gates.

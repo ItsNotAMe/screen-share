@@ -769,3 +769,50 @@ prove measured wire-rate compliance or congestion adaptation. Full facade,
 Auto/Manual settings, scripted gaming input, device/network acceptance and other
 Gate A items remain open. Normal application media is still legacy; no
 application target changed in this milestone.
+## Auto/Manual stream settings core — 2026-09-15
+
+Added portable validated `StreamPreferences`, the original Auto bitrate formula
+and conservative initial-rate calculation, and the agreed preset/degradation
+mapping. `ViewerStreamSettings` applies per-sender maximum bitrate/FPS without
+a minimum bitrate, clears competing sender scale settings and queues a validated
+source revision. Invalid/stale requests do not mutate the working revision.
+Initial bandwidth-estimator startup wiring and aggregate upload allocation remain
+pending; the current initial-rate value is calculated, not applied to a peer.
+
+Configured `CaptureVideoSource` now uses the pinned WebRTC VideoAdapter for
+independent sink pixel/FPS restrictions. Fixed output fits/letterboxes, native
+mode preserves input dimensions, and Auto limits do not upscale. It reports
+observed revision, active-image rectangle, dimensions, drops, scales and GPU
+readback fallback count. Matching dimensions preserve native frames. Resizing
+uses CPU scaling for now, with an explicit counter rather than an unreported
+GPU-preserving claim.
+
+The first adaptation test failed because OnOutputFormatRequest resets upstream's
+framerate controller. Reissuing it per frame prevented FPS reduction. The source
+now caches output limits and only calls it on changes. Final validation:
+
+- Debug/Release complete media suites **20/20 each**:
+  `build/webrtc/settings-debug-tests.log`, `settings-release-tests.log`.
+- Debug headless smoke **5/5**, Release regression **26/26 child runs**, including
+  the settings test, 100 capture restarts, 20 one-peer runs and three four-peer
+  runs: `settings-headless-debug/result.json` and
+  `settings-headless-release/result.json` under `build/webrtc/`.
+- Settings evidence: 60 manual frames versus 21 Auto frames under a 10 FPS
+  request, 160x120 fixed canvas containing a 160x90 active image, black bars,
+  upward Auto recovery, native output, unchanged sibling source and rejected
+  invalid/stale revisions. The real four-peer test now uses the production
+  settings applier and verifies no bitrate floor, manual degradation mode and
+  source-observed revision.
+- Debug/Release GPU scale/preserve tests passed under 30-second watchdogs:
+  `settings-gpu-final.log` includes final executable hashes. It checks one
+  readback for resize, correct pixels, then native output with no extra readback
+  at matching dimensions. These final optional GPU assertions were added after
+  the full suites and are covered by this separate run.
+- Debug/Release WGC live PeerConnection/presentation checks passed under
+  45-second watchdogs in `settings-gpu-live.log`, retaining zero sender GPU
+  readbacks on the existing unscaled live path.
+
+This is source/RTP settings integration, not full product cutover. Coordinator
+and UI wiring, requested/applied/error presentation, source capability failures,
+remote applied-state evidence, real network-driven adaptation, GPU scale
+performance and external gaming latency remain. Normal UI/CLI media is legacy.

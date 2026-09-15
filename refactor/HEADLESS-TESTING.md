@@ -53,6 +53,12 @@ Current coverage:
   and acquisition timestamps across handoff/conversion, and declares screen
   content with denoising disabled. The scenario includes a small-frame and
   delayed-timestamp check of that bridge.
+- `StreamSettingsTest` checks the production Auto/Manual mapping, conservative
+  initial-rate calculation, invalid/replayed revisions, fixed letterboxing and
+  independent WebRTC pixel/FPS requests. It verifies downward adaptation and
+  recovery without source upscaling. The four-peer scenario now applies its
+  200 kbps setting through `ViewerStreamSettings`, checks no minimum bitrate was
+  introduced, and waits for the source to observe that settings revision.
 
 Capture-to-callback percentiles use one local monotonic clock and include pixel
 generation. They do not measure encode, network, decode, display or gaming input
@@ -77,6 +83,21 @@ The four-viewer delay acts at the source handoff, not the decoder or network.
 The sender-limit check verifies parameter independence and continued fixed-size
 decoding; it does not prove congestion recovery, actual wire-rate limits or
 Auto/Manual product semantics. Four software encoders require sufficient CPU.
+
+The settings core now implements the source/RTP mapping, but complete product
+semantics still require the coordinator/UI and impairment acceptance. Fixed
+resolution keeps its canvas; manual FPS targets its rate while encoded-frame
+drops remain allowed; manual bitrate is an upper operating limit subject to
+WebRTC congestion control. Auto source requests use WebRTC's `VideoAdapter`.
+No measured-bandwidth controller was added. Accepted sender settings queue the
+source revision; `observedRevision` reports when capture delivery sees it, not
+when a remote display has rendered it.
+
+Resizing a GPU frame currently uses a counted CPU readback/scaling fallback.
+Matching dimensions preserve the native GPU frame. The optional
+`StreamSettingsTest --gpu` check verifies both paths; it requires a D3D11 GPU
+and should run with a process watchdog. GPU scaling performance and end-to-end
+timing remain acceptance work. CPU/synthetic settings checks need no GPU.
 
 Coordinator contract: assign a fresh nonzero session ID, serialize owner calls,
 keep frame callbacks short, reject obsolete IDs downstream, and join before

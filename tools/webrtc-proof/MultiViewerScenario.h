@@ -1,5 +1,6 @@
 #pragma once
 #include "ProofPeer.h"
+#include "media/webrtc/ViewerStreamSettings.h"
 
 namespace proofmedia {
 struct MediaLink {
@@ -115,10 +116,18 @@ void RunMultiViewer() {
 
     // Exercise one sender's supported limit independently, without adding an
     // application congestion controller or changing other sender parameters.
-    auto parameters = links[3]->sender->GetParameters();
-    Require(parameters.encodings.size() == 1, "Unexpected encoding topology");
-    parameters.encodings[0].max_bitrate_bps = 200000;
-    Require(links[3]->sender->SetParameters(parameters).ok(), "Per-viewer bitrate limit rejected");
+    ViewerStreamSettings settings;
+    StreamPreferences preferences;
+    preferences.resolution = ResolutionMode::Fixed;
+    preferences.width = 640; preferences.height = 360; preferences.fps = 30;
+    preferences.bitrateMode = SettingMode::Manual; preferences.bitrateLimitBps = 200000;
+    Require(settings.Apply(*links[3]->sender, *links[3]->source, preferences, 1) == SettingsApplyError::None,
+            "Per-viewer settings rejected");
+    auto invalidPreferences = preferences; invalidPreferences.fps = 0;
+    Require(settings.Apply(*links[3]->sender, *links[3]->source, invalidPreferences, 2) == SettingsApplyError::Invalid && settings.revision() == 1,
+            "Invalid settings replaced the applied revision");
+    Require(settings.Apply(*links[3]->sender, *links[3]->source, preferences, 1) == SettingsApplyError::StaleRevision,
+            "Stale viewer settings were accepted");
     slow = false;
     const auto recoveredTarget = slowFrames + 30;
     Wait([&] { return links[3]->viewer.decodedFrames >= recoveredTarget && healthy(90); }, "Slow viewer did not recover");
@@ -127,6 +136,10 @@ void RunMultiViewer() {
                 "One viewer's bitrate setting leaked to another");
     Require(links[3]->sender->GetParameters().encodings[0].max_bitrate_bps == 200000,
             "Per-viewer bitrate setting was lost");
+    Require(!links[3]->sender->GetParameters().encodings[0].min_bitrate_bps &&
+            links[3]->sender->GetParameters().degradation_preference == webrtc::DegradationPreference::MAINTAIN_FRAMERATE_AND_RESOLUTION &&
+            links[3]->source->settingsStats().observedRevision == 1,
+            "Manual settings imposed a bitrate floor, enabled adaptation or failed to reach the source");
     const auto replaced = distribution.stats(4).replaced;
     Require(links[3]->viewer.invalidFrames == 0, "Limited viewer changed dimensions or produced invalid pixels");
 

@@ -729,3 +729,25 @@ command and one longer regression command with prerequisites and artifact paths.
 Implementation resumed on 2026-09-15. The first shared capture-session and
 headless media runner are implemented; see HEADLESS-TESTING.md for commands,
 coverage and remaining production-facade/input/network integration.
+
+## Stream-settings implementation note — 2026-09-15
+
+The production settings core maps Auto/Manual preferences to WebRTC RTP limits
+and per-viewer VideoAdapter requests. Fixed canvases fit/letterbox instead of
+cropping; native mode follows input; Auto does not upscale. The implementation
+accepts even dimensions up to 3840x2160, FPS 1–240 and explicit bitrate limits
+1,000–100,000,000 bps. Auto calculation retains the original 2–40 Mbps clamp.
+These are validation bounds, not claims that every machine supports every mode.
+
+Call ViewerStreamSettings on the serialized coordinator, one owner per viewer
+generation. Success means RTP parameters accepted and source revision queued;
+source observedRevision is not remote presentation acknowledgement. Keep the
+initial bitrate calculation for peer startup wiring; do not reset bandwidth
+estimation on every settings change. Aggregate upload allocation, startup wiring,
+full UI/settings transactions and actual congestion acceptance remain pending.
+
+Only call VideoAdapter::OnOutputFormatRequest when source limits change: the
+pinned implementation resets its framerate controller on that call. Calling it
+per frame prevents FPS reduction; the headless regression now catches this.
+GPU resizing currently uses a counted CPU fallback. Matching dimensions retain
+native frames. Preserve this diagnostic until a GPU scaler is validated.
