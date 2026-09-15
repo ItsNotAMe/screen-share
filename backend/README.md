@@ -18,3 +18,8 @@ this directory split does not claim those architectural migrations are complete.
 WebRTC native headers stay in `media/webrtc/`. Public commands must enqueue work
 and publish results without blocking the UI. Capture, signaling and room sockets
 retain their explicit thread/lifetime ownership. See `../refactor/PLAN.md`.
+
+`room/qt/RoomNetwork` owns the dedicated room-network event loop, admission and
+bounded socket command/event queues. `media/RoomPeerRoster` maps authenticated
+snapshot generations/revisions to peer lifecycle hooks. These are used by the
+real-room headless scenario; normal UI/CLI facade adoption remains in progress.

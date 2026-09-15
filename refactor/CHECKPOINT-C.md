@@ -1,5 +1,11 @@
 # Checkpoint C evidence
 
+Native RoomNetwork now owns admission and multiple room sockets on a dedicated
+Qt loop, with bounded command/event mailboxes and asynchronous cancellation.
+RoomPeerRoster consumes authenticated snapshots in the real four-viewer media
+scenario; socket loss/reconnect and kick/rejoin retire/rebuild media peers.
+See CHECKPOINT-B.md for contracts and remaining normal-facade integration work.
+
 ## Compiled native clients against workerd — 2026-09-15
 
 RoomServiceTests now exercises the production Qt RoomAdmission and RoomSocket

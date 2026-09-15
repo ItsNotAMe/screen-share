@@ -42,6 +42,12 @@ target_link_libraries(MfWebRTCCodecs PUBLIC ScreenShare::WebRTC
     d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging)
 target_link_libraries(WebRTCProof PRIVATE MfWebRTCCodecs ScreenShareNegotiation)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/RoomTransport.cmake")
+add_executable(RoomNetworkTest RoomNetworkTest.cpp)
+target_link_libraries(RoomNetworkTest PRIVATE ScreenShareRoom)
+add_custom_command(TARGET RoomNetworkTest POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>" "$<TARGET_FILE_DIR:RoomNetworkTest>" VERBATIM)
+add_test(NAME room-network-ownership COMMAND RoomNetworkTest)
+set_tests_properties(room-network-ownership PROPERTIES TIMEOUT 30)
 add_executable(RoomMediaProof RoomMediaProof.cpp)
 target_link_libraries(RoomMediaProof PRIVATE MfWebRTCCodecs ScreenShareNegotiation ScreenShareRoom)
 add_custom_command(TARGET RoomMediaProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different

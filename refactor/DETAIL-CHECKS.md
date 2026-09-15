@@ -15,9 +15,16 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Complete the grouped room-backed session milestone and shared UI/CLI facade integration.** Authenticated four-viewer media now uses RoomPeerNegotiation with automatic signaling-thread completion/deadline scheduling. Backend and frontend sources are split into root-level folders. Automatic roster ownership, transport-failure recovery and the normal application facade remain open; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
+Current next action: **Complete the grouped room-backed session milestone and shared UI/CLI facade integration.** Authenticated four-viewer media now uses RoomPeerNegotiation, the owned RoomNetwork loop and RoomPeerRoster membership reconciliation. Backend and frontend sources are split into root-level folders. Automatic cross-executor facade dispatch, asynchronous capture-cleanup barriers, recovery budgets and public session events remain open; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
+
+- [x] Owned room networking with bounded cross-thread queues, cancellation and
+  no caller Qt event pump; validated by RoomNetworkTest and real four-viewer media.
+- [x] Shared roster reconciliation drives peer creation/removal in the real-room
+  proof, including socket loss/reconnect, kick/rejoin and room closure.
+- [ ] Integrate those owners into automatic normal-facade dispatch with asynchronous
+  capture cleanup, media recovery budgets and public operation/status events.
 
 - [ ] On continuation, implement headless live-session scenario tooling alongside production integration: one-command smoke/regression runs, paced media, scripted test-owned control events, network constraints, machine-readable metrics and watchdog cleanup. See PLAN.md's headless testing requirement. Distinguish fully headless coverage from unattended WGC tests requiring a desktop/GPU.
 

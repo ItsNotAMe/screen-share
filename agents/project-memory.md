@@ -2,6 +2,13 @@
 
 ## Current integration evidence — 2026-09-16
 
+RoomNetwork now owns one Qt network loop for admission/room sockets, asynchronous
+commands/cancellation, bounded queues and terminal overflow. RoomPeerRoster drives
+actual media lifecycle from authenticated snapshots in RoomMediaProof, including
+socket reconnect and kick/rejoin. No caller Qt event pump is needed. The diagnostic
+still waits on command/capture futures; shared automatic facade dispatch, cleanup
+barriers and recovery-policy integration remain open. See CHECKPOINT-B.
+
 RoomMediaProof now runs four actual H.264 peers and synthetic Opus against isolated
 workerd via native admission/sockets and shared RoomPeerNegotiation. Slow-viewer
 isolation, twelve encrypted channels, fresh-ID restart, stale candidate rejection,

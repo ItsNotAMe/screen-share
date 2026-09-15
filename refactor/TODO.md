@@ -40,6 +40,14 @@ thread, with cancellation-safe delayed callbacks and no recurring idle timer.
 facade, including roster-driven peer ownership and transport-failure recovery.
 The diagnostic still owns orchestration; normal UI/CLI sessions remain legacy.
 
+RoomNetwork now owns one dedicated Qt networking loop for admission and all room
+sockets, with bounded commands/events and asynchronous cancellation. RoomPeerRoster
+reconciles authenticated snapshot generations/revisions into peer lifecycle hooks.
+The real-media proof uses both for creation, socket-loss retirement, reconnect,
+kick/rejoin and close; it no longer pumps Qt events or manually attaches each peer.
+Remaining facade work includes automatic cross-executor dispatch, asynchronous
+capture-cleanup barriers, recovery budget integration and public session events.
+
 - [ ] Complete the integrated media-session deliverable and headless scenarios.
 
 ## 2. Complete user experience (B + D)

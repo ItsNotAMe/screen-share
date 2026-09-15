@@ -1,6 +1,7 @@
 if(NOT TARGET ScreenShareRoom)
     find_package(Qt6 REQUIRED COMPONENTS Core Network WebSockets)
     add_library(ScreenShareRoom STATIC
+        "${CMAKE_CURRENT_LIST_DIR}/../backend/room/qt/RoomNetwork.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/room/protocol/RoomProtocol.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/room/protocol/StateSubscription.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/room/qt/RoomSocket.cpp"

@@ -1,5 +1,44 @@
 # Checkpoint B evidence
 
+## Owned room networking and roster integration — 2026-09-16
+
+RoomNetwork owns a dedicated Qt event loop shared by admission and up to 64 room
+sockets. Commands return futures; no caller Qt event pump is required. Normal
+commands are bounded to 128 / 512 KiB; events to 256 / 512 KiB. Event overflow
+retires all sockets and cancels admission, exposing a terminal backpressure marker
+instead of silently dropping SDP/ICE. Stop requests coalesce outside normal queue
+capacity; StopAll cancels admission and closes sockets asynchronously. Destructor
+cancellation resolves pending admission before joining the thread. Socket handles
+increase across attempts/rejoins, preventing old queued events from being applied
+to replacement sockets. A terminal overflow owner must be replaced, not restarted.
+
+RoomPeerRoster consumes complete authenticated snapshots on the control/signaling
+executor. It validates the full peer set before mutation, ignores old revisions/
+generations, isolates failed additions without retrying on unrelated revisions,
+and retires peers on membership removal or transport loss. A lost transport
+generation cannot revive peers; a newer authoritative snapshot is required.
+Lifecycle hooks retain responsibility for native ownership and cleanup barriers.
+
+The real workerd media scenario uses these shared components: room sockets run
+off the main thread; host roster changes attach/retire native media, kick/rejoin
+is automatic, and room closure removes subscriptions/peers. Socket disconnect
+and reconnect exercise replacement incarnations with fresh signaling IDs.
+RoomNetworkTest covers admission cancellation through StopAll and destruction,
+20 owner lifecycles, coalesced stops, oversized commands, event overflow, and
+roster stale-state/failed-peer behavior without pumping a caller event loop.
+
+This does not complete the normal UI/CLI facade. The diagnostic still waits on
+command futures and capture teardown; production facade commands must instead
+observe completion asynchronously and preserve cleanup/generation barriers.
+Latency, resource, remote-network and service-cost gates remain open.
+
+Validation: full Debug/Release media suites passed 29/29; Release application
+13/13 and CLI-only 8/8. Final affected tests are `room-network-ownership` and
+`room-backed-four-peer-media`; logs live under build/webrtc/network-verified-*.log.
+The latter records `owned_network_loop`, `roster_driven_peers` and
+`socket_reconnect` alongside existing media/recovery metrics. Test-owned waits
+remain distinct from a production asynchronous coordinator.
+
 ## Source ownership and autonomous negotiation — 2026-09-16
 
 Native sources now live in backend/ and frontend/; CMake and proof consumers use

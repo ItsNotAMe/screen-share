@@ -1,6 +1,7 @@
 #include "MultiViewerScenario.h"
 #include "media/webrtc/RoomPeerNegotiation.h"
-#include "room/qt/RoomAdmission.h"
+#include "media/RoomPeerRoster.h"
+#include "room/qt/RoomNetwork.h"
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -9,8 +10,19 @@
 using namespace screenshare::media;
 using screenshare::room::qt::RoomSocket;
 using screenshare::room::qt::RoomAdmission;
+using screenshare::room::qt::RoomNetwork;
 using namespace proofmedia;
 namespace {
+// Diagnostic waits only. Production coordinators observe these futures without
+// blocking; all sockets/admission and their Qt events run in RoomNetwork.
+struct ProofRoomSocket {
+    RoomNetwork& network;
+    uint64_t& next;
+    uint64_t id = 0;
+    bool Start(RoomSocket::Config config) { Stop(); id = ++next; return network.Open(id, std::move(config)).get(); }
+    RoomSocket::SendResult Send(QByteArray command) { return network.Send(id, std::move(command)).get(); }
+    void Stop() { if (id) { network.Stop(id).get(); id = 0; } }
+};
 struct Packet { size_t viewer; bool fromHost; RoomPeerSignal message; };
 struct Context {
     std::unique_ptr<webrtc::Thread> network = webrtc::Thread::CreateWithSocketServer(), worker = webrtc::Thread::Create();
@@ -22,8 +34,12 @@ struct Context {
     std::unique_ptr<MediaLink> unansweredLink;
     std::unique_ptr<RoomPeerNegotiation> unansweredPeer;
     HostMediaSession capture;
+    std::unique_ptr<RoomPeerRoster> membership;
+    std::map<std::string, size_t> peerSlots;
+    std::array<unsigned, 4> incarnations{};
     uint64_t captureGeneration = 0;
     void Close() {
+        membership.reset();
         if (captureGeneration) { capture.Stop(captureGeneration).get(); captureGeneration = 0; }
         for (auto& p : hosts) p.reset();
         for (auto& p : viewers) p.reset();
@@ -56,6 +72,8 @@ RoomPeerSignal Decode(const QJsonObject& event) {
     return signal;
 }
 void Run(const QUrl& origin) {
+    RoomNetwork roomNetwork(true);
+    uint64_t nextSocket = 0;
     SignalingExecutor executor;
     std::unique_ptr<Context> context;
     std::mutex mutex;
@@ -69,7 +87,7 @@ void Run(const QUrl& origin) {
     };
     std::array<RoomSocket::Config, 4> configs;
     RoomSocket::Config hostConfig;
-    std::array<std::unique_ptr<RoomSocket>, 4> sockets;
+    std::array<std::unique_ptr<ProofRoomSocket>, 4> sockets;
     std::array<bool, 4> ready{};
     std::array<bool, 4> closed{};
     bool roomClosed = false;
@@ -77,10 +95,15 @@ void Run(const QUrl& origin) {
     std::function<void(size_t, std::string)> attachMedia;
     bool hostReady = false, transportFailed = false;
     QJsonObject roster;
+    uint64_t rosterGeneration = 0, rosterRevision = 0, rosterLostGeneration = 0;
+    bool rosterDirty = false, rosterLost = false;
     auto receive = [&](const RoomSocket::Event& event, bool toHost, size_t index) {
         if (event.kind == RoomSocket::EventKind::Error || event.kind == RoomSocket::EventKind::Reconnecting) transportFailed = true;
+        if (toHost && (event.kind == RoomSocket::EventKind::Error || event.kind == RoomSocket::EventKind::Reconnecting || event.kind == RoomSocket::EventKind::Closed)) {
+            rosterLost = true; rosterLostGeneration = event.generation;
+        }
         if (event.kind == RoomSocket::EventKind::Snapshot) {
-            if (toHost) { hostReady = true; roster = event.value; } else ready[index] = true;
+            if (toHost) { hostReady = true; roster = event.value; rosterGeneration = event.generation; Require(event.revision.has_value(), "Missing roster revision"); rosterRevision = *event.revision; rosterDirty = true; } else ready[index] = true;
         }
         if (event.kind == RoomSocket::EventKind::Closed) { if (toHost) roomClosed = true; else closed[index] = true; }
         if (event.kind != RoomSocket::EventKind::Signal) return;
@@ -91,11 +114,25 @@ void Run(const QUrl& origin) {
         if (index >= configs.size() || incoming.size() >= 256) { transportFailed = true; return; }
         incoming.push_back({index, !toHost, Decode(event.value)});
     };
-    RoomSocket host([&](const auto& event) { receive(event, true, 0); }, true);
+    ProofRoomSocket host{roomNetwork, nextSocket};
     auto pump = [&] {
-        QCoreApplication::processEvents();
-        Require(!transportFailed, "Room transport failed");
+        for (const auto& event : roomNetwork.Drain()) {
+            Require(event.socket != 0, "Room networking event queue overflowed");
+            if (event.socket == host.id) receive(event.value, true, 0);
+            else for (size_t i = 0; i < sockets.size(); ++i)
+                if (sockets[i] && sockets[i]->id == event.socket) receive(event.value, false, i);
+        }
         if (context) execute([&] {
+            if (context->membership && rosterLost) {
+                context->membership->TransportLost(rosterLostGeneration); rosterLost = false;
+            }
+            if (context->membership && rosterDirty) {
+                std::vector<std::string> peers;
+                for (const auto& member : roster["members"].toArray())
+                    if (member.toObject()["role"] == "viewer" && member.toObject()["status"] == "connected") peers.push_back(member.toObject()["peerId"].toString().toStdString());
+                Require(context->membership->Apply(rosterGeneration, rosterRevision, std::move(peers)) != RoomPeerRoster::Result::Invalid && context->membership->failedCount() == 0, "Roster media reconciliation failed");
+                rosterDirty = false;
+            }
             for (auto& packet : incoming) {
                 auto& target = packet.fromHost ? context->viewers[packet.viewer] : context->hosts[packet.viewer];
                 if (target) Require(target->Receive(std::move(packet.message)), "Authenticated negotiation message rejected");
@@ -103,6 +140,7 @@ void Run(const QUrl& origin) {
             incoming.clear();
             for (size_t i = 0; i < 4; ++i) if (context->hosts[i]) Require(!context->hosts[i]->closed() && !context->viewers[i]->closed(), "Asynchronous negotiation failed");
         });
+        Require(!transportFailed, "Room transport failed");
         std::deque<Packet> packets;
         { std::lock_guard lock(mutex); packets.swap(outgoing); queuedBytes = 0; }
         for (const auto& packet : packets) {
@@ -115,9 +153,8 @@ void Run(const QUrl& origin) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
         while (!predicate()) { Require(std::chrono::steady_clock::now() < deadline, failure); pump(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
     };
-    RoomAdmission admission(true);
     auto admit = [&](RoomAdmission::Request request) {
-        auto future = admission.Start(std::move(request));
+        auto future = roomNetwork.Admit(std::move(request));
         wait([&] { return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }, "Room admission timed out");
         auto result = future.get(); Require(result.error == RoomAdmission::Error::None && result.membership.has_value(), "Room admission failed"); return *result.membership;
     };
@@ -128,7 +165,7 @@ void Run(const QUrl& origin) {
         for (size_t i = 0; i < 4; ++i) {
             RoomAdmission::Request join; join.origin = origin; join.roomId = hostConfig.roomId; join.nickname = "Viewer" + QString::number(i);
             configs[i] = admit(join);
-            sockets[i] = std::make_unique<RoomSocket>([&, i](const auto& e) { receive(e, false, i); }, true);
+            sockets[i] = std::make_unique<ProofRoomSocket>(roomNetwork, nextSocket);
             Require(sockets[i]->Start(configs[i]), "Viewer socket failed");
         }
         wait([&] { return std::all_of(ready.begin(), ready.end(), [](bool v) { return v; }) && roster["members"].toArray().size() == 5; }, "Room membership timed out");
@@ -166,9 +203,22 @@ void Run(const QUrl& origin) {
                 }).get().error == HostOperationError::None, "Capture subscription failed");
                 Require(context->hosts[i]->Offer(std::move(id)), "Offer startup failed");
             };
-            for (size_t i = 0; i < 4; ++i) attachMedia(i, "room_media_" + std::to_string(i) + "_initial");
+            context->membership = std::make_unique<RoomPeerRoster>([&](const std::string& peer) {
+                for (size_t i = 0; i < configs.size(); ++i) if (configs[i].selfPeerId.toStdString() == peer) {
+                    attachMedia(i, "room_media_" + std::to_string(i) + "_" + std::to_string(++context->incarnations[i]));
+                    context->peerSlots.emplace(peer, i); return true;
+                }
+                return false;
+            }, [state = context.get()](const std::string& peer) {
+                const auto slot = state->peerSlots.find(peer);
+                if (slot == state->peerSlots.end()) return;
+                const auto i = slot->second;
+                state->capture.RemoveViewer(state->captureGeneration, i + 1, state->links[i]->host.lifecycle.generation()).get();
+                state->hosts[i].reset(); state->viewers[i].reset(); state->links[i].reset(); state->peerSlots.erase(slot);
+            });
+            rosterDirty = true;
         });
-        auto frames = [&] { for (auto& link : context->links) if (link->viewer.decodedFrames < 60) return false; return context->audioEvidence->audibleBlocks >= 30; };
+        auto frames = [&] { for (auto& link : context->links) if (!link || link->viewer.decodedFrames < 60) return false; return context->audioEvidence->audibleBlocks >= 30; };
         wait(frames, "Authenticated four-viewer media timed out");
         Require(context->links[0]->viewer.decodedFrames > context->links[3]->viewer.decodedFrames * 2, "Slow viewer throttled healthy media");
         slow = false;
@@ -179,28 +229,33 @@ void Run(const QUrl& origin) {
         }); return channelsReady; }, "Encrypted data channels did not open");
         execute([&] { for (auto& link : context->links) for (auto& channel : link->host.channels) Require(channel->channel->Send(webrtc::DataBuffer("screenshare-proof:" + channel->channel->label())), "Encrypted data send failed"); });
         wait([&] { bool received = true; execute([&] { for (auto& link : context->links) for (auto& channel : link->viewer.channels) received &= channel->received; }); return received; }, "Encrypted data delivery timed out");
+        // Lose one room socket while the other viewers remain connected. The
+        // authoritative reconnecting roster must retire its media incarnation.
+        sockets[3]->Stop();
+        wait([&] { return !context->links[3]; }, "Socket loss did not retire its media peer");
+        ready[3] = false;
+        Require(sockets[3]->Start(configs[3]), "Socket reconnect failed");
+        wait([&] { return ready[3] && context->links[3] && context->links[3]->viewer.decodedFrames >= 30; }, "Socket reconnect did not rebuild media");
         unsigned before = context->links[3]->viewer.decodedFrames, healthyBefore = context->links[0]->viewer.decodedFrames;
         execute([&] { Require(context->hosts[3]->Offer("room_media_3_restart", true), "Restart rejected"); });
         wait([&] { return context->links[3]->viewer.decodedFrames >= before + 30 && context->links[0]->viewer.decodedFrames >= healthyBefore + 30; }, "Media did not continue through restart");
         bool restartReady = false;
         wait([&] { execute([&] { restartReady = context->hosts[3]->ready() && context->viewers[3]->ready() && context->viewers[3]->connectionId() == "room_media_3_restart"; }); return restartReady; }, "Restart negotiation incomplete");
         execute([&] {
-            Require(context->viewers[3]->Receive({RoomPeerSignal::Kind::Candidate, "room_media_3_initial", {}, {"retired-invalid-candidate", "0", 0}}), "Retired candidate did not drop safely");
+            Require(context->viewers[3]->Receive({RoomPeerSignal::Kind::Candidate, "room_media_3_1", {}, {"retired-invalid-candidate", "0", 0}}), "Retired candidate did not drop safely");
             Require(context->viewers[3]->ready() && !context->hosts[3]->Offer("room_media_3_restart", true), "Retired/reused generation changed active negotiation");
         });
         Require(host.Send(QJsonDocument(QJsonObject{{"v", 2}, {"type", "peer.disconnect"}, {"roomId", hostConfig.roomId}, {"requestId", "media-kick"}, {"payload", QJsonObject{{"peerId", configs[3].selfPeerId}}}}).toJson(QJsonDocument::Compact)) == RoomSocket::SendResult::Sent, "Kick failed");
         wait([&] { return closed[3] && roster["members"].toArray().size() == 4; }, "Kick not observed");
         execute([&] {
-            Require(context->capture.RemoveViewer(context->captureGeneration, 4, context->links[3]->host.lifecycle.generation()).get().error == HostOperationError::None, "Capture removal failed");
-            context->hosts[3].reset(); context->viewers[3].reset(); context->links[3].reset();
+            Require(!context->links[3] && context->membership->activeCount() == 3, "Roster did not remove kicked media");
         });
         RoomAdmission::Request rejoin; rejoin.origin = origin; rejoin.roomId = hostConfig.roomId; rejoin.nickname = "RejoinedViewer";
         configs[3] = admit(rejoin); ready[3] = false; closed[3] = false;
         Require(sockets[3]->Start(configs[3]), "Rejoin socket failed");
         wait([&] { return ready[3] && roster["members"].toArray().size() == 5; }, "Rejoin membership failed");
         healthyBefore = context->links[0]->viewer.decodedFrames;
-        execute([&] { attachMedia(3, "room_media_3_rejoined"); });
-        wait([&] { return context->links[3]->viewer.decodedFrames >= 30 && context->links[0]->viewer.decodedFrames >= healthyBefore + 30; }, "Rejoined media failed");
+        wait([&] { return context->links[3] && context->links[3]->viewer.decodedFrames >= 30 && context->links[0]->viewer.decodedFrames >= healthyBefore + 30; }, "Rejoined media failed");
         unsigned total = 0;
         for (auto& link : context->links) { total += link->viewer.decodedFrames; Require(link->viewer.invalidFrames == 0, "Decoded media invalid"); }
         const auto audioBlocks = context->audioEvidence->audibleBlocks.load();
@@ -227,12 +282,13 @@ void Run(const QUrl& origin) {
         Require(context->links[0]->viewer.decodedFrames > healthyBefore + 30, "Unanswered peer blocked healthy media");
         Require(host.Send(QJsonDocument(QJsonObject{{"v", 2}, {"type", "peer.leave"}, {"roomId", hostConfig.roomId}, {"requestId", "media-close"}, {"payload", QJsonObject{}}}).toJson(QJsonDocument::Compact)) == RoomSocket::SendResult::Sent, "Room close failed");
         wait([&] { return roomClosed && std::all_of(closed.begin(), closed.end(), [](bool v) { return v; }); }, "Room closure failed");
+        execute([&] { Require(context->membership->activeCount() == 0 && context->peerSlots.empty(), "Room close retained media peers"); });
         for (auto& socket : sockets) socket->Stop(); host.Stop();
         execute([&] { context.reset(); }); executor.Stop();
         Require(candidatesSent > 0, "Room signaling did not exercise trickle ICE");
         std::cout << "{\"passed\":true,\"room_backed_media\":true,\"viewers\":4,\"decoded_frames\":" << total << ",\"opus_audible_blocks\":" << audioBlocks
                   << ",\"ice_candidates_sent\":" << candidatesSent << ",\"peak_signaling_queue_bytes\":" << peakQueuedBytes << ",\"peak_signaling_queue_messages\":" << peakQueuedMessages
-                  << ",\"ice_restart\":true,\"kick_rejoin\":true,\"automatic_timeout\":true,\"cancel_before_tick\":true,\"data_channels\":12}\n";
+                  << ",\"owned_network_loop\":true,\"roster_driven_peers\":true,\"socket_reconnect\":true,\"ice_restart\":true,\"kick_rejoin\":true,\"automatic_timeout\":true,\"cancel_before_tick\":true,\"data_channels\":12}\n";
     } catch (...) {
         for (auto& socket : sockets) if (socket) socket->Stop(); host.Stop();
         execute([&] { context.reset(); }); executor.Stop(); throw;

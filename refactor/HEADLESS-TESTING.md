@@ -259,6 +259,14 @@ through a test-only entry point and exercises the production alarm handler; actu
 hibernation/alarm timing and native-client/media integration remain separate work.
 # Authenticated four-viewer media (2026-09-16)
 
+RoomNetwork now owns the Qt networking loop; the scenario never calls
+QCoreApplication::processEvents. RoomPeerRoster drives peer creation/removal from
+authenticated host snapshots, including socket disconnect/reconnect, kick/rejoin
+and room-close cleanup. `room-network-ownership` separately tests bounded queues,
+overflow, coalesced stops, cancellation and stale roster isolation headlessly.
+The outer diagnostic still waits on command futures; it is not the normal UI/CLI
+session coordinator. Commands for running the scenario remain unchanged.
+
 The backend now schedules negotiation itself; the diagnostic does not poll native
 negotiation futures. Additional coverage cancels before the first scheduled tick
 and lets an unanswered peer hit its automatic 20-second deadline while healthy
