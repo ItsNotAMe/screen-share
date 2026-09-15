@@ -165,43 +165,66 @@ void WaitForPeer(Peer& peer, Predicate predicate, const char* failure) {
     }, failure);
 }
 
+class DescriptionTransfer final {
+public:
+    DescriptionTransfer(Peer& from, Peer& to, bool offer, bool restart = false)
+        : from_(from), to_(to), offer_(offer), restart_(restart) {
+        using namespace screenshare::media;
+        static uint64_t nextGeneration = 0; // Proof signaling executor only.
+        generation_ = ++nextGeneration;
+        if (from.outgoingIce) from.outgoingIce->Close();
+        handoff_ = std::make_shared<IceCandidateHandoff>(generation_,
+            [connection = to.connection](const IceCandidateMessage& message) {
+                std::unique_ptr<webrtc::IceCandidate> candidate(
+                    webrtc::CreateIceCandidate(message.mid, message.line, message.candidate, nullptr));
+                return candidate && connection->AddIceCandidate(candidate.get());
+            });
+        from.outgoingIce = to.incomingIce = handoff_;
+        from.iceGeneration = generation_;
+        pending_ = from.Negotiation().CreateLocal(from.lifecycle.generation(), offer, offer && restart);
+    }
+    // Advance only ready operations. The owner can call this from its timer
+    // without nesting a message loop or waiting for native SDP callbacks.
+    bool Poll() {
+        using namespace screenshare::media;
+        if (stage_ < 2 && pending_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return false;
+        if (stage_ == 0) {
+            auto result = pending_.get();
+            Require(result.error == NegotiationError::None, "Local negotiation failed");
+            // Serialization precedes gathering; connectivity depends on trickled ICE.
+            Require(result.sdp.find("a=candidate:") == std::string::npos, "Unexpected bundled ICE");
+            const auto start = result.sdp.find("a=ice-ufrag:");
+            Require(start != std::string::npos, "Missing ICE credentials");
+            const auto end = result.sdp.find("\r\n", start);
+            const auto username = result.sdp.substr(start + 12, end - start - 12);
+            if (restart_) Require(username != from_.localIceUsername, "ICE restart reused credentials");
+            from_.localIceUsername = username;
+            Require(handoff_->LocalDescriptionReady(generation_) == IceHandoffError::None, "Local ICE handoff failed");
+            pending_ = to_.Negotiation().ApplyRemote(to_.lifecycle.generation(), offer_, std::move(result.sdp));
+            stage_ = 1;
+            return false;
+        }
+        if (stage_ == 1) {
+            Require(pending_.get().error == NegotiationError::None, "Remote negotiation failed");
+            Require(handoff_->RemoteDescriptionReady(generation_) == IceHandoffError::None, "Remote ICE handoff failed");
+            stage_ = 2;
+        }
+        Require(handoff_->error() == IceHandoffError::None, "Trickle ICE rejected");
+        return handoff_->delivered() > 0;
+    }
+private:
+    Peer& from_;
+    Peer& to_;
+    bool offer_, restart_;
+    uint64_t generation_ = 0;
+    int stage_ = 0;
+    std::future<screenshare::media::NegotiationResult> pending_;
+    std::shared_ptr<screenshare::media::IceCandidateHandoff> handoff_;
+};
+
 void TransferDescription(Peer& from, Peer& to, bool offer, bool restart = false) {
-    using namespace screenshare::media;
-    static uint64_t nextGeneration = 0; // Proof signaling executor only.
-    const auto generation = ++nextGeneration;
-    if (from.outgoingIce) from.outgoingIce->Close();
-    auto handoff = std::make_shared<IceCandidateHandoff>(generation,
-        [connection = to.connection](const IceCandidateMessage& message) {
-            std::unique_ptr<webrtc::IceCandidate> candidate(
-                webrtc::CreateIceCandidate(message.mid, message.line, message.candidate, nullptr));
-            return candidate && connection->AddIceCandidate(candidate.get());
-        });
-    from.outgoingIce = to.incomingIce = handoff;
-    from.iceGeneration = generation;
-    auto local = from.Negotiation().CreateLocal(from.lifecycle.generation(), offer, offer && restart);
-    WaitForPeer(from, [&] { return local.wait_for(std::chrono::seconds(0)) == std::future_status::ready; },
-                "Local negotiation timed out");
-    auto localResult = local.get();
-    Require(localResult.error == NegotiationError::None, "Local negotiation failed");
-    const auto& sdp = localResult.sdp;
-    // The backend serializes before gathering but exposes SDP only after local
-    // application succeeds. Connectivity must still depend on trickled ICE.
-    Require(sdp.find("a=candidate:") == std::string::npos, "Unexpected bundled ICE");
-    const auto ufragStart = sdp.find("a=ice-ufrag:");
-    Require(ufragStart != std::string::npos, "Missing ICE credentials");
-    const auto ufragEnd = sdp.find("\r\n", ufragStart);
-    const auto username = sdp.substr(ufragStart + 12, ufragEnd - ufragStart - 12);
-    if (restart) Require(username != from.localIceUsername, "ICE restart reused credentials");
-    from.localIceUsername = username;
-    Require(handoff->LocalDescriptionReady(generation) == IceHandoffError::None, "Local ICE handoff failed");
-    auto remote = to.Negotiation().ApplyRemote(to.lifecycle.generation(), offer, sdp);
-    WaitForPeer(to, [&] { return remote.wait_for(std::chrono::seconds(0)) == std::future_status::ready; },
-                "Remote negotiation timed out");
-    Require(remote.get().error == NegotiationError::None, "Remote negotiation failed");
-    Require(handoff->RemoteDescriptionReady(generation) == IceHandoffError::None, "Remote ICE handoff failed");
-    WaitForPeer(from, [&] { return handoff->error() != IceHandoffError::None || handoff->delivered() > 0; },
-         "Trickle ICE delivery timed out");
-    Require(handoff->error() == IceHandoffError::None, "Trickle ICE rejected");
+    DescriptionTransfer transfer(from, to, offer, restart);
+    WaitForPeer(from, [&] { return transfer.Poll(); }, "Description transfer timed out");
 }
 
 } // namespace proofmedia

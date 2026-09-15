@@ -26,6 +26,13 @@ WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
 
+- `HostPeerOwnerTest` exercises automatic deadlines/restart, failed-completion
+  isolation, capture detachment, healthy media progress, stale requests and 25
+  owner restarts with weak timers still queued. It never pumps WebRTC messages
+  or explicitly ticks the registry. Four real peers now negotiate concurrently
+  through that scheduled owner; restart and rejoin advance ready SDP futures
+  without blocking peer callbacks. Signaling delivery is still in-process.
+
 - The shared `SignalingExecutor` owns the WebRTC event loop for all media
   scenarios. Its headless test covers FIFO execution, native event callbacks,
   task failure, 64-command pressure, cancellation, closure destruction on the

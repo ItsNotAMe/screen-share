@@ -192,8 +192,8 @@ int main(int argc, char** argv) {
         std::exception_ptr failure;
         auto execution = executor.Post([&] {
             try {
-                if (mode == "--multi-viewer") RunMultiViewer();
-                else if (mode == "--negotiation-only") RunMultiViewer(true);
+                if (mode == "--multi-viewer") RunMultiViewer(executor);
+                else if (mode == "--negotiation-only") RunMultiViewer(executor, true);
                 else {
                     Require(mode.empty() || mode == "--hardware" || mode == "--live-capture" || mode == "--wasapi",
                             "Unknown proof mode");

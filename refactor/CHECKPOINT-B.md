@@ -1,5 +1,59 @@
 # Checkpoint B evidence
 
+## Scheduled peer ownership and concurrent negotiation - 2026-09-15
+
+HostPeerOwner now binds the capture-aware registry to SignalingExecutor in the
+shared application/proof library. A single weak delayed callback runs every
+20 ms on signaling, advancing deadlines, restart actions, ready peer operations
+and capture cleanup. No external Tick call is required. This is local lifecycle
+scheduling, not a network poll or a timer on image/input delivery.
+
+IMediaPeer::Poll consumes ready asynchronous work only. False/throw closes the
+affected peer and records operationFailed; other peers keep running. Terminal
+lifecycle failure takes precedence over pending work. Closed rows retain their
+failure/cleanup status until removed. The registry remains the owner of peers.
+
+The real four-viewer scenario now admits connections in generation order before
+waiting for any answers. Its adapter advances local SDP creation, remote apply,
+candidate readiness and answer creation through the owner's completion hook.
+The same path handles restart and replacement. Restart no longer uses a pending
+flag consumed by synchronous test-side SDP exchange, and no peer callback waits
+or pumps messages. DescriptionTransfer is a diagnostic local-delivery adapter;
+authenticated room delivery still needs a production adapter. Outer diagnostic
+waits still pump while observing the scheduled owner.
+
+Embedding requirements:
+
+- Construct, invoke and destroy the owner on its supplied executor. UI/CLI calls
+  must enqueue through the executor. It checks thread affinity at its boundary.
+- Capture and executor outlive the owner. Stop joins capture before closing peers;
+  remove remains asynchronous. Complete owner teardown before executor shutdown.
+- Delayed callbacks hold only weak state and are inert after Stop/destruction.
+  Do not destroy/reenter the owner from a peer's Poll/Close/restart method.
+- A failed lifecycle snapshot can precede scheduled cleanup. peerClosed explicitly
+  distinguishes completed native close from a newly observed failure. Wait for
+  peerClosed with captureCleanupPending false, or removal's row disappearance,
+  before treating cleanup as complete. The first full run caught this assumption
+  in the proof; completion now has an explicit snapshot field.
+- The 20 ms cadence is an initial control scheduling default, not a gaming
+  latency claim. Native/driver hangs still require the process watchdog.
+
+HostPeerOwnerTest uses the actual executor without manual message pumping. It
+checks an expired initial connection, scheduled restart, failed-completion
+isolation, healthy capture progress, stale requests, joined stop, owner-thread
+destruction and 25 recreated owners while weak timers remain queued.
+
+Final evidence: `build/webrtc/owner-verified-sdk-proof-{debug,release}.log`,
+`owner-verified-sdk-app-{debug,release}.log`, and
+`owner-verified-headless-{debug,release}/result.json`. Earlier runs before the
+explicit peerClosed field are retained under `owner-concurrent-*` and
+`owner-headless-*` for comparison.
+Final Debug/Release media suites passed 27/27 each; both application suites
+passed 10/10. Final Debug headless smoke passed 12/12 and Release regression
+passed 33/33, including 20 single-viewer and three concurrent four-viewer runs.
+The normal UI/CLI backend, authenticated room transport, external latency and
+known capture handle-growth acceptance remain open.
+
 ## Owned signaling event loop - 2026-09-15
 
 SignalingExecutor is now part of the shared ScreenShareNegotiation library.

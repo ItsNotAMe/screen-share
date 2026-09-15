@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint B — application peer owner and asynchronous room delivery, then the shared UI/CLI facade.** The shared owned signaling executor now runs real media proofs and supports negotiation without caller message pumping; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
+Current next action: **Checkpoint B — room-backed peer adapter and shared UI/CLI facade integration.** HostPeerOwner now schedules lifecycle/recovery/completion/cleanup on the shared signaling executor; four real peers negotiate concurrently through its nonblocking completion hook. Authenticated room delivery and the normal application facade remain open; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -99,7 +99,7 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 - [x] Add a portable owning peer registry with restart/close dispatch, terminal failure snapshots, bounded membership and generation validation; drive actual four-peer ownership through it.
 - [x] Bind peer failure/removal to asynchronous capture cleanup, retry queue pressure, retain the connection identity until cleanup completes, and join capture before full peer-owner shutdown.
-- [ ] Connect the bound peer owner to the application signaling executor. Real-peer proof integration does not yet replace the UI/CLI facade.
+- [x] Connect the bound peer owner to the shared application signaling executor with automatic deadline/restart, ready-operation and capture-cleanup scheduling. Real-peer proof integration does not yet replace the UI/CLI facade.
 
 - [x] Implement portable host capture/membership coordinator with operation IDs, session generations, bounded command queue, priority cancellation, isolated failed subscribers and joined capture/delivery teardown.
 - [x] Route four-peer headless capture membership through the coordinator; test 100 restarts, stale operations and stop under queue pressure.
@@ -122,7 +122,8 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 - [x] Move asynchronous SDP create/local-apply/remote-apply into a shared application/proof library with typed operation results, cancellation, weak callbacks, single-operation admission and SDP bounds; remove the proof's old description observers.
 - [x] Provide an owned signaling event loop in the shared application/proof library with bounded admission, typed completion/cancellation and joined shutdown; run real media proofs on it and verify SDP negotiation without caller message pumping.
-- [ ] Connect negotiation futures to the application peer owner and authenticated room messages. The diagnostic media scenarios still use nested waits; application commands must initiate async work and return.
+- [x] Consume ready negotiation operations through the scheduled owner's peer interface; exercise concurrent four-peer setup, asynchronous restart and rejoin without nested waits inside peer callbacks.
+- [ ] Implement the room-backed peer adapter and authenticated SDP/ICE delivery. The proof adapter currently delivers in-process; outer diagnostic waits still pump while observing results.
 
 - [x] Implement a portable per-connection deadline/recovery policy with typed failures, stale-event rejection, 500 ms/1 s/2 s backoff and rolling three-per-minute restart budget.
 - [x] Feed real peer ICE state into the policy and exercise a host-requested ICE restart with new credentials, settings preservation and four-peer media continuity.

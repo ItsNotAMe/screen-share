@@ -15,6 +15,9 @@ public:
     virtual ~IMediaPeer() = default;
     virtual PeerConnectionLifecycle& lifecycle() noexcept = 0;
     virtual bool RequestIceRestart(uint64_t revision) = 0;
+    // Consume ready async completions only; never block or reenter the owner.
+    // False/throw isolates a failed completion to this peer.
+    virtual bool Poll() { return true; }
     virtual void Close() noexcept = 0;
 };
 struct ManagedPeerSnapshot {
@@ -22,6 +25,10 @@ struct ManagedPeerSnapshot {
     PeerLifecycleState state = PeerLifecycleState::Connecting;
     PeerLifecycleFailure failure = PeerLifecycleFailure::None;
     bool restartDispatchFailed = false;
+    bool operationFailed = false;
+    // Lifecycle failure can be observed before the next scheduled Tick closes
+    // native peers and starts cleanup. This distinguishes those two phases.
+    bool peerClosed = false;
     bool captureCleanupPending = false;
     HostOperationError captureCleanupError = HostOperationError::None;
 };
@@ -58,6 +65,9 @@ public:
             auto& policy = entry.peer->lifecycle();
             const auto action = policy.Tick(now);
             if (action == PeerLifecycleAction::Close) { CloseEntry(entry); continue; }
+            bool progressed = false;
+            try { progressed = entry.peer->Poll(); } catch (...) {}
+            if (!progressed) { entry.status.operationFailed = true; CloseEntry(entry); continue; }
             if (action == PeerLifecycleAction::RestartIce) {
                 bool accepted = false;
                 try { accepted = entry.peer->RequestIceRestart(policy.restartRevision()); } catch (...) {}
@@ -132,11 +142,12 @@ private:
     void CloseEntry(Entry& entry) {
         if (entry.closed) return;
         entry.status = Read(entry);
-        if (entry.status.restartDispatchFailed) entry.status.state = PeerLifecycleState::Failed;
+        if (entry.status.restartDispatchFailed || entry.status.operationFailed) entry.status.state = PeerLifecycleState::Failed;
         else if (entry.status.state != PeerLifecycleState::Failed) entry.status.state = PeerLifecycleState::Closed;
         entry.closed = true;
         entry.peer->lifecycle().Close();
         entry.peer->Close();
+        entry.status.peerClosed = true;
         entry.status.captureCleanupPending = capture_ && !stopped_;
         PollCleanup(entry);
     }

@@ -21,6 +21,8 @@
 
 ## Current State
 
+- HostPeerOwner now binds HostPeerRegistry to SignalingExecutor and automatically advances deadlines, ready peer operations, restart and capture cleanup every 20 ms on signaling. IMediaPeer::Poll must never wait/reenter; failures are isolated and reported as operationFailed. Four-peer diagnostics now negotiate concurrently, then complete restart/rejoin through this owner instead of manually ticking the registry or synchronously transferring restart SDP. Owner/capture must be destroyed before the executor; delayed callbacks hold weak state. Authenticated room delivery and UI/CLI facade remain open. See `refactor/CHECKPOINT-B.md`.
+
 - SignalingExecutor now owns the native WebRTC event loop in the shared application/proof library. It admits 64 pending commands, reports typed outcomes, cancels queued work on stop and joins externally; accepted closures are destroyed on signaling. Real single/four-peer media proofs use it, and a separate offer/answer test proves progress without manual pumping. The application peer owner, room transport and UI/CLI facade remain next. Close/destroy peers on the executor before stopping; never join it from its own thread. See `refactor/CHECKPOINT-B.md`.
 
 - PeerNegotiation now implements asynchronous SDP creation/application with typed futures, weak callback cancellation and one in-flight operation, in a shared application/proof library. The old proof description observers are removed; real media/restart tests use the adapter. Application executor and authenticated room delivery remain next; UI/CLI media has not switched. See `refactor/CHECKPOINT-B.md`.
