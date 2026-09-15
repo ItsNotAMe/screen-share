@@ -1,5 +1,6 @@
 #pragma once
 #include "ProofPeer.h"
+#include "media/HostMediaSession.h"
 #include "media/webrtc/ViewerStreamSettings.h"
 
 namespace proofmedia {
@@ -94,23 +95,28 @@ void RunMultiViewer() {
     std::array<std::unique_ptr<MediaLink>, 4> links;
     for (auto& link : links) link = ConnectViewer(*factory, audioTrack);
     std::atomic<bool> slow{true};
-    CaptureDistributor distribution(91);
+    HostMediaSession session;
+    auto started = session.Start([] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); }).get();
+    Require(started.error == HostOperationError::None, "Host coordinator failed to start");
+    const auto generation = started.generation;
+    auto deliveryStats = [&](uint64_t viewer) {
+        for (const auto& item : session.snapshot().viewers) if (item.viewer == viewer) return item.delivery;
+        throw std::runtime_error("Missing coordinator viewer");
+    };
     for (size_t i = 0; i < links.size(); ++i) {
-        distribution.Add(i + 1, [source = links[i]->source, &slow, i](auto sample) {
+        auto added = session.AddViewer(generation, i + 1, [source = links[i]->source, &slow, i](auto sample) {
             if (i == 3 && slow) std::this_thread::sleep_for(std::chrono::milliseconds(100));
             source->Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
-        });
+        }).get();
+        Require(added.error == HostOperationError::None, "Host coordinator rejected viewer");
     }
-    CaptureSession capture(91, [] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); },
-                           [&](auto sample) { distribution.Publish(std::move(sample)); });
-    capture.EnableDelivery();
     auto healthy = [&](unsigned target) {
         for (size_t i = 0; i < 3; ++i) if (links[i]->viewer.decodedFrames < target) return false;
         return true;
     };
     Wait([&] { return healthy(60) && links[3]->viewer.decodedFrames >= 10; }, "Healthy viewers stalled beside slow viewer");
     const auto slowFrames = links[3]->viewer.decodedFrames.load();
-    Require(distribution.stats(4).replaced > 10, "Slow viewer did not exercise bounded replacement");
+    Require(deliveryStats(4).replaced > 10, "Slow viewer did not exercise bounded replacement");
     for (size_t i = 0; i < 3; ++i)
         Require(links[i]->viewer.decodedFrames > slowFrames * 2, "Slow source throttled a healthy connection");
 
@@ -140,28 +146,31 @@ void RunMultiViewer() {
             links[3]->sender->GetParameters().degradation_preference == webrtc::DegradationPreference::MAINTAIN_FRAMERATE_AND_RESOLUTION &&
             links[3]->source->settingsStats().observedRevision == 1,
             "Manual settings imposed a bitrate floor, enabled adaptation or failed to reach the source");
-    const auto replaced = distribution.stats(4).replaced;
+    const auto replaced = deliveryStats(4).replaced;
     Require(links[3]->viewer.invalidFrames == 0, "Limited viewer changed dimensions or produced invalid pixels");
 
     // Tear down one complete pair, then attach a fresh connection/source while
     // the other three continue to receive the same capture session.
-    distribution.Remove(4);
+    Require(session.RemoveViewer(generation, 4).get().error == HostOperationError::None, "Coordinator viewer removal failed");
     links[3].reset();
     const auto beforeRejoin = links[0]->viewer.decodedFrames.load();
     links[3] = ConnectViewer(*factory, audioTrack);
-    distribution.Add(4, [source = links[3]->source](auto sample) {
+    auto rejoined = session.AddViewer(generation, 4, [source = links[3]->source](auto sample) {
         source->Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
-    });
+    }).get();
+    Require(rejoined.error == HostOperationError::None, "Coordinator viewer rejoin failed");
     Wait([&] { return links[3]->viewer.decodedFrames >= 30 && links[0]->viewer.decodedFrames >= beforeRejoin + 30; },
          "Viewer rejoin interrupted healthy media");
-    capture.Stop(); distribution.Stop();
-    Require(capture.status().state == CaptureState::Stopped, "Shared capture failed");
+    for (size_t i = 0; i < links.size(); ++i)
+        Require(!deliveryStats(i + 1).failed, "Coordinator delivery failed");
+    Require(session.Stop(generation).get().error == HostOperationError::None && session.snapshot().state == HostMediaState::Stopped,
+            "Coordinator shutdown failed");
     Require(audioEvidence->audibleBlocks >= 30 && audioDiagnostics->captureErrors == 0 && audioDiagnostics->playoutErrors == 0,
             "Multi-viewer shared audio failed");
     std::cout << "{\"passed\":true,\"mode\":\"four-peer-headless\",\"viewers\":4,\"rejoins\":1,"
               << "\"slow_pending_replacements\":" << replaced << ",\"decoded_frames\":[";
     for (size_t i = 0; i < links.size(); ++i) {
-        Require(links[i]->viewer.invalidFrames == 0 && !distribution.stats(i + 1).failed, "Viewer media failed");
+        Require(links[i]->viewer.invalidFrames == 0, "Viewer media failed");
         if (i) std::cout << ',';
         std::cout << links[i]->viewer.decodedFrames.load();
     }

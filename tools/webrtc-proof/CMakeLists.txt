@@ -15,6 +15,7 @@ set(nativeRoot "${CMAKE_CURRENT_LIST_DIR}/../../src")
 set_property(SOURCE "${nativeRoot}/capture/DesktopCapturer.cpp" APPEND PROPERTY COMPILE_OPTIONS
     "$<$<CXX_COMPILER_ID:Clang>:/clang:-mcx16>")
 add_library(MfWebRTCCodecs STATIC
+    "${nativeRoot}/media/HostMediaSession.cpp"
     "${nativeRoot}/media/capture/CaptureSession.cpp"
     "${nativeRoot}/media/capture/CaptureDistributor.cpp"
     "${nativeRoot}/render/Nv12D3D11Presenter.cpp"
@@ -45,6 +46,10 @@ add_executable(StreamSettingsTest StreamSettingsTest.cpp)
 target_link_libraries(StreamSettingsTest PRIVATE MfWebRTCCodecs)
 add_test(NAME stream-settings-and-adaptation COMMAND StreamSettingsTest)
 set_tests_properties(stream-settings-and-adaptation PROPERTIES TIMEOUT 15)
+add_executable(HostMediaSessionTest HostMediaSessionTest.cpp)
+target_link_libraries(HostMediaSessionTest PRIVATE MfWebRTCCodecs)
+add_test(NAME host-media-session-coordinator COMMAND HostMediaSessionTest)
+set_tests_properties(host-media-session-coordinator PROPERTIES TIMEOUT 30)
 add_executable(MfDecoderAdapterTest MfDecoderAdapterTest.cpp)
 target_link_libraries(MfDecoderAdapterTest PRIVATE MfWebRTCCodecs)
 add_test(NAME mf-webrtc-decoder-lifecycle COMMAND MfDecoderAdapterTest)

@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint B — serialized native session coordinator and shared UI/CLI integration.** Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) as a priority resource-lifetime issue before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md).
+Current next action: **Checkpoint B — integrate PeerConnection/signaling ownership with the host coordinator, then the shared UI/CLI facade.** Host capture/membership commands and the four-peer headless path now use the serialized coordinator; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -94,6 +94,10 @@ The original gate is native codec/audio integration and reproducible builds. Ful
 Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 ### Interfaces, ownership and lifecycle
+
+- [x] Implement portable host capture/membership coordinator with operation IDs, session generations, bounded command queue, priority cancellation, isolated failed subscribers and joined capture/delivery teardown.
+- [x] Route four-peer headless capture membership through the coordinator; test 100 restarts, stale operations and stop under queue pressure.
+- [ ] Extend coordinator ownership to peer/signaling generations, settings/events, audio and the production facade. The host capture subset does not complete the broader lifecycle tasks below.
 
 - [ ] Investigate the current-binary closeout resource regressions: full 100-cycle handles 386 → 462; rapid-close 20-cycle handles 329 → 339. Both exceed the bound of 8. Do not remove the existing MTA/dispatcher/module-lifetime mitigations without evidence.
 

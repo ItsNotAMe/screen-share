@@ -4,6 +4,8 @@ Saved: 2026-09-14. Status: Gate A passed for native integration/build proof on 2
 
 Use [TODO.md](TODO.md) to track implementation, validation evidence and deferred work.
 
+Use [COMPARISON.md](COMPARISON.md) for matched before/after measurements and cutover criteria. Passing component tests does not establish better gaming latency or image quality. Checkpoint B evidence is recorded in [CHECKPOINT-B.md](CHECKPOINT-B.md).
+
 ## 1. Objective, decisions and implementation rules
 
 Replace the unstable streaming backend with a modular native WebRTC implementation. Preserve the native C++/Qt application and Cloudflare signaling service.

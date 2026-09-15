@@ -10,7 +10,7 @@ Quick smoke (roughly 15 seconds on the reference machine):
 python scripts/test-headless-media.py build/sdk-proof-release build/webrtc/headless-smoke
 ```
 
-Longer regression (100 capture restarts, 20 one-viewer runs and three four-viewer runs):
+Longer regression (100 capture restarts, 100 coordinator restarts, 20 one-viewer runs and three four-viewer runs):
 
 ```powershell
 python scripts/test-headless-media.py build/sdk-proof-release build/webrtc/headless-regression --regression
@@ -25,6 +25,16 @@ code, elapsed time, timeout status, logs and capture timing percentiles in
 WebRTC transport logging remains disabled to avoid recording signaling secrets.
 
 Current coverage:
+
+- Production `HostMediaSession` serializes capture/membership commands, assigns
+  operation/session IDs and joins workers on stop. Its headless test covers
+  100 restarts, stale commands, isolated callback failure, startup failure and
+  cancellation despite a full command queue. The four-peer proof now uses this
+  coordinator for capture and subscriber lifetime. Peer creation/signaling and
+  the application facade remain outside it. Smoke runs six child processes;
+  regression runs 27. See [CHECKPOINT-B.md](CHECKPOINT-B.md).
+- [COMPARISON.md](COMPARISON.md) defines the matched before/after scorecard.
+  These checks establish regression coverage, not superior end-to-end latency.
 
 - Production `CaptureSession` owns source construction, acquisition, recovery,
   callback delivery and source destruction on one worker. Both synthetic video
