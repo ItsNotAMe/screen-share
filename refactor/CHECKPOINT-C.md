@@ -332,3 +332,10 @@ CLI-only build passed 6/6. Combined Release headless media/room smoke passed
 Next: admission/membership lifecycle, local Cloudflare runtime tests, and mapping
 validated room values into the media owner. These tests do not establish service
 authorization, free-tier headroom, NAT success or gaming latency.
+## Real media integration — 2026-09-16
+
+The native-to-workerd evidence now includes actual four-viewer H.264 and synthetic
+Opus using RoomPeerNegotiation, beyond the earlier synthetic SDP protocol tests.
+It covers encrypted channels, slow-viewer isolation, ICE restart and kick/rejoin.
+See CHECKPOINT-B.md and HEADLESS-TESTING.md. Normal UI/CLI facade adoption and
+production hibernation/cost/network acceptance remain open.

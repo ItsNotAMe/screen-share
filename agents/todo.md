@@ -6,9 +6,13 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
-- [ ] Integrate the shared media facade with native RoomAdmission/RoomSocket. Compiled native clients now exercise actual local workerd end-to-end, including mutation revisions, signaling and room/directory lifecycle; media payloads remain synthetic. Production hibernation, load, queue pressure and latency acceptance remain open.
+Execute the grouped delivery milestones in [refactor/TODO.md](../refactor/TODO.md).
+The checks below are implementation details within those batches, not individual
+turn goals. Preserve all original checks in [DETAIL-CHECKS.md](../refactor/DETAIL-CHECKS.md).
 
-- [ ] Integrate the implemented v2 signaling relay with native media negotiation: fresh wire connection ID for every offer/restart, local description before candidates, and socket generation barriers. Validate outbound pressure, hibernation reconstruction and cost/load; relay-only tests do not establish production media sessions.
+- [ ] Complete the shared scheduled session facade around RoomAdmission/RoomSocket and RoomPeerNegotiation. Real authenticated four-viewer media now passes local workerd with restart, kick/rejoin, slow-viewer isolation and encrypted channels. Normal UI/CLI orchestration, production hibernation, load, queue pressure and latency acceptance remain open.
+
+- [ ] Integrate the implemented authenticated media adapter into automatic roster-driven ownership and socket-failure recovery. Preserve fresh wire IDs, description-before-candidate ordering and generation barriers; validate pressure, hibernation and cost/load beyond the local real-media proof.
 
 - [ ] Finish configurable service caps and browser CORS/preflight support if needed; retain closed-by-default Origin handling and required bindings. Validate hibernation reconstruction and real alarm timing beyond injected expiry tests before deployment/cutover.
 
@@ -17,8 +21,7 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 - [ ] Add easy, one-command headless testing of realistic live sessions through production APIs, without manual mouse/keyboard input. Include paced media, scripted control to a test-owned sink, network/recovery scenarios, metrics and watchdog cleanup; distinguish synthetic headless from desktop/GPU-dependent capture checks. Full requirement: refactor/PLAN.md. Implementation resumed: shared capture ownership, bounded independent viewer delivery, paced synthetic media, four real peer connections with slow-handoff/rejoin coverage and one-command headless smoke/regression now exist (refactor/HEADLESS-TESTING.md); Auto/Manual source/RTP settings and revision validation now exist; complete facade, separate processes, input and network scenarios remain.
 
 - [ ] Embed scheduled HostPeerOwner in the shared UI/CLI facade and supply a room-backed peer adapter. The shared signaling executor now drives deadlines, completion polling, restart and capture cleanup automatically; real four-peer setup/restart/rejoin uses it. Preserve the rolling restart budget and investigate measured restart timing before claiming responsive outage recovery.
-- [ ] Integrate the bounded ICE candidate handoff with authenticated room transport, connection deadlines and restart policy. Real media proofs now use trickled candidates separately from SDP; STUN/NAT and production signaling remain open.
-- [ ] Route successful SDP through authenticated room messages. Scheduled peer completion dispatch now consumes real negotiation futures without waiting; local proof delivery is not authenticated transport. Do not copy outer diagnostic waits into application commands.
+- [ ] Carry the authenticated RoomPeerNegotiation adapter into scheduled production ownership and restart policy. Its bounded candidate handoff, SDP ordering and deadlines now run against workerd with actual media. STUN/NAT remain open. Do not copy outer diagnostic waits into application commands.
 - [ ] Continue Checkpoint B with PeerConnection/signaling ownership and shared UI/CLI facade integration. Portable host capture/membership coordination now passes 100 restarts, stale-operation and queue-pressure cancellation tests and drives the four-peer proof; see refactor/CHECKPOINT-B.md. A is closed against its original integration/build criterion; see refactor/CLOSEOUT-A.md.
 - [ ] Run matched legacy/v2 workloads and external gaming image/input latency measurements as integration becomes available. Record per-requirement verdicts using refactor/COMPARISON.md; current headless passes do not prove the replacement is better.
 - [ ] Investigate current-binary handle-growth failures: +76 over 100 full capture cycles and +10 over 20 rapid-close cycles (bound 8). Cycles complete, resource acceptance fails; resolve before production cutover.

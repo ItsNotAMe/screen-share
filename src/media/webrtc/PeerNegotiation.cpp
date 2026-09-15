@@ -100,6 +100,7 @@ std::future<NegotiationResult> PeerNegotiation::CreateLocal(uint64_t generation,
     if (ticket.accepted) {
         if (!offer && iceRestart) state_->Complete(ticket.operation, NegotiationError::Invalid);
         else {
+            state_->username.clear(); // Retire old ICE callbacks before creating the next local description.
             auto observer = webrtc::make_ref_counted<State::Created>(state_, ticket.operation);
             webrtc::PeerConnectionInterface::RTCOfferAnswerOptions options;
             options.ice_restart = iceRestart;

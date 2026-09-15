@@ -110,6 +110,7 @@ public:
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState) override {}
     void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState) override {}
     void OnIceCandidate(const webrtc::IceCandidate* candidate) override {
+        if (candidateObserver) { candidateObserver(candidate); return; }
         if (!outgoingIce) return;
         // Ignore delayed candidates from credentials retired by an ICE restart.
         if (!negotiation || candidate->candidate().username() != negotiation->localUsername()) return;
@@ -119,6 +120,7 @@ public:
         outgoingIce->Push(iceGeneration, std::move(message));
     }
     bool shutDown = false;
+    std::function<void(const webrtc::IceCandidate*)> candidateObserver;
     uint64_t iceGeneration = 0;
     std::shared_ptr<screenshare::media::IceCandidateHandoff> outgoingIce, incomingIce;
     void OnTrack(webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override {

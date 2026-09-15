@@ -15,7 +15,7 @@ const artifact = join(resolve(process.argv[3]), 'native-service-' + randomUUID()
 await mkdir(artifact, { recursive: true });
 let mf, child, timer;
 const report = { schema: 1, passed: false, timedOut: false, executableSha256: createHash('sha256').update(await readFile(executable)).digest('hex'),
-  limitations: ['Loopback plaintext test adapter; remote TLS is not exercised', 'Signaling payloads are synthetic; no media or physical input', 'No hibernation, load or NAT acceptance'], elapsedMs: 0 };
+  limitations: ['Loopback plaintext test adapter; remote TLS is not exercised', process.argv[4] === 'media' ? 'Synthetic capture/audio; no physical devices or input' : 'Signaling payloads are synthetic; no media or physical input', 'No hibernation, load or NAT acceptance'], elapsedMs: 0 };
 const started = Date.now();
 let log = '';
 try {

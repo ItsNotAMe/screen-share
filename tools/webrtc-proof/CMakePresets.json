@@ -6,6 +6,9 @@
       "hidden": true,
       "generator": "Ninja",
       "cacheVariables": {
+        "Qt6_DIR": "${sourceDir}/../../build/Qt/6.10.3/msvc2022_64/lib/cmake/Qt6",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/../../build/Qt/6.10.3/msvc2022_64",
+        "Qt6CoreTools_DIR": "${sourceDir}/../../build/Qt/6.10.3/msvc2022_64/lib/cmake/Qt6CoreTools",
         "CMAKE_MAKE_PROGRAM": "${sourceDir}/../../build/webrtc/checkout/src/third_party/ninja/ninja.exe",
         "CMAKE_CXX_COMPILER": "${sourceDir}/../../build/webrtc/checkout/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe",
         "CMAKE_LINKER": "${sourceDir}/../../build/webrtc/checkout/src/third_party/llvm-build/Release+Asserts/bin/lld-link.exe"

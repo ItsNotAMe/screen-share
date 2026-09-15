@@ -1,6 +1,18 @@
 # Project Memory
 
+## Current integration evidence — 2026-09-16
+
+RoomMediaProof now runs four actual H.264 peers and synthetic Opus against isolated
+workerd via native admission/sockets and shared RoomPeerNegotiation. Slow-viewer
+isolation, twelve encrypted channels, fresh-ID restart, stale candidate rejection,
+kick/rejoin and close pass. Full Debug/Release proof suites: 28/28; Release app:
+13/13; CLI-only: 8/8. The normal UI/CLI facade remains legacy and automatic roster/
+failure/recovery ownership is still open. Local evidence does not close latency,
+resource, remote-network or cost gates. See CHECKPOINT-B and HEADLESS-TESTING.
+
 ## User Preferences
+
+- Work in the end-to-end delivery milestones in refactor/TODO.md, not one helper/check per turn. Detailed checks moved to refactor/DETAIL-CHECKS.md and are acceptance details, not stopping points. Carry integration and meaningful failure scenarios together; intermediate commits do not end the batch.
 
 - Use the patch editing tool for source/document changes so edits are reviewable in Codex; do not use PowerShell/Python file rewrites. Continue committing at logical milestones. Committed work can be reviewed using the commit or branch diff rather than only unstaged changes.
 

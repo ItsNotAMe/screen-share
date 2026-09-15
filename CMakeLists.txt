@@ -244,15 +244,7 @@ if(TARGET ScreenShareNegotiation)
 endif()
 if(MSVC)
     # Room transport is a backend dependency, including CLI-only builds.
-    find_package(Qt6 REQUIRED COMPONENTS Core Network WebSockets)
-    add_library(ScreenShareRoom STATIC
-        src/room/protocol/RoomProtocol.cpp
-        src/room/protocol/StateSubscription.cpp
-        src/room/qt/RoomSocket.cpp
-        src/room/qt/RoomAdmission.cpp)
-    target_compile_features(ScreenShareRoom PUBLIC cxx_std_20)
-    target_include_directories(ScreenShareRoom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(ScreenShareRoom PUBLIC Qt6::Core Qt6::Network Qt6::WebSockets)
+    include(cmake/RoomTransport.cmake)
     target_link_libraries(ScreenShareCore PRIVATE ScreenShareRoom)
     if(BUILD_TESTING)
         add_executable(RoomSocketTests tests/RoomSocketTests.cpp)

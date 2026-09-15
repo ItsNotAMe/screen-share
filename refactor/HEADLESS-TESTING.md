@@ -257,3 +257,24 @@ disposes sockets/runtime on completion. It tests concurrent admission, credentia
 socket replacement/reconnect, automatic pong and global capacity. Expiry is injected
 through a test-only entry point and exercises the production alarm handler; actual
 hibernation/alarm timing and native-client/media integration remain separate work.
+# Authenticated four-viewer media (2026-09-16)
+
+After building the hardware/audio-enabled WebRTC proof preset (requires the pinned
+Qt 6.10.3 Core, Network and WebSockets installation), run from the repository root:
+
+```powershell
+node signaling-worker/tests/run-native-service.mjs build/sdk-proof-release/RoomMediaProof.exe build/webrtc/room-media-evidence media
+```
+
+This one command starts isolated workerd, creates/joins using native admission and
+room sockets, negotiates real four-viewer H.264/Opus through authenticated signaling,
+checks slow-viewer isolation and twelve encrypted data channels, restarts ICE,
+kicks/rejoins a viewer, closes the room and cleans up under a watchdog. No physical
+mouse/keyboard input is used. CTest includes it as `room-backed-four-peer-media`.
+Each evidence directory includes JSON verdict/metrics, executable and Worker hashes,
+and a native log. Signaling queue peaks and sent candidate counts are reported.
+
+Capture/audio are synthetic; audible PCM is mixed receiver evidence. This test uses
+shared production negotiation/room components with diagnostic orchestration, not
+the unfinished normal UI/CLI facade. It does not establish desktop/GPU capture,
+remote TLS/NAT, gaming input/image latency, leak bounds or service-cost acceptance.

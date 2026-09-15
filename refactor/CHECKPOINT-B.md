@@ -1,11 +1,35 @@
 # Checkpoint B evidence
 
-The native room/directory WebSocket transport now exists in the shared backend
-build. Its live tests and remaining service/media-generation integration boundary
-are recorded in [CHECKPOINT-C.md](CHECKPOINT-C.md). It is not yet wired into the
-normal UI/CLI session facade or the media peer adapter.
-Native create/join admission also now produces role-bound socket configurations;
-adoption by the coordinator and the matching service handlers remain open.
+## Authenticated four-viewer media — 2026-09-16
+
+RoomPeerNegotiation now connects native asynchronous SDP operations and bounded
+trickle ICE to authenticated room messages. It runs on the signaling executor,
+uses fresh wire connection IDs, gates candidates behind descriptions, ignores
+retired candidates/answers, and closes failed/timed-out peers. Local credentials
+are cleared before creating a new description so retired ICE callbacks cannot be
+assigned to the next generation. The transport callback must enqueue without
+blocking; higher-level ownership must propagate later socket failures and enforce
+the restart budget.
+
+RoomMediaProof creates a real local workerd room through RoomAdmission and runs
+one host plus four RoomSockets. Actual H.264 and synthetic Opus travel through
+four native PeerConnections; SDP/ICE travel through the Worker. Coverage includes
+a slow capture subscriber, twelve encrypted data channels, fresh-ID ICE restart,
+stale candidate rejection, duplicate ID rejection, host kick, fresh admission and
+media rejoin, and room shutdown. The proof records frames, mixed audible PCM,
+candidate count and outbound signaling queue peaks in hashed evidence artifacts.
+
+Debug and Release full media suites passed 28/28; Release application passed
+13/13 and CLI-only passed 8/8. See HEADLESS-TESTING.md for the standalone command.
+These are synthetic/local correctness results, not desktop capture, independent
+per-viewer audio, NAT, input latency, resource acceptance or free-tier cost evidence.
+
+The adapter and room library are shared production components. Diagnostic outer
+orchestration still pumps operations and waits; do not copy those waits into UI
+commands. The scheduled shared facade, automatic roster/recovery ownership and
+normal UI/CLI adoption remain open. Matching service handlers now exist and are
+exercised here. Work is grouped by deliverable in TODO.md; detailed original gates
+remain in DETAIL-CHECKS.md.
 
 ## Scheduled peer ownership and concurrent negotiation - 2026-09-15
 
