@@ -1,6 +1,6 @@
 # Screen-sharing backend v2 — implementation handoff
 
-Saved: 2026-09-14. Status: approved handoff; Checkpoint A implementation in progress. Gate A has not passed.
+Saved: 2026-09-14. Status: Gate A passed for native integration/build proof on 2026-09-15; Checkpoint B in progress. Full resource/field/release acceptance remains open. See CLOSEOUT-A.md.
 
 Use [TODO.md](TODO.md) to track implementation, validation evidence and deferred work.
 
@@ -751,3 +751,19 @@ pinned implementation resets its framerate controller on that call. Calling it
 per frame prevents FPS reduction; the headless regression now catches this.
 GPU resizing currently uses a counted CPU fallback. Matching dimensions retain
 native frames. Preserve this diagnostic until a GPU scaler is validated.
+
+## Gate A closeout decision — 2026-09-15
+
+At the user's request, close A against its original Section 5 native-codec/audio
+and reproducible-build gate. Available legacy baseline evidence and a current
+extracted-package smoke audit are recorded in CLOSEOUT-A.md. Production session
+teardown stays in B/E, actual hardware/external latency acceptance in E, and
+remaining distribution/fresh-machine installer work in release preparation.
+Nothing unrun is marked passed and the original performance targets remain.
+
+The closeout resource recheck FAILED: all 100 full cycles and 20 rapid-close
+cycles completed without crash/timeout, but median handle growth was +76 and
++10 respectively (bound 8). This supersedes any earlier claim that current
+resource acceptance is resolved. Preserve existing MTA/dispatcher/module-pin
+mitigations; investigate the discrepancy under B before production cutover.
+Gate A passing authorizes wider implementation, not deployment or release.

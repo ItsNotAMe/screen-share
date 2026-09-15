@@ -1,6 +1,6 @@
 # Checkpoint A evidence
 
-Status: in progress. Build/API inventory is not media integration proof.
+Status: Gate A passed for native integration/build proof. [CLOSEOUT-A.md](CLOSEOUT-A.md) is the current verdict and supersedes older gate/resource status statements below. Full resource acceptance remains FAILED/open.
 
 ## Hardware MF and owned GPU frames — 2026-09-14
 

@@ -1,6 +1,6 @@
 # Backend v2 — implementation checklist
 
-Saved: 2026-09-14. Implementation status: **Checkpoint A in progress; Gate A not passed**.
+Saved: 2026-09-14. Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -15,7 +15,7 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Checkpoint A — production capture-owner/session integration, external gaming latency baseline and installer/distribution evidence.** Scoped application COM lifetime now passes 100 full hardware/recovery cycles and two 100-cycle rapid-close variants within the handle bound. This resolves the reproduced linear event growth, not every resource/lifecycle gate. The GraphicsCapture.dll pin remains. See [CHECKPOINT-A.md](CHECKPOINT-A.md) and [BUILD.md](BUILD.md).
+Current next action: **Checkpoint B — serialized native session coordinator and shared UI/CLI integration.** Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) as a priority resource-lifetime issue before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md).
 
 ## Planning handoff
 
@@ -31,13 +31,15 @@ Resumed at user request on 2026-09-15. See [HEADLESS-TESTING.md](HEADLESS-TESTIN
 
 Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 
+The original gate is native codec/audio integration and reproducible builds. Full production teardown, hardware/latency acceptance and release distribution checks remain explicitly open under B, E and cutover below; see [CLOSEOUT-A.md](CLOSEOUT-A.md).
+
 ### Baseline and repository grounding
 
 - [x] Review applicable instructions, repository memory and current implementation.
 - [x] Inspect/preserve the existing CMake/runtime edits and untracked adaptation/recovery modules/tests.
 - [x] Record the starting commit and relevant dirty-tree changes with the baseline.
 - [x] Record the single-machine proof host/viewer hardware, OS, GPU/driver, generated source, resolution/FPS/bitrate and local network conditions; external LAN/game reference remains separate.
-- [ ] Capture current-backend one-viewer behavior, queue/latency/CPU/GPU data and available multi-viewer results.
+- [x] Record available legacy one-viewer baseline: settings, CPU time, capture/encode timing and queue behavior; explicitly retain missing GPU/external-latency/multi-viewer measurements in Checkpoint E.
 - [x] Record existing validation failures separately from refactor regressions.
 - [x] Write the v2 architecture/protocol reference and shared message fixtures under the repository's documentation/test structure.
 - [x] Add the room wire/ownership reference, matching native/Worker client-command validators and shared malformed-message/Unicode/byte-boundary fixtures.
@@ -56,10 +58,9 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [x] Support an explicit local artifact directory for offline development.
 - [x] Separate application builds from dependency builds; reject mismatched artifacts clearly.
 - [x] Build the UI and CLI with the new toolchain.
-- [ ] Verify dependency notices and portable/installer staging requirements.
+- [x] Audit native dependency notices and portable/installer staging requirements; verify extracted package launch. Outstanding release obligations remain below.
 - [x] Generate WebRTC dependency notices including FFmpeg/OpenH264/compiler-rt and bundle them with the SDK and native portable package.
 - [x] Verify native Release portable CLI, UI self-test and Windows GUI startup from an extracted zip with developer paths removed; confirm package-local Qt plugins.
-- [ ] Complete remaining distribution obligations/notices (including Qt), installer staging and a fresh-machine run before release.
 
 ### Integration proof
 
@@ -73,7 +74,6 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [x] Implement owned live capture snapshots, producer GPU completion and hardware encoder import; validate fixed-output resize and retained pixels.
 - [x] Correct queued-frame draining and session-before-pool shutdown; verify the reproduced WGC closure regression.
 - [x] Validate external source-process exit, minimize/restore and permanent closure with replacement windows.
-- [ ] Validate forced HWND reuse and device-loss recovery.
 - [x] Add automatic proof capture recovery with a three-rebuild budget, cancellable backoff and per-device retirement across replacement generations; verify injected losses and terminal exhaustion.
 - [x] Reproduce and diagnose the intermittent Release access violation in unloaded GraphicsCapture.dll; add a process-lifetime system-module pin and verify 100 full Release cycles.
 - [x] Mitigate rapid source-close StopCapture hang with capture-owner dispatch; complete 100 rapid-close cycles and retain the watchdog regression. Resource acceptance remains separate.
@@ -83,18 +83,21 @@ Plan references: Sections 1, 4.3 and 5 / Checkpoint A.
 - [x] Prove owned live WGC capture through hardware H.264 PeerConnections alongside Opus and data channels.
 - [x] Prove GPU presentation of CPU-decoded NV12, one pending frame, fixed aspect ratio and receiver-window resize (GPU decode remains pending).
 - [x] Prove WASAPI-to-WebRTC PCM capture/playout through the Audio Device Module (process capture through Opus; physical playout tested separately).
-- [ ] Verify clean teardown without retained callbacks, textures, sockets or audio devices.
 - [x] Record integration limitations and exact source/API findings.
 
 **Gate A**
 
-- [ ] Native codec/audio integration and reproducible builds pass. Evidence is recorded; wider migration may begin.
+- [x] Native codec/audio integration and reproducible builds pass. Evidence and scope reconciliation are recorded in CLOSEOUT-A.md; wider implementation may begin. Full resource acceptance is not passed.
 
 ## Checkpoint B — native media engine
 
 Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 ### Interfaces, ownership and lifecycle
+
+- [ ] Investigate the current-binary closeout resource regressions: full 100-cycle handles 386 → 462; rapid-close 20-cycle handles 329 → 339. Both exceed the bound of 8. Do not remove the existing MTA/dispatcher/module-lifetime mitigations without evidence.
+
+- [ ] Verify complete production teardown without retained callbacks, textures, sockets or audio devices; account for native/driver caches separately. Carried from A integration-proof checklist, not marked passed.
 
 - [ ] Implement the separated session, media, capture/audio, presentation, input and diagnostic interfaces.
 - [ ] Keep Windows/WebRTC types out of portable public headers.
@@ -292,6 +295,9 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 
 ### Real-machine acceptance
 
+- [ ] Complete missing legacy GPU utilization, external display/input latency and available multi-viewer comparative baseline; existing one-viewer CPU/queue evidence is in CLOSEOUT-A.md.
+- [ ] Validate forced HWND reuse and actual device-loss recovery on hardware; injected recovery is proven, actual driver removal remains untested.
+
 - [ ] Test actual two-machine LAN and Internet sessions; record host/viewer hardware and drivers.
 - [ ] Measure capture-to-display externally and input-to-visible-response with a deterministic host scene.
 - [ ] Record p50/p95/p99, sample counts and measurement method.
@@ -323,6 +329,8 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [ ] Final acceptance evidence supports completion. Any unmet required criterion remains an open task.
 
 ## Cutover preparation and post-cutover cleanup
+
+- [ ] Complete remaining distribution obligations/notices (including Qt license texts/source requirements), actual Inno installer compilation/staging and a fresh-machine run before release. Carried from A; not marked passed.
 
 Production deployment/release publishing is separate from implementation. Keep preparation and actual external cutover clearly distinguished.
 
@@ -367,7 +375,7 @@ Do not put passwords, membership tokens, SDP, ICE credentials or peer addresses 
 
 ## Open blockers and handoff notes
 
-Gate A remains open. Software/hardware MF H.264, bounded submission, missing-output fallback/quarantine and synthetic GPU lifetime tests pass. Live capture/GPU presentation, broader audio mode/recovery validation, immutable artifact cache/notices and broader performance evidence remain unfinished. See CHECKPOINT-A.md for exact resume work.
+Gate A is closed against its original integration/build criterion. The closeout resource checks FAILED their handle-growth bounds despite completed cycles; prior passing runs are historical evidence, not a current no-leak guarantee. Track native resource ownership under B and full acceptance under E. Normal application media remains legacy until validated integration supports switching it. See CLOSEOUT-A.md for exact results and retained release/hardware limitations.
 
 At each checkpoint handoff, record:
 
@@ -393,7 +401,7 @@ See the latest CHECKPOINT-A.md section for the 100-cycle result and exact artifa
 - [x] Complete 100 rapid source-close cycles without the prior StopCapture hang on the reference machine.
 - [x] Extend automated coverage for dispatcher lifecycle and hardware GPU input with FPS restarts.
 - [x] Resolve residual source-close COM event growth with scoped application MTA ownership; 100 rapid-close cycles and 100 fresh-owner-thread cycles both show zero handle growth.
-- [ ] Preserve native-call watchdog coverage and validate production capture-owner/session integration before claiming Gate A complete.
+- [ ] Preserve native-call watchdog coverage and validate production capture-owner/session integration before production cutover; current handle-growth failures are recorded in CLOSEOUT-A.md.
 
 ### Shared capture session and headless media — 2026-09-15
 
@@ -403,7 +411,7 @@ See the latest CHECKPOINT-A.md section for the 100-cycle result and exact artifa
 - [x] Add one-command headless smoke/regression with watchdogs, executable hashes, JSON timing/results and preserved failure logs.
 - [ ] Extend the runner to the complete production session facade, separate host/viewer processes, settings, multi-viewer isolation, scripted authorized input and simulated network conditions. The current harness does not claim these features.
 
-See HEADLESS-TESTING.md and the latest CHECKPOINT-A.md evidence. Gate A remains open.
+Historical continuation evidence is in HEADLESS-TESTING.md and CHECKPOINT-A.md; the current gate decision is in CLOSEOUT-A.md.
 
 ### Independent capture delivery — 2026-09-15
 

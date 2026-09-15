@@ -1,6 +1,6 @@
 # Native dependency and application build
 
-The working branch is `refactor/backend-v2`. Gate A remains open: the new builds work, but normal application media is still routed through the existing backend.
+The working branch is `refactor/backend-v2`. Gate A passed its native integration/build criterion; see CLOSEOUT-A.md for current evidence and failed resource bounds. Normal application media remains on the existing backend pending validated integration.
 
 ## Current verified SDK and portable workflow
 
