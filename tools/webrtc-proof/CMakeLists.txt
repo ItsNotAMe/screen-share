@@ -14,6 +14,7 @@ set_property(SOURCE "${nativeRoot}/capture/DesktopCapturer.cpp" APPEND PROPERTY 
     "$<$<CXX_COMPILER_ID:Clang>:/clang:-mcx16>")
 add_library(MfWebRTCCodecs STATIC
     "${nativeRoot}/media/capture/CaptureSession.cpp"
+    "${nativeRoot}/media/capture/CaptureDistributor.cpp"
     "${nativeRoot}/render/Nv12D3D11Presenter.cpp"
     "${nativeRoot}/media/webrtc/PcmAudioDeviceModule.cpp"
     "${nativeRoot}/media/audio/WasapiPcmEndpoint.cpp"
@@ -34,6 +35,10 @@ add_executable(CaptureSessionTest CaptureSessionTest.cpp)
 target_link_libraries(CaptureSessionTest PRIVATE MfWebRTCCodecs)
 add_test(NAME capture-session-headless COMMAND CaptureSessionTest)
 set_tests_properties(capture-session-headless PROPERTIES TIMEOUT 20)
+add_executable(CaptureDistributorTest CaptureDistributorTest.cpp)
+target_link_libraries(CaptureDistributorTest PRIVATE MfWebRTCCodecs)
+add_test(NAME capture-distributor-headless COMMAND CaptureDistributorTest)
+set_tests_properties(capture-distributor-headless PROPERTIES TIMEOUT 15)
 add_executable(MfDecoderAdapterTest MfDecoderAdapterTest.cpp)
 target_link_libraries(MfDecoderAdapterTest PRIVATE MfWebRTCCodecs)
 add_test(NAME mf-webrtc-decoder-lifecycle COMMAND MfDecoderAdapterTest)

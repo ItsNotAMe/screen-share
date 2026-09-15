@@ -404,3 +404,11 @@ See the latest CHECKPOINT-A.md section for the 100-cycle result and exact artifa
 - [ ] Extend the runner to the complete production session facade, separate host/viewer processes, settings, multi-viewer isolation, scripted authorized input and simulated network conditions. The current harness does not claim these features.
 
 See HEADLESS-TESTING.md and the latest CHECKPOINT-A.md evidence. Gate A remains open.
+
+### Independent capture delivery — 2026-09-15
+
+- [x] Add a production bounded per-viewer handoff, keeping one pending frame per viewer and independent delivery workers.
+- [x] Reject stale session/device-generation/sequence samples; join removed subscriptions before allowing replacement.
+- [x] Route synthetic and WGC media proofs through the shared distributor.
+- [x] Test four consumers, slow/failing viewer isolation, removal during acquisition and pending-frame replacement under deterministic blocking.
+- [ ] Validate isolation through four actual PeerConnections with independent source restrictions and encoders; four capture consumers alone do not satisfy this requirement.

@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--regression", action="store_true", help="Repeat media teardown 20 times")
     args = parser.parse_args()
     programs = [args.build_directory.resolve() / name for name in
-                ("CaptureSessionTest.exe", "WebRTCProof.exe")]
+                ("CaptureSessionTest.exe", "CaptureDistributorTest.exe", "WebRTCProof.exe")]
     for program in programs:
         if not program.is_file():
             parser.error(f"Build the proof targets first: missing {program.name}")
@@ -25,7 +25,7 @@ def main():
               "limitations": ["Local peers share one process", "No WGC or physical audio/display",
                                "No room service, input injection or network impairment",
                                "Internal timing is not capture-to-display latency"], "runs": []}
-    sequence = [programs[0]] + [programs[1]] * (20 if args.regression else 1)
+    sequence = programs[:2] + [programs[2]] * (20 if args.regression else 1)
     try:
         for index, program in enumerate(sequence):
             log = args.output_directory / f"{index:02d}-{program.stem}.log"
@@ -46,7 +46,7 @@ def main():
             run["elapsed_seconds"] = round(time.monotonic() - started, 3)
             if run["timed_out"] or run["exit_code"] != 0:
                 break
-            if program == programs[0]:
+            if program in programs[:2]:
                 run["metrics"] = json.loads(log.read_text())
             print(f"Passed {program.name} ({index + 1}/{len(sequence)})", flush=True)
         report["passed"] = len(report["runs"]) == len(sequence) and all(

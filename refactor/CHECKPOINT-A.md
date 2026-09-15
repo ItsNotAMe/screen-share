@@ -689,3 +689,40 @@ settings, multi-viewer and impairment scenarios remain. Normal UI/CLI media is
 still legacy. Capture-to-callback timing is an internal measurement, not gaming
 input/display latency. Broader resource accounting, actual device removal,
 forced HWND reuse, external latency and remaining distribution evidence stay open.
+## Bounded viewer capture distribution — 2026-09-15
+
+Production `CaptureDistributor` decouples source acquisition from each viewer's
+delivery callback. Each subscriber owns a delivery worker, one replaceable
+pending sample and counters for delivery, replacement, rejection, callback
+failure and maximum capture-to-handoff age. Publication validates session ID,
+device generation and sequence. Removing a subscriber joins its worker before
+returning; replacing it cannot revive that subscription's old callback. A
+consumer failure stops only its own worker. In-flight callbacks are not
+preempted; downstream device-retirement checks and process watchdogs remain.
+
+Both synthetic and WGC PeerConnection proofs now consume through this same
+component. The headless runner also exercises four capture consumers, including
+a slow callback, a failing callback, removal while capture runs, deterministic
+pending-generation replacement and three stale-message rejection cases.
+
+Evidence under `build/webrtc/`:
+
+- Debug/Release media suites **18/18 each**: `distribution-debug.log` and
+  `distribution-release.log`. Final test cleanup/race assertions were rebuilt
+  and rerun through the headless runner after those full suites.
+- Debug/Release application suites **10/10 each**:
+  `distribution-app-debug.log`, `distribution-app-release.log`.
+- Debug smoke and Release 20-run complete-media regression passed:
+  `distribution-headless-debug/result.json` and
+  `distribution-headless-release/result.json`. Both include the 100 capture
+  restarts and new distributor scenarios, plus hashes and watchdog outcomes.
+  Debug recorded 100 fast-consumer frames versus 24 slow-consumer frames and
+  74 replaced pending frames before removal; healthy acquisition continued.
+- Generated-window recovery and live video/presentation passed in both builds
+  with a 45-second per-process watchdog: `distribution-live.log`. Debug decoded
+  60 frames and Release 61, both with zero sender GPU readbacks.
+
+This proves bounded capture delivery isolation, not independent resolution,
+congestion or encoder behavior across four actual PeerConnections. Those checks,
+full facade integration, scripted gaming input, external latency and the other
+open Gate A requirements remain. Normal UI/CLI media remains legacy.

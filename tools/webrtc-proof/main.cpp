@@ -292,13 +292,16 @@ void Run(bool useHardware, bool useWasapi, bool useLiveCapture) {
     // Capture must not block the WebRTC signaling thread on D3D work.
     std::atomic<bool> captureFailed{false};
     if (live) live->StartDelivery();
+    std::unique_ptr<screenshare::media::CaptureDistributor> distribution;
     std::unique_ptr<screenshare::media::CaptureSession> capture;
     if (!live) {
+        distribution = std::make_unique<screenshare::media::CaptureDistributor>(1);
+        distribution->Add(1, [source](auto sample) {
+            source->Push(*std::static_pointer_cast<screenshare::media::SyntheticCaptureResource>(sample.resource));
+        });
         capture = std::make_unique<screenshare::media::CaptureSession>(1,
             [] { return std::make_unique<screenshare::media::SyntheticCaptureSource>(640, 360, 30); },
-            [source](auto sample) {
-                source->Push(*std::static_pointer_cast<screenshare::media::SyntheticCaptureResource>(sample.resource));
-            });
+            [&](auto sample) { distribution->Publish(std::move(sample)); });
         capture->EnableDelivery();
     }
     bool presentationResized = false;
@@ -307,7 +310,7 @@ void Run(bool useHardware, bool useWasapi, bool useLiveCapture) {
             presentation->Resize(); presentationResized = true;
         }
         if (presentation) presentation->Drain(presentationSink);
-        captureFailed = capture && capture->status().state == screenshare::media::CaptureState::Failed;
+        captureFailed = capture && (capture->status().state == screenshare::media::CaptureState::Failed || distribution->stats(1).failed);
         return captureFailed || (viewer.decodedFrames.load() >= 60 && audioEvidence->audibleBlocks >= 30 &&
             (!presentation || presentation->presented >= 30));
     }, "Audio/video media delivery timed out"); }
@@ -318,6 +321,7 @@ void Run(bool useHardware, bool useWasapi, bool useLiveCapture) {
         throw;
     }
     if (capture) capture->Stop();
+    if (distribution) distribution->Stop();
     if (live) {
         live->Stop();
         Require(!live->HasFailed() && live->frames >= 60, "Live capture source failed");

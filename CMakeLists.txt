@@ -151,6 +151,7 @@ endif()
 
 add_library(ScreenShareCore STATIC
     src/media/capture/CaptureSession.cpp
+    src/media/capture/CaptureDistributor.cpp
     src/audio/OpusCodec.cpp
     src/audio/WasapiCapture.cpp
     src/audio/WasapiRenderer.cpp

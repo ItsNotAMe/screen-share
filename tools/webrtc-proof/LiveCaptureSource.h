@@ -1,5 +1,6 @@
 #pragma once
 #include "media/capture/WindowsCaptureSource.h"
+#include "media/capture/CaptureDistributor.h"
 #include "core/WindowsMediaRuntime.h"
 #include <future>
 
@@ -10,6 +11,10 @@ public:
     using Deliver = std::function<void(webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer>)>;
     LiveCaptureSource(HWND window, Deliver deliver) {
         if (FAILED(runtime_.result())) throw std::runtime_error("MTA lease failed");
+        distributor_.Add(1, [this, deliver = std::move(deliver)](auto sample) {
+            auto resource = std::static_pointer_cast<screenshare::media::WindowsCaptureResource>(sample.resource);
+            deliver(resource->buffer); ++frames;
+        });
         auto ready = std::make_shared<std::promise<std::shared_ptr<screenshare::media::D3dVideoDevice>>>();
         auto started = ready->get_future();
         screenshare::CaptureConfig config;
@@ -18,11 +23,11 @@ public:
         config.targetWidth = 640; config.targetHeight = 360;
         session_ = std::make_unique<screenshare::media::CaptureSession>(1,
             [this, config] { return std::make_unique<FaultSource>(config, injectLoss_); },
-            [this, ready, deliver = std::move(deliver), announced = false](auto sample) mutable {
+            [this, ready, announced = false](auto sample) mutable {
                 auto resource = std::static_pointer_cast<screenshare::media::WindowsCaptureResource>(sample.resource);
                 if (!announced) { ready->set_value(resource->device); announced = true; }
                 generation = sample.generation;
-                if (enabled_) { deliver(resource->buffer); ++frames; }
+                if (enabled_) distributor_.Publish(std::move(sample));
             });
         session_->EnableDelivery();
         while (started.wait_for(std::chrono::milliseconds(5)) != std::future_status::ready) {
@@ -35,8 +40,8 @@ public:
     ~LiveCaptureSource() { Stop(); }
     void StartDelivery() { enabled_ = true; }
     void InjectDeviceLoss() { injectLoss_ = true; }
-    void Stop() { if (session_) session_->Stop(); }
-    bool HasFailed() const { return session_->status().state == screenshare::media::CaptureState::Failed; }
+    void Stop() { if (session_) session_->Stop(); distributor_.Stop(); }
+    bool HasFailed() const { return session_->status().state == screenshare::media::CaptureState::Failed || distributor_.stats(1).failed; }
     std::shared_ptr<screenshare::media::D3dVideoDevice> device() const { return device_; }
     std::atomic<unsigned> frames{0};
     std::atomic<uint64_t> generation{1};
@@ -59,6 +64,7 @@ private:
     screenshare::WindowsMediaRuntime runtime_;
     std::atomic<bool> injectLoss_{false}, enabled_{false};
     std::shared_ptr<screenshare::media::D3dVideoDevice> device_;
+    screenshare::media::CaptureDistributor distributor_{1};
     std::unique_ptr<screenshare::media::CaptureSession> session_;
 };
 }
