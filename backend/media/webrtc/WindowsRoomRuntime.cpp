@@ -40,6 +40,22 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         auto state = std::make_shared<DeviceState>();
         NativeRoomRuntimeOptions native;
         auto endpoints = options.audioEndpoints.value_or(WasapiPcmEndpoints(options.audio, options.playbackDeviceId));
+        if (identity.host) {
+            AudioSelection initial{options.audio.source == AudioCaptureSource::Microphone ? AudioKind::Microphone :
+                options.audio.source == AudioCaptureSource::ProcessOutput ? AudioKind::Process : AudioKind::System,
+                options.audio.deviceId, options.audio.processId};
+            ValidateAudioSelection(initial);
+            native.audioSwitch = std::make_shared<AudioSwitchControl>(initial, endpoints.capture);
+            endpoints.capture = [control = native.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
+            if (options.audioForSelection) native.audioForSelection = options.audioForSelection;
+            else if (!options.audioEndpoints) native.audioForSelection = [](AudioSelection selection) {
+                AudioCaptureConfig config;
+                config.source = selection.kind == AudioKind::Microphone ? AudioCaptureSource::Microphone :
+                    selection.kind == AudioKind::Process ? AudioCaptureSource::ProcessOutput : AudioCaptureSource::SystemOutput;
+                config.deviceId = selection.deviceId; config.processId = selection.processId;
+                return WasapiPcmEndpoints(config).capture;
+            };
+        }
         native.engine = [endpoints = std::move(endpoints), state] {
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, std::make_shared<PcmAudioDiagnostics>()),
                 std::make_unique<MfVideoEncoderFactory>(state->Get()), std::make_unique<MfVideoDecoderFactory>());

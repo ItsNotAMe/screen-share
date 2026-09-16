@@ -177,6 +177,35 @@ and pushing state normally. It verifies Unconfirmed, no automatic retry, continu
 video, an explicit subsequent mutation, and isolation of the first late reply while
 the second request is pending. Production Worker code and timing are unchanged.
 
+## Live shared-audio selection
+
+Hosts can change system-output, microphone or process-output capture with **Share
+selected audio**. Refresh enumerates devices only on demand; process capture uses
+an explicit process ID. The selection requires active recording (normally a connected
+viewer). It changes the shared outbound audio, not the viewer's playback device.
+Host source/settings controls scroll so Stop remains outside the long form.
+
+The public `SwitchAudioSource` operation accepts one pending request. A replacement
+starts on its own capture worker while the old source continues; its first PCM block
+commits the independent audio revision. Invalid/startup/first-block-timeout errors
+retain the previous healthy source. Stop cancels pending work and joins endpoint
+owners. Successful selection survives a recording stop/restart. No room mutation,
+admission, renegotiation or periodic service request is added.
+
+Each producer retains one 10ms block; the WASAPI packet adapter retains at most
+20ms, keeping the combined application capture handoff at 30ms. The consumer follows
+the source cadence, substitutes silence for a missing block and discards stale
+handoff data. Process-loopback activation honors cancellation; its completion event
+is owned by the async handler so a late completion cannot signal a reused handle.
+Native driver calls cannot be forcibly preempted by the adapter.
+
+Actual-widget tests switch to silent synthetic microphone PCM, check decoded Opus
+becomes silent while video continues, reject a missing device without committing,
+then restore decoded audio. Viewer requests are rejected and room/member/settings
+revisions remain unchanged. These tests never capture or play physical audio.
+Physical device switching/unplug/recovery and live playback-device selection remain
+open acceptance/implementation work; synthetic results do not establish them.
+
 ## Headless and Windows checks
 
 `room-v2-qt-ui` runs the actual Qt widgets offscreen against the isolated Worker,

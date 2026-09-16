@@ -10,24 +10,34 @@ void Check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("WASAPI PCM op
 class Capture final : public PcmCaptureEndpoint {
 public:
     explicit Capture(AudioCaptureConfig config) : config_(std::move(config)) {}
-    void Start() override {
+    void Start() override { Start({}); }
+    void Start(std::stop_token stop) override {
         config_.pcm48kStereo = true;
         config_.bufferDuration = std::chrono::milliseconds(10);
-        capture_.Start(config_);
+        capture_.Start(config_, stop);
         if (capture_.format().sampleRate != 48000 || capture_.format().channels != 2 || capture_.format().bitsPerSample != 16)
             throw std::runtime_error("WASAPI did not accept PCM48 stereo");
     }
     bool Read(PcmBlock& output, std::stop_token stop) override {
         while (pending_.size() < output.size() && !stop.stop_requested()) {
             auto packet = capture_.CapturePacket(std::chrono::milliseconds(10));
-            if (!packet) continue;
+            if (!packet) {
+                // Silent loopback devices may report no packets. Keep a bounded
+                // 10ms read and expose silence, so handover can establish readiness.
+                if (stop.stop_requested()) return false;
+                for (auto& value : output) {
+                    value = pending_.empty() ? 0 : pending_.front();
+                    if (!pending_.empty()) pending_.pop_front();
+                }
+                return true;
+            }
             if (packet->dataDiscontinuity) { dropped_ += pending_.size() / 2; pending_.clear(); }
             if (packet->data.size() != size_t(packet->frames) * 4) throw std::runtime_error("Invalid capture PCM packet");
-            // At most 30 ms of application capture data, even after a scheduling stall.
+            // 20ms here plus the switchable endpoint's one 10ms handoff block.
             const size_t samples = size_t(packet->frames) * 2;
-            const size_t keep = std::min<size_t>(samples, 2880);
+            const size_t keep = std::min<size_t>(samples, 1920);
             dropped_ += (samples - keep) / 2;
-            while (pending_.size() + keep > 2880) { pending_.pop_front(); pending_.pop_front(); ++dropped_; }
+            while (pending_.size() + keep > 1920) { pending_.pop_front(); pending_.pop_front(); ++dropped_; }
             for (size_t i = samples - keep; i < samples; ++i) {
                 int16_t value = 0;
                 if (!packet->silent) std::memcpy(&value, packet->data.data() + i * 2, 2);

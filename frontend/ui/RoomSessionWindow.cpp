@@ -16,10 +16,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QSignalBlocker>
+#include <QScrollArea>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
+#include <climits>
 using namespace screenshare::v2;
 using namespace screenshare::media;
 namespace {
@@ -116,6 +118,39 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         else selection.display = selected["display"].toInt();
         captureState_->setText("Waiting for the new source…"); switchCapture_->setEnabled(false); session_.switchCapture(selection);
     });
+    audioKind_ = combo("Shared audio", {"System output", "Microphone", "Process output"}, int(config.media.audio.source));
+    audioKind_->setObjectName("liveAudioKind");
+    audioDevice_ = new QComboBox; audioDevice_->setObjectName("liveAudioDevice"); form->addRow("Audio device", audioDevice_);
+    audioDevice_->addItem(config.media.audio.deviceId.empty() ? "Default device" : "Current device", QString::fromStdWString(config.media.audio.deviceId));
+    audioProcess_ = number("Audio process ID", 0, INT_MAX, int(config.media.audio.processId)); audioProcess_->setObjectName("liveAudioProcess");
+    refreshAudio_ = new QPushButton("Refresh audio devices"); refreshAudio_->setObjectName("refreshAudioDevices"); form->addRow(refreshAudio_);
+    switchAudio_ = new QPushButton("Share selected audio"); switchAudio_->setObjectName("switchAudioSource"); switchAudio_->setEnabled(false); form->addRow(switchAudio_);
+    audioState_ = new QLabel; audioState_->setWordWrap(true); audioState_->setObjectName("audioState"); form->addRow(audioState_);
+    connect(audioKind_, &QComboBox::currentIndexChanged, this, [this] {
+        audioDevice_->clear(); audioDevice_->addItem("Default device", QString());
+        audioDevice_->setEnabled(audioKind_->currentIndex() != 2); audioProcess_->setEnabled(audioKind_->currentIndex() == 2);
+    });
+    connect(refreshAudio_, &QPushButton::clicked, this, [this] {
+        try {
+            const auto selected = audioDevice_->currentData(); audioDevice_->clear(); audioDevice_->addItem("Default device", QString());
+            if (audioKind_->currentIndex() != 2) for (const auto& device : screenshare::WasapiCapture::EnumerateDevices(
+                audioKind_->currentIndex() == 1 ? screenshare::AudioCaptureSource::Microphone : screenshare::AudioCaptureSource::SystemOutput))
+                audioDevice_->addItem(QString::fromStdWString(device.name), QString::fromStdWString(device.id));
+            const auto index = audioDevice_->findData(selected); if (index >= 0) audioDevice_->setCurrentIndex(index);
+        } catch (...) { audioState_->setText("Could not enumerate audio devices."); }
+    });
+    connect(switchAudio_, &QPushButton::clicked, this, [this] {
+        AudioSelection selection; selection.kind = AudioKind(audioKind_->currentIndex());
+        if (selection.kind == AudioKind::Process) selection.processId = uint32_t(audioProcess_->value());
+        else selection.deviceId = audioDevice_->currentData().toString().toStdWString();
+        audioState_->setText("Waiting for the new audio source…"); switchAudio_->setEnabled(false); session_.switchAudio(std::move(selection));
+    });
+    session_.audioUpdated = [this](const AudioUpdateResult& result) {
+        if (result.error == AudioUpdateError::None) audioState_->setText("Sharing the selected audio source.");
+        else if (result.error == AudioUpdateError::Unavailable) audioState_->setText("Audio capture is not active. Connect a viewer first.");
+        else if (result.error == AudioUpdateError::Cancelled) audioState_->setText("Audio change cancelled.");
+        else audioState_->setText("Could not switch audio. The previous source is retained while available.");
+    };
     preset_ = combo("Preset", {"Gaming", "Quality"}, int(p.preset));
     resolution_ = combo("Resolution", {"Auto", "Fixed", "Native"}, int(p.resolution));
     width_ = number("Width", 2, 3840, p.width); width_->setSingleStep(2); width_->setObjectName("streamWidth");
@@ -127,7 +162,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     uploadBudgetEnabled_ = new QCheckBox("Limit total media upload allowance"); uploadBudgetEnabled_->setObjectName("uploadBudgetEnabled");
     uploadBudgetEnabled_->setChecked(p.aggregateUploadLimitBps.has_value()); form->addRow(uploadBudgetEnabled_);
     uploadBudget_ = number("Upload allowance (bits/s)", 160000, 1000000000, p.aggregateUploadLimitBps.value_or(20000000)); uploadBudget_->setObjectName("uploadBudget");
-    apply_ = new QPushButton("Apply settings"); apply_->setObjectName("applyStream"); form->addRow(apply_); layout->addWidget(formWidget);
+    apply_ = new QPushButton("Apply settings"); apply_->setObjectName("applyStream"); form->addRow(apply_);
+    auto* sourceSettings = new QScrollArea; sourceSettings->setWidgetResizable(true); sourceSettings->setWidget(formWidget);
+    sourceSettings->setVisible(config.room.host); sourceSettings->setMinimumHeight(160); layout->addWidget(sourceSettings, 1);
     settingsState_ = new QLabel; settingsState_->setWordWrap(true); layout->addWidget(settingsState_);
     uploadState_ = new QLabel; uploadState_->setWordWrap(true); uploadState_->setObjectName("uploadState"); uploadState_->setVisible(config.room.host); layout->addWidget(uploadState_);
     auto* controls = new QLabel("Remote control is not available in this preview."); layout->addWidget(controls);
@@ -165,6 +202,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         members_->setText("Members: " + members.join(", "));
         apply_->setEnabled(host && value.phase == RoomPhase::Active);
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
+        const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
+        switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() != 2);
+        audioKind_->setEnabled(audioEditable); audioDevice_->setEnabled(audioEditable && audioKind_->currentIndex() != 2);
+        audioProcess_->setEnabled(audioEditable && audioKind_->currentIndex() == 2);
         refreshCapture_->setEnabled(host && !session_.capturePending()); captureSource_->setEnabled(host && !session_.capturePending());
         if (host) {
             qint64 allocated = 0, applied = 0; uint64_t measured = 0; size_t paused = 0, measuredPeers = 0;

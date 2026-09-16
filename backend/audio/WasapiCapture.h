@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <stop_token>
 #include <vector>
 
 #include <audioclient.h>
@@ -74,7 +75,7 @@ public:
 
     static std::vector<AudioDeviceInfo> EnumerateDevices(AudioCaptureSource source);
 
-    void Start(const AudioCaptureConfig& config);
+    void Start(const AudioCaptureConfig& config, std::stop_token stop = {});
     void Stop();
 
     [[nodiscard]] std::optional<CapturedAudioPacket> CapturePacket(std::chrono::milliseconds timeout);

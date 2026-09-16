@@ -1,5 +1,24 @@
 # Project Memory
 
+## Live shared-audio switching — 2026-09-16
+
+RoomSession.SwitchAudioSource(AudioSelection) is host-only in NativeRoomRuntime,
+one pending operation, independently revisioned and cancelled by Stop. Requires
+an active recording endpoint; no automatic retry. AudioSwitchControl retains the
+successful factory/selection across ADM recording incarnations. SwitchablePcmCapture
+owns current/candidate capture workers: first PCM commits, failure/5s timeout keeps
+old audio, endpoint construction/destruction remain on worker. One 10ms handoff
+block + WASAPI 20ms packet bound preserves 30ms application capture buffering.
+Process activation accepts stop tokens; completion handler owns its event.
+UI system/microphone/process selection and strict timed audioChanges (max64) share
+the public backend. CLI emits audio/audio-ended and audioRevision, aborts on failed
+scripted changes; UI preserves session. Physical audio is never used by routine
+tests. Synthetic overrides cannot silently fall back to physical capture.
+Tests cover decoder-observed silence/resume on four viewers and actual widgets,
+unchanged room/settings revisions, failure, timeout, Busy, cancellation and restart.
+Live playback-device selection, physical unplug/recovery and external latency
+remain open. Default AppShell remains legacy; milestone 2 is not complete.
+
 ## Live capture switching — 2026-09-16
 
 RoomSession.SwitchCaptureSource(CaptureSelection) is bounded to one pending operation,

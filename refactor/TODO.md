@@ -93,8 +93,12 @@ tests exercise these behaviors; external congestion/latency acceptance remains o
 Live display/window switching now preserves the room and media peers, commits on
 the replacement's first frame, and retains a healthy previous source on failure.
 UI selection and timed CLI/config changes share the bounded backend operation.
-Default-shell adoption, input consent/control, zero-copy presentation and live
-audio-device switching remain.
+Live host system/microphone/process audio switching now uses a bounded first-PCM
+handover with rollback, timeout, cancellation and a 30ms application capture bound.
+UI selection and timed CLI audioChanges use the same public operation. Silent
+headless tests cover actual decoded audio, video continuity and endpoint ownership.
+Default-shell adoption, input consent/control, zero-copy presentation, live playback
+device selection and physical audio-device loss/recovery acceptance remain.
 This milestone is not complete and defaults are unchanged.
 
 ## 3. Gaming controls end to end (D)

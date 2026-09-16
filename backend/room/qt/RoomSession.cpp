@@ -26,6 +26,9 @@ struct RoomSession::Impl {
         bool sourceQueued = false;
         std::shared_ptr<std::promise<media::CaptureUpdateResult>> sourceReply;
         std::future<media::CaptureUpdateResult> sourceUpdate;
+        bool audioQueued = false;
+        std::shared_ptr<std::promise<media::AudioUpdateResult>> audioReply;
+        std::future<media::AudioUpdateResult> audioUpdate;
         bool mutationQueued = false;
         uint64_t mutationSequence = 0;
         QString mutationId;
@@ -62,6 +65,10 @@ struct RoomSession::Impl {
         void BeginStop(RoomError error = RoomError::None) {
             if (stopping) return;
             stopping = true;
+            if (audioReply) {
+                audioReply->set_value({media::AudioUpdateError::Cancelled}); audioReply.reset();
+                std::lock_guard lock(mutex); audioQueued = false;
+            }
             if (sourceReply) {
                 sourceReply->set_value({media::CaptureUpdateError::Cancelled}); sourceReply.reset();
                 std::lock_guard lock(mutex); sourceQueued = false;
@@ -106,6 +113,7 @@ struct RoomSession::Impl {
                 status.pendingPeers = current.pendingPeers; status.generation = current.generation;
                 status.stream = stream;
                 status.capture = runtime->CaptureSelection();
+                status.audio = runtime->AudioSelection();
             }
             if (current.state == RoomMediaSession::State::Failed) { terminal = true; terminalError = RoomError::Media; Schedule(); }
         }
@@ -159,6 +167,11 @@ struct RoomSession::Impl {
             if (event.kind == RoomSocket::EventKind::Closed) { terminal = true; terminalError = RoomError::None; Schedule(); }
         }
         void Tick() {
+            if (audioReply && audioUpdate.valid() && audioUpdate.wait_for(0ms) == std::future_status::ready) {
+                auto result = audioUpdate.get();
+                { std::lock_guard lock(mutex); audioQueued = false; status.audio = runtime->AudioSelection(); }
+                audioReply->set_value(result); audioReply.reset();
+            }
             if (sourceReply && sourceUpdate.valid() && sourceUpdate.wait_for(0ms) == std::future_status::ready) {
                 auto result = sourceUpdate.get();
                 { std::lock_guard lock(mutex); sourceQueued = false; status.capture = runtime->CaptureSelection(); }
@@ -214,7 +227,7 @@ struct RoomSession::Impl {
                 BeginStop(RoomError::Transport); return;
             }
             if (connected) { Reply(RoomError::None); connected = false; }
-            if (admission.valid() || opening.valid() || startReply || recoveryDeadline || mutationReply || sourceReply) Schedule();
+            if (admission.valid() || opening.valid() || startReply || recoveryDeadline || mutationReply || sourceReply || audioReply) Schedule();
         }
     };
     std::shared_ptr<State> state;
@@ -312,6 +325,28 @@ std::future<media::CaptureUpdateResult> RoomSession::SwitchCaptureSource(media::
 }
 std::future<RoomUpdateResult> RoomSession::UpdateRoomPolicy(RoomPolicy policy, uint64_t revision) {
     return SubmitUpdate({}, std::move(policy), revision);
+}
+std::future<media::AudioUpdateResult> RoomSession::SwitchAudioSource(media::AudioSelection selection) {
+    try { media::ValidateAudioSelection(selection); }
+    catch (...) { return media::CaptureUpdateReady(media::AudioUpdateError::Invalid); }
+    auto state = impl_->state;
+    std::lock_guard lock(state->mutex);
+    if (state->stopQueued || state->status.phase != RoomPhase::Active) return media::CaptureUpdateReady(media::AudioUpdateError::Unavailable);
+    if (state->audioQueued) return media::CaptureUpdateReady(media::AudioUpdateError::Busy);
+    state->audioQueued = true;
+    auto reply = std::make_shared<std::promise<media::AudioUpdateResult>>(); auto future = reply->get_future();
+    impl_->executor.Post([state, reply, selection = std::move(selection)] {
+        if (state->stopping || !state->runtime) {
+            { std::lock_guard lock(state->mutex); state->audioQueued = false; }
+            reply->set_value({media::AudioUpdateError::Unavailable}); return;
+        }
+        state->audioReply = reply;
+        try { state->audioUpdate = state->runtime->SwitchAudioSource(selection); }
+        catch (...) { state->audioUpdate = media::CaptureUpdateReady(media::AudioUpdateError::Failed); }
+        if (!state->audioUpdate.valid()) state->audioUpdate = media::CaptureUpdateReady(media::AudioUpdateError::Failed);
+        state->Schedule();
+    });
+    return future;
 }
 std::future<RoomUpdateResult> RoomSession::SubmitUpdate(std::optional<std::string> nickname, std::optional<RoomPolicy> policy, uint64_t revision) {
     auto reply = std::make_shared<std::promise<RoomUpdateResult>>(); auto future = reply->get_future();

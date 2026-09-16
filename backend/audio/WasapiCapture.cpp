@@ -167,10 +167,12 @@ class AudioInterfaceActivationHandler final :
     public IActivateAudioInterfaceCompletionHandler,
     public IAgileObject {
 public:
-    explicit AudioInterfaceActivationHandler(HANDLE completedEvent) noexcept
-        : completedEvent_(completedEvent)
+    AudioInterfaceActivationHandler()
+        : completedEvent_(CreateEventW(nullptr, FALSE, FALSE, nullptr))
     {
+        if (!completedEvent_) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "CreateEventW");
     }
+    HANDLE completedEvent() const noexcept { return completedEvent_.get(); }
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override
     {
@@ -219,7 +221,7 @@ public:
             result_ = SUCCEEDED(result) ? activateResult : result;
             activated_.Attach(activated);
         }
-        SetEvent(completedEvent_);
+        SetEvent(completedEvent_.get());
         return S_OK;
     }
 
@@ -235,21 +237,18 @@ public:
 
 private:
     std::atomic<ULONG> refCount_{1};
-    HANDLE completedEvent_ = nullptr;
+    // The async operation retains the handler. A late completion after caller
+    // timeout/cancellation must never signal a closed or reused handle.
+    ScopedHandle completedEvent_;
     std::mutex mutex_;
     HRESULT result_ = E_PENDING;
     Microsoft::WRL::ComPtr<IUnknown> activated_;
 };
 
-Microsoft::WRL::ComPtr<IAudioClient> ActivateProcessLoopbackAudioClient(uint32_t processId)
+Microsoft::WRL::ComPtr<IAudioClient> ActivateProcessLoopbackAudioClient(uint32_t processId, std::stop_token stop)
 {
     if (processId == 0) {
         throw std::runtime_error("Application audio capture requires a process id");
-    }
-
-    ScopedHandle completedEvent(CreateEventW(nullptr, FALSE, FALSE, nullptr));
-    if (!completedEvent) {
-        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "CreateEventW");
     }
 
     AUDIOCLIENT_ACTIVATION_PARAMS activationParams{};
@@ -264,7 +263,7 @@ Microsoft::WRL::ComPtr<IAudioClient> ActivateProcessLoopbackAudioClient(uint32_t
     activateProperties.blob.cbSize = sizeof(activationParams);
     activateProperties.blob.pBlobData = reinterpret_cast<BYTE*>(&activationParams);
 
-    auto* handler = new AudioInterfaceActivationHandler(completedEvent.get());
+    auto* handler = new AudioInterfaceActivationHandler();
     Microsoft::WRL::ComPtr<IActivateAudioInterfaceCompletionHandler> handlerGuard;
     handlerGuard.Attach(handler);
 
@@ -279,15 +278,13 @@ Microsoft::WRL::ComPtr<IAudioClient> ActivateProcessLoopbackAudioClient(uint32_t
         ThrowIfFailed(activateResult, "ActivateAudioInterfaceAsync(process loopback)");
     }
 
-    const DWORD waitResult = WaitForSingleObject(completedEvent.get(), 10'000);
-    if (waitResult != WAIT_OBJECT_0) {
-        // The async activation API owns callback timing. If it never signals, avoid
-        // deleting a handler that Windows could still call later.
-        handlerGuard.Detach();
-        if (waitResult == WAIT_TIMEOUT) {
-            throw std::runtime_error("ActivateAudioInterfaceAsync(process loopback) timed out");
-        }
-        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "WaitForSingleObject(process loopback activation)");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (true) {
+        if (stop.stop_requested()) throw std::runtime_error("Process audio activation cancelled");
+        const DWORD waitResult = WaitForSingleObject(handler->completedEvent(), 10);
+        if (waitResult == WAIT_OBJECT_0) break;
+        if (waitResult != WAIT_TIMEOUT) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "WaitForSingleObject(process loopback activation)");
+        if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("ActivateAudioInterfaceAsync(process loopback) timed out");
     }
 
     return handler->TakeAudioClient();
@@ -487,14 +484,14 @@ std::vector<AudioDeviceInfo> WasapiCapture::EnumerateDevices(AudioCaptureSource 
     return devices;
 }
 
-void WasapiCapture::Start(const AudioCaptureConfig& config)
+void WasapiCapture::Start(const AudioCaptureConfig& config, std::stop_token stop)
 {
     Stop();
     InitializeCom();
     config_ = config;
 
     if (config.source == AudioCaptureSource::ProcessOutput) {
-        audioClient_ = ActivateProcessLoopbackAudioClient(config.processId);
+        audioClient_ = ActivateProcessLoopbackAudioClient(config.processId, stop);
         deviceId_ = L"process:" + std::to_wstring(config.processId);
         deviceName_ = L"Application audio";
     } else {

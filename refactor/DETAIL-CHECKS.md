@@ -4,6 +4,22 @@ Saved: 2026-09-14. Implementation status: **Gate A passed for native integration
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+## Latest integration: live shared-audio selection — 2026-09-16
+
+- [x] Integrate bounded host audio selection through public session, Windows native
+  capture, actual Qt controls and timed CLI config, without membership requests.
+- [x] Preserve a healthy old source on startup/first-PCM failure, retain successful
+  selection across recording restart, and cancel pending operations on stop.
+- [x] Keep application capture buffering at 30ms across WASAPI and the new handoff;
+  support cancellation of process-loopback activation and safely own its event.
+- [x] Verify decoded silence/resume with four viewers and actual widgets, continuing
+  video, failed selection, Busy, timeout, shutdown and owner-thread destruction.
+- [ ] Validate physical audio-device switches/unplug/recovery and implement live
+  playback-device selection. Synthetic proofs do not establish physical latency.
+
+Evidence and timings: [CHECKPOINT-B.md](CHECKPOINT-B.md). Remaining grouped work is
+tracked in [TODO.md](TODO.md); older rows below are historical, not new batch goals.
+
 ## Start/resume instructions
 
 1. Read the complete plan before changing implementation.

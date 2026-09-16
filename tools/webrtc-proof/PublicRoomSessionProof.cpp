@@ -65,12 +65,19 @@ public:
         windows.preferences.resolution = ResolutionMode::Fixed;
         windows.preferences.width = 640; windows.preferences.height = 360; windows.preferences.fps = 30;
         windows.audioEndpoints = proof::SyntheticAudio(evidence_->audio);
+        windows.audioForSelection = proof::SyntheticAudioSelection;
         windows.frames = evidence_;
         native_ = WindowsRoomRuntimeFactory(std::move(windows))(identity, std::move(send));
 #else
         NativeRoomRuntimeOptions options;
-        options.engine = [evidence = evidence_] {
-            return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(proof::SyntheticAudio(evidence->audio),
+        auto endpoints = proof::SyntheticAudio(evidence_->audio);
+        if (identity.host) {
+            options.audioSwitch = std::make_shared<AudioSwitchControl>(screenshare::media::AudioSelection{}, endpoints.capture);
+            endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
+            options.audioForSelection = proof::SyntheticAudioSelection;
+        }
+        options.engine = [endpoints] {
+            return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
                 std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
         };
         options.capture = [] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); };
@@ -95,6 +102,8 @@ public:
     std::vector<std::string> FailedPeers() const override { return native_->FailedPeers(); }
     StreamUpdateResult UpdateStreamPreferences(const StreamPreferences& preferences) override { return native_->UpdateStreamPreferences(preferences); }
     StreamStatus StreamSettings() const override { return native_->StreamSettings(); }
+    std::future<AudioUpdateResult> SwitchAudioSource(screenshare::media::AudioSelection selection) override { return native_->SwitchAudioSource(std::move(selection)); }
+    AudioSelectionStatus AudioSelection() const override { return native_->AudioSelection(); }
     void Advance() override {
         try {
             native_->Advance();
@@ -155,6 +164,29 @@ int main(int argc, char** argv) {
             Check(joined.error == RoomError::None);
         }
         Wait([&] { for (auto& value : evidence) if (value->frames < 45 || value->audio->audibleBlocks < 20) return false; return host.Status().activePeers == 4; });
+        const auto beforeAudioSwitch = host.Status();
+        auto audioSwitch = host.SwitchAudioSource({AudioKind::Microphone});
+        Check(Get(audioSwitch).error == AudioUpdateError::None);
+        // Observe real decoded silence instead of assuming a fixed jitter/codec
+        // drain time. This is a correctness deadline, not a gaming latency gate.
+        const auto quietDeadline = std::chrono::steady_clock::now() + 3s;
+        while (!std::all_of(evidence.begin(), evidence.end(), [](const auto& value) { return value->audio->quietStreak >= 30; })) {
+            Check(std::chrono::steady_clock::now() < quietDeadline); std::this_thread::sleep_for(5ms);
+        }
+        std::array<uint64_t, 4> quietBlocks;
+        std::array<unsigned, 4> playingFrames;
+        for (size_t i = 0; i < 4; ++i) { quietBlocks[i] = evidence[i]->audio->audibleBlocks; playingFrames[i] = evidence[i]->frames; }
+        std::this_thread::sleep_for(300ms);
+        for (size_t i = 0; i < 4; ++i) {
+            if (evidence[i]->audio->audibleBlocks != quietBlocks[i] || evidence[i]->frames <= playingFrames[i])
+                std::cerr << "Audio switch viewer " << i << " nonzero blocks " << quietBlocks[i] << '/' << evidence[i]->audio->audibleBlocks
+                    << " frames " << playingFrames[i] << '/' << evidence[i]->frames << " peak " << evidence[i]->audio->lastPeak << '\n';
+            Check(evidence[i]->audio->audibleBlocks == quietBlocks[i] && evidence[i]->frames > playingFrames[i]);
+        }
+        audioSwitch = host.SwitchAudioSource({}); Check(Get(audioSwitch).error == AudioUpdateError::None);
+        Wait([&] { for (size_t i = 0; i < 4; ++i) if (evidence[i]->audio->audibleBlocks < quietBlocks[i] + 10) return false; return true; });
+        Check(host.Status().audio.revision == beforeAudioSwitch.audio.revision + 2 && host.Status().activePeers == 4 &&
+            host.Status().revision == beforeAudioSwitch.revision && host.Status().stream.requestedRevision == beforeAudioSwitch.stream.requestedRevision);
         Wait([&] { const auto peers = host.Status().stream.peers;
             return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) { return peer.transportSendBps.value_or(0) > 0; });
         });

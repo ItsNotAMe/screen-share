@@ -2,6 +2,7 @@
 #include "media/RoomPeerSignal.h"
 #include "media/StreamPreferences.h"
 #include "media/CaptureSelection.h"
+#include "media/AudioSelection.h"
 #include <functional>
 #include <future>
 #include <memory>
@@ -49,6 +50,7 @@ struct RoomStatus {
     RoomPolicy policy;
     std::vector<RoomMember> members;
     media::CaptureSelectionStatus capture;
+    media::AudioSelectionStatus audio;
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
 // into the public control API. All runtime methods execute on owned signaling.
@@ -69,6 +71,8 @@ public:
     virtual StreamStatus StreamSettings() const { return {}; }
     virtual std::future<media::CaptureUpdateResult> SwitchCaptureSource(media::CaptureSelection) { return media::CaptureUpdateReady(media::CaptureUpdateError::Unsupported); }
     virtual media::CaptureSelectionStatus CaptureSelection() const { return {}; }
+    virtual std::future<media::AudioUpdateResult> SwitchAudioSource(media::AudioSelection) { return media::CaptureUpdateReady(media::AudioUpdateError::Unsupported); }
+    virtual media::AudioSelectionStatus AudioSelection() const { return {}; }
     virtual std::shared_future<void> BeginStop() = 0;
 };
 struct RoomIdentity { bool host; std::string roomId, peerId; };
@@ -96,6 +100,9 @@ public:
     // first frame; it is not a remote-display acknowledgement. Failure keeps the
     // previous source when it remains healthy. Stop cancels pending completion.
     std::future<media::CaptureUpdateResult> SwitchCaptureSource(media::CaptureSelection);
+    // Host capture only, one pending handover. Requires an active recording
+    // endpoint (normally at least one viewer). Success means first PCM received.
+    std::future<media::AudioUpdateResult> SwitchAudioSource(media::AudioSelection);
     // One in-flight room/profile mutation. Completion is the server acknowledgement;
     // authoritative state arrives independently through pushed snapshots. Never
     // automatically retry Conflict or Unconfirmed (the server may have committed).

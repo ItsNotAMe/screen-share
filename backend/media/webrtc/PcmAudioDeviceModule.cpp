@@ -52,7 +52,7 @@ public:
             try {
                 auto device = endpoints_.capture();
                 if (!device) throw std::runtime_error("Missing PCM capture endpoint");
-                device->Start();
+                device->Start(stop);
                 recording_ = true; announced = true; ready.set_value(true);
                 PcmBlock block;
                 while (!stop.stop_requested() && device->Read(block, stop)) {

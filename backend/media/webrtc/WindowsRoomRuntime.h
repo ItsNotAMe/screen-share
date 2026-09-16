@@ -13,6 +13,8 @@ struct WindowsRoomRuntimeOptions {
     AudioCaptureConfig audio;
     std::wstring playbackDeviceId;
     std::optional<PcmEndpointFactories> audioEndpoints;
+    // Test/embedding override. Never fall back to physical capture when supplied.
+    std::function<AudioSwitchControl::Factory(AudioSelection)> audioForSelection;
     StreamPreferences preferences;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
     std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;

@@ -12,6 +12,10 @@ class PcmCaptureEndpoint {
 public:
     virtual ~PcmCaptureEndpoint() = default;
     virtual void Start() = 0;
+    // Start must be bounded. Implementations with asynchronous activation should
+    // interrupt that wait; adapters cannot preempt a blocking third-party driver.
+    // Read must honor stop promptly; destruction runs on the same capture worker.
+    virtual void Start(std::stop_token) { Start(); }
     virtual bool Read(PcmBlock&, std::stop_token) = 0;
     virtual uint32_t DelayMs() const = 0;
     virtual uint64_t DroppedFrames() const { return 0; }

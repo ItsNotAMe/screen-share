@@ -1,5 +1,16 @@
 # Headless media checks
 
+Live audio coverage is silent: `pcm-adm-lifecycle` exercises endpoint startup
+failure, a real five-second missing-PCM timeout with old audio continuing, Busy,
+successful changes, recording restart, cancellation during read and activation,
+bounded backlog, and owner-thread destruction. The public four-viewer scenario
+switches to silent PCM and back, checking decoded Opus on every viewer while frames
+continue. Actual Qt widgets and timed CLI configuration use the same public API;
+UI checks include a failed device selection and forbidden viewer operation.
+Windows variants use generated WGC windows with synthetic capture/playout audio.
+Do not enable physical playback to run these tests. Physical device loss/recovery
+and external end-to-end latency remain separate acceptance gates.
+
 Live source coverage uses actual widgets and scripted CLI changes. The UI scenario
 switches to a larger source, checks decoded dimensions with unchanged room/member/
 stream revisions, rejects viewer requests and confirms a failed replacement leaves

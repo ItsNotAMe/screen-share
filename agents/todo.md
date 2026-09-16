@@ -6,6 +6,11 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
+Live host audio-source switching is integrated through public session, native
+Windows binding, actual UI and timed CLI configuration. Keep testing silent.
+Remaining audio work includes live playback-device selection and physical-device
+loss/recovery acceptance; source-switch synthetic proofs do not close those gates.
+
 Execute the grouped delivery milestones in [refactor/TODO.md](../refactor/TODO.md).
 Native source roots are now backend/ and frontend/. RoomPeerNegotiation schedules
 its own completion/deadline work. RoomNetwork owns the dedicated networking loop;

@@ -29,6 +29,10 @@ private:
     QComboBox* captureSource_;
     QPushButton *switchCapture_, *refreshCapture_;
     QLabel* captureState_;
+    QComboBox *audioKind_, *audioDevice_;
+    QSpinBox* audioProcess_;
+    QPushButton *switchAudio_, *refreshAudio_;
+    QLabel* audioState_;
     QCheckBox* bitrateLimit_;
     QPushButton *apply_, *stop_;
     VideoFrameWidget* video_;

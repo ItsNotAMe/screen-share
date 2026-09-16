@@ -16,6 +16,8 @@ struct RoomSessionConfig {
     std::vector<RoomSettingsChange> changes;
     struct CaptureChange { std::chrono::milliseconds at; screenshare::media::CaptureSelection selection; };
     std::vector<CaptureChange> captureChanges;
+    struct AudioChange { std::chrono::milliseconds at; screenshare::media::AudioSelection selection; };
+    std::vector<AudioChange> audioChanges;
 };
 // Strict configuration; loopback is available only to injected test harnesses.
 RoomSessionConfig ParseRoomSessionConfig(const QJsonObject&, bool diagnosticLoopback = false);

@@ -1,5 +1,46 @@
 # Checkpoint B evidence
 
+## Live shared-audio selection — 2026-09-16
+
+The public RoomSession, native Windows runtime, opt-in host widgets and timed CLI
+configuration now share bounded audio-source handover. System output, microphone
+and process output can change without room/peer recreation. First replacement PCM
+commits an independent revision; startup failure or a five-second missing-PCM
+deadline preserves the old healthy source. Stop cancels pending commands and joins
+capture owners. Success persists across ADM recording incarnations. Recording must
+already be active; no service requests or automatic retries are added.
+
+The wrapper owns one current and at most one candidate producer, each retaining a
+single 10ms block. WASAPI retains at most 20ms of packet samples, preserving the
+30ms application capture handoff bound. Source cadence drives reads; missing input
+becomes silence and stale handoff blocks are discarded. Process activation's wait
+now accepts cancellation, and its callback owns the completion event rather than
+retaining a borrowed handle after timeout. Driver calls themselves are not preemptible.
+
+Validation (all audio synthetic, no physical input):
+- Full application suites: **19/19 Release (87.73s), 19/19 Debug (86.83s)**.
+- Final widget/CLI assertions: **2/2 Release (15.53s), 2/2 Debug (16.10s)**.
+- Native four-viewer/PCM lifecycle: **2/2 Release (17.07s), 2/2 Debug (17.12s)**.
+  Tests exercise decoded silence/resume on all four viewers with continuing video,
+  Busy, real five-second timeout, failed startup, bounded backlog, cancellation
+  during read/activation, recording restart and endpoint owner-thread destruction.
+- Final Windows UI: Release **10.891s**, Debug **11.728s**. Artifacts:
+  `build/webrtc/audio-switch-windows-ui-final/native-service-64f9c8af-5f52-4070-82db-cfbc12b86036`
+  and `build/webrtc/audio-switch-windows-ui-debug/native-service-ae4db56c-bec1-49fb-9dbf-aca85d9daa8b`.
+- Windows CLI: **6.708s**, artifact
+  `build/webrtc/audio-switch-windows-cli/native-service-60d4b9d2-ca09-40e4-b388-464ccdeef2aa`.
+- Windows four-viewer source switch: **12.592s**, artifact
+  `build/webrtc/audio-switch-windows-four-viewers/native-service-1b19b9a7-c873-472d-a825-363724940121`.
+- Build/test logs: `build/webrtc/audio-switch-*`.
+
+An initial four-viewer assertion assumed decoded audio would drain within 800ms;
+it failed while video continued, and diagnostics showed silence arriving later.
+The corrected correctness test observes 30 consecutive silent playout blocks within
+a three-second deadline before testing continued silence and explicit resume.
+This is not a gaming latency gate or evidence of sub-80ms playback. Physical WASAPI
+switch/unplug/recovery, live playback-device selection, external latency/resource
+acceptance and default-shell adoption remain open. Milestone 2 is not closed.
+
 ## Live video-source switching and decoder resize recovery — 2026-09-16
 
 Host display/window switching now uses one bounded public RoomSession operation,

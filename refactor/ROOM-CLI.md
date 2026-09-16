@@ -143,6 +143,30 @@ interactive UI errors leave the previous healthy source running. Stop resolves
 pending work and reports `capture-ended` when applicable. Audio selection does
 not change. No membership refresh, room recreation or new admission is needed.
 
+## Timed shared-audio changes
+
+Host configurations can supply up to 64 strictly ordered `audioChanges`, using
+the same public operation as the UI:
+
+```json
+"audioChanges": [
+  { "atMs": 5000, "source": "microphone", "deviceId": "" },
+  { "atMs": 10000, "source": "process", "processId": 1234 },
+  { "atMs": 15000, "source": "system" }
+]
+```
+
+An empty/omitted device ID selects the default endpoint. Process capture requires
+a nonzero process ID and no device ID; other sources reject a process ID. Times
+are relative to session start. Recording must already be active; schedule changes
+after viewers connect. There is one pending audio operation, with no automatic retry.
+The CLI emits `audio` results and `audioRevision` in status; a failed scripted change
+ends the run. Pending shutdown completion is reported as `audio-ended`. UI failures
+leave the session running. No credentials or endpoint identifiers are logged.
+
+The shared parser also applies these selection checks to startup audio. These
+changes affect host capture only; `playbackDeviceId` is still startup-only.
+
 ## Automated checks
 
 `room-v2-cli-entry` executes the shipped CLI and verifies argument handling,
