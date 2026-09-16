@@ -28,3 +28,11 @@ real-room headless scenario; normal UI/CLI facade adoption remains in progress.
 asynchronous send completions on signaling; `RoomSignalCodec` provides structural
 wire conversion after transport authentication. Both live in the shared
 ScreenShareRoomSession target. Consumers should not add a manual event pump.
+
+`api/RoomSession.h` is the asynchronous v2 room-session owner. It owns network and
+signaling executors, admission, authenticated routing, bounded reconnect policy,
+thread-safe status and an asynchronous media-drain barrier. A RoomRuntimeFactory
+constructs native media on signaling; no Qt/WebRTC types cross this control API.
+The headless public-session proof supplies synthetic capture/audio with real
+native peers. The default Windows runtime factory and UI/CLI selection are still
+pending; this API does not silently switch the legacy ScreenShareSession facade.

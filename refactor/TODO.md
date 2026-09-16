@@ -67,9 +67,13 @@ only collect frame/message evidence. RoomMediaSession now owns host/viewer
 membership reconciliation, bounded authenticated signal routing, transport-loss
 retirement and pending rejoin barriers. The scenario supplies native construction
 hooks and uses the coordinator to advance these sessions automatically.
-Next: expose owned admission/start/join/stop and session status through the normal
-facade, including recovery and user-visible state. Public API adoption and complete
-runtime ownership remain; the shared internal session is not yet UI/CLI cutover.
+The public v2 RoomSession now owns admission/start/stop, executors, routing,
+status and asynchronous media drain through an injected RoomRuntimeFactory.
+Its new real-service proof independently delivers H.264/Opus to four viewers.
+Next: supply the standard Windows media-runtime factory (capture/source settings,
+audio and presentation configuration), then wire UI/CLI to this owned API.
+The diagnostic factory validates the public lifecycle but is not the default
+production media composition. UI/CLI cutover and acceptance remain open.
 Do not add another event-pumping layer around the completed coordinator.
 
 - [ ] Complete the integrated media-session deliverable and headless scenarios.

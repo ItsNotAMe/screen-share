@@ -67,7 +67,16 @@ target_link_libraries(RoomMediaProof PRIVATE MfWebRTCCodecs ScreenShareNegotiati
 add_custom_command(TARGET RoomMediaProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>" "$<TARGET_FILE_DIR:RoomMediaProof>" VERBATIM)
 find_program(SCREENSHARE_NODE_EXECUTABLE node)
-if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../signaling-worker/node_modules/miniflare/package.json")
+  if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../signaling-worker/node_modules/miniflare/package.json")
+      add_executable(PublicRoomSessionProof PublicRoomSessionProof.cpp)
+      target_link_libraries(PublicRoomSessionProof PRIVATE MfWebRTCCodecs ScreenShareRoomSession)
+      add_custom_command(TARGET PublicRoomSessionProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+          "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>"
+          "$<TARGET_FILE_DIR:PublicRoomSessionProof>" VERBATIM)
+      add_test(NAME public-room-session-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+          "${CMAKE_CURRENT_LIST_DIR}/../../signaling-worker/tests/run-native-service.mjs"
+          "$<TARGET_FILE:PublicRoomSessionProof>" "${CMAKE_CURRENT_BINARY_DIR}/public-room-evidence" media)
+      set_tests_properties(public-room-session-media PROPERTIES TIMEOUT 90)
     add_test(NAME room-backed-four-peer-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
         "${CMAKE_CURRENT_LIST_DIR}/../../signaling-worker/tests/run-native-service.mjs"
         "$<TARGET_FILE:RoomMediaProof>" "${CMAKE_CURRENT_BINARY_DIR}/room-media-evidence" media)

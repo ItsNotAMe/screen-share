@@ -1,5 +1,14 @@
 # Headless media checks
 
+`public-room-session-media` exercises the public v2 RoomSession API against an
+isolated real Worker. It creates a host and four independent viewers, verifies
+decoded H.264 and audible Opus separately for each viewer, leaves cleanly, cancels
+admission, coalesces stop and holds a media-drain barrier to prove resources remain
+alive while stopping. It also checks production rejects plaintext loopback and
+unlisted room admission works. No Qt/event/SDP pump is exposed to the caller.
+Build PublicRoomSessionProof and run the CTest entry; the usual native-service
+harness records executable/Worker hashes and enforces a 60-second watchdog.
+
 `room-media-session` tests role-based membership, stale socket generations,
 peer-failure isolation without retry storms, asynchronous retirement/rejoin gates,
 cancelled pending peers, startup errors and event-count/byte-pressure termination.

@@ -1,5 +1,50 @@
 # Checkpoint B evidence
 
+## Public owned session lifecycle — 2026-09-16
+
+api/RoomSession.h now exposes asynchronous Start/Stop and thread-safe Status with
+portable options/results. It owns RoomNetwork, SignalingExecutor, admission,
+RoomSessionCoordinator, RoomMediaSession and an injected RoomRuntime. Native
+factory construction and destruction happen on signaling. Start resolves on the
+first authenticated snapshot, not the first decoded media frame. Repeated Start
+is Busy; Stop is coalesced and also cancels pending admission. Cancelled in-flight
+admission conservatively reports an unconfirmed outcome and is never retried.
+Membership credentials remain internal and are cleared after shutdown.
+
+Normal Stop sends peer.leave, waits up to one second for acknowledgement/closure,
+then closes sockets. Media BeginStop completion gates runtime destruction while
+Advance continues servicing cleanup. Stop/Status stay responsive during a held
+media barrier. External destruction joins only after this barrier; never destroy
+the facade inside its runtime callbacks. Runtime Ready/Remove are nonthrowing,
+RoomSend is signaling-only and reports queue acceptance, and BeginStop must return
+a valid completion future. A new admission uses a new RoomSession object.
+
+Transport recovery retains the existing socket implementation and adds a ceiling
+of three reconnect attempts per rolling minute and 35 seconds without a fresh
+snapshot. Protocol/backpressure failures are terminal. The lifecycle timer stops
+while healthy/idle; the existing coordinator continues media/event dispatch.
+Recovery policy exists but injected real transport impairment remains unverified.
+
+PublicRoomSessionProof uses only public Start/Stop/Status from the caller. Its
+injected diagnostic runtime combines shared native engine/peers/negotiation with
+HostMediaSession and synthetic source/audio. Four independent viewer engines each
+validate decoded H.264 and audible Opus. Coverage also includes duplicate Start,
+cancelled admission, unlisted create, graceful viewer departure, host closure,
+production TLS enforcement, coalesced stop and a deliberately held drain barrier.
+No physical input or caller Qt/WebRTC event pumping is involved.
+
+Full media suites pass **33/33 Debug and Release**. Logs:
+`build/webrtc/public-session-debug.log` and `public-session-release.log`.
+Application Release **13/13** and CLI-only Release **8/8** also pass; logs
+`build/webrtc/public-session-app.log` and `public-session-cli.log`.
+After final shutdown/cancellation/security cases, focused public-session checks
+pass again (Release 2.81 s, Debug 3.01 s; Testing/Temporary/LastTest.log).
+This is correctness evidence, not latency, NAT, resource or service-cost acceptance.
+
+Remaining: standard Windows RoomRuntimeFactory with production capture settings,
+audio and presentation, and normal UI/CLI adoption. The synthetic diagnostic
+composition is deliberately not installed as the default application backend.
+
 ## Shared room/media session composition — 2026-09-16
 
 RoomMediaSession, in ScreenShareRoomSession, now consumes authenticated room

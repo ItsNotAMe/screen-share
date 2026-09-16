@@ -2,6 +2,18 @@
 
 ## Current integration evidence — 2026-09-16
 
+Public api/RoomSession.h now owns one v2 session incarnation: Qt network loop,
+signaling executor, admission, coordinator, RoomMediaSession and injected runtime.
+Start resolves at authenticated snapshot; Stop coalesces and awaits network/media
+drain before signaling-side runtime destruction. Normal leave waits at most 1 s
+for acknowledgement, then closes transport. Snapshot/status excludes credentials.
+Transport recovery is bounded to three reconnects/minute and 35 s without a new
+snapshot. There is no automatic retry of ambiguous admission. PublicRoomSessionProof
+uses separate native engines for host/four viewers and individually observes
+H.264 frames/Opus, cancellation, TLS enforcement and held media-drain barrier.
+Next: standard Windows RoomRuntimeFactory/source-settings/presentation composition
+and UI/CLI adoption. The injected diagnostic runtime is not production default.
+
 RoomMediaSession now composes authenticated snapshots/signals with RoomPeerRoster
 for both host and viewer. It runs under RoomSessionCoordinator, bounds events to
 256/512 KiB, retires on transport loss, filters generations and isolates rejected
