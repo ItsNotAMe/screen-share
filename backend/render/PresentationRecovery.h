@@ -5,7 +5,7 @@
 #include <cstdint>
 
 namespace screenshare::media {
-// Owner-thread only. Never retain/retry a failed frame. A session gets at most
+// Shared UI/CLI/proof policy. Owner-thread only. Never retain/retry a failed frame. A session gets at most
 // three device rebuilds; a fourth failure is terminal even after a good frame.
 // This prevents intermittent driver failures from causing endless rebuilds.
 class PresentationRecovery {

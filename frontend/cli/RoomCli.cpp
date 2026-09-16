@@ -162,10 +162,19 @@ int RunRoomCli(int argc, char** argv) {
         if (!config.room.host && config.preview) { preview = std::make_unique<ReceiverPreviewWindow>(); preview->SetLowLatency(true); preview->Show(); }
         RoomCliHooks hooks;
         hooks.report = [](const auto& status) { std::cout << QJsonDocument(status).toJson(QJsonDocument::Compact).constData() << std::endl; };
+        uint64_t reportedPresentationErrors = 0;
         hooks.pump = [&] {
             if (preview) {
                 if (!preview->PumpMessages()) return false;
                 if (auto frame = frames->Take()) preview->PresentFrame(*frame);
+                const auto status = preview->presentationStats();
+                if (status.errors != reportedPresentationErrors) {
+                    reportedPresentationErrors = status.errors;
+                    const QJsonObject update{{"type", "presentation-status"}, {"errors", qint64(status.errors)},
+                        {"recoveries", qint64(status.recoveries)}, {"terminal", status.terminal},
+                        {"message", status.terminal ? "Video presentation failed. Leave and rejoin to retry; audio and room controls remain available." : "Video presentation is recovering."}};
+                    std::cout << QJsonDocument(update).toJson(QJsonDocument::Compact).constData() << std::endl;
+                }
             }
             return !interrupted.load();
         };
@@ -174,7 +183,10 @@ int RunRoomCli(int argc, char** argv) {
         const QJsonObject presentation{{"type", "presentation"}, {"received", qint64(statistics.received)}, {"replaced", qint64(statistics.replaced)},
             {"retained", qint64(statistics.retained)}, {"converted", qint64(statistics.converted)}, {"repacked", qint64(statistics.repacked)},
             {"presented", qint64(preview ? preview->framesPresented() : 0)}, {"dropped", qint64(preview ? preview->framesDropped() : 0)},
-            {"maximumFrameLatency", int(preview ? preview->maximumFrameLatency() : 0)}};
+            {"maximumFrameLatency", int(preview ? preview->maximumFrameLatency() : 0)},
+            {"errors", qint64(preview ? preview->presentationStats().errors : 0)},
+            {"recoveries", qint64(preview ? preview->presentationStats().recoveries : 0)},
+            {"terminal", preview && preview->presentationStats().terminal}};
         std::cout << QJsonDocument(presentation).toJson(QJsonDocument::Compact).constData() << std::endl;
         return result;
     } catch (const std::exception& error) {

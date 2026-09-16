@@ -749,4 +749,12 @@ void Nv12D3D11Presenter::Reset()
     impl_->ResetDevice();
 }
 
+void Nv12D3D11Presenter::Redraw()
+{
+    if (impl_->swapChain) {
+        ThrowIfFailed(impl_->device->GetDeviceRemovedReason(), "Presentation redraw device health");
+        impl_->Render();
+    }
+}
+
 } // namespace screenshare

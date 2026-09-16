@@ -4,7 +4,21 @@ Saved: 2026-09-14. Implementation status: **Gate A passed for native integration
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
-## Latest integration: bounded UI presentation recovery — 2026-09-16
+## Latest integration: shared UI/CLI presentation — 2026-09-17
+
+- [x] Move presentation ownership/recovery into backend/render; both frontends use
+  the same native renderer, typed errors, three-rebuild budget and backoff.
+- [x] Remove the duplicate CLI D3D/shader/texture/swap-chain/viewport implementation.
+- [x] Preserve preview sizing, fit/1:1, fullscreen, minimize/restore, audio callbacks
+  and legacy/retained frame entry points; avoid extra frame copies/queues.
+- [x] Add CLI terminal title/JSON diagnostics, bounded error reporting, callback
+  exception containment, resource release before HWND destruction and local close.
+- [x] Verify actual UI/CLI GPU resource recreation and lifecycle under injected
+  failures, including resize failures and two-window close isolation.
+- [ ] Complete physical driver loss/hangs, hardware decode/GPU zero-copy and
+  external image/input latency acceptance; correctness tests do not close them.
+
+## Bounded UI presentation recovery — 2026-09-16
 
 - [x] Adopt the existing recovery policy in the actual UI worker, including attach,
   resize and presentation errors; three lifetime rebuilds and 250 ms drop-only backoff.

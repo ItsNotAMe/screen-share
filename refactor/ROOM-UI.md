@@ -8,6 +8,13 @@ appearance/usability redesign stays after milestones 1–5.
 
 ## Presentation recovery
 
+UI and CLI now use `backend/render/FramePresentationBackend` and
+`FramePresentationSession`; recovery is in `backend/render/PresentationRecovery.h`.
+The frontend owns only Qt integration, the existing one-slot worker queue and
+presentation timing counters. Backend construction/destruction stay on that worker.
+The native renderer receives a synchronous borrowed NV12 view while the queued
+frame retains the pixel owner. No additional pixel copy or queue is introduced.
+
 The shared video widget permits three device rebuilds per session, with a 250 ms
 drop-only backoff after each recoverable DXGI failure. Successful frames do not
 reset the budget. A fourth failure or a nonrecoverable error stops renderer calls;

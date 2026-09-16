@@ -1,5 +1,58 @@
 # Checkpoint B evidence
 
+## Shared UI/CLI presentation backend and complete preview lifecycle — 2026-09-17
+
+Moved FramePresentationBackend and the common recovery policy into backend/render.
+FramePresentationSession now owns factory/error handling, recovery, terminal state
+and diagnostics for both the Qt worker and Win32 CLI preview. The renderer borrows
+NV12 pixels synchronously while callers retain ownership. No additional queue,
+thread or pixel copy is introduced. UI still owns its latest-only worker queue.
+
+Removed the CLI's duplicate D3D device/shader/texture/swap-chain/viewport pipeline
+(ReceiverPreviewWindow.cpp loses roughly 500 net lines). The preview retains its
+window controls and legacy/retained frame overloads, delegates GPU work to the same
+native backend as the UI, validates shapes before sizing, and skips minimized
+frames. A separate redraw operation preserves scaling/resize/clear behavior without
+counting old-frame redraws as fresh frames.
+
+The CLI now recovers from present/resize device errors with the same lifetime
+three-rebuild/250 ms policy. Exhaustion stops renderer calls, preserves audio/room
+membership, exposes a persistent terminal title and emits bounded JSON status on
+error transitions. Final telemetry includes errors/recoveries/terminal. Repeated
+unchanged titles do not issue Win32 updates. Callback exceptions are contained;
+native resources are released before HWND destruction. Closing a preview uses its
+local close flag rather than posting WM_QUIT into another window's event loop.
+
+Validation (synthetic silent audio; direct messages only to test-owned HWNDs):
+- Full application suites: **19/19 Release (89.63s), Debug (90.65s)**.
+- Final focused CLI/worker checks pass in both builds. One final Release UI run
+  exposed an existing readiness race: room ID/backend Active could precede the Qt
+  snapshot enabling Copy room link. The test now waits for button enablement.
+  Three subsequent UI runs each passed: Release **26.72s**, Debug **28.27s** total.
+- Final Windows CLI: **8.430s Release, 8.367s Debug**. Tests actual GPU recreation
+  after injected present and resize faults, backoff/no renderer calls, fourth-failure
+  exhaustion, terminal-title persistence, clear/reuse, fit/1:1/fullscreen restoration,
+  minimize/restore, mute/volume callbacks, malformed/legacy frame entry points and
+  two-window close isolation. The fullscreen check excludes WS_VISIBLE, which
+  ShowWindow/SetWindowPlacement manage separately from the restored frame style.
+- Final Windows UI: **13.018s Release, 13.512s Debug**, including real resource
+  recreation, budget exhaustion/clear and measured DXGI maximum frame latency 1.
+- Standalone PresentationRecoveryTest rebuilt at its new include path and passed.
+
+Artifacts:
+- `build/webrtc/shared-presentation-tests-{release,debug}.log`
+- `build/webrtc/shared-presentation-final-tests-{release,debug}.log`
+- `build/webrtc/shared-presentation-ui-repeat-{release,debug}.log`
+- `build/webrtc/shared-presentation-cli-release-final/native-service-7ae6eb5f-41ec-4b5f-8c94-7d4c24e0ea80`
+- `build/webrtc/shared-presentation-cli-debug-final/native-service-55725007-b849-44a7-a9f9-f0bd6f94295f`
+- `build/webrtc/shared-presentation-ui-release-final/native-service-702d3c5b-b0c3-479a-90f9-81c27910a685`
+- `build/webrtc/shared-presentation-ui-debug-final/native-service-0b9a86e8-fc75-47b2-8a92-0c720388f677`
+
+This closes duplicate-renderer cleanup and CLI preview recovery integration.
+Physical driver loss/hangs, GPU zero-copy/hardware decode, gaming input, default
+cutover and external performance/resource acceptance remain open. Grouped pending
+work in agents/todo.md now replaces stale instructions to rebuild completed facades.
+
 ## Integrated UI presentation recovery — 2026-09-16
 
 The actual VideoFrameWidget worker now uses the existing PresentationRecovery

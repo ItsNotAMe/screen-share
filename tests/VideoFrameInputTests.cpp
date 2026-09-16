@@ -28,17 +28,17 @@ class TestRenderer final : public FramePresentationBackend {
 public:
     explicit TestRenderer(std::shared_ptr<RendererEvidence> state) : state_(std::move(state)) { state_->owner = std::this_thread::get_id(); }
     ~TestRenderer() override { CheckThread(); state_->destroyed = true; }
-    bool Present(HWND, uint32_t, uint32_t, bool, bool, const screenshare::Nv12VideoFrame& frame) override {
+    bool Present(HWND, uint32_t, uint32_t, bool, bool, const screenshare::Nv12D3D11Presenter::FrameView& frame, screenshare::Nv12D3D11Presenter::ScaleMode) override {
         CheckThread(); ++state_->calls;
         if (state_->block) {
             state_->entered = true;
             while (state_->block) std::this_thread::sleep_for(1ms);
         }
         if (FAILED(state_->failure.load())) throw screenshare::PresentationError(state_->failure, "Injected renderer failure");
-        if (frame.pixels().size() != 6) throw std::runtime_error("Invalid test pixels");
+        if (frame.dataSize != 6) throw std::runtime_error("Invalid test pixels");
         return true;
     }
-    void Update(HWND, uint32_t, uint32_t, bool, bool) override { CheckThread(); }
+    void Update(HWND, uint32_t, uint32_t, bool, bool, screenshare::Nv12D3D11Presenter::ScaleMode) override { CheckThread(); }
     void Reset() noexcept override { CheckThread(); ++state_->resets; }
     uint32_t MaximumFrameLatency() const noexcept override { return 1; }
 };

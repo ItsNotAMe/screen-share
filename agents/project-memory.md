@@ -1,5 +1,23 @@
 # Project Memory
 
+## Shared UI/CLI presentation — 2026-09-17
+
+FramePresentationBackend.h/.cpp and PresentationRecovery.h now live in backend/render;
+the frontend-only header and media/webrtc policy path are removed. UI worker and
+CLI preview both own a FramePresentationSession on their existing owner thread.
+It centralizes factory/error handling, three-rebuild/250ms policy and terminal stats.
+FrameView is borrowed synchronously; the caller owns pixels. No new copies/queues.
+ReceiverPreviewWindow no longer owns duplicate D3D shaders/textures/swap-chain code.
+Keep its window/keyboard controls, source sizing and legacy overload until cutover.
+CLI reports presentation-status on errors and errors/recoveries/terminal at exit;
+terminal renderer failure does not stop audio/membership. A terminal title cannot
+be overwritten by normal status updates; unchanged titles avoid Win32 calls.
+Preview closure releases resources and sets its local flag instead of posting
+thread-wide WM_QUIT. Win32 callback exceptions are contained. Tests cover real
+GPU rebuild/resize loss, fullscreen/scaling/minimize, malformed and legacy frames,
+independent preview closure and owner/queue lifetime. No physical input/audio.
+UI copy-link test now waits for actual button enablement, not merely room ID.
+
 ## UI presentation recovery — 2026-09-16
 
 VideoFrameWidget's existing worker now owns a FramePresentationBackend (factory

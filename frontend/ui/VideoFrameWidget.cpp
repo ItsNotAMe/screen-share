@@ -1,7 +1,6 @@
 #include "ui/VideoFrameWidget.h"
 
 #include "render/Nv12D3D11Presenter.h"
-#include "media/webrtc/PresentationRecovery.h"
 
 #include <QtGui/QPainter>
 #include <QtGui/QPaintEngine>
@@ -22,34 +21,6 @@
 #include <optional>
 #include <thread>
 #include <utility>
-
-class NativeFramePresentation final : public FramePresentationBackend {
-    screenshare::Nv12D3D11Presenter presenter_;
-    bool lowLatency_ = false;
-public:
-    bool Present(HWND window, uint32_t width, uint32_t height, bool smooth,
-        bool lowLatency, const screenshare::Nv12VideoFrame& frame) override {
-        if (!window || !IsWindow(window)) { Reset(); return false; }
-        Update(window, width, height, smooth, lowLatency);
-        const auto pixels = frame.pixels();
-        return presenter_.TryPresent({frame.width, frame.height, pixels.data(), pixels.size()});
-    }
-    void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency) override {
-        if (!window || !IsWindow(window)) { Reset(); return; }
-        if (lowLatency_ != lowLatency) {
-            presenter_.Reset(); presenter_.SetLowLatency(lowLatency); lowLatency_ = lowLatency;
-        }
-        presenter_.Attach(window);
-        presenter_.Resize(width, height);
-        presenter_.SetLinearSampling(smooth);
-    }
-    void Reset() noexcept override { presenter_.Reset(); }
-    uint32_t MaximumFrameLatency() const noexcept override { return presenter_.maximumFrameLatency(); }
-};
-
-std::unique_ptr<FramePresentationBackend> CreateNativeFramePresentation() {
-    return std::make_unique<NativeFramePresentation>();
-}
 
 class D3DFramePresenter final {
 public:
@@ -190,86 +161,51 @@ private:
 
     void run(const FramePresentationFactory& factory)
     {
-        std::unique_ptr<FramePresentationBackend> presenter;
-        screenshare::media::PresentationRecovery recovery;
+        FramePresentationSession presenter(factory);
+        bool active = false;
         for (;;) {
             Work work;
             {
                 std::unique_lock lock(mutex_);
                 condition_.wait(lock, [this] {
-                    return stopping_ ||
-                           pendingFrame_.has_value() ||
-                           resizePending_ ||
-                           smoothPending_ ||
-                           clearPending_;
+                    return stopping_ || pendingFrame_ || resizePending_ || smoothPending_ || clearPending_;
                 });
-                if (stopping_) {
-                    break;
-                }
-
+                if (stopping_) break;
                 work.hwnd = hwnd_;
                 work.width = width_;
                 work.height = height_;
                 work.smoothScaling = smoothScaling_;
-                work.resizePending = resizePending_;
-                work.smoothPending = smoothPending_;
                 work.clearPending = clearPending_;
                 work.lowLatency = lowLatency_;
                 work.frame = std::move(pendingFrame_);
                 pendingFrame_.reset();
                 queuedFrames_.store(0, std::memory_order_release);
-                resizePending_ = false;
-                smoothPending_ = false;
-                clearPending_ = false;
+                resizePending_ = smoothPending_ = clearPending_ = false;
             }
-
-            if (work.clearPending) {
-                if (presenter) presenter->Reset();
-                recovery = {};
-                recoveries_ = 0;
-                maximumFrameLatency_ = 0;
-                terminal_ = false;
+            if (work.clearPending) { presenter.Clear(); active = false; }
+            const auto started = std::chrono::steady_clock::now();
+            bool presented = false;
+            if (work.frame) {
+                active = true;
+                const auto pixels = work.frame->pixels();
+                presented = presenter.Present(work.hwnd, work.width, work.height, work.smoothScaling,
+                    work.lowLatency, {work.frame->width, work.frame->height, pixels.data(), pixels.size()});
+            } else if (active) {
+                presenter.Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
             }
-            if (!work.frame && (!presenter || work.clearPending)) continue;
-            if (terminal_) { if (work.frame) ++droppedFrames_; continue; }
-            try {
-                if (work.hwnd == nullptr) {
-                    if (presenter) presenter->Reset();
-                    if (work.frame) ++droppedFrames_;
-                    continue;
-                }
-                {
-                    const auto presentStarted = std::chrono::steady_clock::now();
-                    const bool presented = recovery.Present([&] {
-                        if (!presenter) presenter = factory ? factory() : CreateNativeFramePresentation();
-                        if (!presenter) throw std::runtime_error("Missing presentation backend");
-                        try {
-                            if (!work.frame) {
-                                presenter->Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
-                                return true;
-                            }
-                            return presenter->Present(work.hwnd, work.width, work.height,
-                                work.smoothScaling, work.lowLatency, *work.frame);
-                        } catch (...) { ++presentErrors_; throw; }
-                    }, [&] { if (presenter) presenter->Reset(); });
-                    recoveries_ = recovery.recoveries();
-                    maximumFrameLatency_ = presenter ? presenter->MaximumFrameLatency() : 0;
-                    if (!work.frame) continue;
-                    if (!presented) { ++droppedFrames_; continue; }
-                    const auto presentElapsed = std::chrono::steady_clock::now() - presentStarted;
-                    const auto presentMicros = static_cast<std::uint64_t>(
-                        std::chrono::duration_cast<std::chrono::microseconds>(presentElapsed).count());
-                    totalPresentMicros_.fetch_add(presentMicros, std::memory_order_relaxed);
-                    lastPresentMicros_.store(presentMicros, std::memory_order_relaxed);
-                    recordMax(maxPresentMicros_, presentMicros);
-                    presentedFrames_.fetch_add(1, std::memory_order_relaxed);
-                }
-            } catch (const std::exception&) {
-                if (work.frame) ++droppedFrames_;
-                if (presenter) presenter->Reset();
-                maximumFrameLatency_ = 0;
-                terminal_ = true;
-            }
+            const auto status = presenter.statistics();
+            presentErrors_ = status.errors;
+            recoveries_ = status.recoveries;
+            maximumFrameLatency_ = status.maximumFrameLatency;
+            terminal_.store(status.terminal, std::memory_order_release);
+            if (!work.frame) continue;
+            if (!presented) { ++droppedFrames_; continue; }
+            const auto micros = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - started).count());
+            totalPresentMicros_.fetch_add(micros, std::memory_order_relaxed);
+            lastPresentMicros_.store(micros, std::memory_order_relaxed);
+            recordMax(maxPresentMicros_, micros);
+            presentedFrames_.fetch_add(1, std::memory_order_relaxed);
         }
     }
 

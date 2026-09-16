@@ -1,5 +1,17 @@
 # Headless media checks
 
+UI/CLI presentation now shares `backend/render/FramePresentationBackend` and
+`FramePresentationSession`. The existing `video-frame-input` worker scenarios
+exercise that shared policy. The Windows CLI scenario additionally covers real
+GPU recreation after injected present/resize loss, bounded recovery, terminal title
+persistence, explicit clear/reuse, fit/1:1 and fullscreen restore, minimize/drop,
+audio-control callbacks, malformed/legacy frames and independent window closure.
+These controls use direct messages only to generated test HWNDs, never SendInput
+or physical keyboard/mouse events. Audio remains synthetic and silent.
+
+The UI copy-link test waits for its button to become enabled, since backend Active
+status/room ID can precede the Qt snapshot that enables the control.
+
 `video-frame-input` now also tests the actual asynchronous presentation worker
 with an injected backend: three recoveries despite intervening good frames,
 250 ms drop-only backoff, fourth-failure exhaustion, nonrecoverable errors, explicit

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/ScreenShareSession.h"
-#include "ui/FramePresentationBackend.h"
+#include "render/FramePresentationBackend.h"
 
 #include <QtGui/QImage>
 #include <QtWidgets/QWidget>

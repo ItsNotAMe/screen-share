@@ -204,6 +204,34 @@ only the latest received frame is retained until shutdown. Counts describe local
 handoff/presentation operations, not physical display latency. Software decode and
 CPU-to-GPU upload remain; the record does not imply GPU zero-copy decoding.
 
+## Shared renderer and preview recovery
+
+ReceiverPreviewWindow is now a Win32 window/control adapter around the same
+backend-owned renderer/session as the UI. Its duplicate D3D device, shader,
+texture, viewport and swap-chain pipeline has been removed. It retains fit/1:1,
+F11/Alt-Enter fullscreen, Escape, mute/volume callbacks, first-frame sizing and both
+legacy/retained NV12 entry points. Invalid shapes are rejected before window sizing.
+Redraw is separate from fresh-frame accounting; minimized frames are discarded.
+
+Device-loss recovery permits three rebuilds, with 250 ms drop-only backoff. Good
+frames do not replenish the budget; a fourth or nonrecoverable failure becomes
+terminal. The title then displays a rejoin instruction, and the shipped v2 CLI emits
+a bounded `presentation-status` record per error transition. Audio and membership
+continue. The final `presentation` record now includes `errors`, `recoveries` and
+`terminal`. Ordinary status updates cannot overwrite the terminal title.
+
+Explicit ClearFrame resets resources and the session recovery budget. Native
+resources are released before window destruction. Closing a preview no longer
+posts thread-wide WM_QUIT, so other previews/Qt windows can continue pumping.
+Win32 callbacks contain exceptions rather than unwinding through system code.
+Titles update only when changed, avoiding a SetWindowText call for every frame.
+
+Windows coverage injects failures after real GPU work and during resize, checks
+recovery/exhaustion/clear, scaling/fullscreen/minimize/restore, control callbacks,
+malformed frames, legacy-frame compatibility and closing one of two previews.
+Only direct messages to test-owned HWNDs are used; no physical input or sound.
+Physical driver removal/hangs and external image/input latency remain separate gates.
+
 ## Automated checks
 
 `room-v2-cli-entry` executes the shipped CLI and verifies argument handling,

@@ -107,6 +107,10 @@ The actual UI presentation worker now uses the shared three-rebuild/250 ms recov
 policy, releases failed frames, stops on exhaustion/nonrecoverable errors, and
 reports a visible rejoin instruction. Headless pressure/failure tests and injected
 loss with real GPU resource recreation cover this path; physical driver loss remains open.
+UI and CLI now share the backend-owned renderer/session and recovery policy.
+The duplicate CLI D3D pipeline has been removed; preview controls, legacy frame
+entry points, terminal diagnostics, resize recovery and independent window closure
+are covered by the integrated presentation tests. Do not recreate a second renderer.
 Default-shell adoption, input consent/control, hardware decode/GPU zero-copy
 presentation and physical audio-device loss/recovery acceptance remain.
 This milestone is not complete and defaults are unchanged.

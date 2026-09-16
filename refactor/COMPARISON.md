@@ -26,6 +26,12 @@ and Qt frame/presentation statistics expose those local operations. This is a
 specific implementation improvement, not a matched legacy/v2 CPU/GPU or external
 latency result. Software decode and CPU-to-GPU upload still occur.
 
+UI and CLI now use one backend-owned native renderer and recovery session; the
+duplicate CLI D3D pipeline is removed. Injected GPU-loss/resize tests demonstrate
+bounded recovery and terminal handling in both frontends. This reduces duplicated
+implementation and closes a CLI correctness gap, but does not establish a CPU/GPU
+speedup, physical-driver recovery or end-to-end gaming latency improvement.
+
 Historical baseline details are in CLOSEOUT-A.md. It used local plaintext,
 mostly unchanged desktop content, no presentation/audio and a Debug binary.
 Do not compare its averages to V2 hardware maxima, synthetic capture timing or

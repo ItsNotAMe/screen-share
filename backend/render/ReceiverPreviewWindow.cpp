@@ -1,15 +1,8 @@
 #include "render/ReceiverPreviewWindow.h"
 
-#include <d3dcompiler.h>
-#include <dxgi1_4.h>
 
 #include <algorithm>
-#include <cstddef>
 #include <cmath>
-#include <cstring>
-#include <iterator>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,48 +12,6 @@ namespace screenshare {
 namespace {
 
 constexpr const wchar_t* WindowClassName = L"ScreenShareReceiverPreviewWindow";
-
-struct PreviewConstants {
-    float lumaTexelWidth = 1.0f;
-    float lumaTexelHeight = 1.0f;
-    float sharpenAmount = 0.0f;
-    float padding = 0.0f;
-};
-
-std::string HResultMessageLocal(HRESULT hr)
-{
-    char* buffer = nullptr;
-    const DWORD size = FormatMessageA(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        nullptr,
-        static_cast<DWORD>(hr),
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        reinterpret_cast<LPSTR>(&buffer),
-        0,
-        nullptr);
-
-    if (size > 0 && buffer != nullptr) {
-        std::string message(buffer, size);
-        LocalFree(buffer);
-
-        while (!message.empty() && (message.back() == '\r' || message.back() == '\n' || message.back() == ' ')) {
-            message.pop_back();
-        }
-
-        return message;
-    }
-
-    std::ostringstream stream;
-    stream << "HRESULT 0x" << std::hex << std::uppercase << static_cast<unsigned long>(hr);
-    return stream.str();
-}
-
-void ThrowIfFailed(HRESULT hr, const char* operation)
-{
-    if (FAILED(hr)) {
-        throw std::runtime_error(std::string(operation) + " failed: " + HResultMessageLocal(hr));
-    }
-}
 
 std::wstring PreviewTitle(std::string_view statusText, PreviewScaleMode scaleMode, bool fullscreen)
 {
@@ -80,39 +31,6 @@ std::wstring PreviewTitle(std::string_view statusText, PreviewScaleMode scaleMod
         title.push_back(static_cast<wchar_t>(static_cast<unsigned char>(character)));
     }
     return title;
-}
-
-Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const char* source, const char* entryPoint, const char* target)
-{
-    Microsoft::WRL::ComPtr<ID3DBlob> shader;
-    Microsoft::WRL::ComPtr<ID3DBlob> errors;
-
-    const HRESULT result = D3DCompile(
-        source,
-        std::strlen(source),
-        nullptr,
-        nullptr,
-        nullptr,
-        entryPoint,
-        target,
-        D3DCOMPILE_ENABLE_STRICTNESS,
-        0,
-        &shader,
-        &errors);
-
-    if (FAILED(result)) {
-        std::string message = HResultMessageLocal(result);
-        if (errors) {
-            message += ": ";
-            message.append(
-                static_cast<const char*>(errors->GetBufferPointer()),
-                errors->GetBufferSize());
-        }
-
-        throw std::runtime_error("D3DCompile failed for " + std::string(entryPoint) + ": " + message);
-    }
-
-    return shader;
 }
 
 void RegisterPreviewWindowClass()
@@ -143,59 +61,6 @@ void RegisterPreviewWindowClass()
 uint32_t ClampDimension(int value)
 {
     return static_cast<uint32_t>(std::max(1, value));
-}
-
-void ValidateNv12Frame(int width, int height, size_t bytes)
-{
-    if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
-        throw std::runtime_error("Decoded preview frame dimensions are not available");
-    }
-    if ((width % 2) != 0 || (height % 2) != 0) {
-        throw std::runtime_error("Decoded preview frame dimensions must be even for NV12");
-    }
-
-    const uint64_t lumaBytes = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
-    const uint64_t requiredBytes = lumaBytes + lumaBytes / 2;
-    if (requiredBytes > std::numeric_limits<size_t>::max() || bytes < static_cast<size_t>(requiredBytes)) {
-        throw std::runtime_error("Decoded preview NV12 frame data is too small");
-    }
-}
-
-void SetSwapChainSdrColorSpace(IDXGISwapChain* swapChain)
-{
-    if (swapChain == nullptr) {
-        return;
-    }
-
-    Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain3;
-    if (FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&swapChain3)))) {
-        return;
-    }
-
-    UINT colorSpaceSupport = 0;
-    if (FAILED(swapChain3->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, &colorSpaceSupport))) {
-        return;
-    }
-    if ((colorSpaceSupport & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == 0) {
-        return;
-    }
-
-    static_cast<void>(swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
-}
-
-void DisableDxgiDefaultAltEnter(IDXGISwapChain* swapChain, HWND hwnd)
-{
-    if (swapChain == nullptr || hwnd == nullptr) {
-        return;
-    }
-
-    Microsoft::WRL::ComPtr<IDXGIFactory> factory;
-    ThrowIfFailed(
-        swapChain->GetParent(IID_PPV_ARGS(&factory)),
-        "IDXGISwapChain::GetParent(receiver preview factory)");
-    ThrowIfFailed(
-        factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER),
-        "IDXGIFactory::MakeWindowAssociation(receiver preview)");
 }
 
 SIZE FitFrameToWorkArea(HWND hwnd, int width, int height)
@@ -242,13 +107,14 @@ void ResizeWindowClientTo(HWND hwnd, int clientWidth, int clientHeight)
 
 } // namespace
 
-ReceiverPreviewWindow::ReceiverPreviewWindow()
+ReceiverPreviewWindow::ReceiverPreviewWindow(FramePresentationFactory factory) : presenter_(std::move(factory))
 {
     windowedPlacement_.length = sizeof(windowedPlacement_);
 }
 
 ReceiverPreviewWindow::~ReceiverPreviewWindow()
 {
+    presenter_.Release();
     if (hwnd_ != nullptr) {
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
@@ -285,59 +151,33 @@ void ReceiverPreviewWindow::PresentFrame(const Nv12VideoFrame& frame)
     PresentPixels(frame.width, frame.height, frame.pixels());
 }
 void ReceiverPreviewWindow::SetLowLatency(bool enabled) {
-    if (device_) throw std::logic_error("Set latency mode before opening preview");
+    if (hwnd_) throw std::logic_error("Set latency mode before opening preview");
     lowLatency_ = enabled;
 }
 void ReceiverPreviewWindow::PresentPixels(int width, int height, std::span<const uint8_t> pixels)
 {
-    if (closeRequested_) {
-        return;
-    }
-    ValidateNv12Frame(width, height, pixels.size());
-
+    if (closeRequested_) return;
+    // Validate before using dimensions to resize the native window. The shared
+    // renderer also validates the full view before GPU upload.
+    if (width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
+        width % 2 || height % 2 || pixels.size() < size_t(width) * size_t(height) * 3 / 2)
+        throw std::invalid_argument("Invalid preview NV12 frame");
     EnsureWindow(width, height);
     SizeWindowForFirstFrame(width, height);
-    EnsureFrameTextures(width, height);
-
-    const size_t lumaBytes = static_cast<size_t>(width) * static_cast<size_t>(height);
-    const auto* luma = pixels.data();
-    const auto* chroma = luma + lumaBytes;
-
-    context_->UpdateSubresource(
-        lumaTexture_.Get(),
-        0,
-        nullptr,
-        luma,
-        static_cast<UINT>(width),
-        0);
-    context_->UpdateSubresource(
-        chromaTexture_.Get(),
-        0,
-        nullptr,
-        chroma,
-        static_cast<UINT>(width),
-        0);
-
-    frameWidth_ = width;
-    frameHeight_ = height;
-    if (Render()) ++framesPresented_; else ++framesDropped_;
+    UpdateClientSize();
+    frameWidth_ = width; frameHeight_ = height;
+    const bool presented = presenter_.Present(hwnd_, clientWidth_, clientHeight_, true, lowLatency_,
+        {width, height, pixels.data(), pixels.size()},
+        scaleMode_ == PreviewScaleMode::Fit ? Nv12D3D11Presenter::ScaleMode::Fit : Nv12D3D11Presenter::ScaleMode::OriginalSize);
+    if (presented) ++framesPresented_; else ++framesDropped_;
+    RefreshTitle();
 }
 
 void ReceiverPreviewWindow::ClearFrame()
 {
-    if (closeRequested_) {
-        return;
-    }
-
-    EnsureWindow(frameWidth_ > 0 ? frameWidth_ : 960, frameHeight_ > 0 ? frameHeight_ : 540);
-    lumaView_.Reset();
-    chromaView_.Reset();
-    lumaTexture_.Reset();
-    chromaTexture_.Reset();
-    lumaDesc_ = {};
-    chromaDesc_ = {};
-    frameWidth_ = 0;
-    frameHeight_ = 0;
+    if (closeRequested_) return;
+    presenter_.Clear();
+    frameWidth_ = frameHeight_ = 0;
     Render();
 }
 
@@ -365,7 +205,12 @@ LRESULT CALLBACK ReceiverPreviewWindow::StaticWindowProc(HWND hwnd, UINT message
     }
 
     if (window != nullptr) {
-        return window->WindowProc(message, wParam, lParam);
+        try { return window->WindowProc(message, wParam, lParam); }
+        catch (...) {
+            // Never unwind C++ exceptions through the Win32 callback boundary.
+            window->closeRequested_ = true;
+            return 0;
+        }
     }
 
     return DefWindowProcW(hwnd, message, wParam, lParam);
@@ -414,18 +259,17 @@ LRESULT ReceiverPreviewWindow::WindowProc(UINT message, WPARAM wParam, LPARAM lP
         return DefWindowProcW(hwnd_, message, wParam, lParam);
     case WM_CLOSE:
         closeRequested_ = true;
+        presenter_.Release();
         DestroyWindow(hwnd_);
         return 0;
     case WM_DESTROY:
         closeRequested_ = true;
         hwnd_ = nullptr;
-        PostQuitMessage(0);
         return 0;
     case WM_SIZE:
         if (wParam != SIZE_MINIMIZED) {
             clientWidth_ = ClampDimension(LOWORD(lParam));
             clientHeight_ = ClampDimension(HIWORD(lParam));
-            swapChainResizePending_ = true;
             Render();
         }
         return 0;
@@ -471,78 +315,7 @@ void ReceiverPreviewWindow::EnsureWindow(int preferredWidth, int preferredHeight
     ShowWindow(hwnd_, SW_SHOWNORMAL);
     UpdateWindow(hwnd_);
     UpdateClientSize();
-    CreateDeviceAndSwapChain();
-    EnsurePipeline();
-}
-
-void ReceiverPreviewWindow::CreateDeviceAndSwapChain()
-{
-    if (device_) {
-        return;
-    }
-
-    DXGI_SWAP_CHAIN_DESC swapChainDesc{};
-    swapChainDesc.BufferDesc.Width = clientWidth_;
-    swapChainDesc.BufferDesc.Height = clientHeight_;
-    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    swapChainDesc.BufferDesc.RefreshRate.Numerator = 0;
-    swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
-    swapChainDesc.SampleDesc.Count = 1;
-    swapChainDesc.SampleDesc.Quality = 0;
-    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.BufferCount = 2;
-    swapChainDesc.OutputWindow = hwnd_;
-    swapChainDesc.Windowed = TRUE;
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-
-    constexpr D3D_FEATURE_LEVEL featureLevels[] = {
-        D3D_FEATURE_LEVEL_11_0,
-        D3D_FEATURE_LEVEL_10_1,
-    };
-
-    D3D_FEATURE_LEVEL selectedFeatureLevel{};
-    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-
-    HRESULT result = D3D11CreateDeviceAndSwapChain(
-        nullptr,
-        D3D_DRIVER_TYPE_HARDWARE,
-        nullptr,
-        flags,
-        featureLevels,
-        static_cast<UINT>(std::size(featureLevels)),
-        D3D11_SDK_VERSION,
-        &swapChainDesc,
-        &swapChain_,
-        &device_,
-        &selectedFeatureLevel,
-        &context_);
-
-    if (FAILED(result)) {
-        result = D3D11CreateDeviceAndSwapChain(
-            nullptr,
-            D3D_DRIVER_TYPE_WARP,
-            nullptr,
-            flags,
-            featureLevels,
-            static_cast<UINT>(std::size(featureLevels)),
-            D3D11_SDK_VERSION,
-            &swapChainDesc,
-            &swapChain_,
-            &device_,
-            &selectedFeatureLevel,
-            &context_);
-    }
-
-    ThrowIfFailed(result, "D3D11CreateDeviceAndSwapChain(receiver preview)");
-    if (lowLatency_) {
-        Microsoft::WRL::ComPtr<IDXGIDevice1> queue;
-        ThrowIfFailed(device_.As(&queue), "DXGI playback queue interface");
-        ThrowIfFailed(queue->SetMaximumFrameLatency(1), "DXGI playback queue limit");
-        ThrowIfFailed(queue->GetMaximumFrameLatency(&maximumFrameLatency_), "DXGI playback queue measurement");
-    }
-    DisableDxgiDefaultAltEnter(swapChain_.Get(), hwnd_);
-    SetSwapChainSdrColorSpace(swapChain_.Get());
-    EnsureRenderTarget();
+    Render();
 }
 
 void ReceiverPreviewWindow::UpdateClientSize()
@@ -558,191 +331,6 @@ void ReceiverPreviewWindow::UpdateClientSize()
     clientHeight_ = ClampDimension(clientRect.bottom - clientRect.top);
 }
 
-void ReceiverPreviewWindow::ResizeSwapChainIfNeeded()
-{
-    if (!swapChain_ || !swapChainResizePending_ || clientWidth_ == 0 || clientHeight_ == 0) {
-        return;
-    }
-
-    renderTarget_.Reset();
-    ID3D11RenderTargetView* nullRenderTargets[] = {nullptr};
-    context_->OMSetRenderTargets(1, nullRenderTargets, nullptr);
-    ThrowIfFailed(
-        swapChain_->ResizeBuffers(0, clientWidth_, clientHeight_, DXGI_FORMAT_UNKNOWN, 0),
-        "IDXGISwapChain::ResizeBuffers(receiver preview)");
-    SetSwapChainSdrColorSpace(swapChain_.Get());
-    swapChainResizePending_ = false;
-    EnsureRenderTarget();
-}
-
-void ReceiverPreviewWindow::EnsureRenderTarget()
-{
-    if (renderTarget_) {
-        return;
-    }
-
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
-    ThrowIfFailed(swapChain_->GetBuffer(0, IID_PPV_ARGS(&backBuffer)), "IDXGISwapChain::GetBuffer(receiver preview)");
-    ThrowIfFailed(
-        device_->CreateRenderTargetView(backBuffer.Get(), nullptr, &renderTarget_),
-        "ID3D11Device::CreateRenderTargetView(receiver preview)");
-}
-
-void ReceiverPreviewWindow::EnsurePipeline()
-{
-    if (vertexShader_ && pixelShader_ && sampler_ && previewConstants_) {
-        return;
-    }
-
-    static constexpr const char* shaderSource = R"(
-struct VertexOut
-{
-    float4 position : SV_Position;
-    float2 uv : TEXCOORD0;
-};
-
-VertexOut vs_main(uint vertexId : SV_VertexID)
-{
-    float2 positions[3] = {
-        float2(-1.0, -1.0),
-        float2(-1.0,  3.0),
-        float2( 3.0, -1.0)
-    };
-
-    float2 uvs[3] = {
-        float2(0.0, 1.0),
-        float2(0.0, -1.0),
-        float2(2.0, 1.0)
-    };
-
-    VertexOut output;
-    output.position = float4(positions[vertexId], 0.0, 1.0);
-    output.uv = uvs[vertexId];
-    return output;
-}
-
-Texture2D lumaTexture : register(t0);
-Texture2D chromaTexture : register(t1);
-SamplerState linearSampler : register(s0);
-
-cbuffer PreviewConstants : register(b0)
-{
-    float lumaTexelWidth;
-    float lumaTexelHeight;
-    float sharpenAmount;
-    float padding;
-};
-
-float SharpenLuma(float2 uv, float y)
-{
-    if (sharpenAmount <= 0.0001) {
-        return y;
-    }
-
-    float2 texel = float2(lumaTexelWidth, lumaTexelHeight);
-    float neighbor =
-        lumaTexture.Sample(linearSampler, uv + float2(-texel.x, 0.0)).r +
-        lumaTexture.Sample(linearSampler, uv + float2( texel.x, 0.0)).r +
-        lumaTexture.Sample(linearSampler, uv + float2(0.0, -texel.y)).r +
-        lumaTexture.Sample(linearSampler, uv + float2(0.0,  texel.y)).r;
-    neighbor *= 0.25;
-    return saturate(y + (y - neighbor) * sharpenAmount);
-}
-
-float4 ps_main(VertexOut input) : SV_Target
-{
-    float y = lumaTexture.Sample(linearSampler, input.uv).r;
-    y = SharpenLuma(input.uv, y);
-    float2 uv = chromaTexture.Sample(linearSampler, input.uv).rg;
-
-    float c = max(0.0, y - (16.0 / 255.0));
-    float u = uv.x - (128.0 / 255.0);
-    float v = uv.y - (128.0 / 255.0);
-
-    float3 rgb;
-    rgb.r = 1.16438356 * c + 1.79274107 * v;
-    rgb.g = 1.16438356 * c - 0.21324861 * u - 0.53290933 * v;
-    rgb.b = 1.16438356 * c + 2.11240179 * u;
-    return float4(saturate(rgb), 1.0);
-}
-)";
-
-    const auto vertexShader = CompileShader(shaderSource, "vs_main", "vs_4_0");
-    const auto pixelShader = CompileShader(shaderSource, "ps_main", "ps_4_0");
-
-    ThrowIfFailed(
-        device_->CreateVertexShader(vertexShader->GetBufferPointer(), vertexShader->GetBufferSize(), nullptr, &vertexShader_),
-        "ID3D11Device::CreateVertexShader(receiver preview)");
-    ThrowIfFailed(
-        device_->CreatePixelShader(pixelShader->GetBufferPointer(), pixelShader->GetBufferSize(), nullptr, &pixelShader_),
-        "ID3D11Device::CreatePixelShader(receiver preview)");
-
-    D3D11_SAMPLER_DESC samplerDesc{};
-    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
-    samplerDesc.MinLOD = 0.0f;
-    samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
-    ThrowIfFailed(device_->CreateSamplerState(&samplerDesc, &sampler_), "ID3D11Device::CreateSamplerState(receiver preview)");
-
-    D3D11_BUFFER_DESC constantDesc{};
-    constantDesc.ByteWidth = sizeof(PreviewConstants);
-    constantDesc.Usage = D3D11_USAGE_DEFAULT;
-    constantDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    ThrowIfFailed(device_->CreateBuffer(&constantDesc, nullptr, &previewConstants_), "ID3D11Device::CreateBuffer(receiver preview constants)");
-}
-
-void ReceiverPreviewWindow::EnsureFrameTextures(int width, int height)
-{
-    if (lumaTexture_ &&
-        chromaTexture_ &&
-        lumaDesc_.Width == static_cast<UINT>(width) &&
-        lumaDesc_.Height == static_cast<UINT>(height) &&
-        chromaDesc_.Width == static_cast<UINT>(width / 2) &&
-        chromaDesc_.Height == static_cast<UINT>(height / 2)) {
-        return;
-    }
-
-    lumaView_.Reset();
-    chromaView_.Reset();
-    lumaTexture_.Reset();
-    chromaTexture_.Reset();
-
-    lumaDesc_ = {};
-    lumaDesc_.Width = static_cast<UINT>(width);
-    lumaDesc_.Height = static_cast<UINT>(height);
-    lumaDesc_.MipLevels = 1;
-    lumaDesc_.ArraySize = 1;
-    lumaDesc_.Format = DXGI_FORMAT_R8_UNORM;
-    lumaDesc_.SampleDesc.Count = 1;
-    lumaDesc_.SampleDesc.Quality = 0;
-    lumaDesc_.Usage = D3D11_USAGE_DEFAULT;
-    lumaDesc_.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-    chromaDesc_ = lumaDesc_;
-    chromaDesc_.Width = static_cast<UINT>(width / 2);
-    chromaDesc_.Height = static_cast<UINT>(height / 2);
-    chromaDesc_.Format = DXGI_FORMAT_R8G8_UNORM;
-
-    ThrowIfFailed(device_->CreateTexture2D(&lumaDesc_, nullptr, &lumaTexture_), "ID3D11Device::CreateTexture2D(receiver luma)");
-    ThrowIfFailed(device_->CreateTexture2D(&chromaDesc_, nullptr, &chromaTexture_), "ID3D11Device::CreateTexture2D(receiver chroma)");
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC lumaViewDesc{};
-    lumaViewDesc.Format = lumaDesc_.Format;
-    lumaViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    lumaViewDesc.Texture2D.MipLevels = 1;
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC chromaViewDesc{};
-    chromaViewDesc.Format = chromaDesc_.Format;
-    chromaViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    chromaViewDesc.Texture2D.MipLevels = 1;
-
-    ThrowIfFailed(device_->CreateShaderResourceView(lumaTexture_.Get(), &lumaViewDesc, &lumaView_), "ID3D11Device::CreateShaderResourceView(receiver luma)");
-    ThrowIfFailed(device_->CreateShaderResourceView(chromaTexture_.Get(), &chromaViewDesc, &chromaView_), "ID3D11Device::CreateShaderResourceView(receiver chroma)");
-}
-
 void ReceiverPreviewWindow::SizeWindowForFirstFrame(int width, int height)
 {
     if (sizedForFirstFrame_ || hwnd_ == nullptr) {
@@ -752,7 +340,6 @@ void ReceiverPreviewWindow::SizeWindowForFirstFrame(int width, int height)
     const SIZE clientSize = FitFrameToWorkArea(hwnd_, width, height);
     ResizeWindowClientTo(hwnd_, clientSize.cx, clientSize.cy);
     UpdateClientSize();
-    swapChainResizePending_ = true;
     sizedForFirstFrame_ = true;
 }
 
@@ -765,7 +352,6 @@ void ReceiverPreviewWindow::SizeWindowForCurrentFrame()
     const SIZE clientSize = FitFrameToWorkArea(hwnd_, frameWidth_, frameHeight_);
     ResizeWindowClientTo(hwnd_, clientSize.cx, clientSize.cy);
     UpdateClientSize();
-    swapChainResizePending_ = true;
 }
 
 void ReceiverPreviewWindow::ToggleFullscreen()
@@ -823,7 +409,6 @@ void ReceiverPreviewWindow::SetFullscreen(bool fullscreen)
     }
 
     UpdateClientSize();
-    swapChainResizePending_ = true;
     RefreshTitle();
     Render();
 }
@@ -844,97 +429,21 @@ void ReceiverPreviewWindow::RefreshTitle()
         return;
     }
 
-    const std::wstring title = PreviewTitle(statusText_, scaleMode_, fullscreen_);
+    const std::wstring title = PreviewTitle(presenter_.statistics().terminal
+        ? "Video presentation failed. Leave and rejoin to retry." : statusText_, scaleMode_, fullscreen_);
+    if (title == renderedTitle_) return;
     SetWindowTextW(hwnd_, title.c_str());
+    renderedTitle_ = title;
 }
 
-D3D11_VIEWPORT ReceiverPreviewWindow::ComputeViewport() const
-{
-    D3D11_VIEWPORT viewport{};
-    viewport.MinDepth = 0.0f;
-    viewport.MaxDepth = 1.0f;
-
-    if (clientWidth_ == 0 || clientHeight_ == 0 || frameWidth_ <= 0 || frameHeight_ <= 0) {
-        viewport.Width = 1.0f;
-        viewport.Height = 1.0f;
-        return viewport;
-    }
-
-    const float clientWidth = static_cast<float>(clientWidth_);
-    const float clientHeight = static_cast<float>(clientHeight_);
-    const float frameWidth = static_cast<float>(frameWidth_);
-    const float frameHeight = static_cast<float>(frameHeight_);
-    float scale = std::min(clientWidth / frameWidth, clientHeight / frameHeight);
-    if (scaleMode_ == PreviewScaleMode::OriginalSize) {
-        scale = std::min(scale, 1.0f);
-    }
-
-    viewport.Width = std::max(1.0f, frameWidth * scale);
-    viewport.Height = std::max(1.0f, frameHeight * scale);
-    viewport.TopLeftX = (clientWidth - viewport.Width) * 0.5f;
-    viewport.TopLeftY = (clientHeight - viewport.Height) * 0.5f;
-    return viewport;
-}
-
-bool ReceiverPreviewWindow::PresentSwapChain() {
-    const auto result = swapChain_->Present(0, lowLatency_ ? DXGI_PRESENT_DO_NOT_WAIT : 0);
-    if (result == DXGI_ERROR_WAS_STILL_DRAWING || result == DXGI_STATUS_OCCLUDED) return false;
-    ThrowIfFailed(result, "IDXGISwapChain::Present(receiver preview)"); return true;
-}
 bool ReceiverPreviewWindow::Render()
 {
-    if (!swapChain_ || hwnd_ == nullptr || IsIconic(hwnd_) != FALSE) {
-        return false;
-    }
-
+    if (!hwnd_ || closeRequested_ || IsIconic(hwnd_)) return false;
     UpdateClientSize();
-    ResizeSwapChainIfNeeded();
-    EnsureRenderTarget();
-
-    const float clearColor[] = {0.02f, 0.02f, 0.02f, 1.0f};
-    context_->ClearRenderTargetView(renderTarget_.Get(), clearColor);
-
-    if (!lumaView_ || !chromaView_) {
-        return PresentSwapChain();
-    }
-
-    EnsurePipeline();
-    const D3D11_VIEWPORT viewport = ComputeViewport();
-    const float frameWidth = static_cast<float>(std::max(frameWidth_, 1));
-    const float frameHeight = static_cast<float>(std::max(frameHeight_, 1));
-    const float displayScale = viewport.Width / frameWidth;
-    PreviewConstants constants;
-    constants.lumaTexelWidth = 1.0f / frameWidth;
-    constants.lumaTexelHeight = 1.0f / frameHeight;
-    constants.sharpenAmount = displayScale > 1.01f
-        ? std::min(0.22f, 0.06f + (displayScale - 1.0f) * 0.35f)
-        : 0.0f;
-    context_->UpdateSubresource(previewConstants_.Get(), 0, nullptr, &constants, 0, 0);
-
-    ID3D11RenderTargetView* renderTargets[] = {renderTarget_.Get()};
-    ID3D11ShaderResourceView* shaderResources[] = {lumaView_.Get(), chromaView_.Get()};
-    ID3D11SamplerState* samplers[] = {sampler_.Get()};
-    ID3D11Buffer* constantBuffers[] = {previewConstants_.Get()};
-
-    context_->OMSetRenderTargets(1, renderTargets, nullptr);
-    context_->RSSetViewports(1, &viewport);
-    context_->IASetInputLayout(nullptr);
-    context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
-    context_->PSSetShader(pixelShader_.Get(), nullptr, 0);
-    context_->PSSetShaderResources(0, 2, shaderResources);
-    context_->PSSetSamplers(0, 1, samplers);
-    context_->PSSetConstantBuffers(0, 1, constantBuffers);
-    context_->Draw(3, 0);
-
-    ID3D11ShaderResourceView* nullShaderResources[] = {nullptr, nullptr};
-    ID3D11RenderTargetView* nullRenderTargets[] = {nullptr};
-    ID3D11Buffer* nullConstantBuffers[] = {nullptr};
-    context_->PSSetShaderResources(0, 2, nullShaderResources);
-    context_->PSSetConstantBuffers(0, 1, nullConstantBuffers);
-    context_->OMSetRenderTargets(1, nullRenderTargets, nullptr);
-
-    return PresentSwapChain();
+    const bool rendered = presenter_.Update(hwnd_, clientWidth_, clientHeight_, true, lowLatency_,
+        scaleMode_ == PreviewScaleMode::Fit ? Nv12D3D11Presenter::ScaleMode::Fit : Nv12D3D11Presenter::ScaleMode::OriginalSize);
+    RefreshTitle();
+    return rendered;
 }
 
 } // namespace screenshare

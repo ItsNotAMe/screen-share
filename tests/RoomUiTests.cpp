@@ -51,13 +51,13 @@ class FaultingNativeRenderer final : public FramePresentationBackend {
 public:
     explicit FaultingNativeRenderer(std::shared_ptr<std::atomic_bool> fail) : fail_(std::move(fail)) {}
     bool Present(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
-        const screenshare::Nv12VideoFrame& frame) override {
-        const bool result = native_->Present(window, width, height, smooth, lowLatency, frame);
+        const screenshare::Nv12D3D11Presenter::FrameView& frame, screenshare::Nv12D3D11Presenter::ScaleMode scale) override {
+        const bool result = native_->Present(window, width, height, smooth, lowLatency, frame, scale);
         if (fail_->exchange(false)) throw screenshare::PresentationError(DXGI_ERROR_DEVICE_REMOVED, "Injected native loss");
         return result;
     }
-    void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency) override {
-        native_->Update(window, width, height, smooth, lowLatency);
+    void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency, screenshare::Nv12D3D11Presenter::ScaleMode scale) override {
+        native_->Update(window, width, height, smooth, lowLatency, scale);
     }
     void Reset() noexcept override { native_->Reset(); }
     uint32_t MaximumFrameLatency() const noexcept override { return native_->MaximumFrameLatency(); }
@@ -210,7 +210,10 @@ void BrowserScenario(const QUrl& origin) {
     auto* list = viewer.findChild<QTableWidget*>("publicRooms");
     Check(list->rowCount() == 1 && list->item(0, 0)->text() == "<b>Plain room</b>" && list->item(0, 3)->text() == "Required");
     const auto hostAttempts = host.directory().connectionAttempts();
-    Wait([&] { return !host.activeSession()->findChild<QLineEdit*>("roomLink")->text().isEmpty(); });
+    // Admission status can become Active before the Qt snapshot enables the
+    // copy button. Wait for the actual control, not just the earlier room ID.
+    Wait([&] { return !host.activeSession()->findChild<QLineEdit*>("roomLink")->text().isEmpty() &&
+        host.activeSession()->findChild<QPushButton*>("copyRoomLink")->isEnabled(); });
     const auto roomLink = host.activeSession()->findChild<QLineEdit*>("roomLink")->text();
     Check(roomLink == MakeRoomLink(QString::fromStdString(host.activeSession()->session().status().roomId)));
     Check(!roomLink.contains("browser-test-secret") && !roomLink.contains(origin.toString()));

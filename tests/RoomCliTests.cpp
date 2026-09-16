@@ -14,23 +14,129 @@
 #include <atomic>
 #include <iostream>
 #include <mutex>
+#include <utility>
+#include <source_location>
 #include "api/make_ref_counted.h"
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
 #include "../tools/webrtc-proof/CaptureTestWindow.h"
 #include "core/WindowsMediaRuntime.h"
 #include "render/ReceiverPreviewWindow.h"
+#include <dxgi.h>
 HWND captureWindow = nullptr;
 #endif
 
 using namespace screenshare::media;
 using namespace screenshare::v2;
 using namespace std::chrono_literals;
-void Check(bool value) { if (!value) throw std::runtime_error("Room CLI integration failed"); }
+void Check(bool value, std::source_location where = std::source_location::current()) {
+    if (!value) throw std::runtime_error("Room CLI integration failed at line " + std::to_string(where.line()));
+}
 template<class F> void Reject(F fn) {
     bool rejected = false;
     try { fn(); } catch (const std::invalid_argument&) { rejected = true; }
     Check(rejected);
 }
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+struct PreviewEvidence {
+    bool failPresent = false, failUpdate = false;
+    unsigned calls = 0, resets = 0;
+    screenshare::Nv12D3D11Presenter::ScaleMode scale = screenshare::Nv12D3D11Presenter::ScaleMode::Fit;
+};
+class PreviewRenderer final : public FramePresentationBackend {
+    std::unique_ptr<FramePresentationBackend> native_ = CreateNativeFramePresentation();
+    std::shared_ptr<PreviewEvidence> evidence_;
+public:
+    explicit PreviewRenderer(std::shared_ptr<PreviewEvidence> evidence) : evidence_(std::move(evidence)) {}
+    bool Present(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
+        const screenshare::Nv12D3D11Presenter::FrameView& frame, screenshare::Nv12D3D11Presenter::ScaleMode scale) override {
+        ++evidence_->calls; evidence_->scale = scale;
+        const bool result = native_->Present(window, width, height, smooth, lowLatency, frame, scale);
+        if (std::exchange(evidence_->failPresent, false))
+            throw screenshare::PresentationError(DXGI_ERROR_DEVICE_REMOVED, "Injected preview device loss");
+        return result;
+    }
+    void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
+        screenshare::Nv12D3D11Presenter::ScaleMode scale) override {
+        ++evidence_->calls; evidence_->scale = scale;
+        native_->Update(window, width, height, smooth, lowLatency, scale);
+        if (std::exchange(evidence_->failUpdate, false))
+            throw screenshare::PresentationError(DXGI_ERROR_DEVICE_RESET, "Injected preview resize loss");
+    }
+    void Reset() noexcept override { ++evidence_->resets; native_->Reset(); }
+    uint32_t MaximumFrameLatency() const noexcept override { return native_->MaximumFrameLatency(); }
+};
+void PreviewLifecycle() {
+    auto evidence = std::make_shared<PreviewEvidence>();
+    screenshare::ReceiverPreviewWindow preview([evidence] { return std::make_unique<PreviewRenderer>(evidence); });
+    preview.SetLowLatency(true); preview.Show();
+    screenshare::Nv12VideoFrame frame; frame.width = 320; frame.height = 180; frame.nv12.resize(320 * 180 * 3 / 2, 128);
+    auto resume = [&] {
+        const auto goal = preview.framesPresented() + 3;
+        const auto deadline = std::chrono::steady_clock::now() + 3s;
+        while (preview.framesPresented() < goal) {
+            Check(preview.PumpMessages() && std::chrono::steady_clock::now() < deadline);
+            preview.PresentFrame(frame); std::this_thread::sleep_for(5ms);
+        }
+        Check(preview.maximumFrameLatency() == 1 && !preview.presentationStats().terminal);
+    };
+    resume();
+    // Only direct messages to our own HWND; no global keyboard/mouse injection.
+    const HWND window = preview.windowHandle();
+    SendMessageW(window, WM_KEYDOWN, '1', 0);
+    Check(evidence->scale == screenshare::Nv12D3D11Presenter::ScaleMode::OriginalSize);
+    SendMessageW(window, WM_KEYDOWN, 'F', 0);
+    Check(evidence->scale == screenshare::Nv12D3D11Presenter::ScaleMode::Fit);
+    const auto style = GetWindowLongPtrW(window, GWL_STYLE);
+    SendMessageW(window, WM_KEYDOWN, VK_F11, 0);
+    Check((GetWindowLongPtrW(window, GWL_STYLE) & WS_OVERLAPPEDWINDOW) == 0);
+    SendMessageW(window, WM_KEYDOWN, VK_ESCAPE, 0);
+    // SetWindowPlacement/ShowWindow manage WS_VISIBLE independently of the
+    // restored frame style (the generated test window may initially be hidden).
+    Check(((GetWindowLongPtrW(window, GWL_STYLE) ^ style) & ~LONG_PTR(WS_VISIBLE)) == 0);
+    int mute = 0, volume = 0;
+    preview.SetControlCallbacks({[&] { ++mute; }, [&](int delta) { volume += delta; }});
+    SendMessageW(window, WM_KEYDOWN, 'M', 0); SendMessageW(window, WM_KEYDOWN, VK_ADD, 0);
+    Check(mute == 1 && volume == 5);
+    ShowWindow(window, SW_MINIMIZE);
+    const auto presented = preview.framesPresented(); preview.PresentFrame(frame);
+    Check(preview.framesPresented() == presented);
+    ShowWindow(window, SW_RESTORE); resume();
+    auto malformed = frame; malformed.width = 321;
+    Reject([&] { preview.PresentFrame(malformed); });
+    Check(!preview.presentationStats().terminal);
+    for (unsigned attempt = 1; attempt <= 3; ++attempt) {
+        if (attempt == 2) {
+            evidence->failUpdate = true;
+            SendMessageW(window, WM_SIZE, SIZE_RESTORED, MAKELPARAM(480, 270));
+        } else {
+            evidence->failPresent = true; preview.PresentFrame(frame);
+        }
+        Check(preview.presentationStats().recoveries == attempt);
+        const auto calls = evidence->calls;
+        for (int drop = 0; drop < 50; ++drop) preview.PresentFrame(frame);
+        Check(evidence->calls == calls);
+        resume();
+    }
+    evidence->failPresent = true; preview.PresentFrame(frame);
+    Check(preview.presentationStats().terminal && preview.presentationStats().errors == 4);
+    const auto calls = evidence->calls;
+    for (int drop = 0; drop < 100; ++drop) preview.PresentFrame(frame);
+    SendMessageW(window, WM_SIZE, SIZE_RESTORED, MAKELPARAM(640, 360));
+    Check(evidence->calls == calls);
+    preview.SetStatusText("Connected");
+    wchar_t title[256]{}; GetWindowTextW(window, title, 256);
+    Check(std::wstring(title).find(L"Leave and rejoin") != std::wstring::npos);
+    preview.ClearFrame(); resume();
+    Check(preview.presentationStats().recoveries == 0);
+    screenshare::DecodedFrameInfo legacy; legacy.width = 320; legacy.height = 180;
+    legacy.data.resize(frame.nv12.size(), std::byte{128}); preview.PresentFrame(legacy);
+    // Closing a preview must not post WM_QUIT into another window's pump.
+    screenshare::ReceiverPreviewWindow sibling; sibling.SetLowLatency(true); sibling.Show();
+    SendMessageW(window, WM_CLOSE, 0, 0);
+    Check(preview.closeRequested() && !IsWindow(window) && sibling.PumpMessages());
+    sibling.PresentFrame(frame);
+}
+#endif
 class CheckedNv12 : public webrtc::NV12BufferInterface {
     std::atomic<int>& destroyed_;
     const int stride_;
@@ -131,6 +237,7 @@ int main(int argc, char** argv) {
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime;
         Check(SUCCEEDED(mediaRuntime.result()));
+        PreviewLifecycle();
         proof::TestWindow capture;
         captureWindow = capture.handle();
 #endif

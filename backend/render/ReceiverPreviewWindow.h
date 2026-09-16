@@ -2,11 +2,9 @@
 
 #include "codec/H264StreamDecoder.h"
 #include "Nv12VideoFrame.h"
+#include "FramePresentationBackend.h"
 
 #include <Windows.h>
-#include <d3d11.h>
-#include <dxgi.h>
-#include <wrl/client.h>
 
 #include <cstdint>
 #include <functional>
@@ -27,7 +25,7 @@ struct ReceiverPreviewControlCallbacks {
 
 class ReceiverPreviewWindow {
 public:
-    ReceiverPreviewWindow();
+    explicit ReceiverPreviewWindow(FramePresentationFactory factory = {});
     ~ReceiverPreviewWindow();
 
     ReceiverPreviewWindow(const ReceiverPreviewWindow&) = delete;
@@ -39,8 +37,10 @@ public:
     void PresentFrame(const Nv12VideoFrame& frame);
     // Configure before Show/PresentFrame. Busy/occluded frames are discarded.
     void SetLowLatency(bool enabled);
-    uint32_t maximumFrameLatency() const noexcept { return maximumFrameLatency_; }
+    uint32_t maximumFrameLatency() const noexcept { return presenter_.statistics().maximumFrameLatency; }
     uint64_t framesDropped() const noexcept { return framesDropped_; }
+    FramePresentationSession::Statistics presentationStats() const noexcept { return presenter_.statistics(); }
+    HWND windowHandle() const noexcept { return hwnd_; }
     void ClearFrame();
     void SetStatusText(std::string_view statusText);
     void SetControlCallbacks(ReceiverPreviewControlCallbacks callbacks);
@@ -54,28 +54,20 @@ private:
     LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam);
 
     void EnsureWindow(int preferredWidth, int preferredHeight);
-    void CreateDeviceAndSwapChain();
     void UpdateClientSize();
-    void ResizeSwapChainIfNeeded();
-    void EnsureRenderTarget();
-    void EnsurePipeline();
-    void EnsureFrameTextures(int width, int height);
     void SizeWindowForFirstFrame(int width, int height);
     void SizeWindowForCurrentFrame();
     void ToggleFullscreen();
     void SetFullscreen(bool fullscreen);
     void ToggleScaleMode();
     void RefreshTitle();
-    [[nodiscard]] D3D11_VIEWPORT ComputeViewport() const;
     bool Render();
-    bool PresentSwapChain();
     void PresentPixels(int width, int height, std::span<const uint8_t> pixels);
 
     HWND hwnd_ = nullptr;
     uint32_t clientWidth_ = 0;
     uint32_t clientHeight_ = 0;
     bool closeRequested_ = false;
-    bool swapChainResizePending_ = false;
     bool sizedForFirstFrame_ = false;
     bool fullscreen_ = false;
     DWORD windowedStyle_ = 0;
@@ -84,28 +76,15 @@ private:
     PreviewScaleMode scaleMode_ = PreviewScaleMode::Fit;
     ReceiverPreviewControlCallbacks controlCallbacks_;
 
-    Microsoft::WRL::ComPtr<ID3D11Device> device_;
-    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
-    Microsoft::WRL::ComPtr<IDXGISwapChain> swapChain_;
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget_;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> lumaTexture_;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> chromaTexture_;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> lumaView_;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> chromaView_;
-    Microsoft::WRL::ComPtr<ID3D11VertexShader> vertexShader_;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> pixelShader_;
-    Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> previewConstants_;
-    D3D11_TEXTURE2D_DESC lumaDesc_{};
-    D3D11_TEXTURE2D_DESC chromaDesc_{};
+    FramePresentationSession presenter_;
 
     int frameWidth_ = 0;
     int frameHeight_ = 0;
     uint64_t framesPresented_ = 0;
     uint64_t framesDropped_ = 0;
-    uint32_t maximumFrameLatency_ = 0;
     bool lowLatency_ = false;
     std::string statusText_;
+    std::wstring renderedTitle_;
 };
 
 } // namespace screenshare

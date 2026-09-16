@@ -171,6 +171,7 @@ add_library(ScreenShareCore STATIC
     backend/input/VirtualGamepadBackend.cpp
     backend/input/XInputGamepad.cpp
     backend/render/Nv12D3D11Presenter.cpp
+    backend/render/FramePresentationBackend.cpp
     backend/render/ReceiverPreviewWindow.cpp
     backend/transport/NatTraversal.cpp
     backend/transport/SignalingClient.cpp

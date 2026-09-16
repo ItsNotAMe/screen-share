@@ -49,6 +49,7 @@ public:
     [[nodiscard]] bool isHardwareAccelerated() const noexcept;
     [[nodiscard]] std::uint32_t maximumFrameLatency() const noexcept;
     void Clear();
+    void Redraw();
     void Reset();
 
     [[nodiscard]] std::uint64_t framesPresented() const noexcept { return framesPresented_; }
