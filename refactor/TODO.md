@@ -58,8 +58,15 @@ RoomSessionCoordinator now automatically drains room events, dispatches them on
 signaling, advances media lifecycle hooks and handles bounded asynchronous sends.
 RoomSignalCodec provides shared SDP/ICE conversion. The four-viewer scenario no
 longer pumps these operations, and recovery completes while the caller is idle.
-Next: move the remaining diagnostic peer-factory/session composition into the
-production engine and expose it through the normal facade's commands/status API.
+MediaEngine now owns native worker/network threads, the factory, Opus setup,
+independent peer creation, host track attachment and the three data-channel
+policies. The authenticated scenario uses it with injected codecs/audio endpoints.
+MediaPeer now owns each native peer's ICE lifecycle, negotiation, incoming video
+sink, bounded/validated channels and idempotent teardown. Diagnostic observers
+only collect frame/message evidence. Outer session composition still remains
+outside the engine. Next: move that composition into the normal facade's commands/status
+API, including recovery and user-visible state; factory extraction alone does
+not complete this milestone.
 Do not add another event-pumping layer around the completed coordinator.
 
 - [ ] Complete the integrated media-session deliverable and headless scenarios.

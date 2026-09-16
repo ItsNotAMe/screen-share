@@ -2,11 +2,21 @@
 
 ## Current integration evidence — 2026-09-16
 
+MediaEngine now owns the native factory and network/worker threads on the
+signaling executor. RoomMediaProof uses its independent peer construction, host
+track attachment and channel policy; audio/codec implementations are injected.
+Destroy all peer/track references before engine teardown, on signaling, then stop
+the executor. SSL stays application-owned. MediaPeer owns each native peer's ICE
+lifecycle, negotiation, video sink and bounded validated channels. RoomMediaProof
+uses it; its derived observer only collects evidence. Close derived sinks before
+their members are destroyed. Outer session composition still needs facade adoption;
+do not mark milestone 1 complete.
+
 RoomSessionCoordinator now owns automatic room-to-signaling dispatch and bounded
 send-completion handling; RoomSignalCodec is shared production wire conversion.
 RoomMediaProof's wait loop only observes state. ICE restart completes during a
-five-second caller pause. Normal facade adoption and diagnostic peer-factory/
-session composition extraction remain open; shared target is ScreenShareRoomSession.
+five-second caller pause. Normal facade adoption and outer session composition
+extraction remain open; shared target is ScreenShareRoomSession.
 
 RoomManagedPeer now joins authenticated negotiation to HostPeerOwner's scheduled
 recovery and capture-cleanup barriers in the four-peer scenario. Capture attachment

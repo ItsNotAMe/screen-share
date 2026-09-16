@@ -1,6 +1,8 @@
 # Shared by the application and native media proofs, using the pinned SDK.
 if(NOT TARGET ScreenShareNegotiation)
     add_library(ScreenShareNegotiation STATIC
+        "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/MediaEngine.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/MediaPeer.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/PeerNegotiation.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/RoomPeerNegotiation.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/SignalingExecutor.cpp"

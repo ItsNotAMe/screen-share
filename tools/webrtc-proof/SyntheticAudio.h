@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include "media/audio/PcmAudioEndpoint.h"
 #include <atomic>
 #include <chrono>

@@ -1,5 +1,13 @@
 # Headless media checks
 
+`media-engine-lifecycle` exercises ten native engine lifetimes, wrong-thread
+rejection, dependency validation, preserved ICE policy, partial-track rollback
+and reliable control/unreliable transient-channel policy. It also verifies native
+peer channel rejection, repeated close and rejection of late ICE revival. The authenticated
+four-viewer scenario also uses this same backend factory/thread implementation.
+Run it with CTest alongside `room-backed-four-peer-media`; neither requires
+physical input. These are correctness checks, not latency or resource acceptance.
+
 Build the proof targets using [BUILD.md](BUILD.md), then run from the repository
 root. No mouse, keyboard, window, audio device or GPU is required for these two
 commands; the Windows software Media Foundation codec must be available.

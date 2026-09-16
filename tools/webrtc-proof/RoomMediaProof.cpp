@@ -1,4 +1,15 @@
-#include "MultiViewerScenario.h"
+#include "SyntheticAudio.h"
+#include "media/HostMediaSession.h"
+#include "media/capture/SyntheticCaptureSource.h"
+#include "media/webrtc/CaptureVideoSource.h"
+#include "media/webrtc/MfVideoEncoderFactory.h"
+#include "media/webrtc/MfVideoDecoderFactory.h"
+#include "media/webrtc/PcmAudioDeviceModule.h"
+#include "api/make_ref_counted.h"
+#include "rtc_base/ssl_adapter.h"
+#include "rtc_base/win32_socket_init.h"
+#include "rtc_base/logging.h"
+#include "media/webrtc/MediaPeer.h"
 #include "media/webrtc/RoomPeerNegotiation.h"
 #include "media/RoomPeerRoster.h"
 #include "media/HostPeerOwner.h"
@@ -8,7 +19,14 @@
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonArray>
+#include "media/webrtc/MediaEngine.h"
 #include <deque>
+#include <array>
+#include <atomic>
+#include <iostream>
+#include <thread>
+#include <algorithm>
+#include <map>
 using namespace screenshare::media;
 using screenshare::room::qt::RoomSocket;
 using screenshare::room::qt::RoomAdmission;
@@ -16,8 +34,22 @@ using screenshare::room::qt::RoomNetwork;
 using screenshare::room::qt::RoomSessionCoordinator;
 using screenshare::room::qt::EncodeRoomSignal;
 using screenshare::room::qt::DecodeRoomSignal;
-using namespace proofmedia;
 namespace {
+void Require(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+class Channel final : public webrtc::DataChannelObserver {
+public:
+    explicit Channel(webrtc::scoped_refptr<webrtc::DataChannelInterface> value)
+        : channel(std::move(value)) { channel->RegisterObserver(this); }
+    ~Channel() override { channel->UnregisterObserver(); }
+    void OnStateChange() override {}
+    void OnMessage(const webrtc::DataBuffer& buffer) override {
+        received = std::string(buffer.data.cdata<char>(), buffer.data.size()) == "screenshare-proof:" + channel->label();
+    }
+    webrtc::scoped_refptr<webrtc::DataChannelInterface> channel;
+    bool received = false;
+};
 // Diagnostic waits only. Production coordinators observe these futures without
 // blocking; all sockets/admission and their Qt events run in RoomNetwork.
 struct ProofRoomSocket {
@@ -46,14 +78,46 @@ struct ProofRoomSocket {
     }
 };
 struct Packet { size_t viewer; bool fromHost; RoomPeerSignal message; };
+// Only evidence collection belongs to the diagnostic. Native callbacks, ICE
+// lifecycle, incoming tracks/channel policy and shutdown belong to MediaPeer.
+struct ObservedPeer : MediaPeer, webrtc::VideoSinkInterface<webrtc::VideoFrame> {
+    ObservedPeer(MediaEngine& engine, uint64_t generation)
+        : MediaPeer(engine, generation, this, [this](auto channel) {
+            channels.push_back(std::make_unique<Channel>(std::move(channel)));
+        }) {}
+    ~ObservedPeer() override { Close(); }
+    void OnFrame(const webrtc::VideoFrame& frame) override {
+        auto buffer = frame.video_frame_buffer();
+        auto pixels = buffer->ToI420();
+        if (frame.width() != 640 || frame.height() != 360 || !pixels || pixels->DataY()[0] < 35)
+            ++invalidFrames;
+        ++decodedFrames;
+    }
+    std::vector<std::unique_ptr<Channel>> channels;
+    std::atomic<unsigned> decodedFrames{0}, invalidFrames{0};
+};
+struct RoomMediaLink {
+    RoomMediaLink(MediaEngine& engine, uint64_t& generation)
+        : host(engine, ++generation), viewer(engine, ++generation) {}
+    ObservedPeer host, viewer;
+    webrtc::scoped_refptr<CaptureVideoSource> source = webrtc::make_ref_counted<CaptureVideoSource>();
+    webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender;
+};
+std::unique_ptr<RoomMediaLink> CreateViewer(MediaEngine& engine,
+    webrtc::scoped_refptr<webrtc::AudioTrackInterface> audio, uint64_t& generation) {
+    auto link = std::make_unique<RoomMediaLink>(engine, generation);
+    link->host.OpenHostChannels(engine);
+    link->sender = engine.AttachHostMedia(*link->host.connection, link->source, std::move(audio));
+    return link;
+}
 struct Context {
-    std::unique_ptr<webrtc::Thread> network = webrtc::Thread::CreateWithSocketServer(), worker = webrtc::Thread::Create();
-    webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
+    std::unique_ptr<MediaEngine> engine;
     webrtc::scoped_refptr<webrtc::AudioTrackInterface> audio;
     std::shared_ptr<proof::AudioEvidence> audioEvidence = std::make_shared<proof::AudioEvidence>();
-    std::array<std::unique_ptr<MediaLink>, 4> links;
+    uint64_t nextPeerGeneration = 0;
+    std::array<std::unique_ptr<RoomMediaLink>, 4> links;
     std::array<std::unique_ptr<RoomPeerNegotiation>, 4> hosts, viewers;
-    std::unique_ptr<MediaLink> unansweredLink;
+    std::unique_ptr<RoomMediaLink> unansweredLink;
     std::unique_ptr<RoomPeerNegotiation> unansweredPeer;
     HostMediaSession capture;
     std::unique_ptr<HostPeerOwner> owner;
@@ -70,7 +134,7 @@ struct Context {
         for (auto& p : viewers) p.reset();
         unansweredPeer.reset(); unansweredLink.reset();
         for (auto& p : links) p.reset();
-        audio = nullptr; factory = nullptr;
+        audio = nullptr; engine.reset();
     }
     ~Context() { Close(); }
 };
@@ -176,17 +240,10 @@ void Run(const QUrl& origin) {
         wait([&] { return std::all_of(ready.begin(), ready.end(), [](bool v) { return v; }) && roster["members"].toArray().size() == 5; }, "Room membership timed out");
         execute([&] {
             context = std::make_unique<Context>();
-            Require(context->network->Start() && context->worker->Start(), "Media threads failed");
-            webrtc::PeerConnectionFactoryDependencies dependencies;
-            dependencies.env = webrtc::CreateEnvironment(); dependencies.network_thread = context->network.get(); dependencies.worker_thread = context->worker.get(); dependencies.signaling_thread = webrtc::Thread::Current();
-            dependencies.adm = CreatePcmAudioDeviceModule(proof::SyntheticAudio(context->audioEvidence), std::make_shared<PcmAudioDiagnostics>());
-            dependencies.audio_encoder_factory = webrtc::CreateAudioEncoderFactory<webrtc::AudioEncoderOpus>();
-            dependencies.audio_decoder_factory = webrtc::CreateAudioDecoderFactory<webrtc::AudioDecoderOpus>();
-            dependencies.video_encoder_factory = std::make_unique<MfVideoEncoderFactory>(); dependencies.video_decoder_factory = std::make_unique<MfVideoDecoderFactory>();
-            webrtc::EnableMedia(dependencies); context->factory = webrtc::CreateModularPeerConnectionFactory(std::move(dependencies));
-            Require(context->factory != nullptr, "Media factory failed");
-            webrtc::AudioOptions options; options.echo_cancellation = options.auto_gain_control = options.noise_suppression = false;
-            auto source = context->factory->CreateAudioSource(options); context->audio = context->factory->CreateAudioTrack("room-audio", source.get());
+            context->engine = std::make_unique<MediaEngine>(
+                CreatePcmAudioDeviceModule(proof::SyntheticAudio(context->audioEvidence), std::make_shared<PcmAudioDiagnostics>()),
+                std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
+            context->audio = context->engine->CreateAudioTrack();
         });
         auto captureStarted = context->capture.Start([] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); });
         wait([&] { return captureStarted.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }, "Capture startup timed out");
@@ -196,7 +253,7 @@ void Run(const QUrl& origin) {
             context->captureGeneration = captureResult.generation;
             context->owner = std::make_unique<HostPeerOwner>(executor, context->capture, context->captureGeneration);
             attachMedia = [&](size_t i, std::string id) {
-                context->links[i] = CreateViewer(*context->factory, context->audio);
+                context->links[i] = CreateViewer(*context->engine, context->audio, context->nextPeerGeneration);
                 auto& link = *context->links[i];
                 auto send = [&, i](bool fromHost) { return [&, i, fromHost](RoomPeerSignal signal) {
                     if (signal.kind == RoomPeerSignal::Kind::Candidate) ++candidatesSent;
@@ -286,13 +343,13 @@ void Run(const QUrl& origin) {
         // peer whose answer never arrives, while the established peers continue.
         const auto unansweredStarted = std::chrono::steady_clock::now();
         execute([&] {
-            auto cancelledLink = CreateViewer(*context->factory, context->audio);
+            auto cancelledLink = CreateViewer(*context->engine, context->audio, context->nextPeerGeneration);
             auto cancelled = std::make_unique<RoomPeerNegotiation>(cancelledLink->host.connection,
                 cancelledLink->host.Negotiation(), cancelledLink->host.lifecycle.generation(), true,
                 [](RoomPeerSignal) { return true; });
             Require(cancelled->Offer("cancelled_before_tick"), "Cancelled offer failed");
             cancelled.reset(); // A queued scheduler callback must not touch freed state.
-            context->unansweredLink = CreateViewer(*context->factory, context->audio);
+            context->unansweredLink = CreateViewer(*context->engine, context->audio, context->nextPeerGeneration);
             auto& orphan = context->unansweredLink->host;
             context->unansweredPeer = std::make_unique<RoomPeerNegotiation>(orphan.connection,
                 orphan.Negotiation(), orphan.lifecycle.generation(), true, [](RoomPeerSignal) { return true; });

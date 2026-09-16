@@ -1,5 +1,47 @@
 # Checkpoint B evidence
 
+## Shared native engine and peer ownership — 2026-09-16
+
+MediaEngine and MediaPeer are production components in ScreenShareNegotiation,
+compiled by both application and diagnostic builds. The engine owns network and
+worker threads, factory/Opus setup, caller-supplied audio/video implementations,
+independent peer creation, host track attachment and data-channel creation.
+Caller ICE configuration is preserved while Unified Plan/MaxBundle are enforced.
+Failed audio attachment rolls back the video attachment; rollback failure closes
+the peer. There is no synthetic source or diagnostic observer inside the engine.
+
+MediaPeer owns ICE-state lifecycle updates, native negotiation, the incoming
+video sink and a maximum of three channels. Unknown/duplicate labels or incorrect
+reliability policies are closed before reaching application callbacks. Control
+is ordered/reliable; input-state and telemetry are unordered/no-retransmit.
+Close disconnects callbacks, removes the video sink, closes channels and native
+connection, and cannot be undone by late ICE callbacks. A replaced incoming video
+track first removes the old sink. Construction/use/destruction belong to signaling;
+frame delivery belongs to WebRTC's delivery thread. Derived evidence sinks must
+call Close before destroying their members. All peers/tracks must be released
+before engine destruction, then the signaling executor may stop. SSL remains
+application-owned.
+
+RoomMediaProof no longer imports the old diagnostic Peer/MediaLink implementation.
+Its remaining observers only validate decoded pixels/messages. Actual room-backed
+four-viewer media, socket reconnect, budgeted restart, kick/rejoin, autonomous
+timeout, cancellation and shutdown now exercise these shared native objects.
+
+Media suites pass **31/31 Debug and Release**; application Release **13/13**, CLI-only
+Release **8/8**. Logs: `build/webrtc/media-peer-debug.log`,
+`media-peer-release.log`, `media-peer-app.log`, `media-peer-cli.log`.
+The new lifecycle test covers ten engine lifetimes, rejected dependencies/thread
+access, ICE-policy preservation, partial-track rollback, channel constraints and
+late-event rejection. These are correctness checks, not handle/latency acceptance.
+After final observer/header cleanup and the additional channel-policy assertions,
+focused engine + authenticated-room tests pass **2/2** again in each configuration
+(Release 35.19 s, Debug 35.33 s; each build's Testing/Temporary/LastTest.log).
+
+Remaining milestone 1 work: move the outer room roster/session composition and
+recovery policy into the shared facade, expose asynchronous commands/status, and
+adopt it in UI/CLI. Normal application sessions still run the legacy backend.
+Do not reopen completed factory, peer-lifecycle or dispatch extraction work.
+
 ## Autonomous room/media dispatch — 2026-09-16
 
 ScreenShareRoomSession is a shared application/proof build target containing
