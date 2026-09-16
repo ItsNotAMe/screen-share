@@ -1,5 +1,6 @@
 #include "cli/RoomCli.h"
 #include "shared/LatestRoomVideoFrame.h"
+#include "shared/RoomStreamDiagnostics.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
@@ -28,15 +29,12 @@ const char* Phase(RoomPhase phase) {
 }
 QJsonObject Status(const RoomStatus& value) {
     QJsonArray peers;
-    for (const auto& peer : value.stream.peers) peers.append(QJsonObject{
-        {"peerId", QString::fromStdString(peer.peerId)}, {"appliedRevision", qint64(peer.appliedRevision)},
-        {"observedRevision", qint64(peer.observedRevision)}, {"rejected", peer.rejected}, {"width", peer.width}, {"height", peer.height},
-        {"allocatedVideoBps", peer.allocatedVideoBitrateBps}, {"appliedVideoBps", peer.appliedVideoBitrateBps},
-        {"transportSendBps", peer.transportSendBps ? QJsonValue(qint64(*peer.transportSendBps)) : QJsonValue(QJsonValue::Null)}});
+    for (const auto& peer : value.stream.peers) peers.append(StreamPeerJson(peer, value.stream.requestedRevision));
     return {{"type", "status"}, {"phase", Phase(value.phase)}, {"error", int(value.error)},
         {"roomId", QString::fromStdString(value.roomId)}, {"activePeers", qint64(value.activePeers)},
         {"failedPeers", qint64(value.failedPeers)}, {"pendingPeers", qint64(value.pendingPeers)},
         {"requestedRevision", qint64(value.stream.requestedRevision)}, {"peers", peers},
+        {"requestedPreferences", StreamPreferencesJson(value.stream.preferences)},
         {"aggregateUploadBps", value.stream.preferences.aggregateUploadLimitBps.value_or(0)}, {"captureRevision", qint64(value.capture.revision)},
         {"audioRevision", qint64(value.audio.revision)}, {"playbackRevision", qint64(value.playback.revision)},
         {"playbackVolume", int(value.playback.selected.volume)}, {"playbackMuted", value.playback.selected.muted}};

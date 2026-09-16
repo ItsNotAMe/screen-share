@@ -60,6 +60,7 @@ int main(int argc, char** argv) try {
     try { ValidateStreamPreferences(preferences); } catch (const std::invalid_argument&) { invalid = true; }
     Require(invalid, "Invalid aggregate allowance accepted");
     auto rate = std::make_shared<TransportSendRate>();
+    Require(!rate->Read().stale && !rate->Read().bitsPerSecond, "Unmeasured transport was not unknown");
     auto collector = webrtc::make_ref_counted<TransportSendRateCallback>(rate);
     auto sample = [&](int64_t microseconds, const char* id, uint64_t bytes) {
         auto report = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(microseconds));
@@ -68,9 +69,18 @@ int main(int argc, char** argv) try {
     };
     sample(1000000, "transport", 1000); Require(!rate->bitsPerSecond, "First counter sample fabricated a rate");
     sample(2000000, "transport", 201000); Require(rate->bitsPerSecond == 1600000, "Transport rate units incorrect");
+    const auto measuredAt = rate->sampled;
+    Require(rate->Read(measuredAt + std::chrono::milliseconds(2999)).bitsPerSecond == 1600000, "Fresh sample expired early");
+    const auto expired = rate->Read(measuredAt + std::chrono::seconds(3));
+    Require(expired.stale && !expired.bitsPerSecond, "Stale transport measurement escaped deadline");
     sample(3000000, "transport", 100); Require(!rate->bitsPerSecond, "Counter reset fabricated a rate");
     sample(4000000, "replacement", 999999); Require(!rate->bitsPerSecond, "Replacement transport reused old counters");
     sample(4000000, "replacement", 999999); Require(!rate->bitsPerSecond, "Duplicate timestamp fabricated a rate");
+    sample(5000000, "replacement", 999999);
+    Require(rate->Read().bitsPerSecond == 0 && !rate->Read().stale, "Measured zero confused with missing sample");
+    auto nextGeneration = std::make_shared<TransportSendRate>();
+    sample(6000000, "replacement", 1000000);
+    Require(!nextGeneration->Read().bitsPerSecond, "Late retired-generation callback contaminated a new peer");
 
     Sink fixedSink, adaptiveSink;
     auto fixed = webrtc::make_ref_counted<CaptureVideoSource>();

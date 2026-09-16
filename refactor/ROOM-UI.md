@@ -319,3 +319,16 @@ sandbox when necessary. Offscreen results do not prove on-screen presentation;
 the Windows proof still does not measure physical-display latency or prove
 hardware-only encoding. Existing security, resource, gaming and service-cost gates
 remain in [TODO.md](TODO.md).
+# Per-viewer sender diagnostics (2026-09-17)
+
+The opt-in host window lists each viewer with its peer identity, application state,
+last source-observed dimensions, applied video cap and measured transport upload.
+Select a row for requested preferences, revision details and allocation. These
+inline details retain selection by peer ID and clear it when that peer leaves.
+Unchanged snapshots do not rebuild the table. Nicknames render as plain text.
+
+Transport samples come from the existing local 1 Hz collector, expire at three
+seconds, and display fresh zero separately from unknown/stale. Transport includes
+audio/protocol traffic but excludes IP/interface overhead. Source observation is
+not remote presentation; remote latency and congestion reasons remain unknown.
+No additional service requests or telemetry uploads are introduced.

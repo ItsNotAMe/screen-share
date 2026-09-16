@@ -1348,3 +1348,15 @@ Artifacts: `build/webrtc/peer-owner-headless-debug/result.json` and
 `build/webrtc/peer-owner-headless-release/result.json`. Reports retain executable
 hashes, watchdog outcomes and restart timing diagnostics. No manual input was
 required. The existing delayed ICE-state confirmation remains unchanged.
+## Sender diagnostics continuation — 2026-09-17
+
+Integrated host per-viewer UI rows/inline details and shared CLI status vocabulary.
+Requested preferences/revisions, applied caps, source observation and measured
+transport remain distinct. Local 1 Hz samples become unknown/stale at three
+seconds; no service traffic was added. Receiver telemetry and remote latency
+remain open. DETAIL-CHECKS separates this implementation from those requirements.
+
+Release and Debug builds and five-case silent regression matrices passed, as did
+the Release stream-settings collector proof. Optional Windows CLI presentation
+timed out twice before diagnostics integration; see HEADLESS-TESTING for evidence.
+This batch does not close desktop GPU or external performance acceptance.

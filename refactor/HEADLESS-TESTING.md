@@ -512,3 +512,19 @@ Capture/audio are synthetic; audible PCM is mixed receiver evidence. This test u
 shared production negotiation/room components with diagnostic orchestration, not
 the unfinished normal UI/CLI facade. It does not establish desktop/GPU capture,
 remote TLS/NAT, gaming input/image latency, leak bounds or service-cost acceptance.
+## Sender diagnostics evidence — 2026-09-17
+
+Release and Debug application builds succeeded. The final silent production
+matrix passed 5/5 in each configuration, including actual widget pause/resume,
+selected-peer preservation and CLI freshness reporting:
+`build/webrtc/diagnostics-final-regression-{release,debug}/result.json`.
+`build/sdk-proof-release/StreamSettingsTest.exe` passed counter reset, replacement,
+zero-rate, exact three-second expiry and independent-generation checks.
+
+The optional desktop matrix did **not** pass: Windows CLI `PreviewLifecycle`
+timed out at its three-second presentation wait (RoomCliTests.cpp line 77), before
+diagnostics integration. It repeated in the isolated desktop check. Evidence:
+`build/webrtc/diagnostics-regression-20260917/result.json` and
+`build/webrtc/diagnostics-desktop-check/`. The cause is not established; desktop
+GPU acceptance remains unresolved. No timeout was relaxed or success fabricated.
+All tests used silent synthetic audio and no physical input.

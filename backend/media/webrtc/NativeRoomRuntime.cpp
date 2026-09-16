@@ -171,8 +171,10 @@ public:
             result.peers.push_back({id, entry->settings.revision(), stats.observedRevision,
                 entry->attemptedRevision == settingsRevision_ && entry->settingsRejected, stats.width, stats.height,
                 AllocateViewerVideo(options_.preferences, allocatedViewers_), entry->settings.appliedVideoBitrateBps()});
-            std::lock_guard lock(entry->sendRate->mutex);
-            if (std::chrono::steady_clock::now() - entry->sendRate->sampled < 3s) result.peers.back().transportSendBps = entry->sendRate->bitsPerSecond;
+            const auto sample = entry->sendRate->Read();
+            auto& peer = result.peers.back();
+            peer.transportSampleStale = sample.stale;
+            peer.transportSendBps = sample.bitsPerSecond;
         }
         return result;
     }

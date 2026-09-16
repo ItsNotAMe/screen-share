@@ -1,6 +1,7 @@
 #include "ui/RoomSessionWindow.h"
 #include "shared/RoomLink.h"
 #include "shared/StreamPreferencesJson.h"
+#include "shared/RoomStreamDiagnostics.h"
 #include <QClipboard>
 #include "ui/RoomBrowserWindow.h"
 #include "ui/VideoFrameWidget.h"
@@ -184,6 +185,21 @@ void MutationLifecycle(const std::string& origin) {
     } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
 }
 void ProfileSettingsScenario() {
+    PeerStreamStatus diagnostic;
+    Check(StreamPeerState(diagnostic, 2) == "pending");
+    Check(StreamPeerJson(diagnostic, 2)["transportSendBps"].isNull());
+    diagnostic.appliedRevision = 2;
+    Check(StreamPeerState(diagnostic, 2) == "upload-paused");
+    diagnostic.appliedVideoBitrateBps = 1000000;
+    Check(StreamPeerState(diagnostic, 2) == "waiting-for-source");
+    diagnostic.observedRevision = 2;
+    Check(StreamPeerState(diagnostic, 2) == "source-observed");
+    diagnostic.transportSendBps = 0;
+    Check(StreamSampleState(diagnostic) == "fresh" && StreamPeerJson(diagnostic, 2)["transportSendBps"].isDouble());
+    diagnostic.transportSampleStale = true;
+    Check(StreamSampleState(diagnostic) == "stale" && StreamPeerJson(diagnostic, 2)["transportSendBps"].isNull());
+    diagnostic.rejected = true;
+    Check(StreamPeerState(diagnostic, 3) == "rejected");
     QTemporaryDir files; Check(files.isValid()); const auto path = files.filePath("profile.ini");
     RoomProfile profile(path);
     const auto guest = profile.nickname(); Check(guest.startsWith("Guest-") && guest.size() == 14);
@@ -559,6 +575,11 @@ int main(int argc, char** argv) {
             return stream.peers.size() == 1 && stream.peers[0].appliedRevision == stream.requestedRevision && stream.peers[0].appliedVideoBitrateBps == 0;
         });
         Wait([&] { return host.findChild<QLabel*>("uploadState")->text().contains("1 viewer(s) paused"); });
+        auto* diagnostics = host.findChild<QTableWidget*>("peerDiagnostics");
+        Wait([&] { return diagnostics->rowCount() == 1 && diagnostics->item(0, 1)->text() == "upload-paused"; });
+        diagnostics->selectRow(0);
+        Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Remote display, latency and congestion reason: unknown"));
+        const auto diagnosticPeer = diagnostics->item(0, 0)->data(Qt::UserRole);
         const auto drainUntil = std::chrono::steady_clock::now() + 500ms;
         Wait([&] { return std::chrono::steady_clock::now() >= drainUntil; });
         const auto pausedFrames = changed;
@@ -575,6 +596,8 @@ int main(int argc, char** argv) {
         Wait([&] { const auto stream = host.session().status().stream;
             return !stream.preferences.aggregateUploadLimitBps && stream.peers[0].appliedVideoBitrateBps == 2000000;
         });
+        Wait([&] { return diagnostics->item(0, 1)->text() == "source-observed"; });
+        Check(diagnostics->item(diagnostics->currentRow(), 0)->data(Qt::UserRole) == diagnosticPeer);
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         auto* video = static_cast<VideoFrameWidget*>(viewer.findChild<QWidget*>("roomVideo"));
         Check(video && video->presentedFrameCount() >= 20);

@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-17 (through `95b423a`, plus the regression-runner batch). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-17 (through `99f4b75`, plus per-peer sender diagnostics). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -382,10 +382,18 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 - [x] Close directory subscriptions during sessions and resubscribe on return; reject stale-list joins while disconnected.
 - [x] Add acknowledged adjustable viewer capacity.
 - [ ] Add a warning for capacity above four.
-- [ ] Add per-viewer summary rows and details popup with requested/applied/actual values.
+- [x] Add host per-viewer summary rows and selectable inline details for requested
+  preferences, applied caps, source-observed size/revisions and measured transport.
+  UI and CLI share status names; absent/stale rates stay unknown, measured zero
+  stays zero. Selection follows peer identity across refreshes.
+- [ ] Add receiver-observed values and complete the planned details popup.
+- [x] Sample local sender transport once per second and suppress samples at the
+  three-second deadline; test exact freshness boundary, resets and peer isolation.
 - [ ] Refresh statistics once per second and mark receiver data stale after three seconds.
 - [ ] Keep receiver telemetry on the peer data channel, not Cloudflare.
-- [ ] Add typed limiting reasons and unknown-valued metrics.
+- [x] Expose sender application states (pending, rejected, upload-paused,
+  waiting-for-source, source-observed) and fresh/stale/unknown transport samples.
+- [ ] Add receiver/network limiting reasons and remaining unknown-valued metrics.
 - [ ] Preserve fullscreen/preview interaction, report paths and signed updater behavior.
 - [ ] Redact secrets/SDP/addresses and reset rate baselines across generations.
 

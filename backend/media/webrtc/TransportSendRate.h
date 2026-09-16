@@ -18,6 +18,12 @@ struct TransportSendRate {
     int64_t timestampUs = 0;
     std::optional<uint64_t> bitsPerSecond;
     std::chrono::steady_clock::time_point sampled{}, next{};
+    struct Snapshot { std::optional<uint64_t> bitsPerSecond; bool stale; };
+    Snapshot Read(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) {
+        std::lock_guard lock(mutex);
+        const bool stale = sampled != std::chrono::steady_clock::time_point{} && now - sampled >= std::chrono::seconds(3);
+        return {stale ? std::nullopt : bitsPerSecond, stale};
+    }
 };
 class TransportSendRateCallback : public webrtc::RTCStatsCollectorCallback {
     std::shared_ptr<TransportSendRate> state_;

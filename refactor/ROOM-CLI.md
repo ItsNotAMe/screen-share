@@ -255,3 +255,12 @@ node signaling-worker/tests/run-native-service.mjs build/sdk-app-release/RoomCli
 This requires an interactive Windows session. It is not registered in routine
 CTest, and may need execution outside the capture-restricted sandbox. These are
 correctness tests; they do not establish remote latency, NAT/TLS or resource gates.
+# Sender diagnostics additions (2026-09-17)
+
+Status JSON now includes `requestedPreferences`; each peer includes
+`requestedRevision`, `state` and `transportSampleState`. States are `pending`,
+`rejected`, `upload-paused`, `waiting-for-source`, or `source-observed`.
+Sample state is `fresh`, `stale`, or `unknown`; `transportSendBps` is null when
+unknown/stale and numeric zero only for a fresh measured zero. Existing fields
+remain compatible. These values describe host sender/source observations, not
+receiver display, physical-interface throughput or a congestion diagnosis.

@@ -285,7 +285,8 @@ int main(int argc, char** argv) {
             for (const auto& peer : value["peers"].toArray()) {
                 const auto row = peer.toObject();
                 if (row["allocatedVideoBps"].toInt() == 1472000 && row["appliedVideoBps"].toInt() == 1472000) budgetReported = true;
-                if (row["transportSendBps"].toDouble() > 0) rateReported = true;
+                if (row["transportSendBps"].toDouble() > 0 && row["transportSampleState"] == "fresh" &&
+                    row["requestedRevision"] == value["requestedRevision"] && value["requestedPreferences"].isObject()) rateReported = true;
                 if (row["width"].toInt() == 160 && row["appliedRevision"] == row["observedRevision"] && !row["rejected"].toBool()) applied = true;
             }
             if (value["phase"] == "stopped") stopped = true;

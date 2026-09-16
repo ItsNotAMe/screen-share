@@ -1,6 +1,10 @@
 #include "ui/RoomSessionWindow.h"
 #include "shared/RoomLink.h"
 #include "shared/RoomProfile.h"
+#include "shared/RoomStreamDiagnostics.h"
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QJsonArray>
 #include <QClipboard>
 #include "ui/VideoFrameWidget.h"
 #include "ui/UiStyle.h"
@@ -198,6 +202,21 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     sourceSettings->setVisible(config.room.host); sourceSettings->setMinimumHeight(160); layout->addWidget(sourceSettings, 1);
     settingsState_ = new QLabel; settingsState_->setWordWrap(true); layout->addWidget(settingsState_);
     uploadState_ = new QLabel; uploadState_->setWordWrap(true); uploadState_->setObjectName("uploadState"); uploadState_->setVisible(config.room.host); layout->addWidget(uploadState_);
+    auto* diagnostics = new QTableWidget(0, 5, this);
+    diagnostics->setObjectName("peerDiagnostics");
+    diagnostics->setHorizontalHeaderLabels({"Viewer", "Settings", "Source size", "Applied cap", "Transport upload"});
+    diagnostics->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    diagnostics->setSelectionBehavior(QAbstractItemView::SelectRows);
+    diagnostics->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    diagnostics->setMaximumHeight(180); diagnostics->setVisible(config.room.host); layout->addWidget(diagnostics);
+    auto* details = new QLabel(this); details->setObjectName("peerDiagnosticsDetails");
+    details->setTextFormat(Qt::PlainText); details->setWordWrap(true);
+    details->setTextInteractionFlags(Qt::TextSelectableByMouse); details->setVisible(config.room.host); layout->addWidget(details);
+    auto refreshDetails = [diagnostics, details] {
+        auto* item = diagnostics->item(diagnostics->currentRow(), 0);
+        details->setText(item ? item->toolTip() : "Select a viewer for settings details. Source observation does not confirm remote display.");
+    };
+    connect(diagnostics, &QTableWidget::itemSelectionChanged, this, refreshDetails);
     if (profile) {
         auto* saveDefaults = new QPushButton(config.room.host ? "Save stream settings for new rooms" : "Save playback settings for new sessions");
         saveDefaults->setObjectName("saveSessionDefaults"); layout->addWidget(saveDefaults);
@@ -215,7 +234,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     connect(apply_, &QPushButton::clicked, this, [this] {
         error_->clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
     });
-    session_.statusChanged = [this, host = config.room.host](const auto& value) {
+    session_.statusChanged = [this, diagnostics, refreshDetails, host = config.room.host](const auto& value) {
         phase_->setText(Phase(value.phase) + QString(" — %1 connected, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
         room_->setText("Room: " + QString::fromStdString(value.roomId));
         roomLink_->setText(MakeRoomLink(QString::fromStdString(value.roomId)));
@@ -248,6 +267,55 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         audioProcess_->setEnabled(audioEditable && audioKind_->currentIndex() == 2);
         refreshCapture_->setEnabled(host && !session_.capturePending()); captureSource_->setEnabled(host && !session_.capturePending());
         if (host) {
+            QJsonArray rows;
+            for (const auto& peer : value.stream.peers) {
+                auto row = StreamPeerJson(peer, value.stream.requestedRevision);
+                for (const auto& member : value.members) if (member.peerId == peer.peerId)
+                    row["nickname"] = QString::fromStdString(member.nickname);
+                rows.append(row);
+            }
+            // Status/control ticks stay responsive, but unchanged measurements do
+            // not rebuild the table. No additional service requests or timers.
+            const auto snapshot = QJsonDocument(QJsonObject{{"rows", rows}, {"preferences", StreamPreferencesJson(value.stream.preferences)}}).toJson(QJsonDocument::Compact);
+            if (diagnostics->property("snapshot").toByteArray() != snapshot) {
+                diagnostics->setProperty("snapshot", snapshot);
+                QString selected;
+                if (auto* current = diagnostics->item(diagnostics->currentRow(), 0)) selected = current->data(Qt::UserRole).toString();
+                const QSignalBlocker blocked(diagnostics);
+                diagnostics->setRowCount(int(value.stream.peers.size()));
+                diagnostics->setCurrentCell(-1, -1);
+                diagnostics->clearSelection();
+                for (int index = 0; index < int(value.stream.peers.size()); ++index) {
+                    const auto& peer = value.stream.peers[index];
+                    const auto id = QString::fromStdString(peer.peerId);
+                    const auto nickname = rows[index].toObject()["nickname"].toString();
+                    const auto rate = !peer.transportSampleStale && peer.transportSendBps ?
+                        QString("%1 Mbps").arg(*peer.transportSendBps / 1000000.0, 0, 'f', 2) : StreamSampleState(peer);
+                    const QStringList cells{nickname.isEmpty() ? id : nickname + " [" + id + "]",
+                        StreamPeerState(peer, value.stream.requestedRevision),
+                        peer.observedRevision ? QString("%1 × %2").arg(peer.width).arg(peer.height) : "unknown",
+                        peer.appliedRevision ? QString("%1 Mbps").arg(peer.appliedVideoBitrateBps / 1000000.0, 0, 'f', 2) : "unknown", rate};
+                    const auto& preferences = value.stream.preferences;
+                    const auto requested = QString("%1; resolution %2 (%3 × %4); FPS %5 (%6); bitrate %7 (%8).")
+                        .arg(preferences.preset == StreamPreset::Gaming ? "Gaming" : "Quality")
+                        .arg(preferences.resolution == ResolutionMode::Fixed ? "Fixed" : preferences.resolution == ResolutionMode::Native ? "Native" : "Auto")
+                        .arg(preferences.width).arg(preferences.height)
+                        .arg(preferences.fpsMode == SettingMode::Manual ? "Manual" : "Auto").arg(preferences.fps)
+                        .arg(preferences.bitrateMode == SettingMode::Manual ? "Manual target" : "Auto ceiling")
+                        .arg(preferences.bitrateLimitBps ? QString::number(*preferences.bitrateLimitBps) + " bps" : "automatic allowance");
+                    const auto detail = QString("Peer %1\nRequested / applied / source-observed revisions: %2 / %3 / %4\nAllocated video cap: %5 bps; applied video cap: %6 bps. Transport sample: %7 (expires after 3 seconds).\nTransport includes audio and protocol traffic, excludes IP/interface overhead. Remote display, latency and congestion reason: unknown.\nRequested settings: %8")
+                        .arg(id).arg(value.stream.requestedRevision).arg(peer.appliedRevision).arg(peer.observedRevision)
+                        .arg(peer.allocatedVideoBitrateBps).arg(peer.appliedVideoBitrateBps).arg(StreamSampleState(peer))
+                        .arg(requested);
+                    for (int column = 0; column < cells.size(); ++column) {
+                        auto* item = diagnostics->item(index, column);
+                        if (!item) { item = new QTableWidgetItem; diagnostics->setItem(index, column, item); }
+                        item->setText(cells[column]); item->setToolTip(detail); item->setData(Qt::UserRole, id);
+                    }
+                    if (id == selected) { diagnostics->setCurrentCell(index, 0); diagnostics->selectRow(index); }
+                }
+                refreshDetails();
+            }
             qint64 allocated = 0, applied = 0; uint64_t measured = 0; size_t paused = 0, measuredPeers = 0;
             for (const auto& peer : value.stream.peers) {
                 allocated += peer.allocatedVideoBitrateBps; applied += peer.appliedVideoBitrateBps;

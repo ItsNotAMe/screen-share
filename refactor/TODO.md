@@ -53,6 +53,12 @@ authorized input, network impairment and continuous soak acceptance remain open.
 
 ## 2. Complete user experience (B + D)
 
+Host per-viewer diagnostics now integrate UI rows/inline details and CLI JSON:
+requested preferences, applied allocation, source observation and transport sample
+freshness. They reuse local 1 Hz WebRTC stats without service traffic. Receiver
+telemetry, remote latency and network limiting reasons remain unfinished; sender
+observation must not be reported as remote display acknowledgement.
+
 **Deliverable:** existing UI and CLI use the shared v2 backend, including capture/
 audio selection, presentation, Auto/Manual/Gaming settings, saved nickname, live
 directory, room policy and viewer diagnostics.

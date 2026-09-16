@@ -21,6 +21,8 @@ Validated local stream/playback defaults and stable randomized Guest nicknames a
 integrated into browser-created sessions with explicit save controls; do not rebuild
 profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
+Host per-peer sender diagnostics now share UI/CLI states and expose transport
+freshness; receiver telemetry and network limiting reasons remain to implement.
 Normal AppShell/legacy CLI cutover remains gated; later visual redesign follows
 milestones 1–5.
 

@@ -34,6 +34,8 @@ struct PeerStreamStatus {
     int allocatedVideoBitrateBps = 0, appliedVideoBitrateBps = 0;
     // Sampled WebRTC transport bytes, not physical-interface/IP overhead.
     std::optional<uint64_t> transportSendBps;
+    // A stale sample is deliberately withheld; absent is not measured zero.
+    bool transportSampleStale = false;
 };
 struct StreamStatus {
     uint64_t requestedRevision = 0;
