@@ -26,19 +26,14 @@ add_library(MfWebRTCCodecs STATIC
     "${nativeRoot}/media/capture/CaptureSession.cpp"
     "${nativeRoot}/media/capture/CaptureDistributor.cpp"
     "${nativeRoot}/render/Nv12D3D11Presenter.cpp"
-    "${nativeRoot}/media/webrtc/PcmAudioDeviceModule.cpp"
-    "${nativeRoot}/media/audio/WasapiPcmEndpoint.cpp"
     "${nativeRoot}/audio/WasapiCapture.cpp"
-    "${nativeRoot}/media/webrtc/D3dVideoFrameBuffer.cpp"
-    "${nativeRoot}/media/webrtc/MfVideoEncoderFactory.cpp"
-    "${nativeRoot}/media/webrtc/MfVideoDecoderFactory.cpp"
     "${nativeRoot}/codec/H264StreamEncoder.cpp"
     "${nativeRoot}/codec/H264Bitstream.cpp"
     "${nativeRoot}/video/Nv12Convert.cpp"
     "${nativeRoot}/capture/DesktopCapturer.cpp"
     "${nativeRoot}/codec/H264StreamDecoder.cpp")
 target_include_directories(MfWebRTCCodecs PUBLIC "${nativeRoot}")
-target_link_libraries(MfWebRTCCodecs PUBLIC ScreenShare::WebRTC
+target_link_libraries(MfWebRTCCodecs PUBLIC ScreenShare::WebRTC ScreenShareMediaAdapters
     d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging)
 target_link_libraries(WebRTCProof PRIVATE MfWebRTCCodecs ScreenShareNegotiation)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/RoomTransport.cmake")
@@ -154,6 +149,20 @@ set_tests_properties(presentation-latest-frame PROPERTIES TIMEOUT 10)
 target_link_libraries(LiveCaptureTest PRIVATE MfWebRTCCodecs gdi32)
 target_link_libraries(WebRTCProof PRIVATE gdi32)
 option(SCREENSHARE_TEST_LIVE_CAPTURE "Capture a generated test window through WGC" OFF)
+if(SCREENSHARE_NODE_EXECUTABLE AND TARGET PublicRoomSessionProof)
+    add_executable(WindowsRoomSessionProof PublicRoomSessionProof.cpp)
+    target_compile_definitions(WindowsRoomSessionProof PRIVATE SCREENSHARE_WINDOWS_ROOM_PROOF)
+    target_link_libraries(WindowsRoomSessionProof PRIVATE MfWebRTCCodecs ScreenShareRoomSession gdi32)
+    add_custom_command(TARGET WindowsRoomSessionProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>"
+        "$<TARGET_FILE_DIR:WindowsRoomSessionProof>" VERBATIM)
+    if(SCREENSHARE_TEST_LIVE_CAPTURE)
+        add_test(NAME windows-room-session-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_LIST_DIR}/../../signaling-worker/tests/run-native-service.mjs"
+            "$<TARGET_FILE:WindowsRoomSessionProof>" "${CMAKE_CURRENT_BINARY_DIR}/windows-room-evidence" windows-media)
+        set_tests_properties(windows-room-session-media PROPERTIES TIMEOUT 90)
+    endif()
+endif()
 if(SCREENSHARE_TEST_LIVE_CAPTURE)
     add_test(NAME capture-automatic-recovery COMMAND CaptureRecoveryTest --live)
     set_tests_properties(capture-automatic-recovery PROPERTIES TIMEOUT 45)

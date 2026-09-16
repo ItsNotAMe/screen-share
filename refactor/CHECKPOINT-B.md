@@ -1,5 +1,54 @@
 # Checkpoint B evidence
 
+## Production runtime composition and Windows binding — 2026-09-16
+
+NativeRoomRuntime replaces PublicRoomSessionProof's diagnostic peer/capture owner.
+It composes MediaEngine/MediaPeer, HostMediaSession, HostPeerRegistry and
+RoomManagedPeer. Host offers wait for attachment; restart requests pass through
+the existing per-peer recovery budget. Viewer recovery emits an authenticated
+restart request to the host. All native references survive capture retirement;
+normal shutdown advances asynchronously until the registry/capture barrier drains.
+Failures are reported to RoomMediaSession so status and authoritative membership
+agree; failed delivery subscriptions cannot silently leave a connected blank peer.
+
+Initial StreamPreferences are validated and applied to each source before delivery;
+RTP settings are applied once negotiation is ready. Sources/senders are independent
+per viewer. Live preference changes, aggregate allocation and UI settings remain
+milestone 2 work. Source-start failure now reaches the public facade as Media,
+rather than being misclassified as a room transport error.
+
+WindowsRoomRuntimeFactory binds WindowsCaptureSource and WasapiPcmEndpoints,
+with injectable audio for tests and a shared presentation sink/channel callback.
+The host waits for its first capture device before building MF codec factories.
+Device retirement retains the existing software fallback; automatic hardware
+reenablement and actual driver-removal acceptance remain open. Source/sink objects
+and the application WindowsMediaRuntime/SSL lease must outlive joined teardown.
+ScreenShareMediaAdapters is now compiled by both application and proof targets;
+NativeRoomRuntimeTests links the Windows factory through ScreenShareCore and checks
+idle cancellation without opening capture/audio devices.
+
+Full suites pass **33/33 media Debug/Release**, **14/14 application Release**,
+**9/9 CLI-only Release**. Logs: `build/webrtc/native-runtime-debug.log`,
+`native-runtime-integrated-release.log`, `native-runtime-app-final.log`,
+`native-runtime-cli-final.log`. Final focused public-runtime checks with restart,
+rejoin and healthy-peer progress after injected delivery failure pass in Release
+(5.86 s) and Debug (5.95 s).
+
+The generated-window Windows public-runtime proof passes outside the sandbox in
+Release (5.76 s) and Debug (5.95 s), including four independent H.264/Opus viewers,
+restart/rejoin and shutdown. Artifact roots:
+`build/webrtc/native-runtime-windows-release-recovery` and
+`build/webrtc/native-runtime-windows-debug-recovery`. Inside the sandbox WGC
+CreateForWindow fails with “The specified service does not exist as an installed
+service”; this is an environment limitation, not a passed test. No physical input
+or desktop audio is used. These runs permit software fallback; hardware-only
+encoding, external latency, two-hour soak and service-cost acceptance are not proven.
+
+Milestone 1's local runtime integration deliverable is complete. Next is milestone
+2: normal UI/CLI adoption, live settings, capture selection/audio configuration and
+presentation through this factory. Legacy default removal still depends on the
+original acceptance gates; normal application sessions have not been switched yet.
+
 ## Public owned session lifecycle — 2026-09-16
 
 api/RoomSession.h now exposes asynchronous Start/Stop and thread-safe Status with

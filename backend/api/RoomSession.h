@@ -4,6 +4,7 @@
 #include <future>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace screenshare::v2 {
 struct RoomOptions {
@@ -35,6 +36,7 @@ public:
     virtual bool Add(const std::string&) = 0;
     virtual void Remove(const std::string&) noexcept = 0;
     virtual bool Receive(const std::string&, media::RoomPeerSignal) = 0;
+    virtual std::vector<std::string> FailedPeers() const { return {}; }
     virtual std::shared_future<void> BeginStop() = 0;
 };
 struct RoomIdentity { bool host; std::string roomId, peerId; };

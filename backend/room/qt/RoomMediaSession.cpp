@@ -78,6 +78,7 @@ void RoomMediaSession::Stop() {
     roster_.TransportLost(generation_);
     pending_.clear(); bytes_ = 0; state_ = State::Stopped;
 }
+void RoomMediaSession::FailPeer(const std::string& peer) { CheckThread(); roster_.Fail(peer); }
 RoomMediaSession::Status RoomMediaSession::status() const {
     CheckThread();
     return {state_, generation_, roster_.activeCount(), roster_.failedCount(), roster_.pendingCount(), pending_.size(), bytes_};

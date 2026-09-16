@@ -17,66 +17,33 @@ headers. Folder organization does not imply the legacy runtime has been replaced
 - Preserve every original security, latency, resource and cutover gate. Never mark
   hardware/remote tests passed using localhost evidence. Report unfinished scope.
 
-## 1. Room-backed media session — active (B + C integration)
+## 1. Room-backed media session — complete for local integration
 
 **Deliverable:** a reusable native session path and one-command headless scenario
 that create/join real v2 rooms, negotiate actual media through authenticated room
 messages, deliver paced frames/audio and stop cleanly.
 
-Include owned networking, typed asynchronous operations/events, session/connection
-generations, room-to-WebRTC adaptation, bounded candidate ordering, host/viewer
-lifecycle, restart/rejoin and cleanup. Use shared production components. Extend
-to four viewers with failure isolation; validate CLI-only and UI-capable builds.
+The public RoomSession now owns admission, networking/signaling executors,
+authenticated membership/signal routing, status and asynchronous shutdown.
+NativeRoomRuntime composes capture, per-viewer sources, native peers, negotiation,
+initial stream preferences and the shared restart/retirement budget.
+WindowsRoomRuntimeFactory binds WGC capture and WASAPI audio, selects the capture
+device before constructing hardware codecs, and retains device-retirement fallback.
 
-Already available: codec/audio/capture peers, scheduled media owner, settings core,
-isolated Worker/directory outbox, Qt transport/admission and native-to-workerd tests.
-Actual authenticated four-viewer H.264/Opus negotiation now also passes against
-local workerd, including slow-viewer isolation, twelve encrypted data channels,
-ICE restart, kick/rejoin and room shutdown. The reusable RoomPeerNegotiation
-adapter enforces candidate ordering and connection-generation barriers.
-Negotiation completions and deadlines now run automatically on its signaling
-thread, with cancellation-safe delayed callbacks and no recurring idle timer.
-**Remaining:** embed this composition in the shared automatically scheduled session
-facade, including roster-driven peer ownership and transport-failure recovery.
-The diagnostic still owns orchestration; normal UI/CLI sessions remain legacy.
+The public headless scenario uses the production runtime with synthetic endpoints.
+It validates four independent H.264/Opus viewers, authenticated restart, fresh
+rejoin, admission cancellation, media-drain barriers, capture startup failure and
+single-viewer delivery-failure isolation. The Windows variant also passes using
+a generated WGC window and synthetic audio, without physical input. Application
+and CLI builds link the same native adapters; no diagnostic runtime implementation
+is needed by the backend.
 
-RoomNetwork now owns one dedicated Qt networking loop for admission and all room
-sockets, with bounded commands/events and asynchronous cancellation. RoomPeerRoster
-reconciles authenticated snapshot generations/revisions into peer lifecycle hooks.
-The real-media proof uses both for creation, socket-loss retirement, reconnect,
-kick/rejoin and close; it no longer pumps Qt events or manually attaches each peer.
-Remaining facade work includes automatic cross-executor dispatch, asynchronous
-capture-cleanup barriers, recovery budget integration and public session events.
+Evidence and scope: [CHECKPOINT-B.md](CHECKPOINT-B.md) and
+[HEADLESS-TESTING.md](HEADLESS-TESTING.md). This closes local composition/integration,
+not latency, resource, NAT/TLS, service-cost or cutover acceptance. Normal UI/CLI
+sessions remain legacy until milestone 2 adoption and the required acceptance gates.
 
-The authenticated proof now uses RoomManagedPeer and HostPeerOwner for deferred
-capture attachment, cleanup barriers and budgeted ICE restarts. BeginStop keeps
-signaling responsive while capture callbacks drain; startup and shutdown waits
-belong to the outer diagnostic, not signaling commands. Carry these integrated
-owners into the normal facade and replace the remaining diagnostic dispatch.
-
-RoomSessionCoordinator now automatically drains room events, dispatches them on
-signaling, advances media lifecycle hooks and handles bounded asynchronous sends.
-RoomSignalCodec provides shared SDP/ICE conversion. The four-viewer scenario no
-longer pumps these operations, and recovery completes while the caller is idle.
-MediaEngine now owns native worker/network threads, the factory, Opus setup,
-independent peer creation, host track attachment and the three data-channel
-policies. The authenticated scenario uses it with injected codecs/audio endpoints.
-MediaPeer now owns each native peer's ICE lifecycle, negotiation, incoming video
-sink, bounded/validated channels and idempotent teardown. Diagnostic observers
-only collect frame/message evidence. RoomMediaSession now owns host/viewer
-membership reconciliation, bounded authenticated signal routing, transport-loss
-retirement and pending rejoin barriers. The scenario supplies native construction
-hooks and uses the coordinator to advance these sessions automatically.
-The public v2 RoomSession now owns admission/start/stop, executors, routing,
-status and asynchronous media drain through an injected RoomRuntimeFactory.
-Its new real-service proof independently delivers H.264/Opus to four viewers.
-Next: supply the standard Windows media-runtime factory (capture/source settings,
-audio and presentation configuration), then wire UI/CLI to this owned API.
-The diagnostic factory validates the public lifecycle but is not the default
-production media composition. UI/CLI cutover and acceptance remain open.
-Do not add another event-pumping layer around the completed coordinator.
-
-- [ ] Complete the integrated media-session deliverable and headless scenarios.
+- [x] Complete the integrated media-session deliverable and headless scenarios.
 
 ## 2. Complete user experience (B + D)
 

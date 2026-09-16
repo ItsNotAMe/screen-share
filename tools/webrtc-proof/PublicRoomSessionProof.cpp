@@ -1,4 +1,10 @@
 #include "api/RoomSession.h"
+#include "media/webrtc/NativeRoomRuntime.h"
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+#include "media/webrtc/WindowsRoomRuntime.h"
+#include "CaptureTestWindow.h"
+#include "core/WindowsMediaRuntime.h"
+#endif
 #include "media/HostMediaSession.h"
 #include "media/webrtc/MediaEngine.h"
 #include "media/webrtc/MediaPeer.h"
@@ -16,109 +22,83 @@
 #include <array>
 #include <map>
 #include <iostream>
+#include <source_location>
 using namespace screenshare::media;
 using namespace screenshare::v2;
 using namespace std::chrono_literals;
-void Check(bool ok) { if (!ok) throw std::runtime_error("Public session proof failed"); }
+void Check(bool ok, std::source_location location = std::source_location::current()) {
+    if (!ok) throw std::runtime_error("Public session proof failed at line " + std::to_string(location.line()));
+}
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+HWND captureWindow = nullptr;
+#endif
 struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<unsigned> frames{0}, invalid{0}, destroyed{0};
+    std::atomic<bool> failDelivery{false};
+    std::atomic<bool> restart{false};
+    std::atomic<unsigned> offers{0};
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     void OnFrame(const webrtc::VideoFrame& frame) override {
         auto pixels = frame.video_frame_buffer()->ToI420();
-        if (frame.width() != 640 || frame.height() != 360 || !pixels || pixels->DataY()[0] < 35) ++invalid;
+        if (frame.width() != 640 || frame.height() != 360 || !pixels ||
+            pixels->DataY()[pixels->StrideY() * (pixels->height() / 2) + pixels->width() / 2] < 35) ++invalid;
         ++frames;
     }
 };
-// Diagnostic source/sink composition; the public owner drives every operation.
-// No caller executor access, transport pumping or SDP relay is available here.
+// Only synthetic dependencies and evidence remain diagnostic-owned.
 class Runtime final : public RoomRuntime {
-    struct Entry {
-        uint64_t generation;
-        std::unique_ptr<MediaPeer> peer;
-        std::unique_ptr<RoomPeerNegotiation> negotiation;
-        webrtc::scoped_refptr<CaptureVideoSource> source;
-        std::future<HostOperationResult> attaching, removing;
-        bool retired = false;
-    };
-    RoomIdentity identity_;
-    RoomSend send_;
     std::shared_ptr<Evidence> evidence_;
-    std::unique_ptr<MediaEngine> engine_;
-    webrtc::scoped_refptr<webrtc::AudioTrackInterface> audio_;
-    HostMediaSession capture_;
-    std::future<HostOperationResult> starting_, stoppingCapture_;
-    uint64_t captureGeneration_ = 0, next_ = 0;
-    std::map<std::string, std::unique_ptr<Entry>> peers_;
-    bool stopping_ = false, stopped_ = false;
-    std::promise<void> stoppedPromise_;
-    std::shared_future<void> stoppedFuture_ = stoppedPromise_.get_future().share();
+    std::unique_ptr<RoomRuntime> native_;
+    RoomSend send_;
+    std::string remote_, connection_;
 public:
     Runtime(RoomIdentity identity, RoomSend send, std::shared_ptr<Evidence> evidence)
-        : identity_(std::move(identity)), send_(std::move(send)), evidence_(std::move(evidence)) {
-        engine_ = std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(proof::SyntheticAudio(evidence_->audio),
-            std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
-        audio_ = engine_->CreateAudioTrack();
-        if (identity_.host) starting_ = capture_.Start([] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); });
+        : evidence_(std::move(evidence)), send_(send) {
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+        WindowsRoomRuntimeOptions windows;
+        windows.capture.sourceType = screenshare::CaptureSourceType::Window;
+        windows.capture.windowHandle = reinterpret_cast<uint64_t>(captureWindow);
+        windows.capture.targetWidth = 640; windows.capture.targetHeight = 360; windows.capture.targetFps = 30;
+        windows.preferences.resolution = ResolutionMode::Fixed;
+        windows.preferences.width = 640; windows.preferences.height = 360; windows.preferences.fps = 30;
+        windows.audioEndpoints = proof::SyntheticAudio(evidence_->audio);
+        windows.frames = evidence_;
+        native_ = WindowsRoomRuntimeFactory(std::move(windows))(identity, std::move(send));
+#else
+        NativeRoomRuntimeOptions options;
+        options.engine = [evidence = evidence_] {
+            return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(proof::SyntheticAudio(evidence->audio),
+                std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
+        };
+        options.capture = [] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); };
+        options.deliver = [evidence = evidence_](auto& source, const auto& sample) {
+            if (evidence->failDelivery.exchange(false)) throw std::runtime_error("Injected viewer delivery failure");
+            source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
+        };
+        options.frames = evidence_;
+        options.preferences.resolution = ResolutionMode::Fixed;
+        options.preferences.width = 640; options.preferences.height = 360; options.preferences.fps = 30;
+        native_ = CreateNativeRoomRuntime(std::move(identity), std::move(send), std::move(options));
+#endif
     }
-    ~Runtime() override { ++evidence_->destroyed; }
-    bool Ready(const std::string& id) override { return !stopping_ && !peers_.contains(id) && (!identity_.host || captureGeneration_); }
-    bool Add(const std::string& id) override {
-        auto entry = std::make_unique<Entry>();
-        entry->generation = ++next_;
-        entry->peer = std::make_unique<MediaPeer>(*engine_, next_, evidence_.get(), MediaPeer::ChannelReady{});
-        auto* raw = entry.get();
-        entry->negotiation = std::make_unique<RoomPeerNegotiation>(entry->peer->connection, entry->peer->Negotiation(), next_, identity_.host,
-            [this, id](auto signal) { return send_(id, std::move(signal)); });
-        entry->peer->candidateObserver = [raw](auto* candidate) { raw->negotiation->LocalCandidate(candidate); };
-        if (identity_.host) {
-            entry->source = webrtc::make_ref_counted<CaptureVideoSource>();
-            entry->peer->OpenHostChannels(*engine_);
-            engine_->AttachHostMedia(*entry->peer->connection, entry->source, audio_);
-            entry->attaching = capture_.AddViewer(captureGeneration_, next_, next_, [source = entry->source](auto sample) {
-                source->Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
-            });
-        }
-        return peers_.emplace(id, std::move(entry)).second;
-    }
-    void Remove(const std::string& id) noexcept override {
-        auto found = peers_.find(id); if (found == peers_.end() || found->second->retired) return;
-        auto& entry = *found->second; entry.retired = true; entry.negotiation->Close();
-        if (identity_.host) entry.removing = capture_.RemoveViewer(captureGeneration_, entry.generation, entry.generation);
-    }
+    ~Runtime() override { native_.reset(); ++evidence_->destroyed; }
+    bool Ready(const std::string& id) override { return native_->Ready(id); }
+    bool Add(const std::string& id) override { remote_ = id; return native_->Add(id); }
+    void Remove(const std::string& id) noexcept override { native_->Remove(id); }
     bool Receive(const std::string& id, RoomPeerSignal signal) override {
-        auto found = peers_.find(id);
-        return found != peers_.end() && !found->second->retired && found->second->negotiation->Receive(std::move(signal));
+        if (signal.kind == RoomPeerSignal::Kind::Offer) { connection_ = signal.connectionId; ++evidence_->offers; }
+        return native_->Receive(id, std::move(signal));
     }
+    std::vector<std::string> FailedPeers() const override { return native_->FailedPeers(); }
     void Advance() override {
-        if (stopped_) return;
-        if (starting_.valid() && starting_.wait_for(0ms) == std::future_status::ready) {
-            auto result = starting_.get(); Check(result.error == HostOperationError::None); captureGeneration_ = result.generation;
+        try {
+            native_->Advance();
+            if (evidence_->restart.exchange(false))
+                Check(send_(remote_, {RoomPeerSignal::Kind::RestartRequest, connection_, {}, {}}));
         }
-        if (stopping_) {
-            if (starting_.valid()) return;
-            if (captureGeneration_ && !stoppingCapture_.valid()) stoppingCapture_ = capture_.Stop(captureGeneration_);
-            if (stoppingCapture_.valid()) {
-                if (stoppingCapture_.wait_for(0ms) != std::future_status::ready) return;
-                Check(stoppingCapture_.get().error == HostOperationError::None); captureGeneration_ = 0;
-            }
-            peers_.clear(); audio_ = nullptr; engine_.reset(); stopped_ = true; stoppedPromise_.set_value(); return;
-        }
-        for (auto it = peers_.begin(); it != peers_.end();) {
-            auto& entry = *it->second;
-            if (entry.retired) {
-                if (!entry.removing.valid() || entry.removing.wait_for(0ms) == std::future_status::ready) { it = peers_.erase(it); continue; }
-            } else if (entry.attaching.valid() && entry.attaching.wait_for(0ms) == std::future_status::ready) {
-                Check(entry.attaching.get().error == HostOperationError::None);
-                Check(entry.negotiation->Offer("session_peer_" + std::to_string(entry.generation)));
-            }
-            ++it;
-        }
+        catch (const std::exception& error) { std::cerr << "Native runtime: " << error.what() << '\n'; throw; }
     }
-    std::shared_future<void> BeginStop() override {
-        stopping_ = true;
-        for (auto& [id, entry] : peers_) entry->negotiation->Close();
-        return stoppedFuture_;
-    }
+    std::shared_future<void> BeginStop() override { return native_->BeginStop(); }
 };
 template<class Predicate> void Wait(Predicate condition) {
     auto deadline = std::chrono::steady_clock::now() + 20s;
@@ -147,6 +127,12 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         Check(argc == 2);
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+        screenshare::WindowsMediaRuntime windowsRuntime;
+        Check(SUCCEEDED(windowsRuntime.result()));
+        proof::TestWindow window;
+        captureWindow = window.handle();
+#endif
         auto hostEvidence = std::make_shared<Evidence>();
         auto factory = [](auto evidence) { return [evidence](auto identity, auto send) { return std::make_unique<Runtime>(identity, std::move(send), evidence); }; };
         RoomOptions hostOptions; hostOptions.origin = argv[1]; hostOptions.host = true; hostOptions.nickname = "FacadeHost"; hostOptions.name = "Facade media";
@@ -159,12 +145,36 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < viewers.size(); ++i) {
             evidence[i] = std::make_shared<Evidence>(); options.nickname = "FacadeViewer" + std::to_string(i);
             viewers[i] = std::make_unique<RoomSession>(factory(evidence[i]), true);
-            auto joining = viewers[i]->Start(options); Check(Get(joining).error == RoomError::None);
+            auto joining = viewers[i]->Start(options); const auto joined = Get(joining);
+            if (joined.error != RoomError::None) std::cerr << "Join error " << int(joined.error) << "; host error " << int(host.Status().error) << '\n';
+            Check(joined.error == RoomError::None);
         }
         Wait([&] { for (auto& value : evidence) if (value->frames < 45 || value->audio->audibleBlocks < 20) return false; return host.Status().activePeers == 4; });
+        const unsigned restartingBefore = evidence[0]->frames, healthyBefore = evidence[1]->frames;
+        evidence[0]->restart = true;
+        Wait([&] { return evidence[0]->offers >= 2 && evidence[0]->frames >= restartingBefore + 30 && evidence[1]->frames >= healthyBefore + 30; });
         auto stopViewer = viewers[3]->Stop(); Get(stopViewer);
         Check(evidence[3]->destroyed == 1);
         Wait([&] { return host.Status().activePeers == 3; });
+        auto retiredEvidence = evidence[3];
+        evidence[3] = std::make_shared<Evidence>();
+        viewers[3] = std::make_unique<RoomSession>(factory(evidence[3]), true);
+        auto rejoining = viewers[3]->Start(options); Check(Get(rejoining).error == RoomError::None);
+        Wait([&] { return host.Status().activePeers == 4 && evidence[3]->frames >= 30 && evidence[3]->audio->audibleBlocks >= 20; });
+        auto leaveAgain = viewers[3]->Stop(); Get(leaveAgain);
+        Wait([&] { return host.Status().activePeers == 3; });
+        Check(retiredEvidence->destroyed == 1);
+#ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
+        hostEvidence->failDelivery = true;
+        Wait([&] { return host.Status().activePeers == 2 && host.Status().failedPeers == 1; });
+        std::array<unsigned, 3> before{};
+        for (size_t i = 0; i < before.size(); ++i) before[i] = evidence[i]->frames;
+        Wait([&] {
+            unsigned progressing = 0;
+            for (size_t i = 0; i < before.size(); ++i) if (evidence[i]->frames >= before[i] + 20) ++progressing;
+            return progressing == 2;
+        });
+#endif
         auto stopping = host.Stop(); auto sameStop = host.Stop(); Get(stopping); Get(sameStop);
         Check(hostEvidence->destroyed == 1 && host.Status().phase == RoomPhase::Stopped);
         for (auto& viewer : viewers) { auto done = viewer->Stop(); Get(done); }
@@ -190,7 +200,18 @@ int main(int argc, char** argv) {
         RoomSession secure(factory(std::make_shared<Evidence>()));
         auto rejected = secure.Start(hostOptions); Check(Get(rejected).error == RoomError::Admission);
         auto secureStop = secure.Stop(); Get(secureStop);
-        std::cout << "{\"passed\":true,\"public_session\":true,\"viewers\":4,\"decoded_frames\":" << frames << ",\"cancel_admission\":true,\"coalesced_stop\":true,\"media_drain_barrier\":true,\"production_tls_required\":true}\n";
+        RoomSession failedCapture([](auto identity, auto send) {
+            NativeRoomRuntimeOptions options;
+            options.engine = []() -> std::unique_ptr<MediaEngine> { throw std::runtime_error("Engine must not start after failed capture"); };
+            options.capture = []() -> std::unique_ptr<ICaptureSource> { throw std::runtime_error("Injected capture startup failure"); };
+            options.deliver = [](auto&, const auto&) {};
+            return CreateNativeRoomRuntime(identity, std::move(send), std::move(options));
+        }, true);
+        auto failedStart = failedCapture.Start(hostOptions); Get(failedStart);
+        Wait([&] { return failedCapture.Status().phase == RoomPhase::Failed; });
+        Check(failedCapture.Status().error == RoomError::Media);
+        auto failedStop = failedCapture.Stop(); Get(failedStop);
+        std::cout << "{\"passed\":true,\"public_session\":true,\"native_runtime\":true,\"rejoin\":true,\"viewers\":4,\"decoded_frames\":" << frames << ",\"cancel_admission\":true,\"coalesced_stop\":true,\"media_drain_barrier\":true,\"production_tls_required\":true}\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL(); return result;
 }

@@ -71,7 +71,11 @@ struct RoomSession::Impl {
         }
         void Advance() {
             if (!runtime || stopping) return;
-            runtime->Advance(); session->Advance();
+            try {
+                runtime->Advance();
+                for (const auto& peer : runtime->FailedPeers()) session->FailPeer(peer);
+                session->Advance();
+            } catch (...) { terminal = true; terminalError = RoomError::Media; Schedule(); return; }
             const auto current = session->status();
             {
                 std::lock_guard lock(mutex);

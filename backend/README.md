@@ -33,6 +33,10 @@ ScreenShareRoomSession target. Consumers should not add a manual event pump.
 signaling executors, admission, authenticated routing, bounded reconnect policy,
 thread-safe status and an asynchronous media-drain barrier. A RoomRuntimeFactory
 constructs native media on signaling; no Qt/WebRTC types cross this control API.
-The headless public-session proof supplies synthetic capture/audio with real
-native peers. The default Windows runtime factory and UI/CLI selection are still
-pending; this API does not silently switch the legacy ScreenShareSession facade.
+NativeRoomRuntime composes shared capture, peers, recovery/retirement and initial
+stream preferences. WindowsRoomRuntimeFactory binds WGC/WASAPI and selects the
+capture device before codec creation. The public-session proofs inject synthetic
+endpoints or use a generated WGC window through this same production runtime.
+ScreenShareMediaAdapters is shared by application/proof builds. UI/CLI selection,
+live settings and presentation wiring remain pending; this API does not silently
+switch the legacy ScreenShareSession facade.

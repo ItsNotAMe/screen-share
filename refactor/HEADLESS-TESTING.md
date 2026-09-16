@@ -1,5 +1,23 @@
 # Headless media checks
 
+The public-session scenario now uses NativeRoomRuntime itself; only source/audio
+dependencies and evidence collection are diagnostic. It includes an authenticated
+restart request, fresh rejoin and a single-viewer delivery failure while healthy
+viewers continue. Capture startup failure must publish a Media error and drain.
+
+For the Windows binding, build WindowsRoomSessionProof and run:
+
+```powershell
+node signaling-worker/tests/run-native-service.mjs build/sdk-proof-release/WindowsRoomSessionProof.exe build/webrtc/windows-runtime-check windows-media
+```
+
+This creates a test-owned animated window and captures it through WGC. Audio is
+synthetic; no mouse/keyboard input occurs. It requires a Windows graphical session.
+In the Codex sandbox WGC reports a missing capture service; the same test passes
+outside that sandbox. With `-LiveCapture`, CTest also registers
+`windows-room-session-media`. The regular CPU-only headless path remains available.
+The Windows test permits codec fallback and does not assert hardware-only encoding.
+
 `public-room-session-media` exercises the public v2 RoomSession API against an
 isolated real Worker. It creates a host and four independent viewers, verifies
 decoded H.264 and audible Opus separately for each viewer, leaves cleanly, cancels

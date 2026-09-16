@@ -2,6 +2,22 @@
 
 ## Current integration evidence — 2026-09-16
 
+Milestone 1 is now complete for local integration; move to milestone 2 UI/CLI,
+live settings and presentation adoption. NativeRoomRuntime replaces the diagnostic
+runtime and uses HostPeerRegistry/RoomManagedPeer for asynchronous capture cleanup,
+budgeted host restart and viewer restart requests. Native failures flow back to
+RoomMediaSession without retry storms; individual capture delivery failures retire
+only their peer. WindowsRoomRuntimeFactory uses WGC/WASAPI, first-device gating for
+MF hardware setup and existing retirement fallback. Initial source preferences
+apply before first delivery; sender settings apply after negotiation.
+ScreenShareMediaAdapters removes proof-only adapter compilation; app link smoke
+verifies the entire Windows binding is linkable without opening devices.
+Full suites: media33/33 Debug+Release, app14/14, CLI9/9. Final public-runtime tests
+include restart/rejoin, held stop, cancellation, startup/delivery failure. Generated
+WGC-window tests pass Debug+Release outside the sandbox (inside it CreateForWindow
+fails with missing-service error). No physical input; audio synthetic. This does
+not establish hardware-only encoding, remote latency/NAT, resource or cost gates.
+
 Public api/RoomSession.h now owns one v2 session incarnation: Qt network loop,
 signaling executor, admission, coordinator, RoomMediaSession and injected runtime.
 Start resolves at authenticated snapshot; Stop coalesces and awaits network/media

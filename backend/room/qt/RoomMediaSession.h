@@ -27,6 +27,7 @@ public:
     void OnEvent(const RoomSocket::Event&);
     void Advance();
     void Stop();
+    void FailPeer(const std::string& peer);
     Status status() const;
     size_t activeCount() const { return status().activePeers; }
     size_t failedCount() const { return status().failedPeers; }
