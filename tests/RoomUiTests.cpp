@@ -1,4 +1,5 @@
 #include "ui/RoomSessionWindow.h"
+#include "ui/RoomBrowserWindow.h"
 #include "ui/VideoFrameWidget.h"
 #include "media/webrtc/NativeRoomRuntime.h"
 #include "media/webrtc/MfVideoEncoderFactory.h"
@@ -12,6 +13,10 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QLineEdit>
+#include <QTableWidget>
+#include <QTemporaryDir>
+#include <QCheckBox>
 #include <iostream>
 #include <source_location>
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
@@ -64,6 +69,66 @@ public:
     bool Receive(const std::string&, RoomPeerSignal) override { return true; }
     std::shared_future<void> BeginStop() override { return barrier_; }
 };
+void BrowserScenario(const QUrl& origin) {
+    using Directory = screenshare::room::qt::RoomDirectory;
+    QTemporaryDir profiles; Check(profiles.isValid());
+    const auto hostFile = profiles.filePath("host.ini"), viewerFile = profiles.filePath("viewer.ini");
+    {
+        QSettings raw(hostFile, QSettings::IniFormat); raw.setValue("nickname", QString("Bad") + QChar(0x202e)); raw.sync();
+    }
+    RoomProfile profile(hostFile);
+    Check(profile.nickname() == "Guest");
+    Check(!profile.saveNickname(QString("Bad") + QChar(0x202e)));
+    Check(!profile.saveNickname(QString(33, 'a')));
+    Check(profile.saveNickname(QStringLiteral(" Cafe\u0301 ")) && profile.nickname() == QStringLiteral("Caf\u00e9"));
+    Check(RoomProfile(hostFile).nickname() == QStringLiteral("Caf\u00e9"));
+    auto audio = std::make_shared<proof::AudioEvidence>();
+    RoomBrowserWindow host(origin, Factory(audio), true, hostFile, false);
+    RoomBrowserWindow viewer(origin, Factory(audio), true, viewerFile, false);
+    Directory audit(true); Check(audit.Start(origin)); host.show(); viewer.show();
+    Wait([&] { return audit.status().phase == Directory::Phase::Ready && host.directory().status().phase == Directory::Phase::Ready && viewer.directory().status().phase == Directory::Phase::Ready; });
+    Check(audit.status().rooms.empty() && host.directory().connectionAttempts() == 1);
+    Check(host.findChild<QLineEdit*>("roomNickname")->text() == QStringLiteral("Caf\u00e9"));
+    host.findChild<QLineEdit*>("roomName")->setText("<b>Plain room</b>");
+    host.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret");
+    host.findChild<QPushButton*>("createV2Room")->click();
+    Wait([&] { return host.activeSession() && host.activeSession()->session().status().phase == RoomPhase::Active &&
+        !host.directory().running() && viewer.directory().status().rooms.size() == 1 && audit.status().rooms.size() == 1; });
+    auto* list = viewer.findChild<QTableWidget*>("publicRooms");
+    Check(list->rowCount() == 1 && list->item(0, 0)->text() == "<b>Plain room</b>" && list->item(0, 3)->text() == "Required");
+    const auto hostAttempts = host.directory().connectionAttempts();
+    viewer.findChild<QLineEdit*>("roomPassword")->setText("wrong-password"); list->selectRow(0);
+    viewer.findChild<QPushButton*>("joinSelectedRoom")->click();
+    Wait([&] { return viewer.activeSession() && viewer.activeSession()->session().status().phase == RoomPhase::Failed; });
+    viewer.activeSession()->close();
+    Wait([&] { return !viewer.activeSession() && viewer.isVisible() && viewer.directory().status().phase == Directory::Phase::Ready; });
+    viewer.findChild<QLineEdit*>("roomNickname")->setText(" Browser viewer ");
+    viewer.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret"); list->selectRow(0);
+    viewer.findChild<QPushButton*>("joinSelectedRoom")->click(); Check(viewer.activeSession());
+    unsigned frames = 0; auto present = viewer.activeSession()->session().frameReady;
+    viewer.activeSession()->session().frameReady = [&](auto frame) { ++frames; present(std::move(frame)); };
+    Wait([&] { return frames >= 10 && !viewer.directory().running() && audit.status().rooms.size() == 1 && audit.status().rooms[0].viewers == 1; });
+    Check(host.directory().connectionAttempts() == hostAttempts); // Hidden browser never reopens.
+    Check(viewer.findChild<QLineEdit*>("roomPassword")->text().isEmpty());
+    Check(RoomProfile(viewerFile).nickname() == "Browser viewer");
+    for (const auto& path : {hostFile, viewerFile}) { QSettings saved(path, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"nickname"}); }
+    host.activeSession()->close();
+    Wait([&] { return !host.activeSession() && host.isVisible() && audit.status().rooms.empty() &&
+        viewer.activeSession()->session().status().phase == RoomPhase::Stopped; });
+    viewer.activeSession()->close();
+    Wait([&] { return !viewer.activeSession() && viewer.directory().status().phase == Directory::Phase::Ready; });
+    // Rapid visibility changes during an outstanding stop reopen just one current subscription.
+    viewer.hide(); viewer.show(); viewer.hide(); viewer.show();
+    Wait([&] { return viewer.directory().status().phase == Directory::Phase::Ready; });
+    const auto attempts = viewer.directory().connectionAttempts();
+    Check(viewer.directory().Start(origin));
+    QTimer idle; bool idleDone = false; idle.setSingleShot(true); QObject::connect(&idle, &QTimer::timeout, [&] { idleDone = true; }); idle.start(150);
+    Wait([&] { return idleDone; }); Check(viewer.directory().connectionAttempts() == attempts);
+    host.close(); viewer.close(); audit.Stop();
+    Wait([&] { return !host.directory().running() && !viewer.directory().running() && !audit.running(); });
+    // Production facade rejects plaintext without opening a connection.
+    Directory secure; Check(!secure.Start(origin)); Check(secure.connectionAttempts() == 0 && secure.status().phase == Directory::Phase::Failed);
+}
 int main(int argc, char** argv) {
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString&) {});
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
@@ -138,7 +203,8 @@ int main(int argc, char** argv) {
         release.set_value(); Wait([&] { return !held.running(); }); Check(finished == 1);
         Check(held.start(config)); Wait([&] { return held.status().phase == RoomPhase::Active; });
         held.stop(); Wait([&] { return !held.running(); }); Check(finished == 2);
-        std::cout << "{\"passed\":true,\"qt_ui\":true,\"coalesced_settings\":true,\"responsive_stop\":true,\"restart_owner\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
+        BrowserScenario(QUrl(QString::fromLocal8Bit(argv[1])));
+        std::cout << "{\"passed\":true,\"qt_ui\":true,\"browser\":true,\"directory_push\":true,\"nickname_persistence\":true,\"coalesced_settings\":true,\"responsive_stop\":true,\"restart_owner\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL(); return result;
 }

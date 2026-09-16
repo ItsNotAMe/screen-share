@@ -14,6 +14,7 @@ public:
                                bool diagnosticLoopback = false);
     ~RoomSessionWindow() override;
     QtRoomSession& session() { return session_; }
+    std::function<void()> closed;
 protected:
     void closeEvent(QCloseEvent*) override;
 private:

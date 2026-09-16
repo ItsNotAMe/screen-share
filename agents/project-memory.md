@@ -1,5 +1,34 @@
 # Project Memory
 
+## Sequencing preference — later UI redesign
+
+User requested a broader UI appearance/feel/usability refactor only after all
+current refactor milestones are finished. It is recorded as TODO milestone 6.
+Continue necessary UI/backend integration now as already planned; do not expand
+the current scope into visual redesign or postpone current integration for it.
+
+## Pushed directory and browser admission — 2026-09-16
+
+ScreenShareUi --room-v2-browser HTTPS_ORIGIN provides opt-in create/join without
+a config file, display/window choice, default system/microphone audio, public/
+unlisted visibility, optional password and saved nickname. RoomBrowserWindow
+opens a RoomSessionWindow and stops its directory while hidden; closing a drained
+session returns to the browser and a fresh subscription. Default shell unchanged.
+Backend RoomDirectory owns RoomNetwork, drains a bounded local queue, filters
+handles/generations, uses existing revision validation and caps reconnects at
+three per rolling minute. No room-list HTTP polling or admission preflight.
+RoomProfile reuses wire normalization for nickname-only QSettings persistence;
+invalid stored nicknames fall back to Guest. Passwords/room IDs/tokens/origins are
+not saved; the password field clears after launch. Nicknames apply to subsequent
+admissions; live profile/policy mutation and room links are still outstanding.
+RoomUiTests now exercise browser push/count/removal, password failure/recovery,
+playback, persistence, hidden stop and rapid hide/show alongside earlier session
+tests. Tests remain silent; no physical input. See ROOM-UI.md and CHECKPOINT-B.
+Evidence: app 18/18 Debug + Release, CLI-only Release 12/12; final focused Debug
+UI check 3.86 s. Final Windows browser/session WGC+renderer runs pass Release
+4.32 s and Debug 4.56 s outside sandbox; exact artifacts in CHECKPOINT-B.
+Logs build/webrtc/room-browser-app-{debug,release}.log and room-browser-cli-release.log.
+
 ## Opt-in Qt v2 session window — 2026-09-16
 
 ScreenShareUi --room-v2 CONFIG.json uses RoomSessionWindow/QtRoomSession and the

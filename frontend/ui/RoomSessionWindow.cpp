@@ -96,7 +96,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
 RoomSessionWindow::~RoomSessionWindow() = default;
 void RoomSessionWindow::closeEvent(QCloseEvent* event) {
     if (session_.running()) { closing_ = true; session_.stop(); event->ignore(); }
-    else event->accept();
+    else { event->accept(); if (closed) closed(); }
 }
 int RunRoomSessionWindow(const QString& path) {
     try {

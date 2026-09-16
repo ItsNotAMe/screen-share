@@ -1,5 +1,49 @@
 # Checkpoint B evidence
 
+## Pushed room browser and saved nickname — 2026-09-16
+
+`ScreenShareUi --room-v2-browser HTTPS_ORIGIN` adds opt-in create/join forms,
+display/window selection, default system/microphone audio, public/unlisted
+visibility, optional password, direct room-ID join and a pushed public list.
+It launches the shared session window and returns after asynchronous close/drain.
+The default application shell remains unchanged. No deployment was performed.
+
+Backend RoomDirectory owns a RoomNetwork subscription, filters stale handles and
+generations and consumes the existing revision-validated cache. Its control timer
+drains only local events; there is no room-list HTTP polling or admission preflight.
+The directory stops while the browser is hidden, resumes with a fresh snapshot,
+and stops automatic reconnection after three attempts in a rolling minute. Selected
+joins are disabled for stale/full/reconnecting listings; direct admission remains
+authoritative. Repeated Start on a healthy origin does not reopen the socket.
+
+RoomProfile persists only the nickname and reuses the wire validator's Unicode,
+length and control/bidi rules. Malformed stored names fall back to Guest; invalid
+edits do not replace valid data. Passwords/room IDs/service origins/tokens are not
+persisted by this profile. Password fields clear after launch, and directory titles
+use plain table text. Live profile mutation remains outstanding.
+
+The extended widget test verifies canonical nickname persistence, invalid-profile
+fallback, nickname-only stored keys, public listing, literal room titles, password
+rejection/recovery, join/media, pushed counts/removal, hidden subscription shutdown,
+rapid hide/show and idempotent start. An independent subscriber observes updates
+while both browser windows are hidden. Production plaintext rejection opens no
+socket. All tests use synthetic silent audio and no physical input.
+
+Application suites pass 18/18 Debug and Release; CLI-only Release passes 12/12.
+Final focused Debug UI check after retry-button adjustment passes in 3.86 s.
+Logs: `build/webrtc/room-browser-app-{debug,release}.log` and
+`build/webrtc/room-browser-cli-release.log`. Final generated-window WGC plus
+real-renderer runs pass outside the capture-restricted sandbox:
+
+- Release, 4.32 s: `build/webrtc/room-browser-windows-final-release/native-service-5437735e-b13f-4a60-a7fd-8bc393009fba`
+- Debug, 4.56 s: `build/webrtc/room-browser-windows-final-debug/native-service-226eabf1-546b-4e87-bea3-46d1f7216978`
+
+These are local correctness checks, not remote latency/NAT/TLS, service-cost or
+resource acceptance. Default-shell adoption, live profile/policy mutations, room
+links, input consent/control, aggregate allocation and source switching remain.
+The requested appearance/feel/usability redesign is separately scheduled as
+TODO milestone 6 after the existing milestones; current integration is not deferred.
+
 ## Opt-in Qt session adoption — 2026-09-16
 
 ScreenShareUi accepts `--room-v2 CONFIG.json` and opens RoomSessionWindow using

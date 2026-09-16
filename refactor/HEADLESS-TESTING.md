@@ -5,6 +5,9 @@ Worker, including coalesced edits, invalid settings, frame delivery and responsi
 asynchronous stop/close. It uses silent synthetic audio and programmatic widget
 actions, without physical input. [ROOM-UI.md](ROOM-UI.md) includes the explicit WGC
 and real-renderer variant; offscreen rendering does not substitute for that proof.
+The same scenario now covers the v2 browser: pushed room creation/count/removal,
+password rejection/recovery, playback after join, nickname normalization and
+nickname-only persistence, hidden subscriptions and rapid hide/show replacement.
 
 The application suite includes `room-v2-cli-entry` (actual executable dispatch,
 HTTPS enforcement and secret-free errors) and `room-v2-cli-media` (shared CLI

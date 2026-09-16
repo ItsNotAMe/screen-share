@@ -785,3 +785,14 @@ The four-peer proof now exercises an explicit host-offered restart and reports
 elapsed negotiation/media-check times. Automatic production action dispatch,
 authenticated restart requests and actual outage/interface-change validation
 remain required. The local proof does not establish NAT or outage recovery time.
+
+## Follow-on UI design phase — requested 2026-09-16
+
+After completing the current implementation, acceptance and cutover milestones,
+refactor the UI's appearance, feel and usability. This is milestone 6 in TODO.md:
+review the complete create/join/share/watch journey, establish consistent visual
+and interaction patterns, improve feedback/accessibility and verify visual and
+end-to-end behavior. Preserve latency, security and backend/frontend boundaries.
+Necessary UI integration continues during the current refactor as already planned;
+the later design phase neither blocks that work nor begins before the current
+milestones are complete.

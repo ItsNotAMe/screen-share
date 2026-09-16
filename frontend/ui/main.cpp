@@ -13,6 +13,7 @@
 #include "ui/UpdateManager.h"
 #ifdef SCREENSHARE_HAS_ROOM_V2_UI
 #include "ui/RoomSessionWindow.h"
+#include "ui/RoomBrowserWindow.h"
 #endif
 
 #include <QtCore/QCoreApplication>
@@ -1002,6 +1003,10 @@ int main(int argc, char** argv)
     }
 
 #ifdef SCREENSHARE_HAS_ROOM_V2_UI
+    if (arguments.size() > 1 && arguments[1] == "--room-v2-browser") {
+        if (arguments.size() != 3) { qCritical("Usage: ScreenShareUi --room-v2-browser HTTPS_ORIGIN"); return 1; }
+        return RunRoomBrowserWindow(QUrl(arguments[2]));
+    }
     if (arguments.size() > 1 && arguments[1] == "--room-v2") {
         if (arguments.size() != 3) { qCritical("Usage: ScreenShareUi --room-v2 CONFIG.json"); return 1; }
         return RunRoomSessionWindow(arguments[2]);

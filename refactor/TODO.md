@@ -73,9 +73,15 @@ The opt-in `ScreenShareUi --room-v2 CONFIG.json` window now uses the same parser
 backend and existing video widget/style. Its Qt owner coalesces live edits, reports
 pending/applied/rejected settings, and drains asynchronously before window close.
 Offscreen and generated-window tests exercise actual widgets without physical
-input; see [ROOM-UI.md](ROOM-UI.md). Normal create/join and directory/profile flows,
-input consent/control, zero-copy presentation, source switching and aggregate
-allocation remain; this milestone is not complete and defaults are unchanged.
+input; see [ROOM-UI.md](ROOM-UI.md).
+
+The opt-in `--room-v2-browser HTTPS_ORIGIN` path now adds create/join forms, capture
+selection, public/unlisted visibility, passwords, a saved validated nickname and
+a pushed room directory. It stops subscribing when hidden for a session and
+resubscribes on return; no separate admission preflight or list polling is added.
+Default-shell adoption, live profile/policy mutations, room links, input consent/
+control, zero-copy presentation, source switching and aggregate allocation remain.
+This milestone is not complete and defaults are unchanged.
 
 ## 3. Gaming controls end to end (D)
 
@@ -111,6 +117,22 @@ installer/fresh-machine checks and documentation. Deployment/publishing remain
 separate authorized actions.
 
 - [ ] Complete safe cutover and legacy cleanup after acceptance.
+
+## 6. UI design and usability refactor — after the current refactor
+
+**Deliverable:** improve the app's appearance, interaction and overall feel after
+milestones 1–5 are finished. Keep current UI work focused on the integration already
+planned above; this later phase is not a reason to defer necessary UI changes now.
+
+Review the complete create/join/share/watch journey, then establish consistent
+layout, typography, spacing, colors, controls and visual hierarchy. Improve clear
+feedback for connecting, recovery, settings and errors; simplify common actions;
+cover keyboard navigation, focus, accessibility, high DPI and window resizing.
+Preserve low-latency presentation, input safety and the shared backend boundary.
+Validate the redesign with representative end-to-end tasks, visual checks and
+the headless UI scenarios before replacing the current interface.
+
+- [ ] Complete the later UI appearance, feel and usability refactor after milestones 1–5.
 
 ## Foundation and evidence
 
