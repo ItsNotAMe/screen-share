@@ -49,7 +49,14 @@ add_custom_command(TARGET RoomNetworkTest POST_BUILD COMMAND "${CMAKE_COMMAND}" 
 add_test(NAME room-network-ownership COMMAND RoomNetworkTest)
 set_tests_properties(room-network-ownership PROPERTIES TIMEOUT 30)
 add_executable(RoomMediaProof RoomMediaProof.cpp)
-target_link_libraries(RoomMediaProof PRIVATE MfWebRTCCodecs ScreenShareNegotiation ScreenShareRoom)
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/RoomSession.cmake")
+add_executable(RoomSessionCoordinatorTest RoomSessionCoordinatorTest.cpp)
+target_link_libraries(RoomSessionCoordinatorTest PRIVATE ScreenShareRoomSession)
+add_custom_command(TARGET RoomSessionCoordinatorTest POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>" "$<TARGET_FILE_DIR:RoomSessionCoordinatorTest>" VERBATIM)
+add_test(NAME room-session-coordinator COMMAND RoomSessionCoordinatorTest)
+set_tests_properties(room-session-coordinator PROPERTIES TIMEOUT 20)
+target_link_libraries(RoomMediaProof PRIVATE MfWebRTCCodecs ScreenShareNegotiation ScreenShareRoomSession)
 add_custom_command(TARGET RoomMediaProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>" "$<TARGET_FILE_DIR:RoomMediaProof>" VERBATIM)
 find_program(SCREENSHARE_NODE_EXECUTABLE node)

@@ -259,6 +259,14 @@ through a test-only entry point and exercises the production alarm handler; actu
 hibernation/alarm timing and native-client/media integration remain separate work.
 # Authenticated four-viewer media (2026-09-16)
 
+RoomSessionCoordinator now owns automatic room/media event dispatch. The scenario
+wait loop only observes state; it does not drain room events or forward SDP/ICE.
+A five-second observation pause during ICE restart verifies independent progress,
+reported as `autonomous_dispatch`. This is not a five-second latency target.
+`room-session-coordinator` tests bounds, late send failures and cancellation.
+Pending-signaling metrics now come from the shared coordinator. Commands below
+are unchanged; expect roughly 35 seconds for the real-room scenario.
+
 Managed room peers now exercise HostPeerOwner's scheduled restart budget and
 asynchronous capture retirement. The initial offer waits for capture attachment;
 capture startup and final stop are awaited outside signaling. The

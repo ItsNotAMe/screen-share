@@ -17,6 +17,11 @@ RoomManagedPeer now connects attachment, retirement and restart policy in the
 real-room proof. HostPeerOwner.BeginStop drains capture asynchronously; runtime
 commands must use it and await completion before owner destruction. Finish normal
 facade dispatch/public events rather than rebuilding these completed primitives.
+
+RoomSessionCoordinator and RoomSignalCodec now provide automatic cross-executor
+dispatch and signaling conversion in the real-media proof and shared build target.
+Next move peer-factory/session composition out of the diagnostic and adopt the
+normal facade's public commands/status; do not recreate manual polling/SDP relay.
 The checks below are implementation details within those batches, not individual
 turn goals. Preserve all original checks in [DETAIL-CHECKS.md](../refactor/DETAIL-CHECKS.md).
 

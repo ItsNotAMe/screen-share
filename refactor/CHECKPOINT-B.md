@@ -1,5 +1,43 @@
 # Checkpoint B evidence
 
+## Autonomous room/media dispatch — 2026-09-16
+
+ScreenShareRoomSession is a shared application/proof build target containing
+RoomSessionCoordinator and RoomSignalCodec. The coordinator runs on signaling,
+consumes the RoomNetwork mailbox automatically, resolves socket-open futures,
+delivers generation-filtered events and advances media lifecycle hooks. Sends
+return queue acceptance immediately; later network failures become typed error
+events. Pending sends are bounded to 128 operations / 512 KiB, and a late failure
+from a retired connection generation cannot fail its replacement. Close removes
+callbacks before asynchronous transport shutdown; Stop cancels unresolved opens
+and invalidates delayed work. Callbacks may send responses but must not mutate
+socket lifetimes or destroy the coordinator.
+
+RoomPeerSignal is now a portable media type. Shared wire conversion validates
+incoming event structure and explicitly rejects non-signal events; authentication
+and role authorization remain RoomSocket's responsibility.
+
+RoomMediaProof no longer drains network events or forwards signaling from its
+outer wait loop. Scenario commands and observations cross the executor boundary;
+backend scheduling drives roster reconciliation, SDP/ICE and send completions.
+The test pauses all observation for five seconds after requesting ICE restart,
+then verifies negotiation already completed. The pause demonstrates autonomous
+dispatch, not a latency acceptance measurement. Queue metrics now describe the
+coordinator's pending sends rather than the retired diagnostic packet queue.
+
+RoomSessionCoordinatorTest covers thread affinity, late send failure, operation/
+byte bounds, retired callback suppression, cancelling an unresolved open and
+no callbacks after stop/destruction. The normal ScreenShareSession facade remains
+legacy: peer-factory/session composition and public commands/status still need
+production adoption, followed by settings/presentation/input integration.
+
+Validation: full media suites passed 30/30 in Debug and Release; Release application
+13/13 and CLI-only 8/8. Final focused dispatch/media checks use
+build/webrtc/coordinator-verified-{debug,release}.log; full logs are
+coordinator-final-release.log, coordinator-full-debug.log, coordinator-final-app.log
+and coordinator-final-cli.log in the same directory. Callback-generated responses
+are tested outside pending-send iteration to avoid iterator invalidation.
+
 ## Managed room peers and asynchronous capture shutdown — 2026-09-16
 
 RoomManagedPeer connects authenticated room negotiation to HostPeerOwner's

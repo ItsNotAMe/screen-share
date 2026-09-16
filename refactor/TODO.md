@@ -54,6 +54,14 @@ signaling responsive while capture callbacks drain; startup and shutdown waits
 belong to the outer diagnostic, not signaling commands. Carry these integrated
 owners into the normal facade and replace the remaining diagnostic dispatch.
 
+RoomSessionCoordinator now automatically drains room events, dispatches them on
+signaling, advances media lifecycle hooks and handles bounded asynchronous sends.
+RoomSignalCodec provides shared SDP/ICE conversion. The four-viewer scenario no
+longer pumps these operations, and recovery completes while the caller is idle.
+Next: move the remaining diagnostic peer-factory/session composition into the
+production engine and expose it through the normal facade's commands/status API.
+Do not add another event-pumping layer around the completed coordinator.
+
 - [ ] Complete the integrated media-session deliverable and headless scenarios.
 
 ## 2. Complete user experience (B + D)

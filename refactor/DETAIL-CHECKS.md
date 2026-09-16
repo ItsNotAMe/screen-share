@@ -19,6 +19,13 @@ Current next action: **Complete the grouped room-backed session milestone and sh
 
 ## Planning handoff
 
+- [x] Shared RoomSessionCoordinator drives network events, bounded asynchronous
+  send completion and media hooks on signaling, without a diagnostic event pump.
+  Shared RoomSignalCodec replaces diagnostic-only SDP/ICE conversion; restart
+  finishes while the caller makes no commands/status queries for five seconds.
+- [ ] Extract the remaining peer-factory/session composition into the production
+  engine and adopt the normal facade's public commands/status using these owners.
+
 - [x] Owned room networking with bounded cross-thread queues, cancellation and
   no caller Qt event pump; validated by RoomNetworkTest and real four-viewer media.
 - [x] Shared roster reconciliation drives peer creation/removal in the real-room

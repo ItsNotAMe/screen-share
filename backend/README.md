@@ -23,3 +23,8 @@ retain their explicit thread/lifetime ownership. See `../refactor/PLAN.md`.
 bounded socket command/event queues. `media/RoomPeerRoster` maps authenticated
 snapshot generations/revisions to peer lifecycle hooks. These are used by the
 real-room headless scenario; normal UI/CLI facade adoption remains in progress.
+
+`room/qt/RoomSessionCoordinator` automatically dispatches network events and
+asynchronous send completions on signaling; `RoomSignalCodec` provides structural
+wire conversion after transport authentication. Both live in the shared
+ScreenShareRoomSession target. Consumers should not add a manual event pump.

@@ -1,15 +1,11 @@
 #pragma once
 #include "PeerNegotiation.h"
 #include "media/IceCandidateHandoff.h"
+#include "media/RoomPeerSignal.h"
 #include <chrono>
 #include <functional>
 
 namespace screenshare::media {
-struct RoomPeerSignal {
-    enum class Kind { Offer, Answer, Candidate, RestartRequest } kind;
-    std::string connectionId, sdp;
-    IceCandidateMessage ice;
-};
 // Private media boundary. All calls/callbacks run on signaling. Transport must
 // authenticate identities before Receive and enqueue Send without blocking.
 // Negotiation completions/deadlines advance on the signaling thread automatically.

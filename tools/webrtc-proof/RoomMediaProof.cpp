@@ -3,27 +3,47 @@
 #include "media/RoomPeerRoster.h"
 #include "media/HostPeerOwner.h"
 #include "media/webrtc/RoomManagedPeer.h"
-#include "room/qt/RoomNetwork.h"
+#include "room/qt/RoomSessionCoordinator.h"
+#include "room/qt/RoomSignalCodec.h"
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <deque>
-#include <mutex>
 using namespace screenshare::media;
 using screenshare::room::qt::RoomSocket;
 using screenshare::room::qt::RoomAdmission;
 using screenshare::room::qt::RoomNetwork;
+using screenshare::room::qt::RoomSessionCoordinator;
+using screenshare::room::qt::EncodeRoomSignal;
+using screenshare::room::qt::DecodeRoomSignal;
 using namespace proofmedia;
 namespace {
 // Diagnostic waits only. Production coordinators observe these futures without
 // blocking; all sockets/admission and their Qt events run in RoomNetwork.
 struct ProofRoomSocket {
-    RoomNetwork& network;
+    RoomSessionCoordinator& coordinator;
+    SignalingExecutor& executor;
     uint64_t& next;
+    RoomSessionCoordinator::Notify notify;
     uint64_t id = 0;
-    bool Start(RoomSocket::Config config) { Stop(); id = ++next; return network.Open(id, std::move(config)).get(); }
-    RoomSocket::SendResult Send(QByteArray command) { return network.Send(id, std::move(command)).get(); }
-    void Stop() { if (id) { network.Stop(id).get(); id = 0; } }
+    bool Start(RoomSocket::Config config) {
+        Stop(); std::future<bool> opened;
+        Require(executor.Post([&] { id = ++next; opened = coordinator.Open(id, std::move(config), notify); }).get().error == ExecutorError::None, "Socket open command failed");
+        return opened.get();
+    }
+    RoomSocket::SendResult Send(QByteArray command) {
+        bool accepted = false;
+        auto send = [&] { accepted = coordinator.Send(id, std::move(command)); };
+        if (executor.IsCurrent()) send();
+        else Require(executor.Post(send).get().error == ExecutorError::None, "Socket send command failed");
+        return accepted ? RoomSocket::SendResult::Sent : RoomSocket::SendResult::Backpressure;
+    }
+    void Stop() {
+        if (!id) return;
+        std::shared_future<void> closed;
+        Require(executor.Post([&] { closed = coordinator.Close(id); id = 0; }).get().error == ExecutorError::None, "Socket close command failed");
+        closed.get();
+    }
 };
 struct Packet { size_t viewer; bool fromHost; RoomPeerSignal message; };
 struct Context {
@@ -54,37 +74,16 @@ struct Context {
     }
     ~Context() { Close(); }
 };
-QByteArray Wire(const Packet& packet, const QString& room, const QString& target) {
-    const auto& signal = packet.message;
-    QString type;
-    QJsonObject payload;
-    switch (signal.kind) {
-    case RoomPeerSignal::Kind::Offer: type = "signal.offer"; payload["sdp"] = QString::fromStdString(signal.sdp); break;
-    case RoomPeerSignal::Kind::Answer: type = "signal.answer"; payload["sdp"] = QString::fromStdString(signal.sdp); break;
-    case RoomPeerSignal::Kind::Candidate: type = "signal.candidate"; payload = {{"candidate", QString::fromStdString(signal.ice.candidate)}, {"sdpMid", QString::fromStdString(signal.ice.mid)}, {"sdpMLineIndex", signal.ice.line}}; break;
-    default: type = "signal.restart_request"; break;
-    }
-    return QJsonDocument(QJsonObject{{"v", 2}, {"type", type}, {"roomId", room}, {"connectionId", QString::fromStdString(signal.connectionId)}, {"toPeerId", target}, {"payload", payload}}).toJson(QJsonDocument::Compact);
-}
-RoomPeerSignal Decode(const QJsonObject& event) {
-    RoomPeerSignal signal;
-    const auto type = event["type"].toString();
-    signal.kind = type == "signal.offer" ? RoomPeerSignal::Kind::Offer : type == "signal.answer" ? RoomPeerSignal::Kind::Answer :
-        type == "signal.candidate" ? RoomPeerSignal::Kind::Candidate : RoomPeerSignal::Kind::RestartRequest;
-    signal.connectionId = event["connectionId"].toString().toStdString();
-    const auto payload = event["payload"].toObject(); signal.sdp = payload["sdp"].toString().toStdString();
-    signal.ice = {payload["candidate"].toString().toStdString(), payload["sdpMid"].toString().toStdString(), payload["sdpMLineIndex"].toInt()};
-    return signal;
-}
 void Run(const QUrl& origin) {
     RoomNetwork roomNetwork(true);
     uint64_t nextSocket = 0;
     SignalingExecutor executor;
+    std::unique_ptr<RoomSessionCoordinator> coordinator;
     std::unique_ptr<Context> context;
-    std::mutex mutex;
-    std::deque<Packet> outgoing, incoming;
-    size_t queuedBytes = 0, peakQueuedBytes = 0, peakQueuedMessages = 0, candidatesSent = 0;
+    std::deque<Packet> incoming;
+    size_t candidatesSent = 0;
     auto execute = [&](auto action) {
+        if (executor.IsCurrent()) { action(); return; }
         std::exception_ptr failure;
         auto done = executor.Post([&] { try { action(); } catch (...) { failure = std::current_exception(); } });
         Require(done.get().error == ExecutorError::None, "Signaling command failed");
@@ -117,17 +116,12 @@ void Run(const QUrl& origin) {
             for (size_t i = 0; i < configs.size(); ++i) if (configs[i].selfPeerId == event.value["fromPeerId"]) index = i;
         }
         if (index >= configs.size() || incoming.size() >= 256) { transportFailed = true; return; }
-        incoming.push_back({index, !toHost, Decode(event.value)});
+        auto signal = DecodeRoomSignal(event.value);
+        if (!signal) { transportFailed = true; return; }
+        incoming.push_back({index, !toHost, std::move(*signal)});
     };
-    ProofRoomSocket host{roomNetwork, nextSocket};
-    auto pump = [&] {
-        for (const auto& event : roomNetwork.Drain()) {
-            Require(event.socket != 0, "Room networking event queue overflowed");
-            if (event.socket == host.id) receive(event.value, true, 0);
-            else for (size_t i = 0; i < sockets.size(); ++i)
-                if (sockets[i] && sockets[i]->id == event.socket) receive(event.value, false, i);
-        }
-        if (context) execute([&] {
+    auto advance = [&] {
+        if (context) {
             for (size_t i = 0; i < 4; ++i) if (context->retired[i].exchange(false)) {
                 context->hosts[i].reset(); context->viewers[i].reset(); context->links[i].reset();
             }
@@ -150,19 +144,19 @@ void Run(const QUrl& origin) {
                 const auto status = context->owner->snapshot(i + 1);
                 if (status && !status->peerClosed) Require(!context->hosts[i]->closed() && !context->viewers[i]->closed(), "Asynchronous negotiation failed");
             }
-        });
-        Require(!transportFailed, "Room transport failed");
-        std::deque<Packet> packets;
-        { std::lock_guard lock(mutex); packets.swap(outgoing); queuedBytes = 0; }
-        for (const auto& packet : packets) {
-            if (packet.message.kind == RoomPeerSignal::Kind::Candidate) ++candidatesSent;
-            auto& socket = packet.fromHost ? host : *sockets[packet.viewer];
-            Require(socket.Send(Wire(packet, hostConfig.roomId, packet.fromHost ? configs[packet.viewer].selfPeerId : hostConfig.selfPeerId)) == RoomSocket::SendResult::Sent, "Room rejected outbound media signaling");
         }
     };
+    execute([&] { coordinator = std::make_unique<RoomSessionCoordinator>(executor, roomNetwork, advance); });
+    ProofRoomSocket host{*coordinator, executor, nextSocket, [&](const auto& event) { receive(event, true, 0); }};
     auto wait = [&](auto predicate, const char* failure) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
-        while (!predicate()) { Require(std::chrono::steady_clock::now() < deadline, failure); pump(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+        for (;;) {
+            bool done = false;
+            execute([&] { Require(!coordinator->failed() && !transportFailed, "Room transport failed"); done = predicate(); });
+            if (done) return;
+            Require(std::chrono::steady_clock::now() < deadline, failure);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     };
     auto admit = [&](RoomAdmission::Request request) {
         auto future = roomNetwork.Admit(std::move(request));
@@ -171,12 +165,12 @@ void Run(const QUrl& origin) {
     };
     try {
         RoomAdmission::Request create; create.origin = origin; create.create = true; create.nickname = "MediaHost"; create.name = "Headless media"; create.viewerLimit = 4;
-        hostConfig = admit(create); Require(host.Start(hostConfig), "Host socket failed");
+        const auto admittedHost = admit(create); execute([&] { hostConfig = admittedHost; }); Require(host.Start(hostConfig), "Host socket failed");
         wait([&] { return hostReady; }, "Host snapshot timed out");
         for (size_t i = 0; i < 4; ++i) {
             RoomAdmission::Request join; join.origin = origin; join.roomId = hostConfig.roomId; join.nickname = "Viewer" + QString::number(i);
-            configs[i] = admit(join);
-            sockets[i] = std::make_unique<ProofRoomSocket>(roomNetwork, nextSocket);
+            const auto admittedViewer = admit(join); execute([&] { configs[i] = admittedViewer; });
+            sockets[i] = std::make_unique<ProofRoomSocket>(*coordinator, executor, nextSocket, [&, i](const auto& event) { receive(event, false, i); });
             Require(sockets[i]->Start(configs[i]), "Viewer socket failed");
         }
         wait([&] { return std::all_of(ready.begin(), ready.end(), [](bool v) { return v; }) && roster["members"].toArray().size() == 5; }, "Room membership timed out");
@@ -205,11 +199,9 @@ void Run(const QUrl& origin) {
                 context->links[i] = CreateViewer(*context->factory, context->audio);
                 auto& link = *context->links[i];
                 auto send = [&, i](bool fromHost) { return [&, i, fromHost](RoomPeerSignal signal) {
-                    const auto bytes = signal.sdp.size() + signal.ice.candidate.size() + 512;
-                    std::lock_guard lock(mutex);
-                    if (outgoing.size() >= 256 || queuedBytes + bytes > 256 * 1024) return false;
-                    queuedBytes += bytes; outgoing.push_back({i, fromHost, std::move(signal)});
-                    peakQueuedBytes = std::max(peakQueuedBytes, queuedBytes); peakQueuedMessages = std::max(peakQueuedMessages, outgoing.size()); return true;
+                    if (signal.kind == RoomPeerSignal::Kind::Candidate) ++candidatesSent;
+                    auto& socket = fromHost ? host : *sockets[i];
+                    return socket.Send(EncodeRoomSignal(signal, hostConfig.roomId, fromHost ? configs[i].selfPeerId : hostConfig.selfPeerId)) == RoomSocket::SendResult::Sent;
                 }; };
                 context->hosts[i] = std::make_unique<RoomPeerNegotiation>(link.host.connection, link.host.Negotiation(), link.host.lifecycle.generation(), true, send(true));
                 context->viewers[i] = std::make_unique<RoomPeerNegotiation>(link.viewer.connection, link.viewer.Negotiation(), link.viewer.lifecycle.generation(), false, send(false));
@@ -241,7 +233,7 @@ void Run(const QUrl& origin) {
         });
         auto frames = [&] { for (auto& link : context->links) if (!link || link->viewer.decodedFrames < 60) return false; return context->audioEvidence->audibleBlocks >= 30; };
         wait(frames, "Authenticated four-viewer media timed out");
-        Require(context->links[0]->viewer.decodedFrames > context->links[3]->viewer.decodedFrames * 2, "Slow viewer throttled healthy media");
+        execute([&] { Require(context->links[0]->viewer.decodedFrames > context->links[3]->viewer.decodedFrames * 2, "Slow viewer throttled healthy media"); });
         slow = false;
         bool channelsReady = false;
         wait([&] { execute([&] {
@@ -254,12 +246,20 @@ void Run(const QUrl& origin) {
         // authoritative reconnecting roster must retire its media incarnation.
         sockets[3]->Stop();
         wait([&] { return !context->links[3]; }, "Socket loss did not retire its media peer");
-        ready[3] = false;
+        execute([&] { ready[3] = false; });
         Require(sockets[3]->Start(configs[3]), "Socket reconnect failed");
         wait([&] { return ready[3] && context->links[3] && context->links[3]->viewer.decodedFrames >= 30; }, "Socket reconnect did not rebuild media");
-        unsigned before = context->links[3]->viewer.decodedFrames, healthyBefore = context->links[0]->viewer.decodedFrames;
-        const auto expectedRestartId = "room_media_3_g" + std::to_string(context->links[3]->host.lifecycle.generation()) + "_restart_1";
+        unsigned before = 0, healthyBefore = 0;
+        std::string expectedRestartId;
+        execute([&] {
+            before = context->links[3]->viewer.decodedFrames; healthyBefore = context->links[0]->viewer.decodedFrames;
+            expectedRestartId = "room_media_3_g" + std::to_string(context->links[3]->host.lifecycle.generation()) + "_restart_1";
+        });
         execute([&] { Require(context->owner->RequestRestart(4, context->links[3]->host.lifecycle.generation()), "Restart rejected"); });
+        // No scenario pumping or status queries during recovery. The backend
+        // must relay offer/answer/ICE and complete negotiation autonomously.
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        execute([&] { Require(context->hosts[3]->ready() && context->viewers[3]->connectionId() == expectedRestartId, "Recovery depended on caller pumping"); });
         wait([&] { return context->links[3]->viewer.decodedFrames >= before + 30 && context->links[0]->viewer.decodedFrames >= healthyBefore + 30; }, "Media did not continue through restart");
         bool restartReady = false;
         wait([&] { execute([&] { restartReady = context->hosts[3]->ready() && context->viewers[3]->ready() && context->viewers[3]->connectionId() == expectedRestartId; }); return restartReady; }, "Restart negotiation incomplete");
@@ -273,13 +273,14 @@ void Run(const QUrl& origin) {
             Require(!context->links[3] && context->membership->activeCount() == 3, "Roster did not remove kicked media");
         });
         RoomAdmission::Request rejoin; rejoin.origin = origin; rejoin.roomId = hostConfig.roomId; rejoin.nickname = "RejoinedViewer";
-        configs[3] = admit(rejoin); ready[3] = false; closed[3] = false;
+        const auto rejoined = admit(rejoin);
+        execute([&] { configs[3] = rejoined; ready[3] = false; closed[3] = false; });
         Require(sockets[3]->Start(configs[3]), "Rejoin socket failed");
         wait([&] { return ready[3] && roster["members"].toArray().size() == 5; }, "Rejoin membership failed");
-        healthyBefore = context->links[0]->viewer.decodedFrames;
+        execute([&] { healthyBefore = context->links[0]->viewer.decodedFrames; });
         wait([&] { return context->links[3] && context->links[3]->viewer.decodedFrames >= 30 && context->links[0]->viewer.decodedFrames >= healthyBefore + 30; }, "Rejoined media failed");
         unsigned total = 0;
-        for (auto& link : context->links) { total += link->viewer.decodedFrames; Require(link->viewer.invalidFrames == 0, "Decoded media invalid"); }
+        execute([&] { for (auto& link : context->links) { total += link->viewer.decodedFrames; Require(link->viewer.invalidFrames == 0, "Decoded media invalid"); } });
         const auto audioBlocks = context->audioEvidence->audibleBlocks.load();
         // No caller polls this adapter: its own signaling timer must close a
         // peer whose answer never arrives, while the established peers continue.
@@ -298,10 +299,10 @@ void Run(const QUrl& origin) {
             Require(context->unansweredPeer->Offer("unanswered_offer"), "Unanswered offer failed");
         });
         bool automaticallyClosed = false;
-        healthyBefore = context->links[0]->viewer.decodedFrames;
+        execute([&] { healthyBefore = context->links[0]->viewer.decodedFrames; });
         wait([&] { execute([&] { automaticallyClosed = context->unansweredPeer->closed(); }); return automaticallyClosed; }, "Automatic negotiation timeout failed");
         Require(std::chrono::steady_clock::now() - unansweredStarted >= std::chrono::seconds(20), "Unanswered peer failed before its negotiation deadline");
-        Require(context->links[0]->viewer.decodedFrames > healthyBefore + 30, "Unanswered peer blocked healthy media");
+        execute([&] { Require(context->links[0]->viewer.decodedFrames > healthyBefore + 30, "Unanswered peer blocked healthy media"); });
         Require(host.Send(QJsonDocument(QJsonObject{{"v", 2}, {"type", "peer.leave"}, {"roomId", hostConfig.roomId}, {"requestId", "media-close"}, {"payload", QJsonObject{}}}).toJson(QJsonDocument::Compact)) == RoomSocket::SendResult::Sent, "Room close failed");
         wait([&] { return roomClosed && std::all_of(closed.begin(), closed.end(), [](bool v) { return v; }); }, "Room closure failed");
         execute([&] { Require(context->membership->activeCount() == 0 && context->peerSlots.empty(), "Room close retained media peers"); });
@@ -309,14 +310,19 @@ void Run(const QUrl& origin) {
         std::shared_future<HostOperationError> mediaStopped;
         execute([&] { mediaStopped = context->owner->BeginStop(); });
         Require(mediaStopped.wait_for(std::chrono::seconds(10)) == std::future_status::ready && mediaStopped.get() == HostOperationError::None, "Asynchronous media shutdown failed");
-        execute([&] { context.reset(); }); executor.Stop();
+        RoomSessionCoordinator::Stats dispatchStats;
+        std::shared_future<void> transportStopped;
+        execute([&] { dispatchStats = coordinator->stats(); transportStopped = coordinator->Stop(); context.reset(); coordinator.reset(); });
+        transportStopped.get(); executor.Stop();
         Require(candidatesSent > 0, "Room signaling did not exercise trickle ICE");
         std::cout << "{\"passed\":true,\"room_backed_media\":true,\"viewers\":4,\"decoded_frames\":" << total << ",\"opus_audible_blocks\":" << audioBlocks
-                  << ",\"ice_candidates_sent\":" << candidatesSent << ",\"peak_signaling_queue_bytes\":" << peakQueuedBytes << ",\"peak_signaling_queue_messages\":" << peakQueuedMessages
-                  << ",\"owned_network_loop\":true,\"roster_driven_peers\":true,\"socket_reconnect\":true,\"ice_restart\":true,\"kick_rejoin\":true,\"automatic_timeout\":true,\"cancel_before_tick\":true,\"data_channels\":12}\n";
+                  << ",\"ice_candidates_sent\":" << candidatesSent << ",\"peak_signaling_queue_bytes\":" << dispatchStats.peakSendBytes << ",\"peak_signaling_queue_messages\":" << dispatchStats.peakSendOperations
+                  << ",\"autonomous_dispatch\":true,\"owned_network_loop\":true,\"roster_driven_peers\":true,\"socket_reconnect\":true,\"ice_restart\":true,\"kick_rejoin\":true,\"automatic_timeout\":true,\"cancel_before_tick\":true,\"data_channels\":12}\n";
     } catch (...) {
         for (auto& socket : sockets) if (socket) socket->Stop(); host.Stop();
-        execute([&] { context.reset(); }); executor.Stop(); throw;
+        std::shared_future<void> transportStopped;
+        execute([&] { transportStopped = coordinator->Stop(); context.reset(); coordinator.reset(); });
+        transportStopped.get(); executor.Stop(); throw;
     }
 }
 }
