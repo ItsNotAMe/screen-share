@@ -56,6 +56,16 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
                 return WasapiPcmEndpoints(config).capture;
             };
         }
+        if (!identity.host) {
+            PlaybackSelection initial{options.playbackDeviceId, options.playbackVolume, options.playbackMuted};
+            ValidatePlaybackSelection(initial);
+            native.playback = std::make_shared<PlaybackControl>(initial, endpoints.playout);
+            endpoints.playout = [control = native.playback] { return std::make_unique<ControlledPcmPlayout>(control); };
+            if (options.playbackForSelection) native.playbackForSelection = options.playbackForSelection;
+            else if (!options.audioEndpoints) native.playbackForSelection = [](PlaybackSelection selection) {
+                return WasapiPcmEndpoints({}, selection.deviceId).playout;
+            };
+        }
         native.engine = [endpoints = std::move(endpoints), state] {
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, std::make_shared<PcmAudioDiagnostics>()),
                 std::make_unique<MfVideoEncoderFactory>(state->Get()), std::make_unique<MfVideoDecoderFactory>());

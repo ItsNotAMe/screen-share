@@ -108,6 +108,8 @@ public:
                     for (auto& sample : block) sample = int16_t(int(sample) * int(gain) / 255);
                     if (stop.stop_requested()) break;
                     device->Write(block, stop);
+                    diagnostics_->playoutBufferFrames = device->BufferFrames();
+                    diagnostics_->playoutEnginePeriodUs = device->EnginePeriodUs();
                     diagnostics_->playoutDelayMs = device->DelayMs();
                     ++diagnostics_->playedBlocks;
                 }

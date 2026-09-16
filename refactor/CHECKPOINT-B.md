@@ -1,5 +1,43 @@
 # Checkpoint B evidence
 
+## Viewer playback device, volume and mute — 2026-09-16
+
+Viewer-local playback now uses one bounded public `UpdatePlayback` operation across
+native Windows runtime, actual widgets and timed CLI configuration. Output device,
+0–100% volume and mute apply independently of host capture and other viewers.
+Volume/mute reuse the existing device. Device replacement commits only after its
+first successful write; startup/first-write failure retains the previous healthy
+output and settings. An independent revision reports application. Stop cancels
+pending public completion; successful settings survive ADM playout restart.
+
+The existing playout worker owns all endpoint construction/write/destruction.
+There is no new media queue, thread or clock, and no service request, renegotiation
+or room recreation. Actual buffer/engine-period diagnostics refresh after a switch.
+Device initialization may temporarily pause local sound; Windows driver activation
+cannot be forcibly preempted. This is not physical unplug/driver-hang acceptance.
+
+Validation (all output synthetic and silent):
+- Application suites: **19/19 Release (86.90s), 19/19 Debug (87.97s)**.
+- Native PCM lifecycle plus existing four-viewer regression: **2/2 Release
+  (16.98s), 2/2 Debug (16.86s)**. Playback-specific checks cover exact gain, mute
+  without endpoint recreation, startup/first-write rollback, Busy, cancellation
+  during write, queued cancellation, restart persistence and owner destruction.
+- Actual-widget tests cover viewer mute with continuing video, unmute, output and
+  volume changes, missing output, unchanged membership, host rejection and public
+  queue/stop ordering. CLI tests exercise timed mute/replacement, acknowledged
+  results, and malformed/unauthorized configuration rejection.
+- Windows UI: Release **12.792s**, Debug **13.007s**. Artifacts:
+  `build/webrtc/playback-windows-ui/native-service-d2997cc0-5a9c-443c-a26f-2b598bd240f8`
+  and `build/webrtc/playback-windows-ui-debug/native-service-af72e3be-4fe3-451a-8c5d-92704d0b55e7`.
+- Windows CLI: **6.890s**, artifact
+  `build/webrtc/playback-windows-cli/native-service-02ecc0ff-9568-43a1-b615-28b01e6e7187`.
+- Logs: `build/webrtc/playback-*.log`. Windows scenarios use generated WGC windows;
+  they neither capture/play physical audio nor inject keyboard/mouse input.
+
+Milestone 2 remains open for default-shell adoption, input consent/control and
+zero-copy presentation. Physical device recovery, resource and external image/input/
+audio latency gates remain open; default AppShell is still legacy.
+
 ## Live shared-audio selection — 2026-09-16
 
 The public RoomSession, native Windows runtime, opt-in host widgets and timed CLI

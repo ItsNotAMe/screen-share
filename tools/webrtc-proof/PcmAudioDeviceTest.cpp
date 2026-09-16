@@ -83,6 +83,72 @@ void Switches() {
     Require(starting.get().error == AudioUpdateError::Cancelled && std::chrono::steady_clock::now() - cancelStart < 300ms && ownership->live == 0,
         "In-flight activation did not cancel promptly");
 }
+struct PlaybackEvidence { std::atomic<int> sample{0}, live{0}, created{0}; std::atomic<bool> wrongThread{false}, entered{false}; };
+class Output final : public screenshare::media::PcmPlayoutEndpoint {
+    std::shared_ptr<PlaybackEvidence> evidence_;
+    std::thread::id owner_ = std::this_thread::get_id();
+    bool fail_, block_, failWrite_;
+public:
+    Output(std::shared_ptr<PlaybackEvidence> evidence, bool fail = false, bool block = false, bool failWrite = false)
+        : evidence_(std::move(evidence)), fail_(fail), block_(block), failWrite_(failWrite) { ++evidence_->live; ++evidence_->created; }
+    ~Output() override { if (owner_ != std::this_thread::get_id()) evidence_->wrongThread = true; --evidence_->live; }
+    void Start() override { if (fail_) throw std::runtime_error("Injected output startup failure"); }
+    void Write(const screenshare::media::PcmBlock& block, std::stop_token stop) override {
+        if (failWrite_) throw std::runtime_error("Injected output write failure");
+        if (block_) {
+            evidence_->entered = true; std::mutex mutex; std::condition_variable_any wake; std::unique_lock lock(mutex);
+            wake.wait(lock, stop, [] { return false; }); return;
+        }
+        evidence_->sample = block[0];
+    }
+    uint32_t DelayMs() const override { return 7; }
+    uint32_t BufferFrames() const override { return 480; }
+    uint32_t EnginePeriodUs() const override { return 10000; }
+};
+void Playback() {
+    using namespace screenshare::media;
+    auto evidence = std::make_shared<PlaybackEvidence>();
+    PlaybackControl::Factory good = [evidence] { return std::make_unique<Output>(evidence); };
+    auto control = std::make_shared<PlaybackControl>(PlaybackSelection{}, good);
+    Require(control->Submit({}, good).get().error == AudioUpdateError::Unavailable, "Inactive playback accepted");
+    {
+        ControlledPcmPlayout output(control); output.Start(); PcmBlock block; block.fill(2000);
+        auto gain = control->Submit({L"", 25, false}, good);
+        Require(control->Submit({}, good).get().error == AudioUpdateError::Busy, "Playback queue unbounded");
+        output.Write(block, {});
+        Require(gain.get().error == AudioUpdateError::None && evidence->sample == 500 && evidence->created == 1, "Volume changed endpoint or applied incorrectly");
+        auto muted = control->Submit({L"", 25, true}, good); output.Write(block, {});
+        Require(muted.get().error == AudioUpdateError::None && evidence->sample == 0 && evidence->created == 1, "Mute did not preserve endpoint");
+        auto replacement = control->Submit({L"next", 50, false}, good); output.Write(block, {});
+        Require(replacement.get().error == AudioUpdateError::None && evidence->sample == 1000 && evidence->live == 1, "Output handover failed");
+        auto failed = control->Submit({L"bad", 100, false}, [evidence] { return std::make_unique<Output>(evidence, true); });
+        output.Write(block, {});
+        Require(failed.get().error == AudioUpdateError::Failed && evidence->sample == 1000 && control->Status().revision == 4 && evidence->live == 1, "Output rollback failed");
+        auto badWrite = control->Submit({L"bad-write", 100, false}, [evidence] { return std::make_unique<Output>(evidence, false, false, true); });
+        output.Write(block, {});
+        Require(badWrite.get().error == AudioUpdateError::Failed && evidence->sample == 1000 && control->Status().revision == 4 && evidence->live == 1,
+            "Failed first write committed replacement");
+        Require(output.BufferFrames() == 480 && output.EnginePeriodUs() == 10000 && output.DelayMs() == 7, "Output diagnostics lost");
+    }
+    Require(evidence->live == 0 && !evidence->wrongThread, "Output ownership leaked");
+    {
+        ControlledPcmPlayout output(control); output.Start(); PcmBlock block; block.fill(2000); output.Write(block, {});
+        Require(evidence->sample == 1000 && control->Status().selected.deviceId == L"next", "Playback settings lost on restart");
+        auto pending = control->Submit({}, good); control->Close();
+        Require(pending.get().error == AudioUpdateError::Cancelled && control->Submit({}, good).get().error == AudioUpdateError::Unavailable, "Output close ordering failed");
+    }
+    auto cancelling = std::make_shared<PlaybackControl>(PlaybackSelection{}, good);
+    std::promise<void> ready; auto started = ready.get_future();
+    std::jthread worker([&](std::stop_token stop) {
+        ControlledPcmPlayout output(cancelling); output.Start(); ready.set_value();
+        while (!stop.stop_requested()) { PcmBlock block{}; output.Write(block, stop); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    });
+    started.get(); auto pending = cancelling->Submit({L"blocked"}, [evidence] { return std::make_unique<Output>(evidence, false, true); });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!evidence->entered) { Require(std::chrono::steady_clock::now() < deadline, "Output did not enter blocking write"); std::this_thread::yield(); }
+    worker.request_stop(); worker.join();
+    Require(pending.get().error == AudioUpdateError::Cancelled && evidence->live == 0 && !evidence->wrongThread, "Output write cancellation failed");
+}
 class Transport final : public webrtc::AudioTransport {
 public:
     int32_t RecordedDataIsAvailable(const void* data, size_t frames, size_t bytes, size_t channels,
@@ -168,6 +234,6 @@ void Run(bool wasapi) {
 }
 }
 int main(int argc, char** argv) {
-    try { Switches(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
+    try { Switches(); Playback(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

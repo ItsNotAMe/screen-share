@@ -90,6 +90,35 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     video_ = new VideoFrameWidget; video_->setMinimumSize(320, 180); video_->setVisible(!config.room.host && config.preview);
     video_->setObjectName("roomVideo");
     layout->addWidget(video_, 1);
+    auto* playbackWidget = new QWidget; auto* playbackForm = new QFormLayout(playbackWidget);
+    playbackWidget->setVisible(!config.room.host); layout->addWidget(playbackWidget);
+    playbackDevice_ = new QComboBox; playbackDevice_->setObjectName("playbackDevice");
+    playbackDevice_->addItem(config.media.playbackDeviceId.empty() ? "Default output" : "Current output", QString::fromStdWString(config.media.playbackDeviceId));
+    playbackForm->addRow("Playback device", playbackDevice_);
+    playbackVolume_ = new QSpinBox; playbackVolume_->setRange(0, 100); playbackVolume_->setSuffix("%");
+    playbackVolume_->setValue(int(config.media.playbackVolume)); playbackVolume_->setObjectName("playbackVolume"); playbackForm->addRow("Volume", playbackVolume_);
+    playbackMuted_ = new QCheckBox("Mute playback"); playbackMuted_->setChecked(config.media.playbackMuted); playbackMuted_->setObjectName("playbackMuted"); playbackForm->addRow(playbackMuted_);
+    refreshPlayback_ = new QPushButton("Refresh output devices"); refreshPlayback_->setObjectName("refreshPlaybackDevices"); playbackForm->addRow(refreshPlayback_);
+    applyPlayback_ = new QPushButton("Apply playback settings"); applyPlayback_->setObjectName("applyPlayback"); applyPlayback_->setEnabled(false); playbackForm->addRow(applyPlayback_);
+    playbackState_ = new QLabel; playbackState_->setWordWrap(true); playbackState_->setObjectName("playbackState"); playbackForm->addRow(playbackState_);
+    connect(refreshPlayback_, &QPushButton::clicked, this, [this] {
+        try {
+            const auto selected = playbackDevice_->currentData(); playbackDevice_->clear(); playbackDevice_->addItem("Default output", QString());
+            for (const auto& device : screenshare::WasapiCapture::EnumerateDevices(screenshare::AudioCaptureSource::SystemOutput))
+                playbackDevice_->addItem(QString::fromStdWString(device.name), QString::fromStdWString(device.id));
+            const auto index = playbackDevice_->findData(selected); if (index >= 0) playbackDevice_->setCurrentIndex(index);
+        } catch (...) { playbackState_->setText("Could not enumerate output devices."); }
+    });
+    connect(applyPlayback_, &QPushButton::clicked, this, [this] {
+        applyPlayback_->setEnabled(false); playbackState_->setText("Applying playback settings…");
+        session_.updatePlayback({playbackDevice_->currentData().toString().toStdWString(), unsigned(playbackVolume_->value()), playbackMuted_->isChecked()});
+    });
+    session_.playbackUpdated = [this](const auto& result) {
+        if (result.error == AudioUpdateError::None) playbackState_->setText("Playback settings applied.");
+        else if (result.error == AudioUpdateError::Cancelled) playbackState_->setText("Playback change cancelled.");
+        else if (result.error == AudioUpdateError::Unavailable) playbackState_->setText("Playback is not active yet.");
+        else playbackState_->setText("Could not change playback. Previous settings retained while available.");
+    };
     auto* formWidget = new QWidget; auto* form = new QFormLayout(formWidget); formWidget->setVisible(config.room.host);
     auto combo = [&](const char* label, QStringList values, int selected) { auto* field = new QComboBox; field->addItems(values); field->setCurrentIndex(selected); form->addRow(label, field); return field; };
     auto number = [&](const char* label, int minimum, int maximum, int value) { auto* field = new QSpinBox; field->setRange(minimum, maximum); field->setValue(value); form->addRow(label, field); return field; };
@@ -201,6 +230,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         for (const auto& member : value.members) members << QString::fromStdString(member.nickname) + (member.host ? " (host)" : " (viewer)");
         members_->setText("Members: " + members.join(", "));
         apply_->setEnabled(host && value.phase == RoomPhase::Active);
+        const bool playbackEditable = !host && value.phase == RoomPhase::Active && !session_.playbackPending();
+        applyPlayback_->setEnabled(playbackEditable); refreshPlayback_->setEnabled(playbackEditable);
+        playbackDevice_->setEnabled(playbackEditable); playbackVolume_->setEnabled(playbackEditable); playbackMuted_->setEnabled(playbackEditable);
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
         const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
         switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() != 2);

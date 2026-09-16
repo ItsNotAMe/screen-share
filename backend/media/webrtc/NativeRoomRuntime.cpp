@@ -147,6 +147,12 @@ public:
         catch (...) { return CaptureUpdateReady(AudioUpdateError::Invalid); }
     }
     AudioSelectionStatus AudioSelection() const override { return options_.audioSwitch ? options_.audioSwitch->Status() : AudioSelectionStatus{}; }
+    std::future<AudioUpdateResult> UpdatePlayback(PlaybackSelection selection) override {
+        if (identity_.host || !options_.playback || !options_.playbackForSelection) return CaptureUpdateReady(AudioUpdateError::Unsupported);
+        try { ValidatePlaybackSelection(selection); return options_.playback->Submit(selection, options_.playbackForSelection(selection)); }
+        catch (...) { return CaptureUpdateReady(AudioUpdateError::Invalid); }
+    }
+    PlaybackStatus Playback() const override { return options_.playback ? options_.playback->Status() : PlaybackStatus{}; }
     v2::StreamUpdateResult UpdateStreamPreferences(const StreamPreferences& preferences) override {
         if (!identity_.host) return {v2::StreamUpdateError::Unsupported};
         if (stopping_) return {v2::StreamUpdateError::Unavailable};
@@ -244,6 +250,7 @@ public:
         }
     }
     std::shared_future<void> BeginStop() override {
+        if (options_.playback) options_.playback->Close();
         if (options_.audioSwitch) options_.audioSwitch->Close();
         stopping_ = true;
         if (owner_) owner_->BeginStop();

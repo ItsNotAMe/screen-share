@@ -5,6 +5,7 @@
 #include "MediaPeer.h"
 #include "CaptureVideoSource.h"
 #include "media/audio/SwitchablePcmCapture.h"
+#include "media/audio/PlaybackControl.h"
 
 namespace screenshare::media {
 // Private native composition boundary. Factories run on signaling/capture owners,
@@ -18,6 +19,8 @@ struct NativeRoomRuntimeOptions {
     std::function<CaptureSession::Factory(CaptureSelection)> captureForSelection;
     std::shared_ptr<AudioSwitchControl> audioSwitch;
     std::function<AudioSwitchControl::Factory(AudioSelection)> audioForSelection;
+    std::shared_ptr<PlaybackControl> playback;
+    std::function<PlaybackControl::Factory(PlaybackSelection)> playbackForSelection;
     std::function<void(CaptureVideoSource&, const CaptureSample&)> deliver;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
     std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;

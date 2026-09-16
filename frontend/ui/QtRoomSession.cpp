@@ -21,7 +21,7 @@ bool QtRoomSession::start(RoomSessionConfig config) {
         config_ = std::move(config);
         admission_ = session_->Start(config_.room);
         pending_.reset(); submitted_.reset(); applying_ = {}; stopping_ = {};
-        nextChange_ = nextCaptureChange_ = nextAudioChange_ = 0; started_ = nextStatus_ = std::chrono::steady_clock::now();
+        nextChange_ = nextCaptureChange_ = nextAudioChange_ = nextPlaybackChange_ = 0; started_ = nextStatus_ = std::chrono::steady_clock::now();
         last_ = session_->Status(); timer_.start(); return true;
     } catch (...) {
         session_.reset(); frames_.reset();
@@ -46,6 +46,9 @@ void QtRoomSession::switchCapture(screenshare::media::CaptureSelection selection
 void QtRoomSession::switchAudio(screenshare::media::AudioSelection selection) {
     if (session_ && !stopping_.valid() && !audioUpdate_.valid()) audioUpdate_ = session_->SwitchAudioSource(std::move(selection));
 }
+void QtRoomSession::updatePlayback(screenshare::media::PlaybackSelection selection) {
+    if (session_ && !stopping_.valid() && !playbackUpdate_.valid()) playbackUpdate_ = session_->UpdatePlayback(std::move(selection));
+}
 void QtRoomSession::updateNickname(std::string nickname, uint64_t revision) {
     if (session_ && !stopping_.valid() && !mutation_.valid()) mutation_ = session_->UpdateNickname(std::move(nickname), revision);
 }
@@ -64,6 +67,9 @@ void QtRoomSession::tick() {
     }
     if (config_.duration.count() && now - started_ >= config_.duration) stop();
     const auto current = session_->Status();
+    if (playbackUpdate_.valid() && playbackUpdate_.wait_for(0ms) == std::future_status::ready) {
+        const auto result = playbackUpdate_.get(); if (playbackUpdated) playbackUpdated(result);
+    }
     if (audioUpdate_.valid() && audioUpdate_.wait_for(0ms) == std::future_status::ready) {
         const auto result = audioUpdate_.get(); if (audioUpdated) audioUpdated(result);
     }
@@ -83,6 +89,9 @@ void QtRoomSession::tick() {
         submitted_.reset();
     }
     if (!stopping_.valid()) {
+        if (!playbackUpdate_.valid() && current.phase == RoomPhase::Active && nextPlaybackChange_ < config_.playbackChanges.size() &&
+            now - started_ >= config_.playbackChanges[nextPlaybackChange_].at)
+            updatePlayback(config_.playbackChanges[nextPlaybackChange_++].selection);
         if (!audioUpdate_.valid() && current.phase == RoomPhase::Active && nextAudioChange_ < config_.audioChanges.size() &&
             now - started_ >= config_.audioChanges[nextAudioChange_].at)
             switchAudio(config_.audioChanges[nextAudioChange_++].selection);
@@ -102,6 +111,7 @@ void QtRoomSession::tick() {
     }
     if (stopping_.valid() && stopping_.wait_for(0ms) == std::future_status::ready) {
         stopping_.get(); last_ = session_->Status();
+        if (playbackUpdate_.valid()) { const auto result = playbackUpdate_.get(); if (playbackUpdated) playbackUpdated(result); }
         if (audioUpdate_.valid()) { const auto result = audioUpdate_.get(); if (audioUpdated) audioUpdated(result); }
         if (captureUpdate_.valid()) { const auto result = captureUpdate_.get(); if (captureUpdated) captureUpdated(result); }
         if (mutation_.valid()) {

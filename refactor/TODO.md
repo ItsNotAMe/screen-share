@@ -97,8 +97,11 @@ Live host system/microphone/process audio switching now uses a bounded first-PCM
 handover with rollback, timeout, cancellation and a 30ms application capture bound.
 UI selection and timed CLI audioChanges use the same public operation. Silent
 headless tests cover actual decoded audio, video continuity and endpoint ownership.
-Default-shell adoption, input consent/control, zero-copy presentation, live playback
-device selection and physical audio-device loss/recovery acceptance remain.
+Viewer-local output-device, volume and mute changes are now integrated through the
+same session/UI/CLI path. They preserve video and membership, add no playback queue,
+retain the old output on replacement failure, and report independent application.
+Default-shell adoption, input consent/control, zero-copy presentation and physical
+audio-device loss/recovery acceptance remain.
 This milestone is not complete and defaults are unchanged.
 
 ## 3. Gaming controls end to end (D)

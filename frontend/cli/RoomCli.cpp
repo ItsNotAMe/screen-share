@@ -38,7 +38,8 @@ QJsonObject Status(const RoomStatus& value) {
         {"failedPeers", qint64(value.failedPeers)}, {"pendingPeers", qint64(value.pendingPeers)},
         {"requestedRevision", qint64(value.stream.requestedRevision)}, {"peers", peers},
         {"aggregateUploadBps", value.stream.preferences.aggregateUploadLimitBps.value_or(0)}, {"captureRevision", qint64(value.capture.revision)},
-        {"audioRevision", qint64(value.audio.revision)}};
+        {"audioRevision", qint64(value.audio.revision)}, {"playbackRevision", qint64(value.playback.revision)},
+        {"playbackVolume", int(value.playback.selected.volume)}, {"playbackMuted", value.playback.selected.muted}};
 }
 std::atomic<bool> interrupted{false};
 BOOL WINAPI ConsoleSignal(DWORD event) {
@@ -55,6 +56,8 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
     size_t nextCapture = 0;
     std::future<AudioUpdateResult> audioUpdate;
     size_t nextAudio = 0;
+    std::future<AudioUpdateResult> playbackUpdate;
+    size_t nextPlayback = 0;
     size_t next = 0; bool failed = false;
     const auto started = std::chrono::steady_clock::now();
     auto nextReport = started;
@@ -96,6 +99,13 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
         if (!captureUpdate.valid() && nextCapture < config.captureChanges.size() && status.phase == RoomPhase::Active && now - started >= config.captureChanges[nextCapture].at)
             captureUpdate = session.SwitchCaptureSource(config.captureChanges[nextCapture++].selection);
         std::this_thread::sleep_for(5ms);
+        if (playbackUpdate.valid() && playbackUpdate.wait_for(0ms) == std::future_status::ready) {
+            const auto result = playbackUpdate.get();
+            report({{"type", "playback"}, {"error", int(result.error)}, {"revision", qint64(result.revision)}});
+            if (result.error != AudioUpdateError::None) { failed = true; break; }
+        }
+        if (!playbackUpdate.valid() && nextPlayback < config.playbackChanges.size() && status.phase == RoomPhase::Active && now - started >= config.playbackChanges[nextPlayback].at)
+            playbackUpdate = session.UpdatePlayback(config.playbackChanges[nextPlayback++].selection);
         if (audioUpdate.valid() && audioUpdate.wait_for(0ms) == std::future_status::ready) {
             const auto result = audioUpdate.get();
             report({{"type", "audio"}, {"error", int(result.error)}, {"revision", qint64(result.revision)}});
@@ -108,6 +118,10 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
     // Keep window messages responsive while native delivery and networking drain.
     while (stopping.wait_for(5ms) != std::future_status::ready) if (hooks.pump) hooks.pump();
     stopping.get();
+    if (playbackUpdate.valid()) {
+        const auto result = playbackUpdate.get();
+        report({{"type", "playback-ended"}, {"error", int(result.error)}, {"revision", qint64(result.revision)}});
+    }
     if (audioUpdate.valid()) {
         const auto result = audioUpdate.get();
         report({{"type", "audio-ended"}, {"error", int(result.error)}, {"revision", qint64(result.revision)}});

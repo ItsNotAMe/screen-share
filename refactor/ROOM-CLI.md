@@ -165,7 +165,29 @@ ends the run. Pending shutdown completion is reported as `audio-ended`. UI failu
 leave the session running. No credentials or endpoint identifiers are logged.
 
 The shared parser also applies these selection checks to startup audio. These
-changes affect host capture only; `playbackDeviceId` is still startup-only.
+changes affect host capture only.
+
+## Viewer playback changes
+
+Startup audio accepts `playbackDeviceId`, `playbackVolume` (0–100, default 100) and
+`playbackMuted` (default false). Viewers may also supply at most 64 strictly ordered
+`playbackChanges`:
+
+```json
+"playbackChanges": [
+  { "atMs": 5000, "muted": true },
+  { "atMs": 10000, "deviceId": "", "volume": 50, "muted": false }
+]
+```
+
+Each entry is a complete selection: omitted device ID means default output,
+omitted volume means 100%, and omitted muted means false. The command requires
+active playback, uses no automatic retry, and emits `playback` results plus status
+`playbackRevision`, `playbackVolume` and `playbackMuted`. Device IDs are not logged.
+A failed scripted command ends the run; shutdown reports `playback-ended` for an
+outstanding command. The interactive UI preserves the session and previous healthy
+output on failure. Device initialization may pause local sound; mute does not stop
+video, audio reception or the room connection. Host playback changes are rejected.
 
 ## Automated checks
 

@@ -1,5 +1,14 @@
 # Headless media checks
 
+Viewer playback coverage uses only synthetic output endpoints. `pcm-adm-lifecycle`
+checks exact gain, mute without device recreation, replacement, startup/first-write
+rollback, Busy, queued and in-write cancellation, diagnostics, restart persistence
+and owner-thread destruction. Actual-widget tests mute/unmute, change output and
+volume, reject a missing output and verify continued frames and unchanged room
+membership. The CLI test applies timed mute/replacement settings and checks their
+results; strict parsing rejects host changes, bad volume and unordered times.
+Physical output switching/unplug/driver-hang acceptance remains separate.
+
 Live audio coverage is silent: `pcm-adm-lifecycle` exercises endpoint startup
 failure, a real five-second missing-PCM timeout with old audio continuing, Busy,
 successful changes, recording restart, cancellation during read and activation,

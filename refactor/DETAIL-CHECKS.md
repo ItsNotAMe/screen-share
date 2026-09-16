@@ -4,6 +4,21 @@ Saved: 2026-09-14. Implementation status: **Gate A passed for native integration
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+## Latest integration: viewer playback — 2026-09-16
+
+- [x] Integrate viewer output-device selection, volume and mute through public
+  session, native Windows adapter, actual Qt widgets and timed CLI configuration.
+- [x] Preserve old output/settings on replacement startup or first-write failure;
+  bound pending work, cancel on stop and retain settings across playout restart.
+- [x] Keep output ownership on the existing worker without extra queues/clocks;
+  refresh actual device buffering and engine-period diagnostics after changes.
+- [x] Validate gain, mute, rollback, Busy, cancellation, restart, owner destruction,
+  actual-widget video continuity and CLI configuration/results with silent output.
+- [ ] Accept physical device unplug/recovery, driver-hang handling and measured
+  end-to-end latency. Synthetic endpoints do not establish these properties.
+
+Evidence: [CHECKPOINT-B.md](CHECKPOINT-B.md). Milestone 2 is still open.
+
 ## Latest integration: live shared-audio selection — 2026-09-16
 
 - [x] Integrate bounded host audio selection through public session, Windows native

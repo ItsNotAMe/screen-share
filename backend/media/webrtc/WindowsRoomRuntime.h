@@ -12,6 +12,9 @@ struct WindowsRoomRuntimeOptions {
     CaptureConfig capture;
     AudioCaptureConfig audio;
     std::wstring playbackDeviceId;
+    unsigned playbackVolume = 100;
+    bool playbackMuted = false;
+    std::function<PlaybackControl::Factory(PlaybackSelection)> playbackForSelection;
     std::optional<PcmEndpointFactories> audioEndpoints;
     // Test/embedding override. Never fall back to physical capture when supplied.
     std::function<AudioSwitchControl::Factory(AudioSelection)> audioForSelection;

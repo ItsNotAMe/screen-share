@@ -203,8 +203,29 @@ Actual-widget tests switch to silent synthetic microphone PCM, check decoded Opu
 becomes silent while video continues, reject a missing device without committing,
 then restore decoded audio. Viewer requests are rejected and room/member/settings
 revisions remain unchanged. These tests never capture or play physical audio.
-Physical device switching/unplug/recovery and live playback-device selection remain
-open acceptance/implementation work; synthetic results do not establish them.
+Physical device switching/unplug/recovery remain open acceptance work; synthetic
+results do not establish them.
+
+## Viewer playback controls
+
+Viewers can refresh output devices, select an output, set volume (0–100%) and mute,
+then apply the settings. These controls affect only that viewer. Host capture and
+other viewers are unchanged, and video continues while playback is muted. An empty
+device selection uses the default output. Device enumeration runs only on request.
+
+`RoomSession.UpdatePlayback` accepts one pending command while playback is active.
+The existing ADM playout worker owns endpoint creation, first write, replacement
+and destruction. Volume/mute changes reuse the device; changing the device can
+temporarily pause local sound during initialization. The old endpoint/settings
+remain available on startup or first-write failure. Success means the new endpoint
+accepted a block, not that a speaker physically played it. No queue, clock, room
+mutation, renegotiation or service request is added. Settings survive an ADM
+playout stop/restart; the independent playback revision reports application.
+
+Stop cancels the public command and drains native work. Endpoint writes honor the
+stop token, but synchronous Windows device initialization cannot be forcibly
+interrupted; driver hangs and physical unplug/recovery still require acceptance.
+Tests use synthetic outputs exclusively, including the Windows widget variant.
 
 ## Headless and Windows checks
 

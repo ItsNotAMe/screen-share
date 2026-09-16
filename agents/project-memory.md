@@ -1,5 +1,21 @@
 # Project Memory
 
+## Viewer-local playback settings — 2026-09-16
+
+RoomSession.UpdatePlayback(PlaybackSelection) is viewer-only in NativeRoomRuntime,
+one pending command, cancelled on Stop, with status.playback independent revision.
+ControlledPcmPlayout runs on the existing ADM worker: no extra queue/clock/thread.
+Volume/mute retain the endpoint; device changes construct/start/write a candidate
+before committing. Failure retains previous healthy output/settings. Synchronous
+device initialization can pause local sound and cannot be forcibly interrupted.
+Native writes honor stop, and endpoint construction/destruction remain on worker.
+PlaybackControl persists accepted selections across ADM restarts. Windows binding
+never falls back to physical output when synthetic endpoints are injected.
+Viewer UI and CLI playbackChanges share the public operation. Startup audio supports
+playbackVolume/playbackMuted as well as playbackDeviceId. Timed changes are complete
+selections (defaults: default device, 100%, unmuted), max64, ordered, viewer-only.
+Tests remain silent; physical device loss/recovery and latency gates remain open.
+
 ## Live shared-audio switching — 2026-09-16
 
 RoomSession.SwitchAudioSource(AudioSelection) is host-only in NativeRoomRuntime,

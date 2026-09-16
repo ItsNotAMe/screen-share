@@ -38,12 +38,18 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
     options.capture.windowHandle = reinterpret_cast<uint64_t>(captureWindow);
     options.audioEndpoints = proof::SyntheticAudio(audio); options.frames = frames;
     options.audioForSelection = proof::SyntheticAudioSelection;
+    options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
     return WindowsRoomRuntimeFactory(std::move(options));
 #else
     return [preferences = config.media.preferences, audio, frames](auto identity, auto send) {
         NativeRoomRuntimeOptions options;
         options.preferences = preferences; options.frames = frames;
         auto endpoints = proof::SyntheticAudio(audio);
+        if (!identity.host) {
+            options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{}, endpoints.playout);
+            endpoints.playout = [control = options.playback] { return std::make_unique<ControlledPcmPlayout>(control); };
+            options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
+        }
         if (identity.host) {
             options.audioSwitch = std::make_shared<AudioSwitchControl>(AudioSelection{}, endpoints.capture);
             endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
@@ -138,6 +144,13 @@ int main(int argc, char** argv) {
         }
         object["host"] = false; object["roomId"] = "screenshare://room/v2/" + QString::fromStdString(joinedRoom); object["nickname"] = "CliViewer";
         object["seconds"] = 6; object.remove("changes"); object.remove("captureChanges"); object.remove("audioChanges");
+        object["playbackChanges"] = QJsonArray{QJsonObject{{"atMs", 2000}, {"muted", true}}, QJsonObject{{"atMs", 4000}, {"deviceId", "replacement"}, {"volume", 50}}};
+        auto invalidPlayback = object; invalidPlayback["playbackChanges"] = QJsonArray{QJsonObject{{"atMs", 100}, {"volume", 101}}};
+        Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
+        invalidPlayback = object; invalidPlayback["host"] = true;
+        Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
+        invalidPlayback = object; invalidPlayback["playbackChanges"] = QJsonArray{QJsonObject{{"atMs", 100}}, QJsonObject{{"atMs", 100}}};
+        Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
         const auto viewer = ParseRoomSessionConfig(object, true);
         auto frames = std::make_shared<LatestRoomVideoFrame>();
         auto audio = std::make_shared<proof::AudioEvidence>();
@@ -147,6 +160,10 @@ int main(int argc, char** argv) {
         preview.Show();
 #endif
         RoomCliHooks viewerHooks;
+        int playbackChanges = 0;
+        viewerHooks.report = [&](const QJsonObject& value) {
+            if (value["type"] == "playback") { Check(value["error"].toInt() == 0); ++playbackChanges; }
+        };
         viewerHooks.pump = [&] {
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
             Check(preview.PumpMessages());
@@ -165,6 +182,7 @@ int main(int argc, char** argv) {
         };
         const int viewing = RunRoomCliSession(viewer, Factory(viewer, audio, frames), viewerHooks, true);
         stopHost = true;
+        Check(playbackChanges == 2);
         Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && sourceChanged && audioChanged);
         Check(original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF

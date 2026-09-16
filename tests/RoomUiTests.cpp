@@ -47,11 +47,17 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
         windows.capture.windowHandle = reinterpret_cast<uint64_t>(captureWindow);
         windows.audioEndpoints = proof::SyntheticAudio(audio);
         windows.audioForSelection = proof::SyntheticAudioSelection;
+        windows.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         return WindowsRoomRuntimeFactory(std::move(windows));
 #else
         return [windows, audio](auto identity, auto send) {
             NativeRoomRuntimeOptions options; options.preferences = windows.preferences; options.frames = windows.frames;
             auto endpoints = proof::SyntheticAudio(audio);
+            if (!identity.host) {
+                options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{windows.playbackDeviceId, windows.playbackVolume, windows.playbackMuted}, endpoints.playout);
+                endpoints.playout = [control = options.playback] { return std::make_unique<ControlledPcmPlayout>(control); };
+                options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
+            }
             if (identity.host) {
                 options.audioSwitch = std::make_shared<AudioSwitchControl>(AudioSelection{}, endpoints.capture);
                 endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
@@ -111,6 +117,8 @@ void MutationLifecycle(const std::string& origin) {
         auto pending = session.UpdateNickname("Pending", revision);
         auto pendingSource = session.SwitchCaptureSource({});
         auto pendingAudio = session.SwitchAudioSource({});
+        auto pendingPlayback = session.UpdatePlayback({});
+        Check(session.UpdatePlayback({}).get().error == AudioUpdateError::Busy);
         Check(session.SwitchAudioSource({}).get().error == AudioUpdateError::Busy);
         Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Busy);
         Check(session.UpdateNickname("Overflow", revision).get().error == RoomUpdateError::Busy);
@@ -121,6 +129,8 @@ void MutationLifecycle(const std::string& origin) {
         Check(pending.get().error == RoomUpdateError::Unconfirmed);
         Check(pendingSource.get().error == CaptureUpdateError::Cancelled);
         Check(pendingAudio.get().error == AudioUpdateError::Cancelled);
+        Check(pendingPlayback.get().error == AudioUpdateError::Cancelled);
+        Check(session.UpdatePlayback({}).get().error == AudioUpdateError::Unavailable);
         Check(session.SwitchAudioSource({}).get().error == AudioUpdateError::Unavailable);
         Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Unavailable);
     } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
@@ -305,6 +315,29 @@ void SourceSwitchScenario(const std::string& origin) {
         afterAudio.stream.requestedRevision == roomBefore.stream.requestedRevision && afterAudio.activePeers == 1);
     viewer.session().audioUpdated = [&](const auto& result) { error = result.error; };
     viewer.session().switchAudio({}); Wait([&] { return !viewer.session().audioPending(); }); Check(error == AudioUpdateError::Unsupported);
+    const auto viewerBefore = viewer.session().status();
+    auto* applyPlayback = viewer.findChild<QPushButton*>("applyPlayback");
+    auto* mute = viewer.findChild<QCheckBox*>("playbackMuted");
+    auto* volume = viewer.findChild<QSpinBox*>("playbackVolume");
+    auto* output = viewer.findChild<QComboBox*>("playbackDevice");
+    Wait([&] { return applyPlayback->isEnabled(); }); mute->setChecked(true); applyPlayback->click();
+    Wait([&] { return !viewer.session().playbackPending() && audio->quietStreak >= 10; });
+    Check(viewer.session().status().playback.selected.muted);
+    const auto quietPlayback = audio->audibleBlocks.load(); const auto framesBeforePlayback = frames;
+    Wait([&] { return frames >= framesBeforePlayback + 10; }); Check(audio->audibleBlocks == quietPlayback);
+    output->addItem("Replacement synthetic output", "replacement"); output->setCurrentIndex(output->count() - 1);
+    mute->setChecked(false); volume->setValue(50); Wait([&] { return applyPlayback->isEnabled(); }); applyPlayback->click();
+    Wait([&] { return !viewer.session().playbackPending() && audio->audibleBlocks > quietPlayback + 10; });
+    Check(viewer.session().status().playback.selected.volume == 50 && viewer.session().status().playback.selected.deviceId == L"replacement");
+    const auto playbackRevision = viewer.session().status().playback.revision;
+    output->addItem("Missing output", "invalid"); output->setCurrentIndex(output->count() - 1);
+    Wait([&] { return applyPlayback->isEnabled(); }); applyPlayback->click();
+    Wait([&] { return !viewer.session().playbackPending(); });
+    Check(viewer.session().status().playback.revision == playbackRevision && viewer.findChild<QLabel*>("playbackState")->text().contains("Previous settings"));
+    Check(viewer.session().status().roomId == viewerBefore.roomId && viewer.session().status().peerId == viewerBefore.peerId &&
+        viewer.session().status().revision == viewerBefore.revision);
+    host.session().playbackUpdated = [&](const auto& result) { error = result.error; };
+    host.session().updatePlayback({}); Wait([&] { return !host.session().playbackPending(); }); Check(error == AudioUpdateError::Unsupported);
     host.close(); viewer.close(); Wait([&] { return !host.session().running() && !viewer.session().running(); });
 }
 void MutationAcknowledgementScenario(const std::string& origin) {

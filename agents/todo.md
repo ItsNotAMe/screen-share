@@ -6,10 +6,14 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
+Viewer-local playback device/volume/mute now use shared public session, UI and timed
+CLI configuration, with rollback and silent lifecycle/widget tests. Physical audio
+device loss/recovery acceptance remains open; do not reimplement these controls.
+
 Live host audio-source switching is integrated through public session, native
 Windows binding, actual UI and timed CLI configuration. Keep testing silent.
-Remaining audio work includes live playback-device selection and physical-device
-loss/recovery acceptance; source-switch synthetic proofs do not close those gates.
+Remaining audio work includes physical-device loss/recovery acceptance;
+source-switch synthetic proofs do not close those gates.
 
 Execute the grouped delivery milestones in [refactor/TODO.md](../refactor/TODO.md).
 Native source roots are now backend/ and frontend/. RoomPeerNegotiation schedules

@@ -3,6 +3,7 @@
 #include "media/StreamPreferences.h"
 #include "media/CaptureSelection.h"
 #include "media/AudioSelection.h"
+#include "media/PlaybackSelection.h"
 #include <functional>
 #include <future>
 #include <memory>
@@ -51,6 +52,7 @@ struct RoomStatus {
     std::vector<RoomMember> members;
     media::CaptureSelectionStatus capture;
     media::AudioSelectionStatus audio;
+    media::PlaybackStatus playback;
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
 // into the public control API. All runtime methods execute on owned signaling.
@@ -73,6 +75,8 @@ public:
     virtual media::CaptureSelectionStatus CaptureSelection() const { return {}; }
     virtual std::future<media::AudioUpdateResult> SwitchAudioSource(media::AudioSelection) { return media::CaptureUpdateReady(media::AudioUpdateError::Unsupported); }
     virtual media::AudioSelectionStatus AudioSelection() const { return {}; }
+    virtual std::future<media::AudioUpdateResult> UpdatePlayback(media::PlaybackSelection) { return media::CaptureUpdateReady(media::AudioUpdateError::Unsupported); }
+    virtual media::PlaybackStatus Playback() const { return {}; }
     virtual std::shared_future<void> BeginStop() = 0;
 };
 struct RoomIdentity { bool host; std::string roomId, peerId; };
@@ -103,6 +107,9 @@ public:
     // Host capture only, one pending handover. Requires an active recording
     // endpoint (normally at least one viewer). Success means first PCM received.
     std::future<media::AudioUpdateResult> SwitchAudioSource(media::AudioSelection);
+    // Viewer-local output settings; success means the endpoint accepted a block,
+    // not physical playback. One pending command, cancelled by Stop.
+    std::future<media::AudioUpdateResult> UpdatePlayback(media::PlaybackSelection);
     // One in-flight room/profile mutation. Completion is the server acknowledgement;
     // authoritative state arrives independently through pushed snapshots. Never
     // automatically retry Conflict or Unconfirmed (the server may have committed).

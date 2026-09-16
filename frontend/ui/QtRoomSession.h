@@ -19,6 +19,8 @@ public:
     bool capturePending() const { return captureUpdate_.valid(); }
     void switchAudio(screenshare::media::AudioSelection);
     bool audioPending() const { return audioUpdate_.valid(); }
+    void updatePlayback(screenshare::media::PlaybackSelection);
+    bool playbackPending() const { return playbackUpdate_.valid(); }
     void updateNickname(std::string, uint64_t revision);
     void updatePolicy(screenshare::v2::RoomPolicy, uint64_t revision);
     bool roomUpdatePending() const { return mutation_.valid(); }
@@ -31,6 +33,7 @@ public:
     std::function<void(const screenshare::v2::RoomUpdateResult&)> roomUpdated;
     std::function<void(const screenshare::media::CaptureUpdateResult&)> captureUpdated;
     std::function<void(const screenshare::media::AudioUpdateResult&)> audioUpdated;
+    std::function<void(const screenshare::media::AudioUpdateResult&)> playbackUpdated;
     std::function<void(const QString&)> error;
     std::function<void(const screenshare::v2::RoomStatus&)> finished;
 private:
@@ -46,11 +49,13 @@ private:
     std::future<screenshare::v2::RoomUpdateResult> mutation_;
     std::future<screenshare::media::CaptureUpdateResult> captureUpdate_;
     std::future<screenshare::media::AudioUpdateResult> audioUpdate_;
+    std::future<screenshare::media::AudioUpdateResult> playbackUpdate_;
     std::shared_future<void> stopping_;
     std::optional<screenshare::media::StreamPreferences> pending_, submitted_;
     std::chrono::steady_clock::time_point started_, nextStatus_;
     size_t nextChange_ = 0;
     size_t nextCaptureChange_ = 0;
     size_t nextAudioChange_ = 0;
+    size_t nextPlaybackChange_ = 0;
     screenshare::v2::RoomStatus last_;
 };

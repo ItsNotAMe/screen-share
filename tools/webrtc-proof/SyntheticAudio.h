@@ -2,6 +2,7 @@
 #include <algorithm>
 #include "media/audio/PcmAudioEndpoint.h"
 #include "media/audio/SwitchablePcmCapture.h"
+#include "media/audio/PlaybackControl.h"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -58,6 +59,12 @@ inline screenshare::media::AudioSwitchControl::Factory SyntheticAudioSelection(s
     return [selection]() -> std::unique_ptr<screenshare::media::PcmCaptureEndpoint> {
         if (selection.deviceId == L"invalid") throw std::runtime_error("Injected audio startup failure");
         return std::make_unique<ToneCapture>(selection.kind == screenshare::media::AudioKind::Microphone);
+    };
+}
+inline screenshare::media::PlaybackControl::Factory SyntheticPlayback(screenshare::media::PlaybackSelection selection, std::shared_ptr<AudioEvidence> evidence) {
+    return [selection, evidence]() -> std::unique_ptr<screenshare::media::PcmPlayoutEndpoint> {
+        if (selection.deviceId == L"invalid") throw std::runtime_error("Injected playback startup failure");
+        return std::make_unique<MeasuredPlayout>(evidence);
     };
 }
 }
