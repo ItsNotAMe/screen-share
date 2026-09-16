@@ -92,6 +92,30 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     auto combo = [&](const char* label, QStringList values, int selected) { auto* field = new QComboBox; field->addItems(values); field->setCurrentIndex(selected); form->addRow(label, field); return field; };
     auto number = [&](const char* label, int minimum, int maximum, int value) { auto* field = new QSpinBox; field->setRange(minimum, maximum); field->setValue(value); form->addRow(label, field); return field; };
     const auto& p = config.media.preferences;
+    captureSource_ = new QComboBox; captureSource_->setObjectName("liveCaptureSource"); form->addRow("Capture source", captureSource_);
+    auto currentSource = QVariantMap{{"display", config.media.capture.displayIndex}};
+    if (config.media.capture.sourceType == screenshare::CaptureSourceType::Window) currentSource = {{"window", QVariant::fromValue<qulonglong>(config.media.capture.windowHandle)}};
+    captureSource_->addItem("Current source", currentSource);
+    refreshCapture_ = new QPushButton("Refresh capture sources"); refreshCapture_->setObjectName("refreshCaptureSources"); form->addRow(refreshCapture_);
+    switchCapture_ = new QPushButton("Share selected source"); switchCapture_->setObjectName("switchCaptureSource"); switchCapture_->setEnabled(false); form->addRow(switchCapture_);
+    captureState_ = new QLabel; captureState_->setWordWrap(true); captureState_->setObjectName("captureState"); form->addRow(captureState_);
+    connect(refreshCapture_, &QPushButton::clicked, this, [this] {
+        try {
+            const auto selected = captureSource_->currentData(); captureSource_->clear();
+            for (const auto& display : screenshare::DesktopCapturer::EnumerateDisplays())
+                captureSource_->addItem(QString("Display %1").arg(display.index + 1), QVariantMap{{"display", display.index}});
+            for (const auto& window : screenshare::DesktopCapturer::EnumerateWindows())
+                captureSource_->addItem(QString::fromStdWString(window.title), QVariantMap{{"window", QVariant::fromValue<qulonglong>(window.handle)}});
+            const auto index = captureSource_->findData(selected); if (index >= 0) captureSource_->setCurrentIndex(index);
+        } catch (...) { captureState_->setText("Could not enumerate capture sources."); }
+    });
+    connect(switchCapture_, &QPushButton::clicked, this, [this, captureFps = config.media.capture.targetFps] {
+        const auto selected = captureSource_->currentData().toMap(); if (selected.isEmpty()) return;
+        CaptureSelection selection; selection.fps = captureFps;
+        if (selected.contains("window")) { selection.kind = CaptureKind::Window; selection.window = selected["window"].toULongLong(); }
+        else selection.display = selected["display"].toInt();
+        captureState_->setText("Waiting for the new source…"); switchCapture_->setEnabled(false); session_.switchCapture(selection);
+    });
     preset_ = combo("Preset", {"Gaming", "Quality"}, int(p.preset));
     resolution_ = combo("Resolution", {"Auto", "Fixed", "Native"}, int(p.resolution));
     width_ = number("Width", 2, 3840, p.width); width_->setSingleStep(2); width_->setObjectName("streamWidth");
@@ -140,6 +164,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         for (const auto& member : value.members) members << QString::fromStdString(member.nickname) + (member.host ? " (host)" : " (viewer)");
         members_->setText("Members: " + members.join(", "));
         apply_->setEnabled(host && value.phase == RoomPhase::Active);
+        switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
+        refreshCapture_->setEnabled(host && !session_.capturePending()); captureSource_->setEnabled(host && !session_.capturePending());
         if (host) {
             qint64 allocated = 0, applied = 0; uint64_t measured = 0; size_t paused = 0, measuredPeers = 0;
             for (const auto& peer : value.stream.peers) {
@@ -168,6 +194,11 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         if (value.phase == RoomPhase::Failed) error_->setText("The room session failed. Stop and start a new session to retry.");
     };
     session_.settingsAccepted = [this](const auto& result) { if (result.error != StreamUpdateError::None) error_->setText("The settings update was rejected."); };
+    session_.captureUpdated = [this](const auto& result) {
+        if (result.error == CaptureUpdateError::None) captureState_->setText("Sharing the new source. Waiting for viewers to display it.");
+        else if (result.error == CaptureUpdateError::Cancelled) captureState_->setText("Source change cancelled.");
+        else captureState_->setText("Could not change source. The previous source remains selected if it is still available.");
+    };
     session_.roomUpdated = [this](const auto& result) {
         switch (result.error) {
         case RoomUpdateError::None:

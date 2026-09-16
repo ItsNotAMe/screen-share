@@ -1,5 +1,6 @@
 #include "media/HostMediaSession.h"
 #include "media/capture/SyntheticCaptureSource.h"
+#include "media/capture/SwitchableCaptureSource.h"
 #include <atomic>
 #include <iostream>
 #include <thread>
@@ -26,7 +27,34 @@ struct OwnedSource final : ICaptureSource {
     void Retire() noexcept override {}
     void Rebuild() override { source.Rebuild(); }
 };
+void CheckSourceSwitching() {
+    using namespace std::chrono_literals;
+    struct EmptySource final : ICaptureSource {
+        void Start() override {} std::optional<CaptureSample> Poll() override { return {}; }
+        bool Closed() const override { return false; } void Retire() noexcept override {} void Rebuild() override {}
+    };
+    auto control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
+    std::atomic<int> living{0}; std::atomic<bool> wrongThread{false}; std::atomic<unsigned> frames{0};
+    auto source = [&]() -> std::unique_ptr<ICaptureSource> { return std::make_unique<OwnedSource>(living, wrongThread); };
+    CaptureSession capture(1, [=] { return std::make_unique<SwitchableCaptureSource>(source, control); }, [&](auto) { ++frames; });
+    capture.EnableDelivery(); Wait([&] { return frames >= 3; });
+    auto failed = control->Submit({}, []() -> std::unique_ptr<ICaptureSource> { throw std::runtime_error("Injected startup failure"); });
+    Require(failed.wait_for(1s) == std::future_status::ready && failed.get().error == CaptureUpdateError::Failed, "Failed replacement did not resolve");
+    auto timed = control->Submit({}, [] { return std::make_unique<EmptySource>(); });
+    Require(control->Submit({}, source).get().error == CaptureUpdateError::Busy, "Source changes were not bounded");
+    const auto before = frames.load();
+    Require(timed.wait_for(6s) == std::future_status::ready && timed.get().error == CaptureUpdateError::Timeout, "Missing-frame replacement did not time out");
+    Require(frames > before + 20 && control->Status().revision == 1, "Failed switch interrupted the working source");
+    auto changed = control->Submit({CaptureKind::Display, 1, 0, 60}, source);
+    Require(changed.wait_for(1s) == std::future_status::ready && changed.get().error == CaptureUpdateError::None && control->Status().revision == 2,
+        "Healthy replacement did not commit");
+    auto cancelled = control->Submit({}, [] { return std::make_unique<EmptySource>(); }); capture.Stop();
+    Require(cancelled.wait_for(0s) == std::future_status::ready && cancelled.get().error == CaptureUpdateError::Cancelled,
+        "Stop did not cancel pending capture selection");
+    Require(living == 0 && !wrongThread, "Switched source leaked or was destroyed off its owner");
+}
 int main() try {
+    CheckSourceSwitching();
     std::atomic<int> living{0};
     std::atomic<bool> wrongThread{false};
     auto factory = [&] { return std::make_unique<OwnedSource>(living, wrongThread); };

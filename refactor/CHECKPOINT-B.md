@@ -1,5 +1,45 @@
 # Checkpoint B evidence
 
+## Live video-source switching and decoder resize recovery — 2026-09-16
+
+Host display/window switching now uses one bounded public RoomSession operation,
+the existing capture worker and an independent selection revision. The worker polls
+the current source while starting a candidate; first valid frame commits it, while
+failure/closure/five-second first-frame timeout discards the candidate. Stop cancels
+pending public completion and drains native ownership. UI refresh/select/share and
+up to 64 ordered CLI/config captureChanges use the same operation. The room, peer
+identities, room revision and stream-settings revision stay intact. Audio is unchanged.
+
+The larger-source UI scenario initially failed: capture committed, but decoded
+frames stopped. The pinned WebRTC receiver initializes its decoder limit from the
+first frame without necessarily reconfiguring for growth. The MF adapter now
+accepts bounded keyframe-declared sizes, still checking actual output against that
+declaration and the global 4096-per-dimension allocation bound. A regression test
+decodes larger keyframes from a small initial hint and rejects oversized declarations.
+
+Validation:
+- Application suites: **19/19 Release (85.15s), 19/19 Debug (86.18s)**.
+- After final Busy/cancellation and unchanged-revision assertions, UI checks passed
+  again: **6.41s Release, 6.84s Debug**.
+- Native four-viewer/coordinator/decoder checks: Release **7.43s / 7.08s / 0.22s**;
+  Debug **3/3, 15.07s**. Capture tests include the real five-second timeout, old-source
+  continuity, bounded queue, stop cancellation and owner-thread destruction.
+- Windows UI switches between two generated windows and confirms changed decoded
+  dimensions. Release **8.14s**:
+  `build/webrtc/source-switch-windows-ui/native-service-d36a14b9-8e65-4d78-8ff5-6b319896187a`.
+- Final Debug Windows UI **8.39s**:
+  `build/webrtc/source-switch-windows-final-debug/native-service-7060a11f-8531-4b0c-af91-4ad2a7207ab9`.
+- Windows CLI scripted switch **6.77s**:
+  `build/webrtc/source-switch-windows-cli/native-service-f9f58f72-3fc0-4ec8-9442-36fe96ca211f`.
+- Logs: `build/webrtc/source-switch-*`. No physical input or audible audio; Windows
+  capture tests ran outside the capture-restricted sandbox.
+
+Success means first-frame readiness, not remote-display acknowledgement. Platform
+startup/polling must stay bounded and can briefly delay acquisition. Switching D3D
+devices can require readback/copy into the retained encoder device. Zero-copy,
+hardware-only, remote latency/resource acceptance and live audio-device switching
+remain open. No default UI cutover or later visual redesign was performed.
+
 ## Shared upload allocation and measured transport rates — 2026-09-16
 
 The optional host upload allowance is integrated through StreamPreferences,

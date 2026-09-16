@@ -58,7 +58,7 @@ StreamPreferences Preferences(const QJsonObject& object) {
 }
 }
 RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopback) {
-    Keys(object, {"origin", "host", "roomId", "nickname", "name", "password", "public", "viewerLimit", "seconds", "preview", "capture", "audio", "stream", "changes"});
+    Keys(object, {"origin", "host", "roomId", "nickname", "name", "password", "public", "viewerLimit", "seconds", "preview", "capture", "audio", "stream", "changes", "captureChanges"});
     RoomSessionConfig result;
     const auto origin = String(object, "origin"); const QUrl url(origin);
     if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment() ||
@@ -75,6 +75,23 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
     }
     result.duration = std::chrono::seconds(Integer(object, "seconds", 0, 0, 86400)); result.preview = Boolean(object, "preview", true);
     result.media.preferences = Preferences(Object(object, "stream"));
+    if (object.contains("captureChanges") && !object["captureChanges"].isArray()) throw std::invalid_argument("Invalid capture changes");
+    const auto captureChanges = object["captureChanges"].toArray();
+    if (captureChanges.size() > 64 || (!result.room.host && !captureChanges.isEmpty())) throw std::invalid_argument("Invalid capture change count or role");
+    for (const auto& item : captureChanges) {
+        if (!item.isObject()) throw std::invalid_argument("Invalid capture change");
+        const auto change = item.toObject(); Keys(change, {"atMs", "display", "window", "fps"});
+        if (!change.contains("atMs") || change.contains("display") == change.contains("window")) throw std::invalid_argument("Capture change requires time and one source");
+        CaptureSelection selection; selection.fps = Integer(change, "fps", 60, 1, 240);
+        if (change.contains("window")) {
+            bool ok = false; selection.kind = CaptureKind::Window; selection.window = String(change, "window").toULongLong(&ok, 0);
+            if (!ok) throw std::invalid_argument("Invalid capture window");
+        } else selection.display = Integer(change, "display", 0, 0, 63);
+        ValidateCaptureSelection(selection);
+        const auto at = std::chrono::milliseconds(Integer(change, "atMs", 0, 0, 86400000));
+        if (!result.captureChanges.empty() && at < result.captureChanges.back().at) throw std::invalid_argument("Capture changes must be ordered");
+        result.captureChanges.push_back({at, selection});
+    }
     const auto capture = Object(object, "capture"); Keys(capture, {"display", "window", "fps"});
     result.media.capture.displayIndex = Integer(capture, "display", 0, 0, 63);
     result.media.capture.targetFps = Integer(capture, "fps", result.media.preferences.fps, 1, 240);

@@ -1,6 +1,7 @@
 #pragma once
 #include "media/RoomPeerSignal.h"
 #include "media/StreamPreferences.h"
+#include "media/CaptureSelection.h"
 #include <functional>
 #include <future>
 #include <memory>
@@ -47,6 +48,7 @@ struct RoomStatus {
     uint64_t revision = 0;
     RoomPolicy policy;
     std::vector<RoomMember> members;
+    media::CaptureSelectionStatus capture;
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
 // into the public control API. All runtime methods execute on owned signaling.
@@ -65,6 +67,8 @@ public:
     virtual std::vector<std::string> FailedPeers() const { return {}; }
     virtual StreamUpdateResult UpdateStreamPreferences(const media::StreamPreferences&) { return {StreamUpdateError::Unsupported}; }
     virtual StreamStatus StreamSettings() const { return {}; }
+    virtual std::future<media::CaptureUpdateResult> SwitchCaptureSource(media::CaptureSelection) { return media::CaptureUpdateReady(media::CaptureUpdateError::Unsupported); }
+    virtual media::CaptureSelectionStatus CaptureSelection() const { return {}; }
     virtual std::shared_future<void> BeginStop() = 0;
 };
 struct RoomIdentity { bool host; std::string roomId, peerId; };
@@ -88,6 +92,10 @@ public:
     // Status exposes per-peer sender application and source-frame observation.
     // At most one command is queued; callers may retry Busy with their latest value.
     std::future<StreamUpdateResult> UpdateStreamPreferences(media::StreamPreferences);
+    // Host-only, one pending switch. Success means the replacement produced its
+    // first frame; it is not a remote-display acknowledgement. Failure keeps the
+    // previous source when it remains healthy. Stop cancels pending completion.
+    std::future<media::CaptureUpdateResult> SwitchCaptureSource(media::CaptureSelection);
     // One in-flight room/profile mutation. Completion is the server acknowledgement;
     // authoritative state arrives independently through pushed snapshots. Never
     // automatically retry Conflict or Unconfirmed (the server may have committed).

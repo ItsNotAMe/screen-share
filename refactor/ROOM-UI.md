@@ -84,9 +84,33 @@ Remote control is unavailable in this opt-in window; no input handler or control
 grant is installed. The opt-in browser above now supplies create/join, persisted
 nickname and pushed directory updates. The default application shell and
 consent/input controls remain to migrate.
-Source switching, aggregate bandwidth allocation, zero-copy
-presentation, NAT/ICE configuration and acceptance measurements also remain.
+Live audio-device switching, zero-copy presentation, NAT/ICE configuration and
+acceptance measurements also remain.
 This path is an integration preview, not milestone 2 completion or default cutover.
+
+## Live display/window switching
+
+The host can use **Refresh capture sources**, select a display/window, and press
+**Share selected source**. Source selection is local to the host; viewers cannot
+request it over signaling. The portable backend exposes `SwitchCaptureSource` with
+one pending operation, typed errors and an independent capture-selection revision.
+Room membership, media peers and stream settings remain in place.
+
+The capture owner starts a candidate while continuing to poll the working source.
+Only a first valid candidate frame commits the selection; startup failure, closure
+or a five-second first-frame timeout discards the candidate. Stop cancels pending
+completion and joins capture teardown. Native creation, polling and destruction
+stay on the capture worker. Source startup/poll calls must remain bounded; starting
+a platform capture may briefly delay acquisition. Completion is first-frame
+readiness, not proof of remote presentation, and already queued old frames may drain.
+
+Fixed output settings keep their canvas; Native/Auto can follow source-size changes.
+The decoder now accepts bounded keyframe-declared size changes because the pinned
+receiver's initial resolution hint may describe only its first frame. Output is
+still checked against the declaration and the global 4096-pixel allocation bound.
+Windows switches may require GPU readback/copy when the new capture device differs
+from the retained encoder device. This is not zero-copy or hardware-only acceptance.
+Live audio-device switching is separate and remains outstanding.
 
 ## Shared upload allowance
 

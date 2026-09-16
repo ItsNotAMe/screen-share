@@ -55,6 +55,14 @@ public:
             if (!decoder_) return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
             if (needsKeyframe_ && image._frameType != webrtc::VideoFrameType::kVideoFrameKey)
                 return WEBRTC_VIDEO_CODEC_ERROR;
+            // The pinned receiver initializes max_render_resolution from its
+            // first frame and does not necessarily reconfigure on source resize.
+            // Permit a bounded keyframe-declared resize, still validating decoded
+            // output against that declaration and the global allocation bound.
+            if (image._frameType == webrtc::VideoFrameType::kVideoFrameKey && image._encodedWidth && image._encodedHeight) {
+                if (image._encodedWidth > 4096 || image._encodedHeight > 4096) return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
+                maxWidth_ = image._encodedWidth; maxHeight_ = image._encodedHeight;
+            }
             try {
                 if (timestamps_.size() >= 32) throw std::runtime_error("MF decoder retained too many frames");
                 EncodedPacket packet;
@@ -101,7 +109,7 @@ private:
     void StartTransform() {
         // MF can initially enumerate a default type larger than the stream, then
         // signal a type change. Bound allocation globally; validate visible output
-        // against WebRTC's negotiated limit once an actual frame is returned.
+        // against the initial hint or bounded keyframe declaration once returned.
         decoder_->Start(4096, 4096);
     }
     void Reset() {

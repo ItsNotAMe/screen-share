@@ -21,7 +21,7 @@ bool QtRoomSession::start(RoomSessionConfig config) {
         config_ = std::move(config);
         admission_ = session_->Start(config_.room);
         pending_.reset(); submitted_.reset(); applying_ = {}; stopping_ = {};
-        nextChange_ = 0; started_ = nextStatus_ = std::chrono::steady_clock::now();
+        nextChange_ = nextCaptureChange_ = 0; started_ = nextStatus_ = std::chrono::steady_clock::now();
         last_ = session_->Status(); timer_.start(); return true;
     } catch (...) {
         session_.reset(); frames_.reset();
@@ -40,6 +40,9 @@ void QtRoomSession::apply(screenshare::media::StreamPreferences preferences) {
     pending_ = preferences; // Replace superseded UI edits; never queue an edit storm.
 }
 RoomStatus QtRoomSession::status() const { return session_ ? session_->Status() : last_; }
+void QtRoomSession::switchCapture(screenshare::media::CaptureSelection selection) {
+    if (session_ && !stopping_.valid() && !captureUpdate_.valid()) captureUpdate_ = session_->SwitchCaptureSource(selection);
+}
 void QtRoomSession::updateNickname(std::string nickname, uint64_t revision) {
     if (session_ && !stopping_.valid() && !mutation_.valid()) mutation_ = session_->UpdateNickname(std::move(nickname), revision);
 }
@@ -58,6 +61,9 @@ void QtRoomSession::tick() {
     }
     if (config_.duration.count() && now - started_ >= config_.duration) stop();
     const auto current = session_->Status();
+    if (captureUpdate_.valid() && captureUpdate_.wait_for(0ms) == std::future_status::ready) {
+        const auto result = captureUpdate_.get(); if (captureUpdated) captureUpdated(result);
+    }
     if (mutation_.valid() && mutation_.wait_for(0ms) == std::future_status::ready) {
         const auto result = mutation_.get();
         if (roomUpdated) roomUpdated(result);
@@ -71,6 +77,9 @@ void QtRoomSession::tick() {
         submitted_.reset();
     }
     if (!stopping_.valid()) {
+        if (!captureUpdate_.valid() && current.phase == RoomPhase::Active && nextCaptureChange_ < config_.captureChanges.size() &&
+            now - started_ >= config_.captureChanges[nextCaptureChange_].at)
+            switchCapture(config_.captureChanges[nextCaptureChange_++].selection);
         if (nextChange_ < config_.changes.size() && now - started_ >= config_.changes[nextChange_].at)
             pending_ = config_.changes[nextChange_++].preferences;
         if (pending_ && !applying_.valid() && current.phase == RoomPhase::Active) {
@@ -84,6 +93,7 @@ void QtRoomSession::tick() {
     }
     if (stopping_.valid() && stopping_.wait_for(0ms) == std::future_status::ready) {
         stopping_.get(); last_ = session_->Status();
+        if (captureUpdate_.valid()) { const auto result = captureUpdate_.get(); if (captureUpdated) captureUpdated(result); }
         if (mutation_.valid()) {
             const auto result = mutation_.get();
             if (roomUpdated) roomUpdated(result);

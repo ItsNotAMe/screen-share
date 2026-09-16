@@ -26,6 +26,9 @@ private:
     QCheckBox* uploadBudgetEnabled_;
     QLabel* uploadState_;
     QComboBox *resolution_, *fpsMode_, *bitrateMode_, *preset_;
+    QComboBox* captureSource_;
+    QPushButton *switchCapture_, *refreshCapture_;
+    QLabel* captureState_;
     QCheckBox* bitrateLimit_;
     QPushButton *apply_, *stop_;
     VideoFrameWidget* video_;

@@ -90,8 +90,11 @@ Optional shared upload allocation is integrated through runtime, UI and CLI: aud
 overhead reservations, equal video shares, individual caps, membership redistribution,
 video pause/resume and separate measured transport rates. Four-viewer and actual-widget
 tests exercise these behaviors; external congestion/latency acceptance remains open.
-Default-shell adoption, input consent/control, zero-copy presentation and source
-switching remain.
+Live display/window switching now preserves the room and media peers, commits on
+the replacement's first frame, and retains a healthy previous source on failure.
+UI selection and timed CLI/config changes share the bounded backend operation.
+Default-shell adoption, input consent/control, zero-copy presentation and live
+audio-device switching remain.
 This milestone is not complete and defaults are unchanged.
 
 ## 3. Gaming controls end to end (D)

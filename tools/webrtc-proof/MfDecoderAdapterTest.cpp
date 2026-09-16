@@ -44,7 +44,7 @@ void Run() {
         sink.height = cycle % 2 ? 1080 : 360;
         webrtc::VideoDecoder::Settings settings;
         settings.set_codec_type(webrtc::kVideoCodecH264);
-        settings.set_max_render_resolution({sink.width, sink.height});
+        settings.set_max_render_resolution({320, 180}); // Receiver's first-frame hint, not a permanent source-size cap.
         Require(decoder->Configure(settings), "Configure failed");
         decoder->RegisterDecodeCompleteCallback(&sink);
         webrtc::EncodedImage empty;
@@ -68,10 +68,13 @@ void Run() {
                 image.SetRtpTimestamp(0xfffff000u + i * 3000u); // Deliberate 32-bit wrap.
                 image.ntp_time_ms_ = 123456;
                 image._frameType = packet.isKeyframe ? webrtc::VideoFrameType::kVideoFrameKey : webrtc::VideoFrameType::kVideoFrameDelta;
+                image._encodedWidth = sink.width; image._encodedHeight = sink.height;
                 if (i == 0) {
                     auto delta = image;
                     delta._frameType = webrtc::VideoFrameType::kVideoFrameDelta;
                     Require(decoder->Decode(delta, 0) == WEBRTC_VIDEO_CODEC_ERROR, "Decoder accepted delta before keyframe");
+                    auto oversized = image; oversized._encodedWidth = 4097;
+                    Require(decoder->Decode(oversized, 0) == WEBRTC_VIDEO_CODEC_ERR_PARAMETER, "Oversized keyframe declaration accepted");
                 }
                 sink.expected.push_back(image.RtpTimestamp());
                 Require(decoder->Decode(image, 0) == WEBRTC_VIDEO_CODEC_OK, "MF adapter decode failed");

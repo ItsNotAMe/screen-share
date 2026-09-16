@@ -46,6 +46,13 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         };
         native.engineReady = [state] { return bool(state->Get()); };
         native.capture = [capture = options.capture, state] { return std::make_unique<DeviceCapture>(capture, state); };
+        native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,
+            options.capture.displayIndex, options.capture.windowHandle, options.capture.targetFps};
+        native.captureForSelection = [base = options.capture, state](CaptureSelection selection) -> CaptureSession::Factory {
+            auto config = base; config.sourceType = selection.kind == CaptureKind::Window ? CaptureSourceType::Window : CaptureSourceType::Display;
+            config.displayIndex = selection.display; config.windowHandle = selection.window; config.targetFps = selection.fps;
+            return [config, state] { return std::make_unique<DeviceCapture>(config, state); };
+        };
         native.deliver = [](CaptureVideoSource& source, const CaptureSample& sample) {
             source.PushBuffer(std::static_pointer_cast<WindowsCaptureResource>(sample.resource)->buffer, sample.capturedAt);
         };

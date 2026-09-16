@@ -47,6 +47,9 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
                 std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
         };
         options.capture = [] { return std::make_unique<SyntheticCaptureSource>(320, 180, 30); };
+        options.captureForSelection = [](CaptureSelection selection) -> CaptureSession::Factory {
+            return [selection] { return std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps); };
+        };
         options.deliver = [](auto& source, const auto& sample) {
             source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
         };
@@ -71,9 +74,14 @@ int main(int argc, char** argv) {
 #endif
         QJsonObject stream{{"resolution", "fixed"}, {"width", 320}, {"height", 180}, {"fps", 30}, {"aggregateUploadBps", 2000000}};
         auto reduced = stream; reduced["width"] = 160; reduced["height"] = 90; reduced["fps"] = 20;
+        QJsonObject captureChange{{"atMs", 2000}, {"display", 1}, {"fps", 30}};
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+        captureChange.remove("display"); captureChange["window"] = QString::number(reinterpret_cast<uint64_t>(captureWindow));
+#endif
         QJsonObject object{{"origin", argv[1]}, {"host", true}, {"nickname", "CliHost"}, {"name", "CLI media"},
             {"seconds", 15}, {"stream", stream}, {"password", "test-only-password"},
             {"changes", QJsonArray{QJsonObject{{"atMs", 3000}, {"stream", reduced}}}}};
+        object["captureChanges"] = QJsonArray{captureChange};
         Reject([&] { ParseRoomSessionConfig(object); }); // Production cannot opt into plaintext.
         auto malformed = object; malformed["unknown"] = true;
         Reject([&] { ParseRoomSessionConfig(malformed, true); });
@@ -87,7 +95,7 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(malformed); });
         const auto host = ParseRoomSessionConfig(object, true);
         std::mutex mutex; std::string roomId;
-        std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false};
+        std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, sourceChanged{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomCliHooks hostHooks;
         hostHooks.pump = [&] { return !stopHost; };
@@ -95,6 +103,7 @@ int main(int argc, char** argv) {
             const auto encoded = QJsonDocument(value).toJson();
             Check(!encoded.contains("test-only-password") && !encoded.contains("token"));
             if (value["type"] == "settings") { Check(value["error"].toInt() == 0); accepted = true; }
+            if (value["type"] == "capture") { Check(value["error"].toInt() == 0 && value["revision"].toInt() == 2); sourceChanged = true; }
             if (value["phase"] == "active") {
                 std::lock_guard lock(mutex); roomId = value["roomId"].toString().toStdString();
             }
@@ -115,7 +124,7 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(5ms);
         }
         object["host"] = false; object["roomId"] = "screenshare://room/v2/" + QString::fromStdString(joinedRoom); object["nickname"] = "CliViewer";
-        object["seconds"] = 6; object.remove("changes");
+        object["seconds"] = 6; object.remove("changes"); object.remove("captureChanges");
         const auto viewer = ParseRoomSessionConfig(object, true);
         auto frames = std::make_shared<LatestRoomVideoFrame>();
         auto audio = std::make_shared<proof::AudioEvidence>();
@@ -143,7 +152,7 @@ int main(int argc, char** argv) {
         };
         const int viewing = RunRoomCliSession(viewer, Factory(viewer, audio, frames), viewerHooks, true);
         stopHost = true;
-        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported);
+        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && sourceChanged);
         Check(original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         Check(preview.framesPresented() >= 20);

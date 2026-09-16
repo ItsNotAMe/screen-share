@@ -13,6 +13,8 @@ struct NativeRoomRuntimeOptions {
     std::function<std::unique_ptr<MediaEngine>()> engine;
     std::function<bool()> engineReady; // Optional first-capture-device barrier.
     CaptureSession::Factory capture;
+    CaptureSelection initialCapture;
+    std::function<CaptureSession::Factory(CaptureSelection)> captureForSelection;
     std::function<void(CaptureVideoSource&, const CaptureSample&)> deliver;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
     std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;

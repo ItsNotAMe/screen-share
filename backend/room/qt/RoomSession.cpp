@@ -23,6 +23,9 @@ struct RoomSession::Impl {
         RoomStatus status;
         bool started = false, stopQueued = false, scheduled = false, stopping = false;
         bool settingsQueued = false;
+        bool sourceQueued = false;
+        std::shared_ptr<std::promise<media::CaptureUpdateResult>> sourceReply;
+        std::future<media::CaptureUpdateResult> sourceUpdate;
         bool mutationQueued = false;
         uint64_t mutationSequence = 0;
         QString mutationId;
@@ -59,6 +62,10 @@ struct RoomSession::Impl {
         void BeginStop(RoomError error = RoomError::None) {
             if (stopping) return;
             stopping = true;
+            if (sourceReply) {
+                sourceReply->set_value({media::CaptureUpdateError::Cancelled}); sourceReply.reset();
+                std::lock_guard lock(mutex); sourceQueued = false;
+            }
             FinishMutation({RoomUpdateError::Unconfirmed});
             Phase(error == RoomError::None ? RoomPhase::Stopping : RoomPhase::Failed, error);
             Reply(error == RoomError::None ? RoomError::Cancelled : error, admission.valid());
@@ -98,6 +105,7 @@ struct RoomSession::Impl {
                 status.activePeers = current.activePeers; status.failedPeers = current.failedPeers;
                 status.pendingPeers = current.pendingPeers; status.generation = current.generation;
                 status.stream = stream;
+                status.capture = runtime->CaptureSelection();
             }
             if (current.state == RoomMediaSession::State::Failed) { terminal = true; terminalError = RoomError::Media; Schedule(); }
         }
@@ -151,6 +159,11 @@ struct RoomSession::Impl {
             if (event.kind == RoomSocket::EventKind::Closed) { terminal = true; terminalError = RoomError::None; Schedule(); }
         }
         void Tick() {
+            if (sourceReply && sourceUpdate.valid() && sourceUpdate.wait_for(0ms) == std::future_status::ready) {
+                auto result = sourceUpdate.get();
+                { std::lock_guard lock(mutex); sourceQueued = false; status.capture = runtime->CaptureSelection(); }
+                sourceReply->set_value(result); sourceReply.reset();
+            }
             if (mutationReply && std::chrono::steady_clock::now() >= mutationDeadline) FinishMutation({RoomUpdateError::Unconfirmed});
             if (stopping) {
                 // Runtime keeps advancing retirement while transport is stopped.
@@ -201,7 +214,7 @@ struct RoomSession::Impl {
                 BeginStop(RoomError::Transport); return;
             }
             if (connected) { Reply(RoomError::None); connected = false; }
-            if (admission.valid() || opening.valid() || startReply || recoveryDeadline || mutationReply) Schedule();
+            if (admission.valid() || opening.valid() || startReply || recoveryDeadline || mutationReply || sourceReply) Schedule();
         }
     };
     std::shared_ptr<State> state;
@@ -274,6 +287,28 @@ std::future<StreamUpdateResult> RoomSession::UpdateStreamPreferences(media::Stre
 }
 std::future<RoomUpdateResult> RoomSession::UpdateNickname(std::string nickname, uint64_t revision) {
     return SubmitUpdate(std::move(nickname), {}, revision);
+}
+std::future<media::CaptureUpdateResult> RoomSession::SwitchCaptureSource(media::CaptureSelection selection) {
+    try { media::ValidateCaptureSelection(selection); }
+    catch (...) { return media::CaptureUpdateReady(media::CaptureUpdateError::Invalid); }
+    auto state = impl_->state;
+    std::lock_guard lock(state->mutex);
+    if (state->stopQueued || state->status.phase != RoomPhase::Active) return media::CaptureUpdateReady(media::CaptureUpdateError::Unavailable);
+    if (state->sourceQueued) return media::CaptureUpdateReady(media::CaptureUpdateError::Busy);
+    state->sourceQueued = true;
+    auto reply = std::make_shared<std::promise<media::CaptureUpdateResult>>(); auto future = reply->get_future();
+    impl_->executor.Post([state, reply, selection] {
+        if (state->stopping || !state->runtime) {
+            { std::lock_guard lock(state->mutex); state->sourceQueued = false; }
+            reply->set_value({media::CaptureUpdateError::Unavailable}); return;
+        }
+        state->sourceReply = reply;
+        try { state->sourceUpdate = state->runtime->SwitchCaptureSource(selection); }
+        catch (...) { state->sourceUpdate = media::CaptureUpdateReady(media::CaptureUpdateError::Failed); }
+        if (!state->sourceUpdate.valid()) state->sourceUpdate = media::CaptureUpdateReady(media::CaptureUpdateError::Failed);
+        state->Schedule();
+    });
+    return future;
 }
 std::future<RoomUpdateResult> RoomSession::UpdateRoomPolicy(RoomPolicy policy, uint64_t revision) {
     return SubmitUpdate({}, std::move(policy), revision);

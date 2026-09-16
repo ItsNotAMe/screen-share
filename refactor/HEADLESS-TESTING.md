@@ -1,5 +1,13 @@
 # Headless media checks
 
+Live source coverage uses actual widgets and scripted CLI changes. The UI scenario
+switches to a larger source, checks decoded dimensions with unchanged room/member/
+stream revisions, rejects viewer requests and confirms a failed replacement leaves
+frames/audio flowing. The Windows variant switches between two generated windows.
+Capture-owner tests cover failure, a real five-second missing-frame timeout, Busy,
+stop cancellation and destruction on the owner thread. Decoder tests cover bounded
+keyframe growth and oversized declarations; all routine audio remains synthetic.
+
 Shared upload coverage uses the public four-viewer room proof for allocation,
 leave/rejoin redistribution and positive per-peer transport-rate samples. Actual
 UI tests pause video with a tiny allowance, verify decoded frames stop while silent

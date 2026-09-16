@@ -1,5 +1,23 @@
 # Project Memory
 
+## Live capture switching — 2026-09-16
+
+RoomSession.SwitchCaptureSource(CaptureSelection) is bounded to one pending operation,
+host-only in the native runtime, and cancellable on Stop. Snapshot.capture exposes
+independent selection/revision. SwitchableCaptureSource wraps the existing owner:
+candidate creation/poll/destruction stay on capture thread, old source is polled
+until first valid new frame, failure/closed/5s timeout retain old healthy source.
+No room/peer rebuild or extra service requests. UI refresh/select/share controls
+and config captureChanges (max64 ordered atMs + display/window + optional fps)
+use shared backend. CLI fails scripted runs on failed changes; UI keeps running.
+Switches can incur device readback/copies with the retained Windows encoder device;
+zero-copy/hardware-only and live audio-device switching are not complete.
+An end-to-end larger-source test exposed decoder rejection after startup at smaller
+size. Pinned WebRTC sets max_render_resolution from its initial frame; decoder now
+accepts bounded keyframe-declared changes, keeps global 4096 allocation bound and
+validates decoded output. Synthetic/Windows source switching and oversized-declaration
+tests cover this. See CHECKPOINT-B for current evidence; default UI remains legacy.
+
 ## Shared upload allocation and transport diagnostics — 2026-09-16
 
 StreamPreferences now has optional aggregateUploadLimitBps; shared config key

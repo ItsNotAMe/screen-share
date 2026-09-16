@@ -19,6 +19,7 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QCheckBox>
+#include <QComboBox>
 #include <iostream>
 #include <source_location>
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
@@ -32,10 +33,10 @@ using namespace std::chrono_literals;
 void Check(bool value, std::source_location where = std::source_location::current()) {
     if (!value) throw std::runtime_error("Room UI proof failed at " + std::to_string(where.line()));
 }
-template<class F> void Wait(F condition) {
+template<class F> void Wait(F condition, std::source_location where = std::source_location::current()) {
     const auto deadline = std::chrono::steady_clock::now() + 15s;
     while (!condition()) {
-        Check(std::chrono::steady_clock::now() < deadline);
+        Check(std::chrono::steady_clock::now() < deadline, where);
         QCoreApplication::processEvents(); std::this_thread::sleep_for(1ms);
     }
 }
@@ -54,6 +55,12 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
                     std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
             };
             options.capture = [] { return std::make_unique<SyntheticCaptureSource>(320, 180, 30); };
+            options.captureForSelection = [](CaptureSelection selection) -> CaptureSession::Factory {
+                return [selection]() -> std::unique_ptr<ICaptureSource> {
+                    if (selection.display == 63 || selection.window == 1) throw std::runtime_error("Injected capture startup failure");
+                    return std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps);
+                };
+            };
             options.deliver = [](auto& source, const auto& sample) { source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt); };
             return CreateNativeRoomRuntime(identity, std::move(send), std::move(options));
         };
@@ -95,12 +102,16 @@ void MutationLifecycle(const std::string& origin) {
     try {
         Wait([&] { return barrier->entered.load(); });
         auto pending = session.UpdateNickname("Pending", revision);
+        auto pendingSource = session.SwitchCaptureSource({});
+        Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Busy);
         Check(session.UpdateNickname("Overflow", revision).get().error == RoomUpdateError::Busy);
         auto stopping = session.Stop();
         Check(session.UpdateNickname("Stopped", revision).get().error == RoomUpdateError::Unavailable);
         barrier->release.set_value();
         Wait([&] { return stopping.wait_for(0ms) == std::future_status::ready; }); stopping.get();
         Check(pending.get().error == RoomUpdateError::Unconfirmed);
+        Check(pendingSource.get().error == CaptureUpdateError::Cancelled);
+        Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Unavailable);
     } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
 }
 void BrowserScenario(const QUrl& origin) {
@@ -214,6 +225,51 @@ void BrowserScenario(const QUrl& origin) {
     Wait([&] { return !host.directory().running() && !viewer.directory().running() && !audit.running(); });
     // Production facade rejects plaintext without opening a connection.
     Directory secure; Check(!secure.Start(origin)); Check(secure.connectionAttempts() == 0 && secure.status().phase == Directory::Phase::Failed);
+}
+void SourceSwitchScenario(const std::string& origin) {
+    RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
+    config.room.nickname = "Source host"; config.room.name = "Source switch";
+    config.media.preferences.resolution = ResolutionMode::Native;
+    RoomSessionWindow host(config, Factory(std::make_shared<proof::AudioEvidence>()), true); host.show();
+    Wait([&] { return host.session().status().phase == RoomPhase::Active; });
+    config.room.host = false; config.room.roomId = host.session().status().roomId;
+    auto audio = std::make_shared<proof::AudioEvidence>();
+    RoomSessionWindow viewer(config, Factory(audio), true); viewer.show();
+    unsigned frames = 0, lastWidth = 0; auto present = viewer.session().frameReady;
+    viewer.session().frameReady = [&](auto frame) { ++frames; lastWidth = frame.width; present(std::move(frame)); };
+    Wait([&] { return frames >= 10 && host.findChild<QPushButton*>("switchCaptureSource")->isEnabled(); });
+    const auto roomBefore = host.session().status(); const auto widthBefore = lastWidth;
+    auto* choices = host.findChild<QComboBox*>("liveCaptureSource");
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+    proof::TestWindow replacement; replacement.Resize();
+    choices->addItem("Replacement proof window", QVariantMap{{"window", QVariant::fromValue<qulonglong>(reinterpret_cast<uint64_t>(replacement.handle()))}});
+#else
+    choices->addItem("Replacement synthetic display", QVariantMap{{"display", 1}});
+#endif
+    choices->setCurrentIndex(choices->count() - 1);
+    host.findChild<QPushButton*>("switchCaptureSource")->click();
+    try { Wait([&] { return !host.session().capturePending() && host.session().status().capture.revision == roomBefore.capture.revision + 1 && lastWidth != widthBefore; }); }
+    catch (...) {
+        const auto status = host.session().status();
+        std::cerr << "Switch revision " << status.capture.revision << " before " << roomBefore.capture.revision << " widths " << widthBefore << "/" << lastWidth
+            << " phase " << int(status.phase) << " pending " << host.session().capturePending() << " frames " << frames
+            << " message " << host.findChild<QLabel*>("captureState")->text().toStdString() << '\n'; throw;
+    }
+    Check(host.session().status().roomId == roomBefore.roomId && host.session().status().peerId == roomBefore.peerId && host.session().status().activePeers == 1 &&
+        host.session().status().revision == roomBefore.revision && host.session().status().stream.requestedRevision == roomBefore.stream.requestedRevision);
+    const auto changedRevision = host.session().status().capture.revision;
+    CaptureUpdateError error = CaptureUpdateError::None;
+    auto notify = host.session().captureUpdated;
+    host.session().captureUpdated = [&](const auto& result) { error = result.error; notify(result); };
+    host.session().switchCapture({CaptureKind::Window, 0, 1, 30});
+    Wait([&] { return !host.session().capturePending(); });
+    Check(error == CaptureUpdateError::Failed && host.session().status().capture.revision == changedRevision);
+    const auto beforeFrames = frames; const auto beforeAudio = audio->audibleBlocks.load();
+    Wait([&] { return frames >= beforeFrames + 10 && audio->audibleBlocks > beforeAudio; });
+    viewer.session().captureUpdated = [&](const auto& result) { error = result.error; };
+    viewer.session().switchCapture({CaptureKind::Display, 0, 0, 30});
+    Wait([&] { return !viewer.session().capturePending(); }); Check(error == CaptureUpdateError::Unsupported);
+    host.close(); viewer.close(); Wait([&] { return !host.session().running() && !viewer.session().running(); });
 }
 void MutationAcknowledgementScenario(const std::string& origin) {
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
@@ -348,6 +404,7 @@ int main(int argc, char** argv) {
         held.stop(); Wait([&] { return !held.running(); }); Check(finished == 2);
         BrowserScenario(QUrl(QString::fromLocal8Bit(argv[1])));
         MutationLifecycle(argv[1]);
+        SourceSwitchScenario(argv[1]);
         std::cout << "{\"passed\":true,\"qt_ui\":true,\"browser\":true,\"directory_push\":true,\"nickname_persistence\":true,\"coalesced_settings\":true,\"responsive_stop\":true,\"restart_owner\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
         }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }

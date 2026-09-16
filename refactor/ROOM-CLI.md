@@ -117,8 +117,31 @@ Status checks read local snapshots; they generate no service polling requests.
 The preview retains only the latest decoded frame and converts I420 to NV12 on the
 window thread. This bounds backlog and avoids rendering on decoder callbacks.
 This first frontend path uses CPU conversion; zero-copy presentation, default UI adoption,
-remote input, source switching, directory/profile persistence, aggregate bandwidth,
-ICE-server configuration and remote network/latency acceptance remain outstanding.
+remote input, live audio-device switching, ICE-server configuration and remote
+network/latency acceptance remain outstanding. The opt-in browser provides the
+directory/profile workflow, and shared upload allocation is integrated.
+
+## Timed capture-source changes
+
+Host configurations may include up to 64 ordered `captureChanges`, independently
+of stream-settings changes. Each entry requires `atMs` and exactly one `display`
+(index 0–63) or `window` (decimal/hex handle string), with optional `fps` (1–240,
+default 60). For example:
+
+```json
+"captureChanges": [
+  { "atMs": 5000, "display": 1, "fps": 60 },
+  { "atMs": 10000, "window": "0x123456", "fps": 30 }
+]
+```
+
+Times are relative to session start; operations wait for active admission and the
+prior source operation to finish. The same configuration works in the opt-in Qt
+window. Success reports a new `captureRevision` after the replacement's first
+frame. The CLI emits `capture` results and aborts a scripted run on failure, while
+interactive UI errors leave the previous healthy source running. Stop resolves
+pending work and reports `capture-ended` when applicable. Audio selection does
+not change. No membership refresh, room recreation or new admission is needed.
 
 ## Automated checks
 

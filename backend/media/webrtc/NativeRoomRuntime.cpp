@@ -2,6 +2,7 @@
 #include "RoomManagedPeer.h"
 #include "ViewerStreamSettings.h"
 #include "TransportSendRate.h"
+#include "media/capture/SwitchableCaptureSource.h"
 #include "api/make_ref_counted.h"
 #include <map>
 #include <set>
@@ -45,6 +46,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
     std::unique_ptr<MediaEngine> engine_;
     webrtc::scoped_refptr<webrtc::AudioTrackInterface> audio_;
     HostMediaSession capture_;
+    std::shared_ptr<CaptureSwitchControl> captureSwitch_;
     std::future<HostOperationResult> starting_;
     uint64_t captureGeneration_ = 0, next_ = 0;
     uint64_t settingsRevision_ = 2;
@@ -64,7 +66,12 @@ public:
             throw std::invalid_argument("Native room runtime requires media dependencies");
         ValidateStreamPreferences(options_.preferences);
         if (identity_.host) {
-            starting_ = capture_.Start(options_.capture);
+            if (options_.captureForSelection) {
+                captureSwitch_ = std::make_shared<CaptureSwitchControl>(options_.initialCapture);
+                starting_ = capture_.Start([initial = options_.capture, control = captureSwitch_] {
+                    return std::make_unique<SwitchableCaptureSource>(initial, control);
+                });
+            } else starting_ = capture_.Start(options_.capture);
         } else {
             engine_ = options_.engine();
             if (!engine_) throw std::runtime_error("Native media engine creation failed");
@@ -127,6 +134,13 @@ public:
         return entry.negotiation->Receive(std::move(signal));
     }
     std::vector<std::string> FailedPeers() const override { return {failed_.begin(), failed_.end()}; }
+    std::future<CaptureUpdateResult> SwitchCaptureSource(media::CaptureSelection selection) override {
+        if (!identity_.host || !captureSwitch_) return CaptureUpdateReady(CaptureUpdateError::Unsupported);
+        if (stopping_) return CaptureUpdateReady(CaptureUpdateError::Unavailable);
+        try { ValidateCaptureSelection(selection); return captureSwitch_->Submit(selection, options_.captureForSelection(selection)); }
+        catch (...) { return CaptureUpdateReady(CaptureUpdateError::Invalid); }
+    }
+    CaptureSelectionStatus CaptureSelection() const override { return captureSwitch_ ? captureSwitch_->Status() : CaptureSelectionStatus{}; }
     v2::StreamUpdateResult UpdateStreamPreferences(const StreamPreferences& preferences) override {
         if (!identity_.host) return {v2::StreamUpdateError::Unsupported};
         if (stopping_) return {v2::StreamUpdateError::Unavailable};
