@@ -100,8 +100,11 @@ headless tests cover actual decoded audio, video continuity and endpoint ownersh
 Viewer-local output-device, volume and mute changes are now integrated through the
 same session/UI/CLI path. They preserve video and membership, add no playback queue,
 retain the old output on replacement failure, and report independent application.
-Default-shell adoption, input consent/control, zero-copy presentation and physical
-audio-device loss/recovery acceptance remain.
+The UI/CLI now retain packed decoded NV12 directly through presentation, removing
+the NV12/I420 round trip and UI pixel copy. One-frame DXGI queue configuration and
+nonblocking present/drop accounting are tested with actual Windows renderers.
+Default-shell adoption, input consent/control, hardware decode/GPU zero-copy
+presentation and physical audio-device loss/recovery acceptance remain.
 This milestone is not complete and defaults are unchanged.
 
 ## 3. Gaming controls end to end (D)

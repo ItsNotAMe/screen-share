@@ -23,6 +23,8 @@ public:
         double averagePresentMs = 0.0;
         double maxPresentMs = 0.0;
         double lastPresentMs = 0.0;
+        std::uint64_t presentErrors = 0;
+        std::uint32_t maximumFrameLatency = 0;
     };
 
     explicit VideoFrameWidget(QWidget* parent = nullptr);
@@ -33,6 +35,7 @@ public:
     bool presentVideoFrameAsync(screenshare::SessionEvent::VideoFrame frame);
     void showVideoSurface();
     void setSmoothScaling(bool enabled);
+    void setLowLatency(bool enabled);
     [[nodiscard]] std::uint64_t presentedFrameCount() const;
     [[nodiscard]] PresentationStats presentationStats() const;
     void clearFrame();

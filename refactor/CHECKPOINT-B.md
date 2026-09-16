@@ -1,5 +1,42 @@
 # Checkpoint B evidence
 
+## Retained NV12 handoff and low-latency presentation — 2026-09-16
+
+UI and CLI now retain immutable packed decoder NV12 through a shared portable frame
+instead of converting NV12 to I420/back and copying into another UI vector. Legacy
+vector producers remain compatible through the same frame type. Padded NV12 takes
+one explicit plane pack, other formats use an explicit conversion fallback, and
+shape/rotation/timestamp bounds are validated. A latest-only sink releases pending
+ownership on stop and rejects late callbacks. Qt preserves final frame counters;
+the shipped CLI emits a final `presentation` record.
+
+V2 renderers now request and measure DXGI maximum frame latency 1 and present
+without waiting. Busy/occluded frames are dropped, never queued for retry; successful
+presentation counts no longer include dropped frames. The widget exposes error and
+queue-limit diagnostics. No extra media thread or queue was introduced.
+
+Validation (synthetic silent audio, no physical input):
+- Application suites: **19/19 Release (85.83s), 19/19 Debug (87.84s)**.
+- Ownership checks in CLI integration prove packed-buffer pointer identity after
+  original references are released, fail on any unexpected NV12 `ToI420` call,
+  verify padded-plane pixel values and I420 fallback, reject rotation, retire
+  100 overwritten buffers correctly and reject callbacks after Stop.
+- Real H.264 media in UI/CLI asserts directly retained decoded buffers with empty
+  copy vectors and zero conversion/repack counts.
+- Windows UI: Release **11.598s**, Debug **11.910s**, actual successful presents
+  and measured DXGI queue limit 1. Artifacts:
+  `build/webrtc/presentation-windows-ui/native-service-8770749f-605a-4b90-b809-224810f6f41e`
+  and `build/webrtc/presentation-windows-ui-debug/native-service-f8250a4c-5f50-4901-b1ff-8ff91992c41b`.
+- Windows CLI: **6.730s**, artifact
+  `build/webrtc/presentation-windows-cli/native-service-e766dc92-daea-4158-be5c-c457a5cbcd98`.
+- Logs: `build/webrtc/presentation-*.log`.
+
+This proves removal of redundant CPU handoff operations and bounded local
+presentation configuration. The MF decoder remains software/CPU NV12 and textures
+still require upload. Hardware decode/GPU zero-copy, remote latency, driver-loss
+acceptance and matched whole-program efficiency remain open; milestone 2 is not
+complete and default AppShell remains legacy.
+
 ## Viewer playback device, volume and mute — 2026-09-16
 
 Viewer-local playback now uses one bounded public `UpdatePlayback` operation across

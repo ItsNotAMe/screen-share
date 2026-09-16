@@ -15,6 +15,7 @@ bool QtRoomSession::start(RoomSessionConfig config) {
     if (session_) return false;
     try {
         frames_ = std::make_shared<LatestRoomVideoFrame>();
+        lastFrames_ = {};
         config.media.frames = frames_;
         auto factory = factory_(config.media);
         session_ = std::make_unique<RoomSession>(std::move(factory), loopback_);
@@ -30,6 +31,7 @@ bool QtRoomSession::start(RoomSessionConfig config) {
     }
 }
 void QtRoomSession::stop() {
+    if (frames_) frames_->Stop();
     pending_.reset();
     if (session_ && !stopping_.valid()) stopping_ = session_->Stop();
 }
@@ -123,7 +125,7 @@ void QtRoomSession::tick() {
             if (result.outcomeUnconfirmed && error) error(QStringLiteral("Admission ended before the server outcome could be confirmed."));
         }
         applying_ = {}; pending_.reset(); submitted_.reset();
-        session_.reset(); frames_.reset(); timer_.stop();
+        lastFrames_ = frames_->statistics(); session_.reset(); frames_.reset(); timer_.stop();
         config_.media.frames.reset();
         config_.room.password.clear();
         if (statusChanged) statusChanged(last_);

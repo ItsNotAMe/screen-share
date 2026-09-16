@@ -189,6 +189,21 @@ outstanding command. The interactive UI preserves the session and previous healt
 output on failure. Device initialization may pause local sound; mute does not stop
 video, audio reception or the room connection. Host playback changes are rejected.
 
+## Presentation diagnostics
+
+The v2 preview retains packed decoder NV12 directly, uses one latest pending frame,
+and enables nonblocking presentation with a measured DXGI queue limit of one.
+Padded NV12 is explicitly packed; other formats use a conversion fallback. Busy or
+occluded frames are dropped rather than retried. The legacy vector-based preview
+entry remains compatible, while the v2 path passes immutable retained pixel storage.
+
+At exit the shipped CLI emits a `presentation` JSON record with `received`,
+`replaced`, `retained`, `converted`, `repacked`, `presented`, `dropped` and
+`maximumFrameLatency`. With preview disabled there is no conversion/presentation;
+only the latest received frame is retained until shutdown. Counts describe local
+handoff/presentation operations, not physical display latency. Software decode and
+CPU-to-GPU upload remain; the record does not imply GPU zero-copy decoding.
+
 ## Automated checks
 
 `room-v2-cli-entry` executes the shipped CLI and verifies argument handling,

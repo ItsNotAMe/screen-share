@@ -4,6 +4,21 @@ Saved: 2026-09-14. Implementation status: **Gate A passed for native integration
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+## Latest integration: retained presentation — 2026-09-16
+
+- [x] Retain packed decoded NV12 through the actual UI/CLI without a planar round
+  trip or second UI pixel copy; explicitly handle padded NV12 and other formats.
+- [x] Preserve immutable frame ownership through overwrite, consumption and stop;
+  test pointer identity, plane values, fallback, rotation and late callbacks.
+- [x] Enable and measure one-frame DXGI queue configuration in v2 UI/CLI, use
+  nonblocking present, and count busy/occluded frames as drops.
+- [x] Verify the retained path with real media and generated-window Windows
+  renderers; expose conversion/repack and presentation counters for comparisons.
+- [ ] Complete hardware decoding/GPU zero-copy and physical/remote latency
+  acceptance. CPU handoff improvements do not satisfy these broader gates.
+
+Evidence: [CHECKPOINT-B.md](CHECKPOINT-B.md). Milestone 2 remains open.
+
 ## Latest integration: viewer playback — 2026-09-16
 
 - [x] Integrate viewer output-device selection, volume and mute through public

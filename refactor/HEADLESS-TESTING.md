@@ -1,5 +1,14 @@
 # Headless media checks
 
+Presentation checks validate immutable NV12 ownership through the shared UI/CLI
+handoff: pointer identity on packed buffers, no `ToI420` call, padded-plane packing,
+I420 fallback, rotation rejection, 100-frame overwrite ownership and late-callback
+rejection after stop. Real media scenarios assert decoded frames use the retained
+path with zero conversions/repacks. Windows UI/CLI variants additionally verify
+successful presents and actual DXGI maximum frame latency of one. No physical
+input or audible output is used. CPU decode/upload still exist; these checks do
+not prove hardware decoding, GPU zero-copy or external image/input latency.
+
 Viewer playback coverage uses only synthetic output endpoints. `pcm-adm-lifecycle`
 checks exact gain, mute without device recreation, replacement, startup/first-write
 rollback, Busy, queued and in-write cancellation, diagnostics, restart persistence

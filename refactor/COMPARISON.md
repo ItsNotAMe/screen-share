@@ -13,10 +13,18 @@ component test or Gate A is not a comparative performance result.
 | Quality capture-to-display p95 <250 ms | No external measurement | No external measurement | Unmeasured |
 | Image quality at equal bitrate | No matched reference capture | No matched reference capture | Unmeasured |
 | Sustained delivery and stale queue age | ~60 FPS, 126 ms peak sender queue in old local Debug run | Bounded-frame and recovery proofs, different workload | Not comparable |
-| CPU/GPU/memory efficiency | Old CPU time available, GPU unmeasured | No matched production run | Not comparable |
+| CPU/GPU/memory efficiency | Old CPU time available, GPU unmeasured | Retained NV12 handoff proven; no matched production run | Not comparable |
 | Native resource lifetime | No matched old-backend soak | Current full/rapid-close handle bounds fail (+76/+10) | V2 acceptance failed; relative comparison unavailable |
 | Congestion recovery and viewer isolation | No matched impairment run | Controlled sink/source-delay tests and four-peer rejoin pass | Network comparison unmeasured |
-| Room responsiveness/free-tier cost | No matched workload report | New room transport not yet integrated | Unmeasured |
+| Room responsiveness/free-tier cost | No matched workload report | Authenticated push transport integrated; no matched service workload/cost report | Unmeasured |
+
+The v2 CPU presentation handoff now demonstrably avoids its previous NV12→I420→NV12
+round trip and extra UI pixel-vector copy. Tests assert original pixel-pointer
+identity and zero conversion/repack counts on actual decoded frames; Windows UI
+and CLI tests measure DXGI maximum frame latency 1. CLI `presentation` counters
+and Qt frame/presentation statistics expose those local operations. This is a
+specific implementation improvement, not a matched legacy/v2 CPU/GPU or external
+latency result. Software decode and CPU-to-GPU upload still occur.
 
 Historical baseline details are in CLOSEOUT-A.md. It used local plaintext,
 mostly unchanged desktop content, no presentation/audio and a Debug binary.

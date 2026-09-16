@@ -6,6 +6,11 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
+UI/CLI packed NV12 handoff now retains immutable decoder buffers directly and
+uses measured one-frame/nonblocking DXGI presentation in v2. Remove no ownership
+barriers to chase zero-copy: hardware decode/GPU presentation and external latency
+acceptance remain open; the current improvement is the CPU handoff.
+
 Viewer-local playback device/volume/mute now use shared public session, UI and timed
 CLI configuration, with rollback and silent lifecycle/widget tests. Physical audio
 device loss/recovery acceptance remains open; do not reimplement these controls.

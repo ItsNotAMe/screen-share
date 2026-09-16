@@ -89,6 +89,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     });
     video_ = new VideoFrameWidget; video_->setMinimumSize(320, 180); video_->setVisible(!config.room.host && config.preview);
     video_->setObjectName("roomVideo");
+    video_->setLowLatency(true);
     layout->addWidget(video_, 1);
     auto* playbackWidget = new QWidget; auto* playbackForm = new QFormLayout(playbackWidget);
     playbackWidget->setVisible(!config.room.host); layout->addWidget(playbackWidget);
@@ -284,12 +285,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         default: roomUpdateState_->setText("The room update was not accepted."); break;
         }
     };
-    if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::DecodedFrameInfo frame) {
-        screenshare::SessionEvent::VideoFrame output;
-        output.width = frame.width; output.height = frame.height; output.codedWidth = frame.codedWidth; output.codedHeight = frame.codedHeight;
-        output.timestamp100ns = frame.timestamp100ns; output.duration100ns = frame.duration100ns;
-        const auto* data = reinterpret_cast<const uint8_t*>(frame.data.data()); output.nv12.assign(data, data + frame.data.size());
-        video_->setVideoFrame(std::move(output));
+    if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::Nv12VideoFrame frame) {
+        video_->setVideoFrame(std::move(frame));
     };
     session_.error = [this](const auto& message) { error_->setText(message); };
     session_.finished = [this](const auto&) { stop_->setEnabled(false); apply_->setEnabled(false); if (closing_) QTimer::singleShot(0, this, [this] { close(); }); };

@@ -14,6 +14,7 @@
 #include <atomic>
 #include <iostream>
 #include <mutex>
+#include "api/make_ref_counted.h"
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
 #include "../tools/webrtc-proof/CaptureTestWindow.h"
 #include "core/WindowsMediaRuntime.h"
@@ -29,6 +30,53 @@ template<class F> void Reject(F fn) {
     bool rejected = false;
     try { fn(); } catch (const std::invalid_argument&) { rejected = true; }
     Check(rejected);
+}
+class CheckedNv12 : public webrtc::NV12BufferInterface {
+    std::atomic<int>& destroyed_;
+    const int stride_;
+    std::vector<uint8_t> data_;
+public:
+    CheckedNv12(std::atomic<int>& destroyed, int stride) : destroyed_(destroyed), stride_(stride), data_(stride * 3, 0xee) {
+        for (int y = 0; y < 2; ++y) std::fill_n(data_.data() + y * stride_, 4, uint8_t(42));
+        for (int x = 0; x < 4; ++x) data_[stride_ * 2 + x] = x % 2 ? 190 : 90;
+    }
+    ~CheckedNv12() override { ++destroyed_; }
+    int width() const override { return 4; }
+    int height() const override { return 2; }
+    int StrideY() const override { return stride_; }
+    int StrideUV() const override { return stride_; }
+    const uint8_t* DataY() const override { return data_.data(); }
+    const uint8_t* DataUV() const override { return data_.data() + stride_ * 2; }
+    webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override { throw std::runtime_error("NV12 unexpectedly converted to I420"); }
+};
+void PresentationOwnership() {
+    LatestRoomVideoFrame sink;
+    std::atomic<int> destroyed{0};
+    auto buffer = webrtc::make_ref_counted<CheckedNv12>(destroyed, 4); const auto* pixels = buffer->DataY();
+    sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer).set_timestamp_us(9).build());
+    auto frame = sink.Take(); buffer = nullptr;
+    Check(frame && frame->retainedPixels && frame->nv12.empty() && frame->pixels().data() == pixels && frame->timestamp100ns == 90 && destroyed == 0);
+    auto retained = *frame; frame.reset(); Check(retained.pixels()[0] == 42 && destroyed == 0);
+    retained = {}; Check(destroyed == 1);
+    buffer = webrtc::make_ref_counted<CheckedNv12>(destroyed, 8);
+    sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer).build()); frame = sink.Take(); buffer = nullptr;
+    Check(frame && !frame->retainedPixels && destroyed == 2 && frame->pixels().size() == 12);
+    for (size_t i = 0; i < 12; ++i) Check(frame->pixels()[i] == (i < 8 ? 42 : i % 2 ? 190 : 90));
+    auto planar = webrtc::I420Buffer::Create(4, 2);
+    std::fill_n(planar->MutableDataY(), 8, uint8_t(55)); std::fill_n(planar->MutableDataU(), 2, uint8_t(70)); std::fill_n(planar->MutableDataV(), 2, uint8_t(180));
+    sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(planar).build()); frame = sink.Take();
+    Check(frame && frame->pixels()[0] == 55 && frame->pixels()[8] == 70 && frame->pixels()[9] == 180);
+    Check(sink.statistics().retained == 1 && sink.statistics().repacked == 1 && sink.statistics().converted == 1);
+    sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(planar).set_rotation(webrtc::kVideoRotation_90).build());
+    bool rejected = false; try { sink.Take(); } catch (const std::runtime_error&) { rejected = true; } Check(rejected);
+    for (int i = 0; i < 100; ++i) {
+        auto pending = webrtc::make_ref_counted<CheckedNv12>(destroyed, 4);
+        sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(pending).build());
+    }
+    Check(destroyed == 101 && sink.statistics().replaced == 99);
+    sink.Stop(); Check(destroyed == 102 && !sink.Take());
+    sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(planar).build());
+    Check(!sink.Take() && sink.statistics().rejectedAfterStop == 1);
 }
 RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proof::AudioEvidence> audio,
                            std::shared_ptr<LatestRoomVideoFrame> frames = {}) {
@@ -79,6 +127,7 @@ int main(int argc, char** argv) {
     int exitCode = 0;
     try {
         Check(argc == 2);
+        PresentationOwnership();
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime;
         Check(SUCCEEDED(mediaRuntime.result()));
@@ -157,6 +206,7 @@ int main(int argc, char** argv) {
         unsigned original = 0, changed = 0;
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         screenshare::ReceiverPreviewWindow preview;
+        preview.SetLowLatency(true);
         preview.Show();
 #endif
         RoomCliHooks viewerHooks;
@@ -169,8 +219,8 @@ int main(int argc, char** argv) {
             Check(preview.PumpMessages());
 #endif
             if (auto frame = frames->Take()) {
-                Check(frame->bytes == frame->width * frame->height * 3 / 2);
-                Check(std::to_integer<unsigned>(frame->data[frame->width * frame->height / 2 + frame->width / 2]) >= 35);
+                Check(frame->pixels().size() == frame->width * frame->height * 3 / 2 && frame->retainedPixels && frame->nv12.empty());
+                Check(frame->pixels()[frame->width * frame->height / 2 + frame->width / 2] >= 35);
                 if (frame->width == 320) ++original;
                 else if (frame->width == 160) ++changed;
                 else Check(false);
@@ -185,8 +235,10 @@ int main(int argc, char** argv) {
         Check(playbackChanges == 2);
         Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && sourceChanged && audioChanged);
         Check(original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
+        Check(frames->statistics().retained >= original + changed && frames->statistics().converted == 0 && frames->statistics().repacked == 0);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         Check(preview.framesPresented() >= 20);
+        Check(preview.maximumFrameLatency() == 1);
 #endif
         // A stalled presentation consumer retains only the newest frame.
         auto pixels = webrtc::I420Buffer::Create(4, 2);

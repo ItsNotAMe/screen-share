@@ -227,6 +227,26 @@ stop token, but synchronous Windows device initialization cannot be forcibly
 interrupted; driver hangs and physical unplug/recovery still require acceptance.
 Tests use synthetic outputs exclusively, including the Windows widget variant.
 
+## Retained NV12 presentation
+
+The shared frame sink now hands packed decoded NV12 to the UI with its immutable
+buffer owner attached. It does not convert NV12 to I420 and back or copy pixels
+into a second UI vector. Padded NV12 gets one explicit plane pack; non-NV12 input
+uses an explicit conversion fallback. Visible dimensions and timestamps survive
+the handoff. A stopped sink releases its pending frame and rejects late callbacks;
+every session gets a fresh sink. The existing renderer queue remains latest-only.
+
+The v2 window enables nonblocking presentation and measures a DXGI maximum frame
+latency of one. Busy/occluded frames are discarded, and presentation counters only
+count successful presents. `QtRoomSession.frameStatistics()` reports received,
+replaced, delivered, directly retained, converted and repacked frames. Widget
+statistics expose actual queue configuration and presentation errors. These are
+local diagnostics, not physical display-latency measurements.
+
+The current MF decoder still produces CPU NV12 and the renderer still uploads it
+to D3D textures. This removes the redundant CPU handoff work; it is not hardware
+decoding or GPU zero-copy presentation. Those acceptance items remain open.
+
 ## Headless and Windows checks
 
 `room-v2-qt-ui` runs the actual Qt widgets offscreen against the isolated Worker,

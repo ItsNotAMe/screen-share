@@ -1,5 +1,20 @@
 # Project Memory
 
+## Retained NV12 presentation — 2026-09-16
+
+backend/render/Nv12VideoFrame.h owns either a legacy moved vector or an immutable
+aliased pixel owner/span. SessionEvent::VideoFrame is a compatibility alias; the v2
+Qt/CLI handoff uses the portable frame directly. LatestRoomVideoFrame::Take retains
+packed NV12 (no I420 round trip/no extra pixel copy), explicitly repacks padded NV12
+and converts other formats. Statistics distinguish delivered/retained/converted/
+repacked; Stop clears pending and rejects late callbacks. Qt preserves final stats.
+V2 UI/CLI opt into DXGI queue limit1 and nonblocking present; busy/occluded frames
+are drops, only successful presents count. Legacy entry points keep their defaults.
+CLI emits final presentation JSON counters. Native decoder remains CPU NV12 and
+presentation still uploads: hardware decode/GPU zero-copy acceptance remains open.
+Tests prove buffer pointer identity/lifetime, packing/fallback and live fast paths;
+Windows tests measure actual queue configuration. Audio stays synthetic/silent.
+
 ## Viewer-local playback settings — 2026-09-16
 
 RoomSession.UpdatePlayback(PlaybackSelection) is viewer-only in NativeRoomRuntime,

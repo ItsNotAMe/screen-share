@@ -90,6 +90,10 @@ public:
         }
         condition_.notify_one();
     }
+    void setLowLatency(bool enabled) {
+        { std::scoped_lock lock(mutex_); lowLatency_ = enabled; resizePending_ = true; }
+        condition_.notify_one();
+    }
 
     void clear()
     {
@@ -114,6 +118,8 @@ public:
         snapshot.presentedFrames = presentedFrames_.load(std::memory_order_relaxed);
         snapshot.droppedFrames = droppedFrames_.load(std::memory_order_relaxed);
         snapshot.queuedFrames = queuedFrames_.load(std::memory_order_acquire);
+        snapshot.presentErrors = presentErrors_.load(std::memory_order_relaxed);
+        snapshot.maximumFrameLatency = maximumFrameLatency_.load(std::memory_order_relaxed);
         snapshot.lastPresentMs =
             static_cast<double>(lastPresentMicros_.load(std::memory_order_relaxed)) / 1000.0;
         snapshot.maxPresentMs =
@@ -138,6 +144,7 @@ private:
         bool resizePending = false;
         bool smoothPending = false;
         bool clearPending = false;
+        bool lowLatency = false;
         std::optional<screenshare::SessionEvent::VideoFrame> frame;
     };
 
@@ -152,6 +159,7 @@ private:
     void run()
     {
         screenshare::Nv12D3D11Presenter presenter;
+        bool lowLatency = false;
         for (;;) {
             Work work;
             {
@@ -174,6 +182,7 @@ private:
                 work.resizePending = resizePending_;
                 work.smoothPending = smoothPending_;
                 work.clearPending = clearPending_;
+                work.lowLatency = lowLatency_;
                 work.frame = std::move(pendingFrame_);
                 pendingFrame_.reset();
                 queuedFrames_.store(0, std::memory_order_release);
@@ -188,6 +197,7 @@ private:
                     continue;
                 }
 
+                if (lowLatency != work.lowLatency) { presenter.Reset(); presenter.SetLowLatency(work.lowLatency); lowLatency = work.lowLatency; }
                 presenter.Attach(work.hwnd);
                 if (work.smoothPending) {
                     presenter.SetLinearSampling(work.smoothScaling);
@@ -206,12 +216,15 @@ private:
                     presenter.Resize(work.width, work.height);
                     presenter.SetLinearSampling(work.smoothScaling);
                     const auto presentStarted = std::chrono::steady_clock::now();
-                    presenter.Present(screenshare::Nv12D3D11Presenter::FrameView{
+                    const auto pixels = work.frame->pixels();
+                    const bool presented = presenter.TryPresent(screenshare::Nv12D3D11Presenter::FrameView{
                         work.frame->width,
                         work.frame->height,
-                        work.frame->nv12.data(),
-                        work.frame->nv12.size(),
+                        pixels.data(),
+                        pixels.size(),
                     });
+                    maximumFrameLatency_ = presenter.maximumFrameLatency();
+                    if (!presented) { ++droppedFrames_; continue; }
                     const auto presentElapsed = std::chrono::steady_clock::now() - presentStarted;
                     const auto presentMicros = static_cast<std::uint64_t>(
                         std::chrono::duration_cast<std::chrono::microseconds>(presentElapsed).count());
@@ -221,6 +234,7 @@ private:
                     presentedFrames_.fetch_add(1, std::memory_order_relaxed);
                 }
             } catch (const std::exception&) {
+                ++presentErrors_;
                 presenter.Reset();
             }
         }
@@ -237,6 +251,9 @@ private:
     bool smoothPending_ = false;
     bool clearPending_ = false;
     bool stopping_ = false;
+    bool lowLatency_ = false;
+    std::atomic<std::uint64_t> presentErrors_{0};
+    std::atomic<std::uint32_t> maximumFrameLatency_{0};
     std::atomic<std::uint64_t> enqueuedFrames_{0};
     std::atomic<std::uint64_t> presentedFrames_{0};
     std::atomic<std::uint64_t> droppedFrames_{0};
@@ -294,7 +311,7 @@ QImage nv12ToRgb(const screenshare::SessionEvent::VideoFrame& frame)
 
     const qsizetype lumaBytes = static_cast<qsizetype>(frame.width) * frame.height;
     const qsizetype requiredBytes = lumaBytes + lumaBytes / 2;
-    if (static_cast<qsizetype>(frame.nv12.size()) < requiredBytes) {
+    if (static_cast<qsizetype>(frame.pixels().size()) < requiredBytes) {
         return {};
     }
 
@@ -303,7 +320,7 @@ QImage nv12ToRgb(const screenshare::SessionEvent::VideoFrame& frame)
         return {};
     }
 
-    const auto* yPlane = frame.nv12.data();
+    const auto* yPlane = frame.pixels().data();
     const auto* uvPlane = yPlane + lumaBytes;
     for (int y = 0; y < frame.height; ++y) {
         auto* output = image.scanLine(y);
@@ -341,6 +358,7 @@ VideoFrameWidget::VideoFrameWidget(QWidget* parent) : QWidget(parent)
 }
 
 VideoFrameWidget::~VideoFrameWidget() = default;
+void VideoFrameWidget::setLowLatency(bool enabled) { framePresenter_->setLowLatency(enabled); }
 
 void VideoFrameWidget::setStatusText(const QString& text)
 {

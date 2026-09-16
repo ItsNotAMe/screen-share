@@ -145,18 +145,18 @@ uint32_t ClampDimension(int value)
     return static_cast<uint32_t>(std::max(1, value));
 }
 
-void ValidateNv12Frame(const DecodedFrameInfo& frame)
+void ValidateNv12Frame(int width, int height, size_t bytes)
 {
-    if (frame.width <= 0 || frame.height <= 0) {
+    if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
         throw std::runtime_error("Decoded preview frame dimensions are not available");
     }
-    if ((frame.width % 2) != 0 || (frame.height % 2) != 0) {
+    if ((width % 2) != 0 || (height % 2) != 0) {
         throw std::runtime_error("Decoded preview frame dimensions must be even for NV12");
     }
 
-    const uint64_t lumaBytes = static_cast<uint64_t>(frame.width) * static_cast<uint64_t>(frame.height);
+    const uint64_t lumaBytes = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
     const uint64_t requiredBytes = lumaBytes + lumaBytes / 2;
-    if (requiredBytes > std::numeric_limits<size_t>::max() || frame.data.size() < static_cast<size_t>(requiredBytes)) {
+    if (requiredBytes > std::numeric_limits<size_t>::max() || bytes < static_cast<size_t>(requiredBytes)) {
         throw std::runtime_error("Decoded preview NV12 frame data is too small");
     }
 }
@@ -278,17 +278,29 @@ bool ReceiverPreviewWindow::PumpMessages()
 
 void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
 {
+    PresentPixels(frame.width, frame.height, {reinterpret_cast<const uint8_t*>(frame.data.data()), frame.data.size()});
+}
+void ReceiverPreviewWindow::PresentFrame(const Nv12VideoFrame& frame)
+{
+    PresentPixels(frame.width, frame.height, frame.pixels());
+}
+void ReceiverPreviewWindow::SetLowLatency(bool enabled) {
+    if (device_) throw std::logic_error("Set latency mode before opening preview");
+    lowLatency_ = enabled;
+}
+void ReceiverPreviewWindow::PresentPixels(int width, int height, std::span<const uint8_t> pixels)
+{
     if (closeRequested_) {
         return;
     }
-    ValidateNv12Frame(frame);
+    ValidateNv12Frame(width, height, pixels.size());
 
-    EnsureWindow(frame.width, frame.height);
-    SizeWindowForFirstFrame(frame.width, frame.height);
-    EnsureFrameTextures(frame.width, frame.height);
+    EnsureWindow(width, height);
+    SizeWindowForFirstFrame(width, height);
+    EnsureFrameTextures(width, height);
 
-    const size_t lumaBytes = static_cast<size_t>(frame.width) * static_cast<size_t>(frame.height);
-    const auto* luma = reinterpret_cast<const uint8_t*>(frame.data.data());
+    const size_t lumaBytes = static_cast<size_t>(width) * static_cast<size_t>(height);
+    const auto* luma = pixels.data();
     const auto* chroma = luma + lumaBytes;
 
     context_->UpdateSubresource(
@@ -296,20 +308,19 @@ void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
         0,
         nullptr,
         luma,
-        static_cast<UINT>(frame.width),
+        static_cast<UINT>(width),
         0);
     context_->UpdateSubresource(
         chromaTexture_.Get(),
         0,
         nullptr,
         chroma,
-        static_cast<UINT>(frame.width),
+        static_cast<UINT>(width),
         0);
 
-    frameWidth_ = frame.width;
-    frameHeight_ = frame.height;
-    Render();
-    ++framesPresented_;
+    frameWidth_ = width;
+    frameHeight_ = height;
+    if (Render()) ++framesPresented_; else ++framesDropped_;
 }
 
 void ReceiverPreviewWindow::ClearFrame()
@@ -523,6 +534,12 @@ void ReceiverPreviewWindow::CreateDeviceAndSwapChain()
     }
 
     ThrowIfFailed(result, "D3D11CreateDeviceAndSwapChain(receiver preview)");
+    if (lowLatency_) {
+        Microsoft::WRL::ComPtr<IDXGIDevice1> queue;
+        ThrowIfFailed(device_.As(&queue), "DXGI playback queue interface");
+        ThrowIfFailed(queue->SetMaximumFrameLatency(1), "DXGI playback queue limit");
+        ThrowIfFailed(queue->GetMaximumFrameLatency(&maximumFrameLatency_), "DXGI playback queue measurement");
+    }
     DisableDxgiDefaultAltEnter(swapChain_.Get(), hwnd_);
     SetSwapChainSdrColorSpace(swapChain_.Get());
     EnsureRenderTarget();
@@ -859,10 +876,15 @@ D3D11_VIEWPORT ReceiverPreviewWindow::ComputeViewport() const
     return viewport;
 }
 
-void ReceiverPreviewWindow::Render()
+bool ReceiverPreviewWindow::PresentSwapChain() {
+    const auto result = swapChain_->Present(0, lowLatency_ ? DXGI_PRESENT_DO_NOT_WAIT : 0);
+    if (result == DXGI_ERROR_WAS_STILL_DRAWING || result == DXGI_STATUS_OCCLUDED) return false;
+    ThrowIfFailed(result, "IDXGISwapChain::Present(receiver preview)"); return true;
+}
+bool ReceiverPreviewWindow::Render()
 {
     if (!swapChain_ || hwnd_ == nullptr || IsIconic(hwnd_) != FALSE) {
-        return;
+        return false;
     }
 
     UpdateClientSize();
@@ -873,8 +895,7 @@ void ReceiverPreviewWindow::Render()
     context_->ClearRenderTargetView(renderTarget_.Get(), clearColor);
 
     if (!lumaView_ || !chromaView_) {
-        ThrowIfFailed(swapChain_->Present(0, 0), "IDXGISwapChain::Present(receiver preview)");
-        return;
+        return PresentSwapChain();
     }
 
     EnsurePipeline();
@@ -913,7 +934,7 @@ void ReceiverPreviewWindow::Render()
     context_->PSSetConstantBuffers(0, 1, nullConstantBuffers);
     context_->OMSetRenderTargets(1, nullRenderTargets, nullptr);
 
-    ThrowIfFailed(swapChain_->Present(0, 0), "IDXGISwapChain::Present(receiver preview)");
+    return PresentSwapChain();
 }
 
 } // namespace screenshare

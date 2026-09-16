@@ -159,7 +159,7 @@ int RunRoomCli(int argc, char** argv) {
         struct ConsoleLease { ~ConsoleLease() { SetConsoleCtrlHandler(ConsoleSignal, FALSE); } } console;
         auto frames = std::make_shared<LatestRoomVideoFrame>(); config.media.frames = frames;
         std::unique_ptr<ReceiverPreviewWindow> preview;
-        if (!config.room.host && config.preview) { preview = std::make_unique<ReceiverPreviewWindow>(); preview->Show(); }
+        if (!config.room.host && config.preview) { preview = std::make_unique<ReceiverPreviewWindow>(); preview->SetLowLatency(true); preview->Show(); }
         RoomCliHooks hooks;
         hooks.report = [](const auto& status) { std::cout << QJsonDocument(status).toJson(QJsonDocument::Compact).constData() << std::endl; };
         hooks.pump = [&] {
@@ -169,7 +169,14 @@ int RunRoomCli(int argc, char** argv) {
             }
             return !interrupted.load();
         };
-        return RunRoomCliSession(config, WindowsRoomRuntimeFactory(config.media), std::move(hooks));
+        const int result = RunRoomCliSession(config, WindowsRoomRuntimeFactory(config.media), std::move(hooks));
+        frames->Stop(); const auto statistics = frames->statistics();
+        const QJsonObject presentation{{"type", "presentation"}, {"received", qint64(statistics.received)}, {"replaced", qint64(statistics.replaced)},
+            {"retained", qint64(statistics.retained)}, {"converted", qint64(statistics.converted)}, {"repacked", qint64(statistics.repacked)},
+            {"presented", qint64(preview ? preview->framesPresented() : 0)}, {"dropped", qint64(preview ? preview->framesDropped() : 0)},
+            {"maximumFrameLatency", int(preview ? preview->maximumFrameLatency() : 0)}};
+        std::cout << QJsonDocument(presentation).toJson(QJsonDocument::Compact).constData() << std::endl;
+        return result;
     } catch (const std::exception& error) {
         // Never dump the config, admission response, password or membership token.
         std::cerr << "Room session: " << error.what() << '\n'; return 1;

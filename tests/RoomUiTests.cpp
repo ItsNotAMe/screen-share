@@ -402,11 +402,12 @@ int main(int argc, char** argv) {
         unsigned original = 0, changed = 0;
         auto present = viewer.session().frameReady;
         viewer.session().frameReady = [&](auto frame) {
-            Check(frame.bytes == frame.width * frame.height * 3 / 2);
+            Check(frame.pixels().size() == frame.width * frame.height * 3 / 2 && frame.retainedPixels && frame.nv12.empty());
             if (frame.width == 320) ++original; else if (frame.width == 160) ++changed; else Check(false);
             present(std::move(frame));
         };
         Wait([&] { return original >= 20 && viewerAudio->audibleBlocks >= 20; });
+        Check(viewer.session().frameStatistics().retained >= 20 && viewer.session().frameStatistics().converted == 0 && viewer.session().frameStatistics().repacked == 0);
         auto* width = host.findChild<QSpinBox*>("streamWidth"); auto* height = host.findChild<QSpinBox*>("streamHeight");
         auto* apply = host.findChild<QPushButton*>("applyStream");
         Check(width && height && apply && apply->isEnabled());
@@ -448,6 +449,7 @@ int main(int argc, char** argv) {
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         auto* video = static_cast<VideoFrameWidget*>(viewer.findChild<QWidget*>("roomVideo"));
         Check(video && video->presentedFrameCount() >= 20);
+        Check(video->presentationStats().maximumFrameLatency == 1);
 #endif
         viewer.close(); Check(viewer.session().running()); // Close waits for drain.
         Wait([&] { return !viewer.session().running() && !viewer.isVisible(); });

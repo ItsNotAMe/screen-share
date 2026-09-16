@@ -28,7 +28,8 @@ public:
     bool settingsPending() const { return pending_.has_value() || applying_.valid(); }
     screenshare::v2::RoomStatus status() const;
     std::function<void(const screenshare::v2::RoomStatus&)> statusChanged;
-    std::function<void(screenshare::DecodedFrameInfo)> frameReady;
+    std::function<void(screenshare::Nv12VideoFrame)> frameReady;
+    LatestRoomVideoFrame::Statistics frameStatistics() const { return frames_ ? frames_->statistics() : lastFrames_; }
     std::function<void(const screenshare::v2::StreamUpdateResult&)> settingsAccepted;
     std::function<void(const screenshare::v2::RoomUpdateResult&)> roomUpdated;
     std::function<void(const screenshare::media::CaptureUpdateResult&)> captureUpdated;
@@ -58,4 +59,5 @@ private:
     size_t nextAudioChange_ = 0;
     size_t nextPlaybackChange_ = 0;
     screenshare::v2::RoomStatus last_;
+    LatestRoomVideoFrame::Statistics lastFrames_;
 };
