@@ -1,5 +1,6 @@
 #include "shared/RoomSessionConfig.h"
 #include "shared/RoomLink.h"
+#include "shared/StreamPreferencesJson.h"
 #include <QJsonArray>
 #include <QUrl>
 #include <climits>
@@ -36,7 +37,8 @@ QJsonObject Object(const QJsonObject& value, const char* key) {
     if (!value[key].isObject()) throw std::invalid_argument("Invalid object field");
     return value[key].toObject();
 }
-StreamPreferences Preferences(const QJsonObject& object) {
+}
+StreamPreferences ParseStreamPreferences(const QJsonObject& object) {
     Keys(object, {"preset", "resolution", "width", "height", "fpsMode", "fps", "bitrateMode", "bitrateBps", "aggregateUploadBps"});
     StreamPreferences result;
     const auto preset = String(object, "preset", "gaming");
@@ -56,6 +58,16 @@ StreamPreferences Preferences(const QJsonObject& object) {
     if (object.contains("aggregateUploadBps")) result.aggregateUploadLimitBps = Integer(object, "aggregateUploadBps", 0, 160000, 1000000000);
     ValidateStreamPreferences(result); return result;
 }
+QJsonObject StreamPreferencesJson(const StreamPreferences& value) {
+    ValidateStreamPreferences(value);
+    QJsonObject result{{"preset", value.preset == StreamPreset::Gaming ? "gaming" : "quality"},
+        {"resolution", value.resolution == ResolutionMode::Auto ? "auto" : value.resolution == ResolutionMode::Fixed ? "fixed" : "native"},
+        {"width", value.width}, {"height", value.height}, {"fps", value.fps},
+        {"fpsMode", value.fpsMode == SettingMode::Auto ? "auto" : "manual"},
+        {"bitrateMode", value.bitrateMode == SettingMode::Auto ? "auto" : "manual"}};
+    if (value.bitrateLimitBps) result["bitrateBps"] = *value.bitrateLimitBps;
+    if (value.aggregateUploadLimitBps) result["aggregateUploadBps"] = *value.aggregateUploadLimitBps;
+    return result;
 }
 RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopback) {
     Keys(object, {"origin", "host", "roomId", "nickname", "name", "password", "public", "viewerLimit", "seconds", "preview", "capture", "audio", "stream", "changes", "captureChanges", "audioChanges", "playbackChanges"});
@@ -74,7 +86,7 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
         result.room.roomId = roomId->toStdString();
     }
     result.duration = std::chrono::seconds(Integer(object, "seconds", 0, 0, 86400)); result.preview = Boolean(object, "preview", true);
-    result.media.preferences = Preferences(Object(object, "stream"));
+    result.media.preferences = ParseStreamPreferences(Object(object, "stream"));
     if (object.contains("playbackChanges") && !object["playbackChanges"].isArray()) throw std::invalid_argument("Invalid playback changes");
     const auto playbackChanges = object["playbackChanges"].toArray();
     if (playbackChanges.size() > 64 || (result.room.host && !playbackChanges.isEmpty())) throw std::invalid_argument("Invalid playback change count or role");
@@ -152,7 +164,7 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
         const auto change = item.toObject(); Keys(change, {"atMs", "stream"});
         const int at = Integer(change, "atMs", -1, 0, 86400000);
         if (at <= previous || !change.contains("stream")) throw std::invalid_argument("Settings changes must be ordered and complete");
-        previous = at; result.changes.push_back({std::chrono::milliseconds(at), Preferences(Object(change, "stream"))});
+        previous = at; result.changes.push_back({std::chrono::milliseconds(at), ParseStreamPreferences(Object(change, "stream"))});
     }
     return result;
 }

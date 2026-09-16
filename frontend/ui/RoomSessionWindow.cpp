@@ -1,5 +1,6 @@
 #include "ui/RoomSessionWindow.h"
 #include "shared/RoomLink.h"
+#include "shared/RoomProfile.h"
 #include <QClipboard>
 #include "ui/VideoFrameWidget.h"
 #include "ui/UiStyle.h"
@@ -35,7 +36,7 @@ QString Phase(RoomPhase phase) {
     return "Session failed";
 }
 }
-RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback)
+RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback, RoomProfile* profile)
     : session_(nullptr, std::move(factory), loopback) {
     setWindowTitle(config.room.host ? "ScreenShare — Share room" : "ScreenShare — Watch room");
     setStyleSheet(uiStyleSheet()); resize(960, 720);
@@ -197,16 +198,22 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     sourceSettings->setVisible(config.room.host); sourceSettings->setMinimumHeight(160); layout->addWidget(sourceSettings, 1);
     settingsState_ = new QLabel; settingsState_->setWordWrap(true); layout->addWidget(settingsState_);
     uploadState_ = new QLabel; uploadState_->setWordWrap(true); uploadState_->setObjectName("uploadState"); uploadState_->setVisible(config.room.host); layout->addWidget(uploadState_);
+    if (profile) {
+        auto* saveDefaults = new QPushButton(config.room.host ? "Save stream settings for new rooms" : "Save playback settings for new sessions");
+        saveDefaults->setObjectName("saveSessionDefaults"); layout->addWidget(saveDefaults);
+        auto* savedState = new QLabel; savedState->setObjectName("profileSaveState"); savedState->setWordWrap(true); layout->addWidget(savedState);
+        connect(saveDefaults, &QPushButton::clicked, this, [this, profile, savedState, host = config.room.host] {
+            const bool saved = host ? profile->saveStreamPreferences(ReadPreferences()) :
+                profile->savePlayback({playbackVolume_->value(), playbackMuted_->isChecked()});
+            savedState->setText(saved ? "Saved for new sessions. Use Apply to change this session." :
+                "Settings are invalid or could not be saved. Previous defaults were not replaced by invalid values.");
+        });
+    }
     auto* controls = new QLabel("Remote control is not available in this preview."); layout->addWidget(controls);
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { session_.stop(); stop_->setEnabled(false); apply_->setEnabled(false); });
     connect(apply_, &QPushButton::clicked, this, [this] {
-        StreamPreferences p; p.preset = StreamPreset(preset_->currentIndex()); p.resolution = ResolutionMode(resolution_->currentIndex());
-        p.width = width_->value(); p.height = height_->value(); p.fpsMode = SettingMode(fpsMode_->currentIndex()); p.fps = fps_->value();
-        p.bitrateMode = SettingMode(bitrateMode_->currentIndex());
-        if (p.bitrateMode == SettingMode::Manual || bitrateLimit_->isChecked()) p.bitrateLimitBps = bitrate_->value();
-        if (uploadBudgetEnabled_->isChecked()) p.aggregateUploadLimitBps = uploadBudget_->value();
-        error_->clear(); settingsState_->setText("Settings pending…"); session_.apply(p);
+        error_->clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
     });
     session_.statusChanged = [this, host = config.room.host](const auto& value) {
         phase_->setText(Phase(value.phase) + QString(" — %1 connected, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
@@ -303,6 +310,14 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     if (!session_.start(std::move(config))) { stop_->setEnabled(false); apply_->setEnabled(false); }
 }
 RoomSessionWindow::~RoomSessionWindow() = default;
+StreamPreferences RoomSessionWindow::ReadPreferences() const {
+    StreamPreferences p; p.preset = StreamPreset(preset_->currentIndex()); p.resolution = ResolutionMode(resolution_->currentIndex());
+    p.width = width_->value(); p.height = height_->value(); p.fpsMode = SettingMode(fpsMode_->currentIndex()); p.fps = fps_->value();
+    p.bitrateMode = SettingMode(bitrateMode_->currentIndex());
+    if (p.bitrateMode == SettingMode::Manual || bitrateLimit_->isChecked()) p.bitrateLimitBps = bitrate_->value();
+    if (uploadBudgetEnabled_->isChecked()) p.aggregateUploadLimitBps = uploadBudget_->value();
+    return p;
+}
 void RoomSessionWindow::closeEvent(QCloseEvent* event) {
     if (session_.running()) { closing_ = true; session_.stop(); event->ignore(); }
     else { event->accept(); if (closed) closed(); }

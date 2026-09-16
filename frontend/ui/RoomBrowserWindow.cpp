@@ -117,9 +117,12 @@ void RoomBrowserWindow::Launch(bool host) {
     input["capture"] = capture;
     try {
         auto config = ParseRoomSessionConfig(input, loopback_);
+        config.media.preferences = profile_.streamPreferences();
+        const auto playback = profile_.playback();
+        config.media.playbackVolume = playback.volume; config.media.playbackMuted = playback.muted;
         if (!profile_.saveNickname(*nickname)) { error_->setText("Could not save the nickname."); return; }
         nickname_->setText(*nickname); error_->clear();
-        active_ = std::make_unique<RoomSessionWindow>(std::move(config), factory_, loopback_);
+        active_ = std::make_unique<RoomSessionWindow>(std::move(config), factory_, loopback_, &profile_);
         active_->closed = [this] { QTimer::singleShot(0, this, [this] {
             active_.reset(); if (closing_) close(); else show();
         }); };

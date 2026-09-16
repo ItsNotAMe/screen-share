@@ -49,14 +49,32 @@ shared transport's; automatic reconnects are capped at three per rolling minute,
 then the user can retry explicitly. The 25 ms control timer drains a bounded local
 event queue and generates no room-list HTTP polling.
 
-Only the canonical nickname is persisted via QSettings' user-scoped INI profile
+The canonical nickname is persisted via QSettings' user-scoped INI profile
 (`ScreenShare/RoomV2Profile`). Validation uses the same normalization, length and
-control/bidirectional-character rules as the wire protocol. Invalid stored names
-fall back to Guest. Nicknames are display labels, not proof of identity. Passwords,
+control/bidirectional-character rules as the wire protocol. New or invalid stored
+names receive a saved `Guest-xxxxxxxx` name from the system RNG; existing valid
+names stay unchanged. Nicknames are display labels, not proof of identity. Passwords,
 room IDs, service URLs and membership tokens are not saved by this profile; the
 password field clears after launching a session. Room titles are rendered as plain
 table text. Saved nickname changes apply to future admissions; the session's live
 nickname control changes only the current membership.
+
+Browser-launched sessions also offer **Save stream settings for new rooms** (host)
+or **Save playback settings for new sessions** (viewer). These persist the current
+draft for future sessions; **Apply** remains the separate action for active media.
+The saved stream group contains preset, resolution/FPS/bitrate modes, dimensions,
+limits and optional aggregate allowance. The playback group contains volume/mute.
+Capture handles, process IDs and device identifiers are deliberately not profile
+defaults. New browser sessions load these groups before constructing the runtime.
+Standalone JSON UI/CLI configurations stay authoritative and do not implicitly load
+or overwrite profile defaults.
+
+Versioned JSON groups use strict validation shared with CLI stream configuration.
+Unknown fields, invalid types/ranges and malformed/oversized blobs fall back to
+safe defaults for the affected group, without resetting the nickname or other group.
+Invalid save attempts preserve old values; write failures are reported and restore
+the previous in-memory key. Saving valid stream defaults does not claim hardware
+support or remote application; normal runtime apply/error reporting still applies.
 
 The session's **Copy room link** button copies `screenshare://room/v2/ROOM_ID`.
 Paste it into the browser's **Room ID or v2 link** field. Links contain only the

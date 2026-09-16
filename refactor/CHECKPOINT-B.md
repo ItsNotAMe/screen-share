@@ -1,5 +1,40 @@
 # Checkpoint B evidence
 
+## Validated local profile defaults and browser/session integration — 2026-09-17
+
+RoomProfile now persists versioned, allowlisted stream settings and playback
+volume/mute alongside the canonical nickname. New/invalid nickname profiles receive
+a stable saved Guest-xxxxxxxx name generated from the system RNG; valid existing
+names are preserved. Stream serialization and parsing use the same validation as
+CLI JSON, covering all presets/modes/dimensions/limits and aggregate allowance.
+Corrupt/unknown/oversized groups fall back independently. Invalid saves retain old
+values; failed QSettings writes restore the previous in-memory key.
+
+Browser-created sessions load validated defaults before runtime construction and
+offer explicit save-for-new-session controls. Saving a draft does not apply media
+changes or advance the stream revision. New room/viewer sessions consume the saved
+stream settings and playback volume/mute. Standalone JSON UI/CLI entry points stay
+explicit and do not load/write local defaults. No credentials, room/service identity,
+device IDs, process IDs or capture handles are persisted. Shared Apply/Save reads
+the same widget state, with independent local-save feedback.
+
+Validation, temporary profile files and silent synthetic audio:
+- Full application suites: **19/19 Release (90.57s), 19/19 Debug (90.62s)**.
+- Complete production regression including generated-window WGC/GPU scenarios:
+  **7/7 cases**, `build/webrtc/profile-regression-20260917/result.json`.
+- Profile checks cover all 24 preset/resolution/FPS-mode/bitrate-mode combinations,
+  serialization parity with CLI, absent optional limits, invalid-save preservation,
+  oversized/malformed/type-invalid/unknown-field fallback, independent group
+  retention, randomized nickname stability and real unwritable-path rollback.
+- Actual browser/session widgets save defaults without changing active settings,
+  reject an odd-width draft, close/recreate the room and viewer, and verify selected
+  stream width and playback volume/mute in both controls and runtime status.
+- Saved-key assertions exclude room/password/source/device data; session nickname
+  edits remain distinct from saved profile identity.
+
+Profile persistence is implemented. This does not close default-shell adoption,
+gaming input, physical-device/resource or external latency acceptance.
+
 ## Reconciled implementation checks and production regression matrix — 2026-09-17
 
 Audited DETAIL-CHECKS.md against the implemented public facade/runtime, opt-in

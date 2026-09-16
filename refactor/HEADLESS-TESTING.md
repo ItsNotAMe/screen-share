@@ -48,6 +48,15 @@ cleanup, silent/default scenario selection and fail-fast evidence preservation.
 
 ## Component and scenario coverage
 
+The room UI scenario now tests local profile migration and persistence: stable
+randomized Guest names, all stream preset/resolution/FPS/bitrate combinations,
+strict serializer/parser parity with CLI configuration, independent corruption
+fallback, rejected invalid values and unwritable-file rollback. Actual browser and
+session widgets save drafts without applying them, then create/rejoin a fresh room
+and verify stream/playback defaults reach the runtime. Profiles live in temporary
+directories; tests verify only nickname and versioned stream/playback keys exist.
+No credentials, device IDs, capture handles or process IDs are persisted.
+
 UI/CLI presentation now shares `backend/render/FramePresentationBackend` and
 `FramePresentationSession`. The existing `video-frame-input` worker scenarios
 exercise that shared policy. The Windows CLI scenario additionally covers real

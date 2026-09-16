@@ -1,5 +1,20 @@
 # Project Memory
 
+## Local profile defaults — 2026-09-17
+
+RoomProfile persists normalized nickname plus allowlisted stream/v1 and playback/v1
+JSON. Shared StreamPreferencesJson/ParseStreamPreferences are also the CLI config
+parser/serializer boundary, so profile loads cannot bypass validation. Corrupt/unknown
+fields fall back per group; invalid values never overwrite defaults. Failed QSettings
+writes restore the prior in-memory key. New/invalid nickname profiles get a stable
+persisted Guest-xxxxxxxx from the system RNG; existing valid names are preserved.
+Browser-created RoomSessionWindow borrows the browser's profile (browser outlives it)
+and offers explicit save-for-new-session buttons. Saving a draft never applies media
+settings; Apply remains separate. New browser sessions load stream and playback
+volume/mute; standalone config UI/CLI do not load/write profile defaults. No room
+credentials, URLs, source handles, process IDs or device IDs are stored. Headless
+tests use temporary profiles and actual reopen/join/runtime assertions.
+
 ## Reconciled checks and production regression runner — 2026-09-17
 
 DETAIL-CHECKS.md has been reconciled beyond its latest-update blocks: old facade,

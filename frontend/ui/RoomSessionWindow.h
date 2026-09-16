@@ -8,17 +8,21 @@ class QComboBox;
 class QCheckBox;
 class QPushButton;
 class VideoFrameWidget;
+class RoomProfile;
 
 class RoomSessionWindow final : public QWidget {
 public:
+    // Optional profile is owned by the browser and must outlive this window.
+    // Config-file entry points pass none and remain independent of local defaults.
     explicit RoomSessionWindow(RoomSessionConfig, QtRoomSession::Factory = screenshare::media::WindowsRoomRuntimeFactory,
-                               bool diagnosticLoopback = false);
+                               bool diagnosticLoopback = false, RoomProfile* profile = nullptr);
     ~RoomSessionWindow() override;
     QtRoomSession& session() { return session_; }
     std::function<void()> closed;
 protected:
     void closeEvent(QCloseEvent*) override;
 private:
+    screenshare::media::StreamPreferences ReadPreferences() const;
     QtRoomSession session_;
     QLabel *phase_, *room_, *settingsState_, *error_;
     QSpinBox *width_, *height_, *fps_, *bitrate_;

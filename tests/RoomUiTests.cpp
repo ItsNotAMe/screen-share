@@ -1,5 +1,6 @@
 #include "ui/RoomSessionWindow.h"
 #include "shared/RoomLink.h"
+#include "shared/StreamPreferencesJson.h"
 #include <QClipboard>
 #include "ui/RoomBrowserWindow.h"
 #include "ui/VideoFrameWidget.h"
@@ -182,7 +183,46 @@ void MutationLifecycle(const std::string& origin) {
         Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Unavailable);
     } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
 }
+void ProfileSettingsScenario() {
+    QTemporaryDir files; Check(files.isValid()); const auto path = files.filePath("profile.ini");
+    RoomProfile profile(path);
+    const auto guest = profile.nickname(); Check(guest.startsWith("Guest-") && guest.size() == 14);
+    Check(RoomProfile(path).nickname() == guest);
+    for (int preset = 0; preset < 2; ++preset) for (int resolution = 0; resolution < 3; ++resolution)
+    for (int fps = 0; fps < 2; ++fps) for (int bitrate = 0; bitrate < 2; ++bitrate) {
+        StreamPreferences settings; settings.preset = StreamPreset(preset); settings.resolution = ResolutionMode(resolution);
+        settings.width = 1280; settings.height = 720; settings.fps = 144; settings.fpsMode = SettingMode(fps);
+        settings.bitrateMode = SettingMode(bitrate); settings.bitrateLimitBps = 9000000; settings.aggregateUploadLimitBps = 30000000;
+        Check(profile.saveStreamPreferences(settings));
+        const auto saved = RoomProfile(path).streamPreferences();
+        Check(StreamPreferencesJson(saved) == StreamPreferencesJson(settings));
+        const auto config = ParseRoomSessionConfig(QJsonObject{{"origin", "https://example.invalid"}, {"host", true}, {"stream", StreamPreferencesJson(saved)}});
+        Check(StreamPreferencesJson(config.media.preferences) == StreamPreferencesJson(saved));
+    }
+    StreamPreferences automatic; Check(profile.saveStreamPreferences(automatic));
+    Check(!RoomProfile(path).streamPreferences().bitrateLimitBps);
+    auto invalid = automatic; invalid.width = 3; Check(!profile.saveStreamPreferences(invalid));
+    Check(profile.streamPreferences().width == 1920);
+    Check(profile.savePlayback({23, true})); Check(!profile.savePlayback({101, false}));
+    Check(RoomProfile(path).playback().volume == 23 && RoomProfile(path).playback().muted);
+    for (const auto& bytes : {QByteArray("[]"), QByteArray("{\"width\":3}"), QByteArray("{\"bitrateMode\":\"manual\"}"),
+            QByteArray("{\"width\":\"1280\"}"), QByteArray("{\"password\":\"never-accepted\"}"), QByteArray(5000, 'x')}) {
+        { QSettings raw(path, QSettings::IniFormat); raw.setValue("stream/v1", bytes); raw.sync(); }
+        Check(RoomProfile(path).streamPreferences().width == 1920);
+        Check(RoomProfile(path).playback().volume == 23); // Corrupt stream does not reset playback or nickname.
+        Check(RoomProfile(path).nickname() == guest);
+    }
+    { QSettings raw(path, QSettings::IniFormat); raw.setValue("playback/v1", QByteArray("{\"volume\":50.5,\"muted\":true}")); raw.sync(); }
+    Check(RoomProfile(path).playback().volume == 100 && !RoomProfile(path).playback().muted);
+    // A directory cannot be a settings file. Failed writes must not change the
+    // in-memory defaults later consumed by browser sessions.
+    RoomProfile unwritable(files.path());
+    Check(!unwritable.savePlayback({12, true})); Check(unwritable.playback().volume == 100);
+    auto valid = automatic; valid.width = 1280;
+    Check(!unwritable.saveStreamPreferences(valid)); Check(unwritable.streamPreferences().width == 1920);
+}
 void BrowserScenario(const QUrl& origin) {
+    ProfileSettingsScenario();
     using Directory = screenshare::room::qt::RoomDirectory;
     QTemporaryDir profiles; Check(profiles.isValid());
     const auto hostFile = profiles.filePath("host.ini"), viewerFile = profiles.filePath("viewer.ini");
@@ -190,7 +230,8 @@ void BrowserScenario(const QUrl& origin) {
         QSettings raw(hostFile, QSettings::IniFormat); raw.setValue("nickname", QString("Bad") + QChar(0x202e)); raw.sync();
     }
     RoomProfile profile(hostFile);
-    Check(profile.nickname() == "Guest");
+    Check(profile.nickname().startsWith("Guest-") && profile.nickname().size() == 14);
+    Check(RoomProfile(hostFile).nickname() == profile.nickname());
     Check(!profile.saveNickname(QString("Bad") + QChar(0x202e)));
     Check(!profile.saveNickname(QString(33, 'a')));
     Check(profile.saveNickname(QStringLiteral(" Cafe\u0301 ")) && profile.nickname() == QStringLiteral("Caf\u00e9"));
@@ -246,6 +287,24 @@ void BrowserScenario(const QUrl& origin) {
     Check(RoomProfile(viewerFile).nickname() == "Browser viewer");
     for (const auto& path : {hostFile, viewerFile}) { QSettings saved(path, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"nickname"}); }
     auto* hostWindow = host.activeSession(); auto* viewerWindow = viewer.activeSession();
+    const auto streamRevision = hostWindow->session().status().stream.requestedRevision;
+    hostWindow->findChild<QSpinBox*>("streamWidth")->setValue(1280);
+    hostWindow->findChild<QSpinBox*>("streamHeight")->setValue(720);
+    hostWindow->findChild<QCheckBox*>("uploadBudgetEnabled")->setChecked(true);
+    hostWindow->findChild<QSpinBox*>("uploadBudget")->setValue(8000000);
+    hostWindow->findChild<QPushButton*>("saveSessionDefaults")->click();
+    Check(RoomProfile(hostFile).streamPreferences().width == 1280);
+    Check(RoomProfile(hostFile).streamPreferences().aggregateUploadLimitBps == 8000000);
+    Check(hostWindow->session().status().stream.requestedRevision == streamRevision); // Save does not apply.
+    hostWindow->findChild<QSpinBox*>("streamWidth")->setValue(1279);
+    hostWindow->findChild<QPushButton*>("saveSessionDefaults")->click();
+    Check(RoomProfile(hostFile).streamPreferences().width == 1280);
+    Check(hostWindow->findChild<QLabel*>("profileSaveState")->text().contains("invalid"));
+    hostWindow->findChild<QSpinBox*>("streamWidth")->setValue(1280);
+    viewerWindow->findChild<QSpinBox*>("playbackVolume")->setValue(37);
+    viewerWindow->findChild<QCheckBox*>("playbackMuted")->setChecked(true);
+    viewerWindow->findChild<QPushButton*>("saveSessionDefaults")->click();
+    Check(RoomProfile(viewerFile).playback().volume == 37 && RoomProfile(viewerFile).playback().muted);
     Wait([&] { return hostWindow->session().status().members.size() == 2 && viewerWindow->findChild<QPushButton*>("updateNickname")->isEnabled(); });
     const auto staleRevision = hostWindow->session().status().revision;
     // Hold a host edit while another authenticated member advances the revision.
@@ -285,6 +344,25 @@ void BrowserScenario(const QUrl& origin) {
         viewer.activeSession()->session().status().phase == RoomPhase::Stopped; });
     viewer.activeSession()->close();
     Wait([&] { return !viewer.activeSession() && viewer.directory().status().phase == Directory::Phase::Ready; });
+    // New room and viewer sessions consume saved defaults, including actual
+    // runtime settings. Passwords/source handles/device identifiers stay absent.
+    host.findChild<QPushButton*>("createV2Room")->click();
+    Wait([&] { return host.activeSession() && host.activeSession()->session().status().phase == RoomPhase::Active; });
+    Check(host.activeSession()->findChild<QSpinBox*>("streamWidth")->value() == 1280);
+    Check(host.activeSession()->session().status().stream.preferences.width == 1280);
+    viewer.findChild<QLineEdit*>("joinRoomId")->setText(QString::fromStdString(host.activeSession()->session().status().roomId));
+    viewer.findChild<QPushButton*>("joinV2Room")->click();
+    Wait([&] { return viewer.activeSession() && viewer.activeSession()->session().status().activePeers == 1; });
+    Check(viewer.activeSession()->findChild<QSpinBox*>("playbackVolume")->value() == 37);
+    Check(viewer.activeSession()->findChild<QCheckBox*>("playbackMuted")->isChecked());
+    Check(viewer.activeSession()->session().status().playback.selected.volume == 37);
+    Check(viewer.activeSession()->session().status().playback.selected.muted);
+    for (const auto& path : {hostFile, viewerFile}) {
+        QSettings saved(path, QSettings::IniFormat);
+        for (const auto& key : saved.allKeys()) Check(key == "nickname" || key == "stream/v1" || key == "playback/v1");
+    }
+    host.activeSession()->close(); viewer.activeSession()->close();
+    Wait([&] { return !host.activeSession() && !viewer.activeSession() && viewer.directory().status().phase == Directory::Phase::Ready; });
     // Rapid visibility changes during an outstanding stop reopen just one current subscription.
     viewer.hide(); viewer.show(); viewer.hide(); viewer.show();
     Wait([&] { return viewer.directory().status().phase == Directory::Phase::Ready; });

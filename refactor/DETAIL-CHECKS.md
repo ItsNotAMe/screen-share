@@ -340,7 +340,7 @@ Plan references: Section 3 and 5 / Checkpoint C.
 ### Profile and authorization
 
 - [x] Persist and validate local nickname without reading OS identity.
-- [ ] Complete preference persistence and randomized Guest defaults; the current invalid/missing-profile fallback is Guest.
+- [x] Persist validated stream preferences and playback volume/mute for browser-created sessions; generate and save a random Guest nickname for missing/invalid profiles. Existing valid nicknames remain unchanged. Device/source identifiers and credentials are excluded.
 - [x] Validate nickname normalization, code points/UTF-8 size and forbidden controls.
 - [ ] Implement duplicate-name disambiguation with peer IDs.
 - [x] Implement public/unlisted rooms, creation password and acknowledged live name/visibility/viewer-limit edits.

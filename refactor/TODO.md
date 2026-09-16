@@ -121,6 +121,13 @@ Default-shell adoption, input consent/control, hardware decode/GPU zero-copy
 presentation and physical audio-device loss/recovery acceptance remain.
 This milestone is not complete and defaults are unchanged.
 
+Local profile defaults now include all stream modes/limits and viewer volume/mute,
+with explicit save controls in browser-launched sessions and stable randomized Guest
+names for new/invalid profiles. New sessions consume validated defaults; saving a
+draft does not apply it to active media. Config-file UI/CLI sessions stay explicit.
+Corruption/write-failure tests preserve safe defaults and exclude credentials or
+device/source identifiers. Profile persistence is no longer an open implementation item.
+
 ## 3. Gaming controls end to end (D)
 
 **Deliverable:** authorized mouse/keyboard/gamepads over encrypted data channels,

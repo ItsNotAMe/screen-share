@@ -17,6 +17,9 @@ and retained NV12 handoff are integrated. UI and CLI now share a backend-owned
 renderer/session with bounded recovery; the duplicate CLI GPU pipeline is removed.
 The detailed checklist is reconciled, and test-room-regression.py runs the complete
 silent production UI/CLI/service scenario matrix with process-tree watchdogs.
+Validated local stream/playback defaults and stable randomized Guest nicknames are
+integrated into browser-created sessions with explicit save controls; do not rebuild
+profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
 Normal AppShell/legacy CLI cutover remains gated; later visual redesign follows
 milestones 1–5.
