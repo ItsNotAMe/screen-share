@@ -1,5 +1,40 @@
 # Checkpoint B evidence
 
+## Opt-in Qt session adoption — 2026-09-16
+
+ScreenShareUi accepts `--room-v2 CONFIG.json` and opens RoomSessionWindow using
+QtRoomSession, the shared v2 backend and existing video widget/style. CLI parsing
+was extracted into frontend/shared/RoomSessionConfig and a common frontend target.
+Both entry paths enforce the same configuration/security rules. Default startup
+and the normal room browser remain unchanged.
+
+The Qt owner keeps one settings operation in flight and one latest pending edit,
+checks local status without service requests, and consumes bounded latest frames.
+Stop/close drain asynchronously while Qt continues processing events; the window
+closes only after completion. Finished owners can start a new session incarnation.
+Pending media/settings references are released on drain; cancellation preserves
+admission uncertainty. Host controls expose presets, canvas, FPS, bitrate and Auto
+limits with pending/applied/rejected state. Remote input is deliberately unavailable
+until its authenticated consent/control path is integrated.
+
+The offscreen widget scenario hosts/joins the isolated Worker, observes original
+and reduced frames, rejects odd dimensions, coalesces 101 valid edits into one
+revision, closes the viewer after drain, stops the host and reuses an owner. A
+held media-stop future proves Qt heartbeat timers keep dispatching and finished
+fires once per incarnation. No physical input is injected; audio is synthetic.
+
+Final application suites pass 18/18 in Debug and Release; CLI-only Release passes
+12/12. Logs: `build/webrtc/room-ui-app-debug.log`, `room-ui-app-release.log`,
+`room-ui-cli-release.log`. Final Windows UI proof passes outside the capture-
+restricted sandbox with WGC, the real renderer, 20 original + 20 reduced frames
+and silent synthetic audio in 2.72 s. Artifact:
+`build/webrtc/room-ui-windows-final/native-service-14cc707a-61ed-400d-8c42-69da41cbaed3`.
+
+[ROOM-UI.md](ROOM-UI.md) documents invocation, lifecycle and test commands. These
+results do not establish physical display/input latency, zero-copy presentation,
+NAT/TLS, resource or service-cost acceptance. Normal create/join, directory/profile,
+remote controls, source changes and aggregate allocation remain in milestone 2.
+
 ## Opt-in CLI host/viewer and bounded presentation — 2026-09-16
 
 `ScreenShare --room-v2 CONFIG.json` now routes to a separate frontend using the

@@ -30,7 +30,7 @@ template<class F> void Reject(F fn) {
     try { fn(); } catch (const std::invalid_argument&) { rejected = true; }
     Check(rejected);
 }
-RoomRuntimeFactory Factory(const RoomCliConfig& config, std::shared_ptr<proof::AudioEvidence> audio,
+RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proof::AudioEvidence> audio,
                            std::shared_ptr<LatestRoomVideoFrame> frames = {}) {
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
     auto options = config.media;
@@ -74,18 +74,18 @@ int main(int argc, char** argv) {
         QJsonObject object{{"origin", argv[1]}, {"host", true}, {"nickname", "CliHost"}, {"name", "CLI media"},
             {"seconds", 15}, {"stream", stream}, {"password", "test-only-password"},
             {"changes", QJsonArray{QJsonObject{{"atMs", 3000}, {"stream", reduced}}}}};
-        Reject([&] { ParseRoomCliConfig(object); }); // Production cannot opt into plaintext.
+        Reject([&] { ParseRoomSessionConfig(object); }); // Production cannot opt into plaintext.
         auto malformed = object; malformed["unknown"] = true;
-        Reject([&] { ParseRoomCliConfig(malformed, true); });
+        Reject([&] { ParseRoomSessionConfig(malformed, true); });
         malformed = object; malformed["seconds"] = 1.5;
-        Reject([&] { ParseRoomCliConfig(malformed, true); });
+        Reject([&] { ParseRoomSessionConfig(malformed, true); });
         malformed = object; malformed["changes"] = QJsonArray{QJsonObject{{"stream", stream}}};
-        Reject([&] { ParseRoomCliConfig(malformed, true); });
+        Reject([&] { ParseRoomSessionConfig(malformed, true); });
         malformed = object; malformed["capture"] = QJsonObject{{"display", 0}, {"window", "0x1234"}};
-        Reject([&] { ParseRoomCliConfig(malformed, true); });
+        Reject([&] { ParseRoomSessionConfig(malformed, true); });
         malformed = object; malformed["origin"] = "https://user:password@example.com";
-        Reject([&] { ParseRoomCliConfig(malformed); });
-        const auto host = ParseRoomCliConfig(object, true);
+        Reject([&] { ParseRoomSessionConfig(malformed); });
+        const auto host = ParseRoomSessionConfig(object, true);
         std::mutex mutex; std::string roomId;
         std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
         }
         object["host"] = false; object["roomId"] = QString::fromStdString(joinedRoom); object["nickname"] = "CliViewer";
         object["seconds"] = 6; object.remove("changes");
-        const auto viewer = ParseRoomCliConfig(object, true);
+        const auto viewer = ParseRoomSessionConfig(object, true);
         auto frames = std::make_shared<LatestRoomVideoFrame>();
         auto audio = std::make_shared<proof::AudioEvidence>();
         unsigned original = 0, changed = 0;

@@ -1,5 +1,29 @@
 # Project Memory
 
+## Opt-in Qt v2 session window — 2026-09-16
+
+ScreenShareUi --room-v2 CONFIG.json uses RoomSessionWindow/QtRoomSession and the
+existing video widget/style. Shared config parsing was extracted from RoomCli to
+frontend/shared/RoomSessionConfig (ScreenShareRoomFrontend target); no duplicate
+CLI/UI parser remains. QtRoomSession is UI-thread-owned, polls local status only,
+coalesces edits into one in-flight + latest pending value, delivers latest NV12
+frames and asynchronously drains before finished/close. It supports scheduled
+changes, finite duration and reuse after stop. Normal destruction is after drain;
+destructor remains a synchronous fallback. Configured audio devices are real in
+production; tests inject silent synthetic PCM. Remote control is unavailable and
+no input handler/grant is installed. Normal room browser/create/join, saved
+profiles, directory integration, source switching and input remain outstanding.
+Read refactor/ROOM-UI.md. New offscreen room-v2-qt-ui test uses real widgets against
+the isolated Worker; explicit RoomUiWindowsTests adds WGC and actual presentation.
+Do not claim default cutover or latency/resource/NAT acceptance from these tests.
+Final suites pass app 18/18 Debug + Release and CLI-only Release 12/12, logs
+build/webrtc/room-ui-{app-debug,app-release,cli-release}.log. Final Windows UI proof
+passes outside sandbox in 2.72 s, 20 original + 20 changed frames with actual
+presentation and silent audio; artifact recorded in CHECKPOINT-B. UI proof covers
+invalid edits, 101 valid edits coalesced to one revision, close/drain, a held native
+barrier with Qt heartbeat progress, and owner reuse. Next: normal create/join and
+directory/profile integration, authenticated input/consent, source/budget work.
+
 ## Opt-in v2 CLI integration — 2026-09-16
 
 ScreenShare --room-v2 CONFIG.json now uses frontend/cli/RoomCli (strict parser,

@@ -1,5 +1,11 @@
 # Headless media checks
 
+`room-v2-qt-ui` exercises actual Qt host/viewer widgets offscreen against the local
+Worker, including coalesced edits, invalid settings, frame delivery and responsive
+asynchronous stop/close. It uses silent synthetic audio and programmatic widget
+actions, without physical input. [ROOM-UI.md](ROOM-UI.md) includes the explicit WGC
+and real-renderer variant; offscreen rendering does not substitute for that proof.
+
 The application suite includes `room-v2-cli-entry` (actual executable dispatch,
 HTTPS enforcement and secret-free errors) and `room-v2-cli-media` (shared CLI
 controller, local Worker, silent synthetic media, live changes, cancellation,

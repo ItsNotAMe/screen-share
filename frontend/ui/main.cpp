@@ -11,6 +11,9 @@
 #include "ui/QtSessionBackend.h"
 #include "ui/ScreenAwakeGuard.h"
 #include "ui/UpdateManager.h"
+#ifdef SCREENSHARE_HAS_ROOM_V2_UI
+#include "ui/RoomSessionWindow.h"
+#endif
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QByteArray>
@@ -997,6 +1000,13 @@ int main(int argc, char** argv)
     if (guiSmokeTest) {
         return 0;
     }
+
+#ifdef SCREENSHARE_HAS_ROOM_V2_UI
+    if (arguments.size() > 1 && arguments[1] == "--room-v2") {
+        if (arguments.size() != 3) { qCritical("Usage: ScreenShareUi --room-v2 CONFIG.json"); return 1; }
+        return RunRoomSessionWindow(arguments[2]);
+    }
+#endif
 
     AppShellWindow window;
 

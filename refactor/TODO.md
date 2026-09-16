@@ -67,9 +67,15 @@ The opt-in `ScreenShare --room-v2 CONFIG.json` frontend now uses the shared back
 for host/watch, source/audio selection, timed settings, status and graceful stop.
 Its viewer preview has a one-frame latest-value handoff and owner-thread NV12
 conversion/rendering. Synthetic and generated-window Windows scenarios validate
-the same CLI controller; see [ROOM-CLI.md](ROOM-CLI.md). UI/default adoption,
-zero-copy presentation, source switching, aggregate allocation, input and
-directory/profile integration remain; this milestone is not complete.
+the same CLI controller; see [ROOM-CLI.md](ROOM-CLI.md).
+
+The opt-in `ScreenShareUi --room-v2 CONFIG.json` window now uses the same parser,
+backend and existing video widget/style. Its Qt owner coalesces live edits, reports
+pending/applied/rejected settings, and drains asynchronously before window close.
+Offscreen and generated-window tests exercise actual widgets without physical
+input; see [ROOM-UI.md](ROOM-UI.md). Normal create/join and directory/profile flows,
+input consent/control, zero-copy presentation, source switching and aggregate
+allocation remain; this milestone is not complete and defaults are unchanged.
 
 ## 3. Gaming controls end to end (D)
 

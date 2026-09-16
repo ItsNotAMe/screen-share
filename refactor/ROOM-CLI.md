@@ -4,6 +4,9 @@
 Windows capture/audio runtime. Existing CLI commands and the UI remain on their
 current path until cutover acceptance. Requires the pinned native build and a
 Windows graphical session for capture/preview. No deployment is performed.
+The same configuration can now launch the opt-in Qt session window with
+`ScreenShareUi --room-v2 CONFIG.json`; see [ROOM-UI.md](ROOM-UI.md). Configuration
+validation lives in `frontend/shared/RoomSessionConfig`, shared by both frontends.
 
 Create a host configuration using your v2 service's HTTPS origin:
 
@@ -100,7 +103,7 @@ Status checks read local snapshots; they generate no service polling requests.
 
 The preview retains only the latest decoded frame and converts I420 to NV12 on the
 window thread. This bounds backlog and avoids rendering on decoder callbacks.
-This first frontend path uses CPU conversion; zero-copy presentation, UI adoption,
+This first frontend path uses CPU conversion; zero-copy presentation, default UI adoption,
 remote input, source switching, directory/profile persistence, aggregate bandwidth,
 ICE-server configuration and remote network/latency acceptance remain outstanding.
 
