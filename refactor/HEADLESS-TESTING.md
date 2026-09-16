@@ -1,5 +1,15 @@
 # Headless media checks
 
+`video-frame-input` now also tests the actual asynchronous presentation worker
+with an injected backend: three recoveries despite intervening good frames,
+250 ms drop-only backoff, fourth-failure exhaustion, nonrecoverable errors, explicit
+clear, owner-thread destruction and shutdown during backoff. A stalled renderer
+receives 1,000 retained frames; only the newest pending buffer survives and the
+999 replaced owners are released. It uses Qt offscreen and no physical input/audio.
+`RoomUiWindowsTests` additionally injects loss after real GPU presents, checks
+three resource recreations, terminal exhaustion and clear/reuse. These remain
+injected failures, not physical driver-removal acceptance.
+
 Presentation checks validate immutable NV12 ownership through the shared UI/CLI
 handoff: pointer identity on packed buffers, no `ToI420` call, padded-plane packing,
 I420 fallback, rotation rejection, 100-frame overwrite ownership and late-callback

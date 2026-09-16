@@ -1,5 +1,41 @@
 # Checkpoint B evidence
 
+## Integrated UI presentation recovery — 2026-09-16
+
+The actual VideoFrameWidget worker now uses the existing PresentationRecovery
+policy around attach/resize/present rather than resetting and retrying every
+exception forever. Three recoverable DXGI failures permit rebuilds with a 250 ms
+drop-only backoff; a fourth or nonrecoverable failure becomes terminal. Successful
+frames do not replenish the budget. Explicit session clear resets the budget and
+resources. The v2 window displays a leave/rejoin instruction while audio/controls
+remain available. No network requests, new media thread or frame queue were added.
+
+FramePresentationBackend is constructed/disposed on the worker and is injectable
+for desktop-free tests. The native backend preserves low-latency configuration,
+resize/scaling redraws and real presentation behavior. Window-handle validation
+belongs to the native backend so Qt offscreen handles do not bypass worker tests.
+
+Validation, silent synthetic audio and no physical input:
+- Full application suites: **19/19 Release (89.48s), Debug (90.35s)**.
+- The actual worker test covers success between failures, backoff with no renderer
+  calls, fourth-failure exhaustion, nonrecoverable failure, explicit clear/reuse,
+  owner-thread disposal and shutdown during backoff.
+- A stalled renderer receives 1,000 frames: exactly one pending frame remains,
+  999 overwritten buffers are released, and the final retained buffer drains.
+- Windows UI Release **12.588s**, Debug **13.833s**: typed failures injected after
+  actual GPU work trigger real teardown/recreation three times, terminal exhaustion,
+  clear/reuse and measured DXGI maximum-frame-latency 1.
+
+Artifacts:
+- `build/webrtc/recovery-tests-release.log`, `recovery-tests-debug.log`
+- `build/webrtc/recovery-windows-release/native-service-b71d059d-cc63-451e-a631-59181fd20b7e`
+- `build/webrtc/recovery-windows-debug/native-service-5618167f-54c5-450c-b6c9-65d0f7fb1ffc`
+
+These are injected failures with actual resource recreation, not physical driver
+removal or recovery from a driver call that never returns. Capture/encoder recovery,
+CLI preview recovery, physical-device acceptance and external latency remain open.
+The default application path and cutover gates are unchanged.
+
 ## Retained NV12 handoff and low-latency presentation — 2026-09-16
 
 UI and CLI now retain immutable packed decoder NV12 through a shared portable frame

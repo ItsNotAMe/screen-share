@@ -25,6 +25,8 @@
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
 #include "../tools/webrtc-proof/CaptureTestWindow.h"
 #include "core/WindowsMediaRuntime.h"
+#include "render/Nv12D3D11Presenter.h"
+#include <dxgi.h>
 HWND captureWindow = nullptr;
 #endif
 using namespace screenshare::media;
@@ -40,6 +42,51 @@ template<class F> void Wait(F condition, std::source_location where = std::sourc
         QCoreApplication::processEvents(); std::this_thread::sleep_for(1ms);
     }
 }
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+// Inject typed loss after actual GPU work, then let the production worker tear
+// down/recreate real resources. This is not a physical driver-removal test.
+class FaultingNativeRenderer final : public FramePresentationBackend {
+    std::unique_ptr<FramePresentationBackend> native_ = CreateNativeFramePresentation();
+    std::shared_ptr<std::atomic_bool> fail_;
+public:
+    explicit FaultingNativeRenderer(std::shared_ptr<std::atomic_bool> fail) : fail_(std::move(fail)) {}
+    bool Present(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
+        const screenshare::Nv12VideoFrame& frame) override {
+        const bool result = native_->Present(window, width, height, smooth, lowLatency, frame);
+        if (fail_->exchange(false)) throw screenshare::PresentationError(DXGI_ERROR_DEVICE_REMOVED, "Injected native loss");
+        return result;
+    }
+    void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency) override {
+        native_->Update(window, width, height, smooth, lowLatency);
+    }
+    void Reset() noexcept override { native_->Reset(); }
+    uint32_t MaximumFrameLatency() const noexcept override { return native_->MaximumFrameLatency(); }
+};
+void NativePresentationRecovery() {
+    auto fail = std::make_shared<std::atomic_bool>(false);
+    VideoFrameWidget widget(nullptr, [fail] { return std::make_unique<FaultingNativeRenderer>(fail); });
+    widget.resize(320, 180); widget.setLowLatency(true); widget.show();
+    auto send = [&] {
+        screenshare::Nv12VideoFrame frame; frame.width = 320; frame.height = 180;
+        frame.nv12.resize(320 * 180 * 3 / 2, 128); Check(widget.setVideoFrame(std::move(frame)));
+    };
+    Wait([&] { send(); return widget.presentedFrameCount() >= 3; });
+    for (unsigned attempt = 1; attempt <= 3; ++attempt) {
+        *fail = true;
+        Wait([&] { send(); return widget.presentationStats().recoveries == attempt; });
+        const auto presented = widget.presentedFrameCount();
+        Wait([&] { send(); return widget.presentedFrameCount() >= presented + 3; });
+        Check(!widget.presentationStats().terminal && widget.presentationStats().maximumFrameLatency == 1);
+    }
+    *fail = true;
+    Wait([&] { send(); return widget.presentationStats().terminal; });
+    Check(widget.presentationStats().recoveries == 3);
+    widget.clearFrame(); Wait([&] { return !widget.presentationStats().terminal; });
+    const auto presented = widget.presentedFrameCount();
+    Wait([&] { send(); return widget.presentedFrameCount() >= presented + 3; });
+    Check(widget.presentationStats().recoveries == 0);
+}
+#endif
 QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
     return [audio](WindowsRoomRuntimeOptions windows) -> RoomRuntimeFactory {
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
@@ -384,6 +431,7 @@ int main(int argc, char** argv) {
         Check(argc == 2 || (argc == 3 && std::string(argv[2]) == "mutation-ack-delay"));
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
+        NativePresentationRecovery();
         proof::TestWindow capture; captureWindow = capture.handle();
 #endif
         if (argc == 3) MutationAcknowledgementScenario(argv[1]);

@@ -6,6 +6,10 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — current work
 
+UI renderer recovery is now integrated and bounded (three rebuilds, 250 ms backoff,
+terminal rejoin message), with actual worker pressure tests and real GPU recreation
+under injected loss. Physical driver/device loss acceptance remains open.
+
 UI/CLI packed NV12 handoff now retains immutable decoder buffers directly and
 uses measured one-frame/nonblocking DXGI presentation in v2. Remove no ownership
 barriers to chase zero-copy: hardware decode/GPU presentation and external latency

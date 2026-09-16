@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/ScreenShareSession.h"
+#include "ui/FramePresentationBackend.h"
 
 #include <QtGui/QImage>
 #include <QtWidgets/QWidget>
@@ -25,9 +26,11 @@ public:
         double lastPresentMs = 0.0;
         std::uint64_t presentErrors = 0;
         std::uint32_t maximumFrameLatency = 0;
+        std::uint64_t recoveries = 0;
+        bool terminal = false;
     };
 
-    explicit VideoFrameWidget(QWidget* parent = nullptr);
+    explicit VideoFrameWidget(QWidget* parent = nullptr, FramePresentationFactory factory = {});
     ~VideoFrameWidget() override;
 
     void setStatusText(const QString& text);

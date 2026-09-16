@@ -4,7 +4,17 @@ Saved: 2026-09-14. Implementation status: **Gate A passed for native integration
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
-## Latest integration: retained presentation — 2026-09-16
+## Latest integration: bounded UI presentation recovery — 2026-09-16
+
+- [x] Adopt the existing recovery policy in the actual UI worker, including attach,
+  resize and presentation errors; three lifetime rebuilds and 250 ms drop-only backoff.
+- [x] Stop nonrecoverable/exhausted renderer calls and surface a rejoin instruction.
+- [x] Verify one-slot ownership under 1,000-frame pressure, owner-thread disposal,
+  successful-frame budget persistence, explicit clear and shutdown during backoff.
+- [x] Exercise injected loss with actual GPU resource recreation in Windows UI tests.
+- [ ] Validate physical driver removal/hangs and capture/encoder recovery acceptance.
+
+## Retained presentation — 2026-09-16
 
 - [x] Retain packed decoded NV12 through the actual UI/CLI without a planar round
   trip or second UI pixel copy; explicitly handle padded NV12 and other formats.

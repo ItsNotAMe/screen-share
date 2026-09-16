@@ -1,6 +1,7 @@
 #include "ui/VideoFrameWidget.h"
 
 #include "render/Nv12D3D11Presenter.h"
+#include "media/webrtc/PresentationRecovery.h"
 
 #include <QtGui/QPainter>
 #include <QtGui/QPaintEngine>
@@ -22,11 +23,39 @@
 #include <thread>
 #include <utility>
 
+class NativeFramePresentation final : public FramePresentationBackend {
+    screenshare::Nv12D3D11Presenter presenter_;
+    bool lowLatency_ = false;
+public:
+    bool Present(HWND window, uint32_t width, uint32_t height, bool smooth,
+        bool lowLatency, const screenshare::Nv12VideoFrame& frame) override {
+        if (!window || !IsWindow(window)) { Reset(); return false; }
+        Update(window, width, height, smooth, lowLatency);
+        const auto pixels = frame.pixels();
+        return presenter_.TryPresent({frame.width, frame.height, pixels.data(), pixels.size()});
+    }
+    void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency) override {
+        if (!window || !IsWindow(window)) { Reset(); return; }
+        if (lowLatency_ != lowLatency) {
+            presenter_.Reset(); presenter_.SetLowLatency(lowLatency); lowLatency_ = lowLatency;
+        }
+        presenter_.Attach(window);
+        presenter_.Resize(width, height);
+        presenter_.SetLinearSampling(smooth);
+    }
+    void Reset() noexcept override { presenter_.Reset(); }
+    uint32_t MaximumFrameLatency() const noexcept override { return presenter_.maximumFrameLatency(); }
+};
+
+std::unique_ptr<FramePresentationBackend> CreateNativeFramePresentation() {
+    return std::make_unique<NativeFramePresentation>();
+}
+
 class D3DFramePresenter final {
 public:
-    D3DFramePresenter()
-        : worker_([this] {
-              run();
+    explicit D3DFramePresenter(FramePresentationFactory factory)
+        : worker_([this, factory = std::move(factory)] {
+              run(factory);
           })
     {
     }
@@ -99,6 +128,7 @@ public:
     {
         {
             std::scoped_lock lock(mutex_);
+            if (pendingFrame_) ++droppedFrames_;
             pendingFrame_.reset();
             queuedFrames_.store(0, std::memory_order_release);
             clearPending_ = true;
@@ -120,6 +150,8 @@ public:
         snapshot.queuedFrames = queuedFrames_.load(std::memory_order_acquire);
         snapshot.presentErrors = presentErrors_.load(std::memory_order_relaxed);
         snapshot.maximumFrameLatency = maximumFrameLatency_.load(std::memory_order_relaxed);
+        snapshot.recoveries = recoveries_.load(std::memory_order_relaxed);
+        snapshot.terminal = terminal_.load(std::memory_order_acquire);
         snapshot.lastPresentMs =
             static_cast<double>(lastPresentMicros_.load(std::memory_order_relaxed)) / 1000.0;
         snapshot.maxPresentMs =
@@ -156,10 +188,10 @@ private:
         }
     }
 
-    void run()
+    void run(const FramePresentationFactory& factory)
     {
-        screenshare::Nv12D3D11Presenter presenter;
-        bool lowLatency = false;
+        std::unique_ptr<FramePresentationBackend> presenter;
+        screenshare::media::PresentationRecovery recovery;
         for (;;) {
             Work work;
             {
@@ -191,39 +223,38 @@ private:
                 clearPending_ = false;
             }
 
+            if (work.clearPending) {
+                if (presenter) presenter->Reset();
+                recovery = {};
+                recoveries_ = 0;
+                maximumFrameLatency_ = 0;
+                terminal_ = false;
+            }
+            if (!work.frame && (!presenter || work.clearPending)) continue;
+            if (terminal_) { if (work.frame) ++droppedFrames_; continue; }
             try {
-                if (work.hwnd == nullptr || IsWindow(work.hwnd) == 0) {
-                    presenter.Reset();
+                if (work.hwnd == nullptr) {
+                    if (presenter) presenter->Reset();
+                    if (work.frame) ++droppedFrames_;
                     continue;
                 }
-
-                if (lowLatency != work.lowLatency) { presenter.Reset(); presenter.SetLowLatency(work.lowLatency); lowLatency = work.lowLatency; }
-                presenter.Attach(work.hwnd);
-                if (work.smoothPending) {
-                    presenter.SetLinearSampling(work.smoothScaling);
-                }
-                if (work.resizePending) {
-                    presenter.Resize(work.width, work.height);
-                }
-                if (work.clearPending) {
-                    // Watch pages and their native child HWND are reused across
-                    // rooms. Drop the swap chain at the session boundary so a
-                    // hidden-page resize cannot carry stale buffer dimensions
-                    // into the next room.
-                    presenter.Reset();
-                }
-                if (work.frame) {
-                    presenter.Resize(work.width, work.height);
-                    presenter.SetLinearSampling(work.smoothScaling);
+                {
                     const auto presentStarted = std::chrono::steady_clock::now();
-                    const auto pixels = work.frame->pixels();
-                    const bool presented = presenter.TryPresent(screenshare::Nv12D3D11Presenter::FrameView{
-                        work.frame->width,
-                        work.frame->height,
-                        pixels.data(),
-                        pixels.size(),
-                    });
-                    maximumFrameLatency_ = presenter.maximumFrameLatency();
+                    const bool presented = recovery.Present([&] {
+                        if (!presenter) presenter = factory ? factory() : CreateNativeFramePresentation();
+                        if (!presenter) throw std::runtime_error("Missing presentation backend");
+                        try {
+                            if (!work.frame) {
+                                presenter->Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
+                                return true;
+                            }
+                            return presenter->Present(work.hwnd, work.width, work.height,
+                                work.smoothScaling, work.lowLatency, *work.frame);
+                        } catch (...) { ++presentErrors_; throw; }
+                    }, [&] { if (presenter) presenter->Reset(); });
+                    recoveries_ = recovery.recoveries();
+                    maximumFrameLatency_ = presenter ? presenter->MaximumFrameLatency() : 0;
+                    if (!work.frame) continue;
                     if (!presented) { ++droppedFrames_; continue; }
                     const auto presentElapsed = std::chrono::steady_clock::now() - presentStarted;
                     const auto presentMicros = static_cast<std::uint64_t>(
@@ -234,8 +265,10 @@ private:
                     presentedFrames_.fetch_add(1, std::memory_order_relaxed);
                 }
             } catch (const std::exception&) {
-                ++presentErrors_;
-                presenter.Reset();
+                if (work.frame) ++droppedFrames_;
+                if (presenter) presenter->Reset();
+                maximumFrameLatency_ = 0;
+                terminal_ = true;
             }
         }
     }
@@ -253,6 +286,8 @@ private:
     bool stopping_ = false;
     bool lowLatency_ = false;
     std::atomic<std::uint64_t> presentErrors_{0};
+    std::atomic<std::uint64_t> recoveries_{0};
+    std::atomic_bool terminal_{false};
     std::atomic<std::uint32_t> maximumFrameLatency_{0};
     std::atomic<std::uint64_t> enqueuedFrames_{0};
     std::atomic<std::uint64_t> presentedFrames_{0};
@@ -343,11 +378,11 @@ QImage nv12ToRgb(const screenshare::SessionEvent::VideoFrame& frame)
 
 } // namespace
 
-VideoFrameWidget::VideoFrameWidget(QWidget* parent) : QWidget(parent)
+VideoFrameWidget::VideoFrameWidget(QWidget* parent, FramePresentationFactory factory) : QWidget(parent)
 {
     setObjectName("VideoFrameWidget");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    framePresenter_ = std::make_shared<D3DFramePresenter>();
+    framePresenter_ = std::make_shared<D3DFramePresenter>(std::move(factory));
     d3dSurface_ = new D3DVideoSurface(this);
     d3dSurface_->setGeometry(rect());
     // The D3D surface is a native child window, so it receives mouse/keyboard

@@ -1,5 +1,17 @@
 # Project Memory
 
+## UI presentation recovery — 2026-09-16
+
+VideoFrameWidget's existing worker now owns a FramePresentationBackend (factory
+injection for headless testing), uses PresentationRecovery for attach/resize/present,
+and stops renderer calls after three rebuilds/fourth failure or nonrecoverable error.
+Backoff drops frames for 250 ms; successes do not refresh the budget. clearFrame
+explicitly resets the budget, while resize/configuration changes do not. V2 UI
+shows a terminal rejoin instruction without stopping audio or room controls.
+Tests include actual worker ownership, 1,000-frame pressure, backoff/exhaustion,
+clear/reuse and actual GPU resource recreation after injected errors. Physical
+device removal and hung driver calls remain open. Keep all audio tests silent.
+
 ## Retained NV12 presentation — 2026-09-16
 
 backend/render/Nv12VideoFrame.h owns either a legacy moved vector or an immutable

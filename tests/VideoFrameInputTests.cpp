@@ -6,6 +6,118 @@
 
 #include <iostream>
 #include <vector>
+#include "render/Nv12D3D11Presenter.h"
+#include <dxgi.h>
+#include <chrono>
+#include <thread>
+#include <stdexcept>
+#include <source_location>
+
+namespace {
+using namespace std::chrono_literals;
+struct RendererEvidence {
+    std::atomic<HRESULT> failure{S_OK};
+    std::atomic<unsigned> calls{0}, resets{0};
+    std::atomic_bool destroyed{false}, wrongThread{false};
+    std::atomic_bool block{false}, entered{false};
+    std::thread::id owner;
+};
+class TestRenderer final : public FramePresentationBackend {
+    std::shared_ptr<RendererEvidence> state_;
+    void CheckThread() { if (std::this_thread::get_id() != state_->owner) state_->wrongThread = true; }
+public:
+    explicit TestRenderer(std::shared_ptr<RendererEvidence> state) : state_(std::move(state)) { state_->owner = std::this_thread::get_id(); }
+    ~TestRenderer() override { CheckThread(); state_->destroyed = true; }
+    bool Present(HWND, uint32_t, uint32_t, bool, bool, const screenshare::Nv12VideoFrame& frame) override {
+        CheckThread(); ++state_->calls;
+        if (state_->block) {
+            state_->entered = true;
+            while (state_->block) std::this_thread::sleep_for(1ms);
+        }
+        if (FAILED(state_->failure.load())) throw screenshare::PresentationError(state_->failure, "Injected renderer failure");
+        if (frame.pixels().size() != 6) throw std::runtime_error("Invalid test pixels");
+        return true;
+    }
+    void Update(HWND, uint32_t, uint32_t, bool, bool) override { CheckThread(); }
+    void Reset() noexcept override { CheckThread(); ++state_->resets; }
+    uint32_t MaximumFrameLatency() const noexcept override { return 1; }
+};
+template<class F> void Await(F predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (!predicate()) {
+        if (std::chrono::steady_clock::now() > deadline) throw std::runtime_error("Presentation worker timed out");
+        std::this_thread::sleep_for(1ms);
+    }
+}
+void Require(bool value, std::source_location where = std::source_location::current()) {
+    if (!value) throw std::runtime_error("Presentation recovery assertion failed at line " + std::to_string(where.line()));
+}
+void PresentationRecoveryScenario() {
+    auto state = std::make_shared<RendererEvidence>();
+    const auto mainThread = std::this_thread::get_id();
+    {
+        VideoFrameWidget widget(nullptr, [state] { return std::make_unique<TestRenderer>(state); });
+        widget.setLowLatency(true);
+        auto send = [&] {
+            screenshare::Nv12VideoFrame frame; frame.width = frame.height = 2; frame.nv12.resize(6);
+            Require(widget.presentVideoFrameAsync(std::move(frame)));
+            Await([&] { auto stats = widget.presentationStats(); return stats.enqueuedFrames == stats.presentedFrames + stats.droppedFrames; });
+        };
+        send(); Require(widget.presentationStats().presentedFrames == 1);
+        Require(state->owner != mainThread);
+        // A stalled renderer still has only one replaceable pending frame;
+        // replaced retained buffers are released immediately by the handoff.
+        state->block = true;
+        screenshare::Nv12VideoFrame blocked; blocked.width = blocked.height = 2; blocked.nv12.resize(6);
+        Require(widget.presentVideoFrameAsync(std::move(blocked)));
+        Await([&] { return state->entered.load(); });
+        bool bounded = true;
+        std::weak_ptr<const uint8_t> previous;
+        for (int frame = 0; frame < 1000; ++frame) {
+            auto owner = std::shared_ptr<const uint8_t>(new uint8_t[6]{}, std::default_delete<const uint8_t[]>());
+            screenshare::Nv12VideoFrame pending; pending.width = pending.height = 2;
+            pending.retainedPixels = owner; pending.retainedBytes = 6;
+            bounded &= widget.presentVideoFrameAsync(std::move(pending));
+            bounded &= previous.expired();
+            previous = owner;
+            bounded &= widget.presentationStats().queuedFrames == 1;
+        }
+        state->block = false; // Always release before assertions or widget destruction.
+        Await([&] { auto stats = widget.presentationStats(); return stats.enqueuedFrames == stats.presentedFrames + stats.droppedFrames; });
+        Await([&] { return previous.expired(); });
+        Require(bounded && widget.presentationStats().droppedFrames == 999);
+        for (unsigned failure = 1; failure <= 3; ++failure) {
+            state->failure = DXGI_ERROR_DEVICE_REMOVED;
+            send(); Require(widget.presentationStats().recoveries == failure);
+            const auto calls = state->calls.load();
+            // The actual worker drops new frames during backoff without invoking
+            // the renderer or retaining a failed frame for a later retry.
+            for (int frame = 0; frame < 10; ++frame) send();
+            Require(state->calls == calls);
+            state->failure = S_OK;
+            std::this_thread::sleep_for(260ms);
+            send(); Require(!widget.presentationStats().terminal);
+        }
+        state->failure = DXGI_ERROR_DEVICE_RESET;
+        send(); Await([&] { return widget.presentationStats().terminal; });
+        const auto calls = state->calls.load();
+        for (int frame = 0; frame < 100; ++frame) send();
+        Require(state->calls == calls && widget.presentationStats().recoveries == 3);
+        // Only an explicit session clear refreshes the lifetime recovery budget.
+        widget.clearFrame(); Await([&] { return !widget.presentationStats().terminal; });
+        state->failure = S_OK; send();
+        Require(widget.presentationStats().recoveries == 0);
+        state->failure = E_INVALIDARG; send();
+        Await([&] { return widget.presentationStats().terminal; });
+        Require(widget.presentationStats().recoveries == 0);
+        widget.clearFrame(); Await([&] { return !widget.presentationStats().terminal; });
+        state->failure = DXGI_ERROR_DEVICE_HUNG; send();
+        // Destruction below occurs during backoff; it must join without a timer
+        // sleep and destroy the backend on its owning worker.
+    }
+    Require(state->destroyed && !state->wrongThread);
+}
+}
 
 namespace {
 
@@ -22,6 +134,8 @@ bool Check(bool condition, const char* message)
 int main(int argc, char** argv)
 {
     QApplication application(argc, argv);
+    try { PresentationRecoveryScenario(); }
+    catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
     VideoFrameWidget widget;
     std::vector<screenshare::RemoteInputEvent> inputs;
     widget.setRemoteInputHandler([&](const screenshare::RemoteInputEvent& input) {

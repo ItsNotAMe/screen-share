@@ -6,6 +6,24 @@ window reuse the current stylesheet and VideoFrameWidget while exercising the
 shared v2 backend. Default-shell adoption remains part of milestone 2; the broader
 appearance/usability redesign stays after milestones 1–5.
 
+## Presentation recovery
+
+The shared video widget permits three device rebuilds per session, with a 250 ms
+drop-only backoff after each recoverable DXGI failure. Successful frames do not
+reset the budget. A fourth failure or a nonrecoverable error stops renderer calls;
+the v2 window shows an instruction to leave/rejoin while audio and room controls
+remain available. An explicit `clearFrame()` establishes a new presentation session
+and budget. Closing joins the worker without sleeping through a retry timer.
+
+The existing one-slot handoff remains bounded during recovery. Failed frames are
+released, never retried. Renderer construction, reset and destruction all run on
+the worker; `FramePresentationFactory` allows silent headless tests of the same
+worker. Presentation statistics expose recovery count and terminal state.
+
+Generated-window tests inject typed device loss after real GPU work and verify
+resource recreation, exhaustion, explicit clear and the one-frame DXGI limit.
+This does not establish recovery from physical driver removal or a hung driver call.
+
 ## Room browser and saved nickname
 
 `ScreenShareUi --room-v2-browser https://your-service.example` opens the v2 browser

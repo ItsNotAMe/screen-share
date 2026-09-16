@@ -103,6 +103,10 @@ retain the old output on replacement failure, and report independent application
 The UI/CLI now retain packed decoded NV12 directly through presentation, removing
 the NV12/I420 round trip and UI pixel copy. One-frame DXGI queue configuration and
 nonblocking present/drop accounting are tested with actual Windows renderers.
+The actual UI presentation worker now uses the shared three-rebuild/250 ms recovery
+policy, releases failed frames, stops on exhaustion/nonrecoverable errors, and
+reports a visible rejoin instruction. Headless pressure/failure tests and injected
+loss with real GPU resource recreation cover this path; physical driver loss remains open.
 Default-shell adoption, input consent/control, hardware decode/GPU zero-copy
 presentation and physical audio-device loss/recovery acceptance remain.
 This milestone is not complete and defaults are unchanged.

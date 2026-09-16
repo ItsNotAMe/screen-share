@@ -288,6 +288,16 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::Nv12VideoFrame frame) {
         video_->setVideoFrame(std::move(frame));
     };
+    if (!config.room.host && config.preview) {
+        auto* presentationStatus = new QTimer(this);
+        presentationStatus->setInterval(250);
+        connect(presentationStatus, &QTimer::timeout, this, [this, presentationStatus] {
+            if (!video_->presentationStats().terminal) return;
+            error_->setText("Video presentation failed. Leave and rejoin the room to retry. Audio and room controls remain available.");
+            presentationStatus->stop();
+        });
+        presentationStatus->start();
+    }
     session_.error = [this](const auto& message) { error_->setText(message); };
     session_.finished = [this](const auto&) { stop_->setEnabled(false); apply_->setEnabled(false); if (closing_) QTimer::singleShot(0, this, [this] { close(); }); };
     if (!session_.start(std::move(config))) { stop_->setEnabled(false); apply_->setEnabled(false); }
