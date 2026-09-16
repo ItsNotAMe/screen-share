@@ -1,5 +1,12 @@
 # Headless media checks
 
+`room-media-session` tests role-based membership, stale socket generations,
+peer-failure isolation without retry storms, asynchronous retirement/rejoin gates,
+cancelled pending peers, startup errors and event-count/byte-pressure termination.
+The authenticated four-viewer scenario now reports `shared_room_session: true`:
+its snapshots and SDP/ICE use the same session routing as the backend target.
+The coordinator advances it automatically; the diagnostic only observes progress.
+
 `media-engine-lifecycle` exercises ten native engine lifetimes, wrong-thread
 rejection, dependency validation, preserved ICE policy, partial-track rollback
 and reliable control/unreliable transient-channel policy. It also verifies native

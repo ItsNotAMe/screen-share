@@ -2,6 +2,15 @@
 
 ## Current integration evidence — 2026-09-16
 
+RoomMediaSession now composes authenticated snapshots/signals with RoomPeerRoster
+for both host and viewer. It runs under RoomSessionCoordinator, bounds events to
+256/512 KiB, retires on transport loss, filters generations and isolates rejected
+peer negotiation. RoomPeerRoster has readiness-gated pending additions: wait for
+HostPeerOwner snapshot removal AND native reference retirement before slot reuse.
+Pending adds retry; failed adds do not retry on profile updates. RoomMediaProof
+uses this shared routing instead of its manual packet/roster queue. Next is owned
+admission/start/join/stop/public facade integration, not rebuilding routing.
+
 MediaEngine now owns the native factory and network/worker threads on the
 signaling executor. RoomMediaProof uses its independent peer construction, host
 track attachment and channel policy; audio/codec implementations are injected.
@@ -15,8 +24,8 @@ do not mark milestone 1 complete.
 RoomSessionCoordinator now owns automatic room-to-signaling dispatch and bounded
 send-completion handling; RoomSignalCodec is shared production wire conversion.
 RoomMediaProof's wait loop only observes state. ICE restart completes during a
-five-second caller pause. Normal facade adoption and outer session composition
-extraction remain open; shared target is ScreenShareRoomSession.
+five-second caller pause. Normal facade adoption and runtime composition ownership
+remain open; shared target is ScreenShareRoomSession.
 
 RoomManagedPeer now joins authenticated negotiation to HostPeerOwner's scheduled
 recovery and capture-cleanup barriers in the four-peer scenario. Capture attachment

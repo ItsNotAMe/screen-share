@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -17,7 +18,9 @@ public:
     enum class Result { Applied, Ignored, Invalid };
     using Add = std::function<bool(const std::string&)>;
     using Remove = std::function<void(const std::string&)>;
-    RoomPeerRoster(Add add, Remove remove) : add_(std::move(add)), remove_(std::move(remove)) {}
+    using Ready = std::function<bool(const std::string&)>;
+    RoomPeerRoster(Add add, Remove remove, Ready ready = {})
+        : add_(std::move(add)), remove_(std::move(remove)), ready_(std::move(ready)) {}
     ~RoomPeerRoster() { Clear(); }
     RoomPeerRoster(const RoomPeerRoster&) = delete;
     RoomPeerRoster& operator=(const RoomPeerRoster&) = delete;
@@ -32,28 +35,53 @@ public:
         for (auto it = active_.begin(); it != active_.end();) {
             if (!std::binary_search(peers.begin(), peers.end(), it->first)) {
                 if (it->second) remove_(it->first);
+                pending_.erase(it->first);
                 it = active_.erase(it);
             } else ++it;
         }
         for (const auto& id : peers) if (!active_.contains(id)) {
-            bool added = false;
-            try { added = add_(id); } catch (...) {}
-            // Failed peers stay terminal until they leave/rejoin; unrelated
-            // profile/policy revisions must not cause offer/retry storms.
-            active_.emplace(id, added);
+            active_.emplace(id, false);
+            pending_.insert(id);
         }
+        RetryPending();
         revision_ = revision;
         return Result::Applied;
+    }
+    // Readiness gates asynchronous capture retirement. Only pending additions
+    // retry; failed Add remains terminal until authoritative leave/rejoin.
+    void RetryPending() {
+        for (auto it = pending_.begin(); it != pending_.end();) {
+            if (ready_ && !ready_(*it)) { ++it; continue; }
+            bool added = false;
+            try { added = add_(*it); } catch (...) {}
+            // Failed peers stay terminal until they leave/rejoin; unrelated
+            // profile/policy revisions must not cause offer/retry storms.
+            active_.at(*it) = added;
+            it = pending_.erase(it);
+        }
     }
     void TransportLost(uint64_t generation) {
         if (generation < generation_) return;
         Clear(); generation_ = generation; revision_.reset(); suspended_ = true;
     }
     size_t activeCount() const { return std::count_if(active_.begin(), active_.end(), [](const auto& p) { return p.second; }); }
-    size_t failedCount() const { return active_.size() - activeCount(); }
+    size_t failedCount() const { return active_.size() - activeCount() - pending_.size(); }
+    size_t pendingCount() const { return pending_.size(); }
+    bool contains(const std::string& peer) const {
+        const auto it = active_.find(peer);
+        return it != active_.end() && it->second;
+    }
+    void Fail(const std::string& peer) {
+        const auto it = active_.find(peer);
+        if (it == active_.end() || !it->second) return;
+        remove_(peer);
+        it->second = false;
+    }
 private:
-    void Clear() { for (const auto& [id, active] : active_) if (active) remove_(id); active_.clear(); }
+    void Clear() { for (const auto& [id, active] : active_) if (active) remove_(id); active_.clear(); pending_.clear(); }
     Add add_; Remove remove_;
+    Ready ready_;
+    std::set<std::string> pending_;
     std::map<std::string, bool> active_;
     uint64_t generation_ = 0;
     std::optional<uint64_t> revision_;

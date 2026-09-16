@@ -1,5 +1,43 @@
 # Checkpoint B evidence
 
+## Shared room/media session composition — 2026-09-16
+
+RoomMediaSession, in ScreenShareRoomSession, now consumes authenticated room
+snapshots and signals on signaling. Host sessions reconcile connected viewers;
+viewer sessions reconcile the connected host. The event queue is bounded to
+256 entries / 512 KiB. Socket generation and snapshot revision barriers reject
+stale updates; transport loss retires peers and requires a newer generation to
+resume. Closed/stopped or overflow-failed sessions cannot revive from later input.
+An invalid/rejected negotiation retires only its sender, and unrelated profile
+revisions do not create retry storms. Unknown/nonmember signals are ignored.
+
+RoomPeerRoster now distinguishes pending additions from failed ones. A readiness
+hook gates slot reuse until asynchronous capture cleanup and native retirement
+finish. Only pending additions retry on coordinator ticks. Authoritative removal
+or shutdown cancels pending additions; failed construction waits for leave/rejoin.
+Ready/Remove callbacks must not throw or reenter; Add owns cleanup on failure.
+
+The real four-viewer proof uses a host and four viewer RoomMediaSessions. Its
+diagnostic packet queue, role filtering and roster revision dispatcher have been
+removed. The coordinator services these sessions after capture retirement. Native
+construction hooks and media evidence remain in the proof. Viewer shutdown may
+precede host membership delivery; health checks now respect that suspended state.
+Production facades should create the session before opening its socket, route all
+socket events through OnEvent, and call Advance from the existing coordinator.
+
+Full media suites pass **32/32 Debug and Release**, application Release **13/13**,
+CLI-only Release **8/8**. Logs: `build/webrtc/room-session-debug.log`,
+`room-session-release-final.log`, `room-session-app.log`, `room-session-cli.log`.
+Dedicated tests cover pending rejoin, cancellation, failure isolation, stale events,
+terminal queue pressure and startup errors. These results establish correctness,
+not latency/resource acceptance or a deployed-service free-tier cost improvement.
+After final startup/terminal-close and pending-cancellation assertions, focused
+room-network/session/authenticated-media checks pass **3/3** in both configurations
+(Release 35.00 s, Debug 35.03 s; build Testing/Temporary/LastTest.log files).
+
+Still open: a public facade owning admission, start/join/stop, all native resources,
+recovery status and UI/CLI adoption. Normal application media remains legacy.
+
 ## Shared native engine and peer ownership — 2026-09-16
 
 MediaEngine and MediaPeer are production components in ScreenShareNegotiation,

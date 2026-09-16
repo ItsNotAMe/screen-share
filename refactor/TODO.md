@@ -63,10 +63,13 @@ independent peer creation, host track attachment and the three data-channel
 policies. The authenticated scenario uses it with injected codecs/audio endpoints.
 MediaPeer now owns each native peer's ICE lifecycle, negotiation, incoming video
 sink, bounded/validated channels and idempotent teardown. Diagnostic observers
-only collect frame/message evidence. Outer session composition still remains
-outside the engine. Next: move that composition into the normal facade's commands/status
-API, including recovery and user-visible state; factory extraction alone does
-not complete this milestone.
+only collect frame/message evidence. RoomMediaSession now owns host/viewer
+membership reconciliation, bounded authenticated signal routing, transport-loss
+retirement and pending rejoin barriers. The scenario supplies native construction
+hooks and uses the coordinator to advance these sessions automatically.
+Next: expose owned admission/start/join/stop and session status through the normal
+facade, including recovery and user-visible state. Public API adoption and complete
+runtime ownership remain; the shared internal session is not yet UI/CLI cutover.
 Do not add another event-pumping layer around the completed coordinator.
 
 - [ ] Complete the integrated media-session deliverable and headless scenarios.
