@@ -1,11 +1,17 @@
 # Opt-in shared-backend room UI
 
+These are explicit integration entry points, not a replacement visual design.
+The normal app still opens the existing AppShell. The opt-in browser and session
+window reuse the current stylesheet and VideoFrameWidget while exercising the
+shared v2 backend. Default-shell adoption remains part of milestone 2; the broader
+appearance/usability redesign stays after milestones 1–5.
+
 ## Room browser and saved nickname
 
 `ScreenShareUi --room-v2-browser https://your-service.example` opens the v2 browser
 without a configuration file. It offers a saved nickname, display/window capture
 selection, system/microphone audio, public/unlisted room creation, an optional room
-password, a pushed public list, and direct join by room ID. Choose a room and enter
+password, a pushed public list, and direct join by room ID or v2 link. Choose a room and enter
 its password when required, then join. Admission is one operation; the frontend
 does not issue a separate availability/password preflight.
 
@@ -24,8 +30,16 @@ control/bidirectional-character rules as the wire protocol. Invalid stored names
 fall back to Guest. Nicknames are display labels, not proof of identity. Passwords,
 room IDs, service URLs and membership tokens are not saved by this profile; the
 password field clears after launching a session. Room titles are rendered as plain
-table text. Nickname changes apply to future admissions; live profile mutation is
-still outstanding.
+table text. Saved nickname changes apply to future admissions; the session's live
+nickname control changes only the current membership.
+
+The session's **Copy room link** button copies `screenshare://room/v2/ROOM_ID`.
+Paste it into the browser's **Room ID or v2 link** field. Links contain only the
+versioned identifier, never passwords, membership tokens or a service address.
+The recipient must use the same configured service and enter any password separately.
+Links do not navigate a browser, launch the app through an OS protocol registration,
+or switch service origins. Unknown versions, percent-encoded IDs, credentials,
+queries and fragments are rejected locally before admission.
 
 Closing a session returns to the browser after media/network drain. Stop alone
 leaves the session window available for inspection; close it to return. Closing
@@ -68,8 +82,8 @@ fallback; owners should use stop/finished before destruction.
 
 Remote control is unavailable in this opt-in window; no input handler or control
 grant is installed. The opt-in browser above now supplies create/join, persisted
-nickname and pushed directory updates. The default application shell, room links
-and consent/input controls remain to migrate.
+nickname and pushed directory updates. The default application shell and
+consent/input controls remain to migrate.
 Source switching, aggregate bandwidth allocation, zero-copy
 presentation, NAT/ICE configuration and acceptance measurements also remain.
 This path is an integration preview, not milestone 2 completion or default cutover.
@@ -100,8 +114,13 @@ The real-Worker widget test covers live normalized nickname updates, stale polic
 conflicts, draft preservation/reload, pushed name/capacity/visibility changes,
 unauthorized/invalid edits and uninterrupted frames. A signaling barrier tests
 the public API's Busy bound and stop ordering deterministically, including resolving
-the pending result as Unconfirmed. The ten-second timeout branch is implemented
-but does not yet have a dedicated dropped-acknowledgement fixture.
+the pending result as Unconfirmed.
+
+`room-v2-mutation-ack-recovery` uses a test-only Worker subclass to delay the first
+acknowledgement beyond the production ten-second deadline while still committing
+and pushing state normally. It verifies Unconfirmed, no automatic retry, continuing
+video, an explicit subsequent mutation, and isolation of the first late reply while
+the second request is pending. Production Worker code and timing are unchanged.
 
 ## Headless and Windows checks
 

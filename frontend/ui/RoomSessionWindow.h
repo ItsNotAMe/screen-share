@@ -27,6 +27,8 @@ private:
     QPushButton *apply_, *stop_;
     VideoFrameWidget* video_;
     QLineEdit *nickname_, *name_;
+    QLineEdit* roomLink_;
+    QPushButton* copyLink_;
     QCheckBox* publicRoom_;
     QSpinBox* viewerLimit_;
     QLabel *members_, *roomUpdateState_;

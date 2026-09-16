@@ -1,4 +1,6 @@
 #include "ui/RoomSessionWindow.h"
+#include "shared/RoomLink.h"
+#include <QClipboard>
 #include "ui/VideoFrameWidget.h"
 #include "ui/UiStyle.h"
 #include "rtc_base/ssl_adapter.h"
@@ -38,6 +40,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     auto* layout = new QVBoxLayout(this);
     phase_ = new QLabel("Starting…"); phase_->setObjectName("roomPhase"); layout->addWidget(phase_);
     room_ = new QLabel; room_->setTextFormat(Qt::PlainText); room_->setTextInteractionFlags(Qt::TextSelectableByMouse); layout->addWidget(room_);
+    roomLink_ = new QLineEdit; roomLink_->setReadOnly(true); roomLink_->setObjectName("roomLink"); layout->addWidget(roomLink_);
+    roomLink_->setToolTip("Share with someone using the same service. Passwords must be shared separately.");
+    copyLink_ = new QPushButton("Copy room link"); copyLink_->setObjectName("copyRoomLink"); copyLink_->setEnabled(false); layout->addWidget(copyLink_);
+    connect(copyLink_, &QPushButton::clicked, this, [this] { if (!roomLink_->text().isEmpty()) QApplication::clipboard()->setText(roomLink_->text()); });
     error_ = new QLabel; error_->setObjectName("roomError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
     auto* roomForm = new QFormLayout;
     nickname_ = new QLineEdit; nickname_->setObjectName("liveNickname"); nickname_->setMaxLength(128);
@@ -109,6 +115,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     session_.statusChanged = [this, host = config.room.host](const auto& value) {
         phase_->setText(Phase(value.phase) + QString(" — %1 connected, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
         room_->setText("Room: " + QString::fromStdString(value.roomId));
+        roomLink_->setText(MakeRoomLink(QString::fromStdString(value.roomId)));
+        copyLink_->setEnabled(value.phase == RoomPhase::Active && !roomLink_->text().isEmpty());
         const bool editable = value.phase == RoomPhase::Active && !session_.roomUpdatePending();
         updateNickname_->setEnabled(editable); updatePolicy_->setEnabled(host && editable);
         nickname_->setEnabled(editable); name_->setEnabled(host && editable);

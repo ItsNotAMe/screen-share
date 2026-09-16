@@ -11,8 +11,12 @@ nickname-only persistence, hidden subscriptions and rapid hide/show replacement.
 Live nickname/policy changes are also checked during media delivery: stale revision
 conflicts, draft reload, pushed directory changes and unauthorized/invalid edits.
 A signaling barrier deterministically checks mutation queue bounds and pending
-result resolution during shutdown. The missing-ack timeout branch is not yet
-covered by a dedicated fault fixture; see [CHECKPOINT-B.md](CHECKPOINT-B.md).
+result resolution during shutdown. `room-v2-mutation-ack-recovery` delays replies
+past the real deadline, checking uncertainty, no automatic retry, late-response
+isolation and continued frames. Browser tests exercise copy/paste room links,
+credential/URL rejection and admission through the configured service. Clipboard
+checks run only in offscreen Qt, never against the real Windows clipboard.
+See [CHECKPOINT-B.md](CHECKPOINT-B.md).
 
 The application suite includes `room-v2-cli-entry` (actual executable dispatch,
 HTTPS enforcement and secret-free errors) and `room-v2-cli-media` (shared CLI

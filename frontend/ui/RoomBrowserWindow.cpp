@@ -1,4 +1,5 @@
 #include "ui/RoomBrowserWindow.h"
+#include "shared/RoomLink.h"
 #include "ui/UiStyle.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
@@ -44,10 +45,11 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     form->addRow("Capture", source_);
     audio_ = new QComboBox; audio_->addItems({"System audio", "Microphone"}); form->addRow("Audio", audio_);
     auto* create = new QPushButton("Create room"); create->setObjectName("createV2Room"); form->addRow(create);
-    roomId_ = new QLineEdit; roomId_->setObjectName("joinRoomId"); roomId_->setMaxLength(128); form->addRow("Room ID", roomId_);
+    roomId_ = new QLineEdit; roomId_->setObjectName("joinRoomId"); roomId_->setMaxLength(512); form->addRow("Room ID or v2 link", roomId_);
+    roomId_->setToolTip("Links use the service shown above. Enter the room password separately.");
     password_ = new QLineEdit; password_->setObjectName("roomPassword"); password_->setEchoMode(QLineEdit::Password); password_->setMaxLength(256);
     form->addRow("Room password (create or join)", password_);
-    auto* join = new QPushButton("Join by ID"); join->setObjectName("joinV2Room"); form->addRow(join); layout->addLayout(form);
+    auto* join = new QPushButton("Join room"); join->setObjectName("joinV2Room"); form->addRow(join); layout->addLayout(form);
     status_ = new QLabel; layout->addWidget(status_);
     error_ = new QLabel; error_->setObjectName("browserError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
     rooms_ = new QTableWidget(0, 4); rooms_->setObjectName("publicRooms"); rooms_->setHorizontalHeaderLabels({"Room", "Viewers", "Status", "Password"});
@@ -103,9 +105,10 @@ void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
 void RoomBrowserWindow::Launch(bool host) {
     if (active_ || closing_) return;
     const auto nickname = RoomProfile::normalizeNickname(nickname_->text());
-    if (!nickname || (!host && roomId_->text().trimmed().isEmpty())) { error_->setText("Enter a valid nickname and room ID when joining."); return; }
+    const auto roomId = ParseRoomReference(roomId_->text().trimmed());
+    if (!nickname || (!host && !roomId)) { error_->setText("Enter a valid nickname and room ID or v2 link when joining."); return; }
     QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", name_->text()},
-        {"roomId", host ? QString{} : roomId_->text().trimmed()}, {"password", password_->text()}, {"public", public_->isChecked()},
+        {"roomId", host ? QString{} : *roomId}, {"password", password_->text()}, {"public", public_->isChecked()},
         {"capture", QJsonObject::fromVariantMap(source_->currentData().toMap())},
         {"audio", QJsonObject{{"source", audio_->currentIndex() == 0 ? "system" : "microphone"}}}};
     // Window handles are strings at the shared configuration boundary.

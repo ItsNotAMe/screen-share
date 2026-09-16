@@ -1,5 +1,21 @@
 # Project Memory
 
+## Room links and acknowledgement fault coverage — 2026-09-16
+
+Shared RoomLink.h accepts raw IDs or strict screenshare://room/v2/ID references.
+Browser copy/paste and CLI configuration use the same parsing. No link can change
+the configured origin or carry secrets/query/fragment/encoded IDs. No OS protocol
+handler was registered. Clipboard tests are offscreen-only, never real Windows.
+The new room-v2-mutation-ack-recovery CTest uses the native Worker runner's explicit
+mutation-ack-delay mode: test-only subclass delays ack 1 by 12s and ack 2 by 4s,
+while production commits/state pushes continue. Real 10s timeout, Unconfirmed,
+no retry, late reply isolation and continued frames pass. This closes the earlier
+missing-ack fixture gap. Suites 19/19 Debug+Release; Windows browser/link and
+delayed-ack capture variants pass. See latest CHECKPOINT-B evidence.
+User asked whether the new windows replace the UI: explained these are opt-in
+backend integration screens using existing style/video widget. Normal AppShell is
+unchanged; default adoption remains milestone 2, visual redesign remains phase 6.
+
 ## Live room/profile mutations — 2026-09-16
 
 RoomSession exposes RoomPolicy/RoomMember, authoritative room revision and bounded

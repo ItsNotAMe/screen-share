@@ -7,6 +7,11 @@ Windows graphical session for capture/preview. No deployment is performed.
 The same configuration can now launch the opt-in Qt session window with
 `ScreenShareUi --room-v2 CONFIG.json`; see [ROOM-UI.md](ROOM-UI.md). Configuration
 validation lives in `frontend/shared/RoomSessionConfig`, shared by both frontends.
+Viewer `roomId` accepts either a raw identifier or `screenshare://room/v2/ROOM_ID`.
+The link never overrides `origin` and carries no password or membership token.
+Keep the service origin configured explicitly and supply any password separately.
+Unknown versions, embedded credentials, URL queries/fragments and encoded IDs fail
+local validation. The real-Worker CLI media test joins using this link form.
 
 Create a host configuration using your v2 service's HTTPS origin:
 

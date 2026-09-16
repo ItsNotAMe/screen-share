@@ -1,4 +1,6 @@
 #include "ui/RoomSessionWindow.h"
+#include "shared/RoomLink.h"
+#include <QClipboard>
 #include "ui/RoomBrowserWindow.h"
 #include "ui/VideoFrameWidget.h"
 #include "media/webrtc/NativeRoomRuntime.h"
@@ -129,6 +131,22 @@ void BrowserScenario(const QUrl& origin) {
     auto* list = viewer.findChild<QTableWidget*>("publicRooms");
     Check(list->rowCount() == 1 && list->item(0, 0)->text() == "<b>Plain room</b>" && list->item(0, 3)->text() == "Required");
     const auto hostAttempts = host.directory().connectionAttempts();
+    Wait([&] { return !host.activeSession()->findChild<QLineEdit*>("roomLink")->text().isEmpty(); });
+    const auto roomLink = host.activeSession()->findChild<QLineEdit*>("roomLink")->text();
+    Check(roomLink == MakeRoomLink(QString::fromStdString(host.activeSession()->session().status().roomId)));
+    Check(!roomLink.contains("browser-test-secret") && !roomLink.contains(origin.toString()));
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    // Offscreen Qt clipboard only. Never replace the user's real Windows clipboard.
+    host.activeSession()->findChild<QPushButton*>("copyRoomLink")->click(); Check(QApplication::clipboard()->text() == roomLink);
+#endif
+    for (const auto& invalid : {roomLink + "?password=secret", roomLink + "#token", QString("https://other.example/room"), QString("screenshare://user:secret@room/v2/id"), QString("screenshare://room/v3/id"), QString("screenshare://room/v2/%2e%2e")}) {
+        Check(!ParseRoomReference(invalid));
+        viewer.findChild<QLineEdit*>("joinRoomId")->setText(invalid); viewer.findChild<QPushButton*>("joinV2Room")->click();
+        Check(!viewer.activeSession() && !viewer.findChild<QLabel*>("browserError")->text().isEmpty());
+    }
+    Check(!ParseRoomReference(QString(129, 'x')) && !MakeRoomLink(roomLink).size());
+    const auto parsed = ParseRoomSessionConfig(QJsonObject{{"origin", origin.toString()}, {"roomId", roomLink}}, true);
+    Check(parsed.room.origin == origin.toString().toStdString() && parsed.room.roomId == host.activeSession()->session().status().roomId);
     viewer.findChild<QLineEdit*>("roomPassword")->setText("wrong-password"); list->selectRow(0);
     viewer.findChild<QPushButton*>("joinSelectedRoom")->click();
     Wait([&] { return viewer.activeSession() && viewer.activeSession()->session().status().phase == RoomPhase::Failed; });
@@ -136,7 +154,8 @@ void BrowserScenario(const QUrl& origin) {
     Wait([&] { return !viewer.activeSession() && viewer.isVisible() && viewer.directory().status().phase == Directory::Phase::Ready; });
     viewer.findChild<QLineEdit*>("roomNickname")->setText(" Browser viewer ");
     viewer.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret"); list->selectRow(0);
-    viewer.findChild<QPushButton*>("joinSelectedRoom")->click(); Check(viewer.activeSession());
+    viewer.findChild<QLineEdit*>("joinRoomId")->setText(roomLink);
+    viewer.findChild<QPushButton*>("joinV2Room")->click(); Check(viewer.activeSession());
     unsigned frames = 0; auto present = viewer.activeSession()->session().frameReady;
     viewer.activeSession()->session().frameReady = [&](auto frame) { ++frames; present(std::move(frame)); };
     Wait([&] { return frames >= 10 && !viewer.directory().running() && audit.status().rooms.size() == 1 && audit.status().rooms[0].viewers == 1; });
@@ -196,6 +215,39 @@ void BrowserScenario(const QUrl& origin) {
     // Production facade rejects plaintext without opening a connection.
     Directory secure; Check(!secure.Start(origin)); Check(secure.connectionAttempts() == 0 && secure.status().phase == Directory::Phase::Failed);
 }
+void MutationAcknowledgementScenario(const std::string& origin) {
+    RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
+    config.room.nickname = "Initial host"; config.room.name = "Acknowledgement recovery";
+    RoomSessionWindow host(config, Factory(std::make_shared<proof::AudioEvidence>()), true); host.show();
+    Wait([&] { return host.session().status().phase == RoomPhase::Active; });
+    config.room.host = false; config.room.roomId = host.session().status().roomId; config.room.nickname = "Viewer";
+    RoomSessionWindow viewer(config, Factory(std::make_shared<proof::AudioEvidence>()), true); viewer.show();
+    unsigned frames = 0; auto present = viewer.session().frameReady;
+    viewer.session().frameReady = [&](auto frame) { ++frames; present(std::move(frame)); };
+    Wait([&] { return frames >= 10 && host.session().status().members.size() == 2; });
+    const auto revision = host.session().status().revision;
+    std::vector<RoomUpdateResult> results;
+    auto notify = host.session().roomUpdated;
+    host.session().roomUpdated = [&](const auto& result) { results.push_back(result); notify(result); };
+    const auto started = std::chrono::steady_clock::now();
+    host.session().updateNickname("Committed without reply", revision);
+    Wait([&] { return host.session().status().revision == revision + 1; });
+    Check(host.session().roomUpdatePending());
+    Wait([&] { return results.size() == 1; });
+    Check(results[0].error == RoomUpdateError::Unconfirmed && std::chrono::steady_clock::now() - started >= 10s);
+    Check(host.findChild<QLabel*>("roomUpdateState")->text().contains("unknown"));
+    Check(host.session().status().revision == revision + 1 && frames >= 30); // No automatic mutation retry.
+    host.session().updatePolicy({"Reviewed second change", false, 4}, revision + 1);
+    Wait([&] { return host.session().status().revision == revision + 2; });
+    // First request's late response must not resolve the newer in-flight request.
+    Wait([&] { return std::chrono::steady_clock::now() - started >= 13s; });
+    Check(host.session().roomUpdatePending() && results.size() == 1);
+    Wait([&] { return results.size() == 2; });
+    Check(results[1].error == RoomUpdateError::None);
+    Check(host.session().status().revision == revision + 2 && viewer.session().status().policy.name == "Reviewed second change");
+    host.close(); viewer.close(); Wait([&] { return !host.session().running() && !viewer.session().running(); });
+    std::cout << "{\"passed\":true,\"missing_ack_timeout\":true,\"late_ack_isolated\":true,\"no_retry\":true,\"frames\":" << frames << "}\n";
+}
 int main(int argc, char** argv) {
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString&) {});
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
@@ -204,11 +256,13 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
-        Check(argc == 2);
+        Check(argc == 2 || (argc == 3 && std::string(argv[2]) == "mutation-ack-delay"));
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         proof::TestWindow capture; captureWindow = capture.handle();
 #endif
+        if (argc == 3) MutationAcknowledgementScenario(argv[1]);
+        else {
         RoomSessionConfig config; config.room.origin = argv[1]; config.room.host = true;
         config.room.nickname = "UiHost"; config.room.name = "UI media";
         config.media.preferences.resolution = ResolutionMode::Fixed;
@@ -273,6 +327,7 @@ int main(int argc, char** argv) {
         BrowserScenario(QUrl(QString::fromLocal8Bit(argv[1])));
         MutationLifecycle(argv[1]);
         std::cout << "{\"passed\":true,\"qt_ui\":true,\"browser\":true,\"directory_push\":true,\"nickname_persistence\":true,\"coalesced_settings\":true,\"responsive_stop\":true,\"restart_owner\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
+        }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL(); return result;
 }

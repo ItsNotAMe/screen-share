@@ -1,5 +1,37 @@
 # Checkpoint B evidence
 
+## Room links and delayed acknowledgement recovery — 2026-09-16
+
+Sessions expose a copyable `screenshare://room/v2/ROOM_ID` link. Browser admission
+and the shared CLI/config parser accept it without changing the configured origin.
+No password, membership token or service address is embedded. Strict validation
+rejects credentials, unknown versions, queries/fragments, encoded IDs and invalid
+identifier lengths before admission. Actual browser and CLI media tests join using
+the link; clipboard checks use offscreen Qt only, preserving the real clipboard.
+
+The previous missing-acknowledgement test gap is closed. A test-only Worker subclass
+delays mutation 1's acknowledgement for 12 seconds and mutation 2's for 4 seconds,
+while committing and pushing state immediately. The native session reaches its
+real ten-second deadline, reports Unconfirmed without retry, continues delivering
+frames and ignores the late first reply while the second request remains pending.
+Production service code and deadline values are unchanged. The fixture records its
+fault mode and bundle hash in each result artifact.
+
+Validation:
+- Application suites: **19/19 Release (81.81s), 19/19 Debug (83.95s)**.
+- Final CLI link-join media test: **6.89s Release, 6.90s Debug**.
+- Generated-window WGC/real-renderer Release browser/link scenario: **5.26s**,
+  `build/webrtc/room-links-windows-release/native-service-d841b74e-14a6-445d-959d-08ae5db3be85`.
+- Generated-window Debug delayed-ack media scenario: **15.61s**,
+  `build/webrtc/room-links-windows-debug/native-service-416fd520-538c-40c2-ab08-08aaa93a2180`.
+- Full-suite logs: `build/webrtc/room-links-{release,debug}-tests.log`.
+
+Tests used silent synthetic audio and no physical input. The Windows checks ran
+outside the capture-restricted sandbox. These are local integration checks, not
+remote latency, hardware-only, resource, NAT or service-cost acceptance. Default
+AppShell adoption remains open; opt-in windows reuse existing style/presentation
+and do not start the later visual redesign.
+
 ## Live nickname and room-policy integration — 2026-09-16
 
 The public RoomSession now exposes authoritative room revision, policy and members,

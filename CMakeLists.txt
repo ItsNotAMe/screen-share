@@ -577,6 +577,10 @@ if(SCREENSHARE_BUILD_QT_UI)
                         "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                         "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-ui-evidence" media)
                     set_tests_properties(room-v2-qt-ui PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+                    add_test(NAME room-v2-mutation-ack-recovery COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                        "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-mutation-evidence" media mutation-ack-delay)
+                    set_tests_properties(room-v2-mutation-ack-recovery PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
                 endif()
             endif()
         endif()

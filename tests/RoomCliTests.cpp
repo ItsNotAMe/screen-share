@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
             { std::lock_guard lock(mutex); joinedRoom = roomId; }
             std::this_thread::sleep_for(5ms);
         }
-        object["host"] = false; object["roomId"] = QString::fromStdString(joinedRoom); object["nickname"] = "CliViewer";
+        object["host"] = false; object["roomId"] = "screenshare://room/v2/" + QString::fromStdString(joinedRoom); object["nickname"] = "CliViewer";
         object["seconds"] = 6; object.remove("changes");
         const auto viewer = ParseRoomSessionConfig(object, true);
         auto frames = std::make_shared<LatestRoomVideoFrame>();

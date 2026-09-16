@@ -1,4 +1,5 @@
 #include "shared/RoomSessionConfig.h"
+#include "shared/RoomLink.h"
 #include <QJsonArray>
 #include <QUrl>
 #include <climits>
@@ -66,7 +67,11 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
     result.room.roomId = String(object, "roomId").toStdString(); result.room.nickname = String(object, "nickname").toStdString();
     result.room.name = String(object, "name").toStdString(); result.room.password = String(object, "password").toStdString();
     result.room.publicRoom = Boolean(object, "public", true); result.room.viewerLimit = Integer(object, "viewerLimit", 4, 1, 63);
-    if (!result.room.host && result.room.roomId.empty()) throw std::invalid_argument("Viewer requires roomId");
+    if (!result.room.host) {
+        const auto roomId = ParseRoomReference(QString::fromStdString(result.room.roomId));
+        if (!roomId) throw std::invalid_argument("Viewer requires a room ID or v2 room link");
+        result.room.roomId = roomId->toStdString();
+    }
     result.duration = std::chrono::seconds(Integer(object, "seconds", 0, 0, 86400)); result.preview = Boolean(object, "preview", true);
     result.media.preferences = Preferences(Object(object, "stream"));
     const auto capture = Object(object, "capture"); Keys(capture, {"display", "window", "fps"});

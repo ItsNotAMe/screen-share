@@ -83,7 +83,10 @@ Live session nickname and host policy edits now use bounded, acknowledged backen
 commands with revision conflicts, pushed member/policy state and explicit uncertain
 outcomes. UI drafts survive conflicts; directory names, capacity and visibility
 update through the existing push subscription while media keeps running.
-Default-shell adoption, room links, input consent/
+Versioned room-ID links now support copy/paste browser joins and shared CLI/config
+parsing without credentials or service switching. Delayed-ack fault coverage verifies
+the real timeout, no retry, late-response isolation and continued media.
+Default-shell adoption, input consent/
 control, zero-copy presentation, source switching and aggregate allocation remain.
 This milestone is not complete and defaults are unchanged.
 
