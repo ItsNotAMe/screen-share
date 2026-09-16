@@ -355,6 +355,52 @@ add_executable(ScreenShare
 
 target_compile_features(ScreenShare PRIVATE cxx_std_20)
 target_include_directories(ScreenShare PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
+if(TARGET ScreenShareRoomSession)
+    add_library(ScreenShareRoomCli STATIC frontend/cli/RoomCli.cpp)
+    target_include_directories(ScreenShareRoomCli PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
+    target_link_libraries(ScreenShareRoomCli PUBLIC ScreenShareCore ScreenShareRoomSession)
+    target_link_libraries(ScreenShare PRIVATE ScreenShareRoomCli)
+    target_compile_definitions(ScreenShare PRIVATE SCREENSHARE_HAS_ROOM_V2_CLI)
+    get_filename_component(_screenshare_cli_qt_bin "${Qt6_DIR}/../../../bin" ABSOLUTE)
+    find_program(SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE NAMES windeployqt6 windeployqt
+        PATHS "${_screenshare_cli_qt_bin}" NO_DEFAULT_PATH REQUIRED)
+    add_custom_command(TARGET ScreenShare POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE}"
+            "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:ScreenShare>"
+            "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
+            -DWINDEPLOYQT_HEADLESS=ON
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
+        COMMENT "Deploying Qt networking runtime next to ScreenShare.exe" VERBATIM)
+    if(BUILD_TESTING)
+        add_executable(RoomCliTests tests/RoomCliTests.cpp)
+        add_test(NAME room-v2-cli-entry COMMAND "${CMAKE_COMMAND}"
+            "-DEXECUTABLE=$<TARGET_FILE:ScreenShare>"
+            "-DOUTPUT_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/room-cli-entry"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RoomCliEntryTests.cmake")
+        set_tests_properties(room-v2-cli-entry PROPERTIES TIMEOUT 30)
+        add_test(NAME room-v2-cli-deployment COMMAND "${CMAKE_COMMAND}"
+            "-DEXECUTABLE=$<TARGET_FILE:ScreenShare>"
+            "-DOUTPUT_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/room-cli-deployment"
+            "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE}"
+            "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RoomCliDeploymentTests.cmake")
+        set_tests_properties(room-v2-cli-deployment PROPERTIES TIMEOUT 60)
+        target_link_libraries(RoomCliTests PRIVATE ScreenShareRoomCli)
+        add_dependencies(RoomCliTests RoomSocketTests)
+        # Explicit generated-window check; routine CTest stays headless and silent.
+        add_executable(RoomCliWindowsTests tests/RoomCliTests.cpp)
+        target_compile_definitions(RoomCliWindowsTests PRIVATE SCREENSHARE_WINDOWS_CLI_PROOF)
+        target_link_libraries(RoomCliWindowsTests PRIVATE ScreenShareRoomCli gdi32)
+        add_dependencies(RoomCliWindowsTests RoomSocketTests)
+        if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/node_modules/miniflare/package.json")
+            add_test(NAME room-v2-cli-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                "$<TARGET_FILE:RoomCliTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-cli-evidence" media)
+            set_tests_properties(room-v2-cli-media PROPERTIES TIMEOUT 90)
+        endif()
+    endif()
+endif()
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
     target_link_options(ScreenShare PRIVATE -static)

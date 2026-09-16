@@ -1,5 +1,15 @@
 # Headless media checks
 
+The application suite includes `room-v2-cli-entry` (actual executable dispatch,
+HTTPS enforcement and secret-free errors) and `room-v2-cli-media` (shared CLI
+controller, local Worker, silent synthetic media, live changes, cancellation,
+admission failure and bounded preview conversion). Use
+`ctest --test-dir build/sdk-app-release -R "^room-v2-cli-" --output-on-failure`
+after building. [ROOM-CLI.md](ROOM-CLI.md) documents reproducible finite runs and
+the explicit generated-window Windows capture/preview variant.
+`room-v2-cli-deployment` also stages the CLI alone in a fresh directory, verifies
+its Qt networking/TLS dependencies and executes entry validation there.
+
 Routine runs are silent: omit `-AudioDevice`. The runner explicitly resets the
 cached device-test option OFF, while retaining synthetic PCM/Opus checks that
 never play to speakers. Audible WASAPI tests require both `-AudioDevice` and

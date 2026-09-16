@@ -52,6 +52,9 @@ void PrintHelp()
     std::cout
         << "ScreenShare native C++ capture prototype\n\n"
         << "Usage:\n"
+#ifdef SCREENSHARE_HAS_ROOM_V2_CLI
+        << "  ScreenShare --room-v2 CONFIG.json  (opt-in v2 room media; see refactor/ROOM-CLI.md)\n"
+#endif
         << "  ScreenShare --list\n"
         << "  ScreenShare --self-test [--save-report PATH]\n"
         << "  ScreenShare --generate-access-code\n"

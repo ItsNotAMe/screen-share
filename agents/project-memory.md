@@ -1,5 +1,24 @@
 # Project Memory
 
+## Opt-in v2 CLI integration — 2026-09-16
+
+ScreenShare --room-v2 CONFIG.json now uses frontend/cli/RoomCli (strict parser,
+shared session controller, Windows factory) for host/watch, capture/audio choice,
+scheduled live preferences, NDJSON status and graceful Ctrl+C/window-close/timed
+stop. HTTPS only; no CLI plaintext bypass. Diagnostic loopback/factory injection
+are available only through the internal test API. LatestRoomVideoFrame retains
+one decoded frame; NV12 conversion/presentation runs on the owner thread. Real
+CLI audio is normal WASAPI; tests inject silent PCM endpoints. No physical input.
+Read refactor/ROOM-CLI.md for config/schema, tests and limitations. Existing UI and
+other CLI commands remain legacy. Next integration work is UI adoption, input,
+directory/profile, source switching, aggregate bandwidth and zero-copy presentation.
+Do not mark milestone 2 or latency/resource/NAT acceptance complete.
+Final suites: app 17/17 Debug + Release, CLI-only Release 12/12. CLI deploys Qt
+networking/TLS independently of tests/UI; fresh-directory deployment test passes.
+Windows CLI controller/capture/D3D preview proof passes outside sandbox, silent
+synthetic audio: 53 original + 63 reduced frames in 6.78 s; artifact path recorded
+in CHECKPOINT-B. Full logs build/webrtc/room-cli-{app-release,app-debug,only-release}.log.
+
 ## Routine tests must be silent
 
 User explicitly requested no audible sine during tests. Omit `-AudioDevice` from

@@ -1,6 +1,10 @@
 #include "cli/ScreenShareCLI.h"
 #include "core/WindowsMediaRuntime.h"
 #include <iostream>
+#ifdef SCREENSHARE_HAS_ROOM_V2_CLI
+#include "cli/RoomCli.h"
+#include <string_view>
+#endif
 
 int main(int argc, char** argv)
 {
@@ -10,5 +14,8 @@ int main(int argc, char** argv)
                   << std::hex << mediaRuntime.result() << '\n';
         return 1;
     }
+#ifdef SCREENSHARE_HAS_ROOM_V2_CLI
+    if (argc > 1 && std::string_view(argv[1]) == "--room-v2") return RunRoomCli(argc, argv);
+#endif
     return RunScreenShareCli(argc, argv);
 }

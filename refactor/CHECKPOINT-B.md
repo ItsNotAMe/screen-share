@@ -1,5 +1,47 @@
 # Checkpoint B evidence
 
+## Opt-in CLI host/viewer and bounded presentation — 2026-09-16
+
+`ScreenShare --room-v2 CONFIG.json` now routes to a separate frontend using the
+shared RoomSession/WindowsRoomRuntime. It supports host/join, display or window
+capture, audio source/device selection, stream preferences, ordered timed live
+changes, JSON status and responsive timed/console/window-close shutdown. Its
+configuration parser rejects unknown fields, wrong types, invalid preferences,
+oversized files and non-HTTPS production origins. Status/error output excludes
+passwords and membership credentials; cancellation preserves admission uncertainty.
+
+LatestRoomVideoFrame retains at most one decoded frame, replacing stale pending
+work. The preview owner converts the consumed frame to NV12 and renders through
+the existing D3D preview; decoder callbacks never render or queue unbounded frames.
+CPU conversion is intentional for this first integration; zero-copy presentation
+and measured gaming latency remain outstanding. Settings/status checks use local
+snapshots and do not introduce service polling.
+
+The same parser/controller is exercised against the isolated Worker with synthetic
+H.264/Opus, a mid-session 320x180 -> 160x90 update, source/sender revision reports,
+decoded pixel/NV12 validation, 100-frame presentation backlog replacement,
+cancellation and failed admission. Real executable entry tests verify dispatch,
+argument validation, production plaintext rejection and secret-free errors.
+The deployment check starts with only the CLI executable in a fresh directory,
+deploys and verifies Core/Network/WebSockets plus Windows TLS, and runs entry
+checks. CLI runtime deployment no longer relies on tests or the Qt UI target.
+
+Final application suites pass 17/17 in Release and Debug; CLI-only Release passes
+12/12. Logs: `build/webrtc/room-cli-app-release.log`, `room-cli-app-debug.log` and
+`room-cli-only-release.log`. All routine audio coverage uses silent endpoints.
+
+The explicit Windows variant passes with generated-window WGC capture and actual
+D3D preview presentation, silent synthetic audio and no physical input. Final
+Release evidence: 53 original-resolution and 63 reduced-resolution frames,
+6.78 s, at `build/webrtc/room-cli-windows-final/native-service-82755916-3ee6-4343-b16f-179c8866454f`.
+This ran outside the capture-restricted sandbox. It does not measure physical
+display latency or prove hardware-only codec use.
+
+Usage, configuration and reproducible commands: [ROOM-CLI.md](ROOM-CLI.md).
+Default UI/other CLI sessions remain legacy. This is opt-in frontend adoption,
+not milestone 2 closeout: UI/profile/directory, remote input, source switching,
+aggregate allocation, ICE-server configuration and all acceptance gates remain.
+
 ## Public live stream settings and silent tests — 2026-09-16
 
 RoomSession now accepts validated host settings through a bounded asynchronous

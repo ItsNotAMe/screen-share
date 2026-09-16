@@ -40,8 +40,8 @@ is needed by the backend.
 
 Evidence and scope: [CHECKPOINT-B.md](CHECKPOINT-B.md) and
 [HEADLESS-TESTING.md](HEADLESS-TESTING.md). This closes local composition/integration,
-not latency, resource, NAT/TLS, service-cost or cutover acceptance. Normal UI/CLI
-sessions remain legacy until milestone 2 adoption and the required acceptance gates.
+not latency, resource, NAT/TLS, service-cost or cutover acceptance. Default UI and
+existing CLI commands remain legacy until adoption and the required acceptance gates.
 
 - [x] Complete the integrated media-session deliverable and headless scenarios.
 
@@ -61,8 +61,15 @@ Integrated foundation: the public session accepts bounded host live-settings
 commands and exposes per-peer applied/source-observed revisions and rejection.
 The production runtime updates existing senders and gives joining peers the latest
 preferences. Four-viewer headless coverage exercises resolution/FPS/bitrate changes,
-restart/rejoin and invalid/unauthorized/stopped commands. UI/CLI adoption, capture
-reconfiguration, aggregate upload allocation and presentation remain in this batch.
+restart/rejoin and invalid/unauthorized/stopped commands.
+
+The opt-in `ScreenShare --room-v2 CONFIG.json` frontend now uses the shared backend
+for host/watch, source/audio selection, timed settings, status and graceful stop.
+Its viewer preview has a one-frame latest-value handoff and owner-thread NV12
+conversion/rendering. Synthetic and generated-window Windows scenarios validate
+the same CLI controller; see [ROOM-CLI.md](ROOM-CLI.md). UI/default adoption,
+zero-copy presentation, source switching, aggregate allocation, input and
+directory/profile integration remain; this milestone is not complete.
 
 ## 3. Gaming controls end to end (D)
 

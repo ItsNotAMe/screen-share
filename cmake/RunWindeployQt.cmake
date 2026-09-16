@@ -64,12 +64,14 @@ function(repair_qt_runtime_deploy qt_bin_dir)
     set(runtime_inputs)
     set(copied_core_runtime FALSE)
 
-    foreach(runtime_name IN ITEMS
-        Qt6Core${qt_runtime_suffix}.dll
-        Qt6Gui${qt_runtime_suffix}.dll
-        Qt6Svg${qt_runtime_suffix}.dll
-        Qt6Widgets${qt_runtime_suffix}.dll
-    )
+    set(runtime_modules Core Network WebSockets)
+    set(runtime_plugins tls networkinformation)
+    if(NOT WINDEPLOYQT_HEADLESS)
+        list(APPEND runtime_modules Gui Svg Widgets)
+        list(APPEND runtime_plugins platforms styles imageformats iconengines)
+    endif()
+    foreach(runtime_module IN LISTS runtime_modules)
+        set(runtime_name "Qt6${runtime_module}${qt_runtime_suffix}.dll")
         set(runtime_path "${qt_bin_dir}/${runtime_name}")
         copy_if_exists("${runtime_path}" "${target_dir}" copied_core_runtime)
         if(EXISTS "${target_dir}/${runtime_name}")
@@ -77,16 +79,11 @@ function(repair_qt_runtime_deploy qt_bin_dir)
         endif()
     endforeach()
 
-    foreach(plugin_name IN ITEMS
-        platforms
-        styles
-        imageformats
-        iconengines
-    )
+    foreach(plugin_name IN LISTS runtime_plugins)
         copy_qt_plugin_dir("${qt_plugin_root}" "${plugin_name}" "${target_dir}" runtime_inputs)
     endforeach()
 
-    if(NOT EXISTS "${target_dir}/platforms/qwindows${qt_runtime_suffix}.dll")
+    if(NOT WINDEPLOYQT_HEADLESS AND NOT EXISTS "${target_dir}/platforms/qwindows${qt_runtime_suffix}.dll")
         message(WARNING "Qt runtime repair did not find platforms/qwindows.dll; the UI may not open")
     endif()
 
