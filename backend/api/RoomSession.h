@@ -1,5 +1,6 @@
 #pragma once
 #include "media/RoomPeerSignal.h"
+#include "media/StreamPreferences.h"
 #include <functional>
 #include <future>
 #include <memory>
@@ -15,12 +16,26 @@ struct RoomOptions {
 enum class RoomPhase { Idle, Admitting, Connecting, Active, Reconnecting, Stopping, Stopped, Failed };
 enum class RoomError { None, Busy, Cancelled, Admission, Transport, Media };
 struct RoomResult { RoomError error = RoomError::None; bool outcomeUnconfirmed = false; };
+enum class StreamUpdateError { None, Invalid, Busy, Unavailable, Unsupported, Rejected };
+struct StreamUpdateResult { StreamUpdateError error = StreamUpdateError::None; uint64_t revision = 0; };
+struct PeerStreamStatus {
+    std::string peerId;
+    uint64_t appliedRevision = 0, observedRevision = 0;
+    bool rejected = false;
+    int width = 0, height = 0;
+};
+struct StreamStatus {
+    uint64_t requestedRevision = 0;
+    media::StreamPreferences preferences;
+    std::vector<PeerStreamStatus> peers;
+};
 struct RoomStatus {
     RoomPhase phase = RoomPhase::Idle;
     RoomError error = RoomError::None;
     uint64_t generation = 0;
     std::string roomId, peerId;
     size_t activePeers = 0, failedPeers = 0, pendingPeers = 0;
+    StreamStatus stream;
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
 // into the public control API. All runtime methods execute on owned signaling.
@@ -37,6 +52,8 @@ public:
     virtual void Remove(const std::string&) noexcept = 0;
     virtual bool Receive(const std::string&, media::RoomPeerSignal) = 0;
     virtual std::vector<std::string> FailedPeers() const { return {}; }
+    virtual StreamUpdateResult UpdateStreamPreferences(const media::StreamPreferences&) { return {StreamUpdateError::Unsupported}; }
+    virtual StreamStatus StreamSettings() const { return {}; }
     virtual std::shared_future<void> BeginStop() = 0;
 };
 struct RoomIdentity { bool host; std::string roomId, peerId; };
@@ -56,6 +73,10 @@ public:
     RoomSession(const RoomSession&) = delete;
     RoomSession& operator=(const RoomSession&) = delete;
     std::future<RoomResult> Start(RoomOptions);
+    // Host-only. Completion means accepted, not decoded/displayed remotely.
+    // Status exposes per-peer sender application and source-frame observation.
+    // At most one command is queued; callers may retry Busy with their latest value.
+    std::future<StreamUpdateResult> UpdateStreamPreferences(media::StreamPreferences);
     std::shared_future<void> Stop();
     RoomStatus Status() const;
 private:

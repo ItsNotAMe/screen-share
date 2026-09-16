@@ -33,6 +33,8 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
         webrtc::scoped_refptr<CaptureVideoSource> source;
         webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender;
         ViewerStreamSettings settings;
+        uint64_t attemptedRevision = 0;
+        bool settingsRejected = false;
         bool retired = false, removing = false;
     };
     v2::RoomIdentity identity_;
@@ -43,6 +45,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
     HostMediaSession capture_;
     std::future<HostOperationResult> starting_;
     uint64_t captureGeneration_ = 0, next_ = 0;
+    uint64_t settingsRevision_ = 2;
     std::map<std::string, std::unique_ptr<Entry>> peers_;
     std::set<std::string> failed_;
     // Destroy the registry before native entries it references.
@@ -85,7 +88,7 @@ public:
         entry->peer->candidateObserver = [raw](auto* candidate) { raw->negotiation->LocalCandidate(candidate); };
         if (identity_.host) {
             entry->source = webrtc::make_ref_counted<CaptureVideoSource>();
-            entry->source->Configure(options_.preferences, 1);
+            entry->source->Configure(options_.preferences, settingsRevision_ - 1);
             entry->peer->OpenHostChannels(*engine_);
             entry->sender = engine_->AttachHostMedia(*entry->peer->connection, entry->source, audio_);
         }
@@ -121,6 +124,26 @@ public:
         return entry.negotiation->Receive(std::move(signal));
     }
     std::vector<std::string> FailedPeers() const override { return {failed_.begin(), failed_.end()}; }
+    v2::StreamUpdateResult UpdateStreamPreferences(const StreamPreferences& preferences) override {
+        if (!identity_.host) return {v2::StreamUpdateError::Unsupported};
+        if (stopping_) return {v2::StreamUpdateError::Unavailable};
+        try { ValidateStreamPreferences(preferences); }
+        catch (const std::invalid_argument&) { return {v2::StreamUpdateError::Invalid}; }
+        options_.preferences = preferences;
+        return {v2::StreamUpdateError::None, ++settingsRevision_};
+    }
+    v2::StreamStatus StreamSettings() const override {
+        v2::StreamStatus result;
+        if (!identity_.host) return result;
+        result.requestedRevision = settingsRevision_; result.preferences = options_.preferences;
+        for (const auto& [id, entry] : peers_) {
+            if (entry->removing || entry->retired) continue;
+            const auto stats = entry->source->settingsStats();
+            result.peers.push_back({id, entry->settings.revision(), stats.observedRevision,
+                entry->attemptedRevision == settingsRevision_ && entry->settingsRejected, stats.width, stats.height});
+        }
+        return result;
+    }
     void Advance() override {
         if (stopped_) return;
         if (starting_.valid() && starting_.wait_for(0ms) == std::future_status::ready) {
@@ -167,9 +190,12 @@ public:
                 std::none_of(delivery.viewers.begin(), delivery.viewers.end(), [&](const auto& viewer) {
                     return viewer.viewer == entry.generation && viewer.connectionGeneration == entry.generation;
                 })) failed_.insert(it->first);
-            if (!entry.removing && identity_.host && entry.negotiation->ready() && !entry.settings.revision()) {
-                if (entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, 2) != SettingsApplyError::None)
-                    failed_.insert(it->first);
+            if (!entry.removing && identity_.host && entry.negotiation->ready() && entry.attemptedRevision != settingsRevision_) {
+                entry.attemptedRevision = settingsRevision_;
+                entry.settingsRejected = entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, settingsRevision_) != SettingsApplyError::None;
+                // A live update rejection preserves the previously working sender.
+                // An initial rejection cannot satisfy the initial stream contract.
+                if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
             }
             ++it;
         }

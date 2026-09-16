@@ -1,6 +1,26 @@
 # Project Memory
 
+## Routine tests must be silent
+
+User explicitly requested no audible sine during tests. Omit `-AudioDevice` from
+routine proof runs; the runner resets that cached CMake option OFF. Device tests
+now additionally require `-AllowAudibleTests`; do not opt in without the user's
+request. Synthetic PCM/Opus evidence still runs without speaker playback. Do not
+change the user's system volume. Generated-window public-session tests also use
+synthetic audio.
+
 ## Current integration evidence — 2026-09-16
+
+Latest increment: public RoomSession::UpdateStreamPreferences is bounded to one
+queued command, validates input and returns accepted revision; RoomStatus.stream
+has requested preferences and per-peer applied/source-observed revisions,
+dimensions and rejection. NativeRoomRuntime applies live revisions once per peer,
+preserves prior settings on live sender rejection and gives new joins latest
+preferences. Public four-viewer proof covers reduced decoded resolution, restore,
+restart/rejoin, invalid/viewer/stopped commands. Silent media suites 31/31 Debug
+and Release, app 14/14; Windows generated-window Release proof passes in 9.96 s.
+Final Release public proof after stopped-status cleanup passes in 7.28 s. Evidence in
+CHECKPOINT-B. UI/CLI adoption, capture reconfiguration and aggregate budget remain.
 
 Milestone 1 is now complete for local integration; move to milestone 2 UI/CLI,
 live settings and presentation adoption. NativeRoomRuntime replaces the diagnostic

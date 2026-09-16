@@ -1,5 +1,18 @@
 # Headless media checks
 
+Routine runs are silent: omit `-AudioDevice`. The runner explicitly resets the
+cached device-test option OFF, while retaining synthetic PCM/Opus checks that
+never play to speakers. Audible WASAPI tests require both `-AudioDevice` and
+`-AllowAudibleTests`; only use them when the user requests audible testing.
+Older commands below containing `-AudioDevice` describe historical device runs.
+
+The public session proof also updates all four live viewers to fixed 320x180,
+20 FPS and a manual 1 Mbps limit, verifies applied/source-observed revisions and
+decoded reduced frames, restarts a peer, rejoins with the updated preferences,
+then restores 640x360/30 FPS/Auto bitrate. It rejects invalid preferences, viewer
+settings commands and commands after Stop. This checks correctness, not remote
+latency or achieved bitrate/FPS. Source-observed is not a remote presentation ack.
+
 The public-session scenario now uses NativeRoomRuntime itself; only source/audio
 dependencies and evidence collection are diagnostic. It includes an authenticated
 restart request, fresh rejoin and a single-viewer delivery failure while healthy

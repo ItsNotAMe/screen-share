@@ -37,12 +37,15 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<bool> failDelivery{false};
     std::atomic<bool> restart{false};
     std::atomic<unsigned> offers{0};
+    std::atomic<unsigned> smallFrames{0};
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     void OnFrame(const webrtc::VideoFrame& frame) override {
         auto pixels = frame.video_frame_buffer()->ToI420();
-        if (frame.width() != 640 || frame.height() != 360 || !pixels ||
+        const bool reducedFrame = frame.width() == 320 && frame.height() == 180;
+        if ((!reducedFrame && (frame.width() != 640 || frame.height() != 360)) || !pixels ||
             pixels->DataY()[pixels->StrideY() * (pixels->height() / 2) + pixels->width() / 2] < 35) ++invalid;
         ++frames;
+        if (reducedFrame) ++smallFrames;
     }
 };
 // Only synthetic dependencies and evidence remain diagnostic-owned.
@@ -90,6 +93,8 @@ public:
         return native_->Receive(id, std::move(signal));
     }
     std::vector<std::string> FailedPeers() const override { return native_->FailedPeers(); }
+    StreamUpdateResult UpdateStreamPreferences(const StreamPreferences& preferences) override { return native_->UpdateStreamPreferences(preferences); }
+    StreamStatus StreamSettings() const override { return native_->StreamSettings(); }
     void Advance() override {
         try {
             native_->Advance();
@@ -150,6 +155,26 @@ int main(int argc, char** argv) {
             Check(joined.error == RoomError::None);
         }
         Wait([&] { for (auto& value : evidence) if (value->frames < 45 || value->audio->audibleBlocks < 20) return false; return host.Status().activePeers == 4; });
+        StreamPreferences live;
+        live.resolution = ResolutionMode::Fixed; live.width = 320; live.height = 180;
+        live.fps = 20; live.bitrateMode = SettingMode::Manual; live.bitrateLimitBps = 1000000;
+        auto invalidPreferences = live; invalidPreferences.width = 319;
+        const auto originalRevision = host.Status().stream.requestedRevision;
+        auto invalidUpdate = host.UpdateStreamPreferences(invalidPreferences);
+        Check(Get(invalidUpdate).error == StreamUpdateError::Invalid);
+        Check(host.Status().stream.requestedRevision == originalRevision);
+        auto viewerUpdate = viewers[0]->UpdateStreamPreferences(live);
+        Check(Get(viewerUpdate).error == StreamUpdateError::Unsupported);
+        auto update = host.UpdateStreamPreferences(live); const auto accepted = Get(update);
+        Check(accepted.error == StreamUpdateError::None && accepted.revision > originalRevision);
+        Wait([&] {
+            const auto status = host.Status().stream;
+            if (status.peers.size() != 4) return false;
+            for (const auto& peer : status.peers)
+                if (peer.rejected || peer.appliedRevision != accepted.revision || peer.observedRevision != accepted.revision || peer.width != 320 || peer.height != 180) return false;
+            for (const auto& value : evidence) if (value->smallFrames < 10) return false;
+            return true;
+        });
         const unsigned restartingBefore = evidence[0]->frames, healthyBefore = evidence[1]->frames;
         evidence[0]->restart = true;
         Wait([&] { return evidence[0]->offers >= 2 && evidence[0]->frames >= restartingBefore + 30 && evidence[1]->frames >= healthyBefore + 30; });
@@ -160,7 +185,18 @@ int main(int argc, char** argv) {
         evidence[3] = std::make_shared<Evidence>();
         viewers[3] = std::make_unique<RoomSession>(factory(evidence[3]), true);
         auto rejoining = viewers[3]->Start(options); Check(Get(rejoining).error == RoomError::None);
-        Wait([&] { return host.Status().activePeers == 4 && evidence[3]->frames >= 30 && evidence[3]->audio->audibleBlocks >= 20; });
+        Wait([&] { return host.Status().activePeers == 4 && evidence[3]->smallFrames >= 30 && evidence[3]->audio->audibleBlocks >= 20; });
+        live.width = 640; live.height = 360; live.fps = 30;
+        live.bitrateMode = SettingMode::Auto; live.bitrateLimitBps.reset();
+        auto restore = host.UpdateStreamPreferences(live); const auto restored = Get(restore);
+        Check(restored.error == StreamUpdateError::None && restored.revision > accepted.revision);
+        Wait([&] {
+            const auto status = host.Status().stream;
+            if (status.peers.size() != 4) return false;
+            for (const auto& peer : status.peers)
+                if (peer.rejected || peer.appliedRevision != restored.revision || peer.observedRevision != restored.revision || peer.width != 640) return false;
+            return true;
+        });
         auto leaveAgain = viewers[3]->Stop(); Get(leaveAgain);
         Wait([&] { return host.Status().activePeers == 3; });
         Check(retiredEvidence->destroyed == 1);
@@ -177,6 +213,8 @@ int main(int argc, char** argv) {
 #endif
         auto stopping = host.Stop(); auto sameStop = host.Stop(); Get(stopping); Get(sameStop);
         Check(hostEvidence->destroyed == 1 && host.Status().phase == RoomPhase::Stopped);
+        auto stoppedUpdate = host.UpdateStreamPreferences(live);
+        Check(Get(stoppedUpdate).error == StreamUpdateError::Unavailable);
         for (auto& viewer : viewers) { auto done = viewer->Stop(); Get(done); }
         unsigned frames = 0;
         for (auto& value : evidence) { Check(value->invalid == 0 && value->destroyed == 1); frames += value->frames; }

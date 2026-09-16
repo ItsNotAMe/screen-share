@@ -20,6 +20,7 @@ struct RoomSession::Impl {
         mutable std::mutex mutex;
         RoomStatus status;
         bool started = false, stopQueued = false, scheduled = false, stopping = false;
+        bool settingsQueued = false;
         std::promise<void> stoppedPromise;
         std::shared_future<void> stopped = stoppedPromise.get_future().share();
         std::shared_ptr<std::promise<RoomResult>> startReply;
@@ -77,10 +78,12 @@ struct RoomSession::Impl {
                 session->Advance();
             } catch (...) { terminal = true; terminalError = RoomError::Media; Schedule(); return; }
             const auto current = session->status();
+            const auto stream = runtime->StreamSettings();
             {
                 std::lock_guard lock(mutex);
                 status.activePeers = current.activePeers; status.failedPeers = current.failedPeers;
                 status.pendingPeers = current.pendingPeers; status.generation = current.generation;
+                status.stream = stream;
             }
             if (current.state == RoomMediaSession::State::Failed) { terminal = true; terminalError = RoomError::Media; Schedule(); }
         }
@@ -125,7 +128,8 @@ struct RoomSession::Impl {
                 } catch (...) { Phase(RoomPhase::Failed, RoomError::Media); }
                 session.reset(); runtime.reset(); coordinator.reset(); membership = {};
                 { std::lock_guard lock(mutex); if (status.error == RoomError::None) status.phase = RoomPhase::Stopped;
-                  status.activePeers = status.failedPeers = status.pendingPeers = 0; }
+                  status.activePeers = status.failedPeers = status.pendingPeers = 0;
+                  status.stream.peers.clear(); }
                 stoppedPromise.set_value(); return;
             }
             if (terminal) { BeginStop(terminalError); return; }
@@ -200,6 +204,33 @@ std::future<RoomResult> RoomSession::Start(RoomOptions options) {
             } catch (...) { state->BeginStop(RoomError::Admission); }
         });
     }
+    return future;
+}
+std::future<StreamUpdateResult> RoomSession::UpdateStreamPreferences(media::StreamPreferences preferences) {
+    auto reply = std::make_shared<std::promise<StreamUpdateResult>>(); auto future = reply->get_future();
+    try { media::ValidateStreamPreferences(preferences); }
+    catch (const std::invalid_argument&) { reply->set_value({StreamUpdateError::Invalid}); return future; }
+    auto state = impl_->state;
+    std::lock_guard lock(state->mutex);
+    if (state->stopQueued || state->status.phase != RoomPhase::Active) {
+        reply->set_value({StreamUpdateError::Unavailable}); return future;
+    }
+    if (state->settingsQueued) { reply->set_value({StreamUpdateError::Busy}); return future; }
+    state->settingsQueued = true;
+    // One bounded settings command plus Start/Stop cannot exhaust the executor.
+    impl_->executor.Post([state, reply, preferences] {
+        StreamUpdateResult result{StreamUpdateError::Unavailable};
+        StreamStatus stream;
+        try {
+            if (!state->stopping && state->runtime) {
+                result = state->runtime->UpdateStreamPreferences(preferences);
+                stream = state->runtime->StreamSettings();
+            }
+        } catch (...) { result.error = StreamUpdateError::Rejected; }
+        { std::lock_guard lock(state->mutex); state->settingsQueued = false;
+          if (result.error == StreamUpdateError::None) state->status.stream = std::move(stream); }
+        reply->set_value(result);
+    });
     return future;
 }
 std::shared_future<void> RoomSession::Stop() {

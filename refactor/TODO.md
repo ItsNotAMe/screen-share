@@ -57,6 +57,13 @@ and supported behavior. Do not change the default before required coverage exist
 
 - [ ] Complete UI/CLI adoption and settings/profile/presentation integration.
 
+Integrated foundation: the public session accepts bounded host live-settings
+commands and exposes per-peer applied/source-observed revisions and rejection.
+The production runtime updates existing senders and gives joining peers the latest
+preferences. Four-viewer headless coverage exercises resolution/FPS/bitrate changes,
+restart/rejoin and invalid/unauthorized/stopped commands. UI/CLI adoption, capture
+reconfiguration, aggregate upload allocation and presentation remain in this batch.
+
 ## 3. Gaming controls end to end (D)
 
 **Deliverable:** authorized mouse/keyboard/gamepads over encrypted data channels,

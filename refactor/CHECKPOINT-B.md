@@ -1,5 +1,38 @@
 # Checkpoint B evidence
 
+## Public live stream settings and silent tests — 2026-09-16
+
+RoomSession now accepts validated host settings through a bounded asynchronous
+command (one queued update; Busy tells callers to retry their latest choice).
+Requests after stop/before Active are Unavailable; viewer runtimes return
+Unsupported. Successful acceptance returns a monotonic runtime revision. Status
+publishes desired preferences and each peer's sender-applied/source-observed
+revision, current source dimensions and rejection. Acceptance does not claim
+remote decode/presentation. Stop clears peer observations after media drains.
+
+NativeRoomRuntime applies each revision once per ready sender. Existing peers keep
+their prior working sender on live rejection, without a 5 ms retry loop; the next
+explicit revision can retry. Initial failure still retires the affected peer.
+New joins inherit the latest preferences. No renegotiation or room rebuild is
+required, and the existing manual bitrate policy never installs a bitrate floor.
+This changes per-viewer adaptation, not capture-device configuration or aggregate
+bandwidth allocation. Increasing output FPS cannot exceed available capture FPS.
+
+The public four-viewer proof changes to 320x180/20 FPS/manual 1 Mbps, checks all
+sender/source revisions and reduced decoded frames, restarts, rejoins at the new
+resolution, restores 640x360/30 FPS/Auto, and checks invalid/viewer/stopped commands.
+Release and Debug media suites pass 31/31 with audio-device tests OFF; application
+Release passes 14/14. Final Release public-session rerun after clearing stopped
+peer status passes in 7.28 s. Logs: `build/webrtc/live-settings-{release,debug,app}.log`.
+The Windows WGC variant passes outside the sandbox with synthetic audio in 9.96 s:
+`build/webrtc/live-settings-windows-release/native-service-6ca5748f-03e3-452a-b069-7ba2de39dcbd`.
+
+The runner rejects `-AudioDevice` unless `-AllowAudibleTests` is also supplied;
+the rejection was checked before configuration/device startup. Routine runs omit
+both and retain synthetic audio decoding coverage without speaker output.
+No latency, achieved bitrate/FPS, resource, NAT/TLS or service-cost gate is closed
+by these tests. Normal UI/CLI still use the legacy session pending adoption.
+
 ## Production runtime composition and Windows binding — 2026-09-16
 
 NativeRoomRuntime replaces PublicRoomSessionProof's diagnostic peer/capture owner.

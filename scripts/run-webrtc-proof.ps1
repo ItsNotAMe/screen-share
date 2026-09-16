@@ -5,6 +5,7 @@ param(
     [switch]$NoUi,
     [switch]$Hardware,
     [switch]$AudioDevice,
+    [switch]$AllowAudibleTests,
     [switch]$LiveCapture,
     [string]$ArtifactDirectory,
     [string]$BuildDirectory,
@@ -12,6 +13,7 @@ param(
     [switch]$Package
 )
 $ErrorActionPreference = 'Stop'
+if ($AudioDevice -and -not $AllowAudibleTests) { throw 'Device-audio tests play a tone. Explicitly pass -AllowAudibleTests to permit speaker output; omit -AudioDevice for silent synthetic audio coverage.' }
 if ($NoUi -and -not $Application) { throw '-NoUi requires -Application.' }
 $repoRoot = Split-Path -Parent $PSScriptRoot
 function Resolve-RepoPath([string]$Value) {
