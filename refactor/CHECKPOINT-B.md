@@ -1,5 +1,47 @@
 # Checkpoint B evidence
 
+## Reconciled implementation checks and production regression matrix — 2026-09-17
+
+Audited DETAIL-CHECKS.md against the implemented public facade/runtime, opt-in
+frontends, settings and the existing checkpoint evidence. Updated its stale saved
+date/current-next-action and reconciled older entries that still claimed facade,
+peer/signaling composition, playback, stream modes, aggregate allocation, profile/
+links or presentation were unimplemented. Split mixed implementation/acceptance
+requirements instead of marking broader hardware/network/resource gates complete.
+Default-shell cutover, gaming input, GPU zero-copy/hardware decode, physical device
+loss, +76/+10 capture-handle regressions, service-cost and external latency stay open.
+
+Added scripts/test-room-regression.py to run production app scenarios as one silent
+batch: real room-service integration, shared CLI media, actual offscreen UI,
+delayed-mutation-ack recovery and the actual presentation worker. Optional --desktop
+adds generated WGC/GPU CLI/UI checks; --repeat repeats complete rounds. Each case
+uses the existing native-to-Worker fixture and retains its metrics/hashed evidence.
+The matrix does not rebuild, change app defaults or invoke physical audio tests.
+
+The runner uses a stdin-gated bootstrap assigned to a Windows kill-on-close Job
+before launching children. Success/failure/timeout/cancellation closes the entire
+tree, including orphan descendants. Assignment failure launches no test children.
+There is a 90-second outer watchdog, 1 MiB retained-log bound, fail-fast behavior,
+non-overwriting evidence directories and JSON results even after orchestration
+failure. Fixture failures remain linked to their native evidence. Executable,
+fixture, runner and Worker-bundle hashes make artifacts identifiable.
+
+Validation:
+- Six runner tests passed: exit propagation, runaway output, descendant cleanup
+  on timeout and success, silent matrix selection and fail-fast JSON/log preservation.
+- Two complete Release rounds with --desktop: **14/14 cases, 118.741s**.
+  `build/webrtc/room-regression-release-20260917/result.json`
+- One fully headless Debug round: **5/5 cases, 36.458s**.
+  `build/webrtc/room-regression-debug-20260917/result.json`
+- Final runner revision, headless Release: **5/5 cases, 35.606s**.
+  `build/webrtc/room-regression-final-20260917/result.json`
+
+All audio remained synthetic/silent; desktop controls targeted only generated
+test HWNDs. Repeated independent scenarios are not a continuous soak, and native
+hosts/viewers still share a process within each scenario. Scripted authorized gaming
+input, network impairment, remote TLS/NAT and external latency remain untested here.
+Usage and failure-path test commands are in HEADLESS-TESTING.md.
+
 ## Shared UI/CLI presentation backend and complete preview lifecycle — 2026-09-17
 
 Moved FramePresentationBackend and the common recovery policy into backend/render.

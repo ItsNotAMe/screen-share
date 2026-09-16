@@ -1,5 +1,23 @@
 # Project Memory
 
+## Reconciled checks and production regression runner — 2026-09-17
+
+DETAIL-CHECKS.md has been reconciled beyond its latest-update blocks: old facade,
+peer, stream-settings, profile/link and opt-in integration entries now match the
+implemented code/evidence. Mixed requirements are split; physical/device/resource,
+gaming input, default-shell, cost and external-latency gates remain unchecked.
+Do not treat historical continuation notes as instructions to rebuild completed work.
+
+scripts/test-room-regression.py runs app-build VideoFrameInputTests, RoomServiceTests,
+RoomCliTests, RoomUiTests and delayed-ack UI scenario as one silent matrix. --repeat
+restarts full rounds; --desktop adds generated-window UI/CLI GPU tests (no physical
+input/audio). Requires Python 3.11+, Node and Worker dev dependencies. The Windows
+bootstrap is gated until assigned to a kill-on-close job; all descendants are cleaned
+even after successful parent exit. Fail fast, 90s outer watchdog, bounded retained
+logs, no overwritten evidence, hashes/fixture metrics in result.json. It supplements
+the lower-level test-headless-media.py; no separate native processes, impairment,
+gaming input or continuous-soak claim. Unit tests cover actual child-tree cleanup.
+
 ## Shared UI/CLI presentation — 2026-09-17
 
 FramePresentationBackend.h/.cpp and PresentationRecovery.h now live in backend/render;

@@ -45,6 +45,12 @@ existing CLI commands remain legacy until adoption and the required acceptance g
 
 - [x] Complete the integrated media-session deliverable and headless scenarios.
 
+`scripts/test-room-regression.py` now runs the production room/UI/CLI and mutation
+recovery scenarios as one silent matrix, with repeated rounds, process-tree cleanup,
+bounded logs and hashed JSON evidence. Generated Windows capture/GPU tests are an
+explicit `--desktop` extension. Separate native host/viewer processes, scripted
+authorized input, network impairment and continuous soak acceptance remain open.
+
 ## 2. Complete user experience (B + D)
 
 **Deliverable:** existing UI and CLI use the shared v2 backend, including capture/

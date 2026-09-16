@@ -15,6 +15,8 @@ The shared scheduled room facade, authenticated media composition, opt-in UI/CLI
 live directory/profile/policy, source/audio/playback changes, aggregate allocation
 and retained NV12 handoff are integrated. UI and CLI now share a backend-owned
 renderer/session with bounded recovery; the duplicate CLI GPU pipeline is removed.
+The detailed checklist is reconciled, and test-room-regression.py runs the complete
+silent production UI/CLI/service scenario matrix with process-tree watchdogs.
 Do not rebuild those foundations or return to manual SDP relays/polling.
 Normal AppShell/legacy CLI cutover remains gated; later visual redesign follows
 milestones 1–5.

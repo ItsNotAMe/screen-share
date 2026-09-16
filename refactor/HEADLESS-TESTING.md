@@ -1,5 +1,53 @@
 # Headless media checks
 
+## Production room regression — one command
+
+After building the application test targets and installing signaling-worker dev
+dependencies, run (Python 3.11+ and Node.js required):
+
+```powershell
+python scripts/test-room-regression.py build/sdk-app-release build/webrtc/room-regression-new
+```
+
+This runs the actual presentation worker, native room/service integration, shared
+CLI media controller, actual offscreen Qt widgets and delayed-mutation-ack recovery.
+Every native room case uses the local production Worker through the existing
+loopback-only fixture. Audio is synthetic and silent. No mouse/keyboard operation
+is needed; default mode does not open desktop capture/presentation windows.
+
+Use `--repeat 3` for complete repeated rounds. Add `--desktop` to include both
+generated-window WGC/GPU UI and CLI scenarios; this requires a Windows desktop/GPU
+session but remains silent and uses no physical input. Build directories select
+Release/Debug; the runner never rebuilds or changes application defaults. It does
+not include physical audio tests and has no audible-test switch.
+
+Each case has a 90-second outer watchdog in addition to the fixture's 60-second
+native watchdog. On Windows, a stdin-gated bootstrap joins a kill-on-close Job
+before it can launch Node/native/Worker children. Closing the job cleans up the
+whole tree on success, failure, timeout or cancellation. If job assignment fails,
+no test child launches. Retained runner logs are capped at 1 MiB; runaway output
+fails the case. The first failure stops further cases/rounds. Existing evidence
+directories are rejected rather than overwritten.
+
+`result.json` includes pass/fail, per-case timing/logs, executable/runner/fixture
+hashes, nested Worker evidence and scenario metrics. Failed fixture evidence is
+linked too. Logs, native executable hashes and Worker-bundle hashes stay in the
+case directory. Repeated rounds restart scenarios; they are not a continuous
+two-hour soak. Native hosts/viewers still share a process within each scenario.
+No gaming input, network impairment, remote TLS/NAT, physical driver loss or
+external latency acceptance is claimed.
+
+Runner failure-path verification:
+
+```powershell
+python scripts/test_room_regression_tests.py
+```
+
+This checks exit propagation, log flooding, timeout and successful-exit descendant
+cleanup, silent/default scenario selection and fail-fast evidence preservation.
+
+## Component and scenario coverage
+
 UI/CLI presentation now shares `backend/render/FramePresentationBackend` and
 `FramePresentationSession`. The existing `video-frame-input` worker scenarios
 exercise that shared policy. The Windows CLI scenario additionally covers real

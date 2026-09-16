@@ -1,8 +1,15 @@
 # Backend v2 — detailed checks and historical evidence
 
-Saved: 2026-09-14. Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-17 (through `95b423a`, plus the regression-runner batch). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
+
+Checked implementation rows below apply to the shared v2 backend and opt-in
+frontends, not default-shell cutover or field acceptance. Mixed requirements are
+split into completed implementation and remaining validation. All original
+physical-device, resource, network, cost, latency and cutover gates remain open
+until their own evidence passes. Dated continuation notes at the end are historical;
+the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
 
 ## Latest integration: shared UI/CLI presentation — 2026-09-17
 
@@ -68,11 +75,12 @@ Evidence: [CHECKPOINT-B.md](CHECKPOINT-B.md). Milestone 2 is still open.
   support cancellation of process-loopback activation and safely own its event.
 - [x] Verify decoded silence/resume with four viewers and actual widgets, continuing
   video, failed selection, Busy, timeout, shutdown and owner-thread destruction.
-- [ ] Validate physical audio-device switches/unplug/recovery and implement live
-  playback-device selection. Synthetic proofs do not establish physical latency.
+- [x] Implement live playback-device selection through session/UI/CLI; see viewer playback above.
+- [ ] Validate physical audio-device switches/unplug/recovery. Synthetic proofs do not establish physical latency.
 
 Evidence and timings: [CHECKPOINT-B.md](CHECKPOINT-B.md). Remaining grouped work is
-tracked in [TODO.md](TODO.md); older rows below are historical, not new batch goals.
+tracked in [TODO.md](TODO.md). The checkpoint rows below are reconciled requirements;
+dated continuation notes preserve historical evidence rather than defining new batch goals.
 
 ## Start/resume instructions
 
@@ -85,7 +93,7 @@ tracked in [TODO.md](TODO.md); older rows below are historical, not new batch go
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Complete the grouped room-backed session milestone and shared UI/CLI facade integration.** Authenticated four-viewer media now uses RoomPeerNegotiation, the owned RoomNetwork loop and RoomPeerRoster membership reconciliation. Backend and frontend sources are split into root-level folders. Automatic cross-executor facade dispatch, asynchronous capture-cleanup barriers, recovery budgets and public session events remain open; see [CHECKPOINT-B.md](CHECKPOINT-B.md). Investigate the closeout handle-growth failures (+76 full-cycle / +10 rapid-close handles) before production cutover. Full resource, field and release acceptance remain open. See [CLOSEOUT-A.md](CLOSEOUT-A.md) and the matched-measurement scorecard in [COMPARISON.md](COMPARISON.md).
+Current next action: **Finish the remaining grouped adoption/input and acceptance milestones in TODO.md.** Public RoomSession, NativeRoomRuntime, automatic dispatch, asynchronous capture drain, recovery ownership and opt-in UI/CLI integration are implemented. Remaining work includes gaming input/consent, hardware decode/GPU zero-copy, default-shell adoption and physical-device/resource/remote acceptance. The +76/+10 capture-handle regressions remain blockers before cutover. See [CHECKPOINT-B.md](CHECKPOINT-B.md), [CLOSEOUT-A.md](CLOSEOUT-A.md) and [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -93,22 +101,21 @@ Current next action: **Complete the grouped room-backed session milestone and sh
   send completion and media hooks on signaling, without a diagnostic event pump.
   Shared RoomSignalCodec replaces diagnostic-only SDP/ICE conversion; restart
   finishes while the caller makes no commands/status queries for five seconds.
-- [ ] Extract the remaining peer-factory/session composition into the production
-  engine and adopt the normal facade's public commands/status using these owners.
+- [x] Extract peer-factory/session composition into NativeRoomRuntime and adopt public RoomSession commands/status in opt-in UI/CLI. Default-shell adoption remains under D.
 
 - [x] Owned room networking with bounded cross-thread queues, cancellation and
   no caller Qt event pump; validated by RoomNetworkTest and real four-viewer media.
 - [x] Shared roster reconciliation drives peer creation/removal in the real-room
   proof, including socket loss/reconnect, kick/rejoin and room closure.
-- [ ] Integrate those owners into automatic normal-facade dispatch with asynchronous
-  capture cleanup, media recovery budgets and public operation/status events.
+- [x] Integrate owners into scheduled RoomSession dispatch, asynchronous capture cleanup, shared recovery budgets and public command/status reporting.
 
 - [x] RoomManagedPeer integrates capture-attachment futures, scheduled recovery
   and asynchronous retirement in the real-room scenario. HostPeerOwner.BeginStop
   keeps signaling responsive while capture drains; a held-callback test validates
-  retention and repeated completion. Normal facade adoption remains the open item.
+  retention and repeated completion. Public facade adoption is now implemented; default-shell adoption remains open.
 
-- [ ] On continuation, implement headless live-session scenario tooling alongside production integration: one-command smoke/regression runs, paced media, scripted test-owned control events, network constraints, machine-readable metrics and watchdog cleanup. See PLAN.md's headless testing requirement. Distinguish fully headless coverage from unattended WGC tests requiring a desktop/GPU.
+- [x] Add one-command production room/UI/CLI regression with repeated paced media, machine-readable evidence, bounded logs and process-tree watchdog cleanup. See HEADLESS-TESTING.md; generated WGC/GPU windows remain an explicit desktop option.
+- [ ] Extend those scenarios with authorized test-owned gaming input, network impairment and separate host/viewer processes.
 
 Resumed at user request on 2026-09-15. See [HEADLESS-TESTING.md](HEADLESS-TESTING.md) for the first runnable headless smoke/regression commands.
 
@@ -188,93 +195,100 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 - [x] Add a portable owning peer registry with restart/close dispatch, terminal failure snapshots, bounded membership and generation validation; drive actual four-peer ownership through it.
 - [x] Bind peer failure/removal to asynchronous capture cleanup, retry queue pressure, retain the connection identity until cleanup completes, and join capture before full peer-owner shutdown.
-- [x] Connect the bound peer owner to the shared application signaling executor with automatic deadline/restart, ready-operation and capture-cleanup scheduling. Real-peer proof integration does not yet replace the UI/CLI facade.
+- [x] Connect the bound peer owner to the shared application signaling executor with automatic deadline/restart, ready-operation and capture-cleanup scheduling. The same owner is now composed by NativeRoomRuntime and the public facade.
 
 - [x] Implement portable host capture/membership coordinator with operation IDs, session generations, bounded command queue, priority cancellation, isolated failed subscribers and joined capture/delivery teardown.
 - [x] Route four-peer headless capture membership through the coordinator; test 100 restarts, stale operations and stop under queue pressure.
-- [ ] Extend coordinator ownership to peer/signaling generations, settings/events, audio and the production facade. The host capture subset does not complete the broader lifecycle tasks below.
+- [x] Extend coordinator ownership to peer/signaling generations, settings/events, audio and the production RoomSession facade; see the public-session and runtime-composition evidence in CHECKPOINT-B.md.
 
 - [ ] Investigate the current-binary closeout resource regressions: full 100-cycle handles 386 → 462; rapid-close 20-cycle handles 329 → 339. Both exceed the bound of 8. Do not remove the existing MTA/dispatcher/module-lifetime mitigations without evidence.
 
 - [ ] Verify complete production teardown without retained callbacks, textures, sockets or audio devices; account for native/driver caches separately. Carried from A integration-proof checklist, not marked passed.
 
-- [ ] Implement the separated session, media, capture/audio, presentation, input and diagnostic interfaces.
-- [ ] Keep Windows/WebRTC types out of portable public headers.
-- [ ] Add profile, room policy, stream preferences, viewer status, operation result, session snapshot and owned frame types.
-- [ ] Implement the serialized control executor and session/viewer generations.
-- [ ] Implement state transitions, idempotent stop, cancellation and complete thread/resource shutdown.
-- [ ] Prevent callbacks from old generations and UI/worker shutdown deadlocks.
-- [ ] Preserve update-only settings without resetting unrelated fields.
-- [ ] Add a synthetic video/audio diagnostic harness using the same backend.
+- [x] Separate session, media, capture/audio, presentation and diagnostic boundaries.
+- [ ] Complete the v2 input service and authorized input boundaries.
+- [x] Keep Windows/WebRTC types out of the v2 public RoomSession control API and portable settings/status/frame ownership types. Native render/capture adapters remain explicitly Windows-specific.
+- [x] Add profile, room policy, stream preferences, per-peer status, operation results, session snapshots and owned frame types.
+- [x] Implement the serialized control executor and session/viewer generations.
+- [x] Implement state transitions, idempotent asynchronous stop, cancellation and joined owner-thread shutdown.
+- [ ] Pass complete production resource acceptance; the capture handle-growth failures remain open.
+- [x] Reject stale-generation callbacks and test held-callback/queue-pressure cancellation and asynchronous UI close. Hung native-driver calls remain a separate acceptance limitation.
+- [x] Preserve update-only settings without resetting unrelated fields.
+- [x] Add synthetic video/audio scenarios using the same public session/native runtime as opt-in frontends.
 
 ### PeerConnections
 
 - [x] Move asynchronous SDP create/local-apply/remote-apply into a shared application/proof library with typed operation results, cancellation, weak callbacks, single-operation admission and SDP bounds; remove the proof's old description observers.
 - [x] Provide an owned signaling event loop in the shared application/proof library with bounded admission, typed completion/cancellation and joined shutdown; run real media proofs on it and verify SDP negotiation without caller message pumping.
 - [x] Consume ready negotiation operations through the scheduled owner's peer interface; exercise concurrent four-peer setup, asynchronous restart and rejoin without nested waits inside peer callbacks.
-- [ ] Implement the room-backed peer adapter and authenticated SDP/ICE delivery. The proof adapter currently delivers in-process; outer diagnostic waits still pump while observing results.
+- [x] Implement the room-backed peer adapter and authenticated SDP/ICE delivery through scheduled RoomPeerNegotiation/RoomNetwork ownership.
 
 - [x] Implement a portable per-connection deadline/recovery policy with typed failures, stale-event rejection, 500 ms/1 s/2 s backoff and rolling three-per-minute restart budget.
 - [x] Feed real peer ICE state into the policy and exercise a host-requested ICE restart with new credentials, settings preservation and four-peer media continuity.
-- [ ] Wire autonomous restart/close actions through production peer ownership and authenticated room signaling. Validate real network loss/interface changes; an explicit local restart request is not impairment evidence.
+- [x] Wire scheduled restart/close actions through production peer ownership and authenticated room signaling.
+- [ ] Validate real network loss/interface changes; an explicit local restart request is not impairment evidence.
 
 - [x] Add bounded generation-scoped candidate handoff and replace bundled-SDP gathering in real media proofs with trickle ICE, gated on successful description application.
-- [ ] Integrate candidate handoff into authenticated room signaling and full peer ownership; test STUN/NAT, restart generations and connection deadlines. Local proof delivery does not complete these tasks.
+- [x] Integrate bounded candidate handoff into authenticated room signaling/full peer ownership; test local restart generations and deadlines.
+- [ ] Validate real STUN/NAT traversal and interface changes; local signaling does not establish these.
 
-- [ ] Implement one host-to-viewer PeerConnection, separate track/source adaptation wrapper and encoder per viewer.
-- [ ] Share source capture/audio without sharing viewer adaptation restrictions.
-- [ ] Use host-offerer Unified Plan, one-way audio/video and bundled transport/data.
-- [ ] Implement direct ICE/STUN, trickled candidates and bounded pre-description candidate queues.
-- [ ] Scope SDP/ICE to connection generations; discard stale messages.
-- [ ] Implement the 20-second connection deadline and bounded ICE restart attempts.
-- [ ] Keep viewer failure/recovery isolated from other viewers.
+- [x] Implement one host-to-viewer PeerConnection, separate track/source adaptation wrapper and encoder per viewer.
+- [x] Share source capture/audio without sharing viewer adaptation restrictions.
+- [x] Use host-offerer Unified Plan, one-way audio/video and bundled transport/data.
+- [x] Implement trickled direct ICE configuration and bounded pre-description candidate queues.
+- [ ] Accept direct connectivity on real STUN/NAT paths.
+- [x] Scope SDP/ICE to connection generations; discard stale messages.
+- [x] Implement the 20-second connection deadline and bounded ICE restart attempts.
+- [x] Keep viewer failure/recovery isolated from other viewers.
 
 ### Windows video and presentation
 
-- [ ] Adapt WGC and appropriate display-only DXGI fallback.
+- [x] Adapt WGC through WindowsRoomRuntimeFactory, including generated-window media tests.
+- [ ] Complete appropriate display-only DXGI fallback in the v2 runtime.
 - [ ] Preserve selected-source privacy, cursor behavior, HDR-to-SDR and source identity.
 - [ ] Handle source closure/minimization/resize and D3D device loss explicitly.
 - [ ] Implement per-viewer GPU scaling and owned GPU frames.
-- [ ] Implement encoder worker/event handling and one pending raw-frame slot.
-- [ ] Honor WebRTC rates, keyframes and timestamps without custom congestion logic.
-- [ ] Probe hardware health; quarantine failed implementations and fall back per viewer.
+- [x] Implement encoder worker/event handling and one pending raw-frame slot; burst/ownership evidence is recorded under A and CHECKPOINT-B.md.
+- [x] Honor WebRTC rates, keyframes and timestamps without custom congestion logic.
+- [x] Probe hardware health; quarantine failed implementations and fall back per viewer. Physical driver-hang preemption remains open.
 - [ ] Preserve fixed-resolution semantics when fallback cannot sustain the configuration.
-- [ ] Adapt decoding and GPU presentation, with reported CPU fallback.
+- [x] Integrate CPU NV12 decoding/upload and shared GPU presentation with conversion/repack and presentation diagnostics.
+- [ ] Implement/accept hardware decoding and GPU zero-copy presentation; the current path still decodes to CPU memory.
 - [ ] Preserve coded dimensions, visible aperture and aspect ratio.
-- [ ] Keep one replaceable pending presentation frame; remove old A/V gating from the new path.
+- [x] Keep one replaceable pending presentation frame; remove old A/V gating from the new path.
 
 ### Audio
 
 - [ ] Implement 48 kHz / 10 ms PCM exchange and consistent multichannel downmix.
-- [ ] Preserve system, microphone, selected device and process-loopback modes.
-- [ ] Use event-driven WASAPI and bounded handoffs with measured device buffering.
+- [x] Preserve system, microphone, selected device and process-loopback modes in shared runtime/UI/CLI selection; physical endpoint acceptance remains separate.
+- [x] Use event-driven WASAPI and bounded handoffs with measured device buffering; shared-audio handover retains the 30 ms application capture bound.
 - [ ] Isolate microphone processing from system/process audio.
 - [ ] Preserve mute/volume, video-only operation and explicit device-error behavior.
 - [ ] Use monotonic local clocks and WebRTC synchronization.
 
 ### Stream settings
 
-- [ ] Implement explicit Auto/Manual modes plus native-size resolution behavior.
-- [ ] Implement fresh-profile Gaming / Auto resolution / 1080p maximum / 60 FPS target / Auto bitrate defaults.
-- [ ] Implement the documented Auto maximum calculation and conservative startup rate.
-- [ ] Map all resolution/FPS mode combinations to the intended WebRTC adaptation preference.
-- [ ] Keep manual resolution fixed and manual bitrate subject to congestion control.
+- [x] Implement explicit Auto/Manual modes plus native-size resolution behavior.
+- [x] Implement fresh-profile Gaming / Auto resolution / 1080p maximum / 60 FPS target / Auto bitrate defaults.
+- [x] Implement the documented Auto maximum calculation and conservative startup rate.
+- [x] Map all resolution/FPS mode combinations to the intended WebRTC adaptation preference.
+- [x] Keep manual resolution fixed and manual bitrate subject to congestion control.
 - [ ] Fit/letterbox fixed dimensions and expose the active image rectangle for input mapping.
 - [ ] Preserve manual settings when switching presets.
-- [ ] Add settings revisions, prevalidation and per-viewer pending/applied/error state.
+- [x] Add settings revisions, prevalidation and per-viewer pending/applied/error state.
 - [ ] Retain/recover working settings on failed reconfiguration; report partial application honestly.
-- [ ] Implement optional aggregate media budgeting with overhead/audio reserve and equal per-viewer allocation.
+- [x] Implement optional aggregate media budgeting with overhead/audio reserve and equal per-viewer allocation.
 - [ ] Show actual wire usage separately; do not add a second bandwidth-control loop.
 
 ### Automated validation
 
 - [ ] Verify manual resolution under congestion and manual bitrate under WebRTC rate reduction.
-- [ ] Verify one viewer's adaptation cannot alter another viewer's restrictions.
+- [x] Verify one viewer's adaptation cannot alter another viewer's restrictions.
 - [ ] Verify encoder failure and hardware-to-software fallback isolation.
 - [ ] Verify bounded queues with slow encoding/rendering.
 - [ ] Verify frame ownership, visible dimensions, aspect ratios and source changes.
-- [ ] Verify silence/missing audio cannot deadlock video.
-- [ ] Verify cancellation, repeated stop and rejection of old callbacks.
+- [x] Verify silence/missing audio cannot deadlock video.
+- [x] Verify cancellation, repeated stop and rejection of old callbacks.
 
 **Gate B**
 
@@ -286,20 +300,20 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Protocol and native client
 
-- [x] Add authenticated directed signaling with host/viewer permissions, socket/offer generations, stale-ID rejection, candidate and recovery bounds, separate message/byte budgets and local workerd relay/rejection tests. Native media mapping and outbound queue-pressure acceptance remain open.
+- [x] Add authenticated directed signaling with host/viewer permissions, socket/offer generations, stale-ID rejection, candidate and recovery bounds, separate message/byte budgets and local workerd relay/rejection tests. Native media mapping is integrated; production load/queue-pressure acceptance remains open.
 
-- [x] Implement authenticated profile/policy mutations, leave/kick, bounded per-generation deduplication, revision conflicts and a local socket message budget; validate authorization and removal through actual workerd sockets. Signaling/directory dispatch remain open.
+- [x] Implement authenticated profile/policy mutations, leave/kick, bounded per-generation deduplication, revision conflicts and a local socket message budget; validate authorization and removal through actual workerd sockets. Shared signaling and pushed-directory dispatch are integrated in opt-in frontends.
 
 - [x] Add isolated v2 Worker admission/room socket membership with hashed credentials, serialized capacity checks, provisional cleanup and actual local workerd tests. Partial service scope and remaining endpoints are recorded in CHECKPOINT-C.md.
 
 - [x] Implement native create/join HTTP admission with canonical requests, exact response/token/identity validation, typed futures, cancellation and unconfirmed outcomes without application retries. Bind the resulting socket to the admitted role; validate real HTTP failures and role-conflicting snapshots locally.
 
 - [x] Add shared native Qt room/directory transport independent of Widgets: authenticated headers, schema/identity/direction checks, bounded writes, snapshot readiness and stale-socket rejection. Validate live I/O on a dedicated networking thread; see [CHECKPOINT-C.md](CHECKPOINT-C.md).
-- [x] Add live local socket tests and optional integration with the headless media runner. Local Cloudflare and media connection-generation dispatch remain separate requirements.
+- [x] Add live local socket tests and integrate local Worker signaling with native media connection-generation dispatch.
 
 - [x] Implement the six documented v2 HTTP/WebSocket endpoints in the isolated service.
 - [x] Implement create/join credentials, provisional membership expiry and publish-after-host-attach.
-- [ ] Use one Qt-backed native networking event loop for UI and CLI.
+- [x] Use the shared owned Qt networking loop implementation from both opt-in UI and CLI, with bounded cross-executor dispatch.
 - [x] Implement all documented socket commands and typed errors in the isolated service.
 - [x] Implement authoritative sender identity, targeted signaling and generation checks.
 - [x] Implement separate room/directory revisions; exclude directed signaling from state revisions.
@@ -312,7 +326,7 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [x] Add separate SQLite Durable Object room/directory namespaces for v2.
 - [x] Implement socket attachments and replacement-generation handling; local workerd replacement/reconnect passes. Hibernation reconstruction still requires coverage.
 - [x] Implement automatic ping/pong and auto-response timestamp liveness; real hibernation reconstruction still needs validation.
-- [x] Implement native client ping/pong deadlines, one-shot resync and jittered reconnect backoff; exercise actual timeout/reconnect locally. Normal UI/CLI adoption remains pending.
+- [x] Implement native client ping/pong deadlines, one-shot resync and jittered reconnect backoff; exercise actual timeout/reconnect locally. Opt-in UI/CLI adoption is implemented; default-shell cutover remains pending.
 - [x] Implement provisional/membership expiry and immediate leave/kick.
 - [x] Handle host reconnecting/expiry without host election or new joins during disconnection.
 - [x] Implement safe directory summaries and snapshot/delta subscriptions.
@@ -325,12 +339,13 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Profile and authorization
 
-- [ ] Persist local nickname/preferences; use random Guest defaults rather than OS identity.
+- [x] Persist and validate local nickname without reading OS identity.
+- [ ] Complete preference persistence and randomized Guest defaults; the current invalid/missing-profile fallback is Guest.
 - [x] Validate nickname normalization, code points/UTF-8 size and forbidden controls.
 - [ ] Implement duplicate-name disambiguation with peer IDs.
-- [ ] Implement public/unlisted rooms, creation password and live name/visibility/viewer-limit edits.
+- [x] Implement public/unlisted rooms, creation password and acknowledged live name/visibility/viewer-limit edits.
 - [x] Preserve existing viewers when the limit is lowered; block new admissions.
-- [ ] Implement v2 room links without secrets.
+- [x] Implement versioned room-ID links without credentials or service switching; validate parsing/copy/paste across UI and CLI.
 - [x] Issue 256-bit membership tokens, store hashes and enforce role/target/socket authorization.
 - [x] Preserve versioned salted PBKDF2 work factor and HTTPS-only secret handling.
 - [x] Add admission and per-socket rate limits without cross-object checks for every message; load tuning remains pending.
@@ -339,7 +354,7 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 ### Worker/native integration tests
 
-- [x] Exercise the compiled Qt admission/socket clients against actual local workerd: directory state, admission, revision-bound mutations, directed signaling, reconnect, visibility, kick and closure. Add one-command execution with watchdogs and hashed artifacts, including CLI-only builds. Payloads are synthetic signaling; production media integration remains open.
+- [x] Exercise compiled Qt admission/socket clients against actual local workerd: directory state, admission, revision-bound mutations, directed signaling, reconnect, visibility, kick and closure. One-command execution has watchdogs and hashed artifacts. Additional UI/CLI scenarios now exercise actual production H.264/Opus media using synthetic endpoints.
 
 - [x] Add Worker typecheck/test scripts and execute tests in the local Cloudflare runtime.
 - [x] Test simultaneous joins, provisional expiry and capacity races; expiry uses injected persisted deadlines with the actual alarm handler.
@@ -362,10 +377,11 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 ### Product integration
 
 - [ ] Route normal UI/CLI sessions and room operations through the new shared interfaces.
-- [ ] Add Auto/Manual controls, Gaming/Quality presets and honest apply status.
-- [ ] Add local nickname settings and server-pushed room browsing.
-- [ ] Close directory subscriptions when hidden and mark disconnected listings stale.
-- [ ] Add adjustable viewer capacity with warning above four.
+- [x] Add Auto/Manual controls, Gaming/Quality presets and honest apply status.
+- [x] Add local nickname settings and server-pushed room browsing in opt-in v2 UI.
+- [x] Close directory subscriptions during sessions and resubscribe on return; reject stale-list joins while disconnected.
+- [x] Add acknowledged adjustable viewer capacity.
+- [ ] Add a warning for capacity above four.
 - [ ] Add per-viewer summary rows and details popup with requested/applied/actual values.
 - [ ] Refresh statistics once per second and mark receiver data stale after three seconds.
 - [ ] Keep receiver telemetry on the peer data channel, not Cloudflare.
@@ -510,7 +526,7 @@ At each checkpoint handoff, record:
 - Any measured tuning changes and corresponding plan updates.
 - The exact next unfinished task.
 
-### Latest lifecycle continuation — 2026-09-15
+### Historical lifecycle continuation — 2026-09-15
 
 - [x] Select hardware MFTs on the actual input adapter and retain activation shutdown ownership.
 - [x] Add optional handle-growth acceptance and isolated encoder/device-rebuild probes.
@@ -534,7 +550,8 @@ See the latest CHECKPOINT-A.md section for the 100-cycle result and exact artifa
 - [x] Route WGC recovery/live PeerConnection proofs and paced synthetic PeerConnection video through that same owner.
 - [x] Add headless 100-restart, recovery, slow-consumer, callback-failure, startup-timeout and cancellation scenarios.
 - [x] Add one-command headless smoke/regression with watchdogs, executable hashes, JSON timing/results and preserved failure logs.
-- [ ] Extend the runner to the complete production session facade, separate host/viewer processes, settings, multi-viewer isolation, scripted authorized input and simulated network conditions. The current harness does not claim these features.
+- [x] Extend automated scenarios to production RoomSession/NativeRoomRuntime, settings, real peer isolation and opt-in UI/CLI; see the 2026-09-16/17 integration evidence.
+- [ ] Complete separate host/viewer processes, scripted authorized input and simulated network conditions.
 
 Historical continuation evidence is in HEADLESS-TESTING.md and CHECKPOINT-A.md; the current gate decision is in CLOSEOUT-A.md.
 
@@ -544,7 +561,7 @@ Historical continuation evidence is in HEADLESS-TESTING.md and CHECKPOINT-A.md; 
 - [x] Reject stale session/device-generation/sequence samples; join removed subscriptions before allowing replacement.
 - [x] Route synthetic and WGC media proofs through the shared distributor.
 - [x] Test four consumers, slow/failing viewer isolation, removal during acquisition and pending-frame replacement under deterministic blocking.
-- [ ] Validate isolation through four actual PeerConnections with independent source restrictions and encoders; four capture consumers alone do not satisfy this requirement.
+- [x] Validate local isolation through four actual PeerConnections with independent source restrictions and encoders; see authenticated/public four-viewer scenarios in CHECKPOINT-B.md. Network impairment acceptance remains separate.
 
 ### Four-peer headless media — 2026-09-15
 
@@ -552,7 +569,8 @@ Historical continuation evidence is in HEADLESS-TESTING.md and CHECKPOINT-A.md; 
 - [x] Exercise four actual host/viewer PeerConnection pairs from one capture session with separate source wrappers and video senders.
 - [x] Verify slow source-handoff isolation, per-viewer sender-limit independence, recovery and full connection leave/rejoin while healthy peers continue.
 - [x] Include one four-peer scenario in headless smoke and three in the longer regression, with JSON results and a 60-second process watchdog.
-- [ ] Add production Auto/Manual adaptation mapping, per-viewer receive-audio evidence, decoder/network impairment and actual rate/latency acceptance. The current sender-parameter check is not wire-rate or congestion proof.
+- [x] Add production Auto/Manual mapping and per-viewer received Opus evidence.
+- [ ] Complete decoder/network impairment and actual rate/latency acceptance; sender-parameter checks are not congestion proof.
 
 ### Stream settings core — 2026-09-15
 
@@ -561,7 +579,8 @@ Historical continuation evidence is in HEADLESS-TESTING.md and CHECKPOINT-A.md; 
 - [x] Adapt each source independently through WebRTC VideoAdapter; preserve fixed canvases, native dimensions, aspect ratio and bounded FPS dropping.
 - [x] Test fixed/manual versus adaptive sink requests, upward recovery, letterbox pixels and settings propagation through real PeerConnections.
 - [x] Report and test GPU resize readback fallback and native-frame preservation at matching dimensions.
-- [ ] Wire initial bandwidth settings, aggregate upload allocation, full coordinator/UI settings events, capability failure recovery and remote applied-state reporting.
+- [x] Wire initial bandwidth settings, aggregate upload allocation and public/UI per-peer sender/source-observed revisions.
+- [ ] Complete capability failure recovery and remote displayed-state acceptance; sender/source application is not a remote-display acknowledgement.
 - [ ] Verify real congestion-driven adaptation and GPU scaling performance; controlled sink requests alone do not satisfy impairment/latency gates.
 # Integration update — 2026-09-16
 
@@ -572,5 +591,5 @@ checks below remain acceptance requirements, not individual turn goals.
   sockets, with description ordering, bounded candidates and generation barriers.
 - [x] Real local workerd four-viewer H.264/synthetic Opus scenario exercises slow
   delivery, twelve encrypted channels, ICE restart, kick/rejoin and room shutdown.
-- [ ] Complete automatically scheduled shared session facade and normal UI/CLI
-  adoption; diagnostic orchestration does not satisfy this requirement.
+- [x] Complete automatically scheduled shared session facade and opt-in UI/CLI adoption.
+- [ ] Complete default UI/CLI cutover after remaining acceptance gates.
