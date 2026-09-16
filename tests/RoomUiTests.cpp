@@ -298,6 +298,28 @@ int main(int argc, char** argv) {
             return changed >= 20 && stream.requestedRevision == before + 1 && stream.peers.size() == 1 &&
                 stream.peers[0].observedRevision == stream.requestedRevision && !host.session().settingsPending();
         });
+        host.findChild<QCheckBox*>("uploadBudgetEnabled")->setChecked(true);
+        host.findChild<QSpinBox*>("uploadBudget")->setValue(160000); apply->click();
+        Wait([&] { const auto stream = host.session().status().stream;
+            return stream.peers.size() == 1 && stream.peers[0].appliedRevision == stream.requestedRevision && stream.peers[0].appliedVideoBitrateBps == 0;
+        });
+        Wait([&] { return host.findChild<QLabel*>("uploadState")->text().contains("1 viewer(s) paused"); });
+        const auto drainUntil = std::chrono::steady_clock::now() + 500ms;
+        Wait([&] { return std::chrono::steady_clock::now() >= drainUntil; });
+        const auto pausedFrames = changed;
+        const auto audioBeforePause = viewerAudio->audibleBlocks.load();
+        const auto pauseUntil = std::chrono::steady_clock::now() + 300ms;
+        Wait([&] { return std::chrono::steady_clock::now() >= pauseUntil; });
+        Check(changed <= pausedFrames + 1 && viewerAudio->audibleBlocks > audioBeforePause);
+        host.findChild<QSpinBox*>("uploadBudget")->setValue(1000000); apply->click();
+        const auto resumeFrames = changed;
+        Wait([&] { const auto stream = host.session().status().stream;
+            return changed >= resumeFrames + 10 && stream.peers[0].appliedVideoBitrateBps == 672000;
+        });
+        host.findChild<QCheckBox*>("uploadBudgetEnabled")->setChecked(false); apply->click();
+        Wait([&] { const auto stream = host.session().status().stream;
+            return !stream.preferences.aggregateUploadLimitBps && stream.peers[0].appliedVideoBitrateBps == 2000000;
+        });
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         auto* video = static_cast<VideoFrameWidget*>(viewer.findChild<QWidget*>("roomVideo"));
         Check(video && video->presentedFrameCount() >= 20);

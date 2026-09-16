@@ -1,4 +1,5 @@
 #include "media/webrtc/CaptureVideoSource.h"
+#include "media/webrtc/TransportSendRate.h"
 #include "api/make_ref_counted.h"
 #include "rtc_base/logging.h"
 #include "core/WindowsMediaRuntime.h"
@@ -40,6 +41,36 @@ int main(int argc, char** argv) try {
     preferences.width = 3840; preferences.height = 2160; preferences.fps = 240;
     preferences.bitrateMode = SettingMode::Auto; preferences.bitrateLimitBps.reset();
     Require(ValidateStreamPreferences(preferences).maxVideoBitrateBps == 40000000, "Auto ceiling clamp overflowed");
+    preferences.aggregateUploadLimitBps = 4000000;
+    Require(AllocateViewerVideo(preferences, 4) == 672000, "Four-viewer audio/overhead reservation failed");
+    Require(AllocateViewerVideo(preferences, 3) == 938666, "Departure did not redistribute allowance");
+    preferences.bitrateLimitBps = 200000;
+    Require(AllocateViewerVideo(preferences, 4) == 200000, "Aggregate allocation exceeded individual cap");
+    preferences.aggregateUploadLimitBps = 160000;
+    Require(AllocateViewerVideo(preferences, 1) == 0, "Audio-only budget failed to pause video");
+    for (int budget : {160000, 1000000, 4000000, 1000000000}) {
+        preferences.aggregateUploadLimitBps = budget;
+        for (size_t viewers = 1; viewers <= 63; ++viewers) {
+            const auto share = AllocateViewerVideo(preferences, viewers);
+            Require(int64_t(share) * viewers <= std::max<int64_t>(0, int64_t(budget) * 4 / 5 - int64_t(viewers) * 128000), "Allocation exceeded available video budget");
+            Require(share <= *preferences.bitrateLimitBps, "Individual cap exceeded");
+        }
+    }
+    preferences.aggregateUploadLimitBps = 159999; invalid = false;
+    try { ValidateStreamPreferences(preferences); } catch (const std::invalid_argument&) { invalid = true; }
+    Require(invalid, "Invalid aggregate allowance accepted");
+    auto rate = std::make_shared<TransportSendRate>();
+    auto collector = webrtc::make_ref_counted<TransportSendRateCallback>(rate);
+    auto sample = [&](int64_t microseconds, const char* id, uint64_t bytes) {
+        auto report = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(microseconds));
+        auto transport = std::make_unique<webrtc::RTCTransportStats>(id, report->timestamp());
+        transport->bytes_sent = bytes; report->AddStats(std::move(transport)); collector->OnStatsDelivered(report);
+    };
+    sample(1000000, "transport", 1000); Require(!rate->bitsPerSecond, "First counter sample fabricated a rate");
+    sample(2000000, "transport", 201000); Require(rate->bitsPerSecond == 1600000, "Transport rate units incorrect");
+    sample(3000000, "transport", 100); Require(!rate->bitsPerSecond, "Counter reset fabricated a rate");
+    sample(4000000, "replacement", 999999); Require(!rate->bitsPerSecond, "Replacement transport reused old counters");
+    sample(4000000, "replacement", 999999); Require(!rate->bitsPerSecond, "Duplicate timestamp fabricated a rate");
 
     Sink fixedSink, adaptiveSink;
     auto fixed = webrtc::make_ref_counted<CaptureVideoSource>();

@@ -86,8 +86,12 @@ update through the existing push subscription while media keeps running.
 Versioned room-ID links now support copy/paste browser joins and shared CLI/config
 parsing without credentials or service switching. Delayed-ack fault coverage verifies
 the real timeout, no retry, late-response isolation and continued media.
-Default-shell adoption, input consent/
-control, zero-copy presentation, source switching and aggregate allocation remain.
+Optional shared upload allocation is integrated through runtime, UI and CLI: audio/
+overhead reservations, equal video shares, individual caps, membership redistribution,
+video pause/resume and separate measured transport rates. Four-viewer and actual-widget
+tests exercise these behaviors; external congestion/latency acceptance remains open.
+Default-shell adoption, input consent/control, zero-copy presentation and source
+switching remain.
 This milestone is not complete and defaults are unchanged.
 
 ## 3. Gaming controls end to end (D)

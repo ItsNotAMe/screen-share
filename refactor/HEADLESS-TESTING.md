@@ -1,5 +1,12 @@
 # Headless media checks
 
+Shared upload coverage uses the public four-viewer room proof for allocation,
+leave/rejoin redistribution and positive per-peer transport-rate samples. Actual
+UI tests pause video with a tiny allowance, verify decoded frames stop while silent
+synthetic audio continues, then restore video and remove the cap. CLI tests check
+configuration and reported applied allocation/rates. Pure settings tests cover
+individual caps, 1–63 viewer arithmetic and counter reset/replacement behavior.
+
 `room-v2-qt-ui` exercises actual Qt host/viewer widgets offscreen against the local
 Worker, including coalesced edits, invalid settings, frame delivery and responsive
 asynchronous stop/close. It uses silent synthetic audio and programmatic widget

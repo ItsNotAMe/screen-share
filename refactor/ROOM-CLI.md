@@ -13,6 +13,14 @@ Keep the service origin configured explicitly and supply any password separately
 Unknown versions, embedded credentials, URL queries/fragments and encoded IDs fail
 local validation. The real-Worker CLI media test joins using this link form.
 
+Optional `stream.aggregateUploadBps` sets the host's shared upload allowance
+(160,000–1,000,000,000 bits/s), including in timed full-settings changes. Omit it
+to disable. The backend reserves 20% plus 128 kbps audio per viewer, shares remaining
+video equally, and respects the individual cap. Too little allowance pauses video;
+audio continues. Status reports allocated/applied caps and nullable measured WebRTC
+transport rates separately. See [ROOM-UI.md](ROOM-UI.md#shared-upload-allowance) for
+the allocation rules and measurement limits. This is not an interface shaper.
+
 Create a host configuration using your v2 service's HTTPS origin:
 
 ```json

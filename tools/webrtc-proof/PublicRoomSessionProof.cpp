@@ -155,9 +155,13 @@ int main(int argc, char** argv) {
             Check(joined.error == RoomError::None);
         }
         Wait([&] { for (auto& value : evidence) if (value->frames < 45 || value->audio->audibleBlocks < 20) return false; return host.Status().activePeers == 4; });
+        Wait([&] { const auto peers = host.Status().stream.peers;
+            return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) { return peer.transportSendBps.value_or(0) > 0; });
+        });
         StreamPreferences live;
         live.resolution = ResolutionMode::Fixed; live.width = 320; live.height = 180;
         live.fps = 20; live.bitrateMode = SettingMode::Manual; live.bitrateLimitBps = 1000000;
+        live.aggregateUploadLimitBps = 4000000;
         auto invalidPreferences = live; invalidPreferences.width = 319;
         const auto originalRevision = host.Status().stream.requestedRevision;
         auto invalidUpdate = host.UpdateStreamPreferences(invalidPreferences);
@@ -171,7 +175,8 @@ int main(int argc, char** argv) {
             const auto status = host.Status().stream;
             if (status.peers.size() != 4) return false;
             for (const auto& peer : status.peers)
-                if (peer.rejected || peer.appliedRevision != accepted.revision || peer.observedRevision != accepted.revision || peer.width != 320 || peer.height != 180) return false;
+                if (peer.rejected || peer.appliedRevision != accepted.revision || peer.observedRevision != accepted.revision || peer.width != 320 || peer.height != 180 ||
+                    peer.allocatedVideoBitrateBps != 672000 || peer.appliedVideoBitrateBps != 672000) return false;
             for (const auto& value : evidence) if (value->smallFrames < 10) return false;
             return true;
         });
@@ -181,11 +186,21 @@ int main(int argc, char** argv) {
         auto stopViewer = viewers[3]->Stop(); Get(stopViewer);
         Check(evidence[3]->destroyed == 1);
         Wait([&] { return host.Status().activePeers == 3; });
+        Wait([&] { const auto status = host.Status().stream;
+            return status.peers.size() == 3 && std::all_of(status.peers.begin(), status.peers.end(), [&](const auto& peer) {
+                return peer.appliedRevision == status.requestedRevision && peer.appliedVideoBitrateBps == 938666;
+            });
+        });
         auto retiredEvidence = evidence[3];
         evidence[3] = std::make_shared<Evidence>();
         viewers[3] = std::make_unique<RoomSession>(factory(evidence[3]), true);
         auto rejoining = viewers[3]->Start(options); Check(Get(rejoining).error == RoomError::None);
         Wait([&] { return host.Status().activePeers == 4 && evidence[3]->smallFrames >= 30 && evidence[3]->audio->audibleBlocks >= 20; });
+        Wait([&] { const auto status = host.Status().stream;
+            return status.peers.size() == 4 && std::all_of(status.peers.begin(), status.peers.end(), [&](const auto& peer) {
+                return peer.appliedRevision == status.requestedRevision && peer.appliedVideoBitrateBps == 672000;
+            });
+        });
         live.width = 640; live.height = 360; live.fps = 30;
         live.bitrateMode = SettingMode::Auto; live.bitrateLimitBps.reset();
         auto restore = host.UpdateStreamPreferences(live); const auto restored = Get(restore);

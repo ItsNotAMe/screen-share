@@ -30,11 +30,14 @@ QJsonObject Status(const RoomStatus& value) {
     QJsonArray peers;
     for (const auto& peer : value.stream.peers) peers.append(QJsonObject{
         {"peerId", QString::fromStdString(peer.peerId)}, {"appliedRevision", qint64(peer.appliedRevision)},
-        {"observedRevision", qint64(peer.observedRevision)}, {"rejected", peer.rejected}, {"width", peer.width}, {"height", peer.height}});
+        {"observedRevision", qint64(peer.observedRevision)}, {"rejected", peer.rejected}, {"width", peer.width}, {"height", peer.height},
+        {"allocatedVideoBps", peer.allocatedVideoBitrateBps}, {"appliedVideoBps", peer.appliedVideoBitrateBps},
+        {"transportSendBps", peer.transportSendBps ? QJsonValue(qint64(*peer.transportSendBps)) : QJsonValue(QJsonValue::Null)}});
     return {{"type", "status"}, {"phase", Phase(value.phase)}, {"error", int(value.error)},
         {"roomId", QString::fromStdString(value.roomId)}, {"activePeers", qint64(value.activePeers)},
         {"failedPeers", qint64(value.failedPeers)}, {"pendingPeers", qint64(value.pendingPeers)},
-        {"requestedRevision", qint64(value.stream.requestedRevision)}, {"peers", peers}};
+        {"requestedRevision", qint64(value.stream.requestedRevision)}, {"peers", peers},
+        {"aggregateUploadBps", value.stream.preferences.aggregateUploadLimitBps.value_or(0)}};
 }
 std::atomic<bool> interrupted{false};
 BOOL WINAPI ConsoleSignal(DWORD event) {

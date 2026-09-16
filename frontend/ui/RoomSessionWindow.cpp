@@ -100,8 +100,12 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     bitrateMode_ = combo("Bitrate mode", {"Auto", "Manual"}, int(p.bitrateMode));
     bitrate_ = number("Bitrate limit (bits/s)", 1000, 100000000, p.bitrateLimitBps.value_or(12000000));
     bitrateLimit_ = new QCheckBox("Also limit Auto bitrate"); bitrateLimit_->setChecked(p.bitrateLimitBps.has_value()); form->addRow(bitrateLimit_);
+    uploadBudgetEnabled_ = new QCheckBox("Limit total media upload allowance"); uploadBudgetEnabled_->setObjectName("uploadBudgetEnabled");
+    uploadBudgetEnabled_->setChecked(p.aggregateUploadLimitBps.has_value()); form->addRow(uploadBudgetEnabled_);
+    uploadBudget_ = number("Upload allowance (bits/s)", 160000, 1000000000, p.aggregateUploadLimitBps.value_or(20000000)); uploadBudget_->setObjectName("uploadBudget");
     apply_ = new QPushButton("Apply settings"); apply_->setObjectName("applyStream"); form->addRow(apply_); layout->addWidget(formWidget);
     settingsState_ = new QLabel; settingsState_->setWordWrap(true); layout->addWidget(settingsState_);
+    uploadState_ = new QLabel; uploadState_->setWordWrap(true); uploadState_->setObjectName("uploadState"); uploadState_->setVisible(config.room.host); layout->addWidget(uploadState_);
     auto* controls = new QLabel("Remote control is not available in this preview."); layout->addWidget(controls);
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { session_.stop(); stop_->setEnabled(false); apply_->setEnabled(false); });
@@ -110,6 +114,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         p.width = width_->value(); p.height = height_->value(); p.fpsMode = SettingMode(fpsMode_->currentIndex()); p.fps = fps_->value();
         p.bitrateMode = SettingMode(bitrateMode_->currentIndex());
         if (p.bitrateMode == SettingMode::Manual || bitrateLimit_->isChecked()) p.bitrateLimitBps = bitrate_->value();
+        if (uploadBudgetEnabled_->isChecked()) p.aggregateUploadLimitBps = uploadBudget_->value();
         error_->clear(); settingsState_->setText("Settings pending…"); session_.apply(p);
     });
     session_.statusChanged = [this, host = config.room.host](const auto& value) {
@@ -135,11 +140,25 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         for (const auto& member : value.members) members << QString::fromStdString(member.nickname) + (member.host ? " (host)" : " (viewer)");
         members_->setText("Members: " + members.join(", "));
         apply_->setEnabled(host && value.phase == RoomPhase::Active);
+        if (host) {
+            qint64 allocated = 0, applied = 0; uint64_t measured = 0; size_t paused = 0, measuredPeers = 0;
+            for (const auto& peer : value.stream.peers) {
+                allocated += peer.allocatedVideoBitrateBps; applied += peer.appliedVideoBitrateBps;
+                paused += peer.appliedRevision && peer.appliedVideoBitrateBps == 0;
+                if (peer.transportSendBps) { measured += *peer.transportSendBps; ++measuredPeers; }
+            }
+            const auto measuredText = measuredPeers && measuredPeers == value.stream.peers.size() ?
+                QString("Measured WebRTC transport upload: %1 Mbps (excludes IP/interface overhead).").arg(measured / 1000000.0, 0, 'f', 2) :
+                QString("Measured transport upload: waiting for fresh samples from every viewer.");
+            uploadState_->setText(QString("Video caps: %1 Mbps allocated, %2 Mbps applied; %3 viewer(s) paused by the upload allowance. ")
+                .arg(allocated / 1000000.0, 0, 'f', 2).arg(applied / 1000000.0, 0, 'f', 2).arg(paused) + measuredText);
+        }
         if (host && session_.settingsPending()) settingsState_->setText("Settings pending…");
         else if (host && value.stream.requestedRevision) {
             size_t complete = 0, rejected = 0;
             for (const auto& peer : value.stream.peers) {
-                complete += peer.appliedRevision == value.stream.requestedRevision && peer.observedRevision == value.stream.requestedRevision;
+                complete += peer.appliedRevision == value.stream.requestedRevision &&
+                    (peer.observedRevision == value.stream.requestedRevision || peer.appliedVideoBitrateBps == 0);
                 rejected += peer.rejected;
             }
             settingsState_->setText(value.stream.peers.empty() ? QString("Settings saved. Waiting for viewers.") :

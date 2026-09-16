@@ -88,6 +88,37 @@ Source switching, aggregate bandwidth allocation, zero-copy
 presentation, NAT/ICE configuration and acceptance measurements also remain.
 This path is an integration preview, not milestone 2 completion or default cutover.
 
+## Shared upload allowance
+
+Host stream controls include an optional **Limit total media upload allowance**.
+The complete settings edit applies the allowance together with resolution/FPS and
+the individual bitrate cap. The same setting is `stream.aggregateUploadBps` in the
+shared UI/CLI JSON configuration; valid values are 160,000–1,000,000,000 bits/s.
+Omit it or uncheck the control to restore individual caps alone.
+
+Allocation reserves 20% of the allowance for transport/recovery and 128 kbps of
+audio per viewer, then divides the remainder equally. Each video cap is the smaller
+of that share and the existing individual cap. Negotiating viewers reserve a share
+before they send. Joins, departures and settings changes update the allocation;
+measured rates never drive a second adaptation controller.
+
+If a share is below 1 kbps, its video encoding is deactivated until the allowance
+or membership permits video again. Audio and room membership remain active. Very
+small allowances can be below the audio reservation alone: this is an estimated
+media budget, not a strict network-interface shaper. Congestion control can send
+less, while recovery/probes and overhead can exceed estimates. A rejected sender
+update retains its previous cap and is reported as rejected; cross-peer application
+is not atomic. Manual resolution/FPS and absence of a bitrate floor are preserved.
+
+The host displays allocated/applied video caps separately from measured WebRTC
+transport upload. Native stats are sampled at most once per second per viewer, with
+one request in flight. Rates require two compatible counters; resets/replacement
+transports invalidate the rate, and samples older than three seconds are omitted.
+An aggregate measured value is shown only when every current viewer has a fresh
+sample. These counters exclude IP/interface overhead and are not a physical-link
+measurement. The CLI emits per-peer `allocatedVideoBps`, `appliedVideoBps` and nullable
+`transportSendBps` alongside the selected `aggregateUploadBps` (zero when disabled).
+
 ## Live room and nickname edits
 
 Each session displays the authenticated member list. Any member can change their

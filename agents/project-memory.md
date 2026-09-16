@@ -1,5 +1,25 @@
 # Project Memory
 
+## Shared upload allocation and transport diagnostics — 2026-09-16
+
+StreamPreferences now has optional aggregateUploadLimitBps; shared config key
+stream.aggregateUploadBps (160000..1000000000). AllocateViewerVideo reserves 20%
+plus 128kbps audio per viewer, splits video equally, then takes the individual cap.
+Negotiating peers reserve shares too. Membership changes bump the runtime settings
+revision only while a budget is enabled. Under 1kbps share deactivates RTP video;
+audio stays active and budget recovery reactivates video without rebuilding peers.
+RTP rejection preserves previous sender settings and reports rejection, not atomic
+budget application. This is not an interface shaper and tiny budgets may not cover
+audio alone. Existing fixed resolution/FPS and no-min-bitrate behavior remain.
+Status/CLI report allocated and applied video caps plus optional transportSendBps.
+TransportSendRate uses a per-generation mailbox, one asynchronous native stats
+request per second (one outstanding), compatible counter deltas, and 3s freshness.
+Late callbacks retain only the mailbox; UI aggregate requires all fresh samples.
+Measured WebRTC transport bytes exclude IP/interface overhead. No rate feedback is
+fed into allocation and no extra room-service requests are added. Tests cover four
+viewers, departure/rejoin, video pause/audio continuation/resume, CLI reporting,
+1..63-viewer arithmetic and stats reset/replacement. See CHECKPOINT-B evidence.
+
 ## Room links and acknowledgement fault coverage — 2026-09-16
 
 Shared RoomLink.h accepts raw IDs or strict screenshare://room/v2/ID references.

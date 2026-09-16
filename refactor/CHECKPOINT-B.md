@@ -1,5 +1,44 @@
 # Checkpoint B evidence
 
+## Shared upload allocation and measured transport rates — 2026-09-16
+
+The optional host upload allowance is integrated through StreamPreferences,
+NativeRoomRuntime, sender parameters, shared JSON parsing, CLI status and the opt-in
+host controls. Allocation reserves 20% and 128kbps audio per viewer, divides the
+remaining video allowance equally and applies the smaller individual cap. Pending
+negotiations reserve shares; membership/settings changes recompute allocation.
+Insufficient shares deactivate video while retaining audio/session membership;
+raising/removing the allowance restores video without replacing peers.
+
+Status distinguishes allocated and applied caps. Independent per-generation native
+stats mailboxes provide sampled WebRTC transport rates once per second, with one
+request outstanding and a three-second freshness limit. First samples, counter
+resets and transport replacements produce no fabricated rate. Late callbacks retain
+only their mailbox. UI aggregation requires fresh samples for every viewer. This
+adds no service requests or measured-rate adaptation loop.
+
+Validation:
+- Application suites: **19/19 Release (83.74s), 19/19 Debug (85.34s)**.
+- Final Release UI/CLI focused checks after stronger pause/report assertions:
+  **2/2 (12.35s)**. Debug's full run included those assertions.
+- Native four-viewer plus settings/counter tests: **2/2 Release (7.48s)**,
+  **2/2 Debug (7.55s)**. A 4Mbps allowance yields 672000bps video per viewer;
+  departure redistributes to 938666bps for three, and rejoin restores four shares.
+- Windows WGC/real-renderer UI pause/audio-continuation/resume: **6.36s**,
+  `build/webrtc/upload-budget-windows-ui/native-service-30c21118-2e79-4e1c-a0ac-36d3e49446e2`.
+- Windows WGC four-viewer budget/rejoin/rate proof: **8.28s**,
+  `build/webrtc/upload-budget-windows-four-viewer/native-service-fd0c3dea-ba02-4cc2-8fc7-cc883bfa3aba`.
+- Build/test logs: `build/webrtc/upload-budget-*`. Tests remained silent and used
+  no physical input. Windows capture checks ran outside the capture sandbox.
+
+This is an application allowance, not interface shaping. Tiny budgets may not
+cover audio alone; probes/recovery/overhead can exceed estimates. Rejected sender
+updates retain their previous caps with rejection reported, so application is not
+atomic. Measured WebRTC transport counters exclude IP/interface overhead. Manual
+resolution/FPS and congestion control remain intact; no bitrate floor or padding
+was added. Remote latency/impairment, resource, hardware-only, cost and cutover
+acceptance remain open.
+
 ## Room links and delayed acknowledgement recovery — 2026-09-16
 
 Sessions expose a copyable `screenshare://room/v2/ROOM_ID` link. Browser admission

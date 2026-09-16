@@ -1,6 +1,7 @@
 #include "NativeRoomRuntime.h"
 #include "RoomManagedPeer.h"
 #include "ViewerStreamSettings.h"
+#include "TransportSendRate.h"
 #include "api/make_ref_counted.h"
 #include <map>
 #include <set>
@@ -36,6 +37,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
         uint64_t attemptedRevision = 0;
         bool settingsRejected = false;
         bool retired = false, removing = false;
+        std::shared_ptr<TransportSendRate> sendRate = std::make_shared<TransportSendRate>();
     };
     v2::RoomIdentity identity_;
     v2::RoomSend send_;
@@ -46,6 +48,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
     std::future<HostOperationResult> starting_;
     uint64_t captureGeneration_ = 0, next_ = 0;
     uint64_t settingsRevision_ = 2;
+    size_t allocatedViewers_ = 0;
     std::map<std::string, std::unique_ptr<Entry>> peers_;
     std::set<std::string> failed_;
     // Destroy the registry before native entries it references.
@@ -140,7 +143,10 @@ public:
             if (entry->removing || entry->retired) continue;
             const auto stats = entry->source->settingsStats();
             result.peers.push_back({id, entry->settings.revision(), stats.observedRevision,
-                entry->attemptedRevision == settingsRevision_ && entry->settingsRejected, stats.width, stats.height});
+                entry->attemptedRevision == settingsRevision_ && entry->settingsRejected, stats.width, stats.height,
+                AllocateViewerVideo(options_.preferences, allocatedViewers_), entry->settings.appliedVideoBitrateBps()});
+            std::lock_guard lock(entry->sendRate->mutex);
+            if (std::chrono::steady_clock::now() - entry->sendRate->sampled < 3s) result.peers.back().transportSendBps = entry->sendRate->bitsPerSecond;
         }
         return result;
     }
@@ -181,6 +187,13 @@ public:
         }
         owner_->Tick(PeerConnectionLifecycle::Clock::now());
         const auto delivery = identity_.host ? capture_.snapshot() : HostMediaSnapshot{};
+        const size_t viewers = std::count_if(peers_.begin(), peers_.end(), [](const auto& item) {
+            return !item.second->removing && !item.second->retired;
+        });
+        if (viewers != allocatedViewers_) {
+            allocatedViewers_ = viewers;
+            if (identity_.host && options_.preferences.aggregateUploadLimitBps) ++settingsRevision_;
+        }
         for (auto it = peers_.begin(); it != peers_.end();) {
             auto& entry = *it->second;
             if (entry.retired) { it = peers_.erase(it); continue; }
@@ -192,10 +205,20 @@ public:
                 })) failed_.insert(it->first);
             if (!entry.removing && identity_.host && entry.negotiation->ready() && entry.attemptedRevision != settingsRevision_) {
                 entry.attemptedRevision = settingsRevision_;
-                entry.settingsRejected = entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, settingsRevision_) != SettingsApplyError::None;
+                entry.settingsRejected = entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, settingsRevision_,
+                    AllocateViewerVideo(options_.preferences, allocatedViewers_)) != SettingsApplyError::None;
                 // A live update rejection preserves the previously working sender.
                 // An initial rejection cannot satisfy the initial stream contract.
                 if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
+            }
+            if (!entry.removing && identity_.host && entry.negotiation->ready()) {
+                bool request = false;
+                { std::lock_guard lock(entry.sendRate->mutex);
+                  const auto now = std::chrono::steady_clock::now();
+                  if (!entry.sendRate->pending && now >= entry.sendRate->next) {
+                      entry.sendRate->pending = true; entry.sendRate->next = now + 1s; request = true;
+                  } }
+                if (request) entry.peer->connection->GetStats(webrtc::make_ref_counted<TransportSendRateCallback>(entry.sendRate).get());
             }
             ++it;
         }

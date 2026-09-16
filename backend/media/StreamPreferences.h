@@ -17,6 +17,7 @@ struct StreamPreferences {
     int fps = 60;
     SettingMode bitrateMode = SettingMode::Auto;
     std::optional<int> bitrateLimitBps;
+    std::optional<int> aggregateUploadLimitBps;
 };
 struct StreamLimits {
     int maxVideoBitrateBps, initialVideoBitrateBps;
@@ -30,7 +31,8 @@ inline StreamLimits ValidateStreamPreferences(const StreamPreferences& value) {
         value.width < 2 || value.height < 2 || value.width > 3840 || value.height > 2160 ||
         value.width % 2 || value.height % 2 || value.fps < 1 || value.fps > 240 ||
         (value.bitrateMode == SettingMode::Manual && !value.bitrateLimitBps) ||
-        (value.bitrateLimitBps && (*value.bitrateLimitBps < 1000 || *value.bitrateLimitBps > 100000000)))
+        (value.bitrateLimitBps && (*value.bitrateLimitBps < 1000 || *value.bitrateLimitBps > 100000000)) ||
+        (value.aggregateUploadLimitBps && (*value.aggregateUploadLimitBps < 160000 || *value.aggregateUploadLimitBps > 1000000000)))
         throw std::invalid_argument("Invalid stream preferences");
     const auto calculated = std::clamp<int64_t>(int64_t(value.width) * value.height * value.fps / 10, 2000000, 40000000);
     const int maximum = value.bitrateLimitBps.value_or(static_cast<int>(calculated));
@@ -40,5 +42,17 @@ inline StreamLimits ValidateStreamPreferences(const StreamPreferences& value) {
         !autoSize ? StreamDegradation::MaintainResolution :
         !autoFps || value.preset == StreamPreset::Gaming ? StreamDegradation::MaintainFps : StreamDegradation::Balanced;
     return {maximum, std::min(3000000, maximum), degradation};
+}
+// Application allowance, not a physical-interface shaper. Pending peers reserve
+// a share too, avoiding over-allocation while their negotiation completes.
+// Audio allowance is per unicast viewer; actual wire usage remains independent.
+inline int AllocateViewerVideo(const StreamPreferences& preferences, size_t viewers) {
+    if (viewers > 63) throw std::invalid_argument("Invalid viewer count");
+    const auto individual = ValidateStreamPreferences(preferences).maxVideoBitrateBps;
+    if (!preferences.aggregateUploadLimitBps || !viewers) return individual;
+    constexpr int64_t audioPerViewer = 128000;
+    const auto available = std::max<int64_t>(0, int64_t(*preferences.aggregateUploadLimitBps) * 4 / 5 - int64_t(viewers) * audioPerViewer);
+    const auto share = available / int64_t(viewers);
+    return share < 1000 ? 0 : int(std::min<int64_t>(individual, share));
 }
 }

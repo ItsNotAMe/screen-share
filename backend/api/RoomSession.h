@@ -28,6 +28,9 @@ struct PeerStreamStatus {
     uint64_t appliedRevision = 0, observedRevision = 0;
     bool rejected = false;
     int width = 0, height = 0;
+    int allocatedVideoBitrateBps = 0, appliedVideoBitrateBps = 0;
+    // Sampled WebRTC transport bytes, not physical-interface/IP overhead.
+    std::optional<uint64_t> transportSendBps;
 };
 struct StreamStatus {
     uint64_t requestedRevision = 0;

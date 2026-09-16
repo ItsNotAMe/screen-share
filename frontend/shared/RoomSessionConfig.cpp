@@ -37,7 +37,7 @@ QJsonObject Object(const QJsonObject& value, const char* key) {
     return value[key].toObject();
 }
 StreamPreferences Preferences(const QJsonObject& object) {
-    Keys(object, {"preset", "resolution", "width", "height", "fpsMode", "fps", "bitrateMode", "bitrateBps"});
+    Keys(object, {"preset", "resolution", "width", "height", "fpsMode", "fps", "bitrateMode", "bitrateBps", "aggregateUploadBps"});
     StreamPreferences result;
     const auto preset = String(object, "preset", "gaming");
     if (preset != "gaming" && preset != "quality") throw std::invalid_argument("Invalid preset");
@@ -53,6 +53,7 @@ StreamPreferences Preferences(const QJsonObject& object) {
     result.bitrateMode = bitrateMode == "auto" ? SettingMode::Auto : SettingMode::Manual;
     result.fps = Integer(object, "fps", 60, 1, 240);
     if (object.contains("bitrateBps")) result.bitrateLimitBps = Integer(object, "bitrateBps", 0, 1000, 100000000);
+    if (object.contains("aggregateUploadBps")) result.aggregateUploadLimitBps = Integer(object, "aggregateUploadBps", 0, 160000, 1000000000);
     ValidateStreamPreferences(result); return result;
 }
 }

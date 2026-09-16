@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
         proof::TestWindow capture;
         captureWindow = capture.handle();
 #endif
-        QJsonObject stream{{"resolution", "fixed"}, {"width", 320}, {"height", 180}, {"fps", 30}};
+        QJsonObject stream{{"resolution", "fixed"}, {"width", 320}, {"height", 180}, {"fps", 30}, {"aggregateUploadBps", 2000000}};
         auto reduced = stream; reduced["width"] = 160; reduced["height"] = 90; reduced["fps"] = 20;
         QJsonObject object{{"origin", argv[1]}, {"host", true}, {"nickname", "CliHost"}, {"name", "CLI media"},
             {"seconds", 15}, {"stream", stream}, {"password", "test-only-password"},
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(malformed); });
         const auto host = ParseRoomSessionConfig(object, true);
         std::mutex mutex; std::string roomId;
-        std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false};
+        std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomCliHooks hostHooks;
         hostHooks.pump = [&] { return !stopHost; };
@@ -100,6 +100,8 @@ int main(int argc, char** argv) {
             }
             for (const auto& peer : value["peers"].toArray()) {
                 const auto row = peer.toObject();
+                if (row["allocatedVideoBps"].toInt() == 1472000 && row["appliedVideoBps"].toInt() == 1472000) budgetReported = true;
+                if (row["transportSendBps"].toDouble() > 0) rateReported = true;
                 if (row["width"].toInt() == 160 && row["appliedRevision"] == row["observedRevision"] && !row["rejected"].toBool()) applied = true;
             }
             if (value["phase"] == "stopped") stopped = true;
@@ -141,7 +143,7 @@ int main(int argc, char** argv) {
         };
         const int viewing = RunRoomCliSession(viewer, Factory(viewer, audio, frames), viewerHooks, true);
         stopHost = true;
-        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied);
+        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported);
         Check(original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         Check(preview.framesPresented() >= 20);

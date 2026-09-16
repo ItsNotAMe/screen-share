@@ -22,6 +22,9 @@ private:
     QtRoomSession session_;
     QLabel *phase_, *room_, *settingsState_, *error_;
     QSpinBox *width_, *height_, *fps_, *bitrate_;
+    QSpinBox* uploadBudget_;
+    QCheckBox* uploadBudgetEnabled_;
+    QLabel* uploadState_;
     QComboBox *resolution_, *fpsMode_, *bitrateMode_, *preset_;
     QCheckBox* bitrateLimit_;
     QPushButton *apply_, *stop_;
