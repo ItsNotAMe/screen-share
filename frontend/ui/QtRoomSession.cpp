@@ -40,6 +40,12 @@ void QtRoomSession::apply(screenshare::media::StreamPreferences preferences) {
     pending_ = preferences; // Replace superseded UI edits; never queue an edit storm.
 }
 RoomStatus QtRoomSession::status() const { return session_ ? session_->Status() : last_; }
+void QtRoomSession::updateNickname(std::string nickname, uint64_t revision) {
+    if (session_ && !stopping_.valid() && !mutation_.valid()) mutation_ = session_->UpdateNickname(std::move(nickname), revision);
+}
+void QtRoomSession::updatePolicy(RoomPolicy policy, uint64_t revision) {
+    if (session_ && !stopping_.valid() && !mutation_.valid()) mutation_ = session_->UpdateRoomPolicy(std::move(policy), revision);
+}
 void QtRoomSession::tick() {
     if (!session_) return;
     const auto now = std::chrono::steady_clock::now();
@@ -52,6 +58,10 @@ void QtRoomSession::tick() {
     }
     if (config_.duration.count() && now - started_ >= config_.duration) stop();
     const auto current = session_->Status();
+    if (mutation_.valid() && mutation_.wait_for(0ms) == std::future_status::ready) {
+        const auto result = mutation_.get();
+        if (roomUpdated) roomUpdated(result);
+    }
     if (current.phase == RoomPhase::Failed || current.phase == RoomPhase::Stopped) stop();
     if (applying_.valid() && applying_.wait_for(0ms) == std::future_status::ready) {
         const auto result = applying_.get();
@@ -74,6 +84,10 @@ void QtRoomSession::tick() {
     }
     if (stopping_.valid() && stopping_.wait_for(0ms) == std::future_status::ready) {
         stopping_.get(); last_ = session_->Status();
+        if (mutation_.valid()) {
+            const auto result = mutation_.get();
+            if (roomUpdated) roomUpdated(result);
+        }
         if (admission_.valid()) {
             const auto result = admission_.get();
             if (result.outcomeUnconfirmed && error) error(QStringLiteral("Admission ended before the server outcome could be confirmed."));

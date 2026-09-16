@@ -8,6 +8,11 @@ and real-renderer variant; offscreen rendering does not substitute for that proo
 The same scenario now covers the v2 browser: pushed room creation/count/removal,
 password rejection/recovery, playback after join, nickname normalization and
 nickname-only persistence, hidden subscriptions and rapid hide/show replacement.
+Live nickname/policy changes are also checked during media delivery: stale revision
+conflicts, draft reload, pushed directory changes and unauthorized/invalid edits.
+A signaling barrier deterministically checks mutation queue bounds and pending
+result resolution during shutdown. The missing-ack timeout branch is not yet
+covered by a dedicated fault fixture; see [CHECKPOINT-B.md](CHECKPOINT-B.md).
 
 The application suite includes `room-v2-cli-entry` (actual executable dispatch,
 HTTPS enforcement and secret-free errors) and `room-v2-cli-media` (shared CLI

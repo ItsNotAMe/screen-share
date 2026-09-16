@@ -69,6 +69,38 @@ public:
     bool Receive(const std::string&, RoomPeerSignal) override { return true; }
     std::shared_future<void> BeginStop() override { return barrier_; }
 };
+struct MutationBarrier { std::atomic<bool> pause{false}, entered{false}; std::promise<void> release; std::shared_future<void> ready = release.get_future().share(); };
+class PausedRuntime final : public RoomRuntime {
+    std::shared_ptr<MutationBarrier> barrier_;
+public:
+    explicit PausedRuntime(std::shared_ptr<MutationBarrier> barrier) : barrier_(std::move(barrier)) {}
+    void Advance() override { if (barrier_->pause) { barrier_->entered = true; barrier_->ready.wait(); } }
+    bool Ready(const std::string&) override { return true; }
+    bool Add(const std::string&) override { return true; }
+    void Remove(const std::string&) noexcept override {}
+    bool Receive(const std::string&, RoomPeerSignal) override { return true; }
+    std::shared_future<void> BeginStop() override { std::promise<void> done; done.set_value(); return done.get_future().share(); }
+};
+void MutationLifecycle(const std::string& origin) {
+    auto barrier = std::make_shared<MutationBarrier>();
+    RoomSession session([barrier](auto, auto) { return std::make_unique<PausedRuntime>(barrier); }, true);
+    RoomOptions options; options.origin = origin; options.host = true; options.nickname = "Lifecycle"; options.name = "Mutation lifecycle";
+    auto start = session.Start(options); Wait([&] { return start.wait_for(0ms) == std::future_status::ready; }); Check(start.get().error == RoomError::None);
+    const auto revision = session.Status().revision;
+    Check(session.UpdateNickname("Invalid revision", UINT64_MAX).get().error == RoomUpdateError::Invalid);
+    Check(session.UpdateNickname(std::string(1, char(0xff)), revision).get().error == RoomUpdateError::Invalid);
+    barrier->pause = true;
+    try {
+        Wait([&] { return barrier->entered.load(); });
+        auto pending = session.UpdateNickname("Pending", revision);
+        Check(session.UpdateNickname("Overflow", revision).get().error == RoomUpdateError::Busy);
+        auto stopping = session.Stop();
+        Check(session.UpdateNickname("Stopped", revision).get().error == RoomUpdateError::Unavailable);
+        barrier->release.set_value();
+        Wait([&] { return stopping.wait_for(0ms) == std::future_status::ready; }); stopping.get();
+        Check(pending.get().error == RoomUpdateError::Unconfirmed);
+    } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
+}
 void BrowserScenario(const QUrl& origin) {
     using Directory = screenshare::room::qt::RoomDirectory;
     QTemporaryDir profiles; Check(profiles.isValid());
@@ -112,6 +144,41 @@ void BrowserScenario(const QUrl& origin) {
     Check(viewer.findChild<QLineEdit*>("roomPassword")->text().isEmpty());
     Check(RoomProfile(viewerFile).nickname() == "Browser viewer");
     for (const auto& path : {hostFile, viewerFile}) { QSettings saved(path, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"nickname"}); }
+    auto* hostWindow = host.activeSession(); auto* viewerWindow = viewer.activeSession();
+    Wait([&] { return hostWindow->session().status().members.size() == 2 && viewerWindow->findChild<QPushButton*>("updateNickname")->isEnabled(); });
+    const auto staleRevision = hostWindow->session().status().revision;
+    // Hold a host edit while another authenticated member advances the revision.
+    hostWindow->findChild<QLineEdit*>("liveRoomName")->setText("Preserved draft");
+    viewerWindow->findChild<QLineEdit*>("liveNickname")->setText(" New viewer ");
+    viewerWindow->findChild<QPushButton*>("updateNickname")->click();
+    Wait([&] {
+        const auto state = hostWindow->session().status();
+        return state.revision > staleRevision && state.members.size() == 2 && state.members[1].nickname == "New viewer" && !viewerWindow->session().roomUpdatePending();
+    });
+    Check(RoomProfile(viewerFile).nickname() == "Browser viewer"); // Session-only customization.
+    hostWindow->findChild<QPushButton*>("updateRoomPolicy")->click();
+    Wait([&] { return hostWindow->findChild<QLabel*>("roomUpdateState")->text().contains("changed while"); });
+    Check(hostWindow->session().status().policy.name == "<b>Plain room</b>");
+    Check(hostWindow->findChild<QLineEdit*>("liveRoomName")->text() == "Preserved draft");
+    hostWindow->findChild<QPushButton*>("reloadRoomValues")->click();
+    Wait([&] { return hostWindow->findChild<QLineEdit*>("liveRoomName")->text() == "<b>Plain room</b>"; });
+    hostWindow->findChild<QLineEdit*>("liveRoomName")->setText(" Renamed room ");
+    hostWindow->findChild<QSpinBox*>("liveViewerLimit")->setValue(1);
+    hostWindow->findChild<QPushButton*>("updateRoomPolicy")->click();
+    Wait([&] { return audit.status().rooms.size() == 1 && audit.status().rooms[0].name == "Renamed room" &&
+        audit.status().rooms[0].status == "full" && viewerWindow->session().status().policy.viewerLimit == 1 &&
+        hostWindow->findChild<QLineEdit*>("liveRoomName")->text() == "Renamed room"; });
+    hostWindow->findChild<QCheckBox*>("livePublicRoom")->setChecked(false);
+    hostWindow->findChild<QPushButton*>("updateRoomPolicy")->click();
+    Wait([&] { return audit.status().rooms.empty() && !viewerWindow->session().status().policy.publicRoom && !hostWindow->session().roomUpdatePending(); });
+    const auto frameCount = frames;
+    Wait([&] { return frames >= frameCount + 10; }); // Mutations preserve the media session.
+    RoomUpdateError mutationError = RoomUpdateError::None;
+    viewerWindow->session().roomUpdated = [&](const auto& result) { mutationError = result.error; };
+    viewerWindow->session().updatePolicy({"Unauthorized", true, 4}, viewerWindow->session().status().revision);
+    Wait([&] { return !viewerWindow->session().roomUpdatePending(); }); Check(mutationError == RoomUpdateError::Forbidden);
+    viewerWindow->session().updateNickname(std::string(33, 'x'), viewerWindow->session().status().revision);
+    Wait([&] { return !viewerWindow->session().roomUpdatePending(); }); Check(mutationError == RoomUpdateError::Invalid);
     host.activeSession()->close();
     Wait([&] { return !host.activeSession() && host.isVisible() && audit.status().rooms.empty() &&
         viewer.activeSession()->session().status().phase == RoomPhase::Stopped; });
@@ -204,6 +271,7 @@ int main(int argc, char** argv) {
         Check(held.start(config)); Wait([&] { return held.status().phase == RoomPhase::Active; });
         held.stop(); Wait([&] { return !held.running(); }); Check(finished == 2);
         BrowserScenario(QUrl(QString::fromLocal8Bit(argv[1])));
+        MutationLifecycle(argv[1]);
         std::cout << "{\"passed\":true,\"qt_ui\":true,\"browser\":true,\"directory_push\":true,\"nickname_persistence\":true,\"coalesced_settings\":true,\"responsive_stop\":true,\"restart_owner\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL(); return result;

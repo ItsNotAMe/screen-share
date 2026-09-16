@@ -12,6 +12,8 @@
 #include <QFormLayout>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QLineEdit>
+#include <QSignalBlocker>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSpinBox>
@@ -37,6 +39,46 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     phase_ = new QLabel("Starting…"); phase_->setObjectName("roomPhase"); layout->addWidget(phase_);
     room_ = new QLabel; room_->setTextFormat(Qt::PlainText); room_->setTextInteractionFlags(Qt::TextSelectableByMouse); layout->addWidget(room_);
     error_ = new QLabel; error_->setObjectName("roomError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
+    auto* roomForm = new QFormLayout;
+    nickname_ = new QLineEdit; nickname_->setObjectName("liveNickname"); nickname_->setMaxLength(128);
+    name_ = new QLineEdit; name_->setObjectName("liveRoomName"); name_->setMaxLength(256);
+    publicRoom_ = new QCheckBox("Public room"); publicRoom_->setObjectName("livePublicRoom");
+    viewerLimit_ = new QSpinBox; viewerLimit_->setRange(1, 63); viewerLimit_->setObjectName("liveViewerLimit");
+    updateNickname_ = new QPushButton("Update nickname for this session"); updateNickname_->setObjectName("updateNickname");
+    updatePolicy_ = new QPushButton("Update room"); updatePolicy_->setObjectName("updateRoomPolicy");
+    roomForm->addRow("Nickname", nickname_); roomForm->addRow(updateNickname_);
+    if (config.room.host) {
+        roomForm->addRow("Room name", name_); roomForm->addRow(publicRoom_);
+        roomForm->addRow("Viewer limit", viewerLimit_); roomForm->addRow(updatePolicy_);
+    } else { name_->hide(); publicRoom_->hide(); viewerLimit_->hide(); updatePolicy_->hide(); }
+    // Parent even hidden host controls, so their lifetime follows this window.
+    QWidget* roomFields[] = {name_, publicRoom_, viewerLimit_, updatePolicy_};
+    for (auto* field : roomFields) if (!field->parent()) field->setParent(this);
+    updateNickname_->setEnabled(false); updatePolicy_->setEnabled(false);
+    auto* reloadRoom = new QPushButton("Reload current room values"); reloadRoom->setObjectName("reloadRoomValues"); roomForm->addRow(reloadRoom);
+    layout->addLayout(roomForm);
+    members_ = new QLabel; members_->setTextFormat(Qt::PlainText); members_->setWordWrap(true); members_->setObjectName("roomMembers"); layout->addWidget(members_);
+    roomUpdateState_ = new QLabel; roomUpdateState_->setWordWrap(true); roomUpdateState_->setObjectName("roomUpdateState"); layout->addWidget(roomUpdateState_);
+    auto edited = [this] { editingRoom_ = true; };
+    connect(nickname_, &QLineEdit::textChanged, this, [this] { editingNickname_ = true; }); connect(name_, &QLineEdit::textChanged, this, edited);
+    connect(publicRoom_, &QCheckBox::toggled, this, edited);
+    connect(viewerLimit_, &QSpinBox::valueChanged, this, edited);
+    connect(reloadRoom, &QPushButton::clicked, this, [this] {
+        if (!session_.roomUpdatePending()) { editingRoom_ = editingNickname_ = false; roomUpdateState_->clear(); }
+    });
+    auto lockRoomFields = [this] {
+        nickname_->setEnabled(false); name_->setEnabled(false); publicRoom_->setEnabled(false); viewerLimit_->setEnabled(false);
+        updateNickname_->setEnabled(false); updatePolicy_->setEnabled(false);
+    };
+    connect(updateNickname_, &QPushButton::clicked, this, [this, lockRoomFields] {
+        updatingNickname_ = true; lockRoomFields();
+        roomUpdateState_->setText("Updating nickname…"); session_.updateNickname(nickname_->text().toStdString(), nicknameRevision_);
+    });
+    connect(updatePolicy_, &QPushButton::clicked, this, [this, lockRoomFields] {
+        updatingNickname_ = false; lockRoomFields();
+        roomUpdateState_->setText("Updating room…");
+        session_.updatePolicy({name_->text().toStdString(), publicRoom_->isChecked(), viewerLimit_->value()}, editRevision_);
+    });
     video_ = new VideoFrameWidget; video_->setMinimumSize(320, 180); video_->setVisible(!config.room.host && config.preview);
     video_->setObjectName("roomVideo");
     layout->addWidget(video_, 1);
@@ -67,6 +109,23 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     session_.statusChanged = [this, host = config.room.host](const auto& value) {
         phase_->setText(Phase(value.phase) + QString(" — %1 connected, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
         room_->setText("Room: " + QString::fromStdString(value.roomId));
+        const bool editable = value.phase == RoomPhase::Active && !session_.roomUpdatePending();
+        updateNickname_->setEnabled(editable); updatePolicy_->setEnabled(host && editable);
+        nickname_->setEnabled(editable); name_->setEnabled(host && editable);
+        publicRoom_->setEnabled(host && editable); viewerLimit_->setEnabled(host && editable);
+        if (!editingRoom_ && !session_.roomUpdatePending()) {
+            const QSignalBlocker nameBlock(name_), publicBlock(publicRoom_), limitBlock(viewerLimit_);
+            editRevision_ = value.revision;
+            name_->setText(QString::fromStdString(value.policy.name)); publicRoom_->setChecked(value.policy.publicRoom);
+            viewerLimit_->setValue(value.policy.viewerLimit);
+        }
+        if (!editingNickname_ && !session_.roomUpdatePending()) {
+            const QSignalBlocker nicknameBlock(nickname_); nicknameRevision_ = value.revision;
+            for (const auto& member : value.members) if (member.peerId == value.peerId) nickname_->setText(QString::fromStdString(member.nickname));
+        }
+        QStringList members;
+        for (const auto& member : value.members) members << QString::fromStdString(member.nickname) + (member.host ? " (host)" : " (viewer)");
+        members_->setText("Members: " + members.join(", "));
         apply_->setEnabled(host && value.phase == RoomPhase::Active);
         if (host && session_.settingsPending()) settingsState_->setText("Settings pending…");
         else if (host && value.stream.requestedRevision) {
@@ -82,6 +141,18 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         if (value.phase == RoomPhase::Failed) error_->setText("The room session failed. Stop and start a new session to retry.");
     };
     session_.settingsAccepted = [this](const auto& result) { if (result.error != StreamUpdateError::None) error_->setText("The settings update was rejected."); };
+    session_.roomUpdated = [this](const auto& result) {
+        switch (result.error) {
+        case RoomUpdateError::None:
+            if (updatingNickname_) editingNickname_ = false; else editingRoom_ = false;
+            roomUpdateState_->setText("Server confirmed the update."); break;
+        case RoomUpdateError::Conflict: roomUpdateState_->setText("The room changed while you were editing. Reload current values and review your change."); break;
+        case RoomUpdateError::Unconfirmed: roomUpdateState_->setText("The server outcome is unknown. Check current room values before trying again."); break;
+        case RoomUpdateError::Invalid: roomUpdateState_->setText("Invalid name or room settings."); break;
+        case RoomUpdateError::Forbidden: roomUpdateState_->setText("Only the host can change room settings."); break;
+        default: roomUpdateState_->setText("The room update was not accepted."); break;
+        }
+    };
     if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::DecodedFrameInfo frame) {
         screenshare::SessionEvent::VideoFrame output;
         output.width = frame.width; output.height = frame.height; output.codedWidth = frame.codedWidth; output.codedHeight = frame.codedHeight;

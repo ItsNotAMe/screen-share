@@ -79,7 +79,11 @@ The opt-in `--room-v2-browser HTTPS_ORIGIN` path now adds create/join forms, cap
 selection, public/unlisted visibility, passwords, a saved validated nickname and
 a pushed room directory. It stops subscribing when hidden for a session and
 resubscribes on return; no separate admission preflight or list polling is added.
-Default-shell adoption, live profile/policy mutations, room links, input consent/
+Live session nickname and host policy edits now use bounded, acknowledged backend
+commands with revision conflicts, pushed member/policy state and explicit uncertain
+outcomes. UI drafts survive conflicts; directory names, capacity and visibility
+update through the existing push subscription while media keeps running.
+Default-shell adoption, room links, input consent/
 control, zero-copy presentation, source switching and aggregate allocation remain.
 This milestone is not complete and defaults are unchanged.
 

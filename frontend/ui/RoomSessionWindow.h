@@ -2,6 +2,7 @@
 #include "ui/QtRoomSession.h"
 #include <QWidget>
 class QLabel;
+class QLineEdit;
 class QSpinBox;
 class QComboBox;
 class QCheckBox;
@@ -25,6 +26,13 @@ private:
     QCheckBox* bitrateLimit_;
     QPushButton *apply_, *stop_;
     VideoFrameWidget* video_;
+    QLineEdit *nickname_, *name_;
+    QCheckBox* publicRoom_;
+    QSpinBox* viewerLimit_;
+    QLabel *members_, *roomUpdateState_;
+    QPushButton *updateNickname_, *updatePolicy_;
+    uint64_t editRevision_ = 0, nicknameRevision_ = 0;
+    bool editingRoom_ = false, editingNickname_ = false, updatingNickname_ = false;
     bool closing_ = false;
 };
 int RunRoomSessionWindow(const QString& configurationPath);

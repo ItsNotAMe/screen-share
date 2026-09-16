@@ -7,6 +7,8 @@
 #include <mutex>
 #include <deque>
 #include <QJsonDocument>
+#include <QJsonArray>
+#include "room/protocol/RoomProtocol.h"
 
 namespace screenshare::v2 {
 using namespace room::qt;
@@ -21,6 +23,11 @@ struct RoomSession::Impl {
         RoomStatus status;
         bool started = false, stopQueued = false, scheduled = false, stopping = false;
         bool settingsQueued = false;
+        bool mutationQueued = false;
+        uint64_t mutationSequence = 0;
+        QString mutationId;
+        std::shared_ptr<std::promise<RoomUpdateResult>> mutationReply;
+        std::chrono::steady_clock::time_point mutationDeadline;
         std::promise<void> stoppedPromise;
         std::shared_future<void> stopped = stoppedPromise.get_future().share();
         std::shared_ptr<std::promise<RoomResult>> startReply;
@@ -43,9 +50,16 @@ struct RoomSession::Impl {
         void Reply(RoomError error, bool unconfirmed = false) {
             if (startReply) { startReply->set_value({error, unconfirmed}); startReply.reset(); }
         }
+        void FinishMutation(RoomUpdateResult result) {
+            if (!mutationReply) return;
+            auto reply = std::move(mutationReply); mutationId.clear();
+            { std::lock_guard lock(mutex); mutationQueued = false; }
+            reply->set_value(result);
+        }
         void BeginStop(RoomError error = RoomError::None) {
             if (stopping) return;
             stopping = true;
+            FinishMutation({RoomUpdateError::Unconfirmed});
             Phase(error == RoomError::None ? RoomPhase::Stopping : RoomPhase::Failed, error);
             Reply(error == RoomError::None ? RoomError::Cancelled : error, admission.valid());
             if (session) session->Stop();
@@ -94,6 +108,30 @@ struct RoomSession::Impl {
                 return;
             }
             session->OnEvent(event);
+            if (event.kind == RoomSocket::EventKind::Snapshot) {
+                const auto payload = event.value;
+                const auto policy = payload["policy"].toObject();
+                std::lock_guard lock(mutex);
+                status.revision = event.revision.value_or(0);
+                status.policy = {policy["name"].toString().toStdString(), policy["visibility"] == "public", policy["viewerLimit"].toInt()};
+                status.members.clear();
+                for (const auto& item : payload["members"].toArray()) {
+                    const auto member = item.toObject();
+                    status.members.push_back({member["peerId"].toString().toStdString(), member["nickname"].toString().toStdString(), member["role"] == "host"});
+                }
+            }
+            if (event.kind == RoomSocket::EventKind::Result && mutationReply && event.value["requestId"].toString() == mutationId) {
+                const auto payload = event.value["payload"].toObject();
+                RoomUpdateResult result;
+                if (payload["status"] == "conflict") {
+                    result.error = RoomUpdateError::Conflict;
+                    result.currentRevision = uint64_t(payload["currentRevision"].toDouble());
+                } else if (payload["status"] != "ok")
+                    result.error = payload["code"] == "forbidden" ? RoomUpdateError::Forbidden : RoomUpdateError::Rejected;
+                FinishMutation(result);
+            }
+            if (event.kind == RoomSocket::EventKind::Reconnecting || event.kind == RoomSocket::EventKind::Error || event.kind == RoomSocket::EventKind::Closed)
+                FinishMutation({RoomUpdateError::Unconfirmed});
             if (event.kind == RoomSocket::EventKind::Snapshot) { admittedSnapshot = true; connected = true; recoveryDeadline.reset(); Phase(RoomPhase::Active); if (startReply) Schedule(); }
             if (event.kind == RoomSocket::EventKind::Reconnecting) {
                 const auto now = std::chrono::steady_clock::now();
@@ -113,6 +151,7 @@ struct RoomSession::Impl {
             if (event.kind == RoomSocket::EventKind::Closed) { terminal = true; terminalError = RoomError::None; Schedule(); }
         }
         void Tick() {
+            if (mutationReply && std::chrono::steady_clock::now() >= mutationDeadline) FinishMutation({RoomUpdateError::Unconfirmed});
             if (stopping) {
                 // Runtime keeps advancing retirement while transport is stopped.
                 try { if (runtime) runtime->Advance(); } catch (...) { Phase(RoomPhase::Failed, RoomError::Media); }
@@ -162,7 +201,7 @@ struct RoomSession::Impl {
                 BeginStop(RoomError::Transport); return;
             }
             if (connected) { Reply(RoomError::None); connected = false; }
-            if (admission.valid() || opening.valid() || startReply || recoveryDeadline) Schedule();
+            if (admission.valid() || opening.valid() || startReply || recoveryDeadline || mutationReply) Schedule();
         }
     };
     std::shared_ptr<State> state;
@@ -230,6 +269,56 @@ std::future<StreamUpdateResult> RoomSession::UpdateStreamPreferences(media::Stre
         { std::lock_guard lock(state->mutex); state->settingsQueued = false;
           if (result.error == StreamUpdateError::None) state->status.stream = std::move(stream); }
         reply->set_value(result);
+    });
+    return future;
+}
+std::future<RoomUpdateResult> RoomSession::UpdateNickname(std::string nickname, uint64_t revision) {
+    return SubmitUpdate(std::move(nickname), {}, revision);
+}
+std::future<RoomUpdateResult> RoomSession::UpdateRoomPolicy(RoomPolicy policy, uint64_t revision) {
+    return SubmitUpdate({}, std::move(policy), revision);
+}
+std::future<RoomUpdateResult> RoomSession::SubmitUpdate(std::optional<std::string> nickname, std::optional<RoomPolicy> policy, uint64_t revision) {
+    auto reply = std::make_shared<std::promise<RoomUpdateResult>>(); auto future = reply->get_future();
+    // Bound allocations and reject revisions before converting to JSON doubles.
+    if (revision > 9007199254740991ULL || (nickname && nickname->size() > 1024) || (policy && policy->name.size() > 1024)) {
+        reply->set_value({RoomUpdateError::Invalid}); return future;
+    }
+    if ((nickname && QString::fromStdString(*nickname).toStdString() != *nickname) ||
+        (policy && QString::fromStdString(policy->name).toStdString() != policy->name)) {
+        reply->set_value({RoomUpdateError::Invalid}); return future;
+    }
+    QJsonObject payload{{"expectedRevision", double(revision)}};
+    if (nickname) payload["nickname"] = QString::fromStdString(*nickname);
+    if (policy) {
+        payload["name"] = QString::fromStdString(policy->name);
+        payload["visibility"] = policy->publicRoom ? "public" : "unlisted";
+        payload["viewerLimit"] = policy->viewerLimit;
+    }
+    auto state = impl_->state;
+    std::lock_guard lock(state->mutex);
+    if (state->stopQueued || state->status.phase != RoomPhase::Active) {
+        reply->set_value({RoomUpdateError::Unavailable}); return future;
+    }
+    bool host = false;
+    for (const auto& member : state->status.members) if (member.peerId == state->status.peerId) host = member.host;
+    if (policy && !host) { reply->set_value({RoomUpdateError::Forbidden}); return future; }
+    if (state->mutationQueued) { reply->set_value({RoomUpdateError::Busy}); return future; }
+    const auto id = QString("mutation_%1").arg(++state->mutationSequence);
+    const auto validation = room::wire::ValidateClientCommand(QJsonDocument(QJsonObject{
+        {"v", 2}, {"type", nickname ? "profile.update" : "room.update"}, {"roomId", QString::fromStdString(state->status.roomId)},
+        {"requestId", id}, {"payload", payload}}).toJson(QJsonDocument::Compact));
+    if (!validation.ok) { reply->set_value({RoomUpdateError::Invalid}); return future; }
+    state->mutationQueued = true;
+    impl_->executor.Post([state, reply, id, bytes = QJsonDocument(validation.message).toJson(QJsonDocument::Compact)] {
+        state->mutationReply = reply; state->mutationId = id;
+        try {
+            if (state->stopping || !state->coordinator->Send(1, bytes)) {
+                state->FinishMutation({RoomUpdateError::Unavailable}); return;
+            }
+            state->mutationDeadline = std::chrono::steady_clock::now() + 10s;
+            state->Schedule();
+        } catch (...) { state->FinishMutation({RoomUpdateError::Unconfirmed}); }
     });
     return future;
 }

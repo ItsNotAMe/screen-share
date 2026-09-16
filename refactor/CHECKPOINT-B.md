@@ -1,5 +1,36 @@
 # Checkpoint B evidence
 
+## Live nickname and room-policy integration — 2026-09-16
+
+The public RoomSession now exposes authoritative room revision, policy and members,
+plus bounded acknowledged nickname/policy mutations. Shared validation and server
+authorization remain authoritative. UI drafts retain their revision, survive
+conflicts and require explicit reload/review. Unknown server outcomes are never
+automatically retried. These operations use the existing socket and pushed cache;
+no extra HTTP polling/preflight was introduced.
+
+The real-Worker widget scenario verifies normalized live nicknames, stale-edit
+conflicts, preserved drafts, pushed name/capacity/public-list changes, rejected
+viewer policy edits and invalid names, with continued video. A deterministic native
+signaling barrier verifies one-command capacity and pending-result completion during
+stop. The ten-second missing-ack deadline still needs a dedicated fault fixture.
+
+Validation:
+- Release application suite: **18/18**, 65.82s; Debug: **18/18**, 67.87s.
+- After final independent-draft UI refinement, focused UI test passed again:
+  Release **4.28s**, Debug **4.44s**.
+- Final generated-window WGC/real-renderer scenarios passed outside the capture
+  sandbox: Release **4.88s**, Debug **5.15s**. Synthetic audio remained silent;
+  no physical keyboard/mouse input was used.
+- Logs: `build/webrtc/room-mutations-{release,debug}-tests.log`.
+- Windows artifacts:
+  `build/webrtc/room-mutations-windows-release/native-service-de42ba13-c6a7-402b-8a1f-30243030ee93`
+  and `build/webrtc/room-mutations-windows-debug/native-service-dcc0a217-1e48-4f60-b213-a4bcfc6f8e22`.
+
+Milestone 2 and default cutover remain open. This is local integration evidence,
+not remote latency, hardware-only encoding, resource or service-cost acceptance.
+Session nickname edits are intentionally separate from browser nickname persistence.
+
 ## Pushed room browser and saved nickname — 2026-09-16
 
 `ScreenShareUi --room-v2-browser HTTPS_ORIGIN` adds opt-in create/join forms,

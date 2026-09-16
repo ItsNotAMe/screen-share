@@ -1,5 +1,19 @@
 # Project Memory
 
+## Live room/profile mutations — 2026-09-16
+
+RoomSession exposes RoomPolicy/RoomMember, authoritative room revision and bounded
+UpdateNickname/UpdateRoomPolicy futures. Shared wire validation normalizes names;
+invalid UTF-8 and oversized/nonrepresentable revisions fail locally. One mutation
+in flight; host policy authorization also checked server-side. Match acknowledgements
+by unique request ID; no retries. Disconnect/stop/10s deadline => Unconfirmed, because
+the server may have committed. Snapshot state is independent of acknowledgement.
+QtRoomSession polls futures locally; RoomSessionWindow provides live edits, plain
+member roster, independent nickname/policy drafts and explicit conflict/reload flow.
+Session nickname does not change browser persistence. Tests extend the real Worker
+UI scenario and deterministically hold signaling to check Busy and stop ordering.
+No audible tests or physical input. Milestone 2/default cutover remain open.
+
 ## Sequencing preference — later UI redesign
 
 User requested a broader UI appearance/feel/usability refactor only after all

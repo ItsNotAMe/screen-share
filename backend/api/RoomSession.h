@@ -4,6 +4,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,10 @@ struct RoomOptions {
 enum class RoomPhase { Idle, Admitting, Connecting, Active, Reconnecting, Stopping, Stopped, Failed };
 enum class RoomError { None, Busy, Cancelled, Admission, Transport, Media };
 struct RoomResult { RoomError error = RoomError::None; bool outcomeUnconfirmed = false; };
+struct RoomPolicy { std::string name; bool publicRoom = true; int viewerLimit = 4; };
+struct RoomMember { std::string peerId, nickname; bool host = false; };
+enum class RoomUpdateError { None, Invalid, Busy, Unavailable, Forbidden, Conflict, Rejected, Unconfirmed };
+struct RoomUpdateResult { RoomUpdateError error = RoomUpdateError::None; uint64_t currentRevision = 0; };
 enum class StreamUpdateError { None, Invalid, Busy, Unavailable, Unsupported, Rejected };
 struct StreamUpdateResult { StreamUpdateError error = StreamUpdateError::None; uint64_t revision = 0; };
 struct PeerStreamStatus {
@@ -36,6 +41,9 @@ struct RoomStatus {
     std::string roomId, peerId;
     size_t activePeers = 0, failedPeers = 0, pendingPeers = 0;
     StreamStatus stream;
+    uint64_t revision = 0;
+    RoomPolicy policy;
+    std::vector<RoomMember> members;
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
 // into the public control API. All runtime methods execute on owned signaling.
@@ -77,9 +85,15 @@ public:
     // Status exposes per-peer sender application and source-frame observation.
     // At most one command is queued; callers may retry Busy with their latest value.
     std::future<StreamUpdateResult> UpdateStreamPreferences(media::StreamPreferences);
+    // One in-flight room/profile mutation. Completion is the server acknowledgement;
+    // authoritative state arrives independently through pushed snapshots. Never
+    // automatically retry Conflict or Unconfirmed (the server may have committed).
+    std::future<RoomUpdateResult> UpdateNickname(std::string, uint64_t expectedRevision);
+    std::future<RoomUpdateResult> UpdateRoomPolicy(RoomPolicy, uint64_t expectedRevision);
     std::shared_future<void> Stop();
     RoomStatus Status() const;
 private:
+    std::future<RoomUpdateResult> SubmitUpdate(std::optional<std::string>, std::optional<RoomPolicy>, uint64_t);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

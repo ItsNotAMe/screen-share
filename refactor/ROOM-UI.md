@@ -68,11 +68,40 @@ fallback; owners should use stop/finished before destruction.
 
 Remote control is unavailable in this opt-in window; no input handler or control
 grant is installed. The opt-in browser above now supplies create/join, persisted
-nickname and pushed directory updates. The default application shell, live profile/
-policy mutations, room links and consent/input controls remain to migrate.
+nickname and pushed directory updates. The default application shell, room links
+and consent/input controls remain to migrate.
 Source switching, aggregate bandwidth allocation, zero-copy
 presentation, NAT/ICE configuration and acceptance measurements also remain.
 This path is an integration preview, not milestone 2 completion or default cutover.
+
+## Live room and nickname edits
+
+Each session displays the authenticated member list. Any member can change their
+own session nickname; the host can change room name, public/unlisted visibility and
+viewer limit. Session nickname edits do not replace the browser's saved nickname.
+Names remain plain text, normalize through the existing protocol boundary and reject
+invalid Unicode, control/bidi characters and excessive length. Host authorization
+is checked locally and by the server.
+
+The portable backend exposes `UpdateNickname` and `UpdateRoomPolicy`, accepting an
+explicit expected room revision from `Status()`. One mutation may be queued or in
+flight per session. A result confirms server acknowledgement, not optimistic local
+state: member/policy snapshots and directory updates arrive independently. Stream
+preferences retain their separate revision and command path.
+
+Drafts retain their starting revision. A conflict preserves the draft and asks the
+user to reload current values before reviewing/resubmitting. Nickname and policy
+drafts are independent. Controls are disabled during a pending mutation. There is
+no mutation retry or extra HTTP refresh. A disconnect, shutdown or ten-second
+acknowledgement deadline reports `Unconfirmed`: the server may already have saved
+the change. Inspect pushed state before deciding whether to submit again.
+
+The real-Worker widget test covers live normalized nickname updates, stale policy
+conflicts, draft preservation/reload, pushed name/capacity/visibility changes,
+unauthorized/invalid edits and uninterrupted frames. A signaling barrier tests
+the public API's Busy bound and stop ordering deterministically, including resolving
+the pending result as Unconfirmed. The ten-second timeout branch is implemented
+but does not yet have a dedicated dropped-acknowledgement fixture.
 
 ## Headless and Windows checks
 

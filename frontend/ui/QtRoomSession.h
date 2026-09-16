@@ -15,12 +15,16 @@ public:
     bool start(RoomSessionConfig);
     void stop();
     void apply(screenshare::media::StreamPreferences);
+    void updateNickname(std::string, uint64_t revision);
+    void updatePolicy(screenshare::v2::RoomPolicy, uint64_t revision);
+    bool roomUpdatePending() const { return mutation_.valid(); }
     bool running() const { return bool(session_); }
     bool settingsPending() const { return pending_.has_value() || applying_.valid(); }
     screenshare::v2::RoomStatus status() const;
     std::function<void(const screenshare::v2::RoomStatus&)> statusChanged;
     std::function<void(screenshare::DecodedFrameInfo)> frameReady;
     std::function<void(const screenshare::v2::StreamUpdateResult&)> settingsAccepted;
+    std::function<void(const screenshare::v2::RoomUpdateResult&)> roomUpdated;
     std::function<void(const QString&)> error;
     std::function<void(const screenshare::v2::RoomStatus&)> finished;
 private:
@@ -33,6 +37,7 @@ private:
     std::shared_ptr<LatestRoomVideoFrame> frames_;
     std::future<screenshare::v2::RoomResult> admission_;
     std::future<screenshare::v2::StreamUpdateResult> applying_;
+    std::future<screenshare::v2::RoomUpdateResult> mutation_;
     std::shared_future<void> stopping_;
     std::optional<screenshare::media::StreamPreferences> pending_, submitted_;
     std::chrono::steady_clock::time_point started_, nextStatus_;
