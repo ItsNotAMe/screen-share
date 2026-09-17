@@ -33,6 +33,19 @@ void Check(bool ok, std::source_location location = std::source_location::curren
 HWND captureWindow = nullptr;
 #endif
 struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
+    class InputSink final : public screenshare::input::Sink {
+    public:
+        std::atomic<unsigned> applied{0}, releases{0};
+        std::atomic<bool> pressed{false};
+        bool Grant(const std::string&, uint8_t, int) override { return true; }
+        bool Apply(const std::string&, const screenshare::input::Event& e) override {
+            if (e.kind == screenshare::input::Kind::Key) pressed = e.down;
+            ++applied; return true;
+        }
+        void Release(const std::string&) noexcept override { pressed = false; ++releases; }
+    };
+    std::shared_ptr<InputSink> input = std::make_shared<InputSink>();
+    std::atomic<unsigned> responseFrames{0};
     std::atomic<unsigned> frames{0}, invalid{0}, destroyed{0};
     std::atomic<bool> failDelivery{false};
     std::atomic<bool> restart{false};
@@ -42,6 +55,7 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     void OnFrame(const webrtc::VideoFrame& frame) override {
         auto pixels = frame.video_frame_buffer()->ToI420();
+        if (pixels && pixels->DataY()[pixels->StrideY() * (pixels->height() / 2) + pixels->width() / 2] > 185) ++responseFrames;
         const bool reducedFrame = frame.width() == 320 && frame.height() == 180;
         if ((!reducedFrame && (frame.width() != 640 || frame.height() != 360)) || !pixels ||
             pixels->DataY()[pixels->StrideY() * (pixels->height() / 2) + pixels->width() / 2] < 35) ++invalid;
@@ -69,9 +83,11 @@ public:
         windows.audioForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
         windows.playbackForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         windows.frames = evidence_;
+        windows.inputSink = evidence_->input;
         native_ = WindowsRoomRuntimeFactory(std::move(windows))(identity, std::move(send));
 #else
         NativeRoomRuntimeOptions options;
+        options.inputSink = evidence_->input;
         auto endpoints = proof::SyntheticAudio(evidence_->audio);
         if (identity.host) {
             options.audioSwitch = std::make_shared<AudioSwitchControl>(screenshare::media::AudioSelection{}, endpoints.capture, ProcessMicrophone);
@@ -89,6 +105,11 @@ public:
         options.capture = [] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); };
         options.deliver = [evidence = evidence_](auto& source, const auto& sample) {
             if (evidence->failDelivery.exchange(false)) throw std::runtime_error("Injected viewer delivery failure");
+            if (evidence->input->pressed) {
+                auto response = *std::static_pointer_cast<SyntheticCaptureResource>(sample.resource);
+                std::fill(response.luma.begin(), response.luma.end(), uint8_t(210));
+                source.Push(response, sample.capturedAt); return;
+            }
             source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
         };
         options.frames = evidence_;
@@ -112,6 +133,7 @@ public:
     AudioSelectionStatus AudioSelection() const override { return native_->AudioSelection(); }
     std::future<AudioUpdateResult> UpdatePlayback(screenshare::media::PlaybackSelection selection) override { return native_->UpdatePlayback(std::move(selection)); }
     PlaybackStatus Playback() const override { return native_->Playback(); }
+    std::shared_ptr<screenshare::input::Port> Input() const override { return native_->Input(); }
     void Advance() override {
         try {
             if (evidence_->pauseAdvance) return; // Media threads keep running; telemetry cannot publish.
@@ -148,6 +170,7 @@ int main(int argc, char** argv) {
     webrtc::InitializeLogging(std::move(logging)); webrtc::WinsockInitializer winsock;
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
+    std::optional<int64_t> inputResponseMs;
     try {
         Check(argc == 2);
 #ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
@@ -173,6 +196,59 @@ int main(int argc, char** argv) {
             Check(joined.error == RoomError::None);
         }
         Wait([&] { for (auto& value : evidence) if (value->frames < 45 || value->audio->audibleBlocks < 20) return false; return host.Status().activePeers == 4; });
+        // Actual encrypted data channels and public port while four media peers
+        // run. The sink changes only a synthetic scene, never Windows input.
+        const auto hostId = host.Status().peerId, controllerId = viewers[0]->Status().peerId;
+        Wait([&] {
+            if (!host.Input() || !viewers[0]->Input()) return false;
+            for (const auto& p : viewers[0]->Input()->Read()) if (p.peer == hostId && p.ready && p.permission) return true;
+            return false;
+        });
+        auto granted = [&](const std::shared_ptr<screenshare::input::Port>& port, const std::string& peer) {
+            for (const auto& p : port->Read()) if (p.peer == peer) return p.granted;
+            return uint8_t(0);
+        };
+        const uint8_t capability =
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+            screenshare::input::Mouse;
+#else
+            screenshare::input::Keyboard;
+#endif
+        Check(viewers[0]->Input()->Request(hostId, capability));
+        Wait([&] { for (const auto& p : host.Input()->Read()) if (p.peer == controllerId && p.requested == capability) return true; return false; });
+        Check(!granted(host.Input(), controllerId));
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+        Check(!host.Input()->Grant(controllerId, screenshare::input::Keyboard));
+#endif
+        Check(host.Input()->Grant(controllerId, capability));
+        Wait([&] { return granted(viewers[0]->Input(), hostId) == capability; });
+        screenshare::input::Event press;
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+        press.kind = screenshare::input::Kind::Button; press.x = press.y = .5f;
+#else
+        press.kind = screenshare::input::Kind::Key; press.key = 65;
+#endif
+        press.down = true;
+        const auto inputStart = std::chrono::steady_clock::now();
+        Check(viewers[0]->Input()->Submit(hostId, press));
+        Wait([&] { return hostEvidence->input->applied > 0; });
+#ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
+        Wait([&] { return evidence[0]->responseFrames > 0; });
+        inputResponseMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - inputStart).count();
+#endif
+        // Stop runtime advancement, not the input owner: watchdog still releases.
+        evidence[0]->pauseAdvance = true;
+        hostEvidence->pauseAdvance = true;
+        Wait([&] { return !granted(host.Input(), controllerId) && hostEvidence->input->releases > 0; });
+        Check(!hostEvidence->input->pressed);
+        hostEvidence->pauseAdvance = false;
+        evidence[0]->pauseAdvance = false;
+        Wait([&] { return !granted(viewers[0]->Input(), hostId); });
+        Check(!viewers[0]->Input()->Submit(hostId, press));
+        Check(host.Input()->Grant(controllerId, capability));
+        Wait([&] { return granted(viewers[0]->Input(), hostId) == capability; });
+        host.Input()->Revoke();
+        Wait([&] { return !granted(viewers[0]->Input(), hostId); });
         const auto beforeAudioFailure = host.Status();
         hostEvidence->audio->captureUnavailable = true;
         Wait([&] {
@@ -370,7 +446,9 @@ int main(int argc, char** argv) {
         Wait([&] { return failedCapture.Status().phase == RoomPhase::Failed; });
         Check(failedCapture.Status().error == RoomError::Media);
         auto failedStop = failedCapture.Stop(); Get(failedStop);
-        std::cout << "{\"passed\":true,\"public_session\":true,\"native_runtime\":true,\"rejoin\":true,\"viewers\":4,\"decoded_frames\":" << frames << ",\"cancel_admission\":true,\"coalesced_stop\":true,\"media_drain_barrier\":true,\"production_tls_required\":true}\n";
+        std::cout << "{\"passed\":true,\"public_session\":true,\"native_runtime\":true,\"rejoin\":true,\"viewers\":4,\"decoded_frames\":" << frames
+            << ",\"authorized_input\":true,\"input_response_internal_ms\":" << (inputResponseMs ? std::to_string(*inputResponseMs) : "null")
+            << ",\"cancel_admission\":true,\"coalesced_stop\":true,\"media_drain_barrier\":true,\"production_tls_required\":true}\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL(); return result;
 }

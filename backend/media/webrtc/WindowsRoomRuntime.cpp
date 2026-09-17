@@ -87,6 +87,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
             source.PushBuffer(std::static_pointer_cast<WindowsCaptureResource>(sample.resource)->buffer, sample.capturedAt);
         };
         native.preferences = options.preferences; native.frames = options.frames; native.channel = options.channel;
+        native.inputSink = options.inputSink;
         native.presentation = options.presentation;
         native.codecStatus = [state] {
             CodecPipelineStatus value;

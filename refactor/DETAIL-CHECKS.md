@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (through `82bd791`, plus guarded normal-home/CLI adoption). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-18 (through `0849e44`, plus shared input transport/safety and real-channel headless response). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -10,6 +10,21 @@ split into completed implementation and remaining validation. All original
 physical-device, resource, network, cost, latency and cutover gates remain open
 until their own evidence passes. Dated continuation notes at the end are historical;
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
+
+## Input transport, safety and headless response — 2026-09-18
+
+- [x] Integrate a portable, versioned input service and dedicated input owner with
+  actual encrypted channels and the public RoomSession input port.
+- [x] Validate hostile/stale/wrong-channel events, per-kind sequence spaces,
+  reliable backpressure, state coalescing, explicit grant/revoke, watchdog and
+  backend failure with recording sinks and no physical input.
+- [x] Exercise authorized input and a synthetic returning image under four-viewer
+  media; watchdog release still works when host/viewer runtime advancement pauses.
+- [ ] Complete Windows injection/controller/mapping, normal UI/CLI consent,
+  indicators, panic revoke, focus/unplug and actual local-slot integration.
+
+See [INPUT.md](INPUT.md). Normal v2 sessions remain view-only. Backend safety
+and internal response samples do not close Gate D or physical latency acceptance.
 
 ## Guarded normal-home/CLI adoption — 2026-09-18
 
@@ -317,7 +332,8 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [ ] Verify complete production teardown without retained callbacks, textures, sockets or audio devices; account for native/driver caches separately. Carried from A integration-proof checklist, not marked passed.
 
 - [x] Separate session, media, capture/audio, presentation and diagnostic boundaries.
-- [ ] Complete the v2 input service and authorized input boundaries.
+- [x] Implement the v2 input service and authenticated transport boundary with a recording sink.
+- [ ] Complete Windows input, source mapping and frontend consent boundaries (INPUT.md).
 - [x] Keep Windows/WebRTC types out of the v2 public RoomSession control API and portable settings/status/frame ownership types. Native render/capture adapters remain explicitly Windows-specific.
 - [x] Add profile, room policy, stream preferences, per-peer status, operation results, session snapshots and owned frame types.
 - [x] Implement the serialized control executor and session/viewer generations.
@@ -551,13 +567,17 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 
 ### Input channels and Windows backends
 
-- [ ] Implement reliable ordered control, unreliable unordered input state and replaceable telemetry channels.
-- [ ] Implement explicit versioned input serialization and validation.
-- [ ] Include connection/permission generations and sequence checks.
+- [x] Implement reliable ordered control, unreliable unordered input state and replaceable telemetry channels.
+- [x] Implement explicit versioned input serialization and validation.
+- [x] Include connection/permission generations and sequence checks.
 - [ ] Implement pointer coalescing, gamepad polling and 100 ms state keepalives.
-- [ ] Bound reliable queues and handle backpressure without stale input replay.
+  Coalescing, transport rate ceiling and complete pad/heartbeat keepalives are
+  implemented; physical controller polling remains in the Windows/frontend group.
+- [x] Bound reliable queues and handle backpressure without stale input replay.
 - [ ] Preserve exclusive mouse/keyboard ownership and up to three remote gamepads with local-slot reservation.
-- [ ] Implement 300 ms watchdog neutralization and fresh-generation recovery.
+  Service ownership/allocation policy is tested. Physical local-slot discovery,
+  device lifecycle and normal frontend integration remain open.
+- [x] Implement 300 ms watchdog neutralization and fresh-generation recovery at the service/sink boundary; physical sink integration remains below.
 - [ ] Preserve consent, persistent indicators, panic revoke and window confinement.
 - [ ] Neutralize input on source change and rebuild active-image coordinate mapping.
 - [ ] Preserve XInput/PlayStation reports and installer-only virtual-driver lifecycle.

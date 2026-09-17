@@ -254,18 +254,29 @@ if(MSVC)
         if(BUILD_TESTING)
             add_executable(NativeRoomRuntimeTests tests/NativeRoomRuntimeTests.cpp)
             target_link_libraries(NativeRoomRuntimeTests PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_executable(RoomInputTests tools/webrtc-proof/PublicRoomSessionProof.cpp)
+            target_link_libraries(RoomInputTests PRIVATE ScreenShareCore ScreenShareRoomSession)
             add_test(NAME native-room-runtime-link COMMAND NativeRoomRuntimeTests)
             set_tests_properties(native-room-runtime-link PROPERTIES TIMEOUT 15)
         endif()
     endif()
     if(BUILD_TESTING)
         add_executable(RoomSocketTests tests/RoomSocketTests.cpp)
+        if(TARGET RoomInputTests)
+            add_dependencies(RoomInputTests RoomSocketTests) # Deploy the same Qt networking DLLs.
+        endif()
         add_executable(RoomAdmissionTests tests/RoomAdmissionTests.cpp)
         add_executable(RoomServiceTests tests/RoomServiceTests.cpp)
         target_link_libraries(RoomServiceTests PRIVATE ScreenShareRoom)
         add_dependencies(RoomServiceTests RoomSocketTests)
         find_program(SCREENSHARE_NODE_EXECUTABLE node)
         if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/node_modules/miniflare/package.json")
+            if(TARGET RoomInputTests)
+                add_test(NAME room-v2-input-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                    "$<TARGET_FILE:RoomInputTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-input-evidence" media)
+                set_tests_properties(room-v2-input-media PROPERTIES TIMEOUT 90)
+            endif()
             add_test(NAME room-v2-native-worker COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                 "$<TARGET_FILE:RoomServiceTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-service-evidence")
@@ -308,6 +319,11 @@ target_link_libraries(ScreenShareAPI PUBLIC
 )
 
 if(BUILD_TESTING)
+    add_executable(InputServiceTests tests/InputServiceTests.cpp backend/input/v2/InputService.cpp)
+    target_compile_features(InputServiceTests PRIVATE cxx_std_20)
+    target_include_directories(InputServiceTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/backend")
+    add_test(NAME input-service COMMAND InputServiceTests)
+    set_tests_properties(input-service PROPERTIES TIMEOUT 20)
     add_executable(ControllerProtocolTests
         tests/ControllerProtocolTests.cpp
     )

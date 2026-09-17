@@ -3,6 +3,7 @@
 #include "ViewerStreamSettings.h"
 #include "TransportSendRate.h"
 #include "ReceiverTelemetryChannel.h"
+#include "InputChannels.h"
 #include "media/capture/SwitchableCaptureSource.h"
 #include "api/make_ref_counted.h"
 #include <map>
@@ -44,10 +45,12 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
         std::string statsConnection;
         // Destroy/unregister observer before native peer/channel destruction.
         std::unique_ptr<ReceiverTelemetryChannel> telemetry;
+        std::unique_ptr<InputChannels> input;
     };
     v2::RoomIdentity identity_;
     v2::RoomSend send_;
     NativeRoomRuntimeOptions options_;
+    std::shared_ptr<input::Service> input_;
     std::unique_ptr<MediaEngine> engine_;
     webrtc::scoped_refptr<webrtc::AudioTrackInterface> audio_;
     HostMediaSession capture_;
@@ -70,6 +73,8 @@ public:
         if (!options_.engine || !send_ || (identity_.host && (!options_.capture || !options_.deliver)))
             throw std::invalid_argument("Native room runtime requires media dependencies");
         ValidateStreamPreferences(options_.preferences);
+        input_ = std::make_shared<input::Service>(identity_.host, options_.inputSink);
+        input_->Configure(options_.initialCapture.kind == CaptureKind::Window ? uint8_t(input::Mouse | input::Gamepad) : uint8_t(7), 0);
         if (identity_.host) {
             if (options_.captureForSelection) {
                 captureSwitch_ = std::make_shared<CaptureSwitchControl>(options_.initialCapture);
@@ -84,6 +89,7 @@ public:
         }
     }
     ~NativeRoomRuntime() override {
+        input_->Close();
         if (owner_) owner_->Stop(); // Final teardown fallback; normal Stop already drained.
         owner_.reset(); peers_.clear(); audio_ = nullptr; engine_.reset();
     }
@@ -95,10 +101,12 @@ public:
         failed_.erase(id);
         auto entry = std::make_unique<Entry>(); entry->generation = ++next_;
         entry->telemetry = std::make_unique<ReceiverTelemetryChannel>(identity_.host, options_.presentation);
+        if (!options_.channel) entry->input = std::make_unique<InputChannels>(input_, id);
         auto* raw = entry.get();
         entry->peer = std::make_unique<MediaPeer>(*engine_, next_, options_.frames.get(),
             [this, id, raw](auto channel) {
                 if (channel->label() == "telemetry") raw->telemetry->Attach(std::move(channel));
+                else if (raw->input) raw->input->Attach(std::move(channel));
                 else if (options_.channel) options_.channel(id, std::move(channel));
             }, options_.connection);
         auto send = [this, id](auto signal) { return send_(id, std::move(signal)); };
@@ -130,6 +138,7 @@ public:
         const auto found = peers_.find(id);
         if (found == peers_.end() || found->second->removing) return;
         auto& entry = *found->second; entry.removing = true;
+        input_->Remove(id);
         if (owner_) owner_->Remove(entry.generation, entry.generation);
     }
     bool Receive(const std::string& id, RoomPeerSignal signal) override {
@@ -146,7 +155,14 @@ public:
     std::future<CaptureUpdateResult> SwitchCaptureSource(media::CaptureSelection selection) override {
         if (!identity_.host || !captureSwitch_) return CaptureUpdateReady(CaptureUpdateError::Unsupported);
         if (stopping_) return CaptureUpdateReady(CaptureUpdateError::Unavailable);
-        try { ValidateCaptureSelection(selection); return captureSwitch_->Submit(selection, options_.captureForSelection(selection)); }
+        try {
+            ValidateCaptureSelection(selection);
+            auto factory = options_.captureForSelection(selection);
+            // A sink has no replacement-source mapping yet. Fail closed until a
+            // new runtime supplies one; never use the retired source geometry.
+            input_->Configure(0, 0);
+            return captureSwitch_->Submit(selection, std::move(factory));
+        }
         catch (...) { return CaptureUpdateReady(CaptureUpdateError::Invalid); }
     }
     CaptureSelectionStatus CaptureSelection() const override { return captureSwitch_ ? captureSwitch_->Status() : CaptureSelectionStatus{}; }
@@ -163,6 +179,7 @@ public:
         catch (...) { return CaptureUpdateReady(AudioUpdateError::Invalid); }
     }
     PlaybackStatus Playback() const override { return options_.playback ? options_.playback->Status() : PlaybackStatus{}; }
+    std::shared_ptr<input::Port> Input() const override { return input_; }
     v2::StreamUpdateResult UpdateStreamPreferences(const StreamPreferences& preferences) override {
         if (!identity_.host) return {v2::StreamUpdateError::Unsupported};
         if (stopping_) return {v2::StreamUpdateError::Unavailable};
@@ -259,6 +276,9 @@ public:
             }
             if (!entry.removing) entry.telemetry->Advance(entry.negotiation->connectionId(), *entry.peer->connection, entry.negotiation->ready());
             auto status = owner_->snapshot(entry.generation);
+            if (entry.input) entry.input->Advance(entry.negotiation->connectionId(),
+                !entry.removing && entry.negotiation->ready() && status && !status->peerClosed &&
+                status->state == PeerLifecycleState::Connected);
             if (status && status->peerClosed && !entry.removing) failed_.insert(it->first);
             if (identity_.host && !entry.removing && !entry.negotiation->connectionId().empty() &&
                 std::none_of(delivery.viewers.begin(), delivery.viewers.end(), [&](const auto& viewer) {
@@ -286,6 +306,7 @@ public:
         }
     }
     std::shared_future<void> BeginStop() override {
+        input_->Close();
         if (options_.playback) options_.playback->Close();
         if (options_.audioSwitch) options_.audioSwitch->Close();
         stopping_ = true;

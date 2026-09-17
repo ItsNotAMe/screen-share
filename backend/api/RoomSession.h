@@ -8,6 +8,7 @@
 #include "media/SenderVideoStatus.h"
 #include "media/SourceVideoStatus.h"
 #include "media/PipelineStatus.h"
+#include "input/v2/InputService.h"
 #include <functional>
 #include <future>
 #include <memory>
@@ -92,6 +93,7 @@ public:
     virtual media::AudioSelectionStatus AudioSelection() const { return {}; }
     virtual std::future<media::AudioUpdateResult> UpdatePlayback(media::PlaybackSelection) { return media::CaptureUpdateReady(media::AudioUpdateError::Unsupported); }
     virtual media::PlaybackStatus Playback() const { return {}; }
+    virtual std::shared_ptr<input::Port> Input() const { return {}; }
     virtual std::shared_future<void> BeginStop() = 0;
 };
 struct RoomIdentity { bool host; std::string roomId, peerId; };
@@ -132,6 +134,9 @@ public:
     std::future<RoomUpdateResult> UpdateRoomPolicy(RoomPolicy, uint64_t expectedRevision);
     std::shared_future<void> Stop();
     RoomStatus Status() const;
+    // Retainable, bounded input port; null before runtime creation. No per-event
+    // futures/HTTP/status polling. Retained ports fail closed after session stop.
+    std::shared_ptr<input::Port> Input() const;
 private:
     std::future<RoomUpdateResult> SubmitUpdate(std::optional<std::string>, std::optional<RoomPolicy>, uint64_t);
     struct Impl;

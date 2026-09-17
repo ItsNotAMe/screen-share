@@ -18,7 +18,9 @@ count follows from counting the historical checklist entries.
 
 ## Dependencies that must not be hidden
 
-- Gaming input, consent/revoke, watchdogs and coordinate mapping remain **Stage 3**.
+- Gaming input transport, backend grants/watchdogs and recording-sink real-channel
+  tests are implemented. Windows devices, UI/CLI consent and coordinate mapping
+  remain **Stage 3**; see [INPUT.md](INPUT.md).
   Normal adoption cannot silently remove the existing control/gamepad features.
 - Stress, resource-leak, impairment, service-cost, real TLS/NAT and external latency
   acceptance remain **Stage 4**. Those gates have not been passed by localhost tests.
@@ -33,7 +35,8 @@ The guarded normal home workflow and no-JSON CLI create/join commands are
 implemented. Home/form navigation shares one pushed directory connection and
 sessions use the existing media/runtime pages and asynchronous shutdown. See
 [ADOPTION.md](ADOPTION.md). Next substantial implementation work is Stage 3
-input/consent/controller integration, required for full adoption parity; keep
+Windows input/consent/controller integration on the implemented shared input port,
+required for full adoption parity; keep
 Stage 2 physical acceptance open while progressing that work.
 
 Display-only WGC fallback, pinned output/item recovery, bounded GPU cursor

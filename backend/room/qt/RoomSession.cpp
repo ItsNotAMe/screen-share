@@ -21,6 +21,7 @@ struct RoomSession::Impl {
         RoomRuntimeFactory factory;
         mutable std::mutex mutex;
         RoomStatus status;
+        std::shared_ptr<input::Port> inputPort;
         bool started = false, stopQueued = false, scheduled = false, stopping = false;
         bool settingsQueued = false;
         bool sourceQueued = false;
@@ -122,6 +123,7 @@ struct RoomSession::Impl {
                 status.capture = runtime->CaptureSelection();
                 status.audio = runtime->AudioSelection();
                 status.playback = runtime->Playback();
+                inputPort = runtime->Input();
             }
             if (current.state == RoomMediaSession::State::Failed) { terminal = true; terminalError = RoomError::Media; Schedule(); }
         }
@@ -438,5 +440,8 @@ std::shared_future<void> RoomSession::Stop() {
 }
 RoomStatus RoomSession::Status() const {
     std::lock_guard lock(impl_->state->mutex); return impl_->state->status;
+}
+std::shared_ptr<input::Port> RoomSession::Input() const {
+    std::lock_guard lock(impl_->state->mutex); return impl_->state->inputPort;
 }
 }

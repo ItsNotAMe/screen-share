@@ -21,6 +21,7 @@ struct WindowsRoomRuntimeOptions {
     StreamPreferences preferences;
     std::shared_ptr<PresentationTelemetry> presentation;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
+    std::shared_ptr<input::Sink> inputSink;
     // Control/input-state only; receiver telemetry is owned by the runtime.
     std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;
 };

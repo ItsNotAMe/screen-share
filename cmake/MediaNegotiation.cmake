@@ -2,6 +2,7 @@
 include("${CMAKE_CURRENT_LIST_DIR}/MediaAdapters.cmake")
 if(NOT TARGET ScreenShareNegotiation)
     add_library(ScreenShareNegotiation STATIC
+        "${CMAKE_CURRENT_LIST_DIR}/../backend/input/v2/InputService.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/MediaEngine.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/NativeRoomRuntime.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/WindowsRoomRuntime.cpp"

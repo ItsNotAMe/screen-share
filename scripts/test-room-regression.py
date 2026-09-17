@@ -147,7 +147,9 @@ def sha256(path):
 
 
 def cases(desktop):
-    result = [("presentation-worker", "VideoFrameInputTests.exe", None, None),
+    result = [("input-service", "InputServiceTests.exe", None, None),
+              ("input-media", "RoomInputTests.exe", "media", None),
+              ("presentation-worker", "VideoFrameInputTests.exe", None, None),
               ("room-service", "RoomServiceTests.exe", "service", None),
               ("cli-media", "RoomCliTests.exe", "media", None),
               ("ui-media", "RoomUiTests.exe", "media", None),

@@ -75,7 +75,8 @@ see [CAPTURE-RECOVERY.md](CAPTURE-RECOVERY.md). Supported-desktop DXGI, physical
 privacy/identity/HDR/driver and latency acceptance remain open. The current
 Screen-saver block was observed in the capture batch; the interactive desktop is
 available again for adoption checks, but DXGI still reports unsupported. Stage 3
-input/consent/controller integration is the next implementation group and is
+Windows input/mapping and UI/CLI consent/controller integration is next (INPUT.md);
+the shared input service and real-channel headless response are implemented. This is
 needed for full adoption parity; Stage 2 and gaming latency are not complete.
 
 Detected audio startup/live failures now release the endpoint and preserve video
@@ -222,7 +223,13 @@ watchdog neutralization. Headless input targets only a test-owned sink.
 Validate input isolation and input-to-frame response under media pressure; preserve
 installer-managed drivers and the three-pad/local-slot policy.
 
-- [ ] Complete input integration and adversarial/headless control scenarios.
+- [x] Integrate the portable input service, encrypted channels and public input
+  port; validate adversarial protocol/safety cases and a test-owned input-to-image
+  response with four actual media viewers. See [INPUT.md](INPUT.md).
+- [ ] Complete Windows device/mapping and normal UI/CLI consent/control integration
+  together, including controllers, panic revoke and focus/source transitions.
+  INPUT.md defines this remaining integrated delivery group. Normal v2 control
+  stays disabled until it is connected; Stage 3 and Gate D remain open.
 
 ## 4. Stability, performance and service acceptance (B + C + E)
 

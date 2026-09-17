@@ -1,5 +1,57 @@
 # Headless media checks
 
+## Input transport/safety and returning-image proof — 2026-09-18
+
+The normal regression runner now includes `input-service` and `input-media`:
+seven headless cases, or nine with `--desktop`. Both new cases use recording
+sinks; no physical input is injected and synthetic audio remains discarded.
+
+```powershell
+python scripts/test-room-regression.py build/sdk-app-release build/webrtc/input-check
+```
+
+For only the actual four-viewer input/media scenario:
+
+```powershell
+node signaling-worker/tests/run-native-service.mjs build/sdk-app-release/RoomInputTests.exe build/webrtc/input-media-check media
+```
+
+`RoomInputTests` uses the production public RoomSession/NativeRoomRuntime and actual
+WebRTC channels. A host-authorized key changes a synthetic image, which passes
+through encoding, transport and decoding. It also verifies watchdog release while
+both host and viewer runtime advancement pause, fresh explicit regrant and revoke.
+Its `input_response_internal_ms` is one localhost sample, not an external latency
+measurement, percentile or fulfillment of the gaming p95 target.
+
+- Release/Debug complete application builds: `input-complete-app-{release,debug}.log`.
+- Final seven-case matrices pass **7/7 in both builds**:
+  `build/webrtc/input-verified-{release,debug}/result.json`. Each includes the
+  actual input/media proof linked against the application libraries.
+- Runtime/input/UI/diagnostics smoke: **5/5 each**, `input-smoke-{release,debug}.log`.
+- Final closeout builds and focused input checks are recorded in
+  `input-closeout-app-{release,debug}.log` and `input-closeout-tests-{release,debug}.log`.
+  These include the test target's Qt deployment dependency and monotonic watchdog
+  receive time across reordered state kinds.
+- Portable tests cover explicit wire bytes/truncation/ranges, wrong channel,
+  connection/permission/sequence validation, cross-kind reorder, 10,000 coalesced
+  pointer submissions, full pad keepalive after a dropped state, 300 ms watchdog,
+  delayed reliable input, queue overflow, stuck SCTP with an empty application
+  queue, ownership/local-slot policy, backend failure, removal/rejoin and shutdown.
+- Standalone four-viewer proof passes in both configurations at
+  `input-public-final-{release,debug}/native-service-*/result.json`; observed internal
+  response samples were 57/51 ms. Generated-window Windows-runtime binding also
+  passes both at `input-windows-{release,debug}/native-service-*/result.json`, with
+  keyboard grants rejected for a window share and mouse events sent only to the
+  recording sink. Its response metric is null because no Windows input is injected.
+- Earlier six-case matrices passed at `input-regression-{release,debug}/result.json`.
+  The runner then gained the four-viewer scenario as a regular application target.
+- The first standalone proof completed its assertions but failed result parsing
+  because it printed two JSON objects. Evidence is preserved at
+  `input-public-release`; the metric now lives in the single result object.
+
+See [INPUT.md](INPUT.md) for integration contracts and the remaining Windows,
+mapping and UI/CLI consent group. This is not Gate D or default-control enablement.
+
 ## Guarded normal-home/CLI adoption — 2026-09-18
 
 - Release/Debug application builds pass (`adoption-verified-app-{release,debug}.log`).
