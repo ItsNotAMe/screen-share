@@ -321,6 +321,13 @@ hardware-only encoding. Existing security, resource, gaming and service-cost gat
 remain in [TODO.md](TODO.md).
 # Per-viewer sender diagnostics (2026-09-17)
 
+The dedicated PeerDiagnosticsWidget now provides payload/FPS and WebRTC limiting
+reason columns plus a live nonmodal Viewer details popup. It stays pinned to the
+chosen peer and clears after departure; room controls remain usable. Details show
+selected-path RTT, bandwidth estimate, linked RTCP loss/jitter and receiver age,
+with explicit units and unknown values. Duplicate member names show peer IDs;
+capacity above four shows a performance-cost warning. See NETWORK-DIAGNOSTICS.md.
+
 Host rows now include a separate Receiver decoded column. Inline details show
 receiver-reported decoded frame count and optional FPS, with unknown/stale values
 instead of fabricated zero. Reports expire after three seconds independently of

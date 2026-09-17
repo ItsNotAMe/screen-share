@@ -11,5 +11,6 @@ struct ReceiverVideoObservation {
 struct ReceiverVideoStatus {
     std::optional<ReceiverVideoObservation> observation;
     bool stale = false;
+    std::optional<uint32_t> ageSeconds;
 };
 }

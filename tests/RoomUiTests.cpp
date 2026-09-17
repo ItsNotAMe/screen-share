@@ -22,6 +22,8 @@
 #include <QTemporaryDir>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QPlainTextEdit>
 #include <iostream>
 #include <source_location>
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
@@ -546,7 +548,7 @@ int main(int argc, char** argv) {
         RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
         Wait([&] { return host.session().status().phase == RoomPhase::Active; });
         Check(!host.session().start(config));
-        config.room.host = false; config.room.roomId = host.session().status().roomId; config.room.nickname = "UiViewer";
+        config.room.host = false; config.room.roomId = host.session().status().roomId; config.room.nickname = "UiHost";
         auto viewerAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow viewer(config, Factory(viewerAudio), true); viewer.show();
         unsigned original = 0, changed = 0;
@@ -557,6 +559,12 @@ int main(int argc, char** argv) {
             present(std::move(frame));
         };
         Wait([&] { return original >= 20 && viewerAudio->audibleBlocks >= 20; });
+        Wait([&] { return host.findChild<QLabel*>("roomMembers")->text().contains(QString::fromStdString(viewer.session().status().peerId)); });
+        Check(host.findChild<QLabel*>("roomMembers")->text().contains(QString::fromStdString(host.session().status().peerId)));
+        host.findChild<QSpinBox*>("liveViewerLimit")->setValue(5);
+        Check(host.findChild<QLabel*>("capacityWarning")->isVisible());
+        host.findChild<QSpinBox*>("liveViewerLimit")->setValue(4);
+        Check(!host.findChild<QLabel*>("capacityWarning")->isVisible());
         auto* localDiagnostics = viewer.findChild<QLabel*>("viewerPresentationDiagnostics");
         Check(localDiagnostics);
         Wait([&] { return localDiagnostics->text().contains("do not measure end-to-end latency"); });
@@ -589,6 +597,11 @@ int main(int argc, char** argv) {
         diagnostics->selectRow(0);
         Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Remote display, latency and congestion reason: unknown"));
         const auto diagnosticPeer = diagnostics->item(0, 0)->data(Qt::UserRole);
+        host.findChild<QPushButton*>("openPeerDetails")->click();
+        auto* popup = host.findChild<QDialog*>("peerDetailsDialog");
+        auto* popupText = popup->findChild<QPlainTextEdit*>("peerDetailsText");
+        Check(popup->isVisible() && !popup->isModal() && popup->property("peerId") == diagnosticPeer);
+        Check(popupText->toPlainText().contains("Selected-path RTT") && popupText->toPlainText().contains("not image/input latency"));
         const auto drainUntil = std::chrono::steady_clock::now() + 500ms;
         Wait([&] { return std::chrono::steady_clock::now() >= drainUntil; });
         const auto pausedFrames = changed;
@@ -616,6 +629,8 @@ int main(int argc, char** argv) {
 #endif
         viewer.close(); Check(viewer.session().running()); // Close waits for drain.
         Wait([&] { return !viewer.session().running() && !viewer.isVisible(); });
+        Wait([&] { return popupText->toPlainText().contains("viewer has left"); });
+        Check(!host.findChild<QPushButton*>("openPeerDetails")->isEnabled());
         host.findChild<QPushButton*>("stopRoom")->click();
         Wait([&] { return !host.session().running(); });
         Check(host.session().status().phase == RoomPhase::Stopped);

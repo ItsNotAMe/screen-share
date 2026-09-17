@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-17 (through `f46041d`, plus receiver decoder telemetry). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-17 (through `6a69998`, plus sender/network details integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -351,7 +351,8 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [x] Persist and validate local nickname without reading OS identity.
 - [x] Persist validated stream preferences and playback volume/mute for browser-created sessions; generate and save a random Guest nickname for missing/invalid profiles. Existing valid nicknames remain unchanged. Device/source identifiers and credentials are excluded.
 - [x] Validate nickname normalization, code points/UTF-8 size and forbidden controls.
-- [ ] Implement duplicate-name disambiguation with peer IDs.
+- [x] Implement duplicate-name disambiguation with peer IDs in session membership;
+  per-peer diagnostic rows and the details dialog also retain explicit peer identity.
 - [x] Implement public/unlisted rooms, creation password and acknowledged live name/visibility/viewer-limit edits.
 - [x] Preserve existing viewers when the limit is lowered; block new admissions.
 - [x] Implement versioned room-ID links without credentials or service switching; validate parsing/copy/paste across UI and CLI.
@@ -390,14 +391,16 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 - [x] Add local nickname settings and server-pushed room browsing in opt-in v2 UI.
 - [x] Close directory subscriptions during sessions and resubscribe on return; reject stale-list joins while disconnected.
 - [x] Add acknowledged adjustable viewer capacity.
-- [ ] Add a warning for capacity above four.
+- [x] Add a warning for capacity above four in live host capacity controls.
 - [x] Add host per-viewer summary rows and selectable inline details for requested
   preferences, applied caps, source-observed size/revisions and measured transport.
   UI and CLI share status names; absent/stale rates stay unknown, measured zero
   stays zero. Selection follows peer identity across refreshes.
 - [x] Add receiver-reported decoded dimensions, frame count and optional FPS to
   host rows/details and CLI, separate from source observations and presentation.
-- [ ] Add remaining receiver metrics and complete the planned details popup.
+- [x] Add a live nonmodal details popup pinned to peer identity; clear measurements
+  on departure/stop. Extract the snapshot-only diagnostics widget from room controls.
+- [ ] Add remaining receiver presentation/drop/buffering and codec/fallback metrics.
 - [x] Sample local sender transport once per second and suppress samples at the
   three-second deadline; test exact freshness boundary, resets and peer isolation.
 - [x] Sample receiver decoder statistics once per second and expire reports after
@@ -406,7 +409,10 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
   validate version/length/ranges/sequence/generation and bound pending work.
 - [x] Expose sender application states (pending, rejected, upload-paused,
   waiting-for-source, source-observed) and fresh/stale/unknown transport samples.
-- [ ] Add receiver/network limiting reasons and remaining unknown-valued metrics.
+- [x] Add typed WebRTC limiting reasons, video payload/encoded FPS, selected-pair
+  RTT/bandwidth estimate, linked RTCP loss/jitter and receiver report age. Reject
+  invalid/missing values, expire measurements and replace mailboxes across negotiation.
+- [ ] Add remaining receiver/capture/input limiting reasons and unknown-valued metrics.
 - [ ] Preserve fullscreen/preview interaction, report paths and signed updater behavior.
 - [ ] Redact secrets/SDP/addresses and reset rate baselines across generations.
 

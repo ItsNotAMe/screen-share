@@ -1,6 +1,7 @@
 #pragma once
 #include "ReceiverVideoStatus.h"
 #include <chrono>
+#include <algorithm>
 #include <span>
 #include <string>
 #include <vector>
@@ -62,7 +63,8 @@ public:
     }
     ReceiverVideoStatus Read(Clock::time_point now = Clock::now()) const {
         const bool stale = value_ && now - sampled_ >= std::chrono::seconds(3);
-        return {stale ? std::nullopt : value_, stale};
+        const auto age = std::chrono::duration_cast<std::chrono::seconds>(now - sampled_).count();
+        return {stale ? std::nullopt : value_, stale, value_ ? std::optional(uint32_t(std::clamp<int64_t>(age, 0, UINT32_MAX))) : std::nullopt};
     }
 private:
     std::string connection_;

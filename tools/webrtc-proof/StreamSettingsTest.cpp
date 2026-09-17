@@ -6,6 +6,7 @@
 #include "core/WindowsMediaRuntime.h"
 #include <iostream>
 #include <string_view>
+#include <limits>
 
 using namespace screenshare::media;
 void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
@@ -84,6 +85,39 @@ int main(int argc, char** argv) try {
     Require(!nextGeneration->Read().bitsPerSecond, "Late retired-generation callback contaminated a new peer");
 
     Sink fixedSink, adaptiveSink;
+    auto networkSample = [&](int64_t timestamp, uint64_t bytes, const char* id = "outbound-video", bool invalid = false) {
+        auto report = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(timestamp));
+        auto transport = std::make_unique<webrtc::RTCTransportStats>("transport", report->timestamp());
+        transport->bytes_sent = bytes + 1000; transport->selected_candidate_pair_id = "selected";
+        report->AddStats(std::move(transport));
+        for (const auto* name : {"selected", "unused"}) {
+            auto pair = std::make_unique<webrtc::RTCIceCandidatePairStats>(name, report->timestamp());
+            pair->current_round_trip_time = std::string_view(name) == "selected" ? 0.025 : 0.001;
+            pair->available_outgoing_bitrate = invalid ? std::numeric_limits<double>::infinity() : 5000000;
+            report->AddStats(std::move(pair));
+        }
+        auto video = std::make_unique<webrtc::RTCOutboundRtpStreamStats>(id, report->timestamp());
+        video->kind = "video"; video->bytes_sent = bytes; video->frames_per_second = invalid ? -1 : 30;
+        video->quality_limitation_reason = invalid ? "unrecognized" : "bandwidth"; video->remote_id = "remote-video";
+        report->AddStats(std::move(video));
+        auto remote = std::make_unique<webrtc::RTCRemoteInboundRtpStreamStats>("remote-video", report->timestamp());
+        remote->fraction_lost = invalid ? 1.5 : 0.02; remote->jitter = invalid ? std::numeric_limits<double>::quiet_NaN() : 0.003;
+        report->AddStats(std::move(remote)); collector->OnStatsDelivered(report);
+    };
+    networkSample(7000000, 1000); Require(!rate->Read().sender.payloadBps, "First RTP counter fabricated a rate");
+    networkSample(8000000, 101000);
+    auto sender = rate->Read().sender;
+    Require(sender.payloadBps == 800000 && sender.encodedFps == 30 && sender.rttMs == 25 && sender.jitterMs == 3 &&
+        sender.lossFraction == 0.02 && sender.availableOutgoingBps == 5000000 && sender.limitingReason == VideoLimitReason::Bandwidth,
+        "Sender units/selected-pair/RTCP mapping incorrect");
+    const auto staleSender = rate->Read(rate->sampled + std::chrono::seconds(3)).sender;
+    Require(!staleSender.payloadBps && !staleSender.rttMs && staleSender.limitingReason == VideoLimitReason::Unknown, "Stale sender values escaped expiry");
+    networkSample(9000000, 101000); Require(rate->Read().sender.payloadBps == 0, "Zero payload rate became unknown");
+    networkSample(10000000, 1); Require(!rate->Read().sender.payloadBps, "Reset RTP counter fabricated a rate");
+    networkSample(11000000, 1000, "replacement-video", true); sender = rate->Read().sender;
+    Require(!sender.payloadBps && !sender.encodedFps && !sender.availableOutgoingBps && !sender.jitterMs && !sender.lossFraction &&
+        sender.limitingReason == VideoLimitReason::Unknown, "Invalid or replacement stats were trusted");
+    sample(12000000, "transport", 0); Require(!rate->Read().sender.rttMs, "Missing path retained prior measurements");
     auto receiverMailbox = std::make_shared<ReceiverStatsMailbox>();
     auto receiverCollector = webrtc::make_ref_counted<ReceiverStatsCallback>(receiverMailbox);
     auto receiverReport = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(1000000));

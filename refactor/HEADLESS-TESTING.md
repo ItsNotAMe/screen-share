@@ -570,6 +570,25 @@ despite the fixture's hidden launch state; the visibility assertion passes.
 zero errors. Thus this correction does not establish a fix for desktop occlusion;
 that GPU acceptance result remains open. No timeout or success criteria were relaxed.
 Tests remained silent and used no physical keyboard/mouse input.
+
+## Sender/network details — 2026-09-17
+
+Release and Debug application builds pass with the extracted PeerDiagnosticsWidget.
+Release's five-case matrix passed at `build/webrtc/network-details-release/result.json`.
+Debug's final five-case matrix passed at `build/webrtc/network-details-debug/result.json`,
+including the live payload/RTT assertion.
+The final Release CLI scenario additionally requires a real nonzero payload rate
+and numeric selected-path RTT (`build/webrtc/network-details-live-cli/`).
+
+The Release collector proof passed with constructed WebRTC reports for selected
+versus unused ICE pairs, RTP rate units, actual zero, counter/stream replacement,
+linked RTCP loss/jitter, stale expiry, missing fields and nonfinite/out-of-range
+values. UI scenarios exercise the actual nonmodal popup, peer-pinned updates,
+clearing after departure, duplicate-name IDs and the above-four capacity warning.
+
+These tests are silent and do not send physical input. No desktop GPU rerun or
+external latency/performance acceptance is claimed; the previously documented
+occlusion result remains open.
 All runs used silent synthetic audio and test-owned windows/messages. Physical
 driver failures, end-to-end latency and the earlier intermittent timeout cause
 remain open; local renderer counters do not close those gates.

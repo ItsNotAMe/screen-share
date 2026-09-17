@@ -283,7 +283,7 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(malformed); });
         const auto host = ParseRoomSessionConfig(object, true);
         std::mutex mutex; std::string roomId;
-        std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, receiverReported{false}, sourceChanged{false}, audioChanged{false};
+        std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, receiverReported{false}, senderReported{false}, sourceChanged{false}, audioChanged{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomCliHooks hostHooks;
         hostHooks.pump = [&] { return !stopHost; };
@@ -298,6 +298,9 @@ int main(int argc, char** argv) {
             }
             for (const auto& peer : value["peers"].toArray()) {
                 const auto row = peer.toObject();
+                Check(row["sender"].isObject() && row["sender"].toObject().contains("limitingReason"));
+                if (row["sender"].toObject()["videoPayloadBps"].toDouble() > 0 && row["sender"].toObject()["rttMs"].isDouble()) senderReported = true;
+                Check(!row["sender"].toObject().contains("candidateId"));
                 const auto receiver = row["receiver"].toObject();
                 if (receiver["sampleState"] == "fresh" && receiver["width"].toInt() == 160 && receiver["framesDecoded"].toInteger() > 0) receiverReported = true;
                 if (row["allocatedVideoBps"].toInt() == 1472000 && row["appliedVideoBps"].toInt() == 1472000) budgetReported = true;
@@ -357,7 +360,7 @@ int main(int argc, char** argv) {
         const int viewing = RunRoomCliSession(viewer, Factory(viewer, audio, frames), viewerHooks, true);
         stopHost = true;
         Check(playbackChanges == 2);
-        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && sourceChanged && audioChanged);
+        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && senderReported && sourceChanged && audioChanged);
         Check(original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
         Check(frames->statistics().retained >= original + changed && frames->statistics().converted == 0 && frames->statistics().repacked == 0);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF

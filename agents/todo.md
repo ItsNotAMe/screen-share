@@ -24,7 +24,9 @@ Do not rebuild those foundations or return to manual SDP relays/polling.
 Host per-peer sender diagnostics now share UI/CLI states and expose transport
 freshness. Receiver decoder telemetry now uses the encrypted peer channel with
 bounded versioned reports, generation/sequence validation and three-second expiry.
-Remote presentation/input latency and network limiting reasons remain to implement.
+Remote presentation/input latency remain to implement.
+WebRTC sender/network reasons and the per-peer details popup are now integrated;
+remaining diagnostics concern capture, remote presentation/buffering and input.
 Local renderer outcomes/drop reasons/error codes now reach viewer UI and CLI;
 keep them distinct from receiver-to-host telemetry and end-to-end latency.
 Normal AppShell/legacy CLI cutover remains gated; later visual redesign follows

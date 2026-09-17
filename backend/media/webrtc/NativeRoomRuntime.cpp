@@ -40,6 +40,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
         bool settingsRejected = false;
         bool retired = false, removing = false;
         std::shared_ptr<TransportSendRate> sendRate = std::make_shared<TransportSendRate>();
+        std::string statsConnection;
         // Destroy/unregister observer before native peer/channel destruction.
         std::unique_ptr<ReceiverTelemetryChannel> telemetry;
     };
@@ -183,6 +184,7 @@ public:
             peer.transportSampleStale = sample.stale;
             peer.transportSendBps = sample.bitsPerSecond;
             peer.receiver = entry->telemetry->Status();
+            peer.sender = sample.sender;
         }
         return result;
     }
@@ -233,6 +235,10 @@ public:
         for (auto it = peers_.begin(); it != peers_.end();) {
             auto& entry = *it->second;
             if (entry.retired) { it = peers_.erase(it); continue; }
+            if (entry.statsConnection != entry.negotiation->connectionId()) {
+                entry.statsConnection = entry.negotiation->connectionId();
+                entry.sendRate = std::make_shared<TransportSendRate>();
+            }
             if (!entry.removing) entry.telemetry->Advance(entry.negotiation->connectionId(), *entry.peer->connection, entry.negotiation->ready());
             auto status = owner_->snapshot(entry.generation);
             if (status && status->peerClosed && !entry.removing) failed_.insert(it->first);

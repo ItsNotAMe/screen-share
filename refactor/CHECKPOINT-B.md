@@ -1388,3 +1388,17 @@ collector proof and four-viewer expiry/recovery/restart/rejoin proof passed.
 The CLI preview visibility invariant is corrected and tested, but the optional
 desktop matrix still reports DXGI occlusion with no graphics errors. Hardware/
 desktop acceptance, remote presentation telemetry and external latency remain open.
+
+## Sender/network details continuation — 2026-09-17
+
+The existing 1 Hz host collector now exposes typed payload rate/encoded FPS,
+selected-path RTT/bandwidth estimate, linked RTCP loss/jitter and WebRTC limiting
+reasons. Invalid/missing/stale values remain unknown and negotiation changes
+replace counter mailboxes. Receiver age uses local monotonic receipt time.
+No service requests, adaptation loops or new stats collectors were added.
+
+PeerDiagnosticsWidget now owns the table/inline details and a live nonmodal
+peer-pinned popup, removing that logic from RoomSessionWindow. Departure clears
+the popup. Duplicate nicknames include peer IDs; host capacity above four warns
+about added upload/encoding work. NETWORK-DIAGNOSTICS.md records field semantics
+and remaining capture, remote-presentation, codec and input measurements.

@@ -53,11 +53,18 @@ authorized input, network impairment and continuous soak acceptance remain open.
 
 ## 2. Complete user experience (B + D)
 
+Per-viewer sender/network measurements and the live details popup are integrated.
+Diagnostics are now a separate snapshot-only UI component; duplicate member names
+show peer IDs and host capacity above four gets a cost warning. WebRTC-reported
+limiting reasons remain distinct from application settings states. See
+[NETWORK-DIAGNOSTICS.md](NETWORK-DIAGNOSTICS.md) for fields, validation and remaining
+capture/remote-presentation/input metrics. No competing adaptation loop was added.
+
 Host per-viewer diagnostics now integrate UI rows/inline details and CLI JSON:
 requested preferences, applied allocation, source observation and transport sample
 freshness. They reuse local 1 Hz WebRTC stats without service traffic. Receiver
 decoder reports now reach host UI/CLI over the encrypted peer telemetry channel.
-Remote presentation telemetry, latency and network limiting reasons remain unfinished; sender
+Remote presentation telemetry, capture/input reasons and latency remain unfinished; sender
 observation must not be reported as remote display acknowledgement.
 
 Viewer-local presentation diagnostics now expose actual drop reasons, retained

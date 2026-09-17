@@ -257,6 +257,11 @@ CTest, and may need execution outside the capture-restricted sandbox. These are
 correctness tests; they do not establish remote latency, NAT/TLS or resource gates.
 # Sender diagnostics additions (2026-09-17)
 
+Host peer `sender` contains videoPayloadBps, encodedFps, rttMs, jitterMs,
+lossFraction, availableOutgoingBps and limitingReason. Receiver reports now include
+ageSeconds from local receipt time. Unknown/stale numeric values remain null;
+RTT is not end-to-end latency. Full semantics: NETWORK-DIAGNOSTICS.md.
+
 Each host peer now includes `receiver`: sampleState (fresh/stale/unknown), width,
 height, framesDecoded and decodeFps. Missing/stale values are null; FPS zero is
 retained. Reports arrive over the encrypted peer channel and describe decoding,
