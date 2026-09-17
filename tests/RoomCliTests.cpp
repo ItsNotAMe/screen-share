@@ -209,7 +209,7 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
     options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
     return WindowsRoomRuntimeFactory(std::move(options));
 #else
-    return [preferences = config.media.preferences, audio, frames](auto identity, auto send) {
+    return [preferences = config.media.preferences, initialAudio = config.media.audio, audio, frames](auto identity, auto send) {
         NativeRoomRuntimeOptions options;
         options.preferences = preferences; options.frames = frames;
         auto endpoints = proof::SyntheticAudio(audio);
@@ -219,7 +219,8 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
             options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         }
         if (identity.host) {
-            options.audioSwitch = std::make_shared<AudioSwitchControl>(AudioSelection{}, endpoints.capture);
+            options.audioSwitch = std::make_shared<AudioSwitchControl>(AudioSelection{
+                initialAudio.source == screenshare::AudioCaptureSource::None ? AudioKind::None : AudioKind::System}, endpoints.capture);
             endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
             options.audioForSelection = proof::SyntheticAudioSelection;
         }
@@ -265,12 +266,22 @@ int main(int argc, char** argv) {
             {"seconds", 15}, {"stream", stream}, {"password", "test-only-password"},
             {"changes", QJsonArray{QJsonObject{{"atMs", 3000}, {"stream", reduced}}}}};
         object["captureChanges"] = QJsonArray{captureChange};
+        object["audio"] = QJsonObject{{"source", "none"}};
         object["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 2500}, {"source", "system"}}};
         auto invalidAudio = object; invalidAudio["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 100}, {"source", "process"}}};
         Reject([&] { ParseRoomSessionConfig(invalidAudio, true); });
         invalidAudio["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 100}, {"source", "system"}, {"processId", 1}}};
         Reject([&] { ParseRoomSessionConfig(invalidAudio, true); });
         Reject([&] { ParseRoomSessionConfig(object); }); // Production cannot opt into plaintext.
+        for (const auto& extra : {QJsonObject{{"deviceId", "default"}}, QJsonObject{{"processId", 1}}}) {
+            auto forbidden = extra; forbidden["source"] = "none";
+            auto invalid = object; invalid["audio"] = forbidden;
+            Reject([&] { ParseRoomSessionConfig(invalid, true); });
+            invalid = object; forbidden["atMs"] = 100; invalid["audioChanges"] = QJsonArray{forbidden};
+            Reject([&] { ParseRoomSessionConfig(invalid, true); });
+        }
+        auto silentChange = object; silentChange["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 100}, {"source", "none"}}};
+        Check(ParseRoomSessionConfig(silentChange, true).audioChanges[0].selection.kind == AudioKind::None);
         auto malformed = object; malformed["unknown"] = true;
         Reject([&] { ParseRoomSessionConfig(malformed, true); });
         malformed = object; malformed["seconds"] = 1.5;
@@ -331,6 +342,7 @@ int main(int argc, char** argv) {
         auto frames = std::make_shared<LatestRoomVideoFrame>();
         auto audio = std::make_shared<proof::AudioEvidence>();
         unsigned original = 0, changed = 0;
+        bool silentVideo = false;
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         screenshare::ReceiverPreviewWindow preview;
         preview.SetLowLatency(true);
@@ -342,6 +354,9 @@ int main(int argc, char** argv) {
             if (value["type"] == "playback") { Check(value["error"].toInt() == 0); ++playbackChanges; }
         };
         viewerHooks.pump = [&] {
+            if (!audioChanged && original >= 10 && audio->quietStreak >= 10) {
+                Check(audio->audibleBlocks == 0); silentVideo = true;
+            }
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
             Check(preview.PumpMessages());
 #endif
@@ -361,7 +376,7 @@ int main(int argc, char** argv) {
         stopHost = true;
         Check(playbackChanges == 2);
         Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && senderReported && sourceChanged && audioChanged);
-        Check(original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
+        Check(silentVideo && original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
         Check(frames->statistics().retained >= original + changed && frames->statistics().converted == 0 && frames->statistics().repacked == 0);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         Check(preview.framesPresented() >= 20);

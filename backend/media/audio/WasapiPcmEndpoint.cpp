@@ -1,4 +1,5 @@
 #include "media/audio/WasapiPcmEndpoint.h"
+#include "SilentPcmCapture.h"
 #include <algorithm>
 #include <cstring>
 #include <deque>
@@ -137,7 +138,13 @@ private:
 };
 }
 PcmEndpointFactories WasapiPcmEndpoints(AudioCaptureConfig capture, std::wstring playbackDeviceId) {
-    return {[capture] { return std::make_unique<Capture>(capture); },
+    return {[capture]() -> std::unique_ptr<PcmCaptureEndpoint> {
+            if (capture.source == AudioCaptureSource::None) {
+                if (!capture.deviceId.empty() || capture.processId) throw std::invalid_argument("No shared audio cannot select a device or process");
+                return std::make_unique<SilentPcmCapture>();
+            }
+            return std::make_unique<Capture>(capture);
+        },
         [playbackDeviceId] { return std::make_unique<Playout>(playbackDeviceId); }};
 }
 }

@@ -43,7 +43,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     }
     if (!source_->count()) source_->addItem("Default display", QVariantMap{{"display", 0}});
     form->addRow("Capture", source_);
-    audio_ = new QComboBox; audio_->addItems({"System audio", "Microphone"}); form->addRow("Audio", audio_);
+    audio_ = new QComboBox; audio_->addItems({"System audio", "Microphone", "No shared audio"}); form->addRow("Audio", audio_);
     auto* create = new QPushButton("Create room"); create->setObjectName("createV2Room"); form->addRow(create);
     roomId_ = new QLineEdit; roomId_->setObjectName("joinRoomId"); roomId_->setMaxLength(512); form->addRow("Room ID or v2 link", roomId_);
     roomId_->setToolTip("Links use the service shown above. Enter the room password separately.");
@@ -110,7 +110,7 @@ void RoomBrowserWindow::Launch(bool host) {
     QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", name_->text()},
         {"roomId", host ? QString{} : *roomId}, {"password", password_->text()}, {"public", public_->isChecked()},
         {"capture", QJsonObject::fromVariantMap(source_->currentData().toMap())},
-        {"audio", QJsonObject{{"source", audio_->currentIndex() == 0 ? "system" : "microphone"}}}};
+        {"audio", QJsonObject{{"source", audio_->currentIndex() == 0 ? "system" : audio_->currentIndex() == 1 ? "microphone" : "none"}}}};
     // Window handles are strings at the shared configuration boundary.
     auto capture = input["capture"].toObject();
     if (capture.contains("window")) capture["window"] = QString::number(source_->currentData().toMap()["window"].toULongLong());

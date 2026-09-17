@@ -21,6 +21,9 @@ Validated local stream/playback defaults and stable randomized Guest nicknames a
 integrated into browser-created sessions with explicit save controls; do not rebuild
 profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
+Device-free `none` audio is integrated across startup/live runtime/UI/CLI selection;
+it releases host capture and preserves the track for resumption. Physical recovery,
+microphone processing and audio latency remain open.
 Host per-peer sender diagnostics now share UI/CLI states and expose transport
 freshness. Receiver decoder telemetry now uses the encrypted peer channel with
 bounded versioned reports, generation/sequence validation and three-second expiry.

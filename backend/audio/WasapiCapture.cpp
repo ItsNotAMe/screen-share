@@ -450,6 +450,7 @@ void WasapiCapture::UninitializeCom()
 
 std::vector<AudioDeviceInfo> WasapiCapture::EnumerateDevices(AudioCaptureSource source)
 {
+    if (source == AudioCaptureSource::None) return {};
     ScopedComInitialization com;
     auto enumerator = CreateDeviceEnumerator();
     const EDataFlow flow = DataFlowForSource(source);
@@ -487,6 +488,7 @@ std::vector<AudioDeviceInfo> WasapiCapture::EnumerateDevices(AudioCaptureSource 
 void WasapiCapture::Start(const AudioCaptureConfig& config, std::stop_token stop)
 {
     Stop();
+    if (config.source == AudioCaptureSource::None) throw std::invalid_argument("No shared audio requires the device-free PCM endpoint");
     InitializeCom();
     config_ = config;
 
@@ -694,6 +696,8 @@ const char* AudioCaptureSourceName(AudioCaptureSource source)
         return "microphone";
     case AudioCaptureSource::ProcessOutput:
         return "process";
+    case AudioCaptureSource::None:
+        return "none";
     default:
         return "unknown";
     }

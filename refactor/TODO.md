@@ -53,6 +53,12 @@ authorized input, network impairment and continuous soak acceptance remain open.
 
 ## 2. Complete user experience (B + D)
 
+Device-free **No shared audio** now works at startup and through live host UI/CLI
+changes. Capture factories are bypassed, the old endpoint is released, and failed
+resume retains silence; the negotiated track permits resuming without reconnecting.
+Silent UI/CLI and four-viewer tests verify continued video and resumed audio.
+This does not close physical endpoint recovery, microphone processing or latency gates.
+
 Per-viewer sender/network measurements and the live details popup are integrated.
 Diagnostics are now a separate snapshot-only UI component; duplicate member names
 show peer IDs and host capacity above four gets a cost warning. WebRTC-reported

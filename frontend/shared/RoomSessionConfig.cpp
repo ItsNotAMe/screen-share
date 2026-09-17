@@ -108,8 +108,8 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
         const auto change = item.toObject(); Keys(change, {"atMs", "source", "deviceId", "processId"});
         if (!change.contains("atMs") || !change.contains("source")) throw std::invalid_argument("Audio change requires time and source");
         const auto source = String(change, "source");
-        if (source != "system" && source != "microphone" && source != "process") throw std::invalid_argument("Invalid audio source");
-        AudioSelection selection{source == "microphone" ? AudioKind::Microphone : source == "process" ? AudioKind::Process : AudioKind::System,
+        if (source != "system" && source != "microphone" && source != "process" && source != "none") throw std::invalid_argument("Invalid audio source");
+        AudioSelection selection{source == "microphone" ? AudioKind::Microphone : source == "process" ? AudioKind::Process : source == "none" ? AudioKind::None : AudioKind::System,
             String(change, "deviceId").toStdWString(), uint32_t(Integer(change, "processId", 0, 0, INT_MAX))};
         ValidateAudioSelection(selection);
         const auto at = std::chrono::milliseconds(Integer(change, "atMs", 0, 0, 86400000));
@@ -144,8 +144,8 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
     }
     const auto audio = Object(object, "audio"); Keys(audio, {"source", "deviceId", "playbackDeviceId", "processId", "playbackVolume", "playbackMuted"});
     const auto source = String(audio, "source", "system");
-    if (source != "system" && source != "microphone" && source != "process") throw std::invalid_argument("Invalid audio source");
-    result.media.audio.source = source == "microphone" ? AudioCaptureSource::Microphone : source == "process" ? AudioCaptureSource::ProcessOutput : AudioCaptureSource::SystemOutput;
+    if (source != "system" && source != "microphone" && source != "process" && source != "none") throw std::invalid_argument("Invalid audio source");
+    result.media.audio.source = source == "microphone" ? AudioCaptureSource::Microphone : source == "process" ? AudioCaptureSource::ProcessOutput : source == "none" ? AudioCaptureSource::None : AudioCaptureSource::SystemOutput;
     result.media.audio.deviceId = String(audio, "deviceId").toStdWString();
     result.media.playbackDeviceId = String(audio, "playbackDeviceId").toStdWString();
     result.media.playbackVolume = unsigned(Integer(audio, "playbackVolume", 100, 0, 100));
@@ -153,7 +153,7 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
     ValidatePlaybackSelection({result.media.playbackDeviceId, result.media.playbackVolume, result.media.playbackMuted});
     result.media.audio.processId = Integer(audio, "processId", 0, 0, INT_MAX);
     if (source == "process" && !result.media.audio.processId) throw std::invalid_argument("Process audio requires processId");
-    ValidateAudioSelection({source == "microphone" ? AudioKind::Microphone : source == "process" ? AudioKind::Process : AudioKind::System,
+    ValidateAudioSelection({source == "microphone" ? AudioKind::Microphone : source == "process" ? AudioKind::Process : source == "none" ? AudioKind::None : AudioKind::System,
         result.media.audio.deviceId, result.media.audio.processId});
     if (object.contains("changes") && !object["changes"].isArray()) throw std::invalid_argument("Invalid settings changes");
     const auto changes = object["changes"].toArray();

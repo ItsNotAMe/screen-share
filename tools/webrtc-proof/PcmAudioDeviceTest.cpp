@@ -83,6 +83,56 @@ void Switches() {
     Require(starting.get().error == AudioUpdateError::Cancelled && std::chrono::steady_clock::now() - cancelStart < 300ms && ownership->live == 0,
         "In-flight activation did not cancel promptly");
 }
+void NoSharedAudio() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    auto ownership = std::make_shared<Ownership>();
+    AudioSwitchControl::Factory good = [ownership] { return std::make_unique<OwnedCapture>(ownership, false); };
+    std::atomic<unsigned> forbiddenCalls{0};
+    AudioSwitchControl::Factory forbidden = [&]() -> std::unique_ptr<PcmCaptureEndpoint> {
+        ++forbiddenCalls; throw std::runtime_error("None invoked a device factory");
+    };
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{AudioKind::None}, forbidden);
+    auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    PcmBlock block;
+    auto silence = [&] {
+        block.fill(123); Require(capture->Read(block, {}), "Silent source stopped");
+        Require(std::all_of(block.begin(), block.end(), [](auto sample) { return sample == 0; }), "Silent source leaked audio");
+    };
+    silence();
+    auto pump = [&](std::future<AudioUpdateResult>& result) {
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (result.wait_for(0ms) != std::future_status::ready) {
+            Require(std::chrono::steady_clock::now() < deadline && capture->Read(block, {}), "None handover hung");
+        }
+    };
+    auto failed = control->Submit({}, forbidden); pump(failed);
+    Require(failed.get().error == AudioUpdateError::Failed && control->Status().revision == 1, "Failed resume committed");
+    silence();
+    for (unsigned cycle = 0; cycle < 3; ++cycle) {
+        auto resume = control->Submit({}, good); pump(resume);
+        Require(resume.get().error == AudioUpdateError::None && ownership->live == 1, "Resume did not open capture");
+        auto quiet = control->Submit({AudioKind::None}, forbidden); pump(quiet);
+        Require(quiet.get().error == AudioUpdateError::None && ownership->live == 0 && !ownership->wrongThread,
+            "None retained capture device or destroyed it on the wrong thread");
+        silence();
+    }
+    capture.reset(); capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start(); silence();
+    Require(control->Status().selected.kind == AudioKind::None && forbiddenCalls == 1, "None lost on restart or invoked device factory");
+    capture.reset();
+    // Exercise the production Windows endpoint selector without any audio device.
+    screenshare::AudioCaptureConfig config; config.source = screenshare::AudioCaptureSource::None;
+    auto endpoint = WasapiPcmEndpoints(config).capture(); endpoint->Start();
+    Require(endpoint->Read(block, {}), "Device-free endpoint failed");
+    std::this_thread::sleep_for(50ms); // A delayed consumer may read one block, never a catch-up burst.
+    endpoint->Read(block, {});
+    const auto before = std::chrono::steady_clock::now();
+    endpoint->Read(block, {});
+    Require(std::chrono::steady_clock::now() - before >= 8ms, "Silent endpoint emitted catch-up burst");
+    std::stop_source stopped; stopped.request_stop();
+    Require(!endpoint->Read(block, stopped.get_token()), "Silent endpoint ignored cancellation");
+    Require(std::all_of(block.begin(), block.end(), [](auto sample) { return sample == 0; }), "Production selector did not silence capture");
+}
 struct PlaybackEvidence { std::atomic<int> sample{0}, live{0}, created{0}; std::atomic<bool> wrongThread{false}, entered{false}; };
 class Output final : public screenshare::media::PcmPlayoutEndpoint {
     std::shared_ptr<PlaybackEvidence> evidence_;
@@ -234,6 +284,6 @@ void Run(bool wasapi) {
 }
 }
 int main(int argc, char** argv) {
-    try { Switches(); Playback(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
+    try { Switches(); NoSharedAudio(); Playback(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

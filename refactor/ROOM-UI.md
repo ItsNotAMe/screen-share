@@ -6,6 +6,20 @@ window reuse the current stylesheet and VideoFrameWidget while exercising the
 shared v2 backend. Default-shell adoption remains part of milestone 2; the broader
 appearance/usability redesign stays after milestones 1–5.
 
+## Shared audio disabled
+
+The opt-in browser and host session audio selector include **No shared audio**.
+Choose it initially or apply it while viewers are connected. Device/process fields
+and device refresh are disabled for this selection. On successful handover the old
+capture endpoint is stopped and destroyed on its owner thread; the success message
+confirms that no audio is being shared. Selecting another source resumes capture,
+and a failed resume retains silence. The selection survives capture-worker restart
+when viewers leave and rejoin. It is a session setting, not a saved device profile.
+
+The existing silent audio track stays negotiated for live resumption. Viewer mute
+and output selection are independent; this option does not close viewer speakers.
+Already transmitted audio can drain from receiver buffers after capture stops.
+
 ## Presentation recovery
 
 UI and CLI now use `backend/render/FramePresentationBackend` and

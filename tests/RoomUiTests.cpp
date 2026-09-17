@@ -441,13 +441,19 @@ void SourceSwitchScenario(const std::string& origin) {
     viewer.session().captureUpdated = [&](const auto& result) { error = result.error; };
     viewer.session().switchCapture({CaptureKind::Display, 0, 0, 30});
     Wait([&] { return !viewer.session().capturePending(); }); Check(error == CaptureUpdateError::Unsupported);
-    // Switch the actual host widgets to a silent synthetic microphone. Verify
+    // Switch the actual host widgets to production device-free silence. Verify
     // decoded Opus becomes silent, then resumes, without rebuilding the room/video.
     const auto audioRevision = host.session().status().audio.revision;
     auto* audioKind = host.findChild<QComboBox*>("liveAudioKind");
     auto* switchAudio = host.findChild<QPushButton*>("switchAudioSource");
-    Wait([&] { return switchAudio->isEnabled(); }); audioKind->setCurrentIndex(1); switchAudio->click();
+    Wait([&] { return switchAudio->isEnabled(); }); audioKind->setCurrentIndex(3);
+    Check(!host.findChild<QComboBox*>("liveAudioDevice")->isEnabled() &&
+        !host.findChild<QSpinBox*>("liveAudioProcess")->isEnabled() &&
+        !host.findChild<QPushButton*>("refreshAudioDevices")->isEnabled());
+    switchAudio->click();
     Wait([&] { return !host.session().audioPending() && host.session().status().audio.revision == audioRevision + 1; });
+    Check(host.session().status().audio.selected.kind == AudioKind::None &&
+        host.findChild<QLabel*>("audioState")->text() == "No audio is being shared.");
     const auto settle = std::chrono::steady_clock::now() + 3s;
     Wait([&] { Check(std::chrono::steady_clock::now() < settle); return audio->quietStreak >= 30; });
     const auto quiet = audio->audibleBlocks.load(); const auto videoBefore = frames;

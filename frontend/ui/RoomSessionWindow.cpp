@@ -157,7 +157,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         else selection.display = selected["display"].toInt();
         captureState_->setText("Waiting for the new source…"); switchCapture_->setEnabled(false); session_.switchCapture(selection);
     });
-    audioKind_ = combo("Shared audio", {"System output", "Microphone", "Process output"}, int(config.media.audio.source));
+    audioKind_ = combo("Shared audio", {"System output", "Microphone", "Process output", "No shared audio"}, int(config.media.audio.source));
     audioKind_->setObjectName("liveAudioKind");
     audioDevice_ = new QComboBox; audioDevice_->setObjectName("liveAudioDevice"); form->addRow("Audio device", audioDevice_);
     audioDevice_->addItem(config.media.audio.deviceId.empty() ? "Default device" : "Current device", QString::fromStdWString(config.media.audio.deviceId));
@@ -167,12 +167,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     audioState_ = new QLabel; audioState_->setWordWrap(true); audioState_->setObjectName("audioState"); form->addRow(audioState_);
     connect(audioKind_, &QComboBox::currentIndexChanged, this, [this] {
         audioDevice_->clear(); audioDevice_->addItem("Default device", QString());
-        audioDevice_->setEnabled(audioKind_->currentIndex() != 2); audioProcess_->setEnabled(audioKind_->currentIndex() == 2);
+        audioDevice_->setEnabled(audioKind_->currentIndex() < 2); audioProcess_->setEnabled(audioKind_->currentIndex() == 2);
+        refreshAudio_->setEnabled(audioKind_->currentIndex() < 2);
     });
     connect(refreshAudio_, &QPushButton::clicked, this, [this] {
         try {
             const auto selected = audioDevice_->currentData(); audioDevice_->clear(); audioDevice_->addItem("Default device", QString());
-            if (audioKind_->currentIndex() != 2) for (const auto& device : screenshare::WasapiCapture::EnumerateDevices(
+            if (audioKind_->currentIndex() < 2) for (const auto& device : screenshare::WasapiCapture::EnumerateDevices(
                 audioKind_->currentIndex() == 1 ? screenshare::AudioCaptureSource::Microphone : screenshare::AudioCaptureSource::SystemOutput))
                 audioDevice_->addItem(QString::fromStdWString(device.name), QString::fromStdWString(device.id));
             const auto index = audioDevice_->findData(selected); if (index >= 0) audioDevice_->setCurrentIndex(index);
@@ -181,11 +182,12 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     connect(switchAudio_, &QPushButton::clicked, this, [this] {
         AudioSelection selection; selection.kind = AudioKind(audioKind_->currentIndex());
         if (selection.kind == AudioKind::Process) selection.processId = uint32_t(audioProcess_->value());
-        else selection.deviceId = audioDevice_->currentData().toString().toStdWString();
+        else if (selection.kind != AudioKind::None) selection.deviceId = audioDevice_->currentData().toString().toStdWString();
         audioState_->setText("Waiting for the new audio source…"); switchAudio_->setEnabled(false); session_.switchAudio(std::move(selection));
     });
     session_.audioUpdated = [this](const AudioUpdateResult& result) {
-        if (result.error == AudioUpdateError::None) audioState_->setText("Sharing the selected audio source.");
+        if (result.error == AudioUpdateError::None) audioState_->setText(session_.status().audio.selected.kind == AudioKind::None ?
+            "No audio is being shared." : "Sharing the selected audio source.");
         else if (result.error == AudioUpdateError::Unavailable) audioState_->setText("Audio capture is not active. Connect a viewer first.");
         else if (result.error == AudioUpdateError::Cancelled) audioState_->setText("Audio change cancelled.");
         else audioState_->setText("Could not switch audio. The previous source is retained while available.");
@@ -258,8 +260,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         playbackDevice_->setEnabled(playbackEditable); playbackVolume_->setEnabled(playbackEditable); playbackMuted_->setEnabled(playbackEditable);
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
         const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
-        switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() != 2);
-        audioKind_->setEnabled(audioEditable); audioDevice_->setEnabled(audioEditable && audioKind_->currentIndex() != 2);
+        switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
+        audioKind_->setEnabled(audioEditable); audioDevice_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioProcess_->setEnabled(audioEditable && audioKind_->currentIndex() == 2);
         refreshCapture_->setEnabled(host && !session_.capturePending()); captureSource_->setEnabled(host && !session_.capturePending());
         if (host) {

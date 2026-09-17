@@ -1,5 +1,25 @@
 # Checkpoint B evidence
 
+## Device-free shared audio selection — 2026-09-17
+
+Host None selection is integrated across the native runtime, Windows adapter,
+opt-in browser/session UI and initial/timed CLI JSON. AudioSwitchControl resolves
+None to a portable paced silent endpoint before any device factory is called.
+Successful handover releases the old endpoint on its worker; failed resumption
+keeps silence. Recording restart preserves None. The retained track avoids media
+renegotiation and retains the existing conservative upload audio reserve.
+
+Release/Debug application builds and targeted PCM/public-room proof builds passed.
+Both default silent room matrices passed **5/5**:
+`build/webrtc/no-shared-audio-{release,debug}/result.json`.
+`PcmAudioDeviceTest` passed without physical WASAPI playback in both configurations.
+The four-viewer Release proof passed in **13.974 s**, artifact:
+`build/webrtc/no-shared-audio-four-viewer/native-service-2d15438b-c864-4ea9-a759-1de4a6df7bfe`.
+Coverage includes initial silent video, UI live disable/rollback/resume, owner-thread
+device release, no factory fallback, restart persistence and bounded silent pacing.
+Physical driver hangs/unplug, microphone processing, latency and previously recorded
+DXGI occlusion remain open. No physical audio or mouse/keyboard input was used.
+
 ## Validated local profile defaults and browser/session integration — 2026-09-17
 
 RoomProfile now persists versioned, allowlisted stream settings and playback

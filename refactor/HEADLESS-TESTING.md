@@ -1,5 +1,23 @@
 # Headless media checks
 
+## No shared audio coverage
+
+The default room matrix now starts the CLI host with production `source: none`,
+checks silent decoded audio alongside delivered video, then resumes capture through
+a timed change. The actual UI scenario switches to None, verifies disabled device
+controls and continued video, rejects a failed resume, then resumes successfully.
+`PcmAudioDeviceTest` (without `--wasapi`) verifies bypassed factories, capture-owner
+destruction, three off/on cycles, silence after restart, cancellation and pacing
+without catch-up bursts. It also exercises the Windows None endpoint selector
+without opening a physical audio endpoint. `PublicRoomSessionProof` checks real
+Opus silence and resumption across four viewers with unchanged room/settings state.
+
+Evidence: `build/webrtc/no-shared-audio-release/result.json` and
+`build/webrtc/no-shared-audio-debug/result.json` passed **5/5** each; PCM lifecycle
+checks passed in both configurations. Four-viewer Release evidence is under
+`build/webrtc/no-shared-audio-four-viewer/`. These are correctness checks; their
+drain deadlines are not latency measurements. Desktop/GPU acceptance was not rerun.
+
 ## Production room regression — one command
 
 After building the application test targets and installing signaling-worker dev

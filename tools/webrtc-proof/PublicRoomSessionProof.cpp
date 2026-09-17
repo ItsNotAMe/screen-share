@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
         }
         Wait([&] { for (auto& value : evidence) if (value->frames < 45 || value->audio->audibleBlocks < 20) return false; return host.Status().activePeers == 4; });
         const auto beforeAudioSwitch = host.Status();
-        auto audioSwitch = host.SwitchAudioSource({AudioKind::Microphone});
+        auto audioSwitch = host.SwitchAudioSource({AudioKind::None});
         Check(Get(audioSwitch).error == AudioUpdateError::None);
         // Observe real decoded silence instead of assuming a fixed jitter/codec
         // drain time. This is a correctness deadline, not a gaming latency gate.

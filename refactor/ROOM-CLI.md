@@ -1,5 +1,12 @@
 # Opt-in v2 room CLI
 
+Host `"audio": {"source": "none"}` starts without opening an audio capture device.
+The same `source: "none"` works in timed `audioChanges`; a subsequent system,
+microphone or process change resumes capture. None rejects nonempty `deviceId` and
+nonzero `processId`. JSON status includes `audioSource` for the applied selection.
+The silent Opus track remains negotiated so resuming needs no peer reconnect; this
+does not disable viewers' playback devices or promise zero audio network traffic.
+
 `ScreenShare --room-v2 CONFIG.json` uses the shared v2 RoomSession and production
 Windows capture/audio runtime. Existing CLI commands and the UI remain on their
 current path until cutover acceptance. Requires the pinned native build and a
@@ -75,7 +82,7 @@ sources. Native capture dimensions are retained; per-viewer adaptation controls
 output dimensions. Capture FPS defaults to initial stream FPS; set `capture.fps`
 high enough for scheduled changes. Live settings do not reconfigure the device.
 
-Audio fields are `source: system|microphone|process`, optional `deviceId`, optional
+Audio fields are `source: system|microphone|process|none`, optional `deviceId`, optional
 `playbackDeviceId`, and a required positive `processId` for process output. Device
 IDs are the Windows endpoint IDs from the existing `--list-audio-devices` command.
 

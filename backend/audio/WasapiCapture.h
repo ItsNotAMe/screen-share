@@ -19,6 +19,7 @@ enum class AudioCaptureSource {
     SystemOutput,
     Microphone,
     ProcessOutput,
+    None,
 };
 
 struct AudioDeviceInfo {

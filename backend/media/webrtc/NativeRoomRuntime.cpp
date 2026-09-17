@@ -150,8 +150,9 @@ public:
     }
     CaptureSelectionStatus CaptureSelection() const override { return captureSwitch_ ? captureSwitch_->Status() : CaptureSelectionStatus{}; }
     std::future<AudioUpdateResult> SwitchAudioSource(media::AudioSelection selection) override {
-        if (!identity_.host || !options_.audioSwitch || !options_.audioForSelection) return CaptureUpdateReady(AudioUpdateError::Unsupported);
-        try { ValidateAudioSelection(selection); return options_.audioSwitch->Submit(selection, options_.audioForSelection(selection)); }
+        if (!identity_.host || !options_.audioSwitch || (selection.kind != AudioKind::None && !options_.audioForSelection)) return CaptureUpdateReady(AudioUpdateError::Unsupported);
+        try { ValidateAudioSelection(selection); return options_.audioSwitch->Submit(selection,
+            selection.kind == AudioKind::None ? AudioSwitchControl::Factory{} : options_.audioForSelection(selection)); }
         catch (...) { return CaptureUpdateReady(AudioUpdateError::Invalid); }
     }
     AudioSelectionStatus AudioSelection() const override { return options_.audioSwitch ? options_.audioSwitch->Status() : AudioSelectionStatus{}; }

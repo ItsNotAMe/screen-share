@@ -42,7 +42,8 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         auto endpoints = options.audioEndpoints.value_or(WasapiPcmEndpoints(options.audio, options.playbackDeviceId));
         if (identity.host) {
             AudioSelection initial{options.audio.source == AudioCaptureSource::Microphone ? AudioKind::Microphone :
-                options.audio.source == AudioCaptureSource::ProcessOutput ? AudioKind::Process : AudioKind::System,
+                options.audio.source == AudioCaptureSource::ProcessOutput ? AudioKind::Process :
+                options.audio.source == AudioCaptureSource::None ? AudioKind::None : AudioKind::System,
                 options.audio.deviceId, options.audio.processId};
             ValidateAudioSelection(initial);
             native.audioSwitch = std::make_shared<AudioSwitchControl>(initial, endpoints.capture);

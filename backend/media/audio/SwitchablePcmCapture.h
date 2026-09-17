@@ -1,5 +1,6 @@
 #pragma once
 #include "PcmAudioEndpoint.h"
+#include "SilentPcmCapture.h"
 #include "media/AudioSelection.h"
 #include <condition_variable>
 #include <algorithm>
@@ -14,11 +15,17 @@ class AudioSwitchControl {
 public:
     using Factory = std::function<std::unique_ptr<PcmCaptureEndpoint>()>;
     struct Request { Factory factory; AudioSelection selected; std::promise<AudioUpdateResult> reply; };
-    AudioSwitchControl(AudioSelection initial, Factory factory) : factory_(std::move(factory)) { status_ = {std::move(initial), 1}; }
+    AudioSwitchControl(AudioSelection initial, Factory factory) {
+        ValidateAudioSelection(initial);
+        factory_ = SelectFactory(initial, std::move(factory));
+        status_ = {std::move(initial), 1};
+    }
     Factory Attach() { std::lock_guard lock(mutex_); active_ = !closed_; return factory_; }
     void Detach() { std::lock_guard lock(mutex_); active_ = false; CancelQueued(); }
     void Close() { std::lock_guard lock(mutex_); closed_ = true; CancelQueued(); }
     std::future<AudioUpdateResult> Submit(AudioSelection selected, Factory factory) {
+        ValidateAudioSelection(selected);
+        factory = SelectFactory(selected, std::move(factory));
         std::lock_guard lock(mutex_);
         if (closed_ || !active_) return CaptureUpdateReady(AudioUpdateError::Unavailable);
         if (busy_) return CaptureUpdateReady(AudioUpdateError::Busy);
@@ -35,6 +42,10 @@ public:
     }
     AudioSelectionStatus Status() const { std::lock_guard lock(mutex_); return status_; }
 private:
+    static Factory SelectFactory(const AudioSelection& selected, Factory factory) {
+        if (selected.kind == AudioKind::None) return [] { return std::make_unique<SilentPcmCapture>(); };
+        return factory;
+    }
     void CancelQueued() {
         if (queued_) { queued_->reply.set_value({AudioUpdateError::Cancelled, status_.revision}); queued_.reset(); busy_ = false; }
     }

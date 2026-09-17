@@ -37,7 +37,8 @@ QJsonObject Status(const RoomStatus& value) {
         {"requestedRevision", qint64(value.stream.requestedRevision)}, {"peers", peers},
         {"requestedPreferences", StreamPreferencesJson(value.stream.preferences)},
         {"aggregateUploadBps", value.stream.preferences.aggregateUploadLimitBps.value_or(0)}, {"captureRevision", qint64(value.capture.revision)},
-        {"audioRevision", qint64(value.audio.revision)}, {"playbackRevision", qint64(value.playback.revision)},
+        {"audioRevision", qint64(value.audio.revision)}, {"audioSource", media::AudioKindName(value.audio.selected.kind)},
+        {"playbackRevision", qint64(value.playback.revision)},
         {"playbackVolume", int(value.playback.selected.volume)}, {"playbackMuted", value.playback.selected.muted}};
 }
 std::atomic<bool> interrupted{false};

@@ -272,7 +272,13 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [x] Preserve system, microphone, selected device and process-loopback modes in shared runtime/UI/CLI selection; physical endpoint acceptance remains separate.
 - [x] Use event-driven WASAPI and bounded handoffs with measured device buffering; shared-audio handover retains the 30 ms application capture bound.
 - [ ] Isolate microphone processing from system/process audio.
+- [x] Support device-free no-shared-audio startup/live selection in shared runtime/UI/CLI, with rollback, worker restart and silent end-to-end coverage.
 - [ ] Preserve mute/volume, video-only operation and explicit device-error behavior.
+  Shared runtime/UI/CLI now support device-free `none` capture at startup and live,
+  with capture-device release, failed-resume rollback and restart persistence.
+  The Opus track remains negotiated; viewer output devices remain independent.
+  Synthetic mute/volume/error and no-shared-audio coverage is implemented; physical
+  unplug/recovery and full device-error acceptance keep this combined gate open.
 - [ ] Use monotonic local clocks and WebRTC synchronization.
 
 ### Stream settings
