@@ -36,6 +36,7 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<unsigned> frames{0}, invalid{0}, destroyed{0};
     std::atomic<bool> failDelivery{false};
     std::atomic<bool> restart{false};
+    std::atomic<bool> pauseAdvance{false};
     std::atomic<unsigned> offers{0};
     std::atomic<unsigned> smallFrames{0};
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
@@ -106,6 +107,7 @@ public:
     AudioSelectionStatus AudioSelection() const override { return native_->AudioSelection(); }
     void Advance() override {
         try {
+            if (evidence_->pauseAdvance) return; // Media threads keep running; telemetry cannot publish.
             native_->Advance();
             if (evidence_->restart.exchange(false))
                 Check(send_(remote_, {RoomPeerSignal::Kind::RestartRequest, connection_, {}, {}}));
@@ -188,9 +190,28 @@ int main(int argc, char** argv) {
         Check(host.Status().audio.revision == beforeAudioSwitch.audio.revision + 2 && host.Status().activePeers == 4 &&
             host.Status().revision == beforeAudioSwitch.revision && host.Status().stream.requestedRevision == beforeAudioSwitch.stream.requestedRevision);
         Wait([&] { const auto peers = host.Status().stream.peers;
-            return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) { return peer.transportSendBps.value_or(0) > 0; });
+            return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) {
+                return peer.transportSendBps.value_or(0) > 0 && peer.receiver.observation && peer.receiver.observation->framesDecoded > 0 && !peer.receiver.stale;
+            });
         });
         StreamPreferences live;
+        const auto pausedPeer = viewers[0]->Status().peerId;
+        const auto framesBeforeTelemetryPause = evidence[0]->frames.load();
+        evidence[0]->pauseAdvance = true;
+        try {
+            Wait([&] { const auto peers = host.Status().stream.peers;
+                return std::any_of(peers.begin(), peers.end(), [&](const auto& peer) {
+                    return peer.peerId == pausedPeer && peer.receiver.stale && !peer.receiver.observation;
+                });
+            });
+            Check(evidence[0]->frames > framesBeforeTelemetryPause);
+        } catch (...) { evidence[0]->pauseAdvance = false; throw; }
+        evidence[0]->pauseAdvance = false;
+        Wait([&] { const auto peers = host.Status().stream.peers;
+            return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) {
+                return peer.receiver.observation && !peer.receiver.stale;
+            });
+        });
         live.resolution = ResolutionMode::Fixed; live.width = 320; live.height = 180;
         live.fps = 20; live.bitrateMode = SettingMode::Manual; live.bitrateLimitBps = 1000000;
         live.aggregateUploadLimitBps = 4000000;
@@ -215,6 +236,11 @@ int main(int argc, char** argv) {
         const unsigned restartingBefore = evidence[0]->frames, healthyBefore = evidence[1]->frames;
         evidence[0]->restart = true;
         Wait([&] { return evidence[0]->offers >= 2 && evidence[0]->frames >= restartingBefore + 30 && evidence[1]->frames >= healthyBefore + 30; });
+        Wait([&] { const auto peers = host.Status().stream.peers;
+            return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) {
+                return peer.receiver.observation && peer.receiver.observation->width == 320 && !peer.receiver.stale;
+            });
+        });
         auto stopViewer = viewers[3]->Stop(); Get(stopViewer);
         Check(evidence[3]->destroyed == 1);
         Wait([&] { return host.Status().activePeers == 3; });
@@ -230,7 +256,8 @@ int main(int argc, char** argv) {
         Wait([&] { return host.Status().activePeers == 4 && evidence[3]->smallFrames >= 30 && evidence[3]->audio->audibleBlocks >= 20; });
         Wait([&] { const auto status = host.Status().stream;
             return status.peers.size() == 4 && std::all_of(status.peers.begin(), status.peers.end(), [&](const auto& peer) {
-                return peer.appliedRevision == status.requestedRevision && peer.appliedVideoBitrateBps == 672000;
+                return peer.appliedRevision == status.requestedRevision && peer.appliedVideoBitrateBps == 672000 &&
+                    peer.receiver.observation && peer.receiver.observation->width == 320 && !peer.receiver.stale;
             });
         });
         live.width = 640; live.height = 360; live.fps = 30;

@@ -2,6 +2,7 @@
 #include "RoomManagedPeer.h"
 #include "ViewerStreamSettings.h"
 #include "TransportSendRate.h"
+#include "ReceiverTelemetryChannel.h"
 #include "media/capture/SwitchableCaptureSource.h"
 #include "api/make_ref_counted.h"
 #include <map>
@@ -39,6 +40,8 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
         bool settingsRejected = false;
         bool retired = false, removing = false;
         std::shared_ptr<TransportSendRate> sendRate = std::make_shared<TransportSendRate>();
+        // Destroy/unregister observer before native peer/channel destruction.
+        std::unique_ptr<ReceiverTelemetryChannel> telemetry;
     };
     v2::RoomIdentity identity_;
     v2::RoomSend send_;
@@ -89,9 +92,13 @@ public:
         if (!Ready(id) || peers_.size() >= (identity_.host ? 63u : 1u)) return false;
         failed_.erase(id);
         auto entry = std::make_unique<Entry>(); entry->generation = ++next_;
-        entry->peer = std::make_unique<MediaPeer>(*engine_, next_, options_.frames.get(),
-            [this, id](auto channel) { if (options_.channel) options_.channel(id, std::move(channel)); }, options_.connection);
+        entry->telemetry = std::make_unique<ReceiverTelemetryChannel>(identity_.host);
         auto* raw = entry.get();
+        entry->peer = std::make_unique<MediaPeer>(*engine_, next_, options_.frames.get(),
+            [this, id, raw](auto channel) {
+                if (channel->label() == "telemetry") raw->telemetry->Attach(std::move(channel));
+                else if (options_.channel) options_.channel(id, std::move(channel));
+            }, options_.connection);
         auto send = [this, id](auto signal) { return send_(id, std::move(signal)); };
         entry->negotiation = std::make_unique<RoomPeerNegotiation>(entry->peer->connection,
             entry->peer->Negotiation(), next_, identity_.host, send);
@@ -175,6 +182,7 @@ public:
             auto& peer = result.peers.back();
             peer.transportSampleStale = sample.stale;
             peer.transportSendBps = sample.bitsPerSecond;
+            peer.receiver = entry->telemetry->Status();
         }
         return result;
     }
@@ -225,6 +233,7 @@ public:
         for (auto it = peers_.begin(); it != peers_.end();) {
             auto& entry = *it->second;
             if (entry.retired) { it = peers_.erase(it); continue; }
+            if (!entry.removing) entry.telemetry->Advance(entry.negotiation->connectionId(), *entry.peer->connection, entry.negotiation->ready());
             auto status = owner_->snapshot(entry.generation);
             if (status && status->peerClosed && !entry.removing) failed_.insert(it->first);
             if (identity_.host && !entry.removing && !entry.negotiation->connectionId().empty() &&

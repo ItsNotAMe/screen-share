@@ -200,6 +200,11 @@ void ProfileSettingsScenario() {
     Check(StreamSampleState(diagnostic) == "stale" && StreamPeerJson(diagnostic, 2)["transportSendBps"].isNull());
     diagnostic.rejected = true;
     Check(StreamPeerState(diagnostic, 3) == "rejected");
+    diagnostic.receiver.observation = ReceiverVideoObservation{320, 180, 0, 0};
+    Check(StreamPeerJson(diagnostic, 3)["receiver"].toObject()["decodeFps"].toDouble(-1) == 0);
+    diagnostic.receiver.stale = true;
+    const auto expiredReceiver = StreamPeerJson(diagnostic, 3)["receiver"].toObject();
+    Check(expiredReceiver["sampleState"] == "stale" && expiredReceiver["width"].isNull() && expiredReceiver["framesDecoded"].isNull());
     QTemporaryDir files; Check(files.isValid()); const auto path = files.filePath("profile.ini");
     RoomProfile profile(path);
     const auto guest = profile.nickname(); Check(guest.startsWith("Guest-") && guest.size() == 14);
@@ -601,6 +606,8 @@ int main(int argc, char** argv) {
             return !stream.preferences.aggregateUploadLimitBps && stream.peers[0].appliedVideoBitrateBps == 2000000;
         });
         Wait([&] { return diagnostics->item(0, 1)->text() == "source-observed"; });
+        Wait([&] { return diagnostics->item(0, 5)->text() == QString::fromUtf8("160 × 90"); });
+        Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Receiver-reported decode"));
         Check(diagnostics->item(diagnostics->currentRow(), 0)->data(Qt::UserRole) == diagnosticPeer);
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         auto* video = static_cast<VideoFrameWidget*>(viewer.findChild<QWidget*>("roomVideo"));

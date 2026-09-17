@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-17 (through `a82c07c`, plus local presentation outcomes). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-17 (through `f46041d`, plus receiver decoder telemetry). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -395,11 +395,15 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
   preferences, applied caps, source-observed size/revisions and measured transport.
   UI and CLI share status names; absent/stale rates stay unknown, measured zero
   stays zero. Selection follows peer identity across refreshes.
-- [ ] Add receiver-observed values and complete the planned details popup.
+- [x] Add receiver-reported decoded dimensions, frame count and optional FPS to
+  host rows/details and CLI, separate from source observations and presentation.
+- [ ] Add remaining receiver metrics and complete the planned details popup.
 - [x] Sample local sender transport once per second and suppress samples at the
   three-second deadline; test exact freshness boundary, resets and peer isolation.
-- [ ] Refresh statistics once per second and mark receiver data stale after three seconds.
-- [ ] Keep receiver telemetry on the peer data channel, not Cloudflare.
+- [x] Sample receiver decoder statistics once per second and expire reports after
+  three seconds; real four-viewer coverage pauses telemetry while media continues.
+- [x] Keep decoder telemetry on the encrypted unreliable peer channel, not Cloudflare;
+  validate version/length/ranges/sequence/generation and bound pending work.
 - [x] Expose sender application states (pending, rejected, upload-paused,
   waiting-for-source, source-observed) and fresh/stale/unknown transport samples.
 - [ ] Add receiver/network limiting reasons and remaining unknown-valued metrics.

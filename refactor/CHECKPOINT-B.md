@@ -1373,3 +1373,18 @@ The previously failing Windows CLI test passed before behavior changes; subseque
 Release and Debug desktop-inclusive matrices passed. This is not a root-cause fix
 for the prior intermittent timeout. See HEADLESS-TESTING for exact evidence and
 the remaining physical-device, receiver-telemetry and latency limitations.
+
+## Receiver decoder telemetry continuation — 2026-09-17
+
+The native runtime now owns bounded versioned decoder reports over its encrypted
+unreliable telemetry channel. Reports bind to negotiation generations, reject
+replay/out-of-order/malformed/excess messages, and expire after three seconds.
+Only the latest sample is retained, stats requests run at 1 Hz, and no service
+requests were added. Host UI/CLI distinguish decoded dimensions/count/FPS from
+source observations and presentation. See RECEIVER-TELEMETRY.md for the full contract.
+
+Release/Debug five-case headless matrices and protocol tests passed; the Release
+collector proof and four-viewer expiry/recovery/restart/rejoin proof passed.
+The CLI preview visibility invariant is corrected and tested, but the optional
+desktop matrix still reports DXGI occlusion with no graphics errors. Hardware/
+desktop acceptance, remote presentation telemetry and external latency remain open.

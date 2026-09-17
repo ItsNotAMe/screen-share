@@ -1,5 +1,6 @@
 #include "media/webrtc/CaptureVideoSource.h"
 #include "media/webrtc/TransportSendRate.h"
+#include "media/webrtc/ReceiverTelemetryChannel.h"
 #include "api/make_ref_counted.h"
 #include "rtc_base/logging.h"
 #include "core/WindowsMediaRuntime.h"
@@ -83,6 +84,21 @@ int main(int argc, char** argv) try {
     Require(!nextGeneration->Read().bitsPerSecond, "Late retired-generation callback contaminated a new peer");
 
     Sink fixedSink, adaptiveSink;
+    auto receiverMailbox = std::make_shared<ReceiverStatsMailbox>();
+    auto receiverCollector = webrtc::make_ref_counted<ReceiverStatsCallback>(receiverMailbox);
+    auto receiverReport = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(1000000));
+    auto inbound = std::make_unique<webrtc::RTCInboundRtpStreamStats>("video", receiverReport->timestamp());
+    inbound->kind = "video"; inbound->frame_width = 320; inbound->frame_height = 180; inbound->frames_decoded = 30;
+    inbound->frames_per_second = 29.97; receiverReport->AddStats(std::move(inbound));
+    receiverCollector->OnStatsDelivered(receiverReport);
+    Require(receiverMailbox->video && receiverMailbox->video->fpsMilli == 29970 && receiverMailbox->serial == 1,
+        "Receiver collector lost decoder stats");
+    auto emptyReport = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(2000000));
+    receiverCollector->OnStatsDelivered(emptyReport);
+    Require(!receiverMailbox->video && receiverMailbox->serial == 2, "Absent decoder retained old values");
+    auto replacementMailbox = std::make_shared<ReceiverStatsMailbox>();
+    receiverCollector->OnStatsDelivered(receiverReport);
+    Require(!replacementMailbox->video && replacementMailbox->serial == 0, "Retired stats callback published to new generation");
     auto fixed = webrtc::make_ref_counted<CaptureVideoSource>();
     auto adaptive = webrtc::make_ref_counted<CaptureVideoSource>();
     preferences = {};

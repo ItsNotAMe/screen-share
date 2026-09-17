@@ -23,6 +23,7 @@ struct NativeRoomRuntimeOptions {
     std::function<PlaybackControl::Factory(PlaybackSelection)> playbackForSelection;
     std::function<void(CaptureVideoSource&, const CaptureSample&)> deliver;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
+    // Control/input-state only; runtime exclusively owns the telemetry observer.
     std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;
     StreamPreferences preferences;
     webrtc::PeerConnectionInterface::RTCConfiguration connection;

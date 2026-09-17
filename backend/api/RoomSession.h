@@ -4,6 +4,7 @@
 #include "media/CaptureSelection.h"
 #include "media/AudioSelection.h"
 #include "media/PlaybackSelection.h"
+#include "media/ReceiverVideoStatus.h"
 #include <functional>
 #include <future>
 #include <memory>
@@ -36,6 +37,7 @@ struct PeerStreamStatus {
     std::optional<uint64_t> transportSendBps;
     // A stale sample is deliberately withheld; absent is not measured zero.
     bool transportSampleStale = false;
+    media::ReceiverVideoStatus receiver;
 };
 struct StreamStatus {
     uint64_t requestedRevision = 0;

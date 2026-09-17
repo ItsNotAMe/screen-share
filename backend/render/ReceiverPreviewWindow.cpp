@@ -313,6 +313,10 @@ void ReceiverPreviewWindow::EnsureWindow(int preferredWidth, int preferredHeight
     }
 
     ShowWindow(hwnd_, SW_SHOWNORMAL);
+    // A launcher can supply a hidden startup show state that overrides the
+    // first ShowWindow call. Explicit preview creation must still show its HWND;
+    // this second call does not activate or steal focus from another window.
+    if (!IsWindowVisible(hwnd_)) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     UpdateWindow(hwnd_);
     UpdateClientSize();
     Render();

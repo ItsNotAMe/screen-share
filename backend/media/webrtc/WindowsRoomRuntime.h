@@ -20,6 +20,7 @@ struct WindowsRoomRuntimeOptions {
     std::function<AudioSwitchControl::Factory(AudioSelection)> audioForSelection;
     StreamPreferences preferences;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
+    // Control/input-state only; receiver telemetry is owned by the runtime.
     std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;
 };
 v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions);

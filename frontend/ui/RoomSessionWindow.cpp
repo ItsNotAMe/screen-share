@@ -203,9 +203,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     sourceSettings->setVisible(config.room.host); sourceSettings->setMinimumHeight(160); layout->addWidget(sourceSettings, 1);
     settingsState_ = new QLabel; settingsState_->setWordWrap(true); layout->addWidget(settingsState_);
     uploadState_ = new QLabel; uploadState_->setWordWrap(true); uploadState_->setObjectName("uploadState"); uploadState_->setVisible(config.room.host); layout->addWidget(uploadState_);
-    auto* diagnostics = new QTableWidget(0, 5, this);
+    auto* diagnostics = new QTableWidget(0, 6, this);
     diagnostics->setObjectName("peerDiagnostics");
-    diagnostics->setHorizontalHeaderLabels({"Viewer", "Settings", "Source size", "Applied cap", "Transport upload"});
+    diagnostics->setHorizontalHeaderLabels({"Viewer", "Settings", "Source size", "Applied cap", "Transport upload", "Receiver decoded"});
     diagnostics->setEditTriggers(QAbstractItemView::NoEditTriggers);
     diagnostics->setSelectionBehavior(QAbstractItemView::SelectRows);
     diagnostics->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -292,10 +292,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
                     const auto nickname = rows[index].toObject()["nickname"].toString();
                     const auto rate = !peer.transportSampleStale && peer.transportSendBps ?
                         QString("%1 Mbps").arg(*peer.transportSendBps / 1000000.0, 0, 'f', 2) : StreamSampleState(peer);
+                    const auto received = rows[index].toObject()["receiver"].toObject();
+                    const auto receiverSize = received["sampleState"] == "fresh" ?
+                        QString("%1 × %2").arg(received["width"].toInt()).arg(received["height"].toInt()) : received["sampleState"].toString();
                     const QStringList cells{nickname.isEmpty() ? id : nickname + " [" + id + "]",
                         StreamPeerState(peer, value.stream.requestedRevision),
                         peer.observedRevision ? QString("%1 × %2").arg(peer.width).arg(peer.height) : "unknown",
-                        peer.appliedRevision ? QString("%1 Mbps").arg(peer.appliedVideoBitrateBps / 1000000.0, 0, 'f', 2) : "unknown", rate};
+                        peer.appliedRevision ? QString("%1 Mbps").arg(peer.appliedVideoBitrateBps / 1000000.0, 0, 'f', 2) : "unknown", rate, receiverSize};
                     const auto& preferences = value.stream.preferences;
                     const auto requested = QString("%1; resolution %2 (%3 × %4); FPS %5 (%6); bitrate %7 (%8).")
                         .arg(preferences.preset == StreamPreset::Gaming ? "Gaming" : "Quality")
@@ -304,10 +307,12 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
                         .arg(preferences.fpsMode == SettingMode::Manual ? "Manual" : "Auto").arg(preferences.fps)
                         .arg(preferences.bitrateMode == SettingMode::Manual ? "Manual target" : "Auto ceiling")
                         .arg(preferences.bitrateLimitBps ? QString::number(*preferences.bitrateLimitBps) + " bps" : "automatic allowance");
-                    const auto detail = QString("Peer %1\nRequested / applied / source-observed revisions: %2 / %3 / %4\nAllocated video cap: %5 bps; applied video cap: %6 bps. Transport sample: %7 (expires after 3 seconds).\nTransport includes audio and protocol traffic, excludes IP/interface overhead. Remote display, latency and congestion reason: unknown.\nRequested settings: %8")
+                    const auto detail = QString("Peer %1\nRequested / applied / source-observed revisions: %2 / %3 / %4\nAllocated video cap: %5 bps; applied video cap: %6 bps. Transport sample: %7 (expires after 3 seconds).\nTransport includes audio and protocol traffic, excludes IP/interface overhead. Remote display, latency and congestion reason: unknown.\nRequested settings: %8\nReceiver-reported decode: %9; frames %10; FPS %11. Decoder reports expire after 3 seconds and do not confirm presentation.")
                         .arg(id).arg(value.stream.requestedRevision).arg(peer.appliedRevision).arg(peer.observedRevision)
                         .arg(peer.allocatedVideoBitrateBps).arg(peer.appliedVideoBitrateBps).arg(StreamSampleState(peer))
-                        .arg(requested);
+                        .arg(requested).arg(receiverSize)
+                        .arg(received["framesDecoded"].isNull() ? "unknown" : QString::number(received["framesDecoded"].toInteger()))
+                        .arg(received["decodeFps"].isNull() ? "unknown" : QString::number(received["decodeFps"].toDouble(), 'f', 1));
                     for (int column = 0; column < cells.size(); ++column) {
                         auto* item = diagnostics->item(index, column);
                         if (!item) { item = new QTableWidgetItem; diagnostics->setItem(index, column, item); }

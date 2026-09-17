@@ -547,6 +547,29 @@ The Debug seven-case desktop-inclusive matrix passed in 61.452 seconds:
 seven-case matrix also passed (`presentation-outcomes-release/result.json`).
 The final Release binaries, including periodic CLI reporting and the viewer-label
 assertion, passed 7/7: `build/webrtc/presentation-outcomes-final-release/result.json`.
+
+## Receiver decoder telemetry — 2026-09-17
+
+Final Release and Debug application builds passed. Both silent five-case matrices
+passed, including actual host UI receiver dimensions, null/stale serialization,
+CLI reports after resolution changes and the existing mutation/recovery tests:
+`build/webrtc/receiver-checked-{release,debug}/result.json`.
+
+NativeRoomRuntimeTests passed in both configurations with bounded wire validation,
+all truncations, canonical unknown/zero FPS, replay, generation, flood and exact
+three-second expiry checks. Release StreamSettingsTest passed collector extraction,
+missing-data and mailbox-isolation checks. The final real four-viewer proof passed
+in 12.881 seconds (`build/webrtc/receiver-checked-four-viewer/`), including stale
+reports while video keeps decoding, report recovery, ICE restart and rejoin.
+
+The optional desktop matrix failed before media admission in the CLI preview:
+`receiver-telemetry-release/` recorded visible=0, outcome=occluded, 193 occluded
+drops and zero errors/recoveries. Preview creation now explicitly ensures visibility
+despite the fixture's hidden launch state; the visibility assertion passes.
+`receiver-final-release/` still recorded visible=1, outcome=occluded, 194 drops and
+zero errors. Thus this correction does not establish a fix for desktop occlusion;
+that GPU acceptance result remains open. No timeout or success criteria were relaxed.
+Tests remained silent and used no physical keyboard/mouse input.
 All runs used silent synthetic audio and test-owned windows/messages. Physical
 driver failures, end-to-end latency and the earlier intermittent timeout cause
 remain open; local renderer counters do not close those gates.

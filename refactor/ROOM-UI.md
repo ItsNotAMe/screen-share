@@ -321,6 +321,11 @@ hardware-only encoding. Existing security, resource, gaming and service-cost gat
 remain in [TODO.md](TODO.md).
 # Per-viewer sender diagnostics (2026-09-17)
 
+Host rows now include a separate Receiver decoded column. Inline details show
+receiver-reported decoded frame count and optional FPS, with unknown/stale values
+instead of fabricated zero. Reports expire after three seconds independently of
+source/sender observations. See [RECEIVER-TELEMETRY.md](RECEIVER-TELEMETRY.md).
+
 Viewer sessions also display local presentation diagnostics once per second:
 presented/dropped/pending counts, the last frame-attempt outcome, reason counters,
 graphics error code and recovery budget usage. The renderer snapshot uses a short

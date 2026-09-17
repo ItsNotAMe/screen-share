@@ -22,7 +22,9 @@ integrated into browser-created sessions with explicit save controls; do not reb
 profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
 Host per-peer sender diagnostics now share UI/CLI states and expose transport
-freshness; receiver telemetry and network limiting reasons remain to implement.
+freshness. Receiver decoder telemetry now uses the encrypted peer channel with
+bounded versioned reports, generation/sequence validation and three-second expiry.
+Remote presentation/input latency and network limiting reasons remain to implement.
 Local renderer outcomes/drop reasons/error codes now reach viewer UI and CLI;
 keep them distinct from receiver-to-host telemetry and end-to-end latency.
 Normal AppShell/legacy CLI cutover remains gated; later visual redesign follows

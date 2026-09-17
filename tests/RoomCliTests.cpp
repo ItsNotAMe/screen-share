@@ -70,6 +70,7 @@ void PreviewLifecycle() {
     auto evidence = std::make_shared<PreviewEvidence>();
     screenshare::ReceiverPreviewWindow preview([evidence] { return std::make_unique<PreviewRenderer>(evidence); });
     preview.SetLowLatency(true); preview.Show();
+    Check(IsWindowVisible(preview.windowHandle()));
     screenshare::Nv12VideoFrame frame; frame.width = 320; frame.height = 180; frame.nv12.resize(320 * 180 * 3 / 2, 128);
     auto resume = [&](std::source_location caller = std::source_location::current()) {
         const auto goal = preview.framesPresented() + 3;
@@ -282,7 +283,7 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(malformed); });
         const auto host = ParseRoomSessionConfig(object, true);
         std::mutex mutex; std::string roomId;
-        std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, sourceChanged{false}, audioChanged{false};
+        std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, receiverReported{false}, sourceChanged{false}, audioChanged{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomCliHooks hostHooks;
         hostHooks.pump = [&] { return !stopHost; };
@@ -297,6 +298,8 @@ int main(int argc, char** argv) {
             }
             for (const auto& peer : value["peers"].toArray()) {
                 const auto row = peer.toObject();
+                const auto receiver = row["receiver"].toObject();
+                if (receiver["sampleState"] == "fresh" && receiver["width"].toInt() == 160 && receiver["framesDecoded"].toInteger() > 0) receiverReported = true;
                 if (row["allocatedVideoBps"].toInt() == 1472000 && row["appliedVideoBps"].toInt() == 1472000) budgetReported = true;
                 if (row["transportSendBps"].toDouble() > 0 && row["transportSampleState"] == "fresh" &&
                     row["requestedRevision"] == value["requestedRevision"] && value["requestedPreferences"].isObject()) rateReported = true;
@@ -354,7 +357,7 @@ int main(int argc, char** argv) {
         const int viewing = RunRoomCliSession(viewer, Factory(viewer, audio, frames), viewerHooks, true);
         stopHost = true;
         Check(playbackChanges == 2);
-        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && sourceChanged && audioChanged);
+        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && sourceChanged && audioChanged);
         Check(original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
         Check(frames->statistics().retained >= original + changed && frames->statistics().converted == 0 && frames->statistics().repacked == 0);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF

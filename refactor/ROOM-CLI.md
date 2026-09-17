@@ -257,6 +257,11 @@ CTest, and may need execution outside the capture-restricted sandbox. These are
 correctness tests; they do not establish remote latency, NAT/TLS or resource gates.
 # Sender diagnostics additions (2026-09-17)
 
+Each host peer now includes `receiver`: sampleState (fresh/stale/unknown), width,
+height, framesDecoded and decodeFps. Missing/stale values are null; FPS zero is
+retained. Reports arrive over the encrypted peer channel and describe decoding,
+not remote display or latency. See [RECEIVER-TELEMETRY.md](RECEIVER-TELEMETRY.md).
+
 Viewer `presentation-status` now emits once per second plus immediate error
 transitions. It includes presented/dropped counts and a `diagnostics` object,
 also included in final `presentation`: `outcome`, `lastErrorCode`, `busyDrops`,
