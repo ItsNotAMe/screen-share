@@ -1,5 +1,39 @@
 # Headless media checks
 
+## Diagnostics and settings integration — 2026-09-17
+
+Final artifacts for this batch:
+
+- Application and proof Release/Debug builds:
+  `build/webrtc/diagnostics-{app,proof}-{release,debug}-build.log`.
+- Native protocol/link smoke: `NativeRoomRuntimeTests.exe` passed in both builds,
+  including V2 framing, canonical absence, exact three-second renderer/report
+  expiry, malformed fields, no-renderer replacement, replay and generation checks.
+- `StreamSettingsTest.exe` passed in both builds:
+  `build/webrtc/diagnostics-settings-{release,debug}.log`. It injects sender
+  rejection/topology errors, checks two-viewer isolation, retries and preserved
+  manual settings, and validates codec/encode/retransmit/decoder/buffering stats.
+- Final desktop-inclusive matrix results:
+  `build/webrtc/diagnostics-verified-{release,debug}/result.json`.
+  **7/7 passed in each configuration.**
+  UI/CLI tests cover actual encrypted renderer reports, no-renderer null values,
+  shared pipeline/recovery diagnostics, preset preservation and partial UI state.
+- Four-viewer Release/Debug scenarios passed in **18.000 s / 18.490 s**:
+  `build/webrtc/diagnostics-four-viewer-release/native-service-38fe2fc3-b953-4a8c-af65-0c5dee01cd96`
+  and `build/webrtc/diagnostics-four-viewer-debug/native-service-10741da8-b1d1-44ec-902b-dbf90439631a`.
+  Fresh decoder/codec/handoff/recovery reports, telemetry expiry with continuing
+  media, resumption, restart, rejoin and failure isolation remain covered.
+
+The intermediate `diagnostics-final-release` matrix failed the new partial-UI
+fixture assertion because the preceding settings operation had not fully settled.
+The test now waits for matching requested/applied/source-observed revisions and no
+pending update before injecting its partial snapshot. No assertion was weakened or
+timeout increased. The earlier `diagnostics-release` matrix passed all seven cases.
+
+All audio remains synthetic/discarded and no physical input is injected. These
+checks do not establish physical display, image/input latency, hardware decode,
+driver-loss acceptance, real TLS/NAT or performance improvement. See DIAGNOSTICS.md.
+
 ## Native target visibility and Windows fixture corrections
 
 Production presentation now tests the root window's minimized state before GPU

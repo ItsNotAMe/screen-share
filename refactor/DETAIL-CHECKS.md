@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-17 (through `6a69998`, plus sender/network details integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-17 (through `7a7316f`, plus the complete diagnostics/integration batch). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -10,6 +10,23 @@ split into completed implementation and remaining validation. All original
 physical-device, resource, network, cost, latency and cutover gates remain open
 until their own evidence passes. Dated continuation notes at the end are historical;
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
+
+## Diagnostics and settings integration — 2026-09-17
+
+- [x] Carry renderer submission/drop/queue/outcome, decoder drops/mean buffering
+  and allowlisted decoder identity over bounded encrypted V2 telemetry.
+- [x] Export current capture/recovery, shared hardware fallback, encoder identity,
+  optional mean encode time and retransmission counters through shared UI/CLI.
+- [x] Preserve prior per-viewer settings on sender rejection; expose the successful
+  preferences, typed rejection and disjoint partial-application counts.
+- [x] Verify preset changes preserve explicit choices through actual UI controls,
+  persisted defaults and native sender settings.
+- [x] Keep UI measurement rebuilds at one Hz with immediate lifecycle/settings
+  transitions; keep unknown/stale values separate from zero or physical display.
+
+Implementation contracts and unavailable measurements: [DIAGNOSTICS.md](DIAGNOSTICS.md).
+Final validation artifacts are recorded in HEADLESS-TESTING.md. Ordinary entry-
+point adoption, input, hardware/physical acceptance and external latency stay open.
 
 ## Presentation target lifecycle — 2026-09-17
 
@@ -318,9 +335,12 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [ ] Fit/letterbox fixed dimensions and expose the active image rectangle for input mapping.
   CPU/GPU fitting and backend/UI/CLI rectangle exposure are implemented. Receiver
   generation binding and actual input-coordinate mapping remain in milestone 3.
-- [ ] Preserve manual settings when switching presets.
+- [x] Preserve manual settings when switching presets; actual UI controls/profile
+  roundtrip and native sender adaptation checks are covered in DIAGNOSTICS.md.
 - [x] Add settings revisions, prevalidation and per-viewer pending/applied/error state.
-- [ ] Retain/recover working settings on failed reconfiguration; report partial application honestly.
+- [x] Retain/recover working settings on failed reconfiguration; report partial application honestly.
+  Two-peer sender rejection/retry tests and real UI snapshot-consumer checks cover
+  retained preferences, disjoint counts and explicit retry.
 - [x] Implement optional aggregate media budgeting with overhead/audio reserve and equal per-viewer allocation.
 - [ ] Show actual wire usage separately; do not add a second bandwidth-control loop.
 
@@ -435,7 +455,10 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
   host rows/details and CLI, separate from source observations and presentation.
 - [x] Add a live nonmodal details popup pinned to peer identity; clear measurements
   on departure/stop. Extract the snapshot-only diagnostics widget from room controls.
-- [ ] Add remaining receiver presentation/drop/buffering and codec/fallback metrics.
+- [x] Add receiver presentation/drop/queue, decoder drops/mean buffering,
+  allowlisted codec implementations and shared hardware fallback observations.
+  Mean encode time and retransmission/NACK/PLI counters remain optional; missing
+  encoder pending age is explicitly unknown. See DIAGNOSTICS.md.
 - [x] Sample local sender transport once per second and suppress samples at the
   three-second deadline; test exact freshness boundary, resets and peer isolation.
 - [x] Sample receiver decoder statistics once per second and expire reports after
@@ -447,7 +470,10 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 - [x] Add typed WebRTC limiting reasons, video payload/encoded FPS, selected-pair
   RTT/bandwidth estimate, linked RTCP loss/jitter and receiver report age. Reject
   invalid/missing values, expire measurements and replace mailboxes across negotiation.
-- [ ] Add remaining receiver/capture/input limiting reasons and unknown-valued metrics.
+- [x] Add current capture/recovery and receiver presentation outcomes with honest
+  unknown-valued metrics; do not infer bottlenecks from low bitrate or frame rate.
+- [ ] Add input limiting/timing reasons with Stage 3 input; capture/presentation
+  rate and encoder pending-age instrumentation remain Stage 4 measurement work.
 - [ ] Preserve fullscreen/preview interaction, report paths and signed updater behavior.
 - [ ] Redact secrets/SDP/addresses and reset rate baselines across generations.
 

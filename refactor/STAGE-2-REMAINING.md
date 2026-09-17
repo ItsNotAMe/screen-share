@@ -12,9 +12,8 @@ implementation continues in complete batches, not one checkbox per user turn.
 | Normal UI/CLI adoption | Route ordinary create/join/share/watch and room operations through shared v2 interfaces. Preserve existing functionality, settings and shutdown behavior. Prepare adoption without enabling an unsafe default. | Real normal-entry-point tests, upgrade/configuration behavior, and feature parity. Opt-in RoomSessionWindow/RoomBrowserWindow alone do not complete this. |
 | Video pipeline and recovery | Hardware decode and GPU presentation, unresolved preview occlusion, and remaining display fallback/source identity/privacy/cursor/HDR/visible-aperture/resize/device-loss behavior. Preserve fixed settings across fallback. | Silent generated-window/GPU tests, source and decoder failure injection, device-specific acceptance. GPU **source scaling** is done; it is not GPU decoding/presentation. |
 | Audio completion | Microphone-only processing, consistent multichannel handling, and physical device switch/unplug/recovery acceptance. | PCM/Opus contract tests plus separate physical-device evidence. Detected startup/live endpoint failures now keep video running and support explicit same-device retry; native driver hangs remain unpreemptible. |
-| Remaining diagnostics and integration checks | Remote presentation/drop/buffering and codec/fallback observations; remaining capture/recovery reasons and settings failure/partial-application behavior. Verify preset/manual-setting preservation through ordinary UI flows. | Shared API, actual UI/CLI and encrypted telemetry tests. Keep unknown values honest; do not equate decoded/source-observed frames with displayed frames. |
 
-These are substantial groups, not four small edits. No reliable percentage or turn
+These are substantial groups. No reliable percentage or turn
 count follows from counting the historical checklist entries.
 
 ## Dependencies that must not be hidden
@@ -29,6 +28,14 @@ count follows from counting the historical checklist entries.
   the current refactor. Necessary integration/error/retry UI is allowed now.
 
 ## Already integrated; do not rebuild
+
+The diagnostics/integration group is implemented: remote presentation/drop/queue
+and decoder buffering reports, allowlisted codecs and shared hardware fallback,
+capture/recovery states, per-viewer applied preferences and rejection reasons,
+partial application, and actual UI preset/manual-setting preservation. See
+[DIAGNOSTICS.md](DIAGNOSTICS.md) for contracts, tests and unavailable measurements.
+Normal legacy entry-point parity remains in adoption; input and physical latency
+evidence remain in Stages 3/4. This does not complete Stage 2 as a whole.
 
 Presentation skips GPU work for hidden/minimized targets, including minimized
 application roots above native child video windows, and resumes on fresh frames.

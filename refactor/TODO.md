@@ -60,8 +60,8 @@ join returns to the browser. Ordinary home/create/join and CLI action routing st
 needs migration and must preserve control features. See ROOM-UI.md.
 
 **Remaining work:** ordinary UI/CLI adoption, video pipeline/recovery completion,
-audio processing/physical-device acceptance, and remaining diagnostics/integration
-checks. [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) separates these four groups from
+and audio processing/physical-device acceptance.
+[STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) separates these three groups from
 Stage 3 gaming, Stage 4 acceptance and Stage 5 cutover dependencies.
 
 Detected audio startup/live failures now release the endpoint and preserve video
@@ -92,8 +92,11 @@ Host per-viewer diagnostics now integrate UI rows/inline details and CLI JSON:
 requested preferences, applied allocation, source observation and transport sample
 freshness. They reuse local 1 Hz WebRTC stats without service traffic. Receiver
 decoder reports now reach host UI/CLI over the encrypted peer telemetry channel.
-Remote presentation telemetry, capture/input reasons and latency remain unfinished; sender
-observation must not be reported as remote display acknowledgement.
+The diagnostics/integration group now adds remote presentation/drop/buffering,
+codec/fallback and capture/recovery observations, retained applied preferences,
+partial-application/retry feedback and preset-preservation tests. See
+[DIAGNOSTICS.md](DIAGNOSTICS.md). Input and physical latency remain unfinished;
+sender/renderer observations must not be reported as physical display proof.
 
 Viewer-local presentation diagnostics now expose actual drop reasons, retained
 graphics errors and recovery state in UI/CLI. Windows timeout failures now record

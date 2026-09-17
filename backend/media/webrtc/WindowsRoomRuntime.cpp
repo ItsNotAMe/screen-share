@@ -84,6 +84,16 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
             source.PushBuffer(std::static_pointer_cast<WindowsCaptureResource>(sample.resource)->buffer, sample.capturedAt);
         };
         native.preferences = options.preferences; native.frames = options.frames; native.channel = options.channel;
+        native.presentation = options.presentation;
+        native.codecStatus = [state] {
+            CodecPipelineStatus value;
+            if (const auto hardware = state->Get()) {
+                value.available = true; value.hardwareFrames = hardware->hardwareFrames.load();
+                value.softwareFallbacks = hardware->softwareFallbacks.load();
+                value.quarantined = hardware->quarantined.load(); value.retired = hardware->device->retired();
+            }
+            return value;
+        };
         return CreateNativeRoomRuntime(identity, std::move(send), std::move(native));
     };
 }

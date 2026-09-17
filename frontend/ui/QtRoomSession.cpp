@@ -17,6 +17,8 @@ bool QtRoomSession::start(RoomSessionConfig config) {
         frames_ = std::make_shared<LatestRoomVideoFrame>();
         lastFrames_ = {};
         config.media.frames = frames_;
+        presentation_ = std::make_shared<screenshare::media::PresentationTelemetry>();
+        config.media.presentation = presentation_;
         auto factory = factory_(config.media);
         session_ = std::make_unique<RoomSession>(std::move(factory), loopback_);
         config_ = std::move(config);

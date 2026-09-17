@@ -23,12 +23,21 @@ public:
     explicit ReceiverStatsCallback(std::shared_ptr<ReceiverStatsMailbox> mailbox) : mailbox_(std::move(mailbox)) {}
     void OnStatsDelivered(const webrtc::scoped_refptr<const webrtc::RTCStatsReport>& report) override {
         std::optional<ReceiverVideoObservation> video;
+        unsigned videoReceivers = 0;
         for (const auto* inbound : report->GetStatsOfType<webrtc::RTCInboundRtpStreamStats>()) {
-            if (!inbound->kind || *inbound->kind != "video" || !inbound->frame_width || !inbound->frame_height || !inbound->frames_decoded) continue;
+            if (!inbound->kind || *inbound->kind != "video") continue;
+            if (++videoReceivers > 1) { video.reset(); break; }
+            if (!inbound->frame_width || !inbound->frame_height || !inbound->frames_decoded) continue;
             // The room contract has one video track. Never silently select an
             // arbitrary receiver if the runtime unexpectedly supplies several.
             if (video) { video.reset(); break; }
             ReceiverVideoObservation value{*inbound->frame_width, *inbound->frame_height, *inbound->frames_decoded};
+            value.decoderDrops = inbound->frames_dropped;
+            if (inbound->jitter_buffer_delay && inbound->jitter_buffer_emitted_count && *inbound->jitter_buffer_emitted_count) {
+                const double mean = *inbound->jitter_buffer_delay * 1000 / *inbound->jitter_buffer_emitted_count;
+                if (std::isfinite(mean) && mean >= 0 && mean <= 60000) value.jitterBufferMeanMs = uint32_t(std::lround(mean));
+            }
+            if (inbound->decoder_implementation == "Media Foundation H264 (CPU NV12)") value.decoder = CodecImplementation::MfH264Software;
             if (inbound->frames_per_second && std::isfinite(*inbound->frames_per_second) &&
                 *inbound->frames_per_second >= 0 && *inbound->frames_per_second <= 240)
                 value.fpsMilli = uint32_t(std::lround(*inbound->frames_per_second * 1000));
@@ -48,8 +57,10 @@ class ReceiverTelemetryChannel final : public webrtc::DataChannelObserver {
     ReceiverTelemetryInbox inbox_;
     std::shared_ptr<ReceiverStatsMailbox> mailbox_ = std::make_shared<ReceiverStatsMailbox>();
     uint64_t sent_ = 0;
+    std::shared_ptr<PresentationTelemetry> presentation_;
 public:
-    explicit ReceiverTelemetryChannel(bool host) : host_(host) {}
+    explicit ReceiverTelemetryChannel(bool host, std::shared_ptr<PresentationTelemetry> presentation = {})
+        : host_(host), presentation_(std::move(presentation)) {}
     ~ReceiverTelemetryChannel() override { if (channel_) channel_->UnregisterObserver(); }
     void Attach(webrtc::scoped_refptr<webrtc::DataChannelInterface> channel) {
         if (channel_) channel_->UnregisterObserver();
@@ -85,6 +96,7 @@ public:
         // No application send queue or retransmission. Under SCTP pressure keep
         // only the newest local sample; stale samples are never sent later.
         if (video && serial > sent_ && channel_->buffered_amount() == 0) {
+            if (presentation_) video->presentation = presentation_->Read();
             const auto bytes = EncodeReceiverTelemetry({connection_, serial, *video});
             sent_ = serial; // A rejected send is dropped, not retried every tick.
             if (!bytes.empty()) channel_->Send(webrtc::DataBuffer(webrtc::CopyOnWriteBuffer(bytes.data(), bytes.size()), true));

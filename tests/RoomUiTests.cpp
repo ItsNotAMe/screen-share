@@ -137,6 +137,7 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
 #else
         return [windows, audio](auto identity, auto send) {
             NativeRoomRuntimeOptions options; options.preferences = windows.preferences; options.frames = windows.frames;
+            options.presentation = windows.presentation;
             auto endpoints = proof::SyntheticAudio(audio);
             if (!identity.host) {
                 options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{windows.playbackDeviceId, windows.playbackVolume, windows.playbackMuted}, endpoints.playout);
@@ -238,10 +239,33 @@ void ProfileSettingsScenario() {
     diagnostic.rejected = true;
     Check(StreamPeerState(diagnostic, 3) == "rejected");
     diagnostic.receiver.observation = ReceiverVideoObservation{320, 180, 0, 0};
+    diagnostic.receiver.observation->presentation = ReceiverPresentationObservation{12, 3, 1, 3};
+    diagnostic.receiver.observation->decoderDrops = 4;
+    diagnostic.receiver.observation->jitterBufferMeanMs = 5;
+    diagnostic.receiver.observation->decoder = CodecImplementation::MfH264Software;
     Check(StreamPeerJson(diagnostic, 3)["receiver"].toObject()["decodeFps"].toDouble(-1) == 0);
+    Check(StreamPeerJson(diagnostic, 3)["receiver"].toObject()["presentation"].toObject()["dropped"].toInteger() == 3);
     diagnostic.receiver.stale = true;
     const auto expiredReceiver = StreamPeerJson(diagnostic, 3)["receiver"].toObject();
     Check(expiredReceiver["sampleState"] == "stale" && expiredReceiver["width"].isNull() && expiredReceiver["framesDecoded"].isNull());
+    Check(expiredReceiver["presentation"].isNull() && expiredReceiver["decoderDrops"].isNull() &&
+        expiredReceiver["jitterBufferMeanMs"].isNull() && expiredReceiver["decoder"] == "unknown");
+    StreamStatus partial; partial.requestedRevision = 2;
+    diagnostic.settingsError = SettingsApplyError::SenderRejected;
+    diagnostic.appliedPreferences = StreamPreferences{};
+    partial.peers.push_back(diagnostic); // Rejection takes precedence even with matching prior revisions.
+    auto success = diagnostic; success.rejected = false; success.settingsError = SettingsApplyError::None;
+    partial.peers.push_back(success); partial.peers.push_back(PeerStreamStatus{});
+    const auto application = StreamApplicationJson(partial);
+    Check(application["state"] == "partial" && application["applied"] == 1 && application["rejected"] == 1 && application["pending"] == 1);
+    Check(StreamPeerJson(diagnostic, 2)["settingsError"] == "sender-rejected" &&
+        StreamPeerJson(diagnostic, 2)["appliedPreferences"].toObject()["width"] == 1920);
+    partial.capture = {HostMediaState::Recovering, CaptureFailure::Source, 9};
+    partial.codec = {true, true, false, 12, 1};
+    const auto pipeline = PipelineDiagnosticsJson(partial);
+    Check(pipeline["captureState"] == "recovering" && pipeline["captureFailure"] == "source" &&
+        pipeline["hardwarePipeline"].toObject()["fallbackState"] == "hardware-quarantined");
+    Check(PipelineDiagnosticsJson(StreamStatus{})["hardwarePipeline"].isNull());
     QTemporaryDir files; Check(files.isValid()); const auto path = files.filePath("profile.ini");
     RoomProfile profile(path);
     const auto guest = profile.nickname(); Check(guest.startsWith("Guest-") && guest.size() == 14);
@@ -357,11 +381,27 @@ void BrowserScenario(const QUrl& origin) {
     const auto streamRevision = hostWindow->session().status().stream.requestedRevision;
     hostWindow->findChild<QSpinBox*>("streamWidth")->setValue(1280);
     hostWindow->findChild<QSpinBox*>("streamHeight")->setValue(720);
+    hostWindow->findChild<QComboBox*>("streamResolutionMode")->setCurrentIndex(int(ResolutionMode::Fixed));
+    hostWindow->findChild<QComboBox*>("streamFpsMode")->setCurrentIndex(int(SettingMode::Manual));
+    hostWindow->findChild<QComboBox*>("streamBitrateMode")->setCurrentIndex(int(SettingMode::Manual));
+    hostWindow->findChild<QSpinBox*>("streamFps")->setValue(120);
+    hostWindow->findChild<QSpinBox*>("streamBitrate")->setValue(9000000);
+    for (int preset : {1, 0, 1}) {
+        hostWindow->findChild<QComboBox*>("streamPreset")->setCurrentIndex(preset);
+        Check(hostWindow->findChild<QSpinBox*>("streamWidth")->value() == 1280 &&
+            hostWindow->findChild<QSpinBox*>("streamHeight")->value() == 720 &&
+            hostWindow->findChild<QSpinBox*>("streamFps")->value() == 120 &&
+            hostWindow->findChild<QSpinBox*>("streamBitrate")->value() == 9000000);
+    }
     hostWindow->findChild<QCheckBox*>("uploadBudgetEnabled")->setChecked(true);
     hostWindow->findChild<QSpinBox*>("uploadBudget")->setValue(8000000);
     hostWindow->findChild<QPushButton*>("saveSessionDefaults")->click();
     Check(RoomProfile(hostFile).streamPreferences().width == 1280);
     Check(RoomProfile(hostFile).streamPreferences().aggregateUploadLimitBps == 8000000);
+    const auto savedManual = RoomProfile(hostFile).streamPreferences();
+    Check(savedManual.preset == StreamPreset::Quality && savedManual.resolution == ResolutionMode::Fixed &&
+        savedManual.fpsMode == SettingMode::Manual && savedManual.bitrateMode == SettingMode::Manual &&
+        savedManual.fps == 120 && savedManual.bitrateLimitBps == 9000000);
     Check(hostWindow->session().status().stream.requestedRevision == streamRevision); // Save does not apply.
     hostWindow->findChild<QSpinBox*>("streamWidth")->setValue(1279);
     hostWindow->findChild<QPushButton*>("saveSessionDefaults")->click();
@@ -702,7 +742,7 @@ int main(int argc, char** argv) {
         auto* diagnostics = host.findChild<QTableWidget*>("peerDiagnostics");
         Wait([&] { return diagnostics->rowCount() == 1 && diagnostics->item(0, 1)->text() == "upload-paused"; });
         diagnostics->selectRow(0);
-        Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Remote display, latency and congestion reason: unknown"));
+        Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Physical display and end-to-end latency: unknown"));
         const auto diagnosticPeer = diagnostics->item(0, 0)->data(Qt::UserRole);
         host.findChild<QPushButton*>("openPeerDetails")->click();
         auto* popup = host.findChild<QDialog*>("peerDetailsDialog");
@@ -728,6 +768,36 @@ int main(int argc, char** argv) {
         });
         Wait([&] { return diagnostics->item(0, 1)->text() == "source-observed"; });
         Wait([&] { return diagnostics->item(0, 5)->text() == QString::fromUtf8("160 × 90"); });
+        Wait([&] {
+            const auto stream = host.session().status().stream;
+            const auto& peer = stream.peers[0];
+            return peer.receiver.observation && peer.receiver.observation->presentation &&
+                peer.receiver.observation->decoder == CodecImplementation::MfH264Software &&
+                stream.capture.state == HostMediaState::Running && peer.delivery.delivered > 0 &&
+                peer.recovery.state == PeerLifecycleState::Connected && peer.appliedPreferences &&
+                peer.appliedPreferences->width == 160 && peer.settingsError == SettingsApplyError::None;
+        });
+        Wait([&] { return popupText->toPlainText().contains("Receiver presentation:") &&
+            popupText->toPlainText().contains("receiver decoder: mf-h264-software") &&
+            popupText->toPlainText().contains("Capture: running"); });
+        // Exercise the real frontend snapshot consumer independently of the
+        // native SetParameters rejection test. No production fault switch.
+        Wait([&] { const auto stream = host.session().status().stream;
+            return !host.session().settingsPending() && stream.peers.size() == 1 &&
+                stream.peers[0].observedRevision == stream.requestedRevision &&
+                stream.peers[0].appliedRevision == stream.requestedRevision;
+        });
+        auto partialStatus = host.session().status();
+        auto rejectedPeer = partialStatus.stream.peers[0]; rejectedPeer.peerId = "rejected-fixture";
+        rejectedPeer.rejected = true; rejectedPeer.settingsError = SettingsApplyError::SenderRejected;
+        --rejectedPeer.appliedRevision;
+        partialStatus.stream.peers.push_back(rejectedPeer);
+        host.session().statusChanged(partialStatus);
+        Check(host.findChild<QLabel*>("streamSettingsState")->text().contains("1 applied, 0 pending, 1 rejected"));
+        Check(host.findChild<QLabel*>("streamSettingsState")->text().contains("Apply to retry"));
+        Check(diagnostics->rowCount() == 2 && diagnostics->item(1, 0)->toolTip().contains("sender-rejected"));
+        host.session().statusChanged(host.session().status());
+        Check(diagnostics->rowCount() == 1);
         const auto source = host.session().status().stream.peers[0].source;
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
         Check(source.imageLeft == 0 && source.imageTop == 0 && source.imageWidth == 160 && source.imageHeight == 90);

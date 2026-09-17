@@ -39,6 +39,7 @@ QJsonObject Status(const RoomStatus& value) {
         {"failedPeers", qint64(value.failedPeers)}, {"pendingPeers", qint64(value.pendingPeers)},
         {"requestedRevision", qint64(value.stream.requestedRevision)}, {"peers", peers},
         {"requestedPreferences", StreamPreferencesJson(value.stream.preferences)},
+        {"settingsApplication", StreamApplicationJson(value.stream)}, {"pipeline", PipelineDiagnosticsJson(value.stream)},
         {"aggregateUploadBps", value.stream.preferences.aggregateUploadLimitBps.value_or(0)}, {"captureRevision", qint64(value.capture.revision)},
         {"audioRevision", qint64(value.audio.revision)}, {"audioSource", media::AudioKindName(value.audio.selected.kind)},
         {"audioHealth", health(value.audio.health)}, {"playbackHealth", health(value.playback.health)},
@@ -162,6 +163,7 @@ int RunRoomCli(int argc, char** argv) {
         if (!SetConsoleCtrlHandler(ConsoleSignal, TRUE)) throw std::runtime_error("Cannot install cancellation handler");
         struct ConsoleLease { ~ConsoleLease() { SetConsoleCtrlHandler(ConsoleSignal, FALSE); } } console;
         auto frames = std::make_shared<LatestRoomVideoFrame>(); config.media.frames = frames;
+        config.media.presentation = std::make_shared<PresentationTelemetry>();
         std::unique_ptr<ReceiverPreviewWindow> preview;
         if (!config.room.host && config.preview) { preview = std::make_unique<ReceiverPreviewWindow>(); preview->SetLowLatency(true); preview->Show(); }
         RoomCliHooks hooks;
@@ -175,6 +177,7 @@ int RunRoomCli(int argc, char** argv) {
                 const auto status = preview->presentationStats();
                 const auto now = std::chrono::steady_clock::now();
                 if (status.errors != reportedPresentationErrors || now >= nextPresentationReport) {
+                    config.media.presentation->Publish({preview->framesPresented(), preview->framesDropped(), 0, uint8_t(status.outcome)});
                     reportedPresentationErrors = status.errors;
                     nextPresentationReport = now + 1s;
                     const QJsonObject update{{"type", "presentation-status"}, {"errors", qint64(status.errors)},

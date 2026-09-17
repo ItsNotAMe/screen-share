@@ -26,6 +26,8 @@ struct NativeRoomRuntimeOptions {
     // Control/input-state only; runtime exclusively owns the telemetry observer.
     std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;
     StreamPreferences preferences;
+    std::shared_ptr<PresentationTelemetry> presentation;
+    std::function<CodecPipelineStatus()> codecStatus;
     webrtc::PeerConnectionInterface::RTCConfiguration connection;
 };
 std::unique_ptr<v2::RoomRuntime> CreateNativeRoomRuntime(

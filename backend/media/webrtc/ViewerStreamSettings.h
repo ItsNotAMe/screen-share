@@ -3,7 +3,6 @@
 #include "api/rtp_sender_interface.h"
 
 namespace screenshare::media {
-enum class SettingsApplyError { None, Invalid, StaleRevision, UnsupportedTopology, SenderRejected };
 // Coordinator thread only; one instance per viewer generation. Revision success
 // means RTP parameters accepted and source settings queued. Source statistics
 // separately identify the revision observed while processing frames.
@@ -41,12 +40,15 @@ public:
         source.Configure(preferences, revision);
         revision_ = revision;
         appliedVideoBitrateBps_ = allowance;
+        preferences_ = preferences;
         return SettingsApplyError::None;
     }
     uint64_t revision() const noexcept { return revision_; }
     int appliedVideoBitrateBps() const noexcept { return appliedVideoBitrateBps_; }
+    const std::optional<StreamPreferences>& preferences() const noexcept { return preferences_; }
 private:
     uint64_t revision_ = 0;
     int appliedVideoBitrateBps_ = 0;
+    std::optional<StreamPreferences> preferences_;
 };
 }

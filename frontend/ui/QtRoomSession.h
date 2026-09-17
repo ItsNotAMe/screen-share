@@ -14,6 +14,9 @@ public:
     ~QtRoomSession() override;
     bool start(RoomSessionConfig);
     void stop();
+    void reportPresentation(screenshare::media::ReceiverPresentationObservation value) {
+        if (presentation_) presentation_->Publish(value);
+    }
     void apply(screenshare::media::StreamPreferences);
     void switchCapture(screenshare::media::CaptureSelection);
     bool capturePending() const { return captureUpdate_.valid(); }
@@ -45,6 +48,7 @@ private:
     RoomSessionConfig config_;
     std::unique_ptr<screenshare::v2::RoomSession> session_;
     std::shared_ptr<LatestRoomVideoFrame> frames_;
+    std::shared_ptr<screenshare::media::PresentationTelemetry> presentation_;
     std::future<screenshare::v2::RoomResult> admission_;
     std::future<screenshare::v2::StreamUpdateResult> applying_;
     std::future<screenshare::v2::RoomUpdateResult> mutation_;

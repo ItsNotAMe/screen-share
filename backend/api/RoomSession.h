@@ -7,6 +7,7 @@
 #include "media/ReceiverVideoStatus.h"
 #include "media/SenderVideoStatus.h"
 #include "media/SourceVideoStatus.h"
+#include "media/PipelineStatus.h"
 #include <functional>
 #include <future>
 #include <memory>
@@ -42,11 +43,17 @@ struct PeerStreamStatus {
     media::ReceiverVideoStatus receiver;
     media::SenderVideoObservation sender;
     media::SourceVideoStatus source;
+    media::SettingsApplyError settingsError = media::SettingsApplyError::None;
+    media::CaptureDeliveryStats delivery;
+    media::PeerRecoveryStatus recovery;
+    std::optional<media::StreamPreferences> appliedPreferences;
 };
 struct StreamStatus {
     uint64_t requestedRevision = 0;
     media::StreamPreferences preferences;
     std::vector<PeerStreamStatus> peers;
+    media::CapturePipelineStatus capture;
+    media::CodecPipelineStatus codec;
 };
 struct RoomStatus {
     RoomPhase phase = RoomPhase::Idle;

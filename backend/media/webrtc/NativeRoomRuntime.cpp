@@ -38,6 +38,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
         ViewerStreamSettings settings;
         uint64_t attemptedRevision = 0;
         bool settingsRejected = false;
+        SettingsApplyError settingsError = SettingsApplyError::None;
         bool retired = false, removing = false;
         std::shared_ptr<TransportSendRate> sendRate = std::make_shared<TransportSendRate>();
         std::string statsConnection;
@@ -93,7 +94,7 @@ public:
         if (!Ready(id) || peers_.size() >= (identity_.host ? 63u : 1u)) return false;
         failed_.erase(id);
         auto entry = std::make_unique<Entry>(); entry->generation = ++next_;
-        entry->telemetry = std::make_unique<ReceiverTelemetryChannel>(identity_.host);
+        entry->telemetry = std::make_unique<ReceiverTelemetryChannel>(identity_.host, options_.presentation);
         auto* raw = entry.get();
         entry->peer = std::make_unique<MediaPeer>(*engine_, next_, options_.frames.get(),
             [this, id, raw](auto channel) {
@@ -174,6 +175,9 @@ public:
         v2::StreamStatus result;
         if (!identity_.host) return result;
         result.requestedRevision = settingsRevision_; result.preferences = options_.preferences;
+        const auto capture = capture_.snapshot();
+        result.capture = {capture.state, capture.captureFailure, capture.sourceGeneration};
+        if (options_.codecStatus) result.codec = options_.codecStatus();
         for (const auto& [id, entry] : peers_) {
             if (entry->removing || entry->retired) continue;
             const auto stats = entry->source->settingsStats();
@@ -187,6 +191,13 @@ public:
             peer.receiver = entry->telemetry->Status();
             peer.sender = sample.sender;
             peer.source = stats;
+            peer.appliedPreferences = entry->settings.preferences();
+            peer.settingsError = entry->attemptedRevision == settingsRevision_ ? entry->settingsError : SettingsApplyError::None;
+            if (owner_) if (const auto lifecycle = owner_->snapshot(entry->generation))
+                peer.recovery = {lifecycle->state, lifecycle->failure, lifecycle->restartRevision,
+                    lifecycle->restartDispatchFailed, lifecycle->operationFailed};
+            for (const auto& viewer : capture.viewers) if (viewer.viewer == entry->generation)
+                peer.delivery = viewer.delivery;
         }
         return result;
     }
@@ -250,8 +261,9 @@ public:
                 })) failed_.insert(it->first);
             if (!entry.removing && identity_.host && entry.negotiation->ready() && entry.attemptedRevision != settingsRevision_) {
                 entry.attemptedRevision = settingsRevision_;
-                entry.settingsRejected = entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, settingsRevision_,
-                    AllocateViewerVideo(options_.preferences, allocatedViewers_)) != SettingsApplyError::None;
+                entry.settingsError = entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, settingsRevision_,
+                    AllocateViewerVideo(options_.preferences, allocatedViewers_));
+                entry.settingsRejected = entry.settingsError != SettingsApplyError::None;
                 // A live update rejection preserves the previously working sender.
                 // An initial rejection cannot satisfy the initial stream contract.
                 if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);

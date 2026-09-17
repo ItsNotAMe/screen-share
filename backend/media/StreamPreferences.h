@@ -6,6 +6,7 @@
 
 namespace screenshare::media {
 enum class StreamPreset { Gaming, Quality };
+enum class SettingsApplyError { None, Invalid, StaleRevision, UnsupportedTopology, SenderRejected };
 enum class SettingMode { Auto, Manual };
 enum class ResolutionMode { Auto, Fixed, Native };
 enum class StreamDegradation { MaintainFps, MaintainResolution, Balanced, Disabled };

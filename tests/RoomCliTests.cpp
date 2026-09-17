@@ -209,9 +209,9 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
     options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
     return WindowsRoomRuntimeFactory(std::move(options));
 #else
-    return [preferences = config.media.preferences, initialAudio = config.media.audio, audio, frames](auto identity, auto send) {
+    return [preferences = config.media.preferences, initialAudio = config.media.audio, presentation = config.media.presentation, audio, frames](auto identity, auto send) {
         NativeRoomRuntimeOptions options;
-        options.preferences = preferences; options.frames = frames;
+        options.preferences = preferences; options.frames = frames; options.presentation = presentation;
         auto endpoints = proof::SyntheticAudio(audio);
         if (!identity.host) {
             options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{}, endpoints.playout);
@@ -296,6 +296,10 @@ int main(int argc, char** argv) {
         std::mutex mutex; std::string roomId;
         std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, receiverReported{false}, senderReported{false}, sourceChanged{false}, audioChanged{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
+        std::atomic<bool> extendedReported{false}, pipelineReported{false};
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+        std::atomic<bool> presentationReported{false};
+#endif
         RoomCliHooks hostHooks;
         hostHooks.pump = [&] { return !stopHost; };
         hostHooks.report = [&](const QJsonObject& value) {
@@ -307,6 +311,8 @@ int main(int argc, char** argv) {
             if (value["phase"] == "active") {
                 std::lock_guard lock(mutex); roomId = value["roomId"].toString().toStdString();
             }
+            if (value["pipeline"].toObject()["captureState"] == "running" &&
+                value["settingsApplication"].toObject()["applied"].toInt() == 1) pipelineReported = true;
             for (const auto& peer : value["peers"].toArray()) {
                 const auto row = peer.toObject();
                 const auto source = row["source"].toObject();
@@ -327,6 +333,14 @@ int main(int argc, char** argv) {
                 if (row["sender"].toObject()["videoPayloadBps"].toDouble() > 0 && row["sender"].toObject()["rttMs"].isDouble()) senderReported = true;
                 Check(!row["sender"].toObject().contains("candidateId"));
                 const auto receiver = row["receiver"].toObject();
+                if (receiver["decoder"] == "mf-h264-software" && row["settingsError"] == "none" &&
+                    row["appliedPreferences"].isObject() && row["captureDelivery"].toObject()["delivered"].toInteger() > 0 &&
+                    row["recovery"].toObject()["state"] == "connected") extendedReported = true;
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+                if (receiver["presentation"].toObject()["presented"].toInteger() > 0) presentationReported = true;
+#else
+                Check(receiver["presentation"].isNull()); // No renderer attached: decoded is not displayed.
+#endif
                 if (receiver["sampleState"] == "fresh" && receiver["width"].toInt() == 160 && receiver["framesDecoded"].toInteger() > 0) receiverReported = true;
                 if (row["allocatedVideoBps"].toInt() == 1472000 && row["appliedVideoBps"].toInt() == 1472000) budgetReported = true;
                 if (row["transportSendBps"].toDouble() > 0 && row["transportSampleState"] == "fresh" &&
@@ -352,7 +366,8 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
         invalidPlayback = object; invalidPlayback["playbackChanges"] = QJsonArray{QJsonObject{{"atMs", 100}}, QJsonObject{{"atMs", 100}}};
         Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
-        const auto viewer = ParseRoomSessionConfig(object, true);
+        auto viewer = ParseRoomSessionConfig(object, true);
+        viewer.media.presentation = std::make_shared<PresentationTelemetry>();
         auto frames = std::make_shared<LatestRoomVideoFrame>();
         auto audio = std::make_shared<proof::AudioEvidence>();
         audio->outputUnavailable = true;
@@ -389,6 +404,8 @@ int main(int argc, char** argv) {
                 else Check(false);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
                 preview.PresentFrame(*frame);
+                const auto stats = preview.presentationStats();
+                viewer.media.presentation->Publish({preview.framesPresented(), preview.framesDropped(), 0, uint8_t(stats.outcome)});
 #endif
             }
             return true;
@@ -397,6 +414,10 @@ int main(int argc, char** argv) {
         stopHost = true;
         Check(playbackChanges == 3 && playbackFailed && playbackRecovered);
         Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && senderReported && sourceChanged && audioChanged);
+        Check(extendedReported && pipelineReported);
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+        Check(presentationReported);
+#endif
         Check(silentVideo && original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
         Check(frames->statistics().retained >= original + changed && frames->statistics().converted == 0 && frames->statistics().repacked == 0);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF

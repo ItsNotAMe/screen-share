@@ -80,7 +80,16 @@ public:
             if (outbound->kind && *outbound->kind == "video") { video = outbound; ++videos; }
         }
         if (videos == 1) {
+            if (video->encoder_implementation == "Media Foundation H264 hardware (D3D11/NV12)")
+                state_->sender.encoder = CodecImplementation::MfH264Hardware;
+            else if (video->encoder_implementation == "Media Foundation H264 software (CPU I420/NV12)")
+                state_->sender.encoder = CodecImplementation::MfH264Software;
             state_->sender.encodedFps = finite(video->frames_per_second, 240);
+            if (video->total_encode_time && video->frames_encoded && *video->frames_encoded)
+                state_->sender.meanEncodeMs = finite(*video->total_encode_time / *video->frames_encoded, 60, 1000);
+            if (video->retransmitted_packets_sent && *video->retransmitted_packets_sent <= INT64_MAX)
+                state_->sender.retransmittedPackets = video->retransmitted_packets_sent;
+            state_->sender.nackCount = video->nack_count; state_->sender.pliCount = video->pli_count;
             if (video->quality_limitation_reason) {
                 const auto& reason = *video->quality_limitation_reason;
                 state_->sender.limitingReason = reason == "none" ? VideoLimitReason::None : reason == "cpu" ? VideoLimitReason::Cpu :

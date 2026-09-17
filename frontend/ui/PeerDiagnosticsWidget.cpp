@@ -55,6 +55,26 @@ PeerDiagnosticsWidget::PeerDiagnosticsWidget(QWidget* parent) : QWidget(parent) 
     refreshDetails_ = refreshDetails;
 }
 void PeerDiagnosticsWidget::Update(const screenshare::v2::RoomStatus& value) {
+    // Frame counters change at media cadence. Rebuild measurement text at most
+    // once a second, while membership, settings and failure transitions remain
+    // immediate. This uses the existing status tick and adds no polling.
+    QJsonArray controls;
+    for (const auto& peer : value.stream.peers) {
+        QString nickname;
+        for (const auto& member : value.members) if (member.peerId == peer.peerId)
+            nickname = QString::fromStdString(member.nickname);
+        controls.append(QJsonObject{{"id", QString::fromStdString(peer.peerId)}, {"nickname", nickname},
+            {"applied", qint64(peer.appliedRevision)}, {"observed", qint64(peer.observedRevision)},
+            {"error", SettingsErrorName(peer.settingsError)}, {"rejected", peer.rejected},
+            {"recovery", PeerRecoveryJson(peer.recovery)}, {"stale", peer.receiver.stale}});
+    }
+    const auto control = QJsonDocument(QJsonObject{{"peers", controls}, {"revision", qint64(value.stream.requestedRevision)},
+        {"captureState", int(value.stream.capture.state)}, {"captureFailure", int(value.stream.capture.failure)},
+        {"quarantined", value.stream.codec.quarantined}, {"retired", value.stream.codec.retired}}).toJson(QJsonDocument::Compact);
+    const auto now = std::chrono::steady_clock::now();
+    if (control == controlSnapshot_ && now < nextMeasurementRefresh_) return;
+    controlSnapshot_ = control;
+    nextMeasurementRefresh_ = now + std::chrono::seconds(1);
     auto* diagnostics = diagnostics_;
     const auto& refreshDetails = refreshDetails_;
     QJsonArray rows;
@@ -66,7 +86,9 @@ void PeerDiagnosticsWidget::Update(const screenshare::v2::RoomStatus& value) {
     }
     // Status/control ticks stay responsive, but unchanged measurements do
     // not rebuild the table. No additional service requests or timers.
-    const auto snapshot = QJsonDocument(QJsonObject{{"rows", rows}, {"preferences", StreamPreferencesJson(value.stream.preferences)}}).toJson(QJsonDocument::Compact);
+    const auto pipeline = PipelineDiagnosticsJson(value.stream);
+    const auto snapshot = QJsonDocument(QJsonObject{{"rows", rows}, {"preferences", StreamPreferencesJson(value.stream.preferences)},
+        {"pipeline", pipeline}}).toJson(QJsonDocument::Compact);
     if (diagnostics->property("snapshot").toByteArray() != snapshot) {
         diagnostics->setProperty("snapshot", snapshot);
         QString selected;
@@ -100,7 +122,7 @@ void PeerDiagnosticsWidget::Update(const screenshare::v2::RoomStatus& value) {
                 .arg(preferences.fpsMode == SettingMode::Manual ? "Manual" : "Auto").arg(preferences.fps)
                 .arg(preferences.bitrateMode == SettingMode::Manual ? "Manual target" : "Auto ceiling")
                 .arg(preferences.bitrateLimitBps ? QString::number(*preferences.bitrateLimitBps) + " bps" : "automatic allowance");
-            auto detail = QString("Peer %1\nRequested / applied / source-observed revisions: %2 / %3 / %4\nAllocated video cap: %5 bps; applied video cap: %6 bps. Transport sample: %7 (expires after 3 seconds).\nTransport includes audio and protocol traffic, excludes IP/interface overhead. Remote display, latency and congestion reason: unknown.\nRequested settings: %8\nReceiver-reported decode: %9; frames %10; FPS %11. Decoder reports expire after 3 seconds and do not confirm presentation.")
+            auto detail = QString("Peer %1\nRequested / applied / source-observed revisions: %2 / %3 / %4\nAllocated video cap: %5 bps; applied video cap: %6 bps. Transport sample: %7 (expires after 3 seconds).\nTransport includes audio and protocol traffic, excludes IP/interface overhead. Physical display and end-to-end latency: unknown.\nRequested settings: %8\nReceiver-reported decode: %9; frames %10; FPS %11. Decoder reports expire after 3 seconds and do not confirm presentation.")
                 .arg(id).arg(value.stream.requestedRevision).arg(peer.appliedRevision).arg(peer.observedRevision)
                 .arg(peer.allocatedVideoBitrateBps).arg(peer.appliedVideoBitrateBps).arg(StreamSampleState(peer))
                 .arg(requested).arg(receiverSize)
@@ -109,6 +131,32 @@ void PeerDiagnosticsWidget::Update(const screenshare::v2::RoomStatus& value) {
             auto metric = [&](const char* key, double scale, const char* unit) {
                 return sender[key].isNull() ? QString("unknown") : QString::number(sender[key].toDouble() * scale, 'f', 2) + unit;
             };
+            const auto presentation = received["presentation"].toObject();
+            const auto row = rows[index].toObject();
+            const auto recovery = row["recovery"].toObject();
+            const auto delivery = row["captureDelivery"].toObject();
+            const auto hardware = pipeline["hardwarePipeline"].toObject();
+            detail += QString("\nSettings result: %1. Applied preferences: %2.\nCapture: %3; failure: %4; source generation: %5.\nCapture handoff: %6 delivered, %7 replaced, %8 rejected; maximum age %9 ms (not end-to-end latency).\nConnection: %10; failure: %11; restart revision: %12.\nHost hardware pipeline: %13.")
+                .arg(row["settingsError"].toString()).arg(row["appliedPreferences"].isNull() ? "unknown" :
+                    QString::fromUtf8(QJsonDocument(row["appliedPreferences"].toObject()).toJson(QJsonDocument::Compact)))
+                .arg(pipeline["captureState"].toString()).arg(pipeline["captureFailure"].toString()).arg(pipeline["sourceGeneration"].toInteger())
+                .arg(delivery["delivered"].toInteger()).arg(delivery["replaced"].toInteger()).arg(delivery["rejected"].toInteger())
+                .arg(delivery["maximumHandoffMs"].toDouble(), 0, 'f', 2).arg(recovery["state"].toString())
+                .arg(recovery["failure"].toString()).arg(recovery["restartRevision"].toInteger())
+                .arg(hardware.isEmpty() ? "unknown" : QString("%1 frames, %2 software fallbacks; %3 (shared across viewers)")
+                    .arg(hardware["hardwareFrames"].toInteger()).arg(hardware["softwareFallbacks"].toInteger()).arg(hardware["fallbackState"].toString()));
+            auto receiverMetric = [&](const char* key) {
+                return received[key].isNull() ? QString("unknown") : QString::number(received[key].toInteger());
+            };
+            detail += QString("\nMean encode time: %1 (lifetime average); pending encoder input age: unknown.\nRetransmitted packets: %2; NACKs: %3; PLIs: %4.")
+                .arg(metric("meanEncodeMs", 1, " ms")).arg(metric("retransmittedPackets", 1, ""))
+                .arg(metric("nackCount", 1, "")).arg(metric("pliCount", 1, ""));
+            detail += QString("\nEncoder: %1; receiver decoder: %2. Decoder drops: %3; mean jitter-buffer residence: %4 ms (lifetime average).\nReceiver presentation: %5. These are reported submissions, not physical display or latency proof.")
+                .arg(sender["encoder"].toString()).arg(received["decoder"].toString())
+                .arg(receiverMetric("decoderDrops")).arg(receiverMetric("jitterBufferMeanMs"))
+                .arg(presentation.isEmpty() ? "unknown" : QString("%1 submitted, %2 dropped, %3 queued; %4")
+                    .arg(presentation["presented"].toInteger()).arg(presentation["dropped"].toInteger())
+                    .arg(presentation["queued"].toInt()).arg(presentation["outcome"].toString()));
             const auto source = rows[index].toObject()["source"].toObject();
             const auto activeImage = source["activeImage"].toObject();
             detail += QString("\nSource scaling: %1.\nActive image in source canvas: %2.")

@@ -10,6 +10,7 @@
 #include <string_view>
 #include <limits>
 #include <future>
+#include "SettingsFailureTest.h"
 
 using namespace screenshare::media;
 void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
@@ -40,6 +41,7 @@ int main(int argc, char** argv) try {
     logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE);
     logging.set_log_to_stderr(false);
     Require(webrtc::InitializeLogging(std::move(logging)), "Logging initialization failed");
+    settings_test::Run();
     StreamPreferences preferences;
     auto limits = ValidateStreamPreferences(preferences);
     Require(limits.maxVideoBitrateBps == 12441600 && limits.initialVideoBitrateBps == 3000000,
@@ -116,6 +118,10 @@ int main(int argc, char** argv) try {
         auto video = std::make_unique<webrtc::RTCOutboundRtpStreamStats>(id, report->timestamp());
         video->kind = "video"; video->bytes_sent = bytes; video->frames_per_second = invalid ? -1 : 30;
         video->quality_limitation_reason = invalid ? "unrecognized" : "bandwidth"; video->remote_id = "remote-video";
+        video->encoder_implementation = invalid ? "untrusted implementation / path" : "Media Foundation H264 hardware (D3D11/NV12)";
+        video->total_encode_time = invalid ? -1 : 0.2; video->frames_encoded = 100;
+        video->retransmitted_packets_sent = invalid ? UINT64_MAX : 3;
+        video->nack_count = 2; video->pli_count = 1;
         report->AddStats(std::move(video));
         auto remote = std::make_unique<webrtc::RTCRemoteInboundRtpStreamStats>("remote-video", report->timestamp());
         remote->fraction_lost = invalid ? 1.5 : 0.02; remote->jitter = invalid ? std::numeric_limits<double>::quiet_NaN() : 0.003;
@@ -125,31 +131,55 @@ int main(int argc, char** argv) try {
     networkSample(8000000, 101000);
     auto sender = rate->Read().sender;
     Require(sender.payloadBps == 800000 && sender.encodedFps == 30 && sender.rttMs == 25 && sender.jitterMs == 3 &&
-        sender.lossFraction == 0.02 && sender.availableOutgoingBps == 5000000 && sender.limitingReason == VideoLimitReason::Bandwidth,
+        sender.lossFraction == 0.02 && sender.availableOutgoingBps == 5000000 && sender.limitingReason == VideoLimitReason::Bandwidth &&
+        sender.encoder == CodecImplementation::MfH264Hardware && sender.meanEncodeMs == 2 &&
+        sender.retransmittedPackets == 3 && sender.nackCount == 2 && sender.pliCount == 1,
         "Sender units/selected-pair/RTCP mapping incorrect");
     const auto staleSender = rate->Read(rate->sampled + std::chrono::seconds(3)).sender;
-    Require(!staleSender.payloadBps && !staleSender.rttMs && staleSender.limitingReason == VideoLimitReason::Unknown, "Stale sender values escaped expiry");
+    Require(!staleSender.payloadBps && !staleSender.rttMs && staleSender.limitingReason == VideoLimitReason::Unknown &&
+        staleSender.encoder == CodecImplementation::Unknown && !staleSender.meanEncodeMs && !staleSender.retransmittedPackets,
+        "Stale sender values escaped expiry");
     networkSample(9000000, 101000); Require(rate->Read().sender.payloadBps == 0, "Zero payload rate became unknown");
     networkSample(10000000, 1); Require(!rate->Read().sender.payloadBps, "Reset RTP counter fabricated a rate");
     networkSample(11000000, 1000, "replacement-video", true); sender = rate->Read().sender;
     Require(!sender.payloadBps && !sender.encodedFps && !sender.availableOutgoingBps && !sender.jitterMs && !sender.lossFraction &&
-        sender.limitingReason == VideoLimitReason::Unknown, "Invalid or replacement stats were trusted");
+        sender.limitingReason == VideoLimitReason::Unknown && sender.encoder == CodecImplementation::Unknown &&
+        !sender.meanEncodeMs && !sender.retransmittedPackets,
+        "Invalid or replacement stats were trusted");
     sample(12000000, "transport", 0); Require(!rate->Read().sender.rttMs, "Missing path retained prior measurements");
     auto receiverMailbox = std::make_shared<ReceiverStatsMailbox>();
     auto receiverCollector = webrtc::make_ref_counted<ReceiverStatsCallback>(receiverMailbox);
     auto receiverReport = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(1000000));
     auto inbound = std::make_unique<webrtc::RTCInboundRtpStreamStats>("video", receiverReport->timestamp());
     inbound->kind = "video"; inbound->frame_width = 320; inbound->frame_height = 180; inbound->frames_decoded = 30;
-    inbound->frames_per_second = 29.97; receiverReport->AddStats(std::move(inbound));
+    inbound->frames_per_second = 29.97; inbound->frames_dropped = 7;
+    inbound->jitter_buffer_delay = 2.0; inbound->jitter_buffer_emitted_count = 100;
+    inbound->decoder_implementation = "Media Foundation H264 (CPU NV12)";
+    receiverReport->AddStats(std::move(inbound));
     receiverCollector->OnStatsDelivered(receiverReport);
+    // Codec labels are allowlisted; cumulative buffering averages are reported
+    // only with a finite nonnegative delay and a nonzero emitted count.
     Require(receiverMailbox->video && receiverMailbox->video->fpsMilli == 29970 && receiverMailbox->serial == 1,
         "Receiver collector lost decoder stats");
+    Require(receiverMailbox->video->decoderDrops == 7 && receiverMailbox->video->jitterBufferMeanMs == 20 &&
+        receiverMailbox->video->decoder == CodecImplementation::MfH264Software, "Receiver codec/buffering mapping incorrect");
     auto emptyReport = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(2000000));
     receiverCollector->OnStatsDelivered(emptyReport);
     Require(!receiverMailbox->video && receiverMailbox->serial == 2, "Absent decoder retained old values");
     auto replacementMailbox = std::make_shared<ReceiverStatsMailbox>();
     receiverCollector->OnStatsDelivered(receiverReport);
     Require(!replacementMailbox->video && replacementMailbox->serial == 0, "Retired stats callback published to new generation");
+    auto invalidReport = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(3000000));
+    auto invalidInbound = std::make_unique<webrtc::RTCInboundRtpStreamStats>("video", invalidReport->timestamp());
+    invalidInbound->kind = "video"; invalidInbound->frame_width = 320; invalidInbound->frame_height = 180;
+    invalidInbound->frames_decoded = 1; invalidInbound->jitter_buffer_delay = std::numeric_limits<double>::infinity();
+    invalidInbound->jitter_buffer_emitted_count = 0; invalidInbound->decoder_implementation = "untrusted implementation / path";
+    invalidReport->AddStats(std::move(invalidInbound)); receiverCollector->OnStatsDelivered(invalidReport);
+    Require(receiverMailbox->video && !receiverMailbox->video->decoderDrops && !receiverMailbox->video->jitterBufferMeanMs &&
+        receiverMailbox->video->decoder == CodecImplementation::Unknown, "Unknown receiver measurements were fabricated");
+    auto ambiguous = std::make_unique<webrtc::RTCInboundRtpStreamStats>("other", invalidReport->timestamp());
+    ambiguous->kind = "video"; invalidReport->AddStats(std::move(ambiguous)); receiverCollector->OnStatsDelivered(invalidReport);
+    Require(!receiverMailbox->video, "Ambiguous video receiver selected arbitrarily");
     auto fixed = webrtc::make_ref_counted<CaptureVideoSource>();
     auto adaptive = webrtc::make_ref_counted<CaptureVideoSource>();
     preferences = {};

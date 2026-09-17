@@ -226,7 +226,10 @@ int main(int argc, char** argv) {
             host.Status().revision == beforeAudioSwitch.revision && host.Status().stream.requestedRevision == beforeAudioSwitch.stream.requestedRevision);
         Wait([&] { const auto peers = host.Status().stream.peers;
             return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) {
-                return peer.transportSendBps.value_or(0) > 0 && peer.receiver.observation && peer.receiver.observation->framesDecoded > 0 && !peer.receiver.stale;
+                return peer.transportSendBps.value_or(0) > 0 && peer.receiver.observation && peer.receiver.observation->framesDecoded > 0 && !peer.receiver.stale &&
+                    peer.receiver.observation->decoder == CodecImplementation::MfH264Software &&
+                    !peer.receiver.observation->presentation && peer.appliedPreferences && peer.delivery.delivered > 0 &&
+                    peer.recovery.state == PeerLifecycleState::Connected;
             });
         });
         StreamPreferences live;

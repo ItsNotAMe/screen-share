@@ -21,7 +21,7 @@ Validated local stream/playback defaults and stable randomized Guest nicknames a
 integrated into browser-created sessions with explicit save controls; do not rebuild
 profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
-Use refactor/STAGE-2-REMAINING.md for the four remaining Stage 2 delivery groups.
+Use refactor/STAGE-2-REMAINING.md for the three remaining Stage 2 delivery groups.
 The existing v2 UI entry points now use the normal AppShell with one-window page
 navigation and coordinated media/directory shutdown. Reuse RoomApplication for
 further adoption; ordinary legacy action routing and CLI migration remain open.
@@ -42,9 +42,11 @@ microphone processing and audio latency remain open.
 Host per-peer sender diagnostics now share UI/CLI states and expose transport
 freshness. Receiver decoder telemetry now uses the encrypted peer channel with
 bounded versioned reports, generation/sequence validation and three-second expiry.
-Remote presentation/input latency remain to implement.
-WebRTC sender/network reasons and the per-peer details popup are now integrated;
-remaining diagnostics concern capture, remote presentation/buffering and input.
+Remote presentation/drop/buffering, allowlisted codecs, shared hardware fallback,
+capture/recovery states and retained per-viewer applied settings are integrated.
+Preset preservation and partial application/retry now have native plus UI tests.
+See refactor/DIAGNOSTICS.md; do not rebuild this group. Input timing and physical
+latency, capture/presentation rate and encoder pending-age measurement remain open.
 Local renderer outcomes/drop reasons/error codes now reach viewer UI and CLI;
 keep them distinct from receiver-to-host telemetry and end-to-end latency.
 Normal AppShell/legacy CLI cutover remains gated; later visual redesign follows

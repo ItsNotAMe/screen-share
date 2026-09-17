@@ -4,6 +4,7 @@
 #include "shared/RoomProfile.h"
 #include "ui/PeerDiagnosticsWidget.h"
 #include "shared/PresentationDiagnostics.h"
+#include "shared/PipelineDiagnostics.h"
 #include <QClipboard>
 #include "ui/VideoFrameWidget.h"
 #include "ui/UiStyle.h"
@@ -196,12 +197,16 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         else audioState_->setText("Could not switch audio. The previous source is retained while available.");
     };
     preset_ = combo("Preset", {"Gaming", "Quality"}, int(p.preset));
+    preset_->setObjectName("streamPreset");
     resolution_ = combo("Resolution", {"Auto", "Fixed", "Native"}, int(p.resolution));
     width_ = number("Width", 2, 3840, p.width); width_->setSingleStep(2); width_->setObjectName("streamWidth");
     height_ = number("Height", 2, 2160, p.height); height_->setSingleStep(2); height_->setObjectName("streamHeight");
     fpsMode_ = combo("Frame rate mode", {"Auto", "Manual"}, int(p.fpsMode)); fps_ = number("FPS", 1, 240, p.fps);
     bitrateMode_ = combo("Bitrate mode", {"Auto", "Manual"}, int(p.bitrateMode));
+    resolution_->setObjectName("streamResolutionMode"); fpsMode_->setObjectName("streamFpsMode");
+    bitrateMode_->setObjectName("streamBitrateMode"); fps_->setObjectName("streamFps");
     bitrate_ = number("Bitrate limit (bits/s)", 1000, 100000000, p.bitrateLimitBps.value_or(12000000));
+    bitrate_->setObjectName("streamBitrate");
     bitrateLimit_ = new QCheckBox("Also limit Auto bitrate"); bitrateLimit_->setChecked(p.bitrateLimitBps.has_value()); form->addRow(bitrateLimit_);
     uploadBudgetEnabled_ = new QCheckBox("Limit total media upload allowance"); uploadBudgetEnabled_->setObjectName("uploadBudgetEnabled");
     uploadBudgetEnabled_->setChecked(p.aggregateUploadLimitBps.has_value()); form->addRow(uploadBudgetEnabled_);
@@ -209,7 +214,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     apply_ = new QPushButton("Apply settings"); apply_->setObjectName("applyStream"); form->addRow(apply_);
     auto* sourceSettings = new QScrollArea; sourceSettings->setWidgetResizable(true); sourceSettings->setWidget(formWidget);
     sourceSettings->setVisible(config.room.host); sourceSettings->setMinimumHeight(160); layout->addWidget(sourceSettings, 1);
-    settingsState_ = new QLabel; settingsState_->setWordWrap(true); layout->addWidget(settingsState_);
+    settingsState_ = new QLabel; settingsState_->setObjectName("streamSettingsState"); settingsState_->setWordWrap(true); layout->addWidget(settingsState_);
     uploadState_ = new QLabel; uploadState_->setWordWrap(true); uploadState_->setObjectName("uploadState"); uploadState_->setVisible(config.room.host); layout->addWidget(uploadState_);
     auto* peerDiagnostics = new PeerDiagnosticsWidget(this);
     peerDiagnostics->setVisible(config.room.host); layout->addWidget(peerDiagnostics);
@@ -292,21 +297,17 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         }
         if (host && session_.settingsPending()) settingsState_->setText("Settings pending…");
         else if (host && value.stream.requestedRevision) {
-            size_t complete = 0, rejected = 0;
-            for (const auto& peer : value.stream.peers) {
-                complete += peer.appliedRevision == value.stream.requestedRevision &&
-                    (peer.observedRevision == value.stream.requestedRevision || peer.appliedVideoBitrateBps == 0);
-                rejected += peer.rejected;
-            }
+            const auto application = StreamApplicationJson(value.stream);
             settingsState_->setText(value.stream.peers.empty() ? QString("Settings saved. Waiting for viewers.") :
-                QString("Stream settings: %1 applied, %2 pending, %3 rejected.")
-                .arg(complete).arg(value.stream.peers.size() - complete - rejected).arg(rejected));
+                QString("Stream settings: %1 applied, %2 pending, %3 rejected. %4")
+                .arg(application["applied"].toInt()).arg(application["pending"].toInt()).arg(application["rejected"].toInt())
+                .arg(application["rejected"].toInt() ? "Some viewers retain earlier settings. Review viewer details, then Apply to retry." : ""));
         }
         if (value.phase == RoomPhase::Failed) error_->setText("The room session failed. Stop and start a new session to retry.");
     };
     session_.settingsAccepted = [this](const auto& result) { if (result.error != StreamUpdateError::None) error_->setText("The settings update was rejected."); };
     session_.captureUpdated = [this](const auto& result) {
-        if (result.error == CaptureUpdateError::None) captureState_->setText("Sharing the new source. Waiting for viewers to display it.");
+        if (result.error == CaptureUpdateError::None) captureState_->setText("Sharing the new source. Receiver reports appear in viewer details.");
         else if (result.error == CaptureUpdateError::Cancelled) captureState_->setText("Source change cancelled.");
         else captureState_->setText("Could not change source. The previous source remains selected if it is still available.");
     };
@@ -333,6 +334,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         connect(presentationStatus, &QTimer::timeout, this, [this, diagnostics] {
             const auto stats = video_->presentationStats();
             const auto& renderer = stats.renderer;
+            session_.reportPresentation({stats.presentedFrames, stats.droppedFrames,
+                uint8_t(stats.queuedFrames), uint8_t(renderer.outcome)});
             const auto fields = PresentationDiagnosticsJson(renderer);
             diagnostics->setText(QString("Local preview: %1. Presented %2; dropped %3; pending %4.\nDrops: busy %5, occluded %6, minimized %7, unavailable %8, recovery backoff %9.\nGraphics errors %10; rebuilds %11; last error %12. These counters do not measure end-to-end latency.")
                 .arg(fields["outcome"].toString()).arg(stats.presentedFrames).arg(stats.droppedFrames).arg(stats.queuedFrames)

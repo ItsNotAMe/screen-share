@@ -18,6 +18,9 @@ The collector reports:
   loss detector. No candidate addresses, IDs, SDP or raw encoder strings are exported.
 - WebRTC's explicit quality-limitation reason: none, cpu, bandwidth, other, unknown.
   A low payload rate alone never implies congestion; a static desktop can be cheap.
+- Allowlisted encoder implementation, optional lifetime mean encode time,
+  retransmitted-packet, NACK and PLI counters. Pending input age stays null.
+  Nonfinite/negative encode time and oversized counters are rejected.
 
 ## Validation and ownership
 
@@ -57,7 +60,9 @@ source observations. They describe the last successfully adapted frame; dropped
 frames do not advance the source revision. GPU scaling does not imply hardware
 encoding or GPU decoding. See [GPU-SCALING.md](GPU-SCALING.md).
 
-Remaining scope: remote presentation/drop/buffering telemetry, codec/fallback
-details, capture timing, gaming input measurements and externally measured
-end-to-end latency. This work does not complete default-shell adoption or certify
+Remote presentation/drop/buffering, codec/fallback, capture/recovery states and
+settings rejection/partial application are now integrated; see DIAGNOSTICS.md.
+Remaining measurements include capture/presentation rates, pending encoder age,
+gaming input and externally measured end-to-end latency.
+This work does not complete default-shell adoption or certify
 hardware, network impairment, resource or performance acceptance.

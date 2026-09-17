@@ -1,5 +1,29 @@
 # Checkpoint B evidence
 
+## Complete diagnostics/settings integration batch — 2026-09-17
+
+The shared runtime now exports current capture/recovery states, per-viewer applied
+preferences and typed rejection, and shared Windows hardware fallback counters.
+The existing encrypted one-Hz receiver channel carries renderer submission/drop/
+queue/outcome, decoder drops/mean jitter buffering and allowlisted codec identity.
+Sender stats add encoder identity, optional mean encode time and retransmission
+counters without additional service traffic or a second adaptation controller.
+UI measurement rebuilds are limited to one Hz while state changes remain immediate.
+
+Two-source WebRTC sender-boundary tests prove rejection isolation, retained working
+settings and explicit retry. Actual shared-shell controls preserve manual choices
+across presets/profile persistence; actual UI snapshot handling shows partial
+application without double-counting. Real UI/Windows CLI renderers report to hosts;
+the no-renderer CLI reports unknown presentation. Protocol and collector tests
+cover bounds, expiry, ambiguity and generation isolation.
+
+Release/Debug builds, focused native tests and both four-viewer scenarios pass.
+The final desktop-inclusive matrices pass **7/7 in each configuration**.
+HEADLESS-TESTING.md records final desktop matrix evidence and the corrected test
+acknowledgement race. DIAGNOSTICS.md describes the complete contract, current-only
+failure snapshots and unavailable measurements. Normal legacy routing, remaining
+video/audio work, input and performance/cutover acceptance stay open.
+
 ## Presentation target lifecycle and desktop validation — 2026-09-17
 
 Shared UI/CLI presentation now recognizes minimized roots above native child
