@@ -9,6 +9,8 @@ include client headers. UI resources continue to use repository-level `assets/`.
 The QtSessionBackend name describes the UI adapter; the session implementation
 it invokes belongs to `../backend`.
 
-The folder move preserves behavior. Normal UI/CLI sessions still use the legacy
-runtime until v2 integration and acceptance are complete. Put new transport,
+The folder move preserves behavior. Default UI/CLI sessions still use the legacy
+runtime until v2 parity and acceptance are complete. Explicit `--backend v2`
+routes the existing home workflow and new create/join CLI commands through the
+shared backend; see [ADOPTION.md](../refactor/ADOPTION.md). Put new transport,
 adaptation, recovery and session ownership in the backend, not in client adapters.

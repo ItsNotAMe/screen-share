@@ -22,7 +22,7 @@ using namespace screenshare;
 using namespace screenshare::room::qt;
 
 RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory, bool loopback, QString profileFile, bool enumerateSources)
-    : origin_(std::move(origin)), factory_(std::move(factory)), loopback_(loopback), profile_(profileFile), directory_(loopback) {
+    : origin_(std::move(origin)), factory_(std::move(factory)), loopback_(loopback), enumerateSources_(enumerateSources), profile_(profileFile), directory_(loopback) {
     setWindowTitle("ScreenShare — Rooms"); setStyleSheet(uiStyleSheet()); resize(900, 720);
     auto* layout = new QVBoxLayout(this);
     auto* service = new QLabel(origin_.toString()); service->setTextFormat(Qt::PlainText); layout->addWidget(service);
@@ -33,17 +33,9 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     name_ = new QLineEdit("My room"); name_->setObjectName("roomName"); name_->setMaxLength(256); form->addRow("Room name", name_);
     public_ = new QCheckBox("Show in public room list"); public_->setObjectName("publicRoom"); public_->setChecked(true); form->addRow(public_);
     source_ = new QComboBox; source_->setObjectName("captureSource");
-    if (enumerateSources) {
-        try {
-            for (const auto& display : DesktopCapturer::EnumerateDisplays()) if (display.attachedToDesktop)
-                source_->addItem(QString("Display %1 — %2").arg(display.index).arg(QString::fromStdWString(display.outputName)),
-                    QVariantMap{{"display", display.index}});
-            for (const auto& window : DesktopCapturer::EnumerateWindows())
-                source_->addItem(QString::fromStdWString(window.title), QVariantMap{{"window", QVariant::fromValue<qulonglong>(window.handle)}});
-        } catch (...) { /* Manual restart can re-enumerate transient device failures. */ }
-    }
-    if (!source_->count()) source_->addItem("Default display", QVariantMap{{"display", 0}});
     form->addRow("Capture", source_);
+    auto* refreshSources = new QPushButton("Refresh capture sources"); refreshSources->setObjectName("refreshCaptureSources"); form->addRow(refreshSources);
+    connect(refreshSources, &QPushButton::clicked, this, [this] { RefreshSources(); });
     audio_ = new QComboBox; audio_->addItems({"System audio", "Microphone", "No shared audio"}); form->addRow("Audio", audio_);
     auto* create = new QPushButton("Create room"); create->setObjectName("createV2Room"); form->addRow(create);
     roomId_ = new QLineEdit; roomId_->setObjectName("joinRoomId"); roomId_->setMaxLength(512); form->addRow("Room ID or v2 link", roomId_);
@@ -79,10 +71,34 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     });
     directory_.changed = [this](const auto& value) {
         Refresh(value);
+        if (directoryChanged) directoryChanged(value);
         if (closing_ && !closedNotified_ && !active_ && !directory_.running()) QTimer::singleShot(0, this, [this] { close(); });
     };
+    RefreshSources();
 }
 RoomBrowserWindow::~RoomBrowserWindow() = default;
+void RoomBrowserWindow::RefreshSources() {
+    const auto previous = source_->currentData();
+    source_->clear();
+    if (!enumerateSources_) source_->addItem("Default display", QVariantMap{{"display", 0}});
+    else try {
+        for (const auto& display : DesktopCapturer::EnumerateDisplays()) if (display.attachedToDesktop)
+            source_->addItem(QString("Display %1 — %2").arg(display.index).arg(QString::fromStdWString(display.outputName)), QVariantMap{{"display", display.index}});
+        for (const auto& window : DesktopCapturer::EnumerateWindows())
+            source_->addItem(QString::fromStdWString(window.title), QVariantMap{{"window", QVariant::fromValue<qulonglong>(window.handle)}});
+    } catch (...) { source_->clear(); }
+    if (previous.isValid()) source_->setCurrentIndex(source_->findData(previous));
+    if (!source_->count()) error_->setText("No capture sources available. Refresh to try again.");
+}
+void RoomBrowserWindow::ShowBackButton() {
+    auto* button = new QPushButton("Back", this); button->setObjectName("roomBack");
+    static_cast<QVBoxLayout*>(layout())->insertWidget(0, button);
+    connect(button, &QPushButton::clicked, this, [this] { password_->clear(); if (back) back(); });
+}
+void RoomBrowserWindow::OpenCreate() { setWindowTitle("ScreenShare — Create room"); RefreshSources(); password_->clear(); name_->setFocus(); }
+void RoomBrowserWindow::OpenJoin(const QString& roomId) {
+    setWindowTitle("ScreenShare — Join room"); password_->clear(); roomId_->setText(roomId); roomId_->setFocus();
+}
 void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
     retry_->setEnabled(state.phase == RoomDirectory::Phase::Failed);
     QString selected;
@@ -105,6 +121,7 @@ void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
 }
 void RoomBrowserWindow::Launch(bool host) {
     if (active_ || closing_) return;
+    if (host && source_->currentIndex() < 0) { error_->setText("Choose an available capture source before sharing."); return; }
     const auto nickname = RoomProfile::normalizeNickname(nickname_->text());
     const auto roomId = ParseRoomReference(roomId_->text().trimmed());
     if (!nickname || (!host && !roomId)) { error_->setText("Enter a valid nickname and room ID or v2 link when joining."); return; }
@@ -127,6 +144,7 @@ void RoomBrowserWindow::Launch(bool host) {
         active_->closed = [this] { QTimer::singleShot(0, this, [this] {
             active_.reset();
             if (closing_) close();
+            else if (returnFromSession) returnFromSession();
             else if (presentPage) presentPage(this);
             else show();
         }); };
@@ -136,7 +154,7 @@ void RoomBrowserWindow::Launch(bool host) {
     } catch (...) { error_->setText("Invalid room or capture settings."); }
 }
 void RoomBrowserWindow::showEvent(QShowEvent* event) { QWidget::showEvent(event); if (!closing_) directory_.Start(origin_); }
-void RoomBrowserWindow::hideEvent(QHideEvent* event) { directory_.Stop(); QWidget::hideEvent(event); }
+void RoomBrowserWindow::hideEvent(QHideEvent* event) { if (!keepDirectoryOnHide) directory_.Stop(); QWidget::hideEvent(event); }
 void RoomBrowserWindow::closeEvent(QCloseEvent* event) {
     closing_ = true;
     if (active_ || directory_.running()) {
@@ -144,7 +162,7 @@ void RoomBrowserWindow::closeEvent(QCloseEvent* event) {
     }
     event->accept(); if (!closedNotified_) { closedNotified_ = true; if (closed) closed(); }
 }
-int RunRoomBrowserWindow(const QUrl& origin) {
+int RunRoomBrowserWindow(const QUrl& origin, bool normalHome, std::function<void(AppShellWindow&)> initializeShell) {
     try { ParseRoomSessionConfig(QJsonObject{{"origin", origin.toString()}, {"host", true}}); }
     catch (...) { QMessageBox::critical(nullptr, "Invalid service", "Use an HTTPS service origin without credentials or a path."); return 1; }
     webrtc::WinsockInitializer winsock;
@@ -153,6 +171,8 @@ int RunRoomBrowserWindow(const QUrl& origin) {
     webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false);
     webrtc::InitializeLogging(std::move(logging));
     const bool previous = QApplication::quitOnLastWindowClosed(); QApplication::setQuitOnLastWindowClosed(false);
-    RoomApplication window(origin); window.closed = [] { QApplication::quit(); }; window.show();
+    RoomApplication window(origin, screenshare::media::WindowsRoomRuntimeFactory, false, {}, true, normalHome);
+    if (initializeShell) initializeShell(window.window());
+    window.closed = [] { QApplication::quit(); }; window.show();
     const int result = QApplication::exec(); QApplication::setQuitOnLastWindowClosed(previous); return result;
 }

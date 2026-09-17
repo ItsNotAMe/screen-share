@@ -5,12 +5,41 @@
 #include <algorithm>
 
 RoomApplication::RoomApplication(QUrl origin, QtRoomSession::Factory factory,
-    bool loopback, QString profileFile, bool enumerateSources) {
+    bool loopback, QString profileFile, bool enumerateSources, bool normalHome) : origin_(origin) {
     Initialize();
     browser_ = std::make_unique<RoomBrowserWindow>(std::move(origin), std::move(factory),
         loopback, std::move(profileFile), enumerateSources);
     browser_->presentPage = [this](QWidget* page) { Present(page); };
     browser_->closed = [this] { Finish(); };
+    if (normalHome) {
+        HomeWindow::Actions actions;
+        actions.createRoom = [this] { OpenRoom(true); };
+        actions.joinRoom = [this] { OpenRoom(false); };
+        actions.openRoom = [this](const QString& id) { OpenRoom(false, id); };
+        actions.requestRooms = [this] { browser_->directory().Start(origin_); };
+        home_ = std::make_unique<HomeWindow>(std::move(actions));
+        browser_->back = browser_->returnFromSession = [this] { ShowHome(); };
+        browser_->ShowBackButton();
+        browser_->directoryChanged = [this](const auto& state) {
+            using Directory = screenshare::room::qt::RoomDirectory;
+            QVector<HomeActiveRoom> rooms;
+            for (const auto& room : state.rooms)
+                rooms.push_back({room.id, room.name, room.viewers, room.password, 0, room.status == "open"});
+            home_->setPushedRooms(rooms, state.phase == Directory::Phase::Ready ? QString{} :
+                state.phase == Directory::Phase::Failed ? "Room list unavailable. Reconnect to try again." : "Connecting to room list…");
+        };
+        ShowHome();
+    } else Present(browser_.get());
+}
+
+void RoomApplication::ShowHome() {
+    if (closing_ || !home_) return;
+    Present(home_.get());
+    browser_->directory().Start(origin_);
+}
+void RoomApplication::OpenRoom(bool host, const QString& roomId) {
+    if (closing_ || !browser_ || browser_->activeSession()) return;
+    if (host) browser_->OpenCreate(); else browser_->OpenJoin(roomId);
     Present(browser_.get());
 }
 
@@ -28,6 +57,7 @@ void RoomApplication::Initialize() {
         if (finished_) return true;
         if (!closing_) {
             closing_ = true;
+            if (home_) home_->setEnabled(false);
             // Disable actions during drain, but keep chrome/event processing live.
             if (browser_) {
                 browser_->setEnabled(false);
@@ -42,6 +72,7 @@ void RoomApplication::Initialize() {
 
 void RoomApplication::Present(QWidget* page) {
     if (closing_ || finished_) return;
+    if (browser_) browser_->keepDirectoryOnHide = page == home_.get();
     auto* stack = shell_.findChild<QStackedWidget*>("AppPageStack");
     if (stack->indexOf(page) < 0) {
         // Reserve the normal title-bar hit area without changing page controls.
@@ -56,7 +87,7 @@ void RoomApplication::Present(QWidget* page) {
     // A previously closed child remains explicitly hidden after setCurrentWidget.
     page->show();
     shell_.setWindowTitle(page->windowTitle());
-    awake_.setActive(page != browser_.get());
+    awake_.setActive(page != browser_.get() && page != home_.get());
 }
 
 void RoomApplication::Finish() {

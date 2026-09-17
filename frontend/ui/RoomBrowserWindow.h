@@ -7,6 +7,7 @@ class QTableWidget;
 class QCheckBox;
 class QComboBox;
 class QLabel;
+class AppShellWindow;
 
 class RoomBrowserWindow final : public QWidget {
 public:
@@ -19,6 +20,13 @@ public:
     // An application shell can present these existing widgets as pages.
     // Without a presenter the standalone embedding contract remains available.
     std::function<void(QWidget*)> presentPage;
+    std::function<void()> back;
+    std::function<void()> returnFromSession;
+    std::function<void(const screenshare::room::qt::RoomDirectory::Status&)> directoryChanged;
+    void OpenCreate();
+    void OpenJoin(const QString& roomId = {});
+    void ShowBackButton();
+    bool keepDirectoryOnHide = false; // Shared home/form navigation keeps one subscription.
 protected:
     void showEvent(QShowEvent*) override;
     void hideEvent(QHideEvent*) override;
@@ -26,9 +34,11 @@ protected:
 private:
     void Launch(bool host);
     void Refresh(const screenshare::room::qt::RoomDirectory::Status&);
+    void RefreshSources();
     QUrl origin_;
     QtRoomSession::Factory factory_;
     bool loopback_, closing_ = false, closedNotified_ = false;
+    bool enumerateSources_ = true;
     RoomProfile profile_;
     screenshare::room::qt::RoomDirectory directory_;
     std::unique_ptr<RoomSessionWindow> active_;
@@ -40,4 +50,5 @@ private:
     QPushButton* joinSelected_;
     QPushButton* retry_;
 };
-int RunRoomBrowserWindow(const QUrl& origin);
+int RunRoomBrowserWindow(const QUrl& origin, bool normalHome = false,
+                        std::function<void(AppShellWindow&)> initializeShell = {});

@@ -11,6 +11,13 @@ rooms and platform services) and [frontend/](frontend/README.md) (desktop UI,
 CLI and updater). The room server remains in `signaling-worker/`. The v2 refactor
 and its remaining cutover gates are tracked in [refactor/TODO.md](refactor/TODO.md).
 
+The new backend can be selected explicitly for the existing home screen with
+`ScreenShareUi --backend v2 --signal-server HTTPS_ORIGIN`. CLI room creation/join
+also works without JSON using `--backend v2 --create-room` or `--join-room ID_OR_LINK`
+and the same service option. See [guarded adoption](refactor/ADOPTION.md) for
+options and limitations. Default launch retains existing remote-control features;
+v2 control/gamepad support and production cutover are still pending.
+
 ## Current Capabilities
 
 - Share a full display or selected application window.

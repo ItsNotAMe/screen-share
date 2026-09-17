@@ -87,6 +87,7 @@ QLabel* label(const QString& text, const char* objectName)
 {
     auto* widget = new QLabel(text);
     widget->setObjectName(QString::fromUtf8(objectName));
+    widget->setTextFormat(Qt::PlainText);
     widget->setWordWrap(true);
     widget->setAttribute(Qt::WA_TransparentForMouseEvents);
     return widget;
@@ -183,10 +184,13 @@ HomeWindow::HomeWindow(Actions actions, QWidget* parent)
     root->setSpacing(0);
     root->addWidget(buildTopBar());
     root->addWidget(separator());
+    if (actions_.requestRooms) root->addWidget(label("Screen sharing and audio. Remote control is not available in this mode.", "HomeInfoSecondary"));
     root->addWidget(buildMainMenu(), 1);
 
-    roomNetwork_ = new QNetworkAccessManager(this);
-    refreshRooms();
+    if (!actions_.requestRooms) {
+        roomNetwork_ = new QNetworkAccessManager(this);
+        refreshRooms();
+    } else showRoomStatus("Connecting to room list…");
 }
 
 QWidget* HomeWindow::buildTopBar()
@@ -347,6 +351,7 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
 {
     auto* row = new QFrame;
     row->setObjectName("HomeRoomRow");
+    row->setProperty("roomId", room.roomId);
     row->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     row->setMinimumHeight(76);
 
@@ -375,7 +380,10 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
 
     auto* join = actionButton("Join", "HomeTinyButton", "watch");
     join->setMinimumWidth(64);
+    join->setEnabled(room.joinable);
     QObject::connect(join, &QPushButton::clicked, this, [this, room] {
+        if (!room.joinable) return;
+        if (actions_.openRoom) { actions_.openRoom(room.roomId); return; }
         if (!actions_.quickJoinRoom) {
             return;
         }
@@ -439,6 +447,7 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
 
 void HomeWindow::refreshRooms()
 {
+    if (actions_.requestRooms) { actions_.requestRooms(); return; }
     if (roomNetwork_ == nullptr) {
         return;
     }
@@ -464,6 +473,15 @@ void HomeWindow::refreshRooms()
 
         updateRooms(parseRooms(reply->readAll()));
     });
+}
+
+void HomeWindow::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QString& unavailable)
+{
+    if (!actions_.requestRooms) return;
+    if (unavailable.isEmpty()) updateRooms(rooms);
+    else showRoomStatus(unavailable);
+    refreshRoomsButton_->setText(unavailable.isEmpty() ? "Live updates" : "Reconnect");
+    refreshRoomsButton_->setEnabled(!unavailable.isEmpty());
 }
 
 void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)

@@ -14,6 +14,7 @@
 #ifdef SCREENSHARE_HAS_ROOM_V2_UI
 #include "ui/RoomSessionWindow.h"
 #include "ui/RoomBrowserWindow.h"
+#include "shared/RoomLaunch.h"
 #endif
 
 #include <QtCore/QCoreApplication>
@@ -1003,6 +1004,13 @@ int main(int argc, char** argv)
     }
 
 #ifdef SCREENSHARE_HAS_ROOM_V2_UI
+    if (arguments.contains("--backend")) {
+        try { return RunRoomBrowserWindow(ParseRoomHomeLaunch(arguments.mid(1)), true, [](AppShellWindow& shell) {
+            auto* updater = new UpdateManager(&shell, &shell);
+            QTimer::singleShot(1500, updater, [updater] { updater->checkForUpdates(); });
+        }); }
+        catch (const std::exception& error) { qCritical("Room launch: %s", error.what()); return 1; }
+    }
     if (arguments.size() > 1 && arguments[1] == "--room-v2-browser") {
         if (arguments.size() != 3) { qCritical("Usage: ScreenShareUi --room-v2-browser HTTPS_ORIGIN"); return 1; }
         return RunRoomBrowserWindow(QUrl(arguments[2]));

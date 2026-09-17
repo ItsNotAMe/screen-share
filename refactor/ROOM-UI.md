@@ -1,17 +1,23 @@
-# Opt-in shared-backend room UI
+# Shared-backend room UI
+
+The existing home screen now supports guarded v2 routing with
+`ScreenShareUi --backend v2 --signal-server HTTPS_ORIGIN`. Start Sharing,
+Join Room and Quick Join use the shared backend and pushed directory, within
+the current shell. See [ADOPTION.md](ADOPTION.md) for behavior, tests and the
+remaining parity/cutover gates. Ordinary launch remains legacy until those pass.
 
 These are explicit integration entry points, not a replacement visual design.
 The normal app and both opt-in room entry points now share the existing AppShell.
 The room browser and session are pages in that shell, using the current stylesheet
 and VideoFrameWidget while exercising the shared v2 backend. Normal create/join
-action and CLI adoption remain part of milestone 2; the broader
+default adoption remains gated; the broader
 appearance/usability redesign stays after milestones 1–5.
 
 ## Shared application window
 
 `RoomApplication` owns the existing `AppShellWindow`, browser/session pages and
 `ScreenAwakeGuard`. Both `--room-v2-browser ORIGIN` and `--room-v2 CONFIG.json`
-use it; there is no additional launch mode. Browser-to-session navigation preserves
+use it alongside the guarded normal-home route. Browser-to-session navigation preserves
 one top-level window, its size and its window state. Leaving a session destroys
 its page after asynchronous drain, returns to the browser and opens a fresh pushed
 directory subscription. The old page is removed from the stack, so repeated joins
@@ -29,7 +35,7 @@ v2 still has no remote input support and cannot take the legacy handler's shortc
 
 `ScreenShareUiShell` compiles the shared chrome, toast and screen-awake components
 once for normal and v2 UI users. The ordinary legacy home/create/join/control
-actions remain unchanged pending feature parity and acceptance. This integration
+actions remain available in legacy mode pending feature parity and acceptance. This integration
 does not complete Stage 2 or enable default v2 cutover.
 
 ## Shared audio disabled

@@ -1,5 +1,8 @@
 #include "cli/RoomCli.h"
 #include "shared/LatestRoomVideoFrame.h"
+#include "shared/RoomLaunch.h"
+#include <QTemporaryDir>
+#include <QFile>
 #include "media/webrtc/NativeRoomRuntime.h"
 #include "media/webrtc/MfVideoEncoderFactory.h"
 #include "media/webrtc/MfVideoDecoderFactory.h"
@@ -245,6 +248,45 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
     };
 #endif
 }
+void CommandScenario() {
+    const QStringList base{"--backend", "v2", "--signal-server", "https://example.test", "--create-room"};
+    auto config = ParseRoomCommand(base + QStringList{"--nickname", "  Player  ", "--resolution", "1920x1080", "--fps", "144", "--bitrate", "9000000"});
+    Check(config.room.host && config.room.nickname == "Player" && config.media.preferences.resolution == ResolutionMode::Fixed &&
+        config.media.preferences.width == 1920 && config.media.preferences.fps == 144 &&
+        config.media.preferences.bitrateMode == SettingMode::Manual && config.media.preferences.bitrateLimitBps == 9000000);
+    for (const QStringList extra : {QStringList{"--backend", "v2"}, {"--join-room", "room"}, {"--display", "0", "--window", "1"},
+        {"--resolution", "1921x1080"}, {"--fps", "300"}, {"--bitrate", "-1"}, {"--seconds", "1.5"}, {"--no-preview"},
+        {"--watch", "5000"}, {"--signal-room", "chosen-id"}, {"--remote-control"}, {"--nickname", QString(33, 'a')}, {"--nickname"}})
+        Reject([&] { ParseRoomCommand(base + extra); });
+    Reject([&] { ParseRoomCommand({"--create-room", "--signal-server", "https://example.test"}); });
+    Reject([&] { ParseRoomCommand({"--backend", "v2", "--create-room"}); });
+    Reject([&] { ParseRoomHomeLaunch({"--backend", "v2", "--signal-server", "http://127.0.0.1"}); });
+    Check(ParseRoomHomeLaunch({"--signal-server", "https://example.test", "--backend", "v2"}).host() == "example.test");
+    for (const auto& origin : {"https://name:secret@example.test", "https://example.test/path", "https://example.test/?token=value"})
+        Reject([&] { ParseRoomHomeLaunch({"--backend", "v2", "--signal-server", origin}); });
+    QTemporaryDir files; Check(files.isValid());
+    RoomProfile profile(files.filePath("defaults.ini")); Check(profile.saveNickname("Stored player"));
+    auto prefs = config.media.preferences; Check(profile.saveStreamPreferences(prefs));
+    auto inherited = ParseRoomCommand(base, &profile);
+    Check(inherited.room.nickname == "Stored player" && inherited.media.preferences.fps == 144 && inherited.media.preferences.bitrateLimitBps == 9000000);
+    auto automatic = ParseRoomCommand(base + QStringList{"--fps", "auto", "--bitrate", "auto", "--resolution", "auto"}, &profile);
+    Check(automatic.media.preferences.fpsMode == SettingMode::Auto && !automatic.media.preferences.bitrateLimitBps &&
+        automatic.media.preferences.resolution == ResolutionMode::Auto && profile.streamPreferences().fps == 144);
+    const auto secretFile = files.filePath("password.txt");
+    auto write = [&](const QByteArray& bytes) { QFile file(secretFile); Check(file.open(QIODevice::WriteOnly)); Check(file.write(bytes) == bytes.size()); };
+    write(" preserved spaces \r\n");
+    Check(ParseRoomCommand(base + QStringList{"--password-file", secretFile}).room.password == " preserved spaces ");
+    for (const auto& invalid : {QByteArray(1025, 'x'), QByteArray(129, 'x'), QByteArray("a\nb"), QByteArray("a\0b", 3), QByteArray("\xff", 1)}) {
+        write(invalid); Reject([&] { ParseRoomCommand(base + QStringList{"--password-file", secretFile}); });
+    }
+    const QStringList join{"--backend", "v2", "--signal-server", "https://example.test", "--join-room", "screenshare://room/v2/room_1"};
+    Check(ParseRoomCommand(join + QStringList{"--no-preview", "--volume", "25", "--mute"}).media.playbackMuted);
+    Check(profile.savePlayback({25, true}));
+    Check(!ParseRoomCommand(join + QStringList{"--unmute"}, &profile).media.playbackMuted && profile.playback().muted);
+    Reject([&] { ParseRoomCommand(join + QStringList{"--mute", "--unmute"}); });
+    Reject([&] { ParseRoomCommand(join + QStringList{"--audio", "microphone"}); });
+    Reject([&] { ParseRoomCommand(join + QStringList{"--volume", "101"}); });
+}
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false);
@@ -254,6 +296,7 @@ int main(int argc, char** argv) {
     int exitCode = 0;
     try {
         Check(argc == 2);
+        CommandScenario();
         PresentationOwnership();
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime;
@@ -299,7 +342,14 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(malformed, true); });
         malformed = object; malformed["origin"] = "https://user:password@example.com";
         Reject([&] { ParseRoomSessionConfig(malformed); });
-        const auto host = ParseRoomSessionConfig(object, true);
+        const auto scripted = ParseRoomSessionConfig(object, true);
+        QTemporaryDir commandFiles; Check(commandFiles.isValid());
+        const auto passwordPath = commandFiles.filePath("password.txt");
+        { QFile file(passwordPath); Check(file.open(QIODevice::WriteOnly)); Check(file.write("test-only-password") == 18); }
+        QStringList hostArguments{"--backend", "v2", "--signal-server", argv[1], "--create-room", "--name", "CLI media", "--nickname", "CliHost",
+            "--password-file", passwordPath, "--seconds", "15", "--resolution", "320x180", "--fps", "30", "--upload-bps", "2000000", "--audio", "none"};
+        auto host = ParseRoomCommand(hostArguments, nullptr, true);
+        host.changes = scripted.changes; host.captureChanges = scripted.captureChanges; host.audioChanges = scripted.audioChanges;
         std::mutex mutex; std::string roomId;
         std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, receiverReported{false}, senderReported{false}, sourceChanged{false}, audioChanged{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
@@ -381,7 +431,10 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
         invalidPlayback = object; invalidPlayback["playbackChanges"] = QJsonArray{QJsonObject{{"atMs", 100}}, QJsonObject{{"atMs", 100}}};
         Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
-        auto viewer = ParseRoomSessionConfig(object, true);
+        auto viewer = ParseRoomCommand({"--backend", "v2", "--signal-server", argv[1], "--join-room",
+            "screenshare://room/v2/" + QString::fromStdString(joinedRoom), "--nickname", "CliViewer", "--password-file", passwordPath,
+            "--seconds", "6", "--no-preview"}, nullptr, true);
+        viewer.playbackChanges = ParseRoomSessionConfig(object, true).playbackChanges;
         viewer.media.presentation = std::make_shared<PresentationTelemetry>();
         auto frames = std::make_shared<LatestRoomVideoFrame>();
         auto audio = std::make_shared<proof::AudioEvidence>();
@@ -466,7 +519,7 @@ int main(int argc, char** argv) {
         RoomCliHooks missingHooks;
         missingHooks.report = [&](const QJsonObject& value) { if (value["type"] == "admission-error") admissionError = true; };
         Check(RunRoomCliSession(missing, Factory(missing, audio), missingHooks, true) == 1 && admissionError);
-        std::cout << "{\"passed\":true,\"cli_session\":true,\"live_settings\":true,\"bounded_presentation\":true,\"silent_audio\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
+        std::cout << "{\"passed\":true,\"cli_session\":true,\"command_options\":true,\"live_settings\":true,\"bounded_presentation\":true,\"silent_audio\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; exitCode = 1; }
     webrtc::CleanupSSL(); return exitCode;
 }

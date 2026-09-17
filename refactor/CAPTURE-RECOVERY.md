@@ -92,5 +92,9 @@ content, cursor/HDR visual acceptance and latency/resource measurements. The
 screensaver explains this observed occlusion; it does not establish the cause of
 every historical occlusion report.
 
-Next implementation group: ordinary UI/CLI adoption with existing feature parity.
+Subsequent adoption batch: guarded normal-home/CLI workflows are now implemented
+in ADOPTION.md. The interactive desktop became available again and the WGC
+display rebuild passed again (`build/webrtc/adoption-capture-display.log`), while
+DXGI still reported unsupported. See HEADLESS-TESTING.md for adoption desktop
+matrix evidence; the original blocked/failure records above remain historical.
 Gaming input remains Stage 3; default cutover and deletion remain Stage 5 gates.

@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (through `ae6a3e6`, plus capture fallback/cursor/lifecycle integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-18 (through `82bd791`, plus guarded normal-home/CLI adoption). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -10,6 +10,19 @@ split into completed implementation and remaining validation. All original
 physical-device, resource, network, cost, latency and cutover gates remain open
 until their own evidence passes. Dated continuation notes at the end are historical;
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
+
+## Guarded normal-home/CLI adoption — 2026-09-18
+
+- [x] Route existing Home share/join/quick-join through v2 with explicit backend
+  selection; retain the normal shell, version display and update-check scheduling.
+- [x] Reuse one pushed directory connection across home/form navigation; avoid
+  constructing the legacy HTTP client and render remote room names as plain text.
+- [x] Add no-JSON create/join commands with shared validation/profile defaults,
+  explicit Auto/Manual overrides, bounded password files and no silent legacy mapping.
+- [x] Exercise normal-home admission/media/return/shutdown and command-derived
+  configurations through actual local Worker/media scenarios. See ADOPTION.md.
+- [ ] Complete remote-control/gamepad parity, physical acceptance, legacy report/
+  command disposition and final default cutover audit; this opt-in is not cutover.
 
 ## Capture fallback/cursor/lifecycle implementation — 2026-09-18
 
@@ -21,8 +34,9 @@ the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
   scaling and XOR pixel tests; reject unsupported rotation/HDR format downgrade.
 - [x] Carry source backend/fallback observations through source switching and
   host/UI/CLI diagnostics; test both Debug and Release generated-window lifecycle.
-- [ ] Pass supported-desktop DXGI fallback/rebuild and both full desktop matrices.
-  The current Screen-saver desktop blocks presentation; runner records blocked.
+- [ ] Pass supported-desktop DXGI fallback/rebuild. Adoption reruns now have an
+  interactive desktop; WGC rebuild passes but DXGI still reports unsupported.
+  Full desktop matrix evidence is tracked in HEADLESS-TESTING.md.
 - [ ] Complete physical privacy/source identity/HDR/driver/latency acceptance.
   See CAPTURE-RECOVERY.md for precise evidence and remaining limitations.
 
@@ -94,8 +108,9 @@ point adoption, input, hardware/physical acceptance and external latency stay op
 - [x] Defer shell close until media/directory drain, disable actions during close,
   and preserve responsive cancellation during admission and active streaming.
 - [x] Reuse screen-awake lifecycle and reserve the revoke hotkey only with a handler.
-- [ ] Migrate ordinary home/create/join/control actions and existing CLI commands
-  after feature parity; this shell integration does not close default adoption.
+- [x] Route ordinary home room actions and explicit create/join CLI workflows
+  through shared v2 interfaces behind backend selection. See ADOPTION.md.
+- [ ] Finish control/reporting parity and legacy command disposition before default adoption.
 
 ## Latest integration: shared UI/CLI presentation — 2026-09-17
 
@@ -189,7 +204,7 @@ dated continuation notes preserve historical evidence rather than defining new b
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Finish video capture completion/acceptance and normal adoption in STAGE-2-REMAINING.md.** Public RoomSession, native runtime, dispatch, capture drain, GPU receive/recovery and opt-in UI/CLI integration are implemented. Gaming input/consent follows in Stage 3. Physical-device/resource/remote acceptance remains open; the +76/+10 capture-handle regressions block cutover. See [CHECKPOINT-B.md](CHECKPOINT-B.md), [CLOSEOUT-A.md](CLOSEOUT-A.md) and [COMPARISON.md](COMPARISON.md).
+Current next action: **Stage 3 input/consent/controller integration for full adoption parity, while preserving Stage 2 physical acceptance in STAGE-2-REMAINING.md.** Shared media, capture/receive recovery and guarded normal-home/CLI routing are implemented. Physical-device/resource/remote acceptance remains open; the +76/+10 capture-handle regressions block cutover. See [CHECKPOINT-B.md](CHECKPOINT-B.md), [CLOSEOUT-A.md](CLOSEOUT-A.md), [ADOPTION.md](ADOPTION.md) and [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -496,7 +511,9 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 
 ### Product integration
 
-- [ ] Route normal UI/CLI sessions and room operations through the new shared interfaces.
+- [x] Route normal Home room actions and create/join CLI sessions through shared
+  interfaces with explicit backend selection. Default launch remains gated.
+- [ ] Finish full legacy feature parity, report/command audit and default adoption.
 - [x] Add Auto/Manual controls, Gaming/Quality presets and honest apply status.
 - [x] Add local nickname settings and server-pushed room browsing in opt-in v2 UI.
 - [x] Close directory subscriptions during sessions and resubscribe on return; reject stale-list joins while disconnected.

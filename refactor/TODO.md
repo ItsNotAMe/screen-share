@@ -56,11 +56,13 @@ authorized input, network impairment and continuous soak acceptance remain open.
 The existing v2 browser and config-session entry points now run inside the normal
 AppShell, with in-window navigation, shared screen-awake handling and asynchronous
 close across media/directory workers. Repeated sessions release their pages; failed
-join returns to the browser. Ordinary home/create/join and CLI action routing still
-needs migration and must preserve control features. See ROOM-UI.md.
+join returns to the browser. Explicit `--backend v2` now routes the existing normal
+Home share/join/quick-join actions and no-JSON CLI create/join commands through
+the shared backend. Defaults, one directory subscription, update scheduling and
+shutdown are preserved. See ADOPTION.md; full control/reporting parity remains gated.
 
-**Remaining work:** ordinary UI/CLI adoption, video pipeline/recovery completion,
-and physical audio-device/format/quality acceptance.
+**Remaining work:** full adoption parity, supported-desktop/physical video
+acceptance and physical audio-device/format/quality acceptance.
 [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) separates these three groups from
 Stage 3 gaming, Stage 4 acceptance and Stage 5 cutover dependencies.
 
@@ -71,8 +73,10 @@ visible-aperture ownership and delayed-frame validation during resize. See
 GPU cursor composition and minimized/closed lifecycle states are now implemented;
 see [CAPTURE-RECOVERY.md](CAPTURE-RECOVERY.md). Supported-desktop DXGI, physical
 privacy/identity/HDR/driver and latency acceptance remain open. The current
-Screen-saver desktop blocks visible-presentation checks. Normal UI/CLI adoption
-is the next implementation group; Stage 2 and gaming latency are not complete.
+Screen-saver block was observed in the capture batch; the interactive desktop is
+available again for adoption checks, but DXGI still reports unsupported. Stage 3
+input/consent/controller integration is the next implementation group and is
+needed for full adoption parity; Stage 2 and gaming latency are not complete.
 
 Detected audio startup/live failures now release the endpoint and preserve video
 through paced silence/discard. Public health, UI retry feedback and CLI status/

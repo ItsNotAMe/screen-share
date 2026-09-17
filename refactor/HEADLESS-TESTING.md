@@ -1,5 +1,41 @@
 # Headless media checks
 
+## Guarded normal-home/CLI adoption — 2026-09-18
+
+- Release/Debug application builds pass (`adoption-verified-app-{release,debug}.log`).
+- Both final desktop-inclusive matrices pass **7/7**:
+  `build/webrtc/adoption-verified-{release,debug}/result.json`.
+  Their UI metrics include `normal_home:true`; CLI metrics include
+  `command_options:true`. Windows variants use generated WGC sources/native
+  presentation; all audio remains synthetic/discarded and no physical input is sent.
+- New UI coverage starts from the existing HomeWindow: repeated Create/Back
+  navigation with one directory connection, no legacy HTTP client, plain-text
+  pushed room names, password-protected Quick Join by room ID, decoded frames,
+  returning home and closing during host activity.
+- CLI coverage uses the new command parser for the actual host/viewer media
+  scenario. Tests also cover persisted defaults/ephemeral overrides, manual/auto
+  settings, malformed password files, role/option conflicts and origin validation.
+- Actual executable startup rejection is recorded in
+  `adoption-cli-launch-rejected.log`, `adoption-cli-legacy-rejected.log` and
+  `adoption-ui-launch-rejected.log`. No service request is needed for these checks.
+- Runtime/UI/diagnostics smoke checks pass **4/4 per build**:
+  `adoption-smoke-{release,debug}.log`.
+- Final include/indentation cleanup also builds in both configurations:
+  `adoption-closeout-app-{release,debug}.log`; no media behavior changed after
+  the final matrices.
+- Intermediate Release headless and desktop matrices passed. The first Debug
+  headless run failed the new test's first-row assumption during asynchronous
+  removal of a previous room. The test now finds the exact room ID; both final
+  full matrices pass without relaxed deadlines or media thresholds.
+- The interactive desktop is available again. A new WGC pinned-display rebuild
+  passes, but DXGI still returns unsupported (`adoption-capture-display.log`).
+  This remains an open acceptance item, not a test pass for DXGI.
+
+See [ADOPTION.md](ADOPTION.md). Guarded room workflows are implemented; legacy
+input/gamepad/reporting parity, physical and external latency/resource/network
+acceptance, and default cutover remain open. No deployment or update installation
+was performed.
+
 ## Capture fallback/cursor/lifecycle — 2026-09-18
 
 - Release/Debug application and focused capture builds pass:

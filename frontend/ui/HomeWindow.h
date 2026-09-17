@@ -19,6 +19,7 @@ struct HomeActiveRoom {
     int peerCount = 0;
     bool passwordProtected = false;
     qint64 updatedAt = 0;
+    bool joinable = true;
 };
 
 class HomeWindow final : public QWidget {
@@ -27,10 +28,13 @@ public:
         std::function<void()> createRoom;
         std::function<void()> joinRoom;
         std::function<void(const WatchSessionUiState&)> quickJoinRoom;
+        std::function<void()> requestRooms;
+        std::function<void(const QString&)> openRoom;
     };
 
     explicit HomeWindow(Actions actions, QWidget* parent = nullptr);
     void refreshRooms();
+    void setPushedRooms(const QVector<HomeActiveRoom>&, const QString& unavailable = {});
 
 private:
     QWidget* buildTopBar();

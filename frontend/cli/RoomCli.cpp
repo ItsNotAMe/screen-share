@@ -2,6 +2,7 @@
 #include "shared/LatestRoomVideoFrame.h"
 #include "shared/RoomStreamDiagnostics.h"
 #include "shared/PresentationDiagnostics.h"
+#include "shared/RoomLaunch.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
@@ -146,14 +147,23 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
 
 int RunRoomCli(int argc, char** argv) {
     try {
-        if (argc != 3) throw std::invalid_argument("Usage: ScreenShare --room-v2 CONFIG.json");
-        QFile file(QString::fromLocal8Bit(argv[2]));
-        if (!file.open(QIODevice::ReadOnly) || file.size() > 65536) throw std::invalid_argument("Cannot read configuration (64 KiB maximum)");
-        const auto bytes = file.read(65537);
-        if (bytes.size() > 65536) throw std::invalid_argument("Configuration exceeds 64 KiB");
-        QJsonParseError error; const auto document = QJsonDocument::fromJson(bytes, &error);
-        if (error.error != QJsonParseError::NoError || !document.isObject()) throw std::invalid_argument("Invalid configuration JSON");
-        auto config = ParseRoomSessionConfig(document.object());
+        RoomSessionConfig config;
+        if (argc > 1 && std::string_view(argv[1]) == "--room-v2") {
+            if (argc != 3) throw std::invalid_argument("Usage: ScreenShare --room-v2 CONFIG.json");
+            QFile file(QString::fromLocal8Bit(argv[2]));
+            if (!file.open(QIODevice::ReadOnly) || file.size() > 65536) throw std::invalid_argument("Cannot read configuration (64 KiB maximum)");
+            const auto bytes = file.read(65537);
+            if (bytes.size() > 65536) throw std::invalid_argument("Configuration exceeds 64 KiB");
+            QJsonParseError error; const auto document = QJsonDocument::fromJson(bytes, &error);
+            if (error.error != QJsonParseError::NoError || !document.isObject()) throw std::invalid_argument("Invalid configuration JSON");
+            config = ParseRoomSessionConfig(document.object());
+        } else {
+            QStringList arguments;
+            for (int i = 1; i < argc; ++i) arguments.push_back(QString::fromLocal8Bit(argv[i]));
+            config = ParseRoomCommand(arguments); // Validate before accessing stored defaults.
+            RoomProfile profile;
+            config = ParseRoomCommand(arguments, &profile);
+        }
         QCoreApplication application(argc, argv);
         webrtc::WinsockInitializer winsock;
         if (winsock.error() || !webrtc::InitializeSSL()) throw std::runtime_error("Media networking initialization failed");

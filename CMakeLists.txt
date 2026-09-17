@@ -358,7 +358,7 @@ add_executable(ScreenShare
 target_compile_features(ScreenShare PRIVATE cxx_std_20)
 target_include_directories(ScreenShare PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
 if(TARGET ScreenShareRoomSession)
-    add_library(ScreenShareRoomFrontend STATIC frontend/shared/RoomSessionConfig.cpp frontend/shared/RoomProfile.cpp)
+    add_library(ScreenShareRoomFrontend STATIC frontend/shared/RoomSessionConfig.cpp frontend/shared/RoomProfile.cpp frontend/shared/RoomLaunch.cpp)
     target_include_directories(ScreenShareRoomFrontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
     target_link_libraries(ScreenShareRoomFrontend PUBLIC ScreenShareCore ScreenShareRoomSession)
     add_library(ScreenShareRoomCli STATIC frontend/cli/RoomCli.cpp)
@@ -536,20 +536,19 @@ if(SCREENSHARE_BUILD_QT_UI)
             endif()
         endif()
 
-        add_library(ScreenShareUiShell STATIC frontend/ui/AppShellWindow.cpp frontend/ui/ScreenAwakeGuard.cpp frontend/ui/Toast.cpp)
-        target_include_directories(ScreenShareUiShell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/frontend)
-        target_link_libraries(ScreenShareUiShell PUBLIC Qt6::Widgets Qt6::Svg)
+        add_library(ScreenShareUiShell STATIC frontend/ui/AppShellWindow.cpp frontend/ui/ScreenAwakeGuard.cpp frontend/ui/Toast.cpp
+            frontend/ui/HomeWindow.cpp frontend/ui/RoomAccessCheck.cpp)
+        target_include_directories(ScreenShareUiShell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/frontend ${CMAKE_CURRENT_SOURCE_DIR}/backend)
+        target_link_libraries(ScreenShareUiShell PUBLIC Qt6::Widgets Qt6::Svg Qt6::Network)
         target_compile_features(ScreenShareUiShell PUBLIC cxx_std_20)
-        target_compile_definitions(ScreenShareUiShell PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+        target_compile_definitions(ScreenShareUiShell PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX SCREENSHARE_APP_VERSION="${PROJECT_VERSION}")
         add_executable(ScreenShareUi WIN32
             frontend/ui/main.cpp
             frontend/ui/QtSessionBackend.cpp
             frontend/ui/ActiveShareWindow.cpp
             frontend/ui/ActiveWatchWindow.cpp
             frontend/ui/CreateRoomWindow.cpp
-            frontend/ui/HomeWindow.cpp
             frontend/ui/JoinRoomWindow.cpp
-            frontend/ui/RoomAccessCheck.cpp
             frontend/ui/UiStyle.cpp
             frontend/ui/UpdateManager.cpp
             frontend/ui/UpdatePackageSelection.cpp

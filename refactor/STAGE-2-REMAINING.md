@@ -1,7 +1,7 @@
 # Stage 2 remaining work
 
 Stage 2 is **not complete**. The opt-in room experience is integrated and tested,
-but normal application adoption and important media work remain. The authoritative
+but full adoption parity and physical media acceptance remain. The authoritative
 scope is PLAN.md and DETAIL-CHECKS.md; this file groups the remaining work so that
 implementation continues in complete batches, not one checkbox per user turn.
 
@@ -9,8 +9,8 @@ implementation continues in complete batches, not one checkbox per user turn.
 
 | Group | What remains | Completion evidence |
 | --- | --- | --- |
-| Normal UI/CLI adoption | Route ordinary create/join/share/watch and room operations through shared v2 interfaces. Preserve existing functionality, settings and shutdown behavior. Prepare adoption without enabling an unsafe default. | Real normal-entry-point tests, upgrade/configuration behavior, and feature parity. Opt-in RoomSessionWindow/RoomBrowserWindow alone do not complete this. |
-| Video acceptance | Display fallback, pinned-source rebuild, GPU cursor composition and minimized/closed states are implemented. Remaining: supported-desktop DXGI acceptance, rotation support if required, physical source identity/privacy/HDR/driver validation, occlusion and latency measurements. | CAPTURE-RECOVERY.md records policy/GPU/window tests and a WGC display rebuild. Full desktop checks are currently blocked by the Screen-saver desktop; DXGI returned unsupported. GPU-RECEIVE.md records receive coverage, not strict zero-copy. |
+| Full adoption parity | Guarded normal Home share/join/quick-join and CLI create/join commands now use v2. Remaining: remote-control/gamepad parity (Stage 3), legacy diagnostic/report/direct-invite disposition and final default-entry-point audit (Stage 5). | ADOPTION.md records routing, shared defaults, actual command/media and normal-home tests. Default launch and existing UDP/control commands remain supported; they are not silently translated. |
+| Video acceptance | Display fallback, pinned-source rebuild, GPU cursor composition and minimized/closed states are implemented. Remaining: supported-desktop DXGI acceptance, rotation support if required, physical source identity/privacy/HDR/driver validation, occlusion and latency measurements. | The interactive desktop is available again for adoption regressions; WGC display rebuild passes, but DXGI still reports unsupported in adoption-capture-display.log. CAPTURE-RECOVERY.md and GPU-RECEIVE.md preserve scope limits. |
 | Audio acceptance | Physical mono/stereo/surround format negotiation, microphone quality, device switch/unplug/recovery and measured buffering/latency. Microphone-only processing and explicit multichannel conversion are implemented. | Silent PCM/Opus/UI/CLI checks cover the software paths; physical-device evidence remains required. Native driver hangs remain unpreemptible. See AUDIO-PROCESSING.md. |
 
 These are substantial groups. No reliable percentage or turn
@@ -29,10 +29,16 @@ count follows from counting the historical checklist entries.
 
 ## Already integrated; do not rebuild
 
+The guarded normal home workflow and no-JSON CLI create/join commands are
+implemented. Home/form navigation shares one pushed directory connection and
+sessions use the existing media/runtime pages and asynchronous shutdown. See
+[ADOPTION.md](ADOPTION.md). Next substantial implementation work is Stage 3
+input/consent/controller integration, required for full adoption parity; keep
+Stage 2 physical acceptance open while progressing that work.
+
 Display-only WGC fallback, pinned output/item recovery, bounded GPU cursor
 composition, explicit minimized/closed states and backend diagnostics are
-implemented. See [CAPTURE-RECOVERY.md](CAPTURE-RECOVERY.md). Continue with normal
-UI/CLI adoption as the next implementation group; keep physical acceptance open.
+implemented. See [CAPTURE-RECOVERY.md](CAPTURE-RECOVERY.md); keep physical acceptance open.
 
 The receive pipeline now keeps D3D11-decoded NV12 textures through Qt/CLI display,
 with bounded ownership, explicit cached readback, hardware telemetry and software
@@ -52,7 +58,7 @@ and decoder buffering reports, allowlisted codecs and shared hardware fallback,
 capture/recovery states, per-viewer applied preferences and rejection reasons,
 partial application, and actual UI preset/manual-setting preservation. See
 [DIAGNOSTICS.md](DIAGNOSTICS.md) for contracts, tests and unavailable measurements.
-Normal legacy entry-point parity remains in adoption; input and physical latency
+Full legacy feature parity remains in adoption; input and physical latency
 evidence remain in Stages 3/4. This does not complete Stage 2 as a whole.
 
 Presentation skips GPU work for hidden/minimized targets, including minimized
@@ -64,8 +70,9 @@ both full desktop-inclusive matrices and restricted-thread GPU regression pass.
 
 Both opt-in UI entry points now use the normal AppShell via RoomApplication, with
 one-window browser/session navigation, screen-awake state and asynchronous shell
-shutdown. The ordinary legacy home/create/join/control actions and CLI commands
-still require adoption; embedding these pages does not establish feature parity.
+shutdown. The normal home now routes room actions through v2 when explicitly
+selected. Remote control and legacy CLI/report compatibility still require the
+remaining parity audit; embedding pages and adding commands do not establish it.
 
 Shared room media/runtime, opt-in UI/CLI, pushed directory, validated nickname and
 profile defaults, room links/policy/capacity, Auto/Manual settings, per-viewer upload
@@ -74,6 +81,6 @@ peer diagnostics, retained NV12 presentation handoff, shared renderer recovery,
 bounded GPU source scaling, and explicit audio endpoint failure/retry behavior.
 
 Use GPU-SCALING.md, AUDIO-RECOVERY.md, ROOM-UI.md, ROOM-CLI.md and
-HEADLESS-TESTING.md for the existing implementation contracts. The next adoption
-batch should target the ordinary AppShell/CLI paths rather than creating another
-alternative frontend or reimplementing these foundations.
+HEADLESS-TESTING.md for the existing implementation contracts. Build input/control
+and remaining parity on these shared AppShell/CLI paths; do not create another
+alternative frontend or reimplement these foundations.

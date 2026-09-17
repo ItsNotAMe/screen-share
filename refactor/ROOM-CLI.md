@@ -1,5 +1,11 @@
 # Opt-in v2 room CLI
 
+Normal command-line room workflows are now available without JSON:
+`ScreenShare --backend v2 --signal-server HTTPS_ORIGIN --create-room` or
+`--join-room ID_OR_LINK`. They share the session/configuration implementation and
+saved profile defaults. See [ADOPTION.md](ADOPTION.md) for all options, bounded
+password-file handling and the explicit legacy compatibility limits.
+
 Host `"audio": {"source": "none"}` starts without opening an audio capture device.
 The same `source: "none"` works in timed `audioChanges`; a subsequent system,
 microphone or process change resumes capture. None rejects nonempty `deviceId` and
@@ -8,8 +14,9 @@ The silent Opus track remains negotiated so resuming needs no peer reconnect; th
 does not disable viewers' playback devices or promise zero audio network traffic.
 
 `ScreenShare --room-v2 CONFIG.json` uses the shared v2 RoomSession and production
-Windows capture/audio runtime. Existing CLI commands and the UI remain on their
-current path until cutover acceptance. Requires the pinned native build and a
+Windows capture/audio runtime. Existing CLI commands and default UI launch retain
+their current path until cutover acceptance; normal home routing is opt-in.
+Requires the pinned native build and a
 Windows graphical session for capture/preview. No deployment is performed.
 The same configuration can now launch the opt-in Qt session window with
 `ScreenShareUi --room-v2 CONFIG.json`; see [ROOM-UI.md](ROOM-UI.md). Configuration
@@ -123,10 +130,11 @@ Status checks read local snapshots; they generate no service polling requests.
 
 The preview retains only the latest decoded frame and converts I420 to NV12 on the
 window thread. This bounds backlog and avoids rendering on decoder callbacks.
-This first frontend path uses CPU conversion; zero-copy presentation, default UI adoption,
-remote input, live audio-device switching, ICE-server configuration and remote
-network/latency acceptance remain outstanding. The opt-in browser provides the
-directory/profile workflow, and shared upload allocation is integrated.
+The current receive path retains GPU frames through presentation, with an explicit
+CPU fallback; see GPU-RECEIVE.md. Live audio-device switching and guarded normal
+home/CLI adoption are integrated. Remote input, full default adoption, strict
+zero-copy, ICE-server configuration and remote network/latency acceptance remain
+outstanding. The shared browser/home provides pushed directory/profile workflows.
 
 ## Timed capture-source changes
 
