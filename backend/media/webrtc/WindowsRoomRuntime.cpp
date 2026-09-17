@@ -1,4 +1,5 @@
 #include "WindowsRoomRuntime.h"
+#include "MicrophoneCapture.h"
 #include "media/capture/WindowsCaptureSource.h"
 #include "media/audio/WasapiPcmEndpoint.h"
 #include "MfHardwareSession.h"
@@ -46,7 +47,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
                 options.audio.source == AudioCaptureSource::None ? AudioKind::None : AudioKind::System,
                 options.audio.deviceId, options.audio.processId};
             ValidateAudioSelection(initial);
-            native.audioSwitch = std::make_shared<AudioSwitchControl>(initial, endpoints.capture);
+            native.audioSwitch = std::make_shared<AudioSwitchControl>(initial, endpoints.capture, ProcessMicrophone);
             endpoints.capture = [control = native.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
             if (options.audioForSelection) native.audioForSelection = options.audioForSelection;
             else if (!options.audioEndpoints) native.audioForSelection = [](AudioSelection selection) {

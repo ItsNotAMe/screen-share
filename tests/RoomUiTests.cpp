@@ -145,7 +145,7 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
                 options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
             }
             if (identity.host) {
-                options.audioSwitch = std::make_shared<AudioSwitchControl>(AudioSelection{}, endpoints.capture);
+                options.audioSwitch = std::make_shared<AudioSwitchControl>(AudioSelection{}, endpoints.capture, ProcessMicrophone);
                 endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
                 options.audioForSelection = [audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
             }
@@ -592,6 +592,28 @@ void SourceSwitchScenario(const std::string& origin) {
     Check(host.session().status().audio.revision == audioRevision + 1 && host.findChild<QLabel*>("audioState")->text().contains("previous source"));
     devices->setCurrentIndex(0); Wait([&] { return switchAudio->isEnabled(); }); switchAudio->click();
     Wait([&] { return !host.session().audioPending() && host.session().status().audio.revision == audioRevision + 2 && audio->audibleBlocks >= quiet + 10; });
+    Check(!host.session().status().audio.microphoneProcessing);
+    audioKind->setCurrentIndex(1); Wait([&] { return switchAudio->isEnabled(); }); switchAudio->click();
+    Wait([&] { return !host.session().audioPending() && host.session().status().audio.microphoneProcessing &&
+        host.findChild<QLabel*>("audioHealth")->text().contains("noise suppression") && audio->quietStreak >= 20; });
+    const auto microphoneRevision = host.session().status().audio.revision;
+    hostAudio->captureUnavailable = true;
+    Wait([&] { return host.session().status().audio.health.state == AudioEndpointState::Failed; });
+    const auto microphoneFailureFrames = frames;
+    Wait([&] { return frames > microphoneFailureFrames + 10; });
+    hostAudio->captureUnavailable = false;
+    Wait([&] { return switchAudio->isEnabled(); }); switchAudio->click();
+    Wait([&] { return !host.session().audioPending() && host.session().status().audio.revision == microphoneRevision + 1 &&
+        host.session().status().audio.health.state == AudioEndpointState::Running; });
+    Check(host.session().status().audio.microphoneProcessing);
+    // Process audio must bypass the just-retired microphone processor too.
+    audioKind->setCurrentIndex(2); host.findChild<QSpinBox*>("liveAudioProcess")->setValue(1);
+    const auto beforeProcessAudio = audio->audibleBlocks.load();
+    Wait([&] { return switchAudio->isEnabled(); }); switchAudio->click();
+    Wait([&] { return !host.session().audioPending() && host.session().status().audio.selected.kind == AudioKind::Process &&
+        !host.session().status().audio.microphoneProcessing && audio->audibleBlocks > beforeProcessAudio + 10; });
+    audioKind->setCurrentIndex(0); Wait([&] { return switchAudio->isEnabled(); }); switchAudio->click();
+    Wait([&] { return !host.session().audioPending() && host.session().status().audio.selected.kind == AudioKind::System; });
     const auto afterAudio = host.session().status();
     Check(afterAudio.roomId == roomBefore.roomId && afterAudio.peerId == roomBefore.peerId && afterAudio.revision == roomBefore.revision &&
         afterAudio.stream.requestedRevision == roomBefore.stream.requestedRevision && afterAudio.activePeers == 1);

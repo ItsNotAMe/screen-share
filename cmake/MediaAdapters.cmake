@@ -3,6 +3,7 @@
 if(NOT TARGET ScreenShareMediaAdapters)
     add_library(ScreenShareMediaAdapters STATIC
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/PcmAudioDeviceModule.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/MicrophoneCapture.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/audio/WasapiPcmEndpoint.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/D3dVideoFrameBuffer.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/D3dNv12Scaler.cpp"

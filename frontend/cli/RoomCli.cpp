@@ -43,6 +43,7 @@ QJsonObject Status(const RoomStatus& value) {
         {"aggregateUploadBps", value.stream.preferences.aggregateUploadLimitBps.value_or(0)}, {"captureRevision", qint64(value.capture.revision)},
         {"audioRevision", qint64(value.audio.revision)}, {"audioSource", media::AudioKindName(value.audio.selected.kind)},
         {"audioHealth", health(value.audio.health)}, {"playbackHealth", health(value.playback.health)},
+        {"microphoneProcessing", value.audio.microphoneProcessing},
         {"playbackRevision", qint64(value.playback.revision)},
         {"playbackVolume", int(value.playback.selected.volume)}, {"playbackMuted", value.playback.selected.muted}};
 }

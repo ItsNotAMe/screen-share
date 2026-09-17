@@ -1,5 +1,32 @@
 # Headless media checks
 
+## Audio processing/downmix — 2026-09-17
+
+- Release and Debug desktop-inclusive matrices passed **7/7 each**:
+  `build/webrtc/audio-completion-{release,debug}/result.json`.
+  Actual UI/CLI sessions select microphone speech processing, publish its status,
+  switch back to bypassed system/process audio and preserve video. UI additionally
+  loses/retries the microphone endpoint while video progresses.
+- Both focused PCM runs pass:
+  `build/webrtc/audio-completion-pcm-{release,debug}.log`. Coverage includes real
+  APM/DC filtering, mono/stereo identity, 5.1/7.1 per-channel gains, full-scale
+  headroom, malformed formats, processor-factory failure rollback, mic worker
+  restart, all non-mic bypass modes and the existing silent recovery/lifecycle suite.
+- Four-viewer scenarios pass in **18.589 s / 18.549 s**:
+  `build/webrtc/audio-completion-four-viewer-release/native-service-fdf0ca4e-84c8-46fd-8edc-6cbb0c3f0c3c`
+  and `build/webrtc/audio-completion-four-viewer-debug/native-service-26392211-833d-49d6-8b74-f11e735e5d73`.
+- Final application/proof builds:
+  `build/webrtc/audio-completion-final-{app,proof}-{release,debug}-build.log`.
+  A final defensive extended-format size guard was followed by both PCM suites
+  and **4/4** smoke checks per configuration (native runtime link, A/V diagnostics,
+  report path and UI self-test): `audio-completion-smoke-{release,debug}.log`.
+  The initial Debug configure lacked the pinned developer environment; rebuilding
+  with VsDevCmd satisfied the unchanged SDK verification.
+
+No physical microphone/speaker or mouse/keyboard was used. Actual Windows capture
+channel-format negotiation, microphone listening quality, physical unplug/replug,
+driver hangs and external latency remain unverified. See AUDIO-PROCESSING.md.
+
 ## Diagnostics and settings integration — 2026-09-17
 
 Final artifacts for this batch:

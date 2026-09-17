@@ -35,6 +35,7 @@ struct AudioCaptureConfig {
     uint32_t processId = 0;
     std::chrono::milliseconds bufferDuration{100};
     bool pcm48kStereo = false;
+    bool pcm48kNativeChannels = false; // v2: resample/convert, preserve speaker layout for explicit downmix.
 };
 
 struct AudioCaptureFormat {
@@ -43,6 +44,7 @@ struct AudioCaptureFormat {
     uint16_t bitsPerSample = 0;
     uint16_t blockAlign = 0;
     std::string sampleFormat;
+    uint32_t channelMask = 0;
 };
 
 enum class AudioSampleKind {

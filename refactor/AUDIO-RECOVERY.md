@@ -65,5 +65,6 @@ checks isolation/recovery of one viewer's failed output.
 These tests use synthetic PCM only, never physical audio playback. Actual hardware
 unplug/driver-specific recovery remains open. A synchronous native call that never
 returns cannot be forcibly preempted; this implementation does not claim to solve
-driver hangs or microphone processing/multichannel conversion. Receiver jitter
+driver hangs. Microphone-only processing and explicit multichannel conversion are
+now implemented; see AUDIO-PROCESSING.md for their policy and acceptance limits. Receiver jitter
 buffers can still drain audio already transmitted before capture failure.

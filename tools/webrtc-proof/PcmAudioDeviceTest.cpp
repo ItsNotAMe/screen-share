@@ -1,6 +1,7 @@
 #include "media/webrtc/PcmAudioDeviceModule.h"
 #include "media/audio/WasapiPcmEndpoint.h"
 #include "SyntheticAudio.h"
+#include "AudioProcessingTest.h"
 #include <condition_variable>
 #include <iostream>
 #include <stdexcept>
@@ -40,7 +41,13 @@ void Switches() {
     auto ownership = std::make_shared<Ownership>();
     AudioSwitchControl::Factory good = [ownership] { return std::make_unique<OwnedCapture>(ownership, false); };
     AudioSwitchControl::Factory stalled = [ownership] { return std::make_unique<OwnedCapture>(ownership, true); };
-    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, good);
+    std::atomic<unsigned> processors{0};
+    std::atomic<bool> failProcessor{false};
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, good,
+        [&](std::unique_ptr<PcmCaptureEndpoint> endpoint) {
+            ++processors; if (failProcessor) throw std::runtime_error("Injected processor startup failure");
+            return ProcessMicrophone(std::move(endpoint));
+        });
     Require(control->Submit({}, good).get().error == AudioUpdateError::Unavailable, "Inactive switch accepted");
     auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     PcmBlock block; std::stop_source stop;
@@ -57,6 +64,11 @@ void Switches() {
     };
     auto failure = control->Submit({}, []() -> std::unique_ptr<PcmCaptureEndpoint> { throw std::runtime_error("Injected failure"); });
     pump(failure); Require(failure.get().error == AudioUpdateError::Failed && control->Status().revision == 1, "Failed source committed");
+    failProcessor = true;
+    auto processingFailure = control->Submit({AudioKind::Microphone}, good); pump(processingFailure);
+    Require(processingFailure.get().error == AudioUpdateError::Failed && control->Status().revision == 1 &&
+        !control->Status().microphoneProcessing && ownership->live == 1, "Failed microphone processor replaced healthy system audio");
+    failProcessor = false; processors = 0;
     auto timeout = control->Submit({}, stalled);
     Require(control->Submit({}, good).get().error == AudioUpdateError::Busy, "Unbounded audio requests");
     Require(pump(timeout) > 100, "Old audio interrupted while candidate stalled");
@@ -64,6 +76,7 @@ void Switches() {
     for (int i = 0; i < 3; ++i) {
         auto success = control->Submit({AudioKind::Microphone}, good); pump(success);
         Require(success.get().error == AudioUpdateError::None && control->Status().revision == uint64_t(i + 2), "Audio handover failed");
+        Require(control->Status().microphoneProcessing && processors == unsigned(i + 1), "Microphone processing was not isolated per endpoint");
     }
     auto cancelled = control->Submit({}, stalled); capture->Read(block, stop.get_token());
     const auto beforeStop = std::chrono::steady_clock::now(); capture.reset();
@@ -72,6 +85,12 @@ void Switches() {
     // Recording can restart after its last viewer leaves; successful selection persists.
     capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     Require(control->Status().revision == 4 && control->Status().selected.kind == AudioKind::Microphone, "Selection lost on recording restart");
+    Require(processors == 4, "Microphone processor was nested or reused on restart");
+    for (auto selection : {AudioSelection{AudioKind::None}, AudioSelection{}, AudioSelection{AudioKind::Process, {}, 1}}) {
+        auto bypass = control->Submit(selection, good); pump(bypass);
+        Require(bypass.get().error == AudioUpdateError::None && !control->Status().microphoneProcessing && processors == 4,
+            "Speech processing leaked into non-microphone capture");
+    }
     auto queued = control->Submit({}, good); control->Close();
     Require(queued.get().error == AudioUpdateError::Cancelled, "Queued audio cancellation failed");
     Require(control->Submit({}, good).get().error == AudioUpdateError::Unavailable, "Closed control accepted audio");
@@ -345,6 +364,6 @@ void Run(bool wasapi) {
 }
 }
 int main(int argc, char** argv) {
-    try { Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
+    try { audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

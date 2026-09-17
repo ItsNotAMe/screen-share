@@ -14,11 +14,14 @@ namespace screenshare::media {
 class AudioSwitchControl {
 public:
     using Factory = std::function<std::unique_ptr<PcmCaptureEndpoint>()>;
+    using MicrophoneProcessor = std::function<std::unique_ptr<PcmCaptureEndpoint>(std::unique_ptr<PcmCaptureEndpoint>)>;
     struct Request { Factory factory; AudioSelection selected; std::promise<AudioUpdateResult> reply; };
-    AudioSwitchControl(AudioSelection initial, Factory factory) {
+    AudioSwitchControl(AudioSelection initial, Factory factory, MicrophoneProcessor microphoneProcessor = {})
+        : microphoneProcessor_(std::move(microphoneProcessor)) {
         ValidateAudioSelection(initial);
         factory_ = SelectFactory(initial, std::move(factory));
         status_ = {std::move(initial), 1};
+        status_.microphoneProcessing = bool(microphoneProcessor_) && status_.selected.kind == AudioKind::Microphone;
     }
     Factory Attach() { std::lock_guard lock(mutex_); active_ = !closed_; return factory_; }
     void Detach() { std::lock_guard lock(mutex_); active_ = false; status_.health.state = AudioEndpointState::Inactive; CancelQueued(); }
@@ -50,15 +53,21 @@ public:
     }
     AudioSelectionStatus Status() const { std::lock_guard lock(mutex_); return status_; }
 private:
-    void SetReady() { status_.health.state = status_.selected.kind == AudioKind::None ? AudioEndpointState::Silent : AudioEndpointState::Running; }
-    static Factory SelectFactory(const AudioSelection& selected, Factory factory) {
+    void SetReady() {
+        status_.health.state = status_.selected.kind == AudioKind::None ? AudioEndpointState::Silent : AudioEndpointState::Running;
+        status_.microphoneProcessing = bool(microphoneProcessor_) && status_.selected.kind == AudioKind::Microphone;
+    }
+    Factory SelectFactory(const AudioSelection& selected, Factory factory) const {
         if (selected.kind == AudioKind::None) return [] { return std::make_unique<SilentPcmCapture>(); };
+        if (selected.kind == AudioKind::Microphone && microphoneProcessor_)
+            return [factory = std::move(factory), process = microphoneProcessor_] { return process(factory()); };
         return factory;
     }
     void CancelQueued() {
         if (queued_) { queued_->reply.set_value({AudioUpdateError::Cancelled, status_.revision}); queued_.reset(); busy_ = false; }
     }
     mutable std::mutex mutex_;
+    const MicrophoneProcessor microphoneProcessor_;
     Factory factory_;
     AudioSelectionStatus status_;
     std::unique_ptr<Request> queued_;

@@ -74,7 +74,7 @@ public:
         NativeRoomRuntimeOptions options;
         auto endpoints = proof::SyntheticAudio(evidence_->audio);
         if (identity.host) {
-            options.audioSwitch = std::make_shared<AudioSwitchControl>(screenshare::media::AudioSelection{}, endpoints.capture);
+            options.audioSwitch = std::make_shared<AudioSwitchControl>(screenshare::media::AudioSelection{}, endpoints.capture, ProcessMicrophone);
             endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
             options.audioForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
         } else {

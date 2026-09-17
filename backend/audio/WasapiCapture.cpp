@@ -526,8 +526,31 @@ void WasapiCapture::Start(const AudioCaptureConfig& config, std::stop_token stop
     };
     std::unique_ptr<WAVEFORMATEX, MixFormatDeleter> mixFormat;
     WAVEFORMATEX processLoopbackFormat{};
+    WAVEFORMATEXTENSIBLE channelFormat{};
     WAVEFORMATEX* activeFormat = nullptr;
-    if (config.source == AudioCaptureSource::ProcessOutput || config.pcm48kStereo) {
+    if (config.pcm48kNativeChannels && config.source != AudioCaptureSource::ProcessOutput) {
+        WAVEFORMATEX* raw = nullptr;
+        ThrowIfFailed(audioClient_->GetMixFormat(&raw), "IAudioClient::GetMixFormat");
+        mixFormat.reset(raw);
+        if (!raw || !raw->nChannels || raw->nChannels > 8)
+            throw std::runtime_error("Unsupported capture channel count");
+        uint32_t mask = raw->nChannels == 1 ? SPEAKER_FRONT_CENTER : raw->nChannels == 2 ?
+            SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT : 0;
+        if (raw->wFormatTag == WAVE_FORMAT_EXTENSIBLE && raw->cbSize >= sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX))
+            mask = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(raw)->dwChannelMask;
+        if (!mask && raw->nChannels > 2) throw std::runtime_error("Missing capture speaker layout");
+        channelFormat.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+        channelFormat.Format.nChannels = raw->nChannels;
+        channelFormat.Format.nSamplesPerSec = 48000;
+        channelFormat.Format.wBitsPerSample = 16;
+        channelFormat.Format.nBlockAlign = raw->nChannels * 2;
+        channelFormat.Format.nAvgBytesPerSec = 48000 * channelFormat.Format.nBlockAlign;
+        channelFormat.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+        channelFormat.Samples.wValidBitsPerSample = 16;
+        channelFormat.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+        channelFormat.dwChannelMask = mask;
+        activeFormat = &channelFormat.Format;
+    } else if (config.source == AudioCaptureSource::ProcessOutput || config.pcm48kStereo) {
         processLoopbackFormat.wFormatTag = WAVE_FORMAT_PCM;
         processLoopbackFormat.nChannels = 2;
         processLoopbackFormat.nSamplesPerSec = 48'000;
@@ -553,6 +576,9 @@ void WasapiCapture::Start(const AudioCaptureConfig& config, std::stop_token stop
     format_.bitsPerSample = activeFormat->wBitsPerSample;
     format_.blockAlign = activeFormat->nBlockAlign;
     format_.sampleFormat = SampleKindName(sampleKind_);
+    format_.channelMask = activeFormat->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+        activeFormat->cbSize >= sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX) ?
+        reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(activeFormat)->dwChannelMask : 0;
 
     const REFERENCE_TIME bufferDuration =
         static_cast<REFERENCE_TIME>(std::max<int64_t>(1, config.bufferDuration.count())) * 10'000;
@@ -561,7 +587,7 @@ void WasapiCapture::Start(const AudioCaptureConfig& config, std::stop_token stop
         config.source == AudioCaptureSource::ProcessOutput) {
         streamFlags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
-    if (config.source == AudioCaptureSource::ProcessOutput || config.pcm48kStereo) {
+    if (config.source == AudioCaptureSource::ProcessOutput || config.pcm48kStereo || config.pcm48kNativeChannels) {
         streamFlags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
     }
 

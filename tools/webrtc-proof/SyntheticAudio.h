@@ -3,6 +3,7 @@
 #include "media/audio/PcmAudioEndpoint.h"
 #include "media/audio/SwitchablePcmCapture.h"
 #include "media/audio/PlaybackControl.h"
+#include "media/webrtc/MicrophoneCapture.h"
 #include <atomic>
 #include <chrono>
 #include <cmath>

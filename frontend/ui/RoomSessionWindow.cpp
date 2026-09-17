@@ -274,7 +274,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
         const bool audioFailed = value.audio.health.state == AudioEndpointState::Failed;
         audioHealth_->setText(audioFailed ? "Audio capture failed. Video continues without shared audio. Retry or select another source." :
-            value.audio.health.state == AudioEndpointState::Running ? "Audio capture active." :
+            value.audio.health.state == AudioEndpointState::Running ? (value.audio.microphoneProcessing ?
+                "Microphone active: noise suppression and digital gain. Echo cancellation is unavailable." : "Audio capture active; speech processing bypassed.") :
             value.audio.health.state == AudioEndpointState::Silent ? "Audio capture disabled." : "Audio capture inactive.");
         switchAudio_->setText(audioFailed ? "Retry selected audio" : "Share selected audio");
         switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);

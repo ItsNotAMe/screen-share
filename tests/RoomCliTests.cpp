@@ -220,7 +220,7 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
         }
         if (identity.host) {
             options.audioSwitch = std::make_shared<AudioSwitchControl>(AudioSelection{
-                initialAudio.source == screenshare::AudioCaptureSource::None ? AudioKind::None : AudioKind::System}, endpoints.capture);
+                initialAudio.source == screenshare::AudioCaptureSource::None ? AudioKind::None : AudioKind::System}, endpoints.capture, ProcessMicrophone);
             endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
             options.audioForSelection = [audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
         }
@@ -267,7 +267,8 @@ int main(int argc, char** argv) {
             {"changes", QJsonArray{QJsonObject{{"atMs", 3000}, {"stream", reduced}}}}};
         object["captureChanges"] = QJsonArray{captureChange};
         object["audio"] = QJsonObject{{"source", "none"}};
-        object["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 2500}, {"source", "system"}}};
+        object["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 2500}, {"source", "system"}},
+            QJsonObject{{"atMs", 3500}, {"source", "microphone"}}, QJsonObject{{"atMs", 5000}, {"source", "system"}}};
         auto invalidAudio = object; invalidAudio["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 100}, {"source", "process"}}};
         Reject([&] { ParseRoomSessionConfig(invalidAudio, true); });
         invalidAudio["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 100}, {"source", "system"}, {"processId", 1}}};
@@ -297,6 +298,7 @@ int main(int argc, char** argv) {
         std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, receiverReported{false}, senderReported{false}, sourceChanged{false}, audioChanged{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         std::atomic<bool> extendedReported{false}, pipelineReported{false};
+        std::atomic<bool> microphoneReported{false}, bypassRestored{false};
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         std::atomic<bool> presentationReported{false};
 #endif
@@ -307,7 +309,9 @@ int main(int argc, char** argv) {
             Check(!encoded.contains("test-only-password") && !encoded.contains("token"));
             if (value["type"] == "settings") { Check(value["error"].toInt() == 0); accepted = true; }
             if (value["type"] == "capture") { Check(value["error"].toInt() == 0 && value["revision"].toInt() == 2); sourceChanged = true; }
-            if (value["type"] == "audio") { Check(value["error"].toInt() == 0 && value["revision"].toInt() == 2); audioChanged = true; }
+            if (value["type"] == "audio") { Check(value["error"].toInt() == 0 && value["revision"].toInt() >= 2 && value["revision"].toInt() <= 4); audioChanged = true; }
+            if (value["microphoneProcessing"].toBool()) { Check(value["audioSource"] == "microphone"); microphoneReported = true; }
+            if (microphoneReported && value["audioSource"] == "system" && !value["microphoneProcessing"].toBool()) bypassRestored = true;
             if (value["phase"] == "active") {
                 std::lock_guard lock(mutex); roomId = value["roomId"].toString().toStdString();
             }
@@ -415,6 +419,7 @@ int main(int argc, char** argv) {
         Check(playbackChanges == 3 && playbackFailed && playbackRecovered);
         Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && senderReported && sourceChanged && audioChanged);
         Check(extendedReported && pipelineReported);
+        Check(microphoneReported && bypassRestored);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         Check(presentationReported);
 #endif

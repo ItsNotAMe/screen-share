@@ -31,14 +31,16 @@ and WGC letterbox fixture corrections; earlier visible-but-occluded cases still
 need acceptance. Do not conflate these with hardware decode/zero-copy completion.
 Reported audio endpoint failures now preserve video with explicit same-device
 recovery and visible UI/CLI health; do not reimplement recovery. Physical device
-acceptance, microphone processing and multichannel handling remain open.
+acceptance remains open. Microphone-only processing and native-channel stereo
+downmix are implemented; see refactor/AUDIO-PROCESSING.md. Do not repeat these
+software tasks or mark physical format/quality/unplug checks passed synthetically.
 Per-viewer GPU scaling/letterboxing now preserves owned NV12 frames into hardware
 encoding, drops excess GPU submissions, and quarantines to CPU fallback on failure.
 The active image rectangle is exposed in source diagnostics; actual authorized
 input mapping and hardware decode/presentation remain open. See GPU-SCALING.md.
 Device-free `none` audio is integrated across startup/live runtime/UI/CLI selection;
 it releases host capture and preserves the track for resumption. Physical recovery,
-microphone processing and audio latency remain open.
+physical audio quality and audio latency remain open.
 Host per-peer sender diagnostics now share UI/CLI states and expose transport
 freshness. Receiver decoder telemetry now uses the encrypted peer channel with
 bounded versioned reports, generation/sequence validation and three-second expiry.

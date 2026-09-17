@@ -1,5 +1,25 @@
 # Checkpoint B evidence
 
+## Audio processing/downmix implementation — 2026-09-17
+
+Windows room capture now uses one WebRTC speech processor per microphone endpoint,
+with HPF, moderate NS and adaptive digital gain. System/process/None bypass it, and
+global track processing remains disabled. Processing lifetime follows endpoint
+handover/retry; errors preserve the previous healthy source or paced silence.
+UI/CLI publish the configured processing policy. No AEC is claimed without a
+synchronized speaker reference.
+
+The v2 WASAPI adapter preserves endpoint channel layout while requesting PCM16 at
+48 kHz, then applies the shared explicit stereo fold-down. Mono/stereo stay exact;
+standard surround uses fixed channel coefficients/headroom and omits LFE. Unknown
+layouts fail explicitly. The existing capture queue/handoff bounds are unchanged.
+
+Both configurations pass PCM contract/failure tests, **7/7** desktop matrices and
+four-viewer recovery. Final builds and **4/4** smoke checks also pass. Evidence is
+in HEADLESS-TESTING.md. AUDIO-PROCESSING.md records policy and limitations. The
+audio group now has physical format/quality/device/latency acceptance remaining;
+it is not marked fully complete using synthetic evidence.
+
 ## Complete diagnostics/settings integration batch — 2026-09-17
 
 The shared runtime now exports current capture/recovery states, per-viewer applied

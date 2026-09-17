@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-17 (through `7a7316f`, plus the complete diagnostics/integration batch). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-17 (through `1e08fdc`, plus audio processing/downmix integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -10,6 +10,21 @@ split into completed implementation and remaining validation. All original
 physical-device, resource, network, cost, latency and cutover gates remain open
 until their own evidence passes. Dated continuation notes at the end are historical;
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
+
+## Audio processing/downmix implementation — 2026-09-17
+
+- [x] Process microphone PCM with a per-endpoint WebRTC speech processor; bypass
+  system/process/None and preserve rollback, explicit retry and thread ownership.
+- [x] Preserve native speaker layout through 48 kHz PCM conversion, then explicitly
+  fold standard mono/stereo/5.1/7.1 into bounded stereo capture blocks.
+- [x] Surface configured processing in API/UI/CLI and exercise mic failure/retry,
+  switching back to unprocessed audio and ongoing video through actual Opus peers.
+- [x] Pass Release/Debug focused PCM tests, seven-case desktop matrices and
+  four-viewer recovery scenarios; see HEADLESS-TESTING.md.
+- [ ] Accept real device format negotiation, microphone quality, unplug/replug,
+  driver behavior and measured physical latency. Synthetic tests do not close this.
+
+Contract and limitations: [AUDIO-PROCESSING.md](AUDIO-PROCESSING.md).
 
 ## Diagnostics and settings integration — 2026-09-17
 
@@ -308,10 +323,14 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 ### Audio
 
-- [ ] Implement 48 kHz / 10 ms PCM exchange and consistent multichannel downmix.
+- [x] Implement 48 kHz / 10 ms PCM exchange and explicit speaker-mask multichannel
+  downmix; preserve stereo and bound queues. Synthetic channel/gain/clipping tests
+  pass; real endpoint negotiation remains physical acceptance.
 - [x] Preserve system, microphone, selected device and process-loopback modes in shared runtime/UI/CLI selection; physical endpoint acceptance remains separate.
 - [x] Use event-driven WASAPI and bounded handoffs with measured device buffering; shared-audio handover retains the 30 ms application capture bound.
-- [ ] Isolate microphone processing from system/process audio.
+- [x] Isolate microphone processing per capture endpoint with WebRTC HPF/NS/digital
+  AGC; bypass system/process/None and preserve handover/retry ownership. No AEC is
+  claimed without a speaker reference. See AUDIO-PROCESSING.md.
 - [x] Support device-free no-shared-audio startup/live selection in shared runtime/UI/CLI, with rollback, worker restart and silent end-to-end coverage.
 - [ ] Preserve mute/volume, video-only operation and explicit device-error behavior.
   Reported startup/live capture and output failures now preserve video and support

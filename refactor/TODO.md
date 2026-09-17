@@ -60,7 +60,7 @@ join returns to the browser. Ordinary home/create/join and CLI action routing st
 needs migration and must preserve control features. See ROOM-UI.md.
 
 **Remaining work:** ordinary UI/CLI adoption, video pipeline/recovery completion,
-and audio processing/physical-device acceptance.
+and physical audio-device/format/quality acceptance.
 [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) separates these three groups from
 Stage 3 gaming, Stage 4 acceptance and Stage 5 cutover dependencies.
 
@@ -68,6 +68,12 @@ Detected audio startup/live failures now release the endpoint and preserve video
 through paced silence/discard. Public health, UI retry feedback and CLI status/
 scripted same-device recovery are integrated. No automatic device retry or service
 polling is added. Physical driver acceptance remains open; see AUDIO-RECOVERY.md.
+
+Microphone speech processing and explicit native-channel stereo downmix are now
+implemented, with live UI/CLI processing status, failure/retry and switch-away
+tests. System/process/None bypass the speech processor. See AUDIO-PROCESSING.md;
+the physical audio acceptance group remains open rather than being marked passed
+by synthetic tests.
 
 Per-viewer GPU NV12 scaling/letterboxing is integrated with owned textures, four
 in-flight submissions per device, drop-on-pressure and quarantined CPU fallback.

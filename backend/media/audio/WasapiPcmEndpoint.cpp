@@ -1,5 +1,6 @@
 #include "media/audio/WasapiPcmEndpoint.h"
 #include "SilentPcmCapture.h"
+#include "StereoDownmix.h"
 #include <algorithm>
 #include <cstring>
 #include <deque>
@@ -13,11 +14,13 @@ public:
     explicit Capture(AudioCaptureConfig config) : config_(std::move(config)) {}
     void Start() override { Start({}); }
     void Start(std::stop_token stop) override {
-        config_.pcm48kStereo = true;
+        config_.pcm48kStereo = false;
+        config_.pcm48kNativeChannels = true;
         config_.bufferDuration = std::chrono::milliseconds(10);
         capture_.Start(config_, stop);
-        if (capture_.format().sampleRate != 48000 || capture_.format().channels != 2 || capture_.format().bitsPerSample != 16)
-            throw std::runtime_error("WASAPI did not accept PCM48 stereo");
+        if (capture_.format().sampleRate != 48000 || capture_.format().bitsPerSample != 16)
+            throw std::runtime_error("WASAPI did not accept PCM48");
+        downmix_.emplace(capture_.format().channels, capture_.format().channelMask);
     }
     bool Read(PcmBlock& output, std::stop_token stop) override {
         while (pending_.size() < output.size() && !stop.stop_requested()) {
@@ -33,17 +36,17 @@ public:
                 return true;
             }
             if (packet->dataDiscontinuity) { dropped_ += pending_.size() / 2; pending_.clear(); }
-            if (packet->data.size() != size_t(packet->frames) * 4) throw std::runtime_error("Invalid capture PCM packet");
+            const auto inputFrameBytes = size_t(capture_.format().channels) * 2;
+            if (packet->data.size() != size_t(packet->frames) * inputFrameBytes) throw std::runtime_error("Invalid capture PCM packet");
             // 20ms here plus the switchable endpoint's one 10ms handoff block.
             const size_t samples = size_t(packet->frames) * 2;
             const size_t keep = std::min<size_t>(samples, 1920);
             dropped_ += (samples - keep) / 2;
             while (pending_.size() + keep > 1920) { pending_.pop_front(); pending_.pop_front(); ++dropped_; }
-            for (size_t i = samples - keep; i < samples; ++i) {
-                int16_t value = 0;
-                if (!packet->silent) std::memcpy(&value, packet->data.data() + i * 2, 2);
-                pending_.push_back(value);
-            }
+            std::array<int16_t, 1920> stereo{};
+            if (!packet->silent) downmix_->Convert(std::span(packet->data).subspan((samples - keep) / 2 * inputFrameBytes),
+                std::span(stereo).first(keep));
+            for (size_t i = 0; i < keep; ++i) pending_.push_back(stereo[i]);
         }
         if (stop.stop_requested()) return false;
         for (auto& value : output) { value = pending_.front(); pending_.pop_front(); }
@@ -56,6 +59,7 @@ private:
     WasapiCapture capture_;
     std::deque<int16_t> pending_;
     uint64_t dropped_ = 0;
+    std::optional<StereoDownmix> downmix_;
 };
 
 class Playout final : public PcmPlayoutEndpoint {
