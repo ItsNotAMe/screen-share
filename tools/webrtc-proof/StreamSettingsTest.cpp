@@ -3,6 +3,7 @@
 #include "media/webrtc/ReceiverTelemetryChannel.h"
 #include "api/make_ref_counted.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/thread.h"
 #include "core/WindowsMediaRuntime.h"
 #include "media/GpuSubmissionQueue.h"
 #include <iostream>
@@ -307,6 +308,23 @@ int main(int argc, char** argv) try {
         Require(gpuSink.frames == framesBeforeRetire && device->readbackCount() == readsBeforeRetire &&
             !held->ToI420(), "Retired GPU frame was scaled or read back");
         gpuSource->RemoveSink(&gpuSink); other->RemoveSink(&otherSink);
+        // The final retained texture may be released by a signaling executor
+        // after WebRTC has restricted cross-thread invokes. Exercise a live
+        // scaler's complete teardown without widening that thread's permissions.
+        auto releasing = webrtc::Thread::Create(); Require(releasing->Start(), "Release thread startup failed");
+        auto teardownDevice = std::make_shared<D3dVideoDevice>();
+        std::weak_ptr<D3dVideoDevice> lifetime = teardownDevice;
+        std::vector<uint8_t> teardownPixels(320 * 180 * 3 / 2, 128);
+        auto teardownSource = teardownDevice->UploadNv12(320, 180, teardownPixels);
+        auto teardownFrame = teardownSource->Scale(160, 90, 0, 0, 160, 90);
+        Require(bool(teardownFrame), "Teardown regression requires a live scaler");
+        teardownSource = nullptr; teardownDevice.reset();
+        releasing->BlockingCall([&] {
+            releasing->DisallowAllInvokes();
+            teardownFrame = nullptr;
+        });
+        Require(lifetime.expired(), "GPU owner leaked after restricted-thread final release");
+        releasing->Stop();
     }
     std::cout << "{\"passed\":true,\"mode\":\"stream-settings\",\"manual_frames\":" << fixedSink.frames
               << ",\"auto_frames_before_recovery\":" << adaptiveSink.frames - 3

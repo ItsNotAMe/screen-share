@@ -1,4 +1,5 @@
 #include "render/FramePresentationBackend.h"
+#include "render/PresentationTarget.h"
 
 namespace {
 class NativeFramePresentation final : public FramePresentationBackend {
@@ -10,7 +11,8 @@ public:
         bool lowLatency, const screenshare::Nv12D3D11Presenter::FrameView& frame,
         screenshare::Nv12D3D11Presenter::ScaleMode scale) override {
         if (!window || !IsWindow(window)) { Reset(); outcome_ = screenshare::PresentationOutcome::Unavailable; return false; }
-        if (IsIconic(window)) { outcome_ = screenshare::PresentationOutcome::Minimized; return false; }
+        outcome_ = screenshare::PresentationTargetBlockReason(window);
+        if (outcome_ != screenshare::PresentationOutcome::Unknown) return false;
         Prepare(window, width, height, smooth, lowLatency, scale);
         const bool result = presenter_.TryPresent(frame);
         outcome_ = presenter_.lastOutcome(); return result;
@@ -18,14 +20,13 @@ public:
     void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
         screenshare::Nv12D3D11Presenter::ScaleMode scale) override {
         if (!window || !IsWindow(window)) { Reset(); return; }
-        if (IsIconic(window)) return;
+        outcome_ = screenshare::PresentationTargetBlockReason(window);
+        if (outcome_ != screenshare::PresentationOutcome::Unknown) return;
         Prepare(window, width, height, smooth, lowLatency, scale);
         presenter_.Redraw();
     }
     void Prepare(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
         screenshare::Nv12D3D11Presenter::ScaleMode scale) {
-        if (!window || !IsWindow(window)) { Reset(); return; }
-        if (IsIconic(window)) return;
         if (lowLatency_ != lowLatency) {
             presenter_.Reset(); presenter_.SetLowLatency(lowLatency); lowLatency_ = lowLatency;
         }

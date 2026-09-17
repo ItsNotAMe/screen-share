@@ -107,6 +107,13 @@ waiting for frames. Decoder telemetry implementation details and remaining scope
 The subsequent desktop check confirmed visibility but still reported DXGI
 occlusion and zero presented frames/errors. Visibility correction alone does not
 resolve desktop presentation acceptance; do not count that timeout as passed.
+The Qt renderer fixture's separate hidden-startup failure is now diagnosed and
+corrected. Production rendering also recognizes minimized root windows behind
+child surfaces and drops hidden/minimized frames before GPU work. This does not
+establish a fix for the earlier visible-but-occluded CLI case. See ROOM-UI.md.
+Desktop validation also exposed and fixed GPU device destruction invoking its
+worker from WebRTC's restricted signaling executor. Final release now joins first;
+the targeted regression keeps all invoke restrictions enabled. See GPU-SCALING.md.
 
 **Deliverable:** existing UI and CLI use the shared v2 backend, including capture/
 audio selection, presentation, Auto/Manual/Gaming settings, saved nickname, live

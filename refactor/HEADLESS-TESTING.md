@@ -1,5 +1,49 @@
 # Headless media checks
 
+## Native target visibility and Windows fixture corrections
+
+Production presentation now tests the root window's minimized state before GPU
+work, plus child visibility and nonzero client area. The Windows recovery scenario
+checks child-surface minimize/hide/restore with no extra device recovery, in
+addition to its original injected device-loss budget checks.
+
+The startup timeout reproduced with `qtVisible=1`, `winVisible=0`, 974 enqueued
+frames, zero presented frames and zero graphics errors:
+`build/webrtc/presentation-target-windows/native-service-10ce4020-b184-45c6-afa0-36644f92be8b`.
+The fixture now explicitly shows its test-owned window without activation after
+Qt's first show. This addresses the launcher's hidden STARTUPINFO overriding the
+first native show ([Windows contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow)).
+The adapter now forwards native outcomes, and startup failure diagnostics retain
+Qt/native visibility, drops, errors and HRESULT.
+
+Both UI and CLI had a separate fixture assertion expecting a taller WGC window to
+fill a 16:9 canvas. Windows cases now require positive, centered, even pillarboxes;
+synthetic 16:9 cases still require a full image. No media or presentation assertion
+was removed, no timeout increased and no audio/input device was used.
+
+Release/Debug builds and both five-case silent matrices passed under
+`build/webrtc/presentation-target-{release,debug}/result.json`. The first desktop
+matrix stopped at the incorrect CLI image assertion; UI was run independently.
+Final Release Windows UI passed in **14.804 s** and Windows CLI in **8.520 s**:
+`build/webrtc/presentation-target-final-windows-ui/native-service-f562686e-a2bd-47df-b3fc-fe176fccd8e4`
+and `build/webrtc/presentation-target-final-windows-cli/native-service-75cca481-76a7-4539-8e50-2b99bf428125`.
+These passes include the shared shell's Windows room scenarios. They do not prove
+the cause of historical visible-but-occluded results, physical driver acceptance,
+hardware decoding/zero-copy presentation or external image/input latency.
+
+The subsequent Debug desktop run exposed a real teardown assertion, not a fixture
+failure: `Thread::BlockingCallImpl` rejected the signaling executor's invoke from
+`D3dVideoDevice::~D3dVideoDevice`. The local debugger stack is retained at
+`build/webrtc/presentation-debug-stack-final/native-service-4e3056c7-2244-456b-9498-c2cde4cd6f3e/native.log`.
+The temporary debugger launcher was removed after diagnosis. Cleanup now joins the
+owner before releasing scaler COM references; invoke permissions remain unchanged.
+`StreamSettingsTest --gpu` now releases the last retained scaled texture from a
+thread with all invokes disabled and checks device lifetime expiry. It passes in
+Release and Debug (`build/webrtc/desktop-lifecycle-gpu-{release,debug}.log`).
+Final Release and Debug desktop-inclusive matrices: **7/7 each**, including Windows
+CLI/UI shutdown, `build/webrtc/desktop-lifecycle-{release,debug}/result.json`. Final build evidence:
+`build/webrtc/desktop-lifecycle-{app,proof}-{release,debug}-build.log`.
+
 ## Shared application shell
 
 The final silent Release/Debug matrices passed **5/5 each**:

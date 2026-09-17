@@ -1,5 +1,33 @@
 # Checkpoint B evidence
 
+## Presentation target lifecycle and desktop validation — 2026-09-17
+
+Shared UI/CLI presentation now recognizes minimized roots above native child
+surfaces and drops hidden/minimized/zero-area targets before GPU work. A healthy
+device survives pause/restore, with separate drop reasons and unchanged recovery
+budgets. Windows tests cover fresh-frame restore after both minimize and hide.
+
+The initial Qt test timeout was reproduced with a hidden native window despite
+Qt reporting visible. The fixture explicitly shows its first test window without
+activation and logs native presentation state on timeout. A second UI/CLI test
+defect assumed the taller WGC fixture filled a 16:9 canvas; both now assert the
+correct centered even pillarboxing while preserving exact synthetic assertions.
+
+Release/Debug builds and five-case silent matrices passed. Final Release Windows
+UI and CLI scenarios passed in **14.804 s** and **8.520 s** respectively, including
+shared-shell flows and real GPU presentation. HEADLESS-TESTING.md lists artifacts
+and earlier failures. Historical visible-but-occluded reports remain distinct from
+the diagnosed hidden startup; no physical-device or external latency gate closes.
+
+Further Debug validation caught a GPU teardown assertion: the restricted signaling
+executor attempted a blocking invoke to release the scaler. The debugger confirmed
+the destructor stack. Cleanup now joins the owner before dropping its free-threaded
+COM references. No WebRTC thread permissions were relaxed. The new last-texture
+release regression passes with all invokes disabled in both build configurations;
+the final Release and Debug desktop-inclusive matrices pass **7/7 each**. See
+HEADLESS-TESTING.md for the crash evidence, GPU logs and
+`desktop-lifecycle-{release,debug}/result.json`.
+
 ## Shared application shell — 2026-09-17
 
 Both existing opt-in UI entry points now use RoomApplication and the normal

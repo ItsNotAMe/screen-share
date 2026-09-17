@@ -15,7 +15,11 @@ alignment as the CPU fallback. Different sampling filters need not give identica
 pixels on detailed/downsampled content; subjective text quality remains to assess.
 
 One scaler belongs to each capture D3D device. Shaders/sampler are created lazily
-once and released on its existing owner thread. Complete drawing sequences hold
+on its existing owner thread. Final destruction joins that worker before releasing
+the scaler's free-threaded COM references and bookkeeping; no context operations
+remain. This avoids a forbidden blocking invoke when the last retained device is
+released by WebRTC's restricted signaling executor. Runtime scaler failure still
+clears its resources on the owner. Complete drawing sequences hold
 the device's multithread lock, shared with capture and MF. Output textures are new
 owned resources, never overwritten or pooled while another viewer retains them.
 Commands are flushed before publication; completion does not block the CPU.

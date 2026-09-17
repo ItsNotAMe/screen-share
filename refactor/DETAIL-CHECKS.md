@@ -11,6 +11,19 @@ physical-device, resource, network, cost, latency and cutover gates remain open
 until their own evidence passes. Dated continuation notes at the end are historical;
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
 
+## Presentation target lifecycle — 2026-09-17
+
+- [x] Recognize minimized root windows behind native child video surfaces and skip
+  GPU preparation/upload/draw for hidden, minimized and zero-area targets.
+- [x] Preserve normal drop diagnostics/recovery budgets and restore on fresh frames.
+- [x] Add Windows child-surface minimize/hide/restore checks, native startup failure
+  diagnostics, explicit test-window visibility and WGC-specific letterbox assertions.
+- [x] Fix GPU device final release on restricted signaling executors: join the D3D
+  worker before releasing scaler references, without widening invoke permissions.
+  Exercise a live scaled texture's last release with all cross-thread invokes disabled.
+- [ ] Close historical visible-but-occluded failures and physical desktop/driver
+  acceptance; fixing the hidden test startup does not prove every occlusion cause.
+
 ## Shared application shell integration — 2026-09-17
 
 - [x] Reuse AppShell for both existing v2 UI entry points; browser and session pages

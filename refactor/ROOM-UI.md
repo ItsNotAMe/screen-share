@@ -48,6 +48,22 @@ Already transmitted audio can drain from receiver buffers after capture stops.
 
 ## Presentation recovery
 
+Presentation now checks the native surface **and its root application window**.
+A minimized root produces a `minimized` drop even though the child HWND itself is
+not iconic. Hidden, invalid and zero-sized targets produce `unavailable`. The
+shared UI/CLI backend skips prepare/upload/draw work while blocked, retaining the
+healthy device for restore; invalid handles still release it. The low-level NV12
+presenter repeats the check before upload and drawing for direct callers and
+visibility changes during a frame. No frame retry queue, polling loop or recovery
+attempt is added. Existing latest-frame delivery supplies a new frame after restore.
+
+The Windows test explicitly shows its first test-owned window without activation:
+the launcher's hidden STARTUPINFO can override Qt's initial show while Qt reports
+visible. Startup failures now log native visibility, presentation/drop/error
+counters and HRESULT. The injected renderer forwards native outcome diagnostics.
+Generated WGC tests validate even, centered pillarboxing for their taller window;
+only the synthetic 16:9 source is expected to fill the complete 16:9 output.
+
 UI and CLI now use `backend/render/FramePresentationBackend` and
 `FramePresentationSession`; recovery is in `backend/render/PresentationRecovery.h`.
 The frontend owns only Qt integration, the existing one-slot worker queue and

@@ -57,9 +57,12 @@ webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::RetainCapture(const C
     return webrtc::make_ref_counted<D3dVideoFrameBuffer>(shared_from_this(), frame.nv12Texture, frame.width, frame.height);
 }
 D3dVideoDevice::~D3dVideoDevice() {
-    OnOwner(*owner_, [&] { scaler_.reset(); });
     owner_->Stop();
-    // D3D COM references are free-threaded. No context work remains after join.
+    // Final release can run on WebRTC's restricted signaling executor. Joining
+    // first excludes all context work without a forbidden cross-thread invoke.
+    // The scaler owns only free-threaded D3D COM references and bookkeeping;
+    // destruction after the join performs no immediate-context operations.
+    scaler_.reset();
     context_.Reset(); device_.Reset();
 }
 webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::UploadNv12(int width, int height, std::span<const uint8_t> pixels) {

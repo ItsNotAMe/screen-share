@@ -1,4 +1,5 @@
 #include "render/Nv12D3D11Presenter.h"
+#include "render/PresentationTarget.h"
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -558,8 +559,10 @@ float4 ps_main(VertexOut input) : SV_Target
     void Render()
     {
         lastPresented = false;
-        outcome = IsIconic(hwnd) ? PresentationOutcome::Minimized : PresentationOutcome::Unavailable;
-        if (!swapChain || hwnd == nullptr || IsWindow(hwnd) == 0 || IsIconic(hwnd) != FALSE) {
+        outcome = PresentationTargetBlockReason(hwnd);
+        if (outcome != PresentationOutcome::Unknown) return;
+        if (!swapChain) {
+            outcome = PresentationOutcome::Unavailable;
             return;
         }
 
@@ -702,6 +705,11 @@ bool Nv12D3D11Presenter::TryPresent(const FrameView& frame)
     ValidateNv12Frame(frame);
     if (impl_->hwnd == nullptr) {
         throw std::runtime_error("Embedded preview presenter has no target window");
+    }
+    impl_->outcome = PresentationTargetBlockReason(impl_->hwnd);
+    if (impl_->outcome != PresentationOutcome::Unknown) {
+        impl_->lastPresented = false;
+        return false;
     }
 
     impl_->CreateDeviceAndSwapChain();

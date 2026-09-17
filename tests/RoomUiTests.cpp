@@ -67,16 +67,32 @@ public:
     }
     void Reset() noexcept override { native_->Reset(); }
     uint32_t MaximumFrameLatency() const noexcept override { return native_->MaximumFrameLatency(); }
+    screenshare::PresentationOutcome LastOutcome() const noexcept override { return native_->LastOutcome(); }
 };
 void NativePresentationRecovery() {
     auto fail = std::make_shared<std::atomic_bool>(false);
     VideoFrameWidget widget(nullptr, [fail] { return std::make_unique<FaultingNativeRenderer>(fail); });
     widget.resize(320, 180); widget.setLowLatency(true); widget.show();
+    // The fixture hides helper consoles via STARTUPINFO. Windows can apply that
+    // state to the first GUI ShowWindow as well, despite Qt reporting visible.
+    // Explicitly show only this test-owned window, without taking activation.
+    ShowWindow(reinterpret_cast<HWND>(widget.winId()), SW_SHOWNOACTIVATE);
+    Check(IsWindowVisible(reinterpret_cast<HWND>(widget.winId())));
     auto send = [&] {
         screenshare::Nv12VideoFrame frame; frame.width = 320; frame.height = 180;
         frame.nv12.resize(320 * 180 * 3 / 2, 128); Check(widget.setVideoFrame(std::move(frame)));
     };
-    Wait([&] { send(); return widget.presentedFrameCount() >= 3; });
+    try { Wait([&] { send(); return widget.presentedFrameCount() >= 3; }); }
+    catch (...) {
+        const auto stats = widget.presentationStats();
+        const auto hwnd = reinterpret_cast<HWND>(widget.winId());
+        std::cerr << "native-presentation-start: qtVisible=" << widget.isVisible()
+            << " winVisible=" << IsWindowVisible(hwnd) << " minimized=" << IsIconic(hwnd)
+            << " presented=" << stats.presentedFrames << " enqueued=" << stats.enqueuedFrames
+            << " outcome=" << int(stats.renderer.outcome) << " occluded=" << stats.renderer.occludedDrops
+            << " errors=" << stats.presentErrors << " code=" << stats.renderer.lastError << '\n';
+        throw;
+    }
     for (unsigned attempt = 1; attempt <= 3; ++attempt) {
         *fail = true;
         Wait([&] { send(); return widget.presentationStats().recoveries == attempt; });
@@ -91,6 +107,22 @@ void NativePresentationRecovery() {
     const auto presented = widget.presentedFrameCount();
     Wait([&] { send(); return widget.presentedFrameCount() >= presented + 3; });
     Check(widget.presentationStats().recoveries == 0);
+    // The presenter sees a native child surface, while only its parent shell is
+    // minimized. Drops must avoid GPU work/recovery and restore on a fresh frame.
+    const auto errors = widget.presentationStats().presentErrors;
+    widget.showMinimized();
+    Wait([&] { send(); return widget.presentationStats().renderer.minimizedDrops >= 3; });
+    const auto minimizedFrames = widget.presentedFrameCount();
+    for (int i = 0; i < 10; ++i) { send(); QCoreApplication::processEvents(); }
+    Check(widget.presentedFrameCount() == minimizedFrames);
+    widget.showNormal();
+    Wait([&] { send(); return widget.presentedFrameCount() >= minimizedFrames + 3; });
+    widget.hide();
+    Wait([&] { send(); return widget.presentationStats().renderer.unavailableDrops >= 3; });
+    widget.show();
+    const auto hiddenFrames = widget.presentedFrameCount();
+    Wait([&] { send(); return widget.presentedFrameCount() >= hiddenFrames + 3; });
+    Check(widget.presentationStats().presentErrors == errors && widget.presentationStats().recoveries == 0);
 }
 #endif
 QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
@@ -697,10 +729,16 @@ int main(int argc, char** argv) {
         Wait([&] { return diagnostics->item(0, 1)->text() == "source-observed"; });
         Wait([&] { return diagnostics->item(0, 5)->text() == QString::fromUtf8("160 × 90"); });
         const auto source = host.session().status().stream.peers[0].source;
-        Check(source.imageLeft == 0 && source.imageTop == 0 && source.imageWidth == 160 && source.imageHeight == 90);
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
+        Check(source.imageLeft == 0 && source.imageTop == 0 && source.imageWidth == 160 && source.imageHeight == 90);
         Check(source.scalingPath == SourceScalingPath::Cpu && source.scaled > 0 && source.gpuScaled == 0);
         Wait([&] { return popupText->toPlainText().contains("Source scaling: cpu."); });
+#else
+        // The WGC fixture is 640x400 with window chrome, not the synthetic 16:9
+        // source. It must preserve that taller aspect ratio with even pillarboxes.
+        Check(source.imageTop == 0 && source.imageHeight == 90 && source.imageWidth > 0 && source.imageWidth < 160);
+        Check(source.imageLeft > 0 && source.imageLeft % 2 == 0 && source.imageWidth % 2 == 0);
+        Check(std::abs(160 - source.imageWidth - 2 * source.imageLeft) <= 2);
 #endif
         Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Receiver-reported decode"));
         Check(diagnostics->item(diagnostics->currentRow(), 0)->data(Qt::UserRole) == diagnosticPeer);

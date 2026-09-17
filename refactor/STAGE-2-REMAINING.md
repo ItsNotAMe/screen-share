@@ -30,6 +30,13 @@ count follows from counting the historical checklist entries.
 
 ## Already integrated; do not rebuild
 
+Presentation skips GPU work for hidden/minimized targets, including minimized
+application roots above native child video windows, and resumes on fresh frames.
+The Qt test fixture's hidden-startup problem is corrected. Earlier visible-but-
+occluded reports remain a separate acceptance issue, not a proven fixed defect.
+GPU final release no longer invokes the worker from a restricted signaling thread;
+both full desktop-inclusive matrices and restricted-thread GPU regression pass.
+
 Both opt-in UI entry points now use the normal AppShell via RoomApplication, with
 one-window browser/session navigation, screen-awake state and asynchronous shell
 shutdown. The ordinary legacy home/create/join/control actions and CLI commands

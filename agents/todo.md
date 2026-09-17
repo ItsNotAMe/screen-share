@@ -25,6 +25,10 @@ Use refactor/STAGE-2-REMAINING.md for the four remaining Stage 2 delivery groups
 The existing v2 UI entry points now use the normal AppShell with one-window page
 navigation and coordinated media/directory shutdown. Reuse RoomApplication for
 further adoption; ordinary legacy action routing and CLI migration remain open.
+Native presentation now handles minimized root windows behind child surfaces and
+skips hidden-target GPU work. Windows UI/CLI scenarios pass after hidden-startup
+and WGC letterbox fixture corrections; earlier visible-but-occluded cases still
+need acceptance. Do not conflate these with hardware decode/zero-copy completion.
 Reported audio endpoint failures now preserve video with explicit same-device
 recovery and visible UI/CLI health; do not reimplement recovery. Physical device
 acceptance, microphone processing and multichannel handling remain open.

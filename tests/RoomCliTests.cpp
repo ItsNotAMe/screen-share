@@ -311,10 +311,16 @@ int main(int argc, char** argv) {
                 const auto row = peer.toObject();
                 const auto source = row["source"].toObject();
                 if (row["observedRevision"].toInteger() && row["width"].toInt() == 160) {
-                    Check(source["activeImage"].toObject()["width"].toInt() == 160 &&
-                        source["activeImage"].toObject()["height"].toInt() == 90);
+                    const auto image = source["activeImage"].toObject();
 #ifndef SCREENSHARE_WINDOWS_CLI_PROOF
+                    Check(image["width"].toInt() == 160 && image["height"].toInt() == 90);
                     Check(source["scalingPath"] == "cpu");
+#else
+                    // WGC captures the taller generated window; it must be
+                    // pillarboxed, unlike the synthetic 16:9 fixture.
+                    const int width = image["width"].toInt(), left = image["left"].toInt();
+                    Check(image["top"].toInt() == 0 && image["height"].toInt() == 90 && width > 0 && width < 160);
+                    Check(left > 0 && left % 2 == 0 && width % 2 == 0 && std::abs(160 - width - 2 * left) <= 2);
 #endif
                 }
                 Check(row["sender"].isObject() && row["sender"].toObject().contains("limitingReason"));
