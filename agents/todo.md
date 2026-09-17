@@ -22,6 +22,9 @@ integrated into browser-created sessions with explicit save controls; do not reb
 profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
 Use refactor/STAGE-2-REMAINING.md for the four remaining Stage 2 delivery groups.
+The existing v2 UI entry points now use the normal AppShell with one-window page
+navigation and coordinated media/directory shutdown. Reuse RoomApplication for
+further adoption; ordinary legacy action routing and CLI migration remain open.
 Reported audio endpoint failures now preserve video with explicit same-device
 recovery and visible UI/CLI health; do not reimplement recovery. Physical device
 acceptance, microphone processing and multichannel handling remain open.

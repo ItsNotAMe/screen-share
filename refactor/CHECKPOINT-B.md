@@ -1,5 +1,27 @@
 # Checkpoint B evidence
 
+## Shared application shell — 2026-09-17
+
+Both existing opt-in UI entry points now use RoomApplication and the normal
+AppShell. Browser/session navigation retains one window; returning destroys the
+old page and resumes the pushed directory. Title-bar/Alt+F4/programmatic close
+drains media and directory asynchronously, including admission cancellation and
+repeated close requests. Screen-awake state is released on return/exit, and shells
+without a revoke handler no longer reserve the global panic shortcut.
+
+Release/Debug builds and final silent regression matrices passed **5/5 each**:
+`build/webrtc/room-shell-final-{release,debug}/result.json`. Actual shell tests cover
+failed join/return, repeated sessions, saved defaults, source/audio recovery,
+directory connection counts, page removal, live shutdown and immediate admission
+cancellation. The Release `ScreenShareUi --self-test` also passed.
+
+The optional Windows UI run failed at NativePresentationRecovery's first wait for
+three presented frames, before any shell scenario ran (15.510 s):
+`build/webrtc/room-shell-windows/native-service-3ac5a76d-1111-41d0-9007-37859d3f4741`.
+It does not establish desktop shell/presentation acceptance; no assertion was
+removed or timeout extended. Ordinary home/create/join/control and CLI action
+adoption, Stage 2 completion and default cutover remain open.
+
 ## Audio endpoint failure isolation and recovery — 2026-09-17
 
 Reported host capture/viewer output startup and live I/O failures now preserve the

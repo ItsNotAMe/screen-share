@@ -22,8 +22,11 @@ public:
     // Handler invoked when the host presses the global panic-revoke hotkey
     // (Ctrl+Alt+Shift+F12). Wired to instantly revoke any active remote control.
     void setPanicHotkeyHandler(std::function<void()> handler);
+    // Returning false defers window closure while the page drains its workers.
+    void setCloseHandler(std::function<bool()> handler);
 
 protected:
+    void closeEvent(QCloseEvent* event) override;
     void changeEvent(QEvent* event) override;
     void showEvent(QShowEvent* event) override;
 #ifdef _WIN32
@@ -49,6 +52,7 @@ private:
     QWidget* titleBar_ = nullptr;
     QPushButton* maximizeButton_ = nullptr;
     std::function<void()> panicHotkeyHandler_;
+    std::function<bool()> closeHandler_;
 #ifdef _WIN32
     bool panicHotkeyRegistered_ = false;
 #endif

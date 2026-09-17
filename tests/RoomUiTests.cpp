@@ -4,6 +4,8 @@
 #include "shared/RoomStreamDiagnostics.h"
 #include <QClipboard>
 #include "ui/RoomBrowserWindow.h"
+#include "ui/RoomApplication.h"
+#include <QStackedWidget>
 #include "ui/VideoFrameWidget.h"
 #include "media/webrtc/NativeRoomRuntime.h"
 #include "media/webrtc/MfVideoEncoderFactory.h"
@@ -261,9 +263,14 @@ void BrowserScenario(const QUrl& origin) {
     Check(profile.saveNickname(QStringLiteral(" Cafe\u0301 ")) && profile.nickname() == QStringLiteral("Caf\u00e9"));
     Check(RoomProfile(hostFile).nickname() == QStringLiteral("Caf\u00e9"));
     auto audio = std::make_shared<proof::AudioEvidence>();
-    RoomBrowserWindow host(origin, Factory(audio), true, hostFile, false);
-    RoomBrowserWindow viewer(origin, Factory(audio), true, viewerFile, false);
-    Directory audit(true); Check(audit.Start(origin)); host.show(); viewer.show();
+    RoomApplication hostApp(origin, Factory(audio), true, hostFile, false);
+    RoomApplication viewerApp(origin, Factory(audio), true, viewerFile, false);
+    auto& host = *hostApp.browser(); auto& viewer = *viewerApp.browser();
+    Directory audit(true); Check(audit.Start(origin)); hostApp.show(); viewerApp.show();
+    auto* hostStack = hostApp.window().findChild<QStackedWidget*>("AppPageStack");
+    auto* viewerStack = viewerApp.window().findChild<QStackedWidget*>("AppPageStack");
+    Check(hostStack && viewerStack && hostStack->count() == 1 && !host.isWindow());
+    Check(!hostApp.keepingScreenAwake() && !viewerApp.keepingScreenAwake());
     Wait([&] { return audit.status().phase == Directory::Phase::Ready && host.directory().status().phase == Directory::Phase::Ready && viewer.directory().status().phase == Directory::Phase::Ready; });
     Check(audit.status().rooms.empty() && host.directory().connectionAttempts() == 1);
     Check(host.findChild<QLineEdit*>("roomNickname")->text() == QStringLiteral("Caf\u00e9"));
@@ -275,6 +282,9 @@ void BrowserScenario(const QUrl& origin) {
     auto* list = viewer.findChild<QTableWidget*>("publicRooms");
     Check(list->rowCount() == 1 && list->item(0, 0)->text() == "<b>Plain room</b>" && list->item(0, 3)->text() == "Required");
     const auto hostAttempts = host.directory().connectionAttempts();
+    Check(hostStack->currentWidget() == host.activeSession() && hostStack->count() == 2);
+    Check(host.activeSession()->window() == &hostApp.window() && hostApp.window().isVisible());
+    Check(hostApp.keepingScreenAwake() && !host.isVisible());
     // Admission status can become Active before the Qt snapshot enables the
     // copy button. Wait for the actual control, not just the earlier room ID.
     Wait([&] { return !host.activeSession()->findChild<QLineEdit*>("roomLink")->text().isEmpty() &&
@@ -299,6 +309,7 @@ void BrowserScenario(const QUrl& origin) {
     Wait([&] { return viewer.activeSession() && viewer.activeSession()->session().status().phase == RoomPhase::Failed; });
     viewer.activeSession()->close();
     Wait([&] { return !viewer.activeSession() && viewer.isVisible() && viewer.directory().status().phase == Directory::Phase::Ready; });
+    Check(viewerStack->count() == 1 && viewerStack->currentWidget() == &viewer && !viewerApp.keepingScreenAwake());
     viewer.findChild<QLineEdit*>("roomNickname")->setText(" Browser viewer ");
     viewer.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret"); list->selectRow(0);
     viewer.findChild<QLineEdit*>("joinRoomId")->setText(roomLink);
@@ -394,21 +405,51 @@ void BrowserScenario(const QUrl& origin) {
     Check(viewer.directory().Start(origin));
     QTimer idle; bool idleDone = false; idle.setSingleShot(true); QObject::connect(&idle, &QTimer::timeout, [&] { idleDone = true; }); idle.start(150);
     Wait([&] { return idleDone; }); Check(viewer.directory().connectionAttempts() == attempts);
-    host.close(); viewer.close(); audit.Stop();
-    Wait([&] { return !host.directory().running() && !viewer.directory().running() && !audit.running(); });
+    // Close the real shell during a live session, including repeated close clicks.
+    host.findChild<QPushButton*>("createV2Room")->click();
+    Wait([&] { return host.activeSession() && host.activeSession()->session().status().phase == RoomPhase::Active; });
+    unsigned hostClosed = 0, viewerClosed = 0;
+    hostApp.closed = [&] { ++hostClosed; }; viewerApp.closed = [&] { ++viewerClosed; };
+    Check(!hostApp.window().close()); Check(!hostApp.window().close());
+    Check(hostApp.window().isVisible());
+    viewerApp.window().close(); audit.Stop();
+    Wait([&] { return hostClosed == 1 && viewerClosed == 1 && !host.directory().running() && !viewer.directory().running() && !audit.running(); });
+    Check(!host.activeSession() && !hostApp.window().isVisible() && !viewerApp.window().isVisible());
+    Check(!hostApp.keepingScreenAwake() && !viewerApp.keepingScreenAwake());
+    Check(hostStack->count() == 1 && viewerStack->count() == 1);
     // Production facade rejects plaintext without opening a connection.
     Directory secure; Check(!secure.Start(origin)); Check(secure.connectionAttempts() == 0 && secure.status().phase == Directory::Phase::Failed);
+    // Cancellation before the first network event must drain through the same
+    // shell path, without briefly reopening the directory or orphaning a page.
+    {
+        RoomApplication pending(origin, Factory(audio), true, profiles.filePath("pending.ini"), false);
+        unsigned closed = 0; pending.closed = [&] { ++closed; };
+        pending.show(); pending.window().close(); pending.window().close();
+        Wait([&] { return closed == 1 && !pending.browser()->directory().running(); });
+        Check(pending.finished() && !pending.window().isVisible() && !pending.keepingScreenAwake());
+    }
+    {
+        RoomSessionConfig config; config.room.origin = origin.toString().toStdString();
+        config.room.host = true; config.room.nickname = "Cancelled host"; config.room.name = "Cancelled room";
+        RoomApplication pending(config, Factory(audio), true);
+        unsigned closed = 0; pending.closed = [&] { ++closed; };
+        pending.show(); pending.window().close(); pending.window().close();
+        Wait([&] { return closed == 1 && !pending.session()->session().running(); });
+        Check(pending.finished() && !pending.window().isVisible() && !pending.keepingScreenAwake());
+    }
 }
 void SourceSwitchScenario(const std::string& origin) {
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
     config.room.nickname = "Source host"; config.room.name = "Source switch";
     config.media.preferences.resolution = ResolutionMode::Native;
     auto hostAudio = std::make_shared<proof::AudioEvidence>(); hostAudio->captureUnavailable = true;
-    RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
+    RoomApplication hostApp(config, Factory(hostAudio), true); hostApp.show();
+    auto& host = *hostApp.session();
     Wait([&] { return host.session().status().phase == RoomPhase::Active; });
     config.room.host = false; config.room.roomId = host.session().status().roomId;
     auto audio = std::make_shared<proof::AudioEvidence>();
-    RoomSessionWindow viewer(config, Factory(audio), true); viewer.show();
+    RoomApplication viewerApp(config, Factory(audio), true); viewerApp.show();
+    auto& viewer = *viewerApp.session();
     unsigned frames = 0, lastWidth = 0; auto present = viewer.session().frameReady;
     viewer.session().frameReady = [&](auto frame) { ++frames; lastWidth = frame.width; present(std::move(frame)); };
     Wait([&] { return frames >= 10 && host.findChild<QPushButton*>("switchCaptureSource")->isEnabled(); });
@@ -520,7 +561,10 @@ void SourceSwitchScenario(const std::string& origin) {
         viewer.session().status().revision == viewerBefore.revision);
     host.session().playbackUpdated = [&](const auto& result) { error = result.error; };
     host.session().updatePlayback({}); Wait([&] { return !host.session().playbackPending(); }); Check(error == AudioUpdateError::Unsupported);
-    host.close(); viewer.close(); Wait([&] { return !host.session().running() && !viewer.session().running(); });
+    hostApp.window().close(); viewerApp.window().close();
+    Wait([&] { return hostApp.finished() && viewerApp.finished() && !hostApp.window().isVisible() && !viewerApp.window().isVisible(); });
+    Check(!host.session().running() && !viewer.session().running());
+    Check(!hostApp.keepingScreenAwake() && !viewerApp.keepingScreenAwake());
 }
 void MutationAcknowledgementScenario(const std::string& origin) {
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;

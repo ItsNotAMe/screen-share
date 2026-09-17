@@ -1,4 +1,5 @@
 #include "ui/RoomBrowserWindow.h"
+#include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
 #include "ui/UiStyle.h"
 #include "rtc_base/ssl_adapter.h"
@@ -124,9 +125,14 @@ void RoomBrowserWindow::Launch(bool host) {
         nickname_->setText(*nickname); error_->clear();
         active_ = std::make_unique<RoomSessionWindow>(std::move(config), factory_, loopback_, &profile_);
         active_->closed = [this] { QTimer::singleShot(0, this, [this] {
-            active_.reset(); if (closing_) close(); else show();
+            active_.reset();
+            if (closing_) close();
+            else if (presentPage) presentPage(this);
+            else show();
         }); };
-        password_->clear(); active_->show(); hide();
+        password_->clear();
+        if (presentPage) presentPage(active_.get());
+        else { active_->show(); hide(); }
     } catch (...) { error_->setText("Invalid room or capture settings."); }
 }
 void RoomBrowserWindow::showEvent(QShowEvent* event) { QWidget::showEvent(event); if (!closing_) directory_.Start(origin_); }
@@ -147,6 +153,6 @@ int RunRoomBrowserWindow(const QUrl& origin) {
     webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false);
     webrtc::InitializeLogging(std::move(logging));
     const bool previous = QApplication::quitOnLastWindowClosed(); QApplication::setQuitOnLastWindowClosed(false);
-    RoomBrowserWindow window(origin); window.closed = [] { QApplication::quit(); }; window.show();
+    RoomApplication window(origin); window.closed = [] { QApplication::quit(); }; window.show();
     const int result = QApplication::exec(); QApplication::setQuitOnLastWindowClosed(previous); return result;
 }

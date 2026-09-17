@@ -535,18 +535,20 @@ if(SCREENSHARE_BUILD_QT_UI)
             endif()
         endif()
 
+        add_library(ScreenShareUiShell STATIC frontend/ui/AppShellWindow.cpp frontend/ui/ScreenAwakeGuard.cpp frontend/ui/Toast.cpp)
+        target_include_directories(ScreenShareUiShell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/frontend)
+        target_link_libraries(ScreenShareUiShell PUBLIC Qt6::Widgets Qt6::Svg)
+        target_compile_features(ScreenShareUiShell PUBLIC cxx_std_20)
+        target_compile_definitions(ScreenShareUiShell PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
         add_executable(ScreenShareUi WIN32
             frontend/ui/main.cpp
             frontend/ui/QtSessionBackend.cpp
             frontend/ui/ActiveShareWindow.cpp
             frontend/ui/ActiveWatchWindow.cpp
-            frontend/ui/AppShellWindow.cpp
             frontend/ui/CreateRoomWindow.cpp
             frontend/ui/HomeWindow.cpp
             frontend/ui/JoinRoomWindow.cpp
             frontend/ui/RoomAccessCheck.cpp
-            frontend/ui/ScreenAwakeGuard.cpp
-            frontend/ui/Toast.cpp
             frontend/ui/UiStyle.cpp
             frontend/ui/UpdateManager.cpp
             frontend/ui/UpdatePackageSelection.cpp
@@ -560,10 +562,11 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/frontend
         )
-        target_link_libraries(ScreenShareUi PRIVATE ScreenShareAPI Qt6::Network Qt6::Svg Qt6::Widgets shell32)
+        target_link_libraries(ScreenShareUi PRIVATE ScreenShareAPI ScreenShareUiShell Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         if(TARGET ScreenShareRoomFrontend)
-            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp)
-            target_link_libraries(ScreenShareRoomUi PUBLIC ScreenShareRoomFrontend Qt6::Widgets)
+            # The normal app and room entry points share one shell implementation.
+            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/RoomApplication.cpp)
+            target_link_libraries(ScreenShareRoomUi PUBLIC ScreenShareRoomFrontend ScreenShareUiShell Qt6::Widgets)
             target_link_libraries(ScreenShareUi PRIVATE ScreenShareRoomUi)
             target_compile_definitions(ScreenShareUi PRIVATE SCREENSHARE_HAS_ROOM_V2_UI)
             if(BUILD_TESTING)

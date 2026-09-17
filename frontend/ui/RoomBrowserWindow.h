@@ -16,6 +16,9 @@ public:
     RoomSessionWindow* activeSession() const { return active_.get(); }
     screenshare::room::qt::RoomDirectory& directory() { return directory_; }
     std::function<void()> closed;
+    // An application shell can present these existing widgets as pages.
+    // Without a presenter the standalone embedding contract remains available.
+    std::function<void(QWidget*)> presentPage;
 protected:
     void showEvent(QShowEvent*) override;
     void hideEvent(QHideEvent*) override;

@@ -1,5 +1,26 @@
 # Headless media checks
 
+## Shared application shell
+
+The final silent Release/Debug matrices passed **5/5 each**:
+`build/webrtc/room-shell-final-{release,debug}/result.json`.
+Build logs: `build/webrtc/room-shell-final-{release,debug}-build.log`.
+The browser and source/audio scenarios now run their actual pages inside the
+production RoomApplication/AppShell. They assert one top-level window, bounded
+page count after failed/repeated joins, unchanged hidden-directory subscription
+counts, return navigation, retained profile settings, screen-awake release and
+asynchronous repeated close during streaming and immediate admission cancellation.
+The Release legacy UI `--self-test` passed after shell extraction.
+
+The optional generated-window Windows UI run failed before these scenarios, at
+NativePresentationRecovery's initial wait for three presented frames (line 79),
+in 15.510 s. Evidence:
+`build/webrtc/room-shell-windows/native-service-3ac5a76d-1111-41d0-9007-37859d3f4741`.
+That test emits no renderer snapshot at this wait, so its precise cause is unknown;
+do not label this a confirmed occlusion failure or claim desktop shell acceptance.
+Existing desktop presentation gates remain open. All audio remained synthetic
+and silent; no physical keyboard/mouse input was sent.
+
 ## Audio failure and recovery
 
 `build/webrtc/audio-recovery-{release,debug}/result.json` passed **5/5 each**.

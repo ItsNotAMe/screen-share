@@ -11,6 +11,16 @@ physical-device, resource, network, cost, latency and cutover gates remain open
 until their own evidence passes. Dated continuation notes at the end are historical;
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
 
+## Shared application shell integration — 2026-09-17
+
+- [x] Reuse AppShell for both existing v2 UI entry points; browser and session pages
+  stay inside one top-level window and release old pages when returning.
+- [x] Defer shell close until media/directory drain, disable actions during close,
+  and preserve responsive cancellation during admission and active streaming.
+- [x] Reuse screen-awake lifecycle and reserve the revoke hotkey only with a handler.
+- [ ] Migrate ordinary home/create/join/control actions and existing CLI commands
+  after feature parity; this shell integration does not close default adoption.
+
 ## Latest integration: shared UI/CLI presentation — 2026-09-17
 
 - [x] Expose local presentation outcomes and separate busy, occluded, minimized,

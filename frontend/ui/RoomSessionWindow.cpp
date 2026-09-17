@@ -1,4 +1,5 @@
 #include "ui/RoomSessionWindow.h"
+#include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
 #include "shared/RoomProfile.h"
 #include "ui/PeerDiagnosticsWidget.h"
@@ -374,8 +375,12 @@ int RunRoomSessionWindow(const QString& path) {
         struct Ssl { ~Ssl() { webrtc::CleanupSSL(); } } ssl;
         webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false);
         webrtc::InitializeLogging(std::move(logging));
-        RoomSessionWindow window(std::move(config)); window.show();
-        return QApplication::exec();
+        const bool previous = QApplication::quitOnLastWindowClosed();
+        QApplication::setQuitOnLastWindowClosed(false);
+        RoomApplication window(std::move(config));
+        window.closed = [] { QApplication::quit(); }; window.show();
+        const int result = QApplication::exec();
+        QApplication::setQuitOnLastWindowClosed(previous); return result;
     } catch (const std::exception& error) {
         QMessageBox::critical(nullptr, "Cannot start room", QString::fromUtf8(error.what())); return 1;
     }

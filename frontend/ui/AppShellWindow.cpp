@@ -9,6 +9,7 @@
 #include <QtCore/QIODevice>
 #include <QtCore/QRectF>
 #include <QtGui/QIcon>
+#include <QtGui/QCloseEvent>
 #include <QtGui/QPainter>
 #include <QtGui/QPixmap>
 #include <QtSvg/QSvgRenderer>
@@ -121,6 +122,21 @@ AppShellWindow::~AppShellWindow()
 void AppShellWindow::setPanicHotkeyHandler(std::function<void()> handler)
 {
     panicHotkeyHandler_ = std::move(handler);
+#ifdef _WIN32
+    if (!panicHotkeyHandler_) unregisterPanicHotkey();
+    else if (isVisible()) registerPanicHotkey();
+#endif
+}
+
+void AppShellWindow::setCloseHandler(std::function<bool()> handler)
+{
+    closeHandler_ = std::move(handler);
+}
+
+void AppShellWindow::closeEvent(QCloseEvent* event)
+{
+    if (closeHandler_ && !closeHandler_()) event->ignore();
+    else QWidget::closeEvent(event);
 }
 
 int AppShellWindow::addPage(QWidget* page)
@@ -300,6 +316,8 @@ void AppShellWindow::applyNativeWindowStyle()
 
 void AppShellWindow::registerPanicHotkey()
 {
+    // A media-only room shell must not reserve a revoke shortcut it cannot use.
+    if (!panicHotkeyHandler_) return;
     if (panicHotkeyRegistered_) {
         return;
     }

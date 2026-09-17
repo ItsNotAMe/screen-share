@@ -1,10 +1,36 @@
 # Opt-in shared-backend room UI
 
 These are explicit integration entry points, not a replacement visual design.
-The normal app still opens the existing AppShell. The opt-in browser and session
-window reuse the current stylesheet and VideoFrameWidget while exercising the
-shared v2 backend. Default-shell adoption remains part of milestone 2; the broader
+The normal app and both opt-in room entry points now share the existing AppShell.
+The room browser and session are pages in that shell, using the current stylesheet
+and VideoFrameWidget while exercising the shared v2 backend. Normal create/join
+action and CLI adoption remain part of milestone 2; the broader
 appearance/usability redesign stays after milestones 1–5.
+
+## Shared application window
+
+`RoomApplication` owns the existing `AppShellWindow`, browser/session pages and
+`ScreenAwakeGuard`. Both `--room-v2-browser ORIGIN` and `--room-v2 CONFIG.json`
+use it; there is no additional launch mode. Browser-to-session navigation preserves
+one top-level window, its size and its window state. Leaving a session destroys
+its page after asynchronous drain, returns to the browser and opens a fresh pushed
+directory subscription. The old page is removed from the stack, so repeated joins
+do not accumulate hidden sessions. Config-file sessions close the application when
+their page closes; they do not silently inherit browser defaults.
+
+The title-bar close button, Alt+F4 and programmatic shell closure use the same
+close handler. Closure disables page actions, requests media/directory shutdown,
+and keeps the event loop and window alive until both finish. Repeated close requests
+do not repeat shutdown or emit multiple completion callbacks. No nested event loop
+or synchronous wait is added. Screen-awake state lasts while the session page is
+open and is released on return/exit. Queued page transitions are bound to their
+QObject owner. The shell reserves the panic-revoke hotkey only when it has a handler;
+v2 still has no remote input support and cannot take the legacy handler's shortcut.
+
+`ScreenShareUiShell` compiles the shared chrome, toast and screen-awake components
+once for normal and v2 UI users. The ordinary legacy home/create/join/control
+actions remain unchanged pending feature parity and acceptance. This integration
+does not complete Stage 2 or enable default v2 cutover.
 
 ## Shared audio disabled
 

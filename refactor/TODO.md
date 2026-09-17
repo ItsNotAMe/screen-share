@@ -53,6 +53,12 @@ authorized input, network impairment and continuous soak acceptance remain open.
 
 ## 2. Complete user experience (B + D)
 
+The existing v2 browser and config-session entry points now run inside the normal
+AppShell, with in-window navigation, shared screen-awake handling and asynchronous
+close across media/directory workers. Repeated sessions release their pages; failed
+join returns to the browser. Ordinary home/create/join and CLI action routing still
+needs migration and must preserve control features. See ROOM-UI.md.
+
 **Remaining work:** ordinary UI/CLI adoption, video pipeline/recovery completion,
 audio processing/physical-device acceptance, and remaining diagnostics/integration
 checks. [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) separates these four groups from

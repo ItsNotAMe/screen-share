@@ -30,6 +30,11 @@ count follows from counting the historical checklist entries.
 
 ## Already integrated; do not rebuild
 
+Both opt-in UI entry points now use the normal AppShell via RoomApplication, with
+one-window browser/session navigation, screen-awake state and asynchronous shell
+shutdown. The ordinary legacy home/create/join/control actions and CLI commands
+still require adoption; embedding these pages does not establish feature parity.
+
 Shared room media/runtime, opt-in UI/CLI, pushed directory, validated nickname and
 profile defaults, room links/policy/capacity, Auto/Manual settings, per-viewer upload
 allocation, live capture/audio/playback selection, no-shared-audio mode, local and
