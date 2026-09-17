@@ -2,6 +2,7 @@
 #include "shared/RoomLink.h"
 #include "shared/RoomProfile.h"
 #include "shared/RoomStreamDiagnostics.h"
+#include "shared/PresentationDiagnostics.h"
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -364,12 +365,21 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         video_->setVideoFrame(std::move(frame));
     };
     if (!config.room.host && config.preview) {
+        auto* diagnostics = new QLabel(this); diagnostics->setObjectName("viewerPresentationDiagnostics");
+        diagnostics->setTextFormat(Qt::PlainText); diagnostics->setWordWrap(true); layout->addWidget(diagnostics);
         auto* presentationStatus = new QTimer(this);
-        presentationStatus->setInterval(250);
-        connect(presentationStatus, &QTimer::timeout, this, [this, presentationStatus] {
-            if (!video_->presentationStats().terminal) return;
+        presentationStatus->setInterval(1000);
+        connect(presentationStatus, &QTimer::timeout, this, [this, diagnostics] {
+            const auto stats = video_->presentationStats();
+            const auto& renderer = stats.renderer;
+            const auto fields = PresentationDiagnosticsJson(renderer);
+            diagnostics->setText(QString("Local preview: %1. Presented %2; dropped %3; pending %4.\nDrops: busy %5, occluded %6, minimized %7, unavailable %8, recovery backoff %9.\nGraphics errors %10; rebuilds %11; last error %12. These counters do not measure end-to-end latency.")
+                .arg(fields["outcome"].toString()).arg(stats.presentedFrames).arg(stats.droppedFrames).arg(stats.queuedFrames)
+                .arg(renderer.busyDrops).arg(renderer.occludedDrops).arg(renderer.minimizedDrops).arg(renderer.unavailableDrops)
+                .arg(renderer.backoffDrops).arg(renderer.errors).arg(renderer.recoveries)
+                .arg(fields["lastErrorCode"].isNull() ? "none" : fields["lastErrorCode"].toString()));
+            if (!stats.terminal) return;
             error_->setText("Video presentation failed. Leave and rejoin the room to retry. Audio and room controls remain available.");
-            presentationStatus->stop();
         });
         presentationStatus->start();
     }

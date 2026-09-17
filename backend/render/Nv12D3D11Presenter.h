@@ -9,6 +9,20 @@
 
 namespace screenshare {
 
+enum class PresentationOutcome { Unknown, Presented, Busy, Occluded, Minimized, Unavailable, Backoff, Failed };
+inline const char* PresentationOutcomeName(PresentationOutcome value) noexcept {
+    switch (value) {
+    case PresentationOutcome::Presented: return "presented";
+    case PresentationOutcome::Busy: return "busy";
+    case PresentationOutcome::Occluded: return "occluded";
+    case PresentationOutcome::Minimized: return "minimized";
+    case PresentationOutcome::Unavailable: return "unavailable";
+    case PresentationOutcome::Backoff: return "recovery-backoff";
+    case PresentationOutcome::Failed: return "failed";
+    default: return "unknown";
+    }
+}
+
 class PresentationError : public std::runtime_error {
 public:
     PresentationError(HRESULT result, const std::string& message)
@@ -48,6 +62,7 @@ public:
     bool TryPresent(const FrameView& frame);
     [[nodiscard]] bool isHardwareAccelerated() const noexcept;
     [[nodiscard]] std::uint32_t maximumFrameLatency() const noexcept;
+    [[nodiscard]] PresentationOutcome lastOutcome() const noexcept;
     void Clear();
     void Redraw();
     void Reset();

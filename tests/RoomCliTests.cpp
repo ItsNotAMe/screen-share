@@ -64,17 +64,28 @@ public:
     }
     void Reset() noexcept override { ++evidence_->resets; native_->Reset(); }
     uint32_t MaximumFrameLatency() const noexcept override { return native_->MaximumFrameLatency(); }
+    screenshare::PresentationOutcome LastOutcome() const noexcept override { return native_->LastOutcome(); }
 };
 void PreviewLifecycle() {
     auto evidence = std::make_shared<PreviewEvidence>();
     screenshare::ReceiverPreviewWindow preview([evidence] { return std::make_unique<PreviewRenderer>(evidence); });
     preview.SetLowLatency(true); preview.Show();
     screenshare::Nv12VideoFrame frame; frame.width = 320; frame.height = 180; frame.nv12.resize(320 * 180 * 3 / 2, 128);
-    auto resume = [&] {
+    auto resume = [&](std::source_location caller = std::source_location::current()) {
         const auto goal = preview.framesPresented() + 3;
         const auto deadline = std::chrono::steady_clock::now() + 3s;
         while (preview.framesPresented() < goal) {
-            Check(preview.PumpMessages() && std::chrono::steady_clock::now() < deadline);
+            if (!preview.PumpMessages() || std::chrono::steady_clock::now() >= deadline) {
+                const auto stats = preview.presentationStats();
+                throw std::runtime_error("Preview presentation timeout from line " + std::to_string(caller.line()) +
+                    "; frames=" + std::to_string(preview.framesPresented()) + "; errors=" + std::to_string(stats.errors) +
+                    "; recoveries=" + std::to_string(stats.recoveries) + "; terminal=" + std::to_string(stats.terminal) +
+                    "; outcome=" + screenshare::PresentationOutcomeName(stats.outcome) +
+                    "; lastError=" + std::to_string(uint32_t(stats.lastError)) +
+                    "; busy=" + std::to_string(stats.busyDrops) + "; occluded=" + std::to_string(stats.occludedDrops) +
+                    "; visible=" + std::to_string(IsWindowVisible(preview.windowHandle())) +
+                    "; minimized=" + std::to_string(IsIconic(preview.windowHandle())));
+            }
             preview.PresentFrame(frame); std::this_thread::sleep_for(5ms);
         }
         Check(preview.maximumFrameLatency() == 1 && !preview.presentationStats().terminal);
@@ -100,6 +111,7 @@ void PreviewLifecycle() {
     ShowWindow(window, SW_MINIMIZE);
     const auto presented = preview.framesPresented(); preview.PresentFrame(frame);
     Check(preview.framesPresented() == presented);
+    Check(preview.presentationStats().outcome == screenshare::PresentationOutcome::Minimized && preview.presentationStats().minimizedDrops == 1);
     ShowWindow(window, SW_RESTORE); resume();
     auto malformed = frame; malformed.width = 321;
     Reject([&] { preview.PresentFrame(malformed); });
@@ -112,6 +124,7 @@ void PreviewLifecycle() {
             evidence->failPresent = true; preview.PresentFrame(frame);
         }
         Check(preview.presentationStats().recoveries == attempt);
+        Check(preview.presentationStats().lastError == (attempt == 2 ? DXGI_ERROR_DEVICE_RESET : DXGI_ERROR_DEVICE_REMOVED));
         const auto calls = evidence->calls;
         for (int drop = 0; drop < 50; ++drop) preview.PresentFrame(frame);
         Check(evidence->calls == calls);

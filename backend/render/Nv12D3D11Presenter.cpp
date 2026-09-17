@@ -151,6 +151,7 @@ struct Nv12D3D11Presenter::Impl {
     bool linearSampling = true;
     bool lowLatency = false;
     bool lastPresented = false;
+    PresentationOutcome outcome = PresentationOutcome::Unknown;
     bool softwareDevice = false;
     UINT maximumFrameLatency = 0;
     Nv12D3D11Presenter::ScaleMode scaleMode = Nv12D3D11Presenter::ScaleMode::Fit;
@@ -546,6 +547,9 @@ float4 ps_main(VertexOut input) : SV_Target
     void PresentSwapChain()
     {
         const auto result = swapChain->Present(0, lowLatency ? DXGI_PRESENT_DO_NOT_WAIT : 0);
+        outcome = result == S_OK ? PresentationOutcome::Presented :
+            result == DXGI_ERROR_WAS_STILL_DRAWING ? PresentationOutcome::Busy :
+            result == DXGI_STATUS_OCCLUDED ? PresentationOutcome::Occluded : PresentationOutcome::Failed;
         if (lowLatency && (result == DXGI_ERROR_WAS_STILL_DRAWING || result == DXGI_STATUS_OCCLUDED)) return;
         ThrowIfFailed(result, "IDXGISwapChain::Present(embedded preview)");
         lastPresented = result == S_OK;
@@ -554,6 +558,7 @@ float4 ps_main(VertexOut input) : SV_Target
     void Render()
     {
         lastPresented = false;
+        outcome = IsIconic(hwnd) ? PresentationOutcome::Minimized : PresentationOutcome::Unavailable;
         if (!swapChain || hwnd == nullptr || IsWindow(hwnd) == 0 || IsIconic(hwnd) != FALSE) {
             return;
         }
@@ -684,6 +689,7 @@ void Nv12D3D11Presenter::Present(const FrameView& frame)
 
 bool Nv12D3D11Presenter::isHardwareAccelerated() const noexcept { return impl_->device && !impl_->softwareDevice; }
 std::uint32_t Nv12D3D11Presenter::maximumFrameLatency() const noexcept { return impl_->maximumFrameLatency; }
+PresentationOutcome Nv12D3D11Presenter::lastOutcome() const noexcept { return impl_->outcome; }
 
 void Nv12D3D11Presenter::SetLowLatency(bool enabled)
 {

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <vector>
 #include "render/Nv12D3D11Presenter.h"
+#include "shared/PresentationDiagnostics.h"
 #include <dxgi.h>
 #include <chrono>
 #include <thread>
@@ -17,6 +18,7 @@ namespace {
 using namespace std::chrono_literals;
 struct RendererEvidence {
     std::atomic<HRESULT> failure{S_OK};
+    std::atomic<screenshare::PresentationOutcome> outcome{screenshare::PresentationOutcome::Presented};
     std::atomic<unsigned> calls{0}, resets{0};
     std::atomic_bool destroyed{false}, wrongThread{false};
     std::atomic_bool block{false}, entered{false};
@@ -36,11 +38,12 @@ public:
         }
         if (FAILED(state_->failure.load())) throw screenshare::PresentationError(state_->failure, "Injected renderer failure");
         if (frame.dataSize != 6) throw std::runtime_error("Invalid test pixels");
-        return true;
+        return state_->outcome == screenshare::PresentationOutcome::Presented;
     }
     void Update(HWND, uint32_t, uint32_t, bool, bool, screenshare::Nv12D3D11Presenter::ScaleMode) override { CheckThread(); }
     void Reset() noexcept override { CheckThread(); ++state_->resets; }
     uint32_t MaximumFrameLatency() const noexcept override { return 1; }
+    screenshare::PresentationOutcome LastOutcome() const noexcept override { return state_->outcome; }
 };
 template<class F> void Await(F predicate) {
     const auto deadline = std::chrono::steady_clock::now() + 3s;
@@ -64,6 +67,16 @@ void PresentationRecoveryScenario() {
             Await([&] { auto stats = widget.presentationStats(); return stats.enqueuedFrames == stats.presentedFrames + stats.droppedFrames; });
         };
         send(); Require(widget.presentationStats().presentedFrames == 1);
+        using enum screenshare::PresentationOutcome;
+        for (const auto outcome : {Busy, Occluded, Minimized, Unavailable, Unknown}) {
+            state->outcome = outcome; send();
+            Require(widget.presentationStats().renderer.outcome == outcome);
+        }
+        const auto drops = widget.presentationStats().renderer;
+        Require(drops.busyDrops == 1 && drops.occludedDrops == 1 && drops.minimizedDrops == 1 && drops.unavailableDrops == 1);
+        Require(drops.errors == 0 && drops.recoveries == 0 && PresentationDiagnosticsJson(drops)["lastErrorCode"].isNull());
+        state->outcome = Presented;
+        const auto previousDrops = widget.presentationStats().droppedFrames;
         Require(state->owner != mainThread);
         // A stalled renderer still has only one replaceable pending frame;
         // replaced retained buffers are released immediately by the handoff.
@@ -85,15 +98,17 @@ void PresentationRecoveryScenario() {
         state->block = false; // Always release before assertions or widget destruction.
         Await([&] { auto stats = widget.presentationStats(); return stats.enqueuedFrames == stats.presentedFrames + stats.droppedFrames; });
         Await([&] { return previous.expired(); });
-        Require(bounded && widget.presentationStats().droppedFrames == 999);
+        Require(bounded && widget.presentationStats().droppedFrames == previousDrops + 999);
         for (unsigned failure = 1; failure <= 3; ++failure) {
             state->failure = DXGI_ERROR_DEVICE_REMOVED;
             send(); Require(widget.presentationStats().recoveries == failure);
+            Require(widget.presentationStats().renderer.lastError == DXGI_ERROR_DEVICE_REMOVED);
             const auto calls = state->calls.load();
             // The actual worker drops new frames during backoff without invoking
             // the renderer or retaining a failed frame for a later retry.
             for (int frame = 0; frame < 10; ++frame) send();
             Require(state->calls == calls);
+            Require(widget.presentationStats().renderer.outcome == Backoff && widget.presentationStats().renderer.backoffDrops >= 10);
             state->failure = S_OK;
             std::this_thread::sleep_for(260ms);
             send(); Require(!widget.presentationStats().terminal);
@@ -103,13 +118,16 @@ void PresentationRecoveryScenario() {
         const auto calls = state->calls.load();
         for (int frame = 0; frame < 100; ++frame) send();
         Require(state->calls == calls && widget.presentationStats().recoveries == 3);
+        Require(widget.presentationStats().renderer.outcome == Failed && widget.presentationStats().renderer.lastError == DXGI_ERROR_DEVICE_RESET);
         // Only an explicit session clear refreshes the lifetime recovery budget.
         widget.clearFrame(); Await([&] { return !widget.presentationStats().terminal; });
         state->failure = S_OK; send();
         Require(widget.presentationStats().recoveries == 0);
+        Require(widget.presentationStats().renderer.lastError == S_OK);
         state->failure = E_INVALIDARG; send();
         Await([&] { return widget.presentationStats().terminal; });
         Require(widget.presentationStats().recoveries == 0);
+        Require(PresentationDiagnosticsJson(widget.presentationStats().renderer)["lastErrorCode"] == "0x80070057");
         widget.clearFrame(); Await([&] { return !widget.presentationStats().terminal; });
         state->failure = DXGI_ERROR_DEVICE_HUNG; send();
         // Destruction below occurs during backoff; it must join without a timer

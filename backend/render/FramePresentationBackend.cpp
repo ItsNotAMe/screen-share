@@ -4,14 +4,16 @@ namespace {
 class NativeFramePresentation final : public FramePresentationBackend {
     screenshare::Nv12D3D11Presenter presenter_;
     bool lowLatency_ = false;
+    screenshare::PresentationOutcome outcome_ = screenshare::PresentationOutcome::Unknown;
 public:
     bool Present(HWND window, uint32_t width, uint32_t height, bool smooth,
         bool lowLatency, const screenshare::Nv12D3D11Presenter::FrameView& frame,
         screenshare::Nv12D3D11Presenter::ScaleMode scale) override {
-        if (!window || !IsWindow(window)) { Reset(); return false; }
-        if (IsIconic(window)) return false;
+        if (!window || !IsWindow(window)) { Reset(); outcome_ = screenshare::PresentationOutcome::Unavailable; return false; }
+        if (IsIconic(window)) { outcome_ = screenshare::PresentationOutcome::Minimized; return false; }
         Prepare(window, width, height, smooth, lowLatency, scale);
-        return presenter_.TryPresent(frame);
+        const bool result = presenter_.TryPresent(frame);
+        outcome_ = presenter_.lastOutcome(); return result;
     }
     void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
         screenshare::Nv12D3D11Presenter::ScaleMode scale) override {
@@ -34,6 +36,7 @@ public:
     }
     void Reset() noexcept override { presenter_.Reset(); }
     uint32_t MaximumFrameLatency() const noexcept override { return presenter_.maximumFrameLatency(); }
+    screenshare::PresentationOutcome LastOutcome() const noexcept override { return outcome_; }
 };
 }
 
@@ -44,7 +47,7 @@ std::unique_ptr<FramePresentationBackend> CreateNativeFramePresentation() {
 bool FramePresentationSession::Present(HWND window, uint32_t width, uint32_t height, bool smooth,
     bool lowLatency, const screenshare::Nv12D3D11Presenter::FrameView& frame,
     screenshare::Nv12D3D11Presenter::ScaleMode scale) {
-    return Run([&](auto& backend) { return backend.Present(window, width, height, smooth, lowLatency, frame, scale); });
+    return Run([&](auto& backend) { return backend.Present(window, width, height, smooth, lowLatency, frame, scale); }, true);
 }
 
 bool FramePresentationSession::Update(HWND window, uint32_t width, uint32_t height, bool smooth,
@@ -58,4 +61,6 @@ void FramePresentationSession::Clear() noexcept {
     statistics_.recoveries = 0;
     statistics_.maximumFrameLatency = 0;
     statistics_.terminal = false;
+    statistics_.lastError = S_OK;
+    statistics_.outcome = screenshare::PresentationOutcome::Unknown;
 }

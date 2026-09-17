@@ -1,6 +1,7 @@
 #include "cli/RoomCli.h"
 #include "shared/LatestRoomVideoFrame.h"
 #include "shared/RoomStreamDiagnostics.h"
+#include "shared/PresentationDiagnostics.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
@@ -161,16 +162,23 @@ int RunRoomCli(int argc, char** argv) {
         RoomCliHooks hooks;
         hooks.report = [](const auto& status) { std::cout << QJsonDocument(status).toJson(QJsonDocument::Compact).constData() << std::endl; };
         uint64_t reportedPresentationErrors = 0;
+        auto nextPresentationReport = std::chrono::steady_clock::now();
         hooks.pump = [&] {
             if (preview) {
                 if (!preview->PumpMessages()) return false;
                 if (auto frame = frames->Take()) preview->PresentFrame(*frame);
                 const auto status = preview->presentationStats();
-                if (status.errors != reportedPresentationErrors) {
+                const auto now = std::chrono::steady_clock::now();
+                if (status.errors != reportedPresentationErrors || now >= nextPresentationReport) {
                     reportedPresentationErrors = status.errors;
+                    nextPresentationReport = now + 1s;
                     const QJsonObject update{{"type", "presentation-status"}, {"errors", qint64(status.errors)},
                         {"recoveries", qint64(status.recoveries)}, {"terminal", status.terminal},
-                        {"message", status.terminal ? "Video presentation failed. Leave and rejoin to retry; audio and room controls remain available." : "Video presentation is recovering."}};
+                        {"presented", qint64(preview->framesPresented())}, {"dropped", qint64(preview->framesDropped())},
+                        {"diagnostics", PresentationDiagnosticsJson(status)},
+                        {"message", status.terminal ? "Video presentation failed. Leave and rejoin to retry; audio and room controls remain available." :
+                            status.outcome == PresentationOutcome::Backoff || status.outcome == PresentationOutcome::Failed ?
+                            "Video presentation is recovering." : "Local presentation counters; end-to-end latency is unknown."}};
                     std::cout << QJsonDocument(update).toJson(QJsonDocument::Compact).constData() << std::endl;
                 }
             }
@@ -185,7 +193,9 @@ int RunRoomCli(int argc, char** argv) {
             {"errors", qint64(preview ? preview->presentationStats().errors : 0)},
             {"recoveries", qint64(preview ? preview->presentationStats().recoveries : 0)},
             {"terminal", preview && preview->presentationStats().terminal}};
-        std::cout << QJsonDocument(presentation).toJson(QJsonDocument::Compact).constData() << std::endl;
+        auto finalPresentation = presentation;
+        finalPresentation["diagnostics"] = PresentationDiagnosticsJson(preview ? preview->presentationStats() : FramePresentationSession::Statistics{});
+        std::cout << QJsonDocument(finalPresentation).toJson(QJsonDocument::Compact).constData() << std::endl;
         return result;
     } catch (const std::exception& error) {
         // Never dump the config, admission response, password or membership token.

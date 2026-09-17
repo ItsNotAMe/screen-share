@@ -28,6 +28,7 @@ public:
         std::uint32_t maximumFrameLatency = 0;
         std::uint64_t recoveries = 0;
         bool terminal = false;
+        FramePresentationSession::Statistics renderer;
     };
 
     explicit VideoFrameWidget(QWidget* parent = nullptr, FramePresentationFactory factory = {});

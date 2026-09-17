@@ -23,6 +23,8 @@ profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
 Host per-peer sender diagnostics now share UI/CLI states and expose transport
 freshness; receiver telemetry and network limiting reasons remain to implement.
+Local renderer outcomes/drop reasons/error codes now reach viewer UI and CLI;
+keep them distinct from receiver-to-host telemetry and end-to-end latency.
 Normal AppShell/legacy CLI cutover remains gated; later visual redesign follows
 milestones 1–5.
 

@@ -528,3 +528,25 @@ diagnostics integration. It repeated in the isolated desktop check. Evidence:
 `build/webrtc/diagnostics-desktop-check/`. The cause is not established; desktop
 GPU acceptance remains unresolved. No timeout was relaxed or success fabricated.
 All tests used silent synthetic audio and no physical input.
+
+## Local presentation outcomes — 2026-09-17
+
+The isolated Windows CLI recheck passed before renderer behavior changed:
+`build/webrtc/presentation-diagnose/`. This does not identify the cause of the
+earlier failure. Timeout failures now include caller stage, frame/error/recovery
+counts, last graphics error, drop reason and visibility/minimized state.
+
+Headless worker tests exercise busy/occluded/minimized/unavailable/unknown outcomes,
+ensure these consume no recovery budget, retain error codes through backoff and
+terminal state, and clear the last error on explicit restart. Windows CLI tests
+verify real minimize/resume and injected native HRESULTs. Room UI tests verify the
+actual viewer diagnostics label updates. No waits or acceptance bounds were relaxed.
+
+The Debug seven-case desktop-inclusive matrix passed in 61.452 seconds:
+`build/webrtc/presentation-outcomes-debug/result.json`. A preceding Release
+seven-case matrix also passed (`presentation-outcomes-release/result.json`).
+The final Release binaries, including periodic CLI reporting and the viewer-label
+assertion, passed 7/7: `build/webrtc/presentation-outcomes-final-release/result.json`.
+All runs used silent synthetic audio and test-owned windows/messages. Physical
+driver failures, end-to-end latency and the earlier intermittent timeout cause
+remain open; local renderer counters do not close those gates.

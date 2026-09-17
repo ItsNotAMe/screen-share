@@ -321,6 +321,13 @@ hardware-only encoding. Existing security, resource, gaming and service-cost gat
 remain in [TODO.md](TODO.md).
 # Per-viewer sender diagnostics (2026-09-17)
 
+Viewer sessions also display local presentation diagnostics once per second:
+presented/dropped/pending counts, the last frame-attempt outcome, reason counters,
+graphics error code and recovery budget usage. The renderer snapshot uses a short
+dedicated lock, never held during GPU work. These are local counters, not remote
+telemetry or end-to-end latency measurements. A terminal failure still leaves
+audio and room controls available.
+
 The opt-in host window lists each viewer with its peer identity, application state,
 last source-observed dimensions, applied video cap and measured transport upload.
 Select a row for requested preferences, revision details and allocation. These

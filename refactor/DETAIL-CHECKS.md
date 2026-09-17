@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-17 (through `99f4b75`, plus per-peer sender diagnostics). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-17 (through `a82c07c`, plus local presentation outcomes). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -12,6 +12,15 @@ until their own evidence passes. Dated continuation notes at the end are histori
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
 
 ## Latest integration: shared UI/CLI presentation — 2026-09-17
+
+- [x] Expose local presentation outcomes and separate busy, occluded, minimized,
+  unavailable and recovery-backoff drop counters through the shared renderer,
+  thread-safe Qt snapshot, viewer diagnostics and periodic/final CLI JSON.
+- [x] Retain typed graphics failure codes through recovery/terminal state without
+  logging raw exception text; unknown exceptions use generic E_FAIL.
+- [x] Improve Windows timeout evidence with caller stage, counters, error code,
+  outcome and window visibility. A later pass does not establish the cause of
+  the previously recorded timeout or prove physical driver recovery.
 
 - [x] Move presentation ownership/recovery into backend/render; both frontends use
   the same native renderer, typed errors, three-rebuild budget and backoff.

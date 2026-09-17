@@ -552,6 +552,10 @@ int main(int argc, char** argv) {
             present(std::move(frame));
         };
         Wait([&] { return original >= 20 && viewerAudio->audibleBlocks >= 20; });
+        auto* localDiagnostics = viewer.findChild<QLabel*>("viewerPresentationDiagnostics");
+        Check(localDiagnostics);
+        Wait([&] { return localDiagnostics->text().contains("do not measure end-to-end latency"); });
+        Check(localDiagnostics->text().contains("Graphics errors") && localDiagnostics->text().contains("recovery backoff"));
         Check(viewer.session().frameStatistics().retained >= 20 && viewer.session().frameStatistics().converted == 0 && viewer.session().frameStatistics().repacked == 0);
         auto* width = host.findChild<QSpinBox*>("streamWidth"); auto* height = host.findChild<QSpinBox*>("streamHeight");
         auto* apply = host.findChild<QPushButton*>("applyStream");

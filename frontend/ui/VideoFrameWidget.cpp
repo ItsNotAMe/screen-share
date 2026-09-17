@@ -115,6 +115,7 @@ public:
     [[nodiscard]] VideoFrameWidget::PresentationStats stats() const noexcept
     {
         VideoFrameWidget::PresentationStats snapshot;
+        { std::lock_guard lock(diagnosticsMutex_); snapshot.renderer = rendererStatistics_; }
         snapshot.enqueuedFrames = enqueuedFrames_.load(std::memory_order_relaxed);
         snapshot.presentedFrames = presentedFrames_.load(std::memory_order_relaxed);
         snapshot.droppedFrames = droppedFrames_.load(std::memory_order_relaxed);
@@ -194,6 +195,7 @@ private:
                 presenter.Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
             }
             const auto status = presenter.statistics();
+            { std::lock_guard lock(diagnosticsMutex_); rendererStatistics_ = status; }
             presentErrors_ = status.errors;
             recoveries_ = status.recoveries;
             maximumFrameLatency_ = status.maximumFrameLatency;
@@ -210,6 +212,8 @@ private:
     }
 
     mutable std::mutex mutex_;
+    mutable std::mutex diagnosticsMutex_;
+    FramePresentationSession::Statistics rendererStatistics_;
     std::condition_variable condition_;
     std::optional<screenshare::SessionEvent::VideoFrame> pendingFrame_;
     HWND hwnd_ = nullptr;

@@ -257,6 +257,17 @@ CTest, and may need execution outside the capture-restricted sandbox. These are
 correctness tests; they do not establish remote latency, NAT/TLS or resource gates.
 # Sender diagnostics additions (2026-09-17)
 
+Viewer `presentation-status` now emits once per second plus immediate error
+transitions. It includes presented/dropped counts and a `diagnostics` object,
+also included in final `presentation`: `outcome`, `lastErrorCode`, `busyDrops`,
+`occludedDrops`, `minimizedDrops`, `unavailableDrops` and `backoffDrops`.
+Error codes are hexadecimal HRESULTs (null before errors/after explicit clear;
+untyped exceptions use E_FAIL). Counters are cumulative; explicit clear resets
+the recovery budget, last error and current outcome. They do not sum to total
+drops: queue replacement, unknown backends and terminal/error drops also exist.
+Outcome describes the last frame attempt, not continuing display freshness.
+No telemetry is sent to the room service.
+
 Status JSON now includes `requestedPreferences`; each peer includes
 `requestedRevision`, `state` and `transportSampleState`. States are `pending`,
 `rejected`, `upload-paused`, `waiting-for-source`, or `source-observed`.

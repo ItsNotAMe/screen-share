@@ -1360,3 +1360,16 @@ Release and Debug builds and five-case silent regression matrices passed, as did
 the Release stream-settings collector proof. Optional Windows CLI presentation
 timed out twice before diagnostics integration; see HEADLESS-TESTING for evidence.
 This batch does not close desktop GPU or external performance acceptance.
+
+## Local renderer diagnostics continuation — 2026-09-17
+
+The shared renderer now distinguishes busy, occluded, minimized, unavailable,
+backoff, presented and failed outcomes. Viewer UI and live/final CLI JSON expose
+drop counters and retained graphics codes; no network telemetry was added. Normal
+drops do not spend recovery attempts, and explicit clear resets the current error.
+Timeout evidence is actionable rather than an anonymous assertion line.
+
+The previously failing Windows CLI test passed before behavior changes; subsequent
+Release and Debug desktop-inclusive matrices passed. This is not a root-cause fix
+for the prior intermittent timeout. See HEADLESS-TESTING for exact evidence and
+the remaining physical-device, receiver-telemetry and latency limitations.

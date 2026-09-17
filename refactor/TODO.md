@@ -59,6 +59,11 @@ freshness. They reuse local 1 Hz WebRTC stats without service traffic. Receiver
 telemetry, remote latency and network limiting reasons remain unfinished; sender
 observation must not be reported as remote display acknowledgement.
 
+Viewer-local presentation diagnostics now expose actual drop reasons, retained
+graphics errors and recovery state in UI/CLI. Windows timeout failures now record
+the stage, counters and window state. The earlier timeout did not reproduce in
+the subsequent Release desktop matrix; its root cause remains unproven.
+
 **Deliverable:** existing UI and CLI use the shared v2 backend, including capture/
 audio selection, presentation, Auto/Manual/Gaming settings, saved nickname, live
 directory, room policy and viewer diagnostics.
