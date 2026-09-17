@@ -4,9 +4,11 @@
 #include "api/make_ref_counted.h"
 #include "rtc_base/logging.h"
 #include "core/WindowsMediaRuntime.h"
+#include "media/GpuSubmissionQueue.h"
 #include <iostream>
 #include <string_view>
 #include <limits>
+#include <future>
 
 using namespace screenshare::media;
 void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
@@ -18,6 +20,20 @@ struct Sink : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     }
 };
 int main(int argc, char** argv) try {
+    GpuSubmissionQueue<std::shared_ptr<bool>> pendingGpu;
+    std::vector<std::shared_ptr<bool>> completions;
+    auto ready = [&] { return pendingGpu.Ready([](const auto& completion) { return *completion; }); };
+    for (unsigned i = 0; i < 4; ++i) {
+        Require(ready(), "GPU queue refused work within its bound");
+        completions.push_back(std::make_shared<bool>(false)); pendingGpu.Submitted(completions.back());
+    }
+    for (unsigned i = 0; i < 100; ++i) Require(!ready() && pendingGpu.size() == 4, "Stalled GPU grew its queue");
+    *completions[0] = true;
+    Require(ready() && pendingGpu.size() == 3, "Completed GPU work did not restore capacity");
+    completions.push_back(std::make_shared<bool>(false)); pendingGpu.Submitted(completions.back());
+    Require(!ready(), "GPU completion allowed more than one replacement submission");
+    for (const auto& completion : completions) *completion = true;
+    Require(ready() && pendingGpu.size() == 0, "Completed GPU tokens were retained");
     Require(argc == 1 || (argc == 2 && std::string_view(argv[1]) == "--gpu"), "Unknown settings test argument");
     webrtc::LoggingConfig logging;
     logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE);
@@ -178,6 +194,14 @@ int main(int argc, char** argv) try {
     preferences.width = 641;
     try { adaptive->Configure(preferences, 3); } catch (const std::invalid_argument&) {}
     Require(adaptive->requestedRevision() == 2, "Invalid settings replaced working revision");
+    preferences.resolution = ResolutionMode::Fixed; preferences.width = 320; preferences.height = 180;
+    adaptive->Configure(preferences, 3);
+    adaptive->Push(pixels, beginning + std::chrono::seconds(4));
+    Require(adaptive->settingsStats().observedRevision == 2 && adaptive->settingsStats().width == 640,
+        "A dropped frame falsely acknowledged new dimensions");
+    adaptive->Push(pixels, beginning + std::chrono::seconds(5));
+    Require(adaptive->settingsStats().observedRevision == 3 && adaptive->settingsStats().width == 320,
+        "Accepted frame did not acknowledge its actual dimensions");
     fixed->RemoveSink(&fixedSink); adaptive->RemoveSink(&adaptiveSink);
     uint64_t gpuFallbacks = 0;
     if (argc == 2) {
@@ -186,36 +210,106 @@ int main(int argc, char** argv) try {
         auto device = std::make_shared<D3dVideoDevice>();
         std::vector<uint8_t> nv12(640 * 360 * 3 / 2, 128);
         std::fill_n(nv12.begin(), 640 * 360, uint8_t(80));
+        for (int y = 0; y < 180; ++y) std::fill_n(nv12.begin() + y * 640 + 480, 160, uint8_t(160));
+        for (size_t i = 640 * 360; i < nv12.size(); i += 2) { nv12[i] = 90; nv12[i + 1] = 170; }
         auto texture = device->UploadNv12(640, 360, nv12);
-        Sink gpuSink;
+        struct NativeSink : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
+            webrtc::scoped_refptr<webrtc::VideoFrameBuffer> last;
+            unsigned frames = 0;
+            void OnFrame(const webrtc::VideoFrame& frame) override { last = frame.video_frame_buffer(); ++frames; }
+        } gpuSink;
         auto gpuSource = webrtc::make_ref_counted<CaptureVideoSource>();
         preferences = {}; preferences.resolution = ResolutionMode::Fixed;
         preferences.width = 320; preferences.height = 180;
         gpuSource->Configure(preferences, 1);
         gpuSource->AddOrUpdateSink(&gpuSink, webrtc::VideoSinkWants());
-        gpuSource->PushBuffer(texture, std::chrono::steady_clock::now() - std::chrono::milliseconds(100));
-        gpuSource->RemoveSink(&gpuSink);
+        auto at = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+        auto push = [&] { gpuSource->PushBuffer(texture, at); at += std::chrono::milliseconds(100); };
+        push();
+        Require(gpuSink.last && gpuSink.last->type() == webrtc::VideoFrameBuffer::Type::kNative &&
+            gpuSink.last->width() == 320 && gpuSink.last->height() == 180 && device->readbackCount() == 0 &&
+            gpuSource->settingsStats().gpuScaled == 1, "GPU downscale used CPU readback");
+        auto held = gpuSink.last;
+        preferences.height = 240; gpuSource->Configure(preferences, 2); push();
+        const auto letterbox = gpuSource->settingsStats();
+        Require(letterbox.imageLeft == 0 && letterbox.imageTop == 30 && letterbox.imageWidth == 320 &&
+            letterbox.imageHeight == 180 && letterbox.scalingPath == SourceScalingPath::Gpu &&
+            device->readbackCount() == 0, "GPU letterbox geometry/readback incorrect");
+        auto boxed = gpuSink.last->ToI420();
+        Require(boxed && boxed->DataY()[0] == 16 &&
+            std::abs(int(boxed->DataY()[120 * boxed->StrideY() + 160]) - 80) <= 1 &&
+            std::abs(int(boxed->DataU()[60 * boxed->StrideU() + 80]) - 90) <= 1 &&
+            std::abs(int(boxed->DataV()[60 * boxed->StrideV() + 80]) - 170) <= 1 &&
+            boxed->DataU()[0] == 128 && boxed->DataV()[0] == 128, "GPU letterbox changed YUV colors or black bars");
+        const auto reads = device->readbackCount();
+        preferences.width = 1280; preferences.height = 720; gpuSource->Configure(preferences, 3); push();
+        Require(gpuSink.last->width() == 1280 && gpuSink.last->height() == 720 &&
+            device->readbackCount() == reads, "GPU upscale used readback");
+        // Another viewer has independent dimensions; its work cannot mutate retained output.
+        NativeSink otherSink;
+        auto other = webrtc::make_ref_counted<CaptureVideoSource>();
+        preferences.width = 240; preferences.height = 320; other->Configure(preferences, 1);
+        other->AddOrUpdateSink(&otherSink, webrtc::VideoSinkWants()); other->PushBuffer(texture, at);
+        Require(otherSink.last->width() == 240 && otherSink.last->height() == 320 &&
+            other->settingsStats().imageWidth == 240 && other->settingsStats().imageHeight == 134 &&
+            gpuSink.last->width() == 1280 && device->readbackCount() == reads, "Viewer scaling leaked across sources");
+        auto retained = held->ToI420();
+        Require(retained && retained->width() == 320 && retained->height() == 180 &&
+            std::abs(int(retained->DataY()[0]) - 80) <= 1 &&
+            std::abs(int(retained->DataY()[20 * retained->StrideY() + 280]) - 160) <= 1 &&
+            std::abs(int(retained->DataY()[140 * retained->StrideY() + 280]) - 80) <= 1,
+            "GPU scale flipped/cropped input or later output overwrote retained frame");
+        // Auto must not upscale a source merely because its configured maximum is larger.
+        preferences.resolution = ResolutionMode::Auto; preferences.width = 1280; preferences.height = 720;
+        gpuSource->Configure(preferences, 4); push();
+        Require(gpuSink.last.get() == texture.get() && gpuSource->settingsStats().scalingPath == SourceScalingPath::Unchanged,
+            "Auto upscaled native source");
+        webrtc::VideoSinkWants reduced;
+        reduced.max_pixel_count = 160 * 90; reduced.is_active = true;
+        gpuSource->AddOrUpdateSink(&gpuSink, reduced); push();
+        Require(gpuSink.last->width() * gpuSink.last->height() <= 160 * 90 &&
+            gpuSource->settingsStats().scalingPath == SourceScalingPath::Gpu, "Auto adaptation bypassed GPU scaling");
+        const auto beforeConcurrent = device->readbackCount();
+        auto deliver = [&](auto source) {
+            for (int i = 0; i < 20; ++i) source->PushBuffer(texture, at + std::chrono::milliseconds(i * 40));
+        };
+        auto firstViewer = std::async(std::launch::async, [&] { deliver(gpuSource); });
+        auto secondViewer = std::async(std::launch::async, [&] { deliver(other); });
+        firstViewer.get(); secondViewer.get(); at += std::chrono::seconds(1);
+        Require(device->readbackCount() == beforeConcurrent && gpuSink.last->width() <= 160 &&
+            otherSink.last->width() == 240, "Concurrent viewers used readback or shared dimensions");
+        Require(device->maximumPendingScales() > 0 && device->maximumPendingScales() <= 4 && device->scalingFailures() == 0,
+            "Concurrent scaling exceeded submission bound or treated backpressure as a device failure");
+        bool badRectangle = false;
+        try { texture->Scale(320, 180, 2, 0, 320, 180); } catch (const std::invalid_argument&) { badRectangle = true; }
+        Require(badRectangle && device->scalingFailures() == 0, "Invalid rectangle reached GPU or quarantined healthy device");
+        Require(texture->ToI420() != nullptr, "Source readback for pixel validation failed"); // Also drains submitted GPU work for the failure test.
+        // Unsupported GPU input exercises real shader failure, quarantine and CPU fallback.
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = 640; desc.Height = 360; desc.MipLevels = desc.ArraySize = desc.SampleDesc.Count = 1;
+        desc.Format = DXGI_FORMAT_NV12; desc.Usage = D3D11_USAGE_DEFAULT; // No shader-resource binding.
+        D3D11_SUBRESOURCE_DATA initial{}; initial.pSysMem = nv12.data(); initial.SysMemPitch = 640;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> unsupported;
+        Require(SUCCEEDED(device->device()->CreateTexture2D(&desc, &initial, &unsupported)), "Fallback input creation failed");
+        auto unsupportedFrame = webrtc::make_ref_counted<D3dVideoFrameBuffer>(device, unsupported, 640, 360);
+        preferences.resolution = ResolutionMode::Fixed; preferences.width = 320; preferences.height = 240;
+        gpuSource->Configure(preferences, 5);
+        gpuSource->PushBuffer(unsupportedFrame, at); at += std::chrono::milliseconds(100);
+        Require(gpuSink.last->type() == webrtc::VideoFrameBuffer::Type::kI420 && device->scalingFailures() == 1 &&
+            gpuSource->settingsStats().scalingPath == SourceScalingPath::CpuReadback, "Failed GPU scaler did not fall back");
+        push();
         gpuFallbacks = gpuSource->settingsStats().gpuReadbackFallbacks;
-        Require(gpuSink.width == 320 && gpuSink.height == 180 && gpuSink.last->DataY()[0] == 80 &&
-                gpuFallbacks == 1 && device->readbackCount() == 1,
-                "GPU scaling fallback lost pixels or was not reported");
-        struct NativeSink : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
-            bool native = false;
-            void OnFrame(const webrtc::VideoFrame& frame) override {
-                native = frame.width() == 640 && frame.height() == 360 &&
-                    frame.video_frame_buffer()->type() == webrtc::VideoFrameBuffer::Type::kNative;
-            }
-        } nativeSink;
-        preferences.width = 640; preferences.height = 360;
-        gpuSource->Configure(preferences, 2);
-        gpuSource->AddOrUpdateSink(&nativeSink, webrtc::VideoSinkWants());
-        gpuSource->PushBuffer(texture);
-        gpuSource->RemoveSink(&nativeSink);
-        Require(nativeSink.native && gpuSource->settingsStats().gpuReadbackFallbacks == 1 && device->readbackCount() == 1,
-                "Matching fixed dimensions caused unnecessary GPU readback");
+        Require(gpuFallbacks == 2 && device->scalingFailures() == 1 && gpuSink.last->ToI420()->DataY()[0] == 16,
+            "Quarantined scaler retried or fallback lost letterboxing");
+        const auto framesBeforeRetire = gpuSink.frames;
+        const auto readsBeforeRetire = device->readbackCount();
+        device->Retire(); push();
+        Require(gpuSink.frames == framesBeforeRetire && device->readbackCount() == readsBeforeRetire &&
+            !held->ToI420(), "Retired GPU frame was scaled or read back");
+        gpuSource->RemoveSink(&gpuSink); other->RemoveSink(&otherSink);
     }
     std::cout << "{\"passed\":true,\"mode\":\"stream-settings\",\"manual_frames\":" << fixedSink.frames
-              << ",\"auto_frames_before_recovery\":" << adaptiveSink.frames - 2
+              << ",\"auto_frames_before_recovery\":" << adaptiveSink.frames - 3
               << ",\"fixed_canvas\":[160,120],\"active_image\":[160,90],\"gpu_scaling_fallbacks\":" << gpuFallbacks << "}\n";
     return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

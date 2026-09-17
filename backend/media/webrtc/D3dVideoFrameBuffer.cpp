@@ -1,4 +1,5 @@
 #include "media/webrtc/D3dVideoFrameBuffer.h"
+#include "D3dNv12Scaler.h"
 #include "api/make_ref_counted.h"
 #include "api/video/i420_buffer.h"
 #include "rtc_base/thread.h"
@@ -56,6 +57,7 @@ webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::RetainCapture(const C
     return webrtc::make_ref_counted<D3dVideoFrameBuffer>(shared_from_this(), frame.nv12Texture, frame.width, frame.height);
 }
 D3dVideoDevice::~D3dVideoDevice() {
+    OnOwner(*owner_, [&] { scaler_.reset(); });
     owner_->Stop();
     // D3D COM references are free-threaded. No context work remains after join.
     context_.Reset(); device_.Reset();
@@ -104,6 +106,23 @@ webrtc::scoped_refptr<webrtc::I420BufferInterface> D3dVideoDevice::Readback(ID3D
         return output;
     });
 }
+webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::Scale(ID3D11Texture2D* input,
+    int width, int height, int left, int top, int imageWidth, int imageHeight) {
+    return OnOwner(*owner_, [&]() -> webrtc::scoped_refptr<D3dVideoFrameBuffer> {
+        if (retired() || scalingFailures_) return nullptr;
+        try {
+            if (!scaler_) scaler_ = std::make_unique<D3dNv12Scaler>(device_.Get());
+            auto output = scaler_->Scale(device_.Get(), context_.Get(), input, width, height, left, top, imageWidth, imageHeight);
+            maximumPendingScales_ = std::max(maximumPendingScales_.load(), scaler_->pending());
+            return webrtc::make_ref_counted<D3dVideoFrameBuffer>(shared_from_this(), std::move(output), width, height);
+        } catch (const GpuScalingBusy&) {
+            throw; // Backpressure drops a frame; it is neither failure nor CPU fallback.
+        } catch (...) {
+            // Do not retry a failing shader/driver every frame or every viewer.
+            ++scalingFailures_; scaler_.reset(); return nullptr;
+        }
+    });
+}
 D3dVideoFrameBuffer::D3dVideoFrameBuffer(std::shared_ptr<D3dVideoDevice> owner,
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture, int width, int height)
     : owner_(std::move(owner)), texture_(std::move(texture)), width_(width), height_(height) {
@@ -135,5 +154,14 @@ CapturedFrame D3dVideoFrameBuffer::RetainedNv12() const {
     frame.width = frame.sourceWidth = width_; frame.height = frame.sourceHeight = height_;
     frame.d3dDevice = owner_->device(); frame.nv12Texture = texture_;
     return frame;
+}
+webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoFrameBuffer::Scale(int width, int height,
+    int left, int top, int imageWidth, int imageHeight) {
+    if (width < 2 || height < 2 || width > 3840 || height > 2160 || width % 2 || height % 2 ||
+        left < 0 || top < 0 || left % 2 || top % 2 || imageWidth < 2 || imageHeight < 2 ||
+        imageWidth % 2 || imageHeight % 2 || imageWidth > width || imageHeight > height ||
+        left > width - imageWidth || top > height - imageHeight)
+        throw std::invalid_argument("Invalid GPU image rectangle");
+    return owner_->Scale(texture_.Get(), width, height, left, top, imageWidth, imageHeight);
 }
 }

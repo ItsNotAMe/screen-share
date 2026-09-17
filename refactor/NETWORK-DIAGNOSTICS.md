@@ -51,6 +51,12 @@ lossFraction, availableOutgoingBps and limitingReason. Unavailable numbers are
 JSON null. `receiver.ageSeconds` is null before the first report and numeric
 afterward. Both frontends share serialization and unknown/stale conventions.
 
+Peer JSON also includes `source.scalingPath` and nullable `source.activeImage`
+(`left`, `top`, `width`, `height`). The UI details popup shows these same local
+source observations. They describe the last successfully adapted frame; dropped
+frames do not advance the source revision. GPU scaling does not imply hardware
+encoding or GPU decoding. See [GPU-SCALING.md](GPU-SCALING.md).
+
 Remaining scope: remote presentation/drop/buffering telemetry, codec/fallback
 details, capture timing, gaming input measurements and externally measured
 end-to-end latency. This work does not complete default-shell adoption or certify

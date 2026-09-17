@@ -186,6 +186,7 @@ public:
             peer.transportSendBps = sample.bitsPerSecond;
             peer.receiver = entry->telemetry->Status();
             peer.sender = sample.sender;
+            peer.source = stats;
         }
         return result;
     }

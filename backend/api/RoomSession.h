@@ -6,6 +6,7 @@
 #include "media/PlaybackSelection.h"
 #include "media/ReceiverVideoStatus.h"
 #include "media/SenderVideoStatus.h"
+#include "media/SourceVideoStatus.h"
 #include <functional>
 #include <future>
 #include <memory>
@@ -40,6 +41,7 @@ struct PeerStreamStatus {
     bool transportSampleStale = false;
     media::ReceiverVideoStatus receiver;
     media::SenderVideoObservation sender;
+    media::SourceVideoStatus source;
 };
 struct StreamStatus {
     uint64_t requestedRevision = 0;

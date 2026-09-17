@@ -26,11 +26,24 @@ inline QJsonObject StreamPeerJson(const screenshare::v2::PeerStreamStatus& peer,
     const auto video = peer.receiver.stale ? std::nullopt : peer.receiver.observation;
     const QJsonValue unknown(QJsonValue::Null);
     const auto sender = peer.transportSampleStale ? screenshare::media::SenderVideoObservation{} : peer.sender;
+    const auto& source = peer.source;
+    const char* scalingPath = "unknown";
+    using enum screenshare::media::SourceScalingPath;
+    switch (source.scalingPath) {
+    case Unchanged: scalingPath = "unchanged"; break;
+    case Gpu: scalingPath = "gpu"; break;
+    case Cpu: scalingPath = "cpu"; break;
+    case CpuReadback: scalingPath = "cpu-readback"; break;
+    default: break;
+    }
     auto number = [&](std::optional<double> value) { return value ? QJsonValue(*value) : unknown; };
     return {{"peerId", QString::fromStdString(peer.peerId)}, {"requestedRevision", qint64(requested)},
         {"appliedRevision", qint64(peer.appliedRevision)}, {"observedRevision", qint64(peer.observedRevision)},
         {"state", StreamPeerState(peer, requested)}, {"rejected", peer.rejected},
         {"width", peer.width}, {"height", peer.height},
+        {"source", QJsonObject{{"scalingPath", scalingPath},
+            {"activeImage", source.observedRevision ? QJsonValue(QJsonObject{{"left", source.imageLeft}, {"top", source.imageTop},
+                {"width", source.imageWidth}, {"height", source.imageHeight}}) : unknown}}},
         {"allocatedVideoBps", peer.allocatedVideoBitrateBps}, {"appliedVideoBps", peer.appliedVideoBitrateBps},
         {"transportSampleState", StreamSampleState(peer)},
         {"sender", QJsonObject{{"videoPayloadBps", sender.payloadBps ? QJsonValue(qint64(*sender.payloadBps)) : unknown},

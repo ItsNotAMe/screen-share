@@ -95,6 +95,12 @@ Use `./scripts/run-webrtc-proof.ps1 -Configuration debug -Hardware` (or `release
 
 Hardware tests verify GPU input with zero sender readbacks, rate/zero-rate/keyframe behavior, 100-input burst coalescing, a 500 ms missing-output failure followed by software IDR recovery, session quarantine, cancellation, retained textures and concurrent cached readback. The GPU source is synthetic NV12 upload; live capture and GPU presentation are covered by the separate -LiveCapture tests below.
 
+`MfHardwareAdapterTest` now uses a GPU-scaled NV12 texture as hardware input.
+`StreamSettingsTest --gpu` additionally checks scaling/letterbox pixels, retained
+frames, independent viewer dimensions, bounded GPU submission and CPU fallback.
+Neither executable plays physical audio or opens a preview window. See
+[GPU-SCALING.md](GPU-SCALING.md) for the generated-WGC four-viewer scenario.
+
 The probes do not establish real-game latency, multi-viewer isolation, NAT connectivity, full lifecycle safety, preemption of a hung driver call or performance on another machine.
 
 ## Audio device proof

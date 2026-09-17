@@ -234,6 +234,11 @@ int main(int argc, char** argv) {
             return true;
         });
         const unsigned restartingBefore = evidence[0]->frames, healthyBefore = evidence[1]->frames;
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+        for (const auto& peer : host.Status().stream.peers)
+            Check(peer.source.scalingPath == SourceScalingPath::Gpu && peer.source.gpuScaled > 0 &&
+                peer.source.gpuReadbackFallbacks == 0 && peer.source.imageWidth == 320 && peer.source.imageHeight == 180);
+#endif
         evidence[0]->restart = true;
         Wait([&] { return evidence[0]->offers >= 2 && evidence[0]->frames >= restartingBefore + 30 && evidence[1]->frames >= healthyBefore + 30; });
         Wait([&] { const auto peers = host.Status().stream.peers;

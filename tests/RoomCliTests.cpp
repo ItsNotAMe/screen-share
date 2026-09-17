@@ -309,6 +309,14 @@ int main(int argc, char** argv) {
             }
             for (const auto& peer : value["peers"].toArray()) {
                 const auto row = peer.toObject();
+                const auto source = row["source"].toObject();
+                if (row["observedRevision"].toInteger() && row["width"].toInt() == 160) {
+                    Check(source["activeImage"].toObject()["width"].toInt() == 160 &&
+                        source["activeImage"].toObject()["height"].toInt() == 90);
+#ifndef SCREENSHARE_WINDOWS_CLI_PROOF
+                    Check(source["scalingPath"] == "cpu");
+#endif
+                }
                 Check(row["sender"].isObject() && row["sender"].toObject().contains("limitingReason"));
                 if (row["sender"].toObject()["videoPayloadBps"].toDouble() > 0 && row["sender"].toObject()["rttMs"].isDouble()) senderReported = true;
                 Check(!row["sender"].toObject().contains("candidateId"));

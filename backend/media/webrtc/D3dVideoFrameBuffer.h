@@ -6,10 +6,15 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <stdexcept>
 
 namespace webrtc { class Thread; }
 namespace screenshare::media {
 class D3dVideoFrameBuffer;
+class D3dNv12Scaler;
+class GpuScalingBusy : public std::runtime_error {
+public: GpuScalingBusy() : std::runtime_error("GPU scaling submission limit reached") {}
+};
 
 // Private Windows/WebRTC boundary. All application immediate-context operations
 // run on this owner. Published textures are never overwritten or pooled early.
@@ -28,14 +33,20 @@ public:
     }
     uint64_t readbackCount() const noexcept { return readbackCount_; }
     uint64_t readbackMicroseconds() const noexcept { return readbackMicroseconds_; }
+    uint64_t scalingFailures() const noexcept { return scalingFailures_; }
+    unsigned maximumPendingScales() const noexcept { return maximumPendingScales_; }
 private:
     friend class D3dVideoFrameBuffer;
     webrtc::scoped_refptr<webrtc::I420BufferInterface> Readback(ID3D11Texture2D*, int, int);
+    webrtc::scoped_refptr<D3dVideoFrameBuffer> Scale(ID3D11Texture2D*, int, int, int, int, int, int);
     std::unique_ptr<webrtc::Thread> owner_;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     std::atomic<uint64_t> readbackCount_{0}, readbackMicroseconds_{0};
     std::atomic<bool> retired_{false};
+    std::unique_ptr<D3dNv12Scaler> scaler_;
+    std::atomic<uint64_t> scalingFailures_{0};
+    std::atomic<unsigned> maximumPendingScales_{0};
 };
 
 class D3dVideoFrameBuffer : public webrtc::VideoFrameBuffer {
@@ -47,6 +58,9 @@ public:
     webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override;
     webrtc::scoped_refptr<webrtc::VideoFrameBuffer> GetMappedFrameBuffer(std::span<Type>) override;
     CapturedFrame RetainedNv12() const;
+    // Null means GPU scaling is unavailable; the caller may use ToI420().
+    webrtc::scoped_refptr<D3dVideoFrameBuffer> Scale(int width, int height,
+        int left, int top, int imageWidth, int imageHeight);
     bool retired() const noexcept { return owner_->retired(); }
 private:
     std::shared_ptr<D3dVideoDevice> owner_;

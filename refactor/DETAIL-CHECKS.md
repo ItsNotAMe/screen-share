@@ -256,7 +256,7 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [ ] Complete appropriate display-only DXGI fallback in the v2 runtime.
 - [ ] Preserve selected-source privacy, cursor behavior, HDR-to-SDR and source identity.
 - [ ] Handle source closure/minimization/resize and D3D device loss explicitly.
-- [ ] Implement per-viewer GPU scaling and owned GPU frames.
+- [x] Implement per-viewer GPU scaling and owned GPU frames; bounded submission, fallback and hardware-encode integration are documented in GPU-SCALING.md.
 - [x] Implement encoder worker/event handling and one pending raw-frame slot; burst/ownership evidence is recorded under A and CHECKPOINT-B.md.
 - [x] Honor WebRTC rates, keyframes and timestamps without custom congestion logic.
 - [x] Probe hardware health; quarantine failed implementations and fall back per viewer. Physical driver-hang preemption remains open.
@@ -289,6 +289,8 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [x] Map all resolution/FPS mode combinations to the intended WebRTC adaptation preference.
 - [x] Keep manual resolution fixed and manual bitrate subject to congestion control.
 - [ ] Fit/letterbox fixed dimensions and expose the active image rectangle for input mapping.
+  CPU/GPU fitting and backend/UI/CLI rectangle exposure are implemented. Receiver
+  generation binding and actual input-coordinate mapping remain in milestone 3.
 - [ ] Preserve manual settings when switching presets.
 - [x] Add settings revisions, prevalidation and per-viewer pending/applied/error state.
 - [ ] Retain/recover working settings on failed reconfiguration; report partial application honestly.
@@ -612,6 +614,7 @@ Historical continuation evidence is in HEADLESS-TESTING.md and CHECKPOINT-A.md; 
 - [x] Adapt each source independently through WebRTC VideoAdapter; preserve fixed canvases, native dimensions, aspect ratio and bounded FPS dropping.
 - [x] Test fixed/manual versus adaptive sink requests, upward recovery, letterbox pixels and settings propagation through real PeerConnections.
 - [x] Report and test GPU resize readback fallback and native-frame preservation at matching dimensions.
+- [x] Replace routine GPU resize readback with bounded per-viewer NV12 GPU scaling; verify pixels, hardware encoder input, source diagnostics and four-viewer WGC integration. See GPU-SCALING.md and CHECKPOINT-B.md.
 - [x] Wire initial bandwidth settings, aggregate upload allocation and public/UI per-peer sender/source-observed revisions.
 - [ ] Complete capability failure recovery and remote displayed-state acceptance; sender/source application is not a remote-display acknowledgement.
 - [ ] Verify real congestion-driven adaptation and GPU scaling performance; controlled sink requests alone do not satisfy impairment/latency gates.

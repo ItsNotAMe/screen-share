@@ -5,6 +5,7 @@ if(NOT TARGET ScreenShareMediaAdapters)
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/PcmAudioDeviceModule.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/audio/WasapiPcmEndpoint.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/D3dVideoFrameBuffer.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/D3dNv12Scaler.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/MfVideoEncoderFactory.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../backend/media/webrtc/MfVideoDecoderFactory.cpp")
     target_include_directories(ScreenShareMediaAdapters PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../backend")

@@ -751,8 +751,11 @@ full UI/settings transactions and actual congestion acceptance remain pending.
 Only call VideoAdapter::OnOutputFormatRequest when source limits change: the
 pinned implementation resets its framerate controller on that call. Calling it
 per frame prevents FPS reduction; the headless regression now catches this.
-GPU resizing currently uses a counted CPU fallback. Matching dimensions retain
-native frames. Preserve this diagnostic until a GPU scaler is validated.
+GPU resizing now uses per-viewer NV12 plane scaling with owned output textures and
+a four-submission bound per capture device. Unsupported scaling is quarantined and
+uses the counted CPU fallback. Matching dimensions retain native frames. Source
+path and active-image geometry are exposed through the shared API/UI/CLI; see
+GPU-SCALING.md. Input mapping and end-to-end latency acceptance remain open.
 
 ## Gate A closeout decision — 2026-09-15
 

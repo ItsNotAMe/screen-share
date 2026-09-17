@@ -52,7 +52,10 @@ void Run() {
     auto original = device->UploadNv12(640, 360, pixels);
     // A later upload must never mutate a frame retained by another viewer.
     std::fill_n(pixels.begin(), 640 * 360, uint8_t(170));
-    auto newer = device->UploadNv12(640, 360, pixels);
+    // The production GPU scaler's output must remain native all the way into MF.
+    auto larger = device->UploadNv12(1280, 720, std::vector<uint8_t>(1280 * 720 * 3 / 2, 128));
+    auto newer = larger->Scale(640, 360, 0, 0, 640, 360);
+    Require(newer && device->readbackCount() == 0, "GPU scale before encoding used readback");
     auto a = std::async(std::launch::async, [&] { return original->ToI420(); });
     auto b = std::async(std::launch::async, [&] { return original->ToI420(); });
     auto first = a.get(); auto second = b.get();

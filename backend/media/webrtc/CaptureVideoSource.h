@@ -1,6 +1,7 @@
 #pragma once
 #include "media/capture/SyntheticCaptureSource.h"
 #include "media/StreamPreferences.h"
+#include "media/SourceVideoStatus.h"
 #include "D3dVideoFrameBuffer.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_broadcaster.h"
@@ -15,10 +16,7 @@ namespace screenshare::media {
 // must never be shared across viewers. Configure is coordinator-thread safe;
 // Push calls remain serialized on this viewer's delivery worker. Unconfigured
 // sources preserve input for low-level probes; production applies preferences.
-struct SourceSettingsStats {
-    uint64_t observedRevision = 0, dropped = 0, scaled = 0, gpuReadbackFallbacks = 0;
-    int width = 0, height = 0, imageLeft = 0, imageTop = 0, imageWidth = 0, imageHeight = 0;
-};
+using SourceSettingsStats = SourceVideoStatus;
 class CaptureVideoSource : public webrtc::VideoTrackSource {
 public:
     bool is_screencast() const override { return true; }
@@ -105,7 +103,7 @@ private:
         int cropWidth, cropHeight, width, height;
         if (!adapter_.AdaptFrameResolution(canvasWidth, canvasHeight, timestamp * 1000,
                                            &cropWidth, &cropHeight, &width, &height)) {
-            std::lock_guard lock(settingsMutex_); stats_.observedRevision = revision; ++stats_.dropped;
+            std::lock_guard lock(settingsMutex_); ++stats_.dropped;
             return nullptr;
         }
         if (value.resolution != ResolutionMode::Auto && (width != canvasWidth || height != canvasHeight))
@@ -113,36 +111,52 @@ private:
         const auto fitted = Fit(buffer->width(), buffer->height(), width, height, true);
         const int left = ((width - fitted.first) / 2) & ~1;
         const int top = ((height - fitted.second) / 2) & ~1;
+        auto scalingPath = SourceScalingPath::Unchanged;
         if (width != buffer->width() || height != buffer->height()) {
             const bool gpu = buffer->type() == webrtc::VideoFrameBuffer::Type::kNative;
-            auto pixels = buffer->ToI420();
-            if (!pixels) {
-                std::lock_guard lock(settingsMutex_); ++stats_.dropped; return nullptr;
+            webrtc::scoped_refptr<D3dVideoFrameBuffer> gpuOutput;
+            try {
+                if (auto* native = dynamic_cast<D3dVideoFrameBuffer*>(buffer.get()))
+                    gpuOutput = native->Scale(width, height, left, top, fitted.first, fitted.second);
+            } catch (const GpuScalingBusy&) {
+                std::lock_guard lock(settingsMutex_); ++stats_.dropped; ++stats_.gpuBusyDrops; return nullptr;
             }
-            auto scaled = webrtc::I420Buffer::Create(fitted.first, fitted.second);
-            scaled->ScaleFrom(*pixels);
-            if (fitted.first == width && fitted.second == height) buffer = std::move(scaled);
-            else {
-                auto canvas = webrtc::I420Buffer::Create(width, height);
-                for (int y = 0; y < height; ++y) std::fill_n(canvas->MutableDataY() + y * canvas->StrideY(), width, uint8_t(16));
-                for (int y = 0; y < height / 2; ++y) {
-                    std::fill_n(canvas->MutableDataU() + y * canvas->StrideU(), width / 2, uint8_t(128));
-                    std::fill_n(canvas->MutableDataV() + y * canvas->StrideV(), width / 2, uint8_t(128));
+            if (gpuOutput) {
+                buffer = std::move(gpuOutput); scalingPath = SourceScalingPath::Gpu;
+            } else {
+                scalingPath = gpu ? SourceScalingPath::CpuReadback : SourceScalingPath::Cpu;
+                auto pixels = buffer->ToI420();
+                if (!pixels) {
+                    std::lock_guard lock(settingsMutex_); ++stats_.dropped; return nullptr;
                 }
-                for (int y = 0; y < fitted.second; ++y)
-                    std::copy_n(scaled->DataY() + y * scaled->StrideY(), fitted.first, canvas->MutableDataY() + (y + top) * canvas->StrideY() + left);
-                for (int y = 0; y < fitted.second / 2; ++y) {
-                    std::copy_n(scaled->DataU() + y * scaled->StrideU(), fitted.first / 2, canvas->MutableDataU() + (y + top / 2) * canvas->StrideU() + left / 2);
-                    std::copy_n(scaled->DataV() + y * scaled->StrideV(), fitted.first / 2, canvas->MutableDataV() + (y + top / 2) * canvas->StrideV() + left / 2);
+                auto scaled = webrtc::I420Buffer::Create(fitted.first, fitted.second);
+                scaled->ScaleFrom(*pixels);
+                if (fitted.first == width && fitted.second == height) buffer = std::move(scaled);
+                else {
+                    auto canvas = webrtc::I420Buffer::Create(width, height);
+                    for (int y = 0; y < height; ++y) std::fill_n(canvas->MutableDataY() + y * canvas->StrideY(), width, uint8_t(16));
+                    for (int y = 0; y < height / 2; ++y) {
+                        std::fill_n(canvas->MutableDataU() + y * canvas->StrideU(), width / 2, uint8_t(128));
+                        std::fill_n(canvas->MutableDataV() + y * canvas->StrideV(), width / 2, uint8_t(128));
+                    }
+                    for (int y = 0; y < fitted.second; ++y)
+                        std::copy_n(scaled->DataY() + y * scaled->StrideY(), fitted.first, canvas->MutableDataY() + (y + top) * canvas->StrideY() + left);
+                    for (int y = 0; y < fitted.second / 2; ++y) {
+                        std::copy_n(scaled->DataU() + y * scaled->StrideU(), fitted.first / 2, canvas->MutableDataU() + (y + top / 2) * canvas->StrideU() + left / 2);
+                        std::copy_n(scaled->DataV() + y * scaled->StrideV(), fitted.first / 2, canvas->MutableDataV() + (y + top / 2) * canvas->StrideV() + left / 2);
+                    }
+                    buffer = std::move(canvas);
                 }
-                buffer = std::move(canvas);
             }
-            std::lock_guard lock(settingsMutex_); ++stats_.scaled; stats_.gpuReadbackFallbacks += gpu;
+            std::lock_guard lock(settingsMutex_); ++stats_.scaled;
+            stats_.gpuReadbackFallbacks += scalingPath == SourceScalingPath::CpuReadback;
+            stats_.gpuScaled += scalingPath == SourceScalingPath::Gpu;
         }
         {
             std::lock_guard lock(settingsMutex_);
             stats_.observedRevision = revision; stats_.width = width; stats_.height = height;
             stats_.imageLeft = left; stats_.imageTop = top; stats_.imageWidth = fitted.first; stats_.imageHeight = fitted.second;
+            stats_.scalingPath = scalingPath;
         }
         return buffer;
     }

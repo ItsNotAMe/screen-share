@@ -109,6 +109,13 @@ void PeerDiagnosticsWidget::Update(const screenshare::v2::RoomStatus& value) {
             auto metric = [&](const char* key, double scale, const char* unit) {
                 return sender[key].isNull() ? QString("unknown") : QString::number(sender[key].toDouble() * scale, 'f', 2) + unit;
             };
+            const auto source = rows[index].toObject()["source"].toObject();
+            const auto activeImage = source["activeImage"].toObject();
+            detail += QString("\nSource scaling: %1.\nActive image in source canvas: %2.")
+                .arg(source["scalingPath"].toString())
+                .arg(activeImage.isEmpty() ? "unknown" : QString("%1,%2 + %3 × %4")
+                    .arg(activeImage["left"].toInt()).arg(activeImage["top"].toInt())
+                    .arg(activeImage["width"].toInt()).arg(activeImage["height"].toInt()));
             detail += QString("\nWebRTC video payload: %1; encoded FPS: %2.\nSelected-path RTT: %3 (not image/input latency); estimated available upload: %4.\nVideo RTCP loss: %5; jitter: %6.\nWebRTC limiting reason: %7. Receiver report age: %8 seconds.\nUnknown values are not zero. Low bitrate alone does not establish congestion.")
                 .arg(metric("videoPayloadBps", 0.000001, " Mbps")).arg(metric("encodedFps", 1, ""))
                 .arg(metric("rttMs", 1, " ms")).arg(metric("availableOutgoingBps", 0.000001, " Mbps"))

@@ -21,6 +21,10 @@ Validated local stream/playback defaults and stable randomized Guest nicknames a
 integrated into browser-created sessions with explicit save controls; do not rebuild
 profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
+Per-viewer GPU scaling/letterboxing now preserves owned NV12 frames into hardware
+encoding, drops excess GPU submissions, and quarantines to CPU fallback on failure.
+The active image rectangle is exposed in source diagnostics; actual authorized
+input mapping and hardware decode/presentation remain open. See GPU-SCALING.md.
 Device-free `none` audio is integrated across startup/live runtime/UI/CLI selection;
 it releases host capture and preserves the track for resumption. Physical recovery,
 microphone processing and audio latency remain open.

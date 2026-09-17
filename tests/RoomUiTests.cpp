@@ -190,6 +190,7 @@ void ProfileSettingsScenario() {
     PeerStreamStatus diagnostic;
     Check(StreamPeerState(diagnostic, 2) == "pending");
     Check(StreamPeerJson(diagnostic, 2)["transportSendBps"].isNull());
+    Check(StreamPeerJson(diagnostic, 2)["source"].toObject()["activeImage"].isNull());
     diagnostic.appliedRevision = 2;
     Check(StreamPeerState(diagnostic, 2) == "upload-paused");
     diagnostic.appliedVideoBitrateBps = 1000000;
@@ -608,6 +609,7 @@ int main(int argc, char** argv) {
         auto* popupText = popup->findChild<QPlainTextEdit*>("peerDetailsText");
         Check(popup->isVisible() && !popup->isModal() && popup->property("peerId") == diagnosticPeer);
         Check(popupText->toPlainText().contains("Selected-path RTT") && popupText->toPlainText().contains("not image/input latency"));
+        Check(popupText->toPlainText().contains("Source scaling:") && popupText->toPlainText().contains("Active image in source canvas:"));
         const auto drainUntil = std::chrono::steady_clock::now() + 500ms;
         Wait([&] { return std::chrono::steady_clock::now() >= drainUntil; });
         const auto pausedFrames = changed;
@@ -626,6 +628,12 @@ int main(int argc, char** argv) {
         });
         Wait([&] { return diagnostics->item(0, 1)->text() == "source-observed"; });
         Wait([&] { return diagnostics->item(0, 5)->text() == QString::fromUtf8("160 × 90"); });
+        const auto source = host.session().status().stream.peers[0].source;
+        Check(source.imageLeft == 0 && source.imageTop == 0 && source.imageWidth == 160 && source.imageHeight == 90);
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+        Check(source.scalingPath == SourceScalingPath::Cpu && source.scaled > 0 && source.gpuScaled == 0);
+        Wait([&] { return popupText->toPlainText().contains("Source scaling: cpu."); });
+#endif
         Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Receiver-reported decode"));
         Check(diagnostics->item(diagnostics->currentRow(), 0)->data(Qt::UserRole) == diagnosticPeer);
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF

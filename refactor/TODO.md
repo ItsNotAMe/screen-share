@@ -53,6 +53,12 @@ authorized input, network impairment and continuous soak acceptance remain open.
 
 ## 2. Complete user experience (B + D)
 
+Per-viewer GPU NV12 scaling/letterboxing is integrated with owned textures, four
+in-flight submissions per device, drop-on-pressure and quarantined CPU fallback.
+UI/CLI show the actual source scaling path and active image rectangle. Dropped
+frames no longer acknowledge unapplied dimensions. [GPU-SCALING.md](GPU-SCALING.md)
+documents ownership and validation; gaming coordinate mapping remains open.
+
 Device-free **No shared audio** now works at startup and through live host UI/CLI
 changes. Capture factories are bypassed, the old endpoint is released, and failed
 resume retains silence; the negotiated track permits resuming without reconnecting.

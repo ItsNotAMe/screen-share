@@ -1,5 +1,37 @@
 # Checkpoint B evidence
 
+## Bounded per-viewer GPU scaling — 2026-09-17
+
+The native source now scales/letterboxes NV12 on the capture device and preserves
+owned GPU textures into MF encoding. The GPU command backlog is bounded to four
+submissions; pressure drops frames without readback. Unsupported operations
+quarantine scaling on that device and retain the CPU fallback. Source snapshots,
+UI details and CLI JSON expose the scaling path and active image rectangle.
+Dropped frames no longer acknowledge settings whose dimensions were never emitted.
+Implementation details and remaining acceptance: [GPU-SCALING.md](GPU-SCALING.md).
+
+Release and Debug application builds, `StreamSettingsTest --gpu` and
+`MfHardwareAdapterTest` passed. Final logs:
+`build/webrtc/gpu-scaling-bounded-{pixels,mf}-{release,debug}.log` and
+`build/webrtc/gpu-scaling-bounded-{app,proof}-{release,debug}-build.log`.
+The pixel/ownership test covers concurrent independent viewers, zero scaling
+readbacks before explicit pixel validation, color/orientation/letterboxing, Auto
+adaptation, controlled unsupported-resource fallback, retirement, and a portable
+stalled-completion admission-bound scenario.
+
+The final generated-window Windows four-viewer proof passed in **14.772 s**:
+`build/webrtc/gpu-scaling-bounded-windows-room/native-service-f50a88e4-75cd-4914-8367-54b553d00780`.
+All four peers reported GPU scaling and zero scaling-readback fallbacks after the
+live dimension change while real decoded media continued. The initial sandboxed
+capture run failed during capture startup; the desktop-access run passed. This
+does not resolve the separately recorded preview swap-chain occlusion failure.
+
+The final silent UI/CLI/service regression matrix passed **5/5 Release and 5/5
+Debug**, including live source-path/rectangle diagnostics and the dropped-revision
+fix: `build/webrtc/gpu-scaling-bounded-{release,debug}/result.json`.
+Tests used no physical audio or input. These results establish the scaling path
+and its bounds on the tested GPU, not a measured gaming-latency improvement.
+
 ## Device-free shared audio selection — 2026-09-17
 
 Host None selection is integrated across the native runtime, Windows adapter,

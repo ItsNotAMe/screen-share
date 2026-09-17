@@ -1,5 +1,15 @@
 # Headless media checks
 
+## GPU scaling integration
+
+Final Release/Debug evidence is in
+`build/webrtc/gpu-scaling-bounded-{release,debug}/result.json` (**5/5 each**), with
+GPU pixel/encoder logs `gpu-scaling-bounded-{pixels,mf}-{release,debug}.log` in the
+same `build/webrtc/` root. The generated-WGC four-viewer scenario passed with desktop
+access under `build/webrtc/gpu-scaling-bounded-windows-room/`. No physical audio or
+input was used. [GPU-SCALING.md](GPU-SCALING.md) describes submission bounds,
+failure tests and the difference between source GPU scaling and hardware encoding.
+
 ## No shared audio coverage
 
 The default room matrix now starts the CLI host with production `source: none`,
@@ -406,11 +416,13 @@ No measured-bandwidth controller was added. Accepted sender settings queue the
 source revision; `observedRevision` reports when capture delivery sees it, not
 when a remote display has rendered it.
 
-Resizing a GPU frame currently uses a counted CPU readback/scaling fallback.
-Matching dimensions preserve the native GPU frame. The optional
-`StreamSettingsTest --gpu` check verifies both paths; it requires a D3D11 GPU
-and should run with a process watchdog. GPU scaling performance and end-to-end
-timing remain acceptance work. CPU/synthetic settings checks need no GPU.
+GPU resizing now keeps NV12 planes on the GPU, with per-device submission bounds,
+owned output and quarantined CPU fallback. Matching dimensions preserve the native
+frame. `StreamSettingsTest --gpu` verifies pixels, viewer isolation and fallback;
+it requires D3D11 but no preview window. The same test without `--gpu` includes a
+deterministic stalled-completion submission-bound check. See GPU-SCALING.md for
+hardware-encode and generated-WGC room tests. End-to-end timing remains acceptance
+work; CPU/synthetic settings checks need no GPU.
 
 Coordinator contract: assign a fresh nonzero session ID, serialize owner calls,
 keep frame callbacks short, reject obsolete IDs downstream, and join before
