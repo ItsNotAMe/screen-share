@@ -21,6 +21,10 @@ Validated local stream/playback defaults and stable randomized Guest nicknames a
 integrated into browser-created sessions with explicit save controls; do not rebuild
 profile persistence. Config-file sessions remain explicit and independent.
 Do not rebuild those foundations or return to manual SDP relays/polling.
+Use refactor/STAGE-2-REMAINING.md for the four remaining Stage 2 delivery groups.
+Reported audio endpoint failures now preserve video with explicit same-device
+recovery and visible UI/CLI health; do not reimplement recovery. Physical device
+acceptance, microphone processing and multichannel handling remain open.
 Per-viewer GPU scaling/letterboxing now preserves owned NV12 frames into hardware
 encoding, drops excess GPU submissions, and quarantines to CPU fallback on failure.
 The active image rectangle is exposed in source diagnostics; actual authorized

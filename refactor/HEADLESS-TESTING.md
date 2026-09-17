@@ -1,5 +1,23 @@
 # Headless media checks
 
+## Audio failure and recovery
+
+`build/webrtc/audio-recovery-{release,debug}/result.json` passed **5/5 each**.
+Actual UI tests start with failed capture, retry from widgets, then lose/retry
+playback while video continues. CLI tests expose failed output and recover through
+a timed command. `PcmAudioDeviceTest` passed in both configurations; logs are
+`build/webrtc/audio-recovery-pcm-{release,debug}.log` and cover owner-thread release,
+no background retries, failed/successful same-device recovery and shutdown.
+
+The final synthetic four-viewer proof passed in **18.248 s**, including host audio
+loss with video continuity for all viewers and isolated output loss/retry for one:
+`build/webrtc/audio-recovery-four-viewer-final/native-service-71238484-3be2-473e-9e0f-6ddc19ba4c37`.
+The same recovery scenario with generated-window Windows capture passed in
+**18.635 s**:
+`build/webrtc/audio-recovery-windows-room/native-service-abcacbc7-2359-44c3-9888-7a0764fc89b3`.
+These tests open no physical audio endpoint and use no physical input. See
+[AUDIO-RECOVERY.md](AUDIO-RECOVERY.md) for the contract and untested driver behavior.
+
 ## GPU scaling integration
 
 Final Release/Debug evidence is in

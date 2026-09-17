@@ -1,5 +1,6 @@
 #pragma once
 #include "PcmAudioEndpoint.h"
+#include "DiscardPcmPlayout.h"
 #include "media/PlaybackSelection.h"
 #include <mutex>
 
@@ -8,11 +9,20 @@ class PlaybackControl {
 public:
     using Factory = std::function<std::unique_ptr<PcmPlayoutEndpoint>()>;
     struct Request { PlaybackSelection selected; Factory factory; std::promise<AudioUpdateResult> reply; };
-    PlaybackControl(PlaybackSelection selection, Factory factory) : status_{std::move(selection), 1}, factory_(std::move(factory)) {}
+    PlaybackControl(PlaybackSelection selection, Factory factory) : status_{std::move(selection), 1}, factory_(std::move(factory)) { ValidatePlaybackSelection(status_.selected); }
     std::pair<PlaybackSelection, Factory> Attach() { std::lock_guard lock(mutex_); active_ = !closed_; return {status_.selected, factory_}; }
-    void Detach() { std::lock_guard lock(mutex_); active_ = false; Cancel(); }
-    void Close() { std::lock_guard lock(mutex_); closed_ = true; Cancel(); }
+    void Detach() { std::lock_guard lock(mutex_); active_ = false; status_.health.state = AudioEndpointState::Inactive; Cancel(); }
+    void Close() { std::lock_guard lock(mutex_); closed_ = true; status_.health.state = AudioEndpointState::Inactive; Cancel(); }
+    void Ready() { std::lock_guard lock(mutex_); if (active_ && !closed_) status_.health.state = AudioEndpointState::Running; }
+    void Failed() {
+        std::lock_guard lock(mutex_);
+        if (active_ && !closed_) {
+            if (status_.health.state != AudioEndpointState::Failed) ++status_.health.failures;
+            status_.health.state = AudioEndpointState::Failed;
+        }
+    }
     std::future<AudioUpdateResult> Submit(PlaybackSelection selection, Factory factory) {
+        ValidatePlaybackSelection(selection);
         std::lock_guard lock(mutex_);
         if (closed_ || !active_) return CaptureUpdateReady(AudioUpdateError::Unavailable);
         if (busy_) return CaptureUpdateReady(AudioUpdateError::Busy);
@@ -24,7 +34,7 @@ public:
         if (!request) return;
         std::lock_guard lock(mutex_);
         if (closed_) error = AudioUpdateError::Cancelled;
-        if (error == AudioUpdateError::None) { status_.selected = request->selected; factory_ = request->factory; ++status_.revision; }
+        if (error == AudioUpdateError::None) { status_.selected = request->selected; factory_ = request->factory; ++status_.revision; status_.health.state = AudioEndpointState::Running; }
         busy_ = false; request->reply.set_value({error, status_.revision});
     }
     PlaybackStatus Status() const { std::lock_guard lock(mutex_); return status_; }
@@ -39,12 +49,15 @@ private:
     bool active_ = false, busy_ = false, closed_ = false;
 };
 
-// Runs entirely on the existing ADM playout worker. No extra audio queue or clock.
+// Runs entirely on the existing ADM playout worker, without an extra audio queue.
+// Healthy output owns pacing; paced discard keeps callbacks alive after failure.
 // Device initialization can pause local playout; it never blocks video/signaling.
 class ControlledPcmPlayout final : public PcmPlayoutEndpoint {
     std::shared_ptr<PlaybackControl> control_;
     std::unique_ptr<PcmPlayoutEndpoint> device_;
     PlaybackSelection selected_;
+    DiscardPcmPlayout discard_;
+    void Fail() { device_.reset(); discard_.Start(); control_->Failed(); }
     static PcmBlock Apply(PcmBlock block, const PlaybackSelection& selected) {
         const auto gain = selected.muted ? 0 : int(selected.volume);
         for (auto& sample : block) sample = int16_t(int(sample) * gain / 100);
@@ -54,16 +67,19 @@ public:
     explicit ControlledPcmPlayout(std::shared_ptr<PlaybackControl> control) : control_(std::move(control)) {}
     ~ControlledPcmPlayout() override { control_->Detach(); }
     void Start() override {
-        auto [selected, factory] = control_->Attach(); selected_ = std::move(selected); device_ = factory();
-        if (!device_) throw std::runtime_error("Missing playback endpoint");
-        device_->Start();
+        auto [selected, factory] = control_->Attach(); selected_ = std::move(selected);
+        try {
+            device_ = factory();
+            if (!device_) throw std::runtime_error("Missing playback endpoint");
+            device_->Start(); control_->Ready();
+        } catch (...) { Fail(); }
     }
     void Write(const PcmBlock& block, std::stop_token stop) override {
         if (stop.stop_requested()) return;
         if (auto request = control_->Take()) {
             try {
                 std::unique_ptr<PcmPlayoutEndpoint> replacement;
-                if (request->selected.deviceId != selected_.deviceId) {
+                if (!device_ || request->selected.deviceId != selected_.deviceId) {
                     replacement = request->factory();
                     if (!replacement) throw std::runtime_error("Missing replacement playback endpoint");
                     replacement->Start();
@@ -75,10 +91,14 @@ public:
                 selected_ = request->selected; control_->Complete(std::move(request), AudioUpdateError::None); return;
             } catch (...) { control_->Complete(std::move(request), AudioUpdateError::Failed); }
         }
-        device_->Write(Apply(block, selected_), stop);
+        if (device_) {
+            try { device_->Write(Apply(block, selected_), stop); return; }
+            catch (...) { if (stop.stop_requested()) return; Fail(); }
+        }
+        discard_.Write(block, stop);
     }
-    uint32_t DelayMs() const override { return device_->DelayMs(); }
-    uint32_t BufferFrames() const override { return device_->BufferFrames(); }
-    uint32_t EnginePeriodUs() const override { return device_->EnginePeriodUs(); }
+    uint32_t DelayMs() const override { return device_ ? device_->DelayMs() : 0; }
+    uint32_t BufferFrames() const override { return device_ ? device_->BufferFrames() : 0; }
+    uint32_t EnginePeriodUs() const override { return device_ ? device_->EnginePeriodUs() : 0; }
 };
 }

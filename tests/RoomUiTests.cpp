@@ -97,7 +97,7 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
         windows.capture.sourceType = screenshare::CaptureSourceType::Window;
         windows.capture.windowHandle = reinterpret_cast<uint64_t>(captureWindow);
         windows.audioEndpoints = proof::SyntheticAudio(audio);
-        windows.audioForSelection = proof::SyntheticAudioSelection;
+        windows.audioForSelection = [audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
         windows.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         return WindowsRoomRuntimeFactory(std::move(windows));
 #else
@@ -112,7 +112,7 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
             if (identity.host) {
                 options.audioSwitch = std::make_shared<AudioSwitchControl>(AudioSelection{}, endpoints.capture);
                 endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
-                options.audioForSelection = proof::SyntheticAudioSelection;
+                options.audioForSelection = [audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
             }
             options.engine = [endpoints] {
                 return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
@@ -403,7 +403,8 @@ void SourceSwitchScenario(const std::string& origin) {
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
     config.room.nickname = "Source host"; config.room.name = "Source switch";
     config.media.preferences.resolution = ResolutionMode::Native;
-    RoomSessionWindow host(config, Factory(std::make_shared<proof::AudioEvidence>()), true); host.show();
+    auto hostAudio = std::make_shared<proof::AudioEvidence>(); hostAudio->captureUnavailable = true;
+    RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
     Wait([&] { return host.session().status().phase == RoomPhase::Active; });
     config.room.host = false; config.room.roomId = host.session().status().roomId;
     auto audio = std::make_shared<proof::AudioEvidence>();
@@ -411,6 +412,16 @@ void SourceSwitchScenario(const std::string& origin) {
     unsigned frames = 0, lastWidth = 0; auto present = viewer.session().frameReady;
     viewer.session().frameReady = [&](auto frame) { ++frames; lastWidth = frame.width; present(std::move(frame)); };
     Wait([&] { return frames >= 10 && host.findChild<QPushButton*>("switchCaptureSource")->isEnabled(); });
+    Wait([&] { return host.session().status().audio.health.state == AudioEndpointState::Failed &&
+        host.findChild<QLabel*>("audioHealth")->text().contains("Audio capture failed"); });
+    const auto silentFrames = frames;
+    Wait([&] { return frames >= silentFrames + 10 && audio->quietStreak >= 10; });
+    Check(hostAudio->captureStarts == 1 && audio->audibleBlocks == 0 && host.session().status().audio.revision == 1);
+    hostAudio->captureUnavailable = false;
+    auto* retryCaptureAudio = host.findChild<QPushButton*>("switchAudioSource");
+    Check(retryCaptureAudio->text() == "Retry selected audio"); retryCaptureAudio->click();
+    Wait([&] { return host.session().status().audio.health.state == AudioEndpointState::Running && audio->audibleBlocks >= 10; });
+    Check(host.session().status().audio.health.failures == 1);
     const auto roomBefore = host.session().status(); const auto widthBefore = lastWidth;
     auto* choices = host.findChild<QComboBox*>("liveCaptureSource");
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
@@ -492,6 +503,19 @@ void SourceSwitchScenario(const std::string& origin) {
     Wait([&] { return applyPlayback->isEnabled(); }); applyPlayback->click();
     Wait([&] { return !viewer.session().playbackPending(); });
     Check(viewer.session().status().playback.revision == playbackRevision && viewer.findChild<QLabel*>("playbackState")->text().contains("Previous settings"));
+    output->setCurrentIndex(output->findData("replacement"));
+    audio->outputUnavailable = true;
+    Wait([&] { return viewer.session().status().playback.health.state == AudioEndpointState::Failed &&
+        viewer.findChild<QLabel*>("playbackHealth")->text().contains("Audio output failed"); });
+    const auto failureFrames = frames; const auto startsBeforeRetry = audio->outputStarts.load();
+    Wait([&] { return frames >= failureFrames + 10; });
+    Check(audio->outputStarts == startsBeforeRetry && viewer.session().status().playback.revision == playbackRevision);
+    audio->outputUnavailable = false; const auto recoveredAudio = audio->audibleBlocks.load();
+    Wait([&] { return applyPlayback->isEnabled(); }); Check(applyPlayback->text() == "Retry playback"); applyPlayback->click();
+    Wait([&] { return !viewer.session().playbackPending() && audio->audibleBlocks >= recoveredAudio + 10 &&
+        viewer.session().status().playback.health.state == AudioEndpointState::Running; });
+    Check(audio->outputStarts == startsBeforeRetry + 1 && viewer.session().status().playback.health.failures == 1 &&
+        viewer.session().status().playback.selected.deviceId == L"replacement");
     Check(viewer.session().status().roomId == viewerBefore.roomId && viewer.session().status().peerId == viewerBefore.peerId &&
         viewer.session().status().revision == viewerBefore.revision);
     host.session().playbackUpdated = [&](const auto& result) { error = result.error; };

@@ -111,6 +111,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     refreshPlayback_ = new QPushButton("Refresh output devices"); refreshPlayback_->setObjectName("refreshPlaybackDevices"); playbackForm->addRow(refreshPlayback_);
     applyPlayback_ = new QPushButton("Apply playback settings"); applyPlayback_->setObjectName("applyPlayback"); applyPlayback_->setEnabled(false); playbackForm->addRow(applyPlayback_);
     playbackState_ = new QLabel; playbackState_->setWordWrap(true); playbackState_->setObjectName("playbackState"); playbackForm->addRow(playbackState_);
+    playbackHealth_ = new QLabel; playbackHealth_->setWordWrap(true); playbackHealth_->setObjectName("playbackHealth"); playbackForm->addRow(playbackHealth_);
     connect(refreshPlayback_, &QPushButton::clicked, this, [this] {
         try {
             const auto selected = playbackDevice_->currentData(); playbackDevice_->clear(); playbackDevice_->addItem("Default output", QString());
@@ -165,6 +166,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     refreshAudio_ = new QPushButton("Refresh audio devices"); refreshAudio_->setObjectName("refreshAudioDevices"); form->addRow(refreshAudio_);
     switchAudio_ = new QPushButton("Share selected audio"); switchAudio_->setObjectName("switchAudioSource"); switchAudio_->setEnabled(false); form->addRow(switchAudio_);
     audioState_ = new QLabel; audioState_->setWordWrap(true); audioState_->setObjectName("audioState"); form->addRow(audioState_);
+    audioHealth_ = new QLabel; audioHealth_->setWordWrap(true); audioHealth_->setObjectName("audioHealth"); form->addRow(audioHealth_);
     connect(audioKind_, &QComboBox::currentIndexChanged, this, [this] {
         audioDevice_->clear(); audioDevice_->addItem("Default device", QString());
         audioDevice_->setEnabled(audioKind_->currentIndex() < 2); audioProcess_->setEnabled(audioKind_->currentIndex() == 2);
@@ -256,10 +258,19 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         members_->setText("Members: " + members.join(", "));
         apply_->setEnabled(host && value.phase == RoomPhase::Active);
         const bool playbackEditable = !host && value.phase == RoomPhase::Active && !session_.playbackPending();
+        const bool playbackFailed = value.playback.health.state == AudioEndpointState::Failed;
+        playbackHealth_->setText(playbackFailed ? "Audio output failed. Video continues. Retry playback or select another output." :
+            value.playback.health.state == AudioEndpointState::Running ? "Audio output active." : "Audio output inactive.");
+        applyPlayback_->setText(playbackFailed ? "Retry playback" : "Apply playback settings");
         applyPlayback_->setEnabled(playbackEditable); refreshPlayback_->setEnabled(playbackEditable);
         playbackDevice_->setEnabled(playbackEditable); playbackVolume_->setEnabled(playbackEditable); playbackMuted_->setEnabled(playbackEditable);
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
         const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
+        const bool audioFailed = value.audio.health.state == AudioEndpointState::Failed;
+        audioHealth_->setText(audioFailed ? "Audio capture failed. Video continues without shared audio. Retry or select another source." :
+            value.audio.health.state == AudioEndpointState::Running ? "Audio capture active." :
+            value.audio.health.state == AudioEndpointState::Silent ? "Audio capture disabled." : "Audio capture inactive.");
+        switchAudio_->setText(audioFailed ? "Retry selected audio" : "Share selected audio");
         switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioKind_->setEnabled(audioEditable); audioDevice_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioProcess_->setEnabled(audioEditable && audioKind_->currentIndex() == 2);

@@ -274,6 +274,10 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [ ] Isolate microphone processing from system/process audio.
 - [x] Support device-free no-shared-audio startup/live selection in shared runtime/UI/CLI, with rollback, worker restart and silent end-to-end coverage.
 - [ ] Preserve mute/volume, video-only operation and explicit device-error behavior.
+  Reported startup/live capture and output failures now preserve video and support
+  explicit same-device retry, with health surfaced in shared API/UI/CLI. Silent
+  injected-device tests cover release, failure isolation and recovery; see
+  AUDIO-RECOVERY.md. Native driver hangs and physical unplug acceptance remain open.
   Shared runtime/UI/CLI now support device-free `none` capture at startup and live,
   with capture-device release, failed-resume rollback and restart persistence.
   The Opus track remains negotiated; viewer output devices remain independent.

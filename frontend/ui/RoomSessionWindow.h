@@ -37,11 +37,13 @@ private:
     QSpinBox* audioProcess_;
     QPushButton *switchAudio_, *refreshAudio_;
     QLabel* audioState_;
+    QLabel* audioHealth_;
     QComboBox* playbackDevice_;
     QSpinBox* playbackVolume_;
     QCheckBox* playbackMuted_;
     QPushButton *applyPlayback_, *refreshPlayback_;
     QLabel* playbackState_;
+    QLabel* playbackHealth_;
     QCheckBox* bitrateLimit_;
     QPushButton *apply_, *stop_;
     VideoFrameWidget* video_;

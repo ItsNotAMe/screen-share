@@ -7,7 +7,7 @@
 
 namespace {
 void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
-struct Ownership { std::atomic<unsigned> live{0}; std::atomic<bool> wrongThread{false}; };
+struct Ownership { std::atomic<unsigned> live{0}, created{0}; std::atomic<bool> wrongThread{false}, unavailable{false}; };
 class OwnedCapture final : public screenshare::media::PcmCaptureEndpoint {
     std::shared_ptr<Ownership> ownership_;
     std::thread::id owner_ = std::this_thread::get_id();
@@ -16,9 +16,9 @@ class OwnedCapture final : public screenshare::media::PcmCaptureEndpoint {
     proof::ToneCapture tone_;
 public:
     OwnedCapture(std::shared_ptr<Ownership> ownership, bool stalled, bool stalledStart = false)
-        : ownership_(std::move(ownership)), stalled_(stalled), stalledStart_(stalledStart) { ++ownership_->live; }
+        : ownership_(std::move(ownership)), stalled_(stalled), stalledStart_(stalledStart) { ++ownership_->live; ++ownership_->created; }
     ~OwnedCapture() override { if (owner_ != std::this_thread::get_id()) ownership_->wrongThread = true; --ownership_->live; }
-    void Start() override { tone_.Start(); }
+    void Start() override { if (ownership_->unavailable) throw std::runtime_error("Capture unavailable"); tone_.Start(); }
     void Start(std::stop_token stop) override {
         if (stalledStart_) {
             std::mutex mutex; std::condition_variable_any wake; std::unique_lock lock(mutex);
@@ -27,6 +27,7 @@ public:
         Start();
     }
     bool Read(screenshare::media::PcmBlock& block, std::stop_token stop) override {
+        if (ownership_->unavailable) throw std::runtime_error("Capture lost");
         if (!stalled_) return tone_.Read(block, stop);
         std::mutex mutex; std::condition_variable_any wake; std::unique_lock lock(mutex);
         wake.wait(lock, stop, [] { return false; }); return false;
@@ -133,7 +134,7 @@ void NoSharedAudio() {
     Require(!endpoint->Read(block, stopped.get_token()), "Silent endpoint ignored cancellation");
     Require(std::all_of(block.begin(), block.end(), [](auto sample) { return sample == 0; }), "Production selector did not silence capture");
 }
-struct PlaybackEvidence { std::atomic<int> sample{0}, live{0}, created{0}; std::atomic<bool> wrongThread{false}, entered{false}; };
+struct PlaybackEvidence { std::atomic<int> sample{0}, live{0}, created{0}; std::atomic<bool> wrongThread{false}, entered{false}, unavailable{false}; };
 class Output final : public screenshare::media::PcmPlayoutEndpoint {
     std::shared_ptr<PlaybackEvidence> evidence_;
     std::thread::id owner_ = std::this_thread::get_id();
@@ -142,9 +143,9 @@ public:
     Output(std::shared_ptr<PlaybackEvidence> evidence, bool fail = false, bool block = false, bool failWrite = false)
         : evidence_(std::move(evidence)), fail_(fail), block_(block), failWrite_(failWrite) { ++evidence_->live; ++evidence_->created; }
     ~Output() override { if (owner_ != std::this_thread::get_id()) evidence_->wrongThread = true; --evidence_->live; }
-    void Start() override { if (fail_) throw std::runtime_error("Injected output startup failure"); }
+    void Start() override { if (fail_ || evidence_->unavailable) throw std::runtime_error("Injected output startup failure"); }
     void Write(const screenshare::media::PcmBlock& block, std::stop_token stop) override {
-        if (failWrite_) throw std::runtime_error("Injected output write failure");
+        if (failWrite_ || evidence_->unavailable) throw std::runtime_error("Injected output write failure");
         if (block_) {
             evidence_->entered = true; std::mutex mutex; std::condition_variable_any wake; std::unique_lock lock(mutex);
             wake.wait(lock, stop, [] { return false; }); return;
@@ -198,6 +199,66 @@ void Playback() {
     while (!evidence->entered) { Require(std::chrono::steady_clock::now() < deadline, "Output did not enter blocking write"); std::this_thread::yield(); }
     worker.request_stop(); worker.join();
     Require(pending.get().error == AudioUpdateError::Cancelled && evidence->live == 0 && !evidence->wrongThread, "Output write cancellation failed");
+}
+void AudioRecovery() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    auto ownership = std::make_shared<Ownership>(); ownership->unavailable = true;
+    AudioSwitchControl::Factory factory = [ownership] { return std::make_unique<OwnedCapture>(ownership, false); };
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, factory);
+    auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    PcmBlock block;
+    Require(control->Status().health.state == AudioEndpointState::Failed && control->Status().health.failures == 1 && ownership->live == 0,
+        "Initial capture failure was hidden or retained its endpoint");
+    for (int i = 0; i < 10; ++i) {
+        block.fill(2000); Require(capture->Read(block, {}) && std::all_of(block.begin(), block.end(), [](auto sample) { return sample == 0; }),
+            "Failed capture did not supply silence");
+    }
+    Require(ownership->created == 1 && control->Status().revision == 1, "Capture retried without a user command");
+    auto pump = [&](std::future<AudioUpdateResult>& result) {
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (result.wait_for(0ms) != std::future_status::ready)
+            Require(std::chrono::steady_clock::now() < deadline && capture->Read(block, {}), "Capture retry hung");
+    };
+    ownership->unavailable = false;
+    auto retry = control->Submit({}, factory); pump(retry);
+    Require(retry.get().error == AudioUpdateError::None && control->Status().health.state == AudioEndpointState::Running &&
+        ownership->live == 1 && control->Status().health.failures == 1, "Same-source capture retry failed");
+    ownership->unavailable = true;
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (control->Status().health.state != AudioEndpointState::Failed)
+        Require(std::chrono::steady_clock::now() < deadline && capture->Read(block, {}), "Live capture failure stopped the worker");
+    Require(control->Status().health.failures == 2 && ownership->live == 0, "Lost capture endpoint was retained");
+    retry = control->Submit({}, factory); pump(retry);
+    Require(retry.get().error == AudioUpdateError::Failed && control->Status().revision == 2, "Failed capture retry changed selection");
+    ownership->unavailable = false; retry = control->Submit({}, factory); pump(retry);
+    Require(retry.get().error == AudioUpdateError::None && control->Status().health.failures == 2, "Capture recovery lost failure history");
+    control->Close(); capture.reset();
+    Require(ownership->live == 0 && !ownership->wrongThread && control->Status().health.state == AudioEndpointState::Inactive, "Capture recovery leaked ownership");
+
+    auto evidence = std::make_shared<PlaybackEvidence>(); evidence->unavailable = true;
+    PlaybackControl::Factory outputFactory = [evidence] { return std::make_unique<Output>(evidence); };
+    auto playback = std::make_shared<PlaybackControl>(PlaybackSelection{}, outputFactory);
+    {
+        ControlledPcmPlayout output(playback); output.Start(); block.fill(2000);
+        Require(playback->Status().health.state == AudioEndpointState::Failed && evidence->live == 0, "Initial output failure killed recovery or retained device");
+        for (int i = 0; i < 10; ++i) output.Write(block, {});
+        Require(evidence->created == 1 && evidence->sample == 0 && output.BufferFrames() == 0, "Discard path retried, played or buffered failed output");
+        evidence->unavailable = false;
+        auto retryOutput = playback->Submit({}, outputFactory); output.Write(block, {});
+        Require(retryOutput.get().error == AudioUpdateError::None && evidence->sample == 2000 && evidence->created == 2,
+            "Same-device output retry did not reopen endpoint");
+        evidence->unavailable = true; output.Write(block, {});
+        Require(playback->Status().health.state == AudioEndpointState::Failed && playback->Status().health.failures == 2 && evidence->live == 0,
+            "Output failure did not release device and keep worker alive");
+        retryOutput = playback->Submit({}, outputFactory); output.Write(block, {});
+        Require(retryOutput.get().error == AudioUpdateError::Failed && playback->Status().revision == 2, "Failed output retry committed settings");
+        evidence->unavailable = false; retryOutput = playback->Submit({L"", 25, false}, outputFactory); output.Write(block, {});
+        Require(retryOutput.get().error == AudioUpdateError::None && evidence->sample == 500 && playback->Status().health.state == AudioEndpointState::Running,
+            "Recovered output lost volume or remained failed");
+        playback->Close();
+    }
+    Require(evidence->live == 0 && !evidence->wrongThread && playback->Status().health.state == AudioEndpointState::Inactive, "Output recovery leaked ownership");
 }
 class Transport final : public webrtc::AudioTransport {
 public:
@@ -284,6 +345,6 @@ void Run(bool wasapi) {
 }
 }
 int main(int argc, char** argv) {
-    try { Switches(); NoSharedAudio(); Playback(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
+    try { Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

@@ -1,5 +1,27 @@
 # Checkpoint B evidence
 
+## Audio endpoint failure isolation and recovery — 2026-09-17
+
+Reported host capture/viewer output startup and live I/O failures now preserve the
+room and video. Failed endpoints are released on their owner; paced silence/discard
+keeps workers available for explicit same-device retry. Public health, separate UI
+error feedback/retry actions, and CLI health/scripted recovery use the same controls.
+There is no automatic retry or physical-device substitution. See AUDIO-RECOVERY.md.
+
+Release/Debug application builds and PCM recovery tests passed; silent matrices
+passed **5/5 each** (`build/webrtc/audio-recovery-{release,debug}/result.json`).
+PCM tests cover startup/live loss, endpoint release/thread affinity, failed retries,
+same-device recovery, retained volume and stop. Actual UI/CLI tests validate health
+and action/status behavior while frames continue. Final synthetic four-viewer proof
+passed in **18.248 s** under `build/webrtc/audio-recovery-four-viewer-final/`, with
+all-viewer host-capture failure and one-viewer playback failure/recovery.
+The generated-window Windows capture version also passed in **18.635 s** under
+`build/webrtc/audio-recovery-windows-room/`, using silent synthetic audio.
+
+Physical audio unplug/driver hangs, microphone processing and multichannel handling
+remain open. STAGE-2-REMAINING.md now groups the remaining Stage 2 delivery work and
+separates Stage 3/4/5 dependencies; this feature does not close the stage.
+
 ## Bounded per-viewer GPU scaling — 2026-09-17
 
 The native source now scales/letterboxes NV12 on the capture device and preserves

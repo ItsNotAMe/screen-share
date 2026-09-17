@@ -53,6 +53,16 @@ authorized input, network impairment and continuous soak acceptance remain open.
 
 ## 2. Complete user experience (B + D)
 
+**Remaining work:** ordinary UI/CLI adoption, video pipeline/recovery completion,
+audio processing/physical-device acceptance, and remaining diagnostics/integration
+checks. [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) separates these four groups from
+Stage 3 gaming, Stage 4 acceptance and Stage 5 cutover dependencies.
+
+Detected audio startup/live failures now release the endpoint and preserve video
+through paced silence/discard. Public health, UI retry feedback and CLI status/
+scripted same-device recovery are integrated. No automatic device retry or service
+polling is added. Physical driver acceptance remains open; see AUDIO-RECOVERY.md.
+
 Per-viewer GPU NV12 scaling/letterboxing is integrated with owned textures, four
 in-flight submissions per device, drop-on-pressure and quarantined CPU fallback.
 UI/CLI show the actual source scaling path and active image rectangle. Dropped

@@ -256,7 +256,7 @@ handoff data. Process-loopback activation honors cancellation; its completion ev
 is owned by the async handler so a late completion cannot signal a reused handle.
 Native driver calls cannot be forcibly preempted by the adapter.
 
-Actual-widget tests switch to silent synthetic microphone PCM, check decoded Opus
+Actual-widget tests switch to device-free None capture, check decoded Opus
 becomes silent while video continues, reject a missing device without committing,
 then restore decoded audio. Viewer requests are rejected and room/member/settings
 revisions remain unchanged. These tests never capture or play physical audio.
@@ -275,14 +275,25 @@ The existing ADM playout worker owns endpoint creation, first write, replacement
 and destruction. Volume/mute changes reuse the device; changing the device can
 temporarily pause local sound during initialization. The old endpoint/settings
 remain available on startup or first-write failure. Success means the new endpoint
-accepted a block, not that a speaker physically played it. No queue, clock, room
-mutation, renegotiation or service request is added. Settings survive an ADM
+accepted a block, not that a speaker physically played it. Healthy output retains
+its device pacing, without an extra queue, room mutation, renegotiation or service
+request. Settings survive an ADM
 playout stop/restart; the independent playback revision reports application.
 
 Stop cancels the public command and drains native work. Endpoint writes honor the
 stop token, but synchronous Windows device initialization cannot be forcibly
 interrupted; driver hangs and physical unplug/recovery still require acceptance.
 Tests use synthetic outputs exclusively, including the Windows widget variant.
+
+## Audio failure and retry
+
+Separate capture/output health labels distinguish failed devices from intentional
+None capture. A reported startup/live error releases the endpoint and continues
+video with paced silence/discard. The existing action becomes **Retry selected
+audio** or **Retry playback**; selecting a different endpoint is also supported.
+Retrying the same endpoint reopens it, commits only after PCM/write success, and
+retains volume/mute. No automatic retry, device fallback or rejoin is introduced.
+See [AUDIO-RECOVERY.md](AUDIO-RECOVERY.md) for state, ownership and physical-test limits.
 
 ## Retained NV12 presentation
 

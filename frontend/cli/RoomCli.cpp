@@ -29,6 +29,9 @@ const char* Phase(RoomPhase phase) {
     return "failed";
 }
 QJsonObject Status(const RoomStatus& value) {
+    auto health = [](const AudioEndpointHealth& value) -> QJsonObject {
+        return {{"state", AudioEndpointStateName(value.state)}, {"failures", qint64(value.failures)}};
+    };
     QJsonArray peers;
     for (const auto& peer : value.stream.peers) peers.append(StreamPeerJson(peer, value.stream.requestedRevision));
     return {{"type", "status"}, {"phase", Phase(value.phase)}, {"error", int(value.error)},
@@ -38,6 +41,7 @@ QJsonObject Status(const RoomStatus& value) {
         {"requestedPreferences", StreamPreferencesJson(value.stream.preferences)},
         {"aggregateUploadBps", value.stream.preferences.aggregateUploadLimitBps.value_or(0)}, {"captureRevision", qint64(value.capture.revision)},
         {"audioRevision", qint64(value.audio.revision)}, {"audioSource", media::AudioKindName(value.audio.selected.kind)},
+        {"audioHealth", health(value.audio.health)}, {"playbackHealth", health(value.playback.health)},
         {"playbackRevision", qint64(value.playback.revision)},
         {"playbackVolume", int(value.playback.selected.volume)}, {"playbackMuted", value.playback.selected.muted}};
 }

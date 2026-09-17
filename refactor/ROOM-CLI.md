@@ -176,6 +176,12 @@ changes affect host capture only.
 
 ## Viewer playback changes
 
+Status now includes `audioHealth` and `playbackHealth`, each containing `state`
+(`inactive`, `running`, `silent`, `failed`) and cumulative `failures`. An endpoint
+startup/live failure alone preserves video and the room; a later timed command can
+retry the same source/device. There is no automatic retry and command failures still
+follow the existing exit policy. See [AUDIO-RECOVERY.md](AUDIO-RECOVERY.md).
+
 Startup audio accepts `playbackDeviceId`, `playbackVolume` (0–100, default 100) and
 `playbackMuted` (default false). Viewers may also supply at most 64 strictly ordered
 `playbackChanges`:

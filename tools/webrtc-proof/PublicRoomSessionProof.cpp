@@ -66,7 +66,8 @@ public:
         windows.preferences.resolution = ResolutionMode::Fixed;
         windows.preferences.width = 640; windows.preferences.height = 360; windows.preferences.fps = 30;
         windows.audioEndpoints = proof::SyntheticAudio(evidence_->audio);
-        windows.audioForSelection = proof::SyntheticAudioSelection;
+        windows.audioForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
+        windows.playbackForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         windows.frames = evidence_;
         native_ = WindowsRoomRuntimeFactory(std::move(windows))(identity, std::move(send));
 #else
@@ -75,7 +76,11 @@ public:
         if (identity.host) {
             options.audioSwitch = std::make_shared<AudioSwitchControl>(screenshare::media::AudioSelection{}, endpoints.capture);
             endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
-            options.audioForSelection = proof::SyntheticAudioSelection;
+            options.audioForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
+        } else {
+            options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{}, endpoints.playout);
+            endpoints.playout = [control = options.playback] { return std::make_unique<ControlledPcmPlayout>(control); };
+            options.playbackForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         }
         options.engine = [endpoints] {
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
@@ -105,6 +110,8 @@ public:
     StreamStatus StreamSettings() const override { return native_->StreamSettings(); }
     std::future<AudioUpdateResult> SwitchAudioSource(screenshare::media::AudioSelection selection) override { return native_->SwitchAudioSource(std::move(selection)); }
     AudioSelectionStatus AudioSelection() const override { return native_->AudioSelection(); }
+    std::future<AudioUpdateResult> UpdatePlayback(screenshare::media::PlaybackSelection selection) override { return native_->UpdatePlayback(std::move(selection)); }
+    PlaybackStatus Playback() const override { return native_->Playback(); }
     void Advance() override {
         try {
             if (evidence_->pauseAdvance) return; // Media threads keep running; telemetry cannot publish.
@@ -166,6 +173,34 @@ int main(int argc, char** argv) {
             Check(joined.error == RoomError::None);
         }
         Wait([&] { for (auto& value : evidence) if (value->frames < 45 || value->audio->audibleBlocks < 20) return false; return host.Status().activePeers == 4; });
+        const auto beforeAudioFailure = host.Status();
+        hostEvidence->audio->captureUnavailable = true;
+        Wait([&] {
+            if (host.Status().audio.health.state != AudioEndpointState::Failed) return false;
+            for (const auto& value : evidence) if (value->audio->quietStreak < 30) return false;
+            return true;
+        });
+        std::array<unsigned, 4> silentFrames;
+        for (size_t i = 0; i < evidence.size(); ++i) silentFrames[i] = evidence[i]->frames;
+        Wait([&] { for (size_t i = 0; i < evidence.size(); ++i) if (evidence[i]->frames < silentFrames[i] + 10) return false; return true; });
+        Check(hostEvidence->audio->captureStarts == 1 && host.Status().audio.revision == beforeAudioFailure.audio.revision);
+        hostEvidence->audio->captureUnavailable = false;
+        std::array<uint64_t, 4> quietAudio;
+        for (size_t i = 0; i < evidence.size(); ++i) quietAudio[i] = evidence[i]->audio->audibleBlocks;
+        auto recoveredCapture = host.SwitchAudioSource({}); Check(Get(recoveredCapture).error == AudioUpdateError::None);
+        Wait([&] { for (size_t i = 0; i < evidence.size(); ++i) if (evidence[i]->audio->audibleBlocks < quietAudio[i] + 10) return false; return true; });
+        Check(hostEvidence->audio->captureStarts == 2 && host.Status().audio.health.failures == 1 && host.Status().revision == beforeAudioFailure.revision);
+        evidence[0]->audio->outputUnavailable = true;
+        Wait([&] { return viewers[0]->Status().playback.health.state == AudioEndpointState::Failed; });
+        const auto failedOutputFrames = evidence[0]->frames.load();
+        const auto healthyAudio = evidence[1]->audio->audibleBlocks.load();
+        Wait([&] { return evidence[0]->frames >= failedOutputFrames + 10 && evidence[1]->audio->audibleBlocks >= healthyAudio + 10; });
+        Check(evidence[0]->audio->outputStarts == 1 && host.Status().activePeers == 4);
+        evidence[0]->audio->outputUnavailable = false;
+        const auto outputBeforeRetry = evidence[0]->audio->audibleBlocks.load();
+        auto recoveredOutput = viewers[0]->UpdatePlayback({}); Check(Get(recoveredOutput).error == AudioUpdateError::None);
+        Wait([&] { return evidence[0]->audio->audibleBlocks >= outputBeforeRetry + 10; });
+        Check(evidence[0]->audio->outputStarts == 2 && viewers[0]->Status().playback.health.failures == 1);
         const auto beforeAudioSwitch = host.Status();
         auto audioSwitch = host.SwitchAudioSource({AudioKind::None});
         Check(Get(audioSwitch).error == AudioUpdateError::None);

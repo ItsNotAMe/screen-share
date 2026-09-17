@@ -1,5 +1,6 @@
 #pragma once
 #include "CaptureSelection.h"
+#include "AudioEndpointHealth.h"
 #include <string>
 
 namespace screenshare::media {
@@ -20,7 +21,7 @@ struct AudioSelection {
 };
 using AudioUpdateError = CaptureUpdateError;
 using AudioUpdateResult = CaptureUpdateResult;
-struct AudioSelectionStatus { AudioSelection selected; uint64_t revision = 0; };
+struct AudioSelectionStatus { AudioSelection selected; uint64_t revision = 0; AudioEndpointHealth health; };
 inline void ValidateAudioSelection(const AudioSelection& value) {
     if ((value.kind != AudioKind::System && value.kind != AudioKind::Microphone && value.kind != AudioKind::Process && value.kind != AudioKind::None) ||
         (value.kind == AudioKind::None && !value.deviceId.empty()) ||
