@@ -1,5 +1,35 @@
 # Checkpoint B evidence
 
+## GPU receive and bounded decoder recovery — 2026-09-17
+
+Windows rooms now prefer D3D11 MF decoding and retain owned visible NV12 textures
+through Qt/CLI presentation. A single GPU copy escapes MF's reusable output pool;
+the normal path has no CPU readback, planar conversion or re-upload. Published
+GPU outputs are capped at eight per decoder; frontend queues remain one frame.
+Explicit offscreen/pixel access uses cached readback, counted in local diagnostics.
+The shared renderer adopts the decoder device and protects complete draw sequences
+against concurrent MF context work. CPU and GPU frames can alternate on one viewer.
+
+GPU startup failure selects software. Runtime failure quarantines hardware across
+decoder reconfiguration/replacement within the runtime's factory and
+requires a keyframe after 250 ms; no more than three rebuild attempts are allowed
+per configuration. The receive path preserves fixed dimensions. Live resize now
+validates delayed output against its timestamp-associated dimensions, fixing a
+reproduced 320×180-to-160×90 transition that unnecessarily forced GPU fallback.
+Hardware/software receiver telemetry reaches the actual host UI/CLI.
+
+Release/Debug full seven-case desktop matrices pass, as do both focused GPU
+decoder/settings suites. Four Windows hardware-decoding viewers pass restart,
+settings, telemetry expiry/recovery, rejoin and failure isolation in 18.631 / 17.543
+seconds; a software four-viewer run also passes in 18.008 seconds. Exact artifacts
+and final shared-context checks are in HEADLESS-TESTING.md.
+
+Tests are silent and require no physical input. One GPU copy is intentional, so
+strict zero-copy is not claimed. Display-only capture fallback, source identity/
+privacy/cursor/HDR/state completion, physical loss/occlusion and external latency
+acceptance remain open. Stage 2's broader video group is not complete.
+See GPU-RECEIVE.md and STAGE-2-REMAINING.md.
+
 ## Audio processing/downmix implementation — 2026-09-17
 
 Windows room capture now uses one WebRTC speech processor per microphone endpoint,

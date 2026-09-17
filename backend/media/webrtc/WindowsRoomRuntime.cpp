@@ -70,7 +70,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         }
         native.engine = [endpoints = std::move(endpoints), state] {
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, std::make_shared<PcmAudioDiagnostics>()),
-                std::make_unique<MfVideoEncoderFactory>(state->Get()), std::make_unique<MfVideoDecoderFactory>());
+                std::make_unique<MfVideoEncoderFactory>(state->Get()), std::make_unique<MfVideoDecoderFactory>(true));
         };
         native.engineReady = [state] { return bool(state->Get()); };
         native.capture = [capture = options.capture, state] { return std::make_unique<DeviceCapture>(capture, state); };

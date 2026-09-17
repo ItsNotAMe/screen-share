@@ -26,6 +26,13 @@ RoomApplication shell, RoomSessionWindow and production CLI session runner.
 - Receiver stats: allowlisted decoder implementation, dropped decoder frames and
   optional mean jitter-buffer residence (cumulative delay / emitted count). This
   is a lifetime average, not instantaneous buffering or end-to-end latency.
+  Windows GPU decode maps to `mf-h264-hardware`; startup/runtime software fallback
+  maps to `mf-h264-software`. The current implementation determines this label.
+- Local receive handoff: `gpuRetained` counts native decoded frames consumed by
+  the frontend, and `gpuReadbacks` counts explicit cached CPU conversions requested
+  through those frames. Qt displays both; final CLI presentation JSON includes
+  both. These local counters are separate from sender hardware/scaling counters
+  and are not transmitted as additional receiver telemetry fields.
 - Receiver presentation: actual frontend renderer submissions, total drops,
   pending-frame count (0 or 1), and last outcome. Qt publishes on its existing
   one-second diagnostics timer; CLI uses its existing periodic report. No renderer

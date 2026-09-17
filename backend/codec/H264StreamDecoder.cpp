@@ -102,14 +102,15 @@ bool TryReadVideoArea(IMFMediaType* mediaType, const GUID& key, int codedWidth, 
 
     MFVideoArea mfArea{};
     UINT32 blobSize = 0;
-    if (FAILED(mediaType->GetBlob(
+    const HRESULT sizeResult = mediaType->GetBlobSize(key, &blobSize);
+    if (sizeResult == MF_E_ATTRIBUTENOTFOUND) return false;
+    ThrowIfFailed(sizeResult, "Decoder aperture metadata");
+    if (blobSize != sizeof(mfArea)) throw std::runtime_error("Invalid decoder aperture size");
+    ThrowIfFailed(mediaType->GetBlob(
             key,
             reinterpret_cast<UINT8*>(&mfArea),
             static_cast<UINT32>(sizeof(mfArea)),
-            &blobSize)) ||
-        blobSize < sizeof(mfArea)) {
-        return false;
-    }
+            &blobSize), "Decoder aperture");
 
     VisibleFrameArea candidate;
     candidate.left = static_cast<int>(mfArea.OffsetX.value);
@@ -121,13 +122,14 @@ bool TryReadVideoArea(IMFMediaType* mediaType, const GUID& key, int codedWidth, 
         candidate.top < 0 ||
         candidate.width <= 0 ||
         candidate.height <= 0 ||
-        candidate.left + candidate.width > codedWidth ||
-        candidate.top + candidate.height > codedHeight ||
+        candidate.left > codedWidth || candidate.width > codedWidth - candidate.left ||
+        candidate.top > codedHeight || candidate.height > codedHeight - candidate.top ||
+        mfArea.OffsetX.fract != 0 || mfArea.OffsetY.fract != 0 ||
         (candidate.left % 2) != 0 ||
         (candidate.top % 2) != 0 ||
         (candidate.width % 2) != 0 ||
         (candidate.height % 2) != 0) {
-        return false;
+        throw std::runtime_error("Decoder returned an invalid NV12 visible aperture");
     }
 
     area = candidate;
@@ -223,7 +225,7 @@ H264StreamDecoder::~H264StreamDecoder()
     }
 }
 
-void H264StreamDecoder::Start(int maxWidth, int maxHeight)
+void H264StreamDecoder::Start(int maxWidth, int maxHeight, ID3D11Device* device)
 {
     Stop();
     if (maxWidth <= 0 || maxHeight <= 0 || maxWidth > 16384 || maxHeight > 16384) {
@@ -236,6 +238,18 @@ void H264StreamDecoder::Start(int maxWidth, int maxHeight)
         CoCreateInstance(H264DecoderClsid, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform_)),
         "CoCreateInstance(CMSH264DecoderMFT)");
     ConfigureLowLatencyDecoderOptions(transform_.Get());
+    if (device) {
+        Microsoft::WRL::ComPtr<IMFAttributes> attributes;
+        ThrowIfFailed(transform_->GetAttributes(&attributes), "Decoder attributes");
+        if (!MFGetAttributeUINT32(attributes.Get(), MF_SA_D3D11_AWARE, FALSE))
+            throw std::runtime_error("Decoder does not support D3D11");
+        UINT token = 0;
+        ThrowIfFailed(MFCreateDXGIDeviceManager(&token, &manager_), "Decoder device manager");
+        ThrowIfFailed(manager_->ResetDevice(device, token), "Decoder device binding");
+        ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER,
+            reinterpret_cast<ULONG_PTR>(manager_.Get())), "Decoder acceleration binding");
+        device_ = device;
+    }
 
     DWORD inputCount = 0;
     DWORD outputCount = 0;
@@ -332,6 +346,7 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::Drain()
 void H264StreamDecoder::Stop()
 {
     transform_.Reset();
+    manager_.Reset(); device_.Reset();
     outputWidth_ = 0;
     outputHeight_ = 0;
     outputVisibleLeft_ = 0;
@@ -396,7 +411,9 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
 {
     std::vector<DecodedFrameInfo> frames;
 
+    unsigned operations = 0;
     while (true) {
+        if (++operations > 64 || frames.size() >= 32) throw std::runtime_error("Decoder output work limit exceeded");
         if (!outputTypeConfigured_ && !TryConfigureOutputType()) {
             break;
         }
@@ -415,9 +432,11 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
         while (true) {
             Microsoft::WRL::ComPtr<IMFMediaBuffer> outputBuffer;
             Microsoft::WRL::ComPtr<IMFSample> outputSample;
-            ThrowIfFailed(MFCreateMemoryBuffer(outputBufferBytes, &outputBuffer), "MFCreateMemoryBuffer(decoder output)");
-            ThrowIfFailed(MFCreateSample(&outputSample), "MFCreateSample(decoder output)");
-            ThrowIfFailed(outputSample->AddBuffer(outputBuffer.Get()), "IMFSample::AddBuffer(decoder output)");
+            if (!(streamInfo.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES)) {
+                ThrowIfFailed(MFCreateMemoryBuffer(outputBufferBytes, &outputBuffer), "MFCreateMemoryBuffer(decoder output)");
+                ThrowIfFailed(MFCreateSample(&outputSample), "MFCreateSample(decoder output)");
+                ThrowIfFailed(outputSample->AddBuffer(outputBuffer.Get()), "IMFSample::AddBuffer(decoder output)");
+            }
 
             MFT_OUTPUT_DATA_BUFFER outputData{};
             outputData.dwStreamID = outputStreamId_;
@@ -425,6 +444,7 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
 
             DWORD status = 0;
             const HRESULT outputResult = transform_->ProcessOutput(0, 1, &outputData, &status);
+            if (!outputSample && outputData.pSample) outputSample.Attach(outputData.pSample);
 
             if (outputData.pEvents != nullptr) {
                 outputData.pEvents->Release();
@@ -455,6 +475,7 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             }
 
             ThrowIfFailed(outputResult, "IMFTransform::ProcessOutput(decoder)");
+            if (!outputSample) throw std::runtime_error("Decoder returned no sample");
 
             DecodedFrameInfo frame;
             frame.width = outputVisibleWidth_ > 0 ? outputVisibleWidth_ : outputWidth_;
@@ -469,6 +490,37 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             }
             if (SUCCEEDED(outputSample->GetSampleDuration(&sampleDuration))) {
                 frame.duration100ns = sampleDuration;
+            }
+
+            if (device_) {
+                Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
+                Microsoft::WRL::ComPtr<IMFDXGIBuffer> dxgi;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> decoded;
+                ThrowIfFailed(outputSample->GetBufferByIndex(0, &buffer), "Decoder GPU buffer");
+                ThrowIfFailed(buffer.As(&dxgi), "Decoder GPU output required");
+                ThrowIfFailed(dxgi->GetResource(IID_PPV_ARGS(&decoded)), "Decoder GPU texture");
+                UINT subresource = 0; ThrowIfFailed(dxgi->GetSubresourceIndex(&subresource), "Decoder GPU slice");
+                D3D11_TEXTURE2D_DESC description{}; decoded->GetDesc(&description);
+                Microsoft::WRL::ComPtr<ID3D11Device> actualDevice; decoded->GetDevice(&actualDevice);
+                if (description.Format != DXGI_FORMAT_NV12 || description.MipLevels != 1 || description.SampleDesc.Count != 1 ||
+                    subresource >= description.ArraySize || actualDevice.Get() != device_.Get() ||
+                    description.Width < UINT(outputWidth_) || description.Height < UINT(outputHeight_))
+                    throw std::runtime_error("Invalid decoder GPU resource");
+                // Detach from MF's recycled surface pool. One GPU copy, no CPU
+                // readback/upload; published textures are immutable and owned.
+                description.Width = frame.width; description.Height = frame.height;
+                description.ArraySize = 1; description.Usage = D3D11_USAGE_DEFAULT;
+                description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                description.CPUAccessFlags = description.MiscFlags = 0;
+                ThrowIfFailed(device_->CreateTexture2D(&description, nullptr, &frame.texture), "Owned decoder texture");
+                Microsoft::WRL::ComPtr<ID3D11DeviceContext> context; device_->GetImmediateContext(&context);
+                D3D11_BOX crop{UINT(outputVisibleLeft_), UINT(outputVisibleTop_), 0,
+                    UINT(outputVisibleLeft_ + frame.width), UINT(outputVisibleTop_ + frame.height), 1};
+                context->CopySubresourceRegion(frame.texture.Get(), 0, 0, 0, 0, decoded.Get(), subresource, &crop);
+                context->Flush();
+                ThrowIfFailed(device_->GetDeviceRemovedReason(), "Decoder device health");
+                frames.push_back(std::move(frame));
+                break;
             }
 
             Microsoft::WRL::ComPtr<IMFMediaBuffer> contiguousBuffer;
@@ -498,7 +550,7 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
                 frame.bytes = static_cast<uint32_t>(frame.data.size());
             }
 
-            frames.push_back(frame);
+            frames.push_back(std::move(frame));
             break;
         }
     }

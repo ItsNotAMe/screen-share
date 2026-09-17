@@ -180,6 +180,13 @@ int main(int argc, char** argv) try {
     auto ambiguous = std::make_unique<webrtc::RTCInboundRtpStreamStats>("other", invalidReport->timestamp());
     ambiguous->kind = "video"; invalidReport->AddStats(std::move(ambiguous)); receiverCollector->OnStatsDelivered(invalidReport);
     Require(!receiverMailbox->video, "Ambiguous video receiver selected arbitrarily");
+    auto hardwareReport = webrtc::RTCStatsReport::Create(webrtc::Timestamp::Micros(4000000));
+    auto hardwareInbound = std::make_unique<webrtc::RTCInboundRtpStreamStats>("video", hardwareReport->timestamp());
+    hardwareInbound->kind = "video"; hardwareInbound->frame_width = 320; hardwareInbound->frame_height = 180;
+    hardwareInbound->frames_decoded = 30; hardwareInbound->decoder_implementation = "Media Foundation H264 (D3D11 NV12)";
+    hardwareReport->AddStats(std::move(hardwareInbound)); receiverCollector->OnStatsDelivered(hardwareReport);
+    Require(receiverMailbox->video && receiverMailbox->video->decoder == CodecImplementation::MfH264Hardware,
+        "Hardware decoder telemetry was not allowlisted");
     auto fixed = webrtc::make_ref_counted<CaptureVideoSource>();
     auto adaptive = webrtc::make_ref_counted<CaptureVideoSource>();
     preferences = {};

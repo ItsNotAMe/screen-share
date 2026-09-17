@@ -1,5 +1,6 @@
 #include "media/webrtc/MfVideoDecoderFactory.h"
 #include "media/webrtc/OwnedNv12Buffer.h"
+#include "media/webrtc/D3dVideoFrameBuffer.h"
 #include "api/make_ref_counted.h"
 
 #include "codec/H264StreamDecoder.h"
@@ -12,13 +13,44 @@
 #include <cstring>
 #include <map>
 #include <stdexcept>
+#include <atomic>
+#include <chrono>
 
 namespace screenshare::media {
 namespace {
-// Explicit software/CPU fallback. No hardware or zero-copy claim is made.
+void RequireGpuPresentation(ID3D11Device* device) {
+    // Reject decode devices that cannot expose the two NV12 planes to the
+    // renderer. Fallback happens before accepting a GPU-only stream.
+    D3D11_TEXTURE2D_DESC description{};
+    description.Width = description.Height = 16;
+    description.MipLevels = description.ArraySize = description.SampleDesc.Count = 1;
+    description.Format = DXGI_FORMAT_NV12; description.Usage = D3D11_USAGE_DEFAULT;
+    description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(device->CreateTexture2D(&description, nullptr, &texture))) throw std::runtime_error("NV12 GPU presentation unavailable");
+    D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+    view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; view.Texture2D.MipLevels = 1;
+    for (auto format : {DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8G8_UNORM}) {
+        view.Format = format;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> plane;
+        if (FAILED(device->CreateShaderResourceView(texture.Get(), &view, &plane))) throw std::runtime_error("NV12 GPU plane unavailable");
+    }
+}
+// Hold at most eight published GPU frames per decoder configuration. A slow
+// consumer drops output rather than accumulating textures or blocking decoding.
+class DecodedGpuBuffer : public D3dVideoFrameBuffer {
+public:
+    DecodedGpuBuffer(std::shared_ptr<D3dVideoDevice> device, Microsoft::WRL::ComPtr<ID3D11Texture2D> texture,
+        int width, int height, std::shared_ptr<std::atomic<unsigned>> retained)
+        : D3dVideoFrameBuffer(std::move(device), std::move(texture), width, height), retained_(std::move(retained)) { ++*retained_; }
+    ~DecodedGpuBuffer() override { --*retained_; }
+private:
+    std::shared_ptr<std::atomic<unsigned>> retained_;
+};
 class MfVideoDecoder final : public webrtc::VideoDecoder {
 public:
-    MfVideoDecoder() : worker_(webrtc::Thread::Create()) {
+    MfVideoDecoder(bool preferHardware, MfVideoDecoderFactory::DeviceFactory factory, std::shared_ptr<std::atomic<bool>> quarantine)
+        : worker_(webrtc::Thread::Create()), preferHardware_(preferHardware), deviceFactory_(std::move(factory)), hardwareQuarantined_(std::move(quarantine)) {
         worker_->SetName("MF decoder", nullptr);
         if (!worker_->Start()) throw std::runtime_error("MF decoder thread startup failed");
     }
@@ -34,6 +66,20 @@ public:
             maxHeight_ = maximum.Valid() ? maximum.Height() : 4096;
             try {
                 decoder_ = std::make_unique<H264StreamDecoder>();
+                if (preferHardware_ && !hardwareQuarantined_->load()) {
+                    try {
+                        gpu_ = deviceFactory_ ? deviceFactory_() : std::make_shared<D3dVideoDevice>();
+                        if (!gpu_ || gpu_->retired()) throw std::runtime_error("Decoder GPU unavailable");
+                        RequireGpuPresentation(gpu_->device());
+                        decoder_->Start(4096, 4096, gpu_->device());
+                        hardware_ = true;
+                        return true;
+                    } catch (const std::exception& error) {
+                        *hardwareQuarantined_ = true;
+                        RTC_LOG(LS_WARNING) << "MF hardware decoder unavailable: " << error.what();
+                        decoder_->Stop(); gpu_.reset();
+                    }
+                }
                 StartTransform();
                 return true;
             } catch (...) { Reset(); return false; }
@@ -64,6 +110,14 @@ public:
                 maxWidth_ = image._encodedWidth; maxHeight_ = image._encodedHeight;
             }
             try {
+                if (restartPending_) {
+                    if (std::chrono::steady_clock::now() < retryAfter_) return WEBRTC_VIDEO_CODEC_ERROR;
+                    if (restarts_ >= 3) return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
+                    ++restarts_;
+                    StartTransform();
+                    restartPending_ = false;
+                }
+                if (gpu_ && gpu_->retired()) throw std::runtime_error("Decoder device retired");
                 if (timestamps_.size() >= 32) throw std::runtime_error("MF decoder retained too many frames");
                 EncodedPacket packet;
                 packet.timestamp100ns = ++sampleId_ * 100'000;
@@ -71,14 +125,20 @@ public:
                 packet.isKeyframe = image._frameType == webrtc::VideoFrameType::kVideoFrameKey;
                 packet.bytes.resize(image.size());
                 std::memcpy(packet.bytes.data(), image.data(), image.size());
-                timestamps_.emplace(packet.timestamp100ns, Timing{image.RtpTimestamp(), image.NtpTimeMs()});
+                timestamps_.emplace(packet.timestamp100ns, Timing{image.RtpTimestamp(), image.NtpTimeMs(), maxWidth_, maxHeight_});
                 for (auto& output : decoder_->DecodePacket(packet)) {
                     auto timestamp = timestamps_.find(output.timestamp100ns);
                     if (timestamp == timestamps_.end()) throw std::runtime_error("MF decoder lost timestamp association");
-                    if (output.width > maxWidth_ || output.height > maxHeight_ ||
-                        output.data.size() < size_t(output.width) * output.height * 3 / 2)
-                        throw std::runtime_error("MF decoder returned invalid visible buffer");
-                    auto buffer = webrtc::make_ref_counted<OwnedNv12Buffer>(output.width, output.height, std::move(output.data));
+                    if (output.width < 2 || output.height < 2 || output.width > timestamp->second.width || output.height > timestamp->second.height ||
+                        (!output.texture && output.data.size() < size_t(output.width) * output.height * 3 / 2))
+                        throw std::runtime_error("MF decoder returned invalid visible buffer " + std::to_string(output.width) + "x" +
+                            std::to_string(output.height) + " bound " + std::to_string(timestamp->second.width) + "x" + std::to_string(timestamp->second.height));
+                    webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer;
+                    if (output.texture) {
+                        if (retained_->load() >= 8) { timestamps_.erase(timestamp); continue; }
+                        buffer = webrtc::make_ref_counted<DecodedGpuBuffer>(gpu_, std::move(output.texture), output.width, output.height, retained_);
+                    }
+                    else buffer = webrtc::make_ref_counted<OwnedNv12Buffer>(output.width, output.height, std::move(output.data));
                     frames.push_back(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer)
                         .set_rtp_timestamp(timestamp->second.rtp).set_ntp_time_ms(timestamp->second.ntp).build());
                     timestamps_.erase(timestamp);
@@ -90,7 +150,13 @@ public:
                 frames.clear();
                 timestamps_.clear();
                 needsKeyframe_ = true;
-                try { StartTransform(); } catch (...) { decoder_.reset(); }
+                // Retire hardware for this configuration. Rebuild only on a new
+                // keyframe, at most three times; corrupt input cannot spin MF up.
+                decoder_->Stop();
+                if (gpu_) *hardwareQuarantined_ = true;
+                gpu_.reset(); hardware_ = false;
+                restartPending_ = true;
+                retryAfter_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
                 return WEBRTC_VIDEO_CODEC_ERROR;
             }
         });
@@ -103,7 +169,10 @@ public:
         callback_ = nullptr;
         return WEBRTC_VIDEO_CODEC_OK;
     }
-    DecoderInfo GetDecoderInfo() const override { return {"Media Foundation H264 (CPU NV12)", false}; }
+    DecoderInfo GetDecoderInfo() const override {
+        const bool hardware = hardware_;
+        return {hardware ? "Media Foundation H264 (D3D11 NV12)" : "Media Foundation H264 (CPU NV12)", hardware};
+    }
 
 private:
     void StartTransform() {
@@ -114,13 +183,27 @@ private:
     }
     void Reset() {
         decoder_.reset();
+        gpu_.reset(); hardware_ = false;
+        retained_ = std::make_shared<std::atomic<unsigned>>(0);
+        restarts_ = 0; restartPending_ = false;
         timestamps_.clear();
         sampleId_ = 0;
         needsKeyframe_ = true;
     }
     std::unique_ptr<webrtc::Thread> worker_;
     std::unique_ptr<H264StreamDecoder> decoder_;
-    struct Timing { uint32_t rtp; int64_t ntp; };
+    bool preferHardware_;
+    MfVideoDecoderFactory::DeviceFactory deviceFactory_;
+    std::shared_ptr<std::atomic<bool>> hardwareQuarantined_;
+    std::shared_ptr<D3dVideoDevice> gpu_;
+    std::shared_ptr<std::atomic<unsigned>> retained_ = std::make_shared<std::atomic<unsigned>>(0);
+    std::atomic<bool> hardware_{false};
+    unsigned restarts_ = 0;
+    bool restartPending_ = false;
+    std::chrono::steady_clock::time_point retryAfter_{};
+    // Decoder output can lag an incoming resize keyframe. Validate against the
+    // declaration attached to that output, never the newest stream dimensions.
+    struct Timing { uint32_t rtp; int64_t ntp; int width, height; };
     std::map<int64_t, Timing> timestamps_;
     int maxWidth_ = 4096;
     int maxHeight_ = 4096;
@@ -145,6 +228,6 @@ webrtc::VideoDecoderFactory::CodecSupport MfVideoDecoderFactory::QueryCodecSuppo
 std::unique_ptr<webrtc::VideoDecoder> MfVideoDecoderFactory::Create(
     const webrtc::Environment&, const webrtc::SdpVideoFormat& format) {
     if (!QueryCodecSupport(format, false, std::nullopt).is_supported) return nullptr;
-    return std::make_unique<MfVideoDecoder>();
+    return std::make_unique<MfVideoDecoder>(preferHardware_, deviceFactory_, hardwareQuarantined_);
 }
 } // namespace screenshare::media

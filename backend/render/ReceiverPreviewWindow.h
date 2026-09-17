@@ -63,6 +63,7 @@ private:
     void RefreshTitle();
     bool Render();
     void PresentPixels(int width, int height, std::span<const uint8_t> pixels);
+    void PresentView(const Nv12D3D11Presenter::FrameView& view);
 
     HWND hwnd_ = nullptr;
     uint32_t clientWidth_ = 0;

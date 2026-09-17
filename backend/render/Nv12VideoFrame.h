@@ -3,8 +3,17 @@
 #include <memory>
 #include <span>
 #include <vector>
+struct ID3D11Texture2D;
 
 namespace screenshare {
+// The owner retains both device and immutable visible NV12 texture. CPU access
+// is an explicit, cached fallback for offscreen rendering and image assertions.
+class NativeNv12Frame {
+public:
+    virtual ~NativeNv12Frame() = default;
+    virtual ID3D11Texture2D* texture() const = 0;
+    virtual std::span<const uint8_t> pixels() const = 0;
+};
 // Packed, visible-aperture NV12. Retained pixels are immutable and their owner
 // outlives every queued frame. Legacy producers may still move an owned vector.
 struct Nv12VideoFrame {
@@ -13,7 +22,9 @@ struct Nv12VideoFrame {
     std::vector<uint8_t> nv12;
     std::shared_ptr<const uint8_t> retainedPixels;
     size_t retainedBytes = 0;
+    std::shared_ptr<const NativeNv12Frame> native;
     std::span<const uint8_t> pixels() const {
+        if (native) return native->pixels();
         return retainedPixels ? std::span<const uint8_t>(retainedPixels.get(), retainedBytes) : std::span<const uint8_t>(nv12);
     }
 };

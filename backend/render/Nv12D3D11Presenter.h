@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+struct ID3D11Texture2D;
 
 namespace screenshare {
 
@@ -39,6 +40,7 @@ public:
         int height = 0;
         const std::uint8_t* data = nullptr;
         std::size_t dataSize = 0;
+        ID3D11Texture2D* texture = nullptr;
     };
 
     enum class ScaleMode {

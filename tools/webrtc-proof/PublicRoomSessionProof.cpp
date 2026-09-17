@@ -227,7 +227,11 @@ int main(int argc, char** argv) {
         Wait([&] { const auto peers = host.Status().stream.peers;
             return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) {
                 return peer.transportSendBps.value_or(0) > 0 && peer.receiver.observation && peer.receiver.observation->framesDecoded > 0 && !peer.receiver.stale &&
+#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
+                    peer.receiver.observation->decoder == CodecImplementation::MfH264Hardware &&
+#else
                     peer.receiver.observation->decoder == CodecImplementation::MfH264Software &&
+#endif
                     !peer.receiver.observation->presentation && peer.appliedPreferences && peer.delivery.delivered > 0 &&
                     peer.recovery.state == PeerLifecycleState::Connected;
             });

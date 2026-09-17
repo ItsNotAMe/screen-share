@@ -32,6 +32,7 @@
 #include "../tools/webrtc-proof/CaptureTestWindow.h"
 #include "core/WindowsMediaRuntime.h"
 #include "render/Nv12D3D11Presenter.h"
+#include "shared/LatestRoomVideoFrame.h"
 #include <dxgi.h>
 HWND captureWindow = nullptr;
 #endif
@@ -78,9 +79,16 @@ void NativePresentationRecovery() {
     // Explicitly show only this test-owned window, without taking activation.
     ShowWindow(reinterpret_cast<HWND>(widget.winId()), SW_SHOWNOACTIVATE);
     Check(IsWindowVisible(reinterpret_cast<HWND>(widget.winId())));
+    auto gpu = std::make_shared<D3dVideoDevice>();
+    const std::vector<uint8_t> pixels(320 * 180 * 3 / 2, 128);
+    auto texture = gpu->UploadNv12(320, 180, pixels);
+    auto native = std::make_shared<RetainedRoomGpuFrame>(texture);
+    bool useGpu = true;
     auto send = [&] {
         screenshare::Nv12VideoFrame frame; frame.width = 320; frame.height = 180;
-        frame.nv12.resize(320 * 180 * 3 / 2, 128); Check(widget.setVideoFrame(std::move(frame)));
+        if (useGpu) frame.native = native;
+        else frame.nv12 = pixels;
+        Check(widget.setVideoFrame(std::move(frame)));
     };
     try { Wait([&] { send(); return widget.presentedFrameCount() >= 3; }); }
     catch (...) {
@@ -123,6 +131,13 @@ void NativePresentationRecovery() {
     const auto hiddenFrames = widget.presentedFrameCount();
     Wait([&] { send(); return widget.presentedFrameCount() >= hiddenFrames + 3; });
     Check(widget.presentationStats().presentErrors == errors && widget.presentationStats().recoveries == 0);
+    // Switch between GPU output and software fallback on the same widget/device.
+    for (bool mode : {false, true, false, true}) {
+        useGpu = mode;
+        const auto previous = widget.presentedFrameCount();
+        Wait([&] { send(); return widget.presentedFrameCount() >= previous + 3; });
+    }
+    Check(gpu->readbackCount() == 0 && widget.presentationStats().maximumFrameLatency == 1);
 }
 #endif
 QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
@@ -723,7 +738,12 @@ int main(int argc, char** argv) {
         unsigned original = 0, changed = 0;
         auto present = viewer.session().frameReady;
         viewer.session().frameReady = [&](auto frame) {
-            Check(frame.pixels().size() == frame.width * frame.height * 3 / 2 && frame.retainedPixels && frame.nv12.empty());
+            Check(frame.pixels().size() == frame.width * frame.height * 3 / 2 && frame.nv12.empty());
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+            Check(bool(frame.native));
+#else
+            Check(bool(frame.retainedPixels));
+#endif
             if (frame.width == 320) ++original; else if (frame.width == 160) ++changed; else Check(false);
             present(std::move(frame));
         };
@@ -739,6 +759,10 @@ int main(int argc, char** argv) {
         Wait([&] { return localDiagnostics->text().contains("do not measure end-to-end latency"); });
         Check(localDiagnostics->text().contains("Graphics errors") && localDiagnostics->text().contains("recovery backoff"));
         Check(viewer.session().frameStatistics().retained >= 20 && viewer.session().frameStatistics().converted == 0 && viewer.session().frameStatistics().repacked == 0);
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+        Check(viewer.session().frameStatistics().gpuRetained >= 20 && viewer.session().frameStatistics().gpuReadbacks >= 20);
+        Check(localDiagnostics->text().contains("CPU readbacks")); // Pixel assertions explicitly request this fallback.
+#endif
         auto* width = host.findChild<QSpinBox*>("streamWidth"); auto* height = host.findChild<QSpinBox*>("streamHeight");
         auto* apply = host.findChild<QPushButton*>("applyStream");
         Check(width && height && apply && apply->isEnabled());
@@ -794,13 +818,21 @@ int main(int argc, char** argv) {
             const auto stream = host.session().status().stream;
             const auto& peer = stream.peers[0];
             return peer.receiver.observation && peer.receiver.observation->presentation &&
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+                peer.receiver.observation->decoder == CodecImplementation::MfH264Hardware &&
+#else
                 peer.receiver.observation->decoder == CodecImplementation::MfH264Software &&
+#endif
                 stream.capture.state == HostMediaState::Running && peer.delivery.delivered > 0 &&
                 peer.recovery.state == PeerLifecycleState::Connected && peer.appliedPreferences &&
                 peer.appliedPreferences->width == 160 && peer.settingsError == SettingsApplyError::None;
         });
         Wait([&] { return popupText->toPlainText().contains("Receiver presentation:") &&
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+            popupText->toPlainText().contains("receiver decoder: mf-h264-hardware") &&
+#else
             popupText->toPlainText().contains("receiver decoder: mf-h264-software") &&
+#endif
             popupText->toPlainText().contains("Capture: running"); });
         // Exercise the real frontend snapshot consumer independently of the
         // native SetParameters rejection test. No production fault switch.

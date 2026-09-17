@@ -188,9 +188,10 @@ private:
             bool presented = false;
             if (work.frame) {
                 active = true;
-                const auto pixels = work.frame->pixels();
+                const auto pixels = work.frame->native ? std::span<const uint8_t>{} : work.frame->pixels();
                 presented = presenter.Present(work.hwnd, work.width, work.height, work.smoothScaling,
-                    work.lowLatency, {work.frame->width, work.frame->height, pixels.data(), pixels.size()});
+                    work.lowLatency, {work.frame->width, work.frame->height, pixels.data(), pixels.size(),
+                        work.frame->native ? work.frame->native->texture() : nullptr});
             } else if (active) {
                 presenter.Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
             }

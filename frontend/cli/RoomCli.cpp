@@ -197,6 +197,7 @@ int RunRoomCli(int argc, char** argv) {
         frames->Stop(); const auto statistics = frames->statistics();
         const QJsonObject presentation{{"type", "presentation"}, {"received", qint64(statistics.received)}, {"replaced", qint64(statistics.replaced)},
             {"retained", qint64(statistics.retained)}, {"converted", qint64(statistics.converted)}, {"repacked", qint64(statistics.repacked)},
+            {"gpuRetained", qint64(statistics.gpuRetained)}, {"gpuReadbacks", qint64(statistics.gpuReadbacks)},
             {"presented", qint64(preview ? preview->framesPresented() : 0)}, {"dropped", qint64(preview ? preview->framesDropped() : 0)},
             {"maximumFrameLatency", int(preview ? preview->maximumFrameLatency() : 0)},
             {"errors", qint64(preview ? preview->presentationStats().errors : 0)},

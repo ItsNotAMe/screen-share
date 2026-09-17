@@ -3,17 +3,46 @@
 #include "api/video/video_sink_interface.h"
 #include "render/Nv12VideoFrame.h"
 #include "api/video/nv12_buffer.h"
+#include "media/webrtc/D3dVideoFrameBuffer.h"
 #include "libyuv/planar_functions.h"
 #include <limits>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 
+class RetainedRoomGpuFrame final : public screenshare::NativeNv12Frame {
+public:
+    explicit RetainedRoomGpuFrame(webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer> buffer,
+        std::shared_ptr<std::atomic<uint64_t>> readbacks = {})
+        : buffer_(std::move(buffer)), frame_(buffer_->RetainedNv12()), readbacks_(std::move(readbacks)) {}
+    ID3D11Texture2D* texture() const override { return frame_.nv12Texture.Get(); }
+    std::span<const uint8_t> pixels() const override {
+        std::call_once(readback_, [&] {
+            auto planar = buffer_->ToI420();
+            if (!planar) throw std::runtime_error("GPU preview readback failed");
+            auto nv12 = webrtc::NV12Buffer::Copy(*planar);
+            pixels_.resize(size_t(buffer_->width()) * buffer_->height() * 3 / 2);
+            if (libyuv::NV12Copy(nv12->DataY(), nv12->StrideY(), nv12->DataUV(), nv12->StrideUV(),
+                pixels_.data(), buffer_->width(), pixels_.data() + size_t(buffer_->width()) * buffer_->height(),
+                buffer_->width(), buffer_->width(), buffer_->height())) throw std::runtime_error("GPU preview packing failed");
+            if (readbacks_) ++*readbacks_;
+        });
+        return pixels_;
+    }
+private:
+    webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer> buffer_;
+    screenshare::CapturedFrame frame_;
+    std::shared_ptr<std::atomic<uint64_t>> readbacks_;
+    mutable std::once_flag readback_;
+    mutable std::vector<uint8_t> pixels_;
+};
+
 // Decoder callbacks never render or wait for the window thread. Retain at most
 // one frame; conversion happens only when the presentation owner consumes it.
 class LatestRoomVideoFrame final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
-    struct Statistics { uint64_t received = 0, replaced = 0, delivered = 0, retained = 0, converted = 0, repacked = 0, rejectedAfterStop = 0; };
+    struct Statistics { uint64_t received = 0, replaced = 0, delivered = 0, retained = 0, converted = 0, repacked = 0, rejectedAfterStop = 0,
+        gpuRetained = 0, gpuReadbacks = 0; };
     void OnFrame(const webrtc::VideoFrame& frame) override {
         std::lock_guard lock(mutex_);
         if (stopped_) { ++stats_.rejectedAfterStop; return; }
@@ -21,7 +50,7 @@ public:
         if (pending_) ++stats_.replaced;
         pending_ = frame;
     }
-    Statistics statistics() const { std::lock_guard lock(mutex_); return stats_; }
+    Statistics statistics() const { std::lock_guard lock(mutex_); auto result = stats_; result.gpuReadbacks = *readbacks_; return result; }
     void Stop() { std::lock_guard lock(mutex_); stopped_ = true; pending_.reset(); }
     std::optional<screenshare::Nv12VideoFrame> Take() {
         std::optional<webrtc::VideoFrame> frame;
@@ -33,6 +62,14 @@ public:
             frame->timestamp_us() < std::numeric_limits<int64_t>::min() / 10)
             throw std::runtime_error("Unsupported preview dimensions");
         auto buffer = frame->video_frame_buffer();
+        if (auto* gpu = dynamic_cast<screenshare::media::D3dVideoFrameBuffer*>(buffer.get())) {
+            screenshare::Nv12VideoFrame result;
+            result.width = result.codedWidth = width; result.height = result.codedHeight = height;
+            result.timestamp100ns = frame->timestamp_us() * 10;
+            result.native = std::make_shared<RetainedRoomGpuFrame>(webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer>(gpu), readbacks_);
+            { std::lock_guard lock(mutex_); ++stats_.delivered; ++stats_.retained; ++stats_.gpuRetained; }
+            return result;
+        }
         webrtc::scoped_refptr<webrtc::NV12Buffer> converted;
         const webrtc::NV12BufferInterface* pixels = nullptr;
         bool conversion = false, repack = false;
@@ -63,5 +100,6 @@ private:
     mutable std::mutex mutex_;
     std::optional<webrtc::VideoFrame> pending_;
     Statistics stats_;
+    const std::shared_ptr<std::atomic<uint64_t>> readbacks_ = std::make_shared<std::atomic<uint64_t>>(0);
     bool stopped_ = false;
 };

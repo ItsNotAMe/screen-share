@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-17 (through `1e08fdc`, plus audio processing/downmix integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-17 (through `eaf9c02`, plus GPU receive/recovery integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -10,6 +10,22 @@ split into completed implementation and remaining validation. All original
 physical-device, resource, network, cost, latency and cutover gates remain open
 until their own evidence passes. Dated continuation notes at the end are historical;
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
+
+## GPU receive/recovery implementation — 2026-09-17
+
+- [x] Prefer D3D11 MF decode in Windows rooms; preserve an owned visible NV12
+  texture through both frontend handoffs and the shared native renderer.
+- [x] Bound retained GPU outputs, drop on consumer pressure, and make CPU readback
+  explicit/cached/countable. One GPU ownership copy remains; not strict zero-copy.
+- [x] Probe presentation compatibility, quarantine failed decoder hardware and
+  recover in software only at a keyframe, with backoff and three rebuild attempts.
+  Quarantine survives Configure/replacement decoders within the runtime factory.
+- [x] Preserve fixed dimensions during fallback and associate resize validation
+  with each sample's timestamp instead of the newest resolution declaration.
+- [x] Carry allowlisted hardware decoder telemetry and local GPU/readback counters
+  through actual UI/CLI diagnostics.
+- [ ] Complete remaining capture fallback/privacy/source-state behavior and
+  physical adapter/driver/occlusion/latency acceptance. See GPU-RECEIVE.md.
 
 ## Audio processing/downmix implementation — 2026-09-17
 
@@ -86,7 +102,7 @@ point adoption, input, hardware/physical acceptance and external latency stay op
   exception containment, resource release before HWND destruction and local close.
 - [x] Verify actual UI/CLI GPU resource recreation and lifecycle under injected
   failures, including resize failures and two-window close isolation.
-- [ ] Complete physical driver loss/hangs, hardware decode/GPU zero-copy and
+- [ ] Complete physical driver loss/hangs, GPU receive field acceptance and
   external image/input latency acceptance; correctness tests do not close them.
 
 ## Bounded UI presentation recovery — 2026-09-16
@@ -109,8 +125,9 @@ point adoption, input, hardware/physical acceptance and external latency stay op
   nonblocking present, and count busy/occluded frames as drops.
 - [x] Verify the retained path with real media and generated-window Windows
   renderers; expose conversion/repack and presentation counters for comparisons.
-- [ ] Complete hardware decoding/GPU zero-copy and physical/remote latency
-  acceptance. CPU handoff improvements do not satisfy these broader gates.
+- [x] Implement hardware decoding/GPU presentation with one owned GPU copy; see
+  GPU-RECEIVE.md for the new ownership and recovery contract.
+- [ ] Complete physical/remote latency and device-specific GPU acceptance.
 
 Evidence: [CHECKPOINT-B.md](CHECKPOINT-B.md). Milestone 2 remains open.
 
@@ -157,7 +174,7 @@ dated continuation notes preserve historical evidence rather than defining new b
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Finish the remaining grouped adoption/input and acceptance milestones in TODO.md.** Public RoomSession, NativeRoomRuntime, automatic dispatch, asynchronous capture drain, recovery ownership and opt-in UI/CLI integration are implemented. Remaining work includes gaming input/consent, hardware decode/GPU zero-copy, default-shell adoption and physical-device/resource/remote acceptance. The +76/+10 capture-handle regressions remain blockers before cutover. See [CHECKPOINT-B.md](CHECKPOINT-B.md), [CLOSEOUT-A.md](CLOSEOUT-A.md) and [COMPARISON.md](COMPARISON.md).
+Current next action: **Finish video capture completion/acceptance and normal adoption in STAGE-2-REMAINING.md.** Public RoomSession, native runtime, dispatch, capture drain, GPU receive/recovery and opt-in UI/CLI integration are implemented. Gaming input/consent follows in Stage 3. Physical-device/resource/remote acceptance remains open; the +76/+10 capture-handle regressions block cutover. See [CHECKPOINT-B.md](CHECKPOINT-B.md), [CLOSEOUT-A.md](CLOSEOUT-A.md) and [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -241,7 +258,7 @@ The original gate is native codec/audio integration and reproducible builds. Ful
 - [x] Prove original-window WGC device reconstruction, shared encoder-device retirement and fresh-device software IDR recovery without reading retired textures (explicit reconstruction/invalidation; automatic session recovery and real driver removal remain pending).
 - [x] Add bounded receiver presentation recovery and verify policy plus GPU resource recreation with injected device-loss HRESULTs (actual driver removal and capture/encoder recovery remain untested).
 - [x] Prove owned live WGC capture through hardware H.264 PeerConnections alongside Opus and data channels.
-- [x] Prove GPU presentation of CPU-decoded NV12, one pending frame, fixed aspect ratio and receiver-window resize (GPU decode remains pending).
+- [x] Prove GPU presentation, one pending frame, fixed aspect ratio and receiver-window resize; hardware decode/retained GPU presentation is now integrated (GPU-RECEIVE.md).
 - [x] Prove WASAPI-to-WebRTC PCM capture/playout through the Audio Device Module (process capture through Opus; physical playout tested separately).
 - [x] Record integration limitations and exact source/API findings.
 
@@ -317,8 +334,9 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [x] Probe hardware health; quarantine failed implementations and fall back per viewer. Physical driver-hang preemption remains open.
 - [ ] Preserve fixed-resolution semantics when fallback cannot sustain the configuration.
 - [x] Integrate CPU NV12 decoding/upload and shared GPU presentation with conversion/repack and presentation diagnostics.
-- [ ] Implement/accept hardware decoding and GPU zero-copy presentation; the current path still decodes to CPU memory.
-- [ ] Preserve coded dimensions, visible aperture and aspect ratio.
+- [x] Implement hardware decode and GPU presentation without CPU readback/upload on the normal receive path; one GPU copy detaches from MF's pool.
+- [x] Preserve decoder coded dimensions and publish only the validated visible aperture, including 1088-to-1080 cropping and delayed output across resize.
+- [ ] Accept GPU receive across physical adapters/driver loss and measure performance; the implementation proof does not satisfy field acceptance.
 - [x] Keep one replaceable pending presentation frame; remove old A/V gating from the new path.
 
 ### Audio

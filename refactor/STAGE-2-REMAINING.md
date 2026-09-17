@@ -10,7 +10,7 @@ implementation continues in complete batches, not one checkbox per user turn.
 | Group | What remains | Completion evidence |
 | --- | --- | --- |
 | Normal UI/CLI adoption | Route ordinary create/join/share/watch and room operations through shared v2 interfaces. Preserve existing functionality, settings and shutdown behavior. Prepare adoption without enabling an unsafe default. | Real normal-entry-point tests, upgrade/configuration behavior, and feature parity. Opt-in RoomSessionWindow/RoomBrowserWindow alone do not complete this. |
-| Video pipeline and recovery | Hardware decode and GPU presentation, unresolved preview occlusion, and remaining display fallback/source identity/privacy/cursor/HDR/visible-aperture/resize/device-loss behavior. Preserve fixed settings across fallback. | Silent generated-window/GPU tests, source and decoder failure injection, device-specific acceptance. GPU **source scaling** is done; it is not GPU decoding/presentation. |
+| Video capture completion and acceptance | Display-only fallback, source identity/privacy/cursor/HDR and capture-state/device-loss completion; historical preview occlusion and physical driver acceptance. Hardware decode, retained GPU presentation, visible-aperture receive cropping, live receive resize and bounded software recovery are implemented. | Finish source failure/privacy tests and device-specific acceptance. GPU-RECEIVE.md records receive-path coverage; its GPU surface ownership copy is not strict zero-copy. |
 | Audio acceptance | Physical mono/stereo/surround format negotiation, microphone quality, device switch/unplug/recovery and measured buffering/latency. Microphone-only processing and explicit multichannel conversion are implemented. | Silent PCM/Opus/UI/CLI checks cover the software paths; physical-device evidence remains required. Native driver hangs remain unpreemptible. See AUDIO-PROCESSING.md. |
 
 These are substantial groups. No reliable percentage or turn
@@ -28,6 +28,13 @@ count follows from counting the historical checklist entries.
   the current refactor. Necessary integration/error/retry UI is allowed now.
 
 ## Already integrated; do not rebuild
+
+The receive pipeline now keeps D3D11-decoded NV12 textures through Qt/CLI display,
+with bounded ownership, explicit cached readback, hardware telemetry and software
+fallback. Decoder recovery is keyframe-gated with a lifetime retry budget, and
+live resizing validates delayed output against that frame's own dimensions.
+See [GPU-RECEIVE.md](GPU-RECEIVE.md). The remaining video row concerns capture
+completion and acceptance; do not implement another decoder or presentation path.
 
 The audio implementation now isolates WebRTC speech processing per microphone
 endpoint, bypasses system/process/None, and explicitly converts native multichannel

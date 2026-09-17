@@ -1,5 +1,55 @@
 # Headless media checks
 
+## GPU receive/recovery — 2026-09-17
+
+- Release/Debug application and focused proof builds pass:
+  `build/webrtc/video-final-{app,proof}-{release,debug}-build.log`.
+- Both full desktop matrices passed **7/7**:
+  `build/webrtc/video-verified-{release,debug}/result.json`.
+  The Windows UI/CLI scenarios require native decoded frames, hardware decoder
+  telemetry and live resize while retaining existing room/audio/settings checks.
+- `MfDecoderAdapterTest.exe --gpu` passes in both configurations:
+  `build/webrtc/video-final-decoder-{release,debug}.log`. Each checks 44 CPU frames,
+  44 startup-fallback frames and 44 GPU frames across four configure/release
+  cycles; 1080p bottom-row luma/chroma, retained surfaces after release, RTP/NTP,
+  zero implicit readbacks, bounded texture retention, device retirement, fixed-size
+  fallback, backoff/keyframes and exhausted malformed-input recovery are covered.
+- Both `StreamSettingsTest.exe --gpu` runs pass:
+  `build/webrtc/video-final-settings-{release,debug}.log`, including hardware
+  decoder allowlisting and existing source-scaling/fallback/settings checks.
+- Four simultaneous Windows hardware-decoding viewers passed in **18.631 s**
+  (Release) and **17.543 s** (Debug):
+  `build/webrtc/video-four-viewer-gpu-release/native-service-b8fadbbb-9de4-4d42-bc3c-8601f508006a`
+  and `build/webrtc/video-four-viewer-gpu-debug/native-service-6d6676b4-1a9b-4145-af21-dfa5088c417d`.
+  Software four-viewer integration passed in **18.008 s** at
+  `build/webrtc/video-four-viewer-software-release/native-service-1ff0db19-8e49-4753-9916-63450b06e3ca`.
+- Final review added whole-draw context protection for the shared MF/presentation
+  device. Both application builds passed again (`video-context-app-*-build.log`),
+  followed by **4/4** targeted Windows UI/CLI scenarios in Release/Debug:
+  `build/webrtc/video-context-{release,debug}-{RoomCliWindowsTests,RoomUiWindowsTests}/`.
+  The four GPU-viewer proofs above do not attach a renderer; the targeted frontend
+  runs exercise the final shared-context change.
+- The final decoder test additionally verifies quarantine survives Configure and
+  replacement decoder instances from the same factory. Release/Debug runs pass;
+  build logs are `video-quarantine-proof-*-build.log`. A new runtime/factory is
+  required to retry hardware after quarantine.
+  Both final application rebuilds also pass (`video-quarantine-app-*-build.log`).
+  Final native-runtime-link, A/V diagnostics, report-path and UI-self-test smoke
+  checks pass **4/4 in each build** (`video-final-smoke-{release,debug}.log`).
+
+Intermediate `video-receive-release` failed an old CPU-only test assertion. The
+stricter native-frame assertion then exposed delayed pre-resize output being
+validated against new dimensions (`video-cli-size-debug`). Dimension limits now
+travel with timestamp associations; corrected Windows scenarios and both full
+matrices pass. No timeout or success threshold was relaxed. Temporary decoder
+logging used for diagnosis was removed.
+
+The desktop tests use generated windows and discarded synthetic audio. UI/CLI
+pixel assertions deliberately request readback; the separate Qt native renderer
+test requires zero readbacks across GPU/CPU switching and injected recovery.
+Physical devices, driver hangs/removal, historical occlusion, strict zero-copy,
+network impairment and measured gaming latency remain unverified. See GPU-RECEIVE.md.
+
 ## Audio processing/downmix — 2026-09-17
 
 - Release and Debug desktop-inclusive matrices passed **7/7 each**:

@@ -37,7 +37,10 @@ software tasks or mark physical format/quality/unplug checks passed syntheticall
 Per-viewer GPU scaling/letterboxing now preserves owned NV12 frames into hardware
 encoding, drops excess GPU submissions, and quarantines to CPU fallback on failure.
 The active image rectangle is exposed in source diagnostics; actual authorized
-input mapping and hardware decode/presentation remain open. See GPU-SCALING.md.
+input mapping remains open. Hardware decode/GPU presentation and bounded decoder
+fallback are now integrated; see refactor/GPU-RECEIVE.md. Remaining video work is
+display capture fallback, source identity/privacy/cursor/HDR/state completion and
+physical/occlusion acceptance. Do not recreate the receive pipeline.
 Device-free `none` audio is integrated across startup/live runtime/UI/CLI selection;
 it releases host capture and preserves the track for resumption. Physical recovery,
 physical audio quality and audio latency remain open.
@@ -55,7 +58,7 @@ Normal AppShell/legacy CLI cutover remains gated; later visual redesign follows
 milestones 1–5.
 
 - [ ] Complete remaining user-experience adoption: default-shell integration,
-  hardware decode/GPU presentation and actual device recovery, preserving existing
+  capture fallback/source behavior and actual device recovery, preserving existing
   source/playback controls and explicit pending/applied/rejected state.
 - [ ] Deliver gaming input end to end: encrypted channels, first-use consent,
   ownership/generation validation, bounded reliable queues, coalesced state,

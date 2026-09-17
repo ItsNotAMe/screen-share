@@ -338,11 +338,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             session_.reportPresentation({stats.presentedFrames, stats.droppedFrames,
                 uint8_t(stats.queuedFrames), uint8_t(renderer.outcome)});
             const auto fields = PresentationDiagnosticsJson(renderer);
-            diagnostics->setText(QString("Local preview: %1. Presented %2; dropped %3; pending %4.\nDrops: busy %5, occluded %6, minimized %7, unavailable %8, recovery backoff %9.\nGraphics errors %10; rebuilds %11; last error %12. These counters do not measure end-to-end latency.")
+            const auto frames = session_.frameStatistics();
+            diagnostics->setText(QString("Local preview: %1. Presented %2; dropped %3; pending %4.\nDrops: busy %5, occluded %6, minimized %7, unavailable %8, recovery backoff %9.\nGraphics errors %10; rebuilds %11; last error %12. GPU frames %13; CPU readbacks %14. These counters do not measure end-to-end latency.")
                 .arg(fields["outcome"].toString()).arg(stats.presentedFrames).arg(stats.droppedFrames).arg(stats.queuedFrames)
                 .arg(renderer.busyDrops).arg(renderer.occludedDrops).arg(renderer.minimizedDrops).arg(renderer.unavailableDrops)
                 .arg(renderer.backoffDrops).arg(renderer.errors).arg(renderer.recoveries)
-                .arg(fields["lastErrorCode"].isNull() ? "none" : fields["lastErrorCode"].toString()));
+                .arg(fields["lastErrorCode"].isNull() ? "none" : fields["lastErrorCode"].toString())
+                .arg(frames.gpuRetained).arg(frames.gpuReadbacks));
             if (!stats.terminal) return;
             error_->setText("Video presentation failed. Leave and rejoin the room to retry. Audio and room controls remain available.");
         });

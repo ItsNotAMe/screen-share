@@ -337,7 +337,12 @@ int main(int argc, char** argv) {
                 if (row["sender"].toObject()["videoPayloadBps"].toDouble() > 0 && row["sender"].toObject()["rttMs"].isDouble()) senderReported = true;
                 Check(!row["sender"].toObject().contains("candidateId"));
                 const auto receiver = row["receiver"].toObject();
-                if (receiver["decoder"] == "mf-h264-software" && row["settingsError"] == "none" &&
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+                const auto expectedDecoder = "mf-h264-hardware";
+#else
+                const auto expectedDecoder = "mf-h264-software";
+#endif
+                if (receiver["decoder"] == expectedDecoder && row["settingsError"] == "none" &&
                     row["appliedPreferences"].isObject() && row["captureDelivery"].toObject()["delivered"].toInteger() > 0 &&
                     row["recovery"].toObject()["state"] == "connected") extendedReported = true;
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
@@ -401,7 +406,12 @@ int main(int argc, char** argv) {
             Check(preview.PumpMessages());
 #endif
             if (auto frame = frames->Take()) {
-                Check(frame->pixels().size() == frame->width * frame->height * 3 / 2 && frame->retainedPixels && frame->nv12.empty());
+                Check(frame->pixels().size() == frame->width * frame->height * 3 / 2 && frame->nv12.empty());
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+                Check(bool(frame->native));
+#else
+                Check(bool(frame->retainedPixels));
+#endif
                 Check(frame->pixels()[frame->width * frame->height / 2 + frame->width / 2] >= 35);
                 if (frame->width == 320) ++original;
                 else if (frame->width == 160) ++changed;

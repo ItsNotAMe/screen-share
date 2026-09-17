@@ -2,6 +2,8 @@
 #include "codec/H264StreamEncoder.h"
 #include "api/environment/environment_factory.h"
 #include "modules/video_coding/include/video_error_codes.h"
+#include "media/webrtc/D3dVideoFrameBuffer.h"
+#include "../../frontend/shared/LatestRoomVideoFrame.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -20,18 +22,36 @@ public:
         Require(!expected.empty() && frame.rtp_timestamp() == expected.front(), "RTP wrap/timestamp association lost");
         expected.pop_front();
         Require(frame.ntp_time_ms() == 123456, "NTP metadata lost");
-        Require(frame.video_frame_buffer()->ToI420()->DataY()[0] >= 65, "Decoded luma incorrect");
+        if (gpu) {
+            Require(frame.video_frame_buffer()->type() == webrtc::VideoFrameBuffer::Type::kNative, "Hardware decode fell back unexpectedly");
+            LatestRoomVideoFrame latest;
+            const auto before = gpu->readbackCount();
+            latest.OnFrame(frame); latest.OnFrame(frame);
+            retained = latest.Take(); latest.Stop();
+            Require(retained && retained->native && retained->nv12.empty(), "GPU handoff lost native texture");
+            Require(gpu->readbackCount() == before && latest.statistics().converted == 0 && latest.statistics().replaced == 1,
+                "GPU handoff performed a CPU conversion or queued stale frames");
+            if (!firstRetained) firstRetained = retained;
+        }
+        else Require(frame.video_frame_buffer()->ToI420()->DataY()[0] >= 65, "Decoded luma incorrect");
         ++count;
         return 0;
     }
     int width = 0, height = 0;
     std::deque<uint32_t> expected;
     unsigned count = 0;
+    std::shared_ptr<screenshare::media::D3dVideoDevice> gpu;
+    std::optional<screenshare::Nv12VideoFrame> retained;
+    std::optional<screenshare::Nv12VideoFrame> firstRetained;
     std::thread::id caller = std::this_thread::get_id();
 };
 
-void Run() {
-    screenshare::media::MfVideoDecoderFactory factory;
+void Run(bool gpu, bool unavailable = false) {
+    std::shared_ptr<screenshare::media::D3dVideoDevice> device;
+    screenshare::media::MfVideoDecoderFactory factory(gpu, [&] {
+        if (unavailable) throw std::runtime_error("Injected unavailable decoder device");
+        return device = std::make_shared<screenshare::media::D3dVideoDevice>();
+    });
     auto environment = webrtc::CreateEnvironment();
     Require(!factory.Create(environment, webrtc::SdpVideoFormat("VP9")), "Factory accepted unsupported codec");
     const auto format = factory.GetSupportedFormats().front();
@@ -46,6 +66,8 @@ void Run() {
         settings.set_codec_type(webrtc::kVideoCodecH264);
         settings.set_max_render_resolution({320, 180}); // Receiver's first-frame hint, not a permanent source-size cap.
         Require(decoder->Configure(settings), "Configure failed");
+        sink.gpu = device;
+        Require(decoder->GetDecoderInfo().is_hardware_accelerated == (gpu && !unavailable), "Wrong decoder implementation reported");
         decoder->RegisterDecodeCompleteCallback(&sink);
         webrtc::EncodedImage empty;
         Require(decoder->Decode(empty, 0) == WEBRTC_VIDEO_CODEC_ERR_PARAMETER, "Empty frame accepted");
@@ -61,6 +83,7 @@ void Run() {
         std::fill_n(frame.nv12Pixels.begin(), size_t(sink.width) * sink.height, std::byte{80});
         const auto before = sink.count;
         for (unsigned i = 0; i < 12; ++i) {
+            std::fill_n(frame.nv12Pixels.begin(), size_t(sink.width) * sink.height, std::byte(80 + i * 3));
             for (const auto& packet : encoder.EncodeFrame(frame)) {
                 webrtc::EncodedImage image;
                 image.SetEncodedData(webrtc::EncodedImageBuffer::Create(
@@ -82,14 +105,97 @@ void Run() {
         }
         Require(sink.count - before >= 10, "MF adapter retained excessive output");
         decoder->Release();
+        if (sink.retained) {
+            Require(device->readbackCount() == 0, "Normal GPU path read back decoded frames");
+            Require(sink.retained->pixels().size() == size_t(sink.width) * sink.height * 3 / 2 &&
+                sink.retained->pixels()[0] >= 100, "Retained GPU frame did not survive decoder release");
+            Require(sink.firstRetained->pixels()[0] >= 65 && sink.firstRetained->pixels()[0] <= 90,
+                "Decoder recycled a published texture while it was still retained");
+            const auto pixels = sink.retained->pixels();
+            const auto luma = size_t(sink.width) * sink.height;
+            Require(pixels[luma - 1] >= 100 && pixels[luma] >= 120 && pixels[luma] <= 136 &&
+                pixels.back() >= 120 && pixels.back() <= 136, "GPU aperture lost bottom-row luma or chroma");
+            Require(device->readbackCount() == 2, "Explicit readback was not cached");
+            sink.retained.reset(); sink.firstRetained.reset();
+        }
         sink.expected.clear();
         decoder->Release();
         Require(decoder->Decode(empty, 0) == WEBRTC_VIDEO_CODEC_UNINITIALIZED, "Decode remained active after Release");
     }
-    std::cout << "MF adapter: " << sink.count << " decoded frames, four reset/release cycles, 1080 crop, RTP wrap and callback ownership passed.\n";
+    std::cout << "MF adapter " << (gpu ? (unavailable ? "GPU startup fallback" : "GPU") : "CPU") << ": " << sink.count << " decoded frames, four reset/release cycles, 1080 crop, RTP wrap and callback ownership passed.\n";
+}
+
+void Recovery() {
+    std::shared_ptr<screenshare::media::D3dVideoDevice> device;
+    unsigned devices = 0;
+    screenshare::media::MfVideoDecoderFactory factory(true, [&] {
+        ++devices; return device = std::make_shared<screenshare::media::D3dVideoDevice>();
+    });
+    auto decoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    webrtc::VideoDecoder::Settings settings; settings.set_codec_type(webrtc::kVideoCodecH264);
+    settings.set_max_render_resolution({640, 360});
+    Require(decoder->Configure(settings) && decoder->GetDecoderInfo().is_hardware_accelerated, "Recovery GPU configure failed");
+    Sink sink; sink.width = 640; sink.height = 360; decoder->RegisterDecodeCompleteCallback(&sink);
+    screenshare::H264StreamEncoder encoder; screenshare::H264StreamEncoderConfig config;
+    config.width = sink.width; config.height = sink.height; encoder.Start(config);
+    screenshare::CapturedFrame frame; frame.width = frame.sourceWidth = sink.width; frame.height = frame.sourceHeight = sink.height;
+    frame.nv12Pixels.assign(size_t(sink.width) * sink.height * 3 / 2, std::byte{128});
+    std::fill_n(frame.nv12Pixels.begin(), size_t(sink.width) * sink.height, std::byte{80});
+    std::vector<webrtc::EncodedImage> images;
+    for (unsigned i = 0; i < 16; ++i) for (auto& packet : encoder.EncodeFrame(frame)) {
+        webrtc::EncodedImage image;
+        image.SetEncodedData(webrtc::EncodedImageBuffer::Create(reinterpret_cast<const uint8_t*>(packet.bytes.data()), packet.bytes.size()));
+        image.SetRtpTimestamp(i * 3000); image.ntp_time_ms_ = 123456;
+        image._frameType = packet.isKeyframe ? webrtc::VideoFrameType::kVideoFrameKey : webrtc::VideoFrameType::kVideoFrameDelta;
+        image._encodedWidth = sink.width; image._encodedHeight = sink.height;
+        images.push_back(image);
+    }
+    Require(images.size() >= 12 && images.front()._frameType == webrtc::VideoFrameType::kVideoFrameKey, "Recovery encoder output missing");
+    // Deliberately hold every callback: decoding still progresses without
+    // accumulating more than eight published textures or requesting new keys.
+    class HoldingSink : public webrtc::DecodedImageCallback {
+    public:
+        std::vector<webrtc::scoped_refptr<webrtc::VideoFrameBuffer>> frames;
+        int32_t Decoded(webrtc::VideoFrame& value) override { frames.push_back(value.video_frame_buffer()); return 0; }
+    } holding;
+    decoder->RegisterDecodeCompleteCallback(&holding);
+    for (const auto& image : images) Require(decoder->Decode(image, 0) == WEBRTC_VIDEO_CODEC_OK, "Pressure blocked decoding");
+    Require(holding.frames.size() == 8 && device->readbackCount() == 0, "GPU output retention is not bounded");
+    holding.frames.clear();
+    decoder->RegisterDecodeCompleteCallback(&sink);
+    device->Retire();
+    Require(decoder->Decode(images.front(), 0) == WEBRTC_VIDEO_CODEC_ERROR, "Retired GPU was accepted");
+    Require(!decoder->GetDecoderInfo().is_hardware_accelerated, "Retired decoder still reported hardware");
+    Require(decoder->Decode(images.front(), 0) == WEBRTC_VIDEO_CODEC_ERROR, "Decoder ignored recovery backoff");
+    Require(decoder->Decode(images.back(), 0) == WEBRTC_VIDEO_CODEC_ERROR, "Recovery accepted delta without keyframe");
+    std::this_thread::sleep_for(std::chrono::milliseconds(270));
+    for (const auto& image : images) {
+        sink.expected.push_back(image.RtpTimestamp());
+        Require(decoder->Decode(image, 0) == WEBRTC_VIDEO_CODEC_OK, "Software recovery failed");
+    }
+    Require(sink.count >= 10 && devices == 1, "Hardware retried or fixed-size fallback failed");
+    // Malformed keyframes may be buffered by MF instead of failing immediately.
+    // The association bound must still trigger recovery and ultimately stop it.
+    const uint8_t malformed[] = {0, 0, 0, 1, 0};
+    auto corrupt = images.front(); corrupt.SetEncodedData(webrtc::EncodedImageBuffer::Create(malformed, sizeof(malformed)));
+    int result = WEBRTC_VIDEO_CODEC_OK;
+    for (unsigned attempt = 0; attempt < 160 && result != WEBRTC_VIDEO_CODEC_UNINITIALIZED; ++attempt) {
+        result = decoder->Decode(corrupt, 0);
+        if (result == WEBRTC_VIDEO_CODEC_ERROR) std::this_thread::sleep_for(std::chrono::milliseconds(270));
+    }
+    Require(result == WEBRTC_VIDEO_CODEC_UNINITIALIZED && devices == 1, "Corrupt input rebuilt the decoder indefinitely");
+    decoder->Release();
+    Require(decoder->Configure(settings) && !decoder->GetDecoderInfo().is_hardware_accelerated && devices == 1,
+        "Reconfiguration revived quarantined hardware");
+    decoder->Release();
+    auto replacement = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    Require(replacement->Configure(settings) && !replacement->GetDecoderInfo().is_hardware_accelerated && devices == 1,
+        "Decoder replacement revived quarantined hardware");
+    replacement->Release();
+    std::cout << "GPU pressure, device retirement, fixed-size software recovery, keyframe/backoff and exhausted recovery passed.\n";
 }
 }
-int main() {
-    try { Run(); return 0; }
+int main(int argc, char** argv) {
+    try { Run(false); Run(true, true); if (argc > 1 && std::string(argv[1]) == "--gpu") { Run(true); Recovery(); } return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

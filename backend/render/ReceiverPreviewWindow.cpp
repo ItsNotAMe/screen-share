@@ -144,11 +144,12 @@ bool ReceiverPreviewWindow::PumpMessages()
 
 void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
 {
-    PresentPixels(frame.width, frame.height, {reinterpret_cast<const uint8_t*>(frame.data.data()), frame.data.size()});
+    PresentView({frame.width, frame.height, reinterpret_cast<const uint8_t*>(frame.data.data()), frame.data.size(), frame.texture.Get()});
 }
 void ReceiverPreviewWindow::PresentFrame(const Nv12VideoFrame& frame)
 {
-    PresentPixels(frame.width, frame.height, frame.pixels());
+    if (frame.native) PresentView({frame.width, frame.height, nullptr, 0, frame.native->texture()});
+    else PresentPixels(frame.width, frame.height, frame.pixels());
 }
 void ReceiverPreviewWindow::SetLowLatency(bool enabled) {
     if (hwnd_) throw std::logic_error("Set latency mode before opening preview");
@@ -156,18 +157,23 @@ void ReceiverPreviewWindow::SetLowLatency(bool enabled) {
 }
 void ReceiverPreviewWindow::PresentPixels(int width, int height, std::span<const uint8_t> pixels)
 {
+    PresentView({width, height, pixels.data(), pixels.size()});
+}
+void ReceiverPreviewWindow::PresentView(const Nv12D3D11Presenter::FrameView& view)
+{
+    const int width = view.width, height = view.height;
     if (closeRequested_) return;
     // Validate before using dimensions to resize the native window. The shared
     // renderer also validates the full view before GPU upload.
     if (width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
-        width % 2 || height % 2 || pixels.size() < size_t(width) * size_t(height) * 3 / 2)
+        width % 2 || height % 2 || (!view.texture && (!view.data || view.dataSize < size_t(width) * size_t(height) * 3 / 2)))
         throw std::invalid_argument("Invalid preview NV12 frame");
     EnsureWindow(width, height);
     SizeWindowForFirstFrame(width, height);
     UpdateClientSize();
     frameWidth_ = width; frameHeight_ = height;
     const bool presented = presenter_.Present(hwnd_, clientWidth_, clientHeight_, true, lowLatency_,
-        {width, height, pixels.data(), pixels.size()},
+        view,
         scaleMode_ == PreviewScaleMode::Fit ? Nv12D3D11Presenter::ScaleMode::Fit : Nv12D3D11Presenter::ScaleMode::OriginalSize);
     if (presented) ++framesPresented_; else ++framesDropped_;
     RefreshTitle();

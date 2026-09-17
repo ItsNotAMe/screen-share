@@ -64,6 +64,13 @@ and physical audio-device/format/quality acceptance.
 [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) separates these three groups from
 Stage 3 gaming, Stage 4 acceptance and Stage 5 cutover dependencies.
 
+Hardware decode and GPU receive presentation are integrated through both v2
+frontends, including fixed-size software fallback, bounded keyframe recovery,
+visible-aperture ownership and delayed-frame validation during resize. See
+[GPU-RECEIVE.md](GPU-RECEIVE.md). Remaining video work is display capture fallback,
+source privacy/identity/cursor/HDR/state completion and physical acceptance; this
+does not close the entire Stage 2 video group or prove better gaming latency.
+
 Detected audio startup/live failures now release the endpoint and preserve video
 through paced silence/discard. Public health, UI retry feedback and CLI status/
 scripted same-device recovery are integrated. No automatic device retry or service

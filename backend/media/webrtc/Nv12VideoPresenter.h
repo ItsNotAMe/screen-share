@@ -1,6 +1,7 @@
 #pragma once
 #include "api/video/video_frame.h"
 #include "api/video/nv12_buffer.h"
+#include "media/webrtc/D3dVideoFrameBuffer.h"
 #include "render/Nv12D3D11Presenter.h"
 #include "render/PresentationRecovery.h"
 #include "libyuv/planar_functions.h"
@@ -23,6 +24,11 @@ public:
             frame.width() % 2 || frame.height() % 2 || frame.rotation() != webrtc::kVideoRotation_0)
             throw std::invalid_argument("Unsupported presentation shape/rotation");
         auto buffer = frame.video_frame_buffer();
+        if (auto* gpu = dynamic_cast<D3dVideoFrameBuffer*>(buffer.get())) {
+            const auto owned = gpu->RetainedNv12();
+            return recovery_.Present([&] { return presenter_.TryPresent({frame.width(), frame.height(), nullptr, 0, owned.nv12Texture.Get()}); },
+                [&] { presenter_.Reset(); });
+        }
         webrtc::scoped_refptr<webrtc::NV12Buffer> converted;
         const webrtc::NV12BufferInterface* nv12 = nullptr;
         if (buffer->type() == webrtc::VideoFrameBuffer::Type::kNV12) nv12 = buffer->GetNV12();

@@ -38,6 +38,7 @@ public:
                 if (std::isfinite(mean) && mean >= 0 && mean <= 60000) value.jitterBufferMeanMs = uint32_t(std::lround(mean));
             }
             if (inbound->decoder_implementation == "Media Foundation H264 (CPU NV12)") value.decoder = CodecImplementation::MfH264Software;
+            if (inbound->decoder_implementation == "Media Foundation H264 (D3D11 NV12)") value.decoder = CodecImplementation::MfH264Hardware;
             if (inbound->frames_per_second && std::isfinite(*inbound->frames_per_second) &&
                 *inbound->frames_per_second >= 0 && *inbound->frames_per_second <= 240)
                 value.fpsMilli = uint32_t(std::lround(*inbound->frames_per_second * 1000));

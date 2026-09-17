@@ -4,6 +4,8 @@
 
 #include <cstdint>
 #include <vector>
+#include <d3d11.h>
+#include <mfidl.h>
 
 #include <mftransform.h>
 #include <wrl/client.h>
@@ -19,6 +21,7 @@ struct DecodedFrameInfo {
     int64_t duration100ns = 0;
     uint32_t bytes = 0;
     std::vector<std::byte> data;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
 };
 
 class H264StreamDecoder {
@@ -29,7 +32,7 @@ public:
     H264StreamDecoder(const H264StreamDecoder&) = delete;
     H264StreamDecoder& operator=(const H264StreamDecoder&) = delete;
 
-    void Start(int maxWidth = 16384, int maxHeight = 16384);
+    void Start(int maxWidth = 16384, int maxHeight = 16384, ID3D11Device* device = nullptr);
     std::vector<DecodedFrameInfo> DecodePacket(const EncodedPacket& packet);
     std::vector<DecodedFrameInfo> Drain();
     void Stop();
@@ -41,6 +44,8 @@ private:
     std::vector<DecodedFrameInfo> ReadAvailableFrames();
 
     Microsoft::WRL::ComPtr<IMFTransform> transform_;
+    Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> manager_;
+    Microsoft::WRL::ComPtr<ID3D11Device> device_;
     DWORD inputStreamId_ = 0;
     DWORD outputStreamId_ = 0;
     int outputWidth_ = 0;

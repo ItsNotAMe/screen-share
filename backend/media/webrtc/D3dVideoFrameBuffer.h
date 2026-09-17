@@ -16,8 +16,9 @@ class GpuScalingBusy : public std::runtime_error {
 public: GpuScalingBusy() : std::runtime_error("GPU scaling submission limit reached") {}
 };
 
-// Private Windows/WebRTC boundary. All application immediate-context operations
-// run on this owner. Published textures are never overwritten or pooled early.
+// Private Windows/WebRTC boundary. Readback/scaling run on this owner; MF and
+// presentation may share the multithread-protected device. Published textures
+// are never overwritten or returned to a producer pool early.
 class D3dVideoDevice : public std::enable_shared_from_this<D3dVideoDevice> {
 public:
     D3dVideoDevice();

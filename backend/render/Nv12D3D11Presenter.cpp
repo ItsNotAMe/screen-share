@@ -2,6 +2,7 @@
 #include "render/PresentationTarget.h"
 
 #include <d3d11.h>
+#include <d3d10.h>
 #include <d3dcompiler.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
@@ -93,13 +94,21 @@ std::uint32_t ClampDimension(std::uint32_t value)
 
 void ValidateNv12Frame(const Nv12D3D11Presenter::FrameView& frame)
 {
-    if (frame.width <= 0 || frame.height <= 0 || frame.data == nullptr) {
+    if (frame.width <= 0 || frame.height <= 0 || frame.width > 16384 || frame.height > 16384 || (!frame.data && !frame.texture)) {
         throw std::runtime_error("Embedded preview frame is missing NV12 data");
     }
     if ((frame.width % 2) != 0 || (frame.height % 2) != 0) {
         throw std::runtime_error("Embedded preview frame dimensions must be even for NV12");
     }
 
+    if (frame.texture) {
+        D3D11_TEXTURE2D_DESC description{}; frame.texture->GetDesc(&description);
+        if (description.Width != UINT(frame.width) || description.Height != UINT(frame.height) ||
+            description.Format != DXGI_FORMAT_NV12 || description.ArraySize != 1 || description.MipLevels != 1 ||
+            description.SampleDesc.Count != 1 || !(description.BindFlags & D3D11_BIND_SHADER_RESOURCE))
+            throw std::runtime_error("Invalid owned NV12 preview texture");
+        return;
+    }
     const std::uint64_t lumaBytes = static_cast<std::uint64_t>(frame.width) * static_cast<std::uint64_t>(frame.height);
     const std::uint64_t requiredBytes = lumaBytes + lumaBytes / 2;
     if (requiredBytes > std::numeric_limits<std::size_t>::max() ||
@@ -159,6 +168,7 @@ struct Nv12D3D11Presenter::Impl {
 
     Microsoft::WRL::ComPtr<ID3D11Device> device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+    Microsoft::WRL::ComPtr<ID3D10Multithread> contextProtection;
     Microsoft::WRL::ComPtr<IDXGISwapChain> swapChain;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> lumaTexture;
@@ -199,6 +209,7 @@ struct Nv12D3D11Presenter::Impl {
         pixelShader.Reset();
         vertexShader.Reset();
         context.Reset();
+        contextProtection.Reset();
         device.Reset();
     }
 
@@ -243,6 +254,17 @@ struct Nv12D3D11Presenter::Impl {
         swapChainDesc.Windowed = TRUE;
         swapChainDesc.SwapEffect = swapEffect;
 
+        if (device) {
+            Microsoft::WRL::ComPtr<IDXGIDevice> dxgi;
+            Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+            Microsoft::WRL::ComPtr<IDXGIFactory> factory;
+            HRESULT result = device.As(&dxgi);
+            if (SUCCEEDED(result)) result = dxgi->GetAdapter(&adapter);
+            if (SUCCEEDED(result)) result = adapter->GetParent(IID_PPV_ARGS(&factory));
+            if (SUCCEEDED(result)) result = factory->CreateSwapChain(device.Get(), &swapChainDesc, &swapChain);
+            return result;
+        }
+
         constexpr D3D_FEATURE_LEVEL featureLevels[] = {
             D3D_FEATURE_LEVEL_11_0,
             D3D_FEATURE_LEVEL_10_1,
@@ -286,17 +308,21 @@ struct Nv12D3D11Presenter::Impl {
 
     void CreateDeviceAndSwapChain()
     {
-        if (device || hwnd == nullptr) {
+        if (swapChain || hwnd == nullptr) {
             return;
         }
 
         UpdateClientSize();
+        const bool adoptedDevice = bool(device);
         HRESULT result = CreateSwapChainWithEffect(DXGI_SWAP_EFFECT_FLIP_DISCARD, 2);
         if (FAILED(result)) {
-            ResetDevice();
+            if (adoptedDevice) swapChain.Reset();
+            else ResetDevice();
             result = CreateSwapChainWithEffect(DXGI_SWAP_EFFECT_DISCARD, 1);
         }
         ThrowIfFailed(result, "D3D11CreateDeviceAndSwapChain(embedded preview)");
+        ThrowIfFailed(device.As(&contextProtection), "Presentation context protection");
+        contextProtection->SetMultithreadProtected(TRUE);
         if (lowLatency) {
             Microsoft::WRL::ComPtr<IDXGIDevice1> queue;
             ThrowIfFailed(device.As(&queue), "DXGI frame queue interface");
@@ -566,6 +592,14 @@ float4 ps_main(VertexOut input) : SV_Target
             return;
         }
 
+        // MF owns other work on this device. Protect the complete draw sequence,
+        // not just individual D3D calls, against changes to shared context state.
+        struct ContextLock {
+            ID3D10Multithread* protection;
+            explicit ContextLock(ID3D10Multithread* value) : protection(value) { protection->Enter(); }
+            ~ContextLock() { protection->Leave(); }
+        } lock(contextProtection.Get());
+
         UpdateClientSize();
         ResizeSwapChainIfNeeded();
         EnsureRenderTarget();
@@ -712,30 +746,33 @@ bool Nv12D3D11Presenter::TryPresent(const FrameView& frame)
         return false;
     }
 
+    if (frame.texture) {
+        Microsoft::WRL::ComPtr<ID3D11Device> owner;
+        frame.texture->GetDevice(&owner);
+        if (owner.Get() != impl_->device.Get()) {
+            impl_->ResetDevice();
+            impl_->device = owner;
+            owner->GetImmediateContext(&impl_->context);
+        }
+    }
     impl_->CreateDeviceAndSwapChain();
     ThrowIfFailed(impl_->device->GetDeviceRemovedReason(), "Presentation device health");
     impl_->EnsurePipeline();
-    impl_->EnsureFrameTextures(frame.width, frame.height);
-
-    const std::size_t lumaBytes = static_cast<std::size_t>(frame.width) * static_cast<std::size_t>(frame.height);
-    const auto* luma = frame.data;
-    const auto* chroma = frame.data + lumaBytes;
-
-    impl_->context->UpdateSubresource(
-        impl_->lumaTexture.Get(),
-        0,
-        nullptr,
-        luma,
-        static_cast<UINT>(frame.width),
-        0);
-    impl_->context->UpdateSubresource(
-        impl_->chromaTexture.Get(),
-        0,
-        nullptr,
-        chroma,
-        static_cast<UINT>(frame.width),
-        0);
-
+    if (frame.texture) {
+        impl_->lumaTexture.Reset(); impl_->chromaTexture.Reset();
+        impl_->lumaView.Reset(); impl_->chromaView.Reset();
+        D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+        view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; view.Texture2D.MipLevels = 1;
+        view.Format = DXGI_FORMAT_R8_UNORM;
+        ThrowIfFailed(impl_->device->CreateShaderResourceView(frame.texture, &view, &impl_->lumaView), "GPU preview luma view");
+        view.Format = DXGI_FORMAT_R8G8_UNORM;
+        ThrowIfFailed(impl_->device->CreateShaderResourceView(frame.texture, &view, &impl_->chromaView), "GPU preview chroma view");
+    } else {
+        impl_->EnsureFrameTextures(frame.width, frame.height);
+        const std::size_t lumaBytes = static_cast<std::size_t>(frame.width) * static_cast<std::size_t>(frame.height);
+        impl_->context->UpdateSubresource(impl_->lumaTexture.Get(), 0, nullptr, frame.data, static_cast<UINT>(frame.width), 0);
+        impl_->context->UpdateSubresource(impl_->chromaTexture.Get(), 0, nullptr, frame.data + lumaBytes, static_cast<UINT>(frame.width), 0);
+    }
     impl_->frameWidth = frame.width;
     impl_->frameHeight = frame.height;
     impl_->Render();

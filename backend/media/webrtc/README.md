@@ -87,19 +87,29 @@ or UI threads. The harness uses a separate synthetic capture thread.
 
 `MfVideoDecoderFactory` exposes High and constrained-baseline H.264. COM resource
 creation/use/destruction stay on its own MTA worker; output callbacks run on
-WebRTC's decode caller. It returns move-owned NV12 CPU buffers after MF visible-aperture
-cropping. It does not advertise hardware acceleration. Encoded access units are
+WebRTC's decode caller. Windows rooms prefer D3D11 NV12 output; the explicit
+software factory returns move-owned CPU NV12. Both crop the MF visible aperture.
+The GPU path makes one ownership copy out of MF's surface pool, retains at most
+eight published textures and passes them to the shared presenter without CPU
+readback/upload. Cached CPU fallback remains explicit. Encoded access units are
 limited to 16 MiB, timestamp associations to 32, and coded dimensions to 4096².
-Actual visible output is checked against WebRTC's configured maximum. MF may
+Actual visible output is checked against the dimension limit recorded for that
+sample, including keyframe-declared resize. MF may
 enumerate a default larger output type before signaling the stream's real type,
 so the allocation bound is distinct from the negotiated visible-frame bound.
 
 Unique MF sample IDs associate delayed output with the original RTP/NTP values,
-including RTP wraparound. Errors clear associations, reset the transform and
-require a keyframe. Release discards delayed output; it never emits callbacks
+including RTP wraparound. Errors clear associations, quarantine hardware and
+require a keyframe after 250 ms, with at most three software rebuild attempts per
+configuration. Release discards delayed output; it never emits callbacks
 from a retired stream. The short High-profile lifecycle test observes one delayed
 decoded frame per cycle, discarded on release. This must be included in future
 pipeline latency measurements.
+
+`MfDecoderAdapterTest --gpu` exercises texture ownership, aperture/planes, startup
+fallback, pressure, retired-device recovery and exhausted malformed-input retries.
+The actual v2 UI/CLI scenarios require native frames and hardware telemetry while
+resizing. See `refactor/GPU-RECEIVE.md`; physical latency and field acceptance stay open.
 
 Tests cover local MF→WebRTC RTP/SRTP→MF video plus three encrypted data channels,
 zero-rate/resume, keyframes, 100-input burst replacement, reset/release, callback
