@@ -10,10 +10,14 @@ struct Status {
     uint8_t requested = 0, granted = 0;
     uint64_t permission = 0, applied = 0, rejected = 0, coalesced = 0;
     bool ready = false;
+    bool grantPending = false;
+    bool revokePending = false; // Viewer waits for host permission acknowledgement.
     Reason reason = Reason::None;
 };
-// Invoked exclusively on the service's owned input thread. Implementations must
-// be bounded/nonblocking. Release must neutralize every held device for this peer.
+// Invoked exclusively on the service's owned input thread, outside the public
+// mailbox mutex. Driver operations must return promptly; hung native calls cannot
+// be preempted. Late grant completion is revalidated against the permission epoch.
+// Release must neutralize every held device for this peer.
 // No OS injection exists in the portable service. Missing sink means no grants.
 class Sink {
 public:

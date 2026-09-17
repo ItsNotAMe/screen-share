@@ -1,6 +1,8 @@
 #include "cli/RoomCli.h"
 #include "shared/LatestRoomVideoFrame.h"
 #include "shared/RoomLaunch.h"
+#include "shared/RoomInputCommands.h"
+#include "RecordingGamepadSink.h"
 #include <QTemporaryDir>
 #include <QFile>
 #include "media/webrtc/NativeRoomRuntime.h"
@@ -218,9 +220,10 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
     options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
     return WindowsRoomRuntimeFactory(std::move(options));
 #else
-    return [preferences = config.media.preferences, initialAudio = config.media.audio, presentation = config.media.presentation, audio, frames](auto identity, auto send) {
+    return [preferences = config.media.preferences, initialAudio = config.media.audio, presentation = config.media.presentation, inputSink = config.media.inputSink, audio, frames](auto identity, auto send) {
         NativeRoomRuntimeOptions options;
         options.preferences = preferences; options.frames = frames; options.presentation = presentation;
+        options.inputSink = inputSink;
         auto endpoints = proof::SyntheticAudio(audio);
         if (!identity.host) {
             options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{}, endpoints.playout);
@@ -414,6 +417,28 @@ int main(int argc, char** argv) {
             }
             if (value["phase"] == "stopped") stopped = true;
         };
+        host.inputCommandsFile = commandFiles.filePath("host.json");
+        const auto viewerCommands = commandFiles.filePath("viewer.json");
+        auto writeCommand = [](const QString& path, int sequence, const char* operation, const std::string& peer) {
+            QFile file(path); Check(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            const auto data = QJsonDocument(QJsonObject{{"sequence", sequence}, {"operation", operation},
+                {"peer", QString::fromStdString(peer)}, {"consent", true}}).toJson(QJsonDocument::Compact);
+            Check(file.write(data) == data.size()); file.close();
+        };
+        // These persisted grants/requests must be ignored by a new session.
+        writeCommand(host.inputCommandsFile, 1, "grant", "old-peer");
+        writeCommand(viewerCommands, 1, "request", "old-host");
+        auto controllerSink = std::make_shared<RecordingGamepadSink>(); host.media.inputSink = controllerSink;
+        bool grantWritten = false, revokeWritten = false;
+        hostHooks.input = [&](auto port, const auto&) {
+            if (!port) return;
+            for (const auto& state : port->Read()) if (state.ready && (state.requested & screenshare::input::Gamepad) && !grantWritten) {
+                writeCommand(host.inputCommandsFile, 2, "grant", state.peer); grantWritten = true;
+            }
+            if (controllerSink->applied && !revokeWritten) {
+                writeCommand(host.inputCommandsFile, 3, "revoke", ""); revokeWritten = true;
+            }
+        };
         auto hosting = std::async(std::launch::async, [&] { return RunRoomCliSession(host, Factory(host, hostAudio), hostHooks, true); });
         const auto deadline = std::chrono::steady_clock::now() + 10s;
         std::string joinedRoom;
@@ -447,6 +472,17 @@ int main(int argc, char** argv) {
         preview.Show();
 #endif
         RoomCliHooks viewerHooks;
+        viewer.inputCommandsFile = viewerCommands;
+        bool requestWritten = false;
+        viewerHooks.input = [&](auto port, const auto&) {
+            if (!port || requestWritten) return;
+            for (const auto& state : port->Read()) if (state.ready && state.permission) {
+                writeCommand(viewerCommands, 2, "request", state.peer); requestWritten = true; break;
+            }
+        };
+        viewerHooks.gamepad = []() -> std::optional<screenshare::input::Event> {
+            screenshare::input::Event event; event.kind = screenshare::input::Kind::Pad; event.buttons = 1; return event;
+        };
         int playbackChanges = 0;
         bool playbackFailed = false, playbackRecovered = false;
         viewerHooks.report = [&](const QJsonObject& value) {
@@ -512,6 +548,7 @@ int main(int argc, char** argv) {
             }
             if (value["phase"] == "stopped") cancelledStopped = true;
         };
+        Check(grantWritten && revokeWritten && requestWritten && controllerSink->applied > 0 && controllerSink->released > 0);
         Check(RunRoomCliSession(host, Factory(host, hostAudio), cancelHooks, true) == 0);
         Check(cancelledAdmission && cancelledStopped);
         auto missing = viewer; missing.room.roomId = "nonexistent-room";

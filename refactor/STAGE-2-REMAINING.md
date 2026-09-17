@@ -31,6 +31,12 @@ count follows from counting the historical checklist entries.
 
 ## Already integrated; do not rebuild
 
+The Windows controller/UI/CLI group is now integrated with explicit consent,
+selected-device polling, per-peer release, panic/focus/source/unplug handling and
+recording-device tests. See [CONTROLLERS.md](CONTROLLERS.md). Next Stage 3 work is
+mouse/keyboard source-image mapping, confinement and frontend integration as one
+group; physical controller acceptance remains separate and open.
+
 The guarded normal home workflow and no-JSON CLI create/join commands are
 implemented. Home/form navigation shares one pushed directory connection and
 sessions use the existing media/runtime pages and asynchronous shutdown. See

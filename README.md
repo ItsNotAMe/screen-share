@@ -16,7 +16,8 @@ The new backend can be selected explicitly for the existing home screen with
 also works without JSON using `--backend v2 --create-room` or `--join-room ID_OR_LINK`
 and the same service option. See [guarded adoption](refactor/ADOPTION.md) for
 options and limitations. Default launch retains existing remote-control features;
-v2 control/gamepad support and production cutover are still pending.
+v2 now supports [controllers with explicit consent](refactor/CONTROLLERS.md).
+V2 mouse/keyboard mapping and production cutover are still pending.
 
 ## Current Capabilities
 

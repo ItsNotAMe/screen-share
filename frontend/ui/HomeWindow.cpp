@@ -184,7 +184,7 @@ HomeWindow::HomeWindow(Actions actions, QWidget* parent)
     root->setSpacing(0);
     root->addWidget(buildTopBar());
     root->addWidget(separator());
-    if (actions_.requestRooms) root->addWidget(label("Screen sharing and audio. Remote control is not available in this mode.", "HomeInfoSecondary"));
+    if (actions_.requestRooms) root->addWidget(label("Screen sharing, audio and controllers with host permission. Mouse and keyboard control is not available yet.", "HomeInfoSecondary"));
     root->addWidget(buildMainMenu(), 1);
 
     if (!actions_.requestRooms) {

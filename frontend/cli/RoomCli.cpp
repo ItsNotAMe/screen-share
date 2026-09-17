@@ -3,6 +3,10 @@
 #include "shared/RoomStreamDiagnostics.h"
 #include "shared/PresentationDiagnostics.h"
 #include "shared/RoomLaunch.h"
+#include "shared/RoomInputCommands.h"
+#include "input/v2/GamepadSink.h"
+#include "input/v2/GamepadPoller.h"
+#include "input/ViewerGamepad.h"
 #include "render/ReceiverPreviewWindow.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
@@ -14,6 +18,7 @@
 #include <atomic>
 #include <iostream>
 #include <thread>
+#include <utility>
 
 using namespace screenshare;
 using namespace screenshare::v2;
@@ -57,6 +62,11 @@ BOOL WINAPI ConsoleSignal(DWORD event) {
 
 int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factory, RoomCliHooks hooks, bool loopback) {
     RoomSession session(std::move(factory), loopback);
+    std::optional<RoomInputCommands> commands;
+    if (!config.inputCommandsFile.isEmpty()) commands.emplace(config.inputCommandsFile);
+    std::unique_ptr<input::GamepadPoller> controller;
+    std::string requestedPeer;
+    uint64_t requestPermission = 0;
     auto starting = session.Start(config.room);
     std::future<StreamUpdateResult> updating;
     std::future<CaptureUpdateResult> captureUpdate;
@@ -75,8 +85,48 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
         if (hooks.pump && !hooks.pump()) break;
         if (config.duration.count() && now - started >= config.duration) break;
         const auto status = session.Status();
+        const auto input = session.Input();
+        if (hooks.input) hooks.input(input, status);
+        if (commands && input) {
+            const auto result = commands->Poll(input, config.room.host);
+            if (!result.isEmpty()) {
+                report(result);
+                if (!config.room.host && result["accepted"].toBool()) {
+                    if (result["operation"] == "request") {
+                        requestedPeer = result["peer"].toString().toStdString();
+                        for (const auto& state : input->Read()) if (state.peer == requestedPeer) requestPermission = state.permission;
+                    }
+                    else if (result["operation"] == "revoke") { controller.reset(); requestedPeer.clear(); }
+                }
+            }
+        }
+        bool controllerGranted = false;
+        if (hooks.controlActive && !hooks.controlActive()) {
+            controller.reset(); requestedPeer.clear();
+            if (input) input->Revoke();
+        }
+        if (input) for (const auto& state : input->Read()) if (state.peer == requestedPeer) {
+            if (state.granted & input::Gamepad) controllerGranted = true;
+            else if (!state.ready || state.permission > requestPermission) requestedPeer.clear();
+        }
+        if (!config.room.host && controllerGranted && !controller && (hooks.gamepad || (!loopback && !config.gamepadDevice.isEmpty()))) {
+            controller = std::make_unique<input::GamepadPoller>(input, requestedPeer, [read = hooks.gamepad, device = config.gamepadDevice.toStdString()]() -> std::optional<input::Event> {
+                if (read) return read();
+                const auto value = ViewerGamepad::ReadState(device); if (!value) return {};
+                input::Event event; event.kind = input::Kind::Pad; event.buttons = value->buttons;
+                event.leftTrigger = value->leftTrigger; event.rightTrigger = value->rightTrigger;
+                event.axes = {value->thumbLX, value->thumbLY, value->thumbRX, value->thumbRY}; return event;
+            });
+        }
+        if (!controllerGranted && controller) { controller.reset(); requestedPeer.clear(); }
         if (now >= nextReport) {
-            auto value = Status(status); if (value != lastReport) { report(value); lastReport = value; }
+            auto value = Status(status);
+            QJsonArray controls;
+            if (input) for (const auto& state : input->Read()) controls.append(QJsonObject{
+                {"peer", QString::fromStdString(state.peer)}, {"ready", state.ready},
+                {"requested", state.requested}, {"granted", state.granted}, {"pending", state.grantPending}, {"reason", int(state.reason)}});
+            value["input"] = controls;
+            if (value != lastReport) { report(value); lastReport = value; }
             nextReport = now + 100ms;
         }
         if (starting.valid() && starting.wait_for(0ms) == std::future_status::ready) {
@@ -121,6 +171,8 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
         if (!audioUpdate.valid() && nextAudio < config.audioChanges.size() && status.phase == RoomPhase::Active && now - started >= config.audioChanges[nextAudio].at)
             audioUpdate = session.SwitchAudioSource(config.audioChanges[nextAudio++].selection);
     }
+    controller.reset();
+    if (auto input = session.Input()) input->Revoke();
     auto stopping = session.Stop();
     // Keep window messages responsive while native delivery and networking drain.
     while (stopping.wait_for(5ms) != std::future_status::ready) if (hooks.pump) hooks.pump();
@@ -178,12 +230,30 @@ int RunRoomCli(int argc, char** argv) {
         std::unique_ptr<ReceiverPreviewWindow> preview;
         if (!config.room.host && config.preview) { preview = std::make_unique<ReceiverPreviewWindow>(); preview->SetLowLatency(true); preview->Show(); }
         RoomCliHooks hooks;
+        constexpr int panicId = 0x5353;
+        const bool needsControl = !config.inputCommandsFile.isEmpty();
+        if (needsControl && !RegisterHotKey(nullptr, panicId, MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_F12))
+            throw std::runtime_error("Cannot register controller panic shortcut; close the other controller session and retry");
+        struct HotkeyLease { bool active; ~HotkeyLease() { if (active) UnregisterHotKey(nullptr, 0x5353); } } hotkey{needsControl};
+        bool panicRequested = false;
+        hooks.controlActive = [&] {
+            const bool panic = std::exchange(panicRequested, false);
+            return !panic && (!preview || GetForegroundWindow() == GetAncestor(preview->windowHandle(), GA_ROOT));
+        };
+        auto pollPanic = [&] {
+            MSG message{};
+            while (PeekMessageW(&message, nullptr, WM_HOTKEY, WM_HOTKEY, PM_REMOVE)) if (message.wParam == panicId) panicRequested = true;
+        };
+        std::shared_ptr<input::Port> previewInput;
+        hooks.input = [&](auto port, const auto&) { previewInput = std::move(port); };
         hooks.report = [](const auto& status) { std::cout << QJsonDocument(status).toJson(QJsonDocument::Compact).constData() << std::endl; };
         uint64_t reportedPresentationErrors = 0;
         auto nextPresentationReport = std::chrono::steady_clock::now();
         hooks.pump = [&] {
+            pollPanic();
             if (preview) {
                 if (!preview->PumpMessages()) return false;
+                if (previewInput && GetForegroundWindow() != GetAncestor(preview->windowHandle(), GA_ROOT)) previewInput->Revoke();
                 if (auto frame = frames->Take()) preview->PresentFrame(*frame);
                 const auto status = preview->presentationStats();
                 const auto now = std::chrono::steady_clock::now();
@@ -203,6 +273,7 @@ int RunRoomCli(int argc, char** argv) {
             }
             return !interrupted.load();
         };
+        if (config.room.host && !config.inputCommandsFile.isEmpty()) config.media.inputSink = input::CreateWindowsGamepadSink();
         const int result = RunRoomCliSession(config, WindowsRoomRuntimeFactory(config.media), std::move(hooks));
         frames->Stop(); const auto statistics = frames->statistics();
         const QJsonObject presentation{{"type", "presentation"}, {"received", qint64(statistics.received)}, {"replaced", qint64(statistics.replaced)},

@@ -168,6 +168,8 @@ add_library(ScreenShareCore STATIC
     backend/core/SessionCommand.cpp
     backend/core/SessionRuntimeControl.cpp
     backend/input/RemoteInputInjector.cpp
+    backend/input/v2/GamepadSink.cpp
+    backend/input/v2/GamepadPoller.cpp
     backend/input/ViewerGamepad.cpp
     backend/input/VirtualGamepadBackend.cpp
     backend/input/XInputGamepad.cpp
@@ -323,6 +325,10 @@ if(BUILD_TESTING)
     target_compile_features(InputServiceTests PRIVATE cxx_std_20)
     target_include_directories(InputServiceTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/backend")
     add_test(NAME input-service COMMAND InputServiceTests)
+    add_executable(GamepadControlTests tests/GamepadControlTests.cpp)
+    target_link_libraries(GamepadControlTests PRIVATE ScreenShareCore)
+    add_test(NAME gamepad-control COMMAND GamepadControlTests)
+    set_tests_properties(gamepad-control PROPERTIES TIMEOUT 15)
     set_tests_properties(input-service PROPERTIES TIMEOUT 20)
     add_executable(ControllerProtocolTests
         tests/ControllerProtocolTests.cpp
@@ -374,7 +380,7 @@ add_executable(ScreenShare
 target_compile_features(ScreenShare PRIVATE cxx_std_20)
 target_include_directories(ScreenShare PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
 if(TARGET ScreenShareRoomSession)
-    add_library(ScreenShareRoomFrontend STATIC frontend/shared/RoomSessionConfig.cpp frontend/shared/RoomProfile.cpp frontend/shared/RoomLaunch.cpp)
+    add_library(ScreenShareRoomFrontend STATIC frontend/shared/RoomSessionConfig.cpp frontend/shared/RoomProfile.cpp frontend/shared/RoomLaunch.cpp frontend/shared/RoomInputCommands.cpp)
     target_include_directories(ScreenShareRoomFrontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
     target_link_libraries(ScreenShareRoomFrontend PUBLIC ScreenShareCore ScreenShareRoomSession)
     add_library(ScreenShareRoomCli STATIC frontend/cli/RoomCli.cpp)
@@ -581,7 +587,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_link_libraries(ScreenShareUi PRIVATE ScreenShareAPI ScreenShareUiShell Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         if(TARGET ScreenShareRoomFrontend)
             # The normal app and room entry points share one shell implementation.
-            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/RoomApplication.cpp)
+            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomGamepadControl.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/RoomApplication.cpp)
             target_link_libraries(ScreenShareRoomUi PUBLIC ScreenShareRoomFrontend ScreenShareUiShell Qt6::Widgets)
             target_link_libraries(ScreenShareUi PRIVATE ScreenShareRoomUi)
             target_compile_definitions(ScreenShareUi PRIVATE SCREENSHARE_HAS_ROOM_V2_UI)

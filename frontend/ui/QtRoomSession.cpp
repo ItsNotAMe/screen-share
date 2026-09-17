@@ -1,4 +1,5 @@
 #include "ui/QtRoomSession.h"
+#include "input/v2/GamepadSink.h"
 using namespace screenshare::v2;
 using namespace std::chrono_literals;
 
@@ -19,6 +20,10 @@ bool QtRoomSession::start(RoomSessionConfig config) {
         config.media.frames = frames_;
         presentation_ = std::make_shared<screenshare::media::PresentationTelemetry>();
         config.media.presentation = presentation_;
+        // Devices are created only after explicit host consent. Diagnostics never
+        // substitute a physical sink for a missing recording implementation.
+        if (config.room.host && !loopback_ && !config.media.inputSink)
+            config.media.inputSink = screenshare::input::CreateWindowsGamepadSink();
         auto factory = factory_(config.media);
         session_ = std::make_unique<RoomSession>(std::move(factory), loopback_);
         config_ = std::move(config);

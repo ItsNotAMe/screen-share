@@ -19,7 +19,8 @@ ScreenShare --backend v2 --signal-server https://your-worker.example --join-room
 The UI uses the current HomeWindow, AppShell and existing v2 form/session pages,
 not another top-level application window or the later visual redesign. The
 ordinary update-check scheduling and app version remain in this launch path.
-The home explicitly states that remote control is unavailable in this mode.
+The home states that controllers require host permission and mouse/keyboard remain
+unavailable. See [CONTROLLERS.md](CONTROLLERS.md) for UI/CLI controller integration.
 
 CLI create returns a server-issued room ID in its JSON status. Join accepts that
 ID or `screenshare://room/v2/ROOM_ID`. The configured HTTPS origin remains

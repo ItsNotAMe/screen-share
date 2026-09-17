@@ -1,5 +1,10 @@
 # Opt-in v2 room CLI
 
+Controllers use explicit `--control-file PATH` commands and viewer `--gamepad DEVICE_ID`
+with a focused preview. See [CONTROLLERS.md](CONTROLLERS.md) for the command schema,
+fresh-consent rules, panic shortcut and recording-device tests. Mouse/keyboard
+injection remains disabled; controller flags are not persisted profile defaults.
+
 Normal command-line room workflows are now available without JSON:
 `ScreenShare --backend v2 --signal-server HTTPS_ORIGIN --create-room` or
 `--join-room ID_OR_LINK`. They share the session/configuration implementation and

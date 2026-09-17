@@ -3,6 +3,7 @@
 #include "core/ScreenShareSession.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace screenshare {
@@ -18,6 +19,8 @@ public:
     virtual bool SubmitState(const RemoteGamepadState& state, std::string* errorMessage = nullptr) = 0;
     virtual void Neutralize() noexcept = 0;
     virtual void Destroy() noexcept = 0;
+    // Actual XInput player index, not the driver's internal target serial.
+    virtual std::optional<unsigned> UserIndex() const { return {}; }
 };
 
 class VirtualGamepadBackend {

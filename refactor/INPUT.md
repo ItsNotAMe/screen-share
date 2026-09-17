@@ -2,9 +2,9 @@
 
 The shared v2 input backend is implemented and exercised through actual encrypted
 WebRTC channels with four simultaneous media viewers. **Stage 3 is not complete:**
-normal UI/CLI control and Windows injection are not enabled. No sink is created
-implicitly; normal v2 sessions remain view-only. This prevents bypassing the
-remaining consent and coordinate-confinement work.
+controller control is integrated in the normal opt-in UI/CLI with explicit consent
+and a lazy Windows sink; mouse/keyboard injection remains disabled pending source
+mapping and confinement. See [CONTROLLERS.md](CONTROLLERS.md).
 
 ## Implemented contract
 
@@ -42,7 +42,7 @@ remaining consent and coordinate-confinement work.
   already empty. Failed reliable sends also revoke. Replaceable states are
   coalesced and dropped under transport pressure, never replayed as a backlog.
 - Viewers resend complete pad state and a heartbeat every 100 ms while granted.
-  The service does not poll physical controllers yet. Native channel draining
+  A separate selected-device poller samples controllers at up to 250 Hz. Native channel draining
   uses the existing 5 ms signaling schedule; 250 Hz is a ceiling, not a promised
   measured delivery rate. Input application/watchdog operation is independent of
   that schedule.
@@ -52,15 +52,19 @@ remaining consent and coordinate-confinement work.
   A failing partial backend grant is also released. Shutdown joins that owner.
 - Mouse and keyboard ownership are exclusive per capability. At most three pad
   grants are allowed, reduced to `min(3, 4-localPads)`. `Configure` invalidates
-  existing grants before changing this policy. Actual local-pad enumeration and
-  virtual-pad creation remain Windows integration work.
+  existing grants before changing this policy. The Windows sink also enumerates
+  occupied XInput slots and verifies each created device's actual user index.
 - Window-source runtimes refuse keyboard grants. A capture-switch request
-  invalidates all input and disables further grants for the runtime, including
-  after a failed switch. This is deliberately fail-closed until transactional
-  replacement-source mapping is implemented. Invalid source validation does not
+  invalidates all input and restricts fresh grants to gamepads, including after a
+  failed switch. Mouse/keyboard remain disabled until transactional replacement-
+  source mapping is implemented. Invalid source validation does not
   change grants. There is no fallback to physical injection in tests.
 
 ## Remaining integrated delivery group
+
+Controller portions of items 1, 3, 4 and 5 below are now implemented, including
+UI/CLI factories and recording-device tests. Treat those as foundations; the next
+group is mouse/keyboard geometry, confinement and full frontend integration.
 
 Build the Windows device adapters and normal UI/CLI interaction together on this
 port; do not introduce another transport, permission service or room workflow.

@@ -13,6 +13,8 @@ struct RoomSessionConfig {
     screenshare::media::WindowsRoomRuntimeOptions media;
     std::chrono::seconds duration{0}; // Zero runs until cancellation/window close.
     bool preview = true;
+    QString inputCommandsFile;
+    QString gamepadDevice;
     std::vector<RoomSettingsChange> changes;
     struct CaptureChange { std::chrono::milliseconds at; screenshare::media::CaptureSelection selection; };
     std::vector<CaptureChange> captureChanges;

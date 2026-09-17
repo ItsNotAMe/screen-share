@@ -6,6 +6,8 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <array>
+#include <filesystem>
 #include <memory>
 #include <utility>
 
@@ -35,6 +37,7 @@ struct VigEmApi {
     using TargetRemoveFn = uint32_t (*)(void*, void*);
     using TargetFreeFn = void (*)(void*);
     using TargetUpdateFn = uint32_t (*)(void*, void*, XusbReport);
+    using UserIndexFn = uint32_t (*)(void*, void*, unsigned long*);
 
     HMODULE module = nullptr;
     void* client = nullptr;
@@ -45,6 +48,7 @@ struct VigEmApi {
     TargetRemoveFn targetRemove = nullptr;
     TargetFreeFn targetFree = nullptr;
     TargetUpdateFn targetUpdate = nullptr;
+    UserIndexFn userIndex = nullptr;
 
     ~VigEmApi()
     {
@@ -69,7 +73,12 @@ T Resolve(HMODULE module, const char* name)
 std::pair<std::shared_ptr<VigEmApi>, std::string> LoadVigEm()
 {
     auto api = std::make_shared<VigEmApi>();
-    api->module = LoadLibraryW(L"ViGEmClient.dll");
+    std::array<wchar_t, 32768> executable{};
+    const DWORD length = GetModuleFileNameW(nullptr, executable.data(), DWORD(executable.size()));
+    if (!length || length >= executable.size()) return {nullptr, "Cannot locate controller support beside the application."};
+    const auto client = std::filesystem::path(std::wstring(executable.data(), length)).parent_path() / L"ViGEmClient.dll";
+    // Never search the working directory or PATH for an input-injection library.
+    api->module = LoadLibraryExW(client.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (api->module == nullptr) {
         return {nullptr, "Controller support is incomplete. Repair or reinstall ScreenShare."};
     }
@@ -83,6 +92,7 @@ std::pair<std::shared_ptr<VigEmApi>, std::string> LoadVigEm()
     api->targetRemove = Resolve<VigEmApi::TargetRemoveFn>(api->module, "vigem_target_remove");
     api->targetFree = Resolve<VigEmApi::TargetFreeFn>(api->module, "vigem_target_free");
     api->targetUpdate = Resolve<VigEmApi::TargetUpdateFn>(api->module, "vigem_target_x360_update");
+    api->userIndex = Resolve<VigEmApi::UserIndexFn>(api->module, "vigem_target_x360_get_user_index");
     if (alloc == nullptr || connect == nullptr || api->disconnect == nullptr || api->freeClient == nullptr ||
         api->targetAlloc == nullptr || api->targetAdd == nullptr || api->targetRemove == nullptr ||
         api->targetFree == nullptr || api->targetUpdate == nullptr) {
@@ -145,6 +155,14 @@ public:
         if (target_ != nullptr) {
             static_cast<void>(api_->targetUpdate(api_->client, target_, XusbReport{}));
         }
+    }
+
+    std::optional<unsigned> UserIndex() const override
+    {
+        unsigned long index = 4;
+        if (!target_ || !api_->userIndex || api_->userIndex(api_->client, target_, &index) != VigEmErrorNone || index > 3)
+            return {};
+        return unsigned(index);
     }
 
     void Destroy() noexcept override

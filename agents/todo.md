@@ -6,12 +6,12 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — grouped delivery work
 
-Current continuation: the shared input protocol/service, encrypted channels and
-RoomSession input port are implemented, with recording-sink safety tests and a
-four-viewer input-to-synthetic-image proof. Next complete the combined Windows
-device/coordinate mapping and normal UI/CLI consent/controller integration in
-[refactor/INPUT.md](../refactor/INPUT.md). Do not rebuild the transport or enable
-physical control before consent/mapping is wired. Stage 3 remains open.
+Current continuation: the shared input service and controller UI/CLI/device group
+are implemented. See [CONTROLLERS.md](../refactor/CONTROLLERS.md). Next complete
+mouse/keyboard source-generation mapping, confinement and normal UI/CLI consent
+as one integrated group on the same port. Do not rebuild controller transport or
+enable mouse/keyboard before mapping is wired. Stage 3 remains open; physical
+controller/latency acceptance is not established by recording-device tests.
 
 Use [refactor/TODO.md](../refactor/TODO.md) for delivery milestones and
 [DETAIL-CHECKS.md](../refactor/DETAIL-CHECKS.md) for the full acceptance requirements.

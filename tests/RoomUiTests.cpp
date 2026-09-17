@@ -1,4 +1,5 @@
 #include "ui/RoomSessionWindow.h"
+#include "RecordingGamepadSink.h"
 #include "shared/RoomLink.h"
 #include "shared/StreamPreferencesJson.h"
 #include "shared/RoomStreamDiagnostics.h"
@@ -155,6 +156,7 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
         return [windows, audio](auto identity, auto send) {
             NativeRoomRuntimeOptions options; options.preferences = windows.preferences; options.frames = windows.frames;
             options.presentation = windows.presentation;
+            options.inputSink = windows.inputSink;
             auto endpoints = proof::SyntheticAudio(audio);
             if (!identity.host) {
                 options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{windows.playbackDeviceId, windows.playbackVolume, windows.playbackMuted}, endpoints.playout);
@@ -775,6 +777,76 @@ void MutationAcknowledgementScenario(const std::string& origin) {
     host.close(); viewer.close(); Wait([&] { return !host.session().running() && !viewer.session().running(); });
     std::cout << "{\"passed\":true,\"missing_ack_timeout\":true,\"late_ack_isolated\":true,\"no_retry\":true,\"frames\":" << frames << "}\n";
 }
+void ControllerScenario(const std::string& origin) {
+    auto sink = std::make_shared<RecordingGamepadSink>();
+    RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
+    config.room.nickname = "Controller host"; config.room.name = "Controller test";
+    config.media.preferences.resolution = ResolutionMode::Native;
+    config.media.inputSink = sink;
+    RoomSessionWindow host(config, Factory(std::make_shared<proof::AudioEvidence>()), true);
+    host.setAttribute(Qt::WA_ShowWithoutActivating); host.show();
+    try { Wait([&] { return host.session().status().phase == RoomPhase::Active; }); }
+    catch (...) { throw std::runtime_error("Controller host startup: phase=" + std::to_string(int(host.session().status().phase)) +
+        "; error=" + std::to_string(int(host.session().status().error))); }
+    config.room.host = false; config.room.roomId = host.session().status().roomId;
+    config.room.nickname = "Controller viewer"; config.media.inputSink.reset();
+    std::atomic<bool> plugged{true}; std::atomic<uint16_t> buttons{1};
+    RoomSessionWindow viewer(config, Factory(std::make_shared<proof::AudioEvidence>()), true, nullptr,
+        [] { return std::vector<screenshare::ViewerGamepadDevice>{{"test-pad", "Recording controller"}}; },
+        [&](std::string_view device) -> std::optional<screenshare::RemoteGamepadState> {
+            Check(device == "test-pad"); if (!plugged) return {};
+            screenshare::RemoteGamepadState state; state.buttons = buttons.load(); return state;
+        });
+    viewer.setAttribute(Qt::WA_ShowWithoutActivating); viewer.show();
+    Wait([&] { return viewer.session().status().activePeers == 1 && viewer.session().input(); });
+    viewer.findChild<QPushButton*>("refreshControllers")->click();
+    auto* viewerConsent = viewer.findChild<QCheckBox*>("controllerConsent");
+    auto* hostConsent = host.findChild<QCheckBox*>("controllerConsent");
+    auto* request = viewer.findChild<QPushButton*>("controllerAction");
+    auto* grant = host.findChild<QPushButton*>("controllerAction");
+    Wait([&] { return host.findChild<QComboBox*>("controllerPeer")->count() == 1; });
+    Wait([&] { return viewer.findChild<QComboBox*>("controllerPeer")->count() == 1; });
+    unsigned authorization = 0;
+    auto authorize = [&] {
+        ++authorization;
+        viewerConsent->setChecked(true);
+        try { Wait([&] { return request->isEnabled(); }); }
+        catch (...) { throw std::runtime_error("Controller request disabled: " + viewer.findChild<QLabel*>("controllerStatus")->text().toStdString() +
+            "; consent=" + std::to_string(viewerConsent->isChecked()) + "; devices=" + std::to_string(viewer.findChild<QComboBox*>("controllerDevice")->count())); }
+        request->click();
+        Check(!grant->isEnabled()); hostConsent->setChecked(true);
+        Wait([&] { return grant->isEnabled(); }); grant->click();
+        Check(!hostConsent->isChecked());
+        try { Wait([&] { return sink->buttons == buttons.load(); }); }
+        catch (...) { throw std::runtime_error("Controller state missing at grant " + std::to_string(authorization) +
+            "; host=" + host.findChild<QLabel*>("controllerStatus")->text().toStdString() +
+            "; viewer=" + viewer.findChild<QLabel*>("controllerStatus")->text().toStdString()); }
+    };
+    Check(!request->isEnabled() && !grant->isEnabled()); authorize();
+    buttons = 2; Wait([&] { return sink->buttons == 2; });
+    QEvent inactive(QEvent::WindowDeactivate); QApplication::sendEvent(&viewer, &inactive);
+    Wait([&] { return sink->buttons == 0 && !viewerConsent->isChecked(); });
+    authorize(); host.revokeControl(); Wait([&] { return sink->buttons == 0 && !viewerConsent->isChecked(); });
+    authorize();
+    CaptureSelection selection;
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+    selection.kind = CaptureKind::Window; selection.window = reinterpret_cast<uint64_t>(captureWindow);
+#else
+    selection.display = 1;
+#endif
+    host.session().switchCapture(selection);
+    Wait([&] { return !host.session().capturePending() && sink->buttons == 0 && !viewerConsent->isChecked(); });
+    authorize(); plugged = false;
+    Wait([&] { return sink->buttons == 0 && !viewerConsent->isChecked(); });
+    Check(sink->released >= 3 && sink->applied >= 4 && host.session().status().activePeers == 1);
+    plugged = true; sink->fail = true;
+    viewerConsent->setChecked(true); Wait([&] { return request->isEnabled(); }); request->click();
+    hostConsent->setChecked(true); Wait([&] { return grant->isEnabled(); }); grant->click();
+    Wait([&] { return !viewerConsent->isChecked() && host.findChild<QLabel*>("controllerStatus")->text().contains("unavailable"); });
+    Check(host.session().status().activePeers == 1 && !sink->buttons);
+    viewer.session().stop(); host.session().stop();
+    Wait([&] { return !viewer.session().running() && !host.session().running(); });
+}
 int main(int argc, char** argv) {
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString&) {});
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
@@ -783,13 +855,17 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
-        Check(argc == 2 || (argc == 3 && std::string(argv[2]) == "mutation-ack-delay"));
+        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers")));
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         NativePresentationRecovery();
         proof::TestWindow capture; captureWindow = capture.handle();
 #endif
-        if (argc == 3) MutationAcknowledgementScenario(argv[1]);
+        if (argc == 3 && std::string(argv[2]) == "controllers") {
+            ControllerScenario(argv[1]);
+            std::cout << "{\"passed\":true,\"controllers\":true,\"physical_input\":false}\n";
+        }
+        else if (argc == 3) MutationAcknowledgementScenario(argv[1]);
         else {
         RoomSessionConfig config; config.room.origin = argv[1]; config.room.host = true;
         config.room.nickname = "UiHost"; config.room.name = "UI media";
@@ -965,7 +1041,7 @@ int main(int argc, char** argv) {
         BrowserScenario(QUrl(QString::fromLocal8Bit(argv[1])));
         NormalHomeScenario(QUrl(QString::fromLocal8Bit(argv[1])));
         MutationLifecycle(argv[1]);
-        SourceSwitchScenario(argv[1]);
+          SourceSwitchScenario(argv[1]);
         std::cout << "{\"passed\":true,\"qt_ui\":true,\"normal_home\":true,\"browser\":true,\"directory_push\":true,\"nickname_persistence\":true,\"coalesced_settings\":true,\"responsive_stop\":true,\"restart_owner\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
         }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }

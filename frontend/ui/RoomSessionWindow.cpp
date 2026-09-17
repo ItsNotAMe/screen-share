@@ -1,4 +1,5 @@
 #include "ui/RoomSessionWindow.h"
+#include "ui/RoomGamepadControl.h"
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
 #include "shared/RoomProfile.h"
@@ -40,7 +41,8 @@ QString Phase(RoomPhase phase) {
     return "Session failed";
 }
 }
-RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback, RoomProfile* profile)
+RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback, RoomProfile* profile,
+    RoomGamepadControl::Devices devices, RoomGamepadControl::Read read)
     : session_(nullptr, std::move(factory), loopback) {
     setWindowTitle(config.room.host ? "ScreenShare — Share room" : "ScreenShare — Watch room");
     setStyleSheet(uiStyleSheet()); resize(960, 720);
@@ -229,7 +231,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
                 "Settings are invalid or could not be saved. Previous defaults were not replaced by invalid values.");
         });
     }
-    auto* controls = new QLabel("Remote control is not available in this preview."); layout->addWidget(controls);
+    gamepad_ = new RoomGamepadControl(config.room.host, [this] { return session_.input(); },
+        [this] { return session_.status(); }, this, std::move(devices), std::move(read));
+    layout->addWidget(gamepad_);
+    auto* controls = new QLabel("Mouse and keyboard control is unavailable."); layout->addWidget(controls);
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { session_.stop(); stop_->setEnabled(false); apply_->setEnabled(false); });
     connect(apply_, &QPushButton::clicked, this, [this] {
@@ -354,7 +359,11 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     session_.finished = [this](const auto&) { stop_->setEnabled(false); apply_->setEnabled(false); if (closing_) QTimer::singleShot(0, this, [this] { close(); }); };
     if (!session_.start(std::move(config))) { stop_->setEnabled(false); apply_->setEnabled(false); }
 }
-RoomSessionWindow::~RoomSessionWindow() = default;
+RoomSessionWindow::~RoomSessionWindow() {
+    // QWidget children otherwise outlive the session_ member they reference.
+    delete gamepad_; gamepad_ = nullptr;
+}
+void RoomSessionWindow::revokeControl() { if (gamepad_) gamepad_->Revoke(); }
 StreamPreferences RoomSessionWindow::ReadPreferences() const {
     StreamPreferences p; p.preset = StreamPreset(preset_->currentIndex()); p.resolution = ResolutionMode(resolution_->currentIndex());
     p.width = width_->value(); p.height = height_->value(); p.fpsMode = SettingMode(fpsMode_->currentIndex()); p.fps = fps_->value();

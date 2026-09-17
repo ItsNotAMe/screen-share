@@ -1,5 +1,9 @@
 # Shared-backend room UI
 
+Controller request/grant, selected-peer/all revoke, indicators, selected-device
+polling and AppShell panic revoke are now integrated. See [CONTROLLERS.md](CONTROLLERS.md)
+for consent/focus/source behavior and silent tests. Mouse/keyboard remain disabled.
+
 The existing home screen now supports guarded v2 routing with
 `ScreenShareUi --backend v2 --signal-server HTTPS_ORIGIN`. Start Sharing,
 Join Room and Quick Join use the shared backend and pushed directory, within
@@ -185,12 +189,11 @@ runtime references are released after stop. Normal lifecycle does not block the
 GUI thread waiting for capture retirement. Destruction is a final synchronous
 fallback; owners should use stop/finished before destruction.
 
-Remote control is unavailable in this opt-in window; no input handler or control
-grant is installed. The opt-in browser above now supplies create/join, persisted
-nickname and pushed directory updates. The default application shell and
-consent/input controls remain to migrate.
-Live audio-device switching, zero-copy presentation, NAT/ICE configuration and
-acceptance measurements also remain.
+Controller consent/control is integrated into this session page; mouse/keyboard
+mapping and confinement remain. The opt-in browser supplies create/join, persisted
+nickname and pushed directory updates inside the normal shell. Live audio-device
+switching and retained GPU presentation are implemented. Physical-device and
+network/latency acceptance remain open.
 This path is an integration preview, not milestone 2 completion or default cutover.
 
 ## Live display/window switching

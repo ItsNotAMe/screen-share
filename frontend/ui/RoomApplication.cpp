@@ -51,6 +51,10 @@ RoomApplication::RoomApplication(RoomSessionConfig config, QtRoomSession::Factor
 }
 
 void RoomApplication::Initialize() {
+    shell_.setPanicHotkeyHandler([this] {
+        if (session_) session_->revokeControl();
+        if (browser_ && browser_->activeSession()) browser_->activeSession()->revokeControl();
+    });
     shell_.resize(1000, 820);
     shell_.setMinimumSize(740, 600);
     shell_.setCloseHandler([this] {
@@ -104,6 +108,7 @@ void RoomApplication::Finish() {
 void RoomApplication::show() { if (!finished_) shell_.show(); }
 
 RoomApplication::~RoomApplication() {
+    shell_.setPanicHotkeyHandler({});
     shell_.setCloseHandler({});
     // unique_ptr-owned pages remove themselves from the shell's QObject tree.
     // They are destroyed before the shell; deferred callbacks have this context.

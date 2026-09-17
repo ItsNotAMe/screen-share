@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const workerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const executable = resolve(process.argv[2] ?? '');
 const fault = process.argv[5] ?? '';
-if (fault && fault !== 'mutation-ack-delay') throw new Error('Unknown native service fault mode');
+if (fault && fault !== 'mutation-ack-delay' && fault !== 'controllers') throw new Error('Unknown native service scenario');
 if (!process.argv[2] || !process.argv[3]) throw new Error('Usage: node run-native-service.mjs <RoomServiceTests.exe> <artifact-root>');
 const artifact = join(resolve(process.argv[3]), 'native-service-' + randomUUID());
 await mkdir(artifact, { recursive: true });
@@ -26,7 +26,7 @@ try {
     import worker from './src/v2/worker.ts';
     import { V2Room as BaseRoom } from './src/v2/worker.ts';
     export { V2Control, V2Directory } from './src/v2/worker.ts';
-    ${fault ? `
+    ${fault === 'mutation-ack-delay' ? `
     // Test-only override: persist normally and push all state/media immediately,
     // but deliver the first acknowledgement after the client's real 10s deadline.
     export class V2Room extends BaseRoom {

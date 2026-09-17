@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <future>
 #include <limits>
 #include <mutex>
 #include <source_location>
@@ -56,6 +57,24 @@ void Protocol() {
     bad.event.x=1.01f; Check(Encode(bad).empty());
     bad.event.x=0; bad.event.kind=Kind::Key; bad.event.key=256; Check(Encode(bad).empty());
     bad.event.kind=Kind::Pad; bad.event.buttons=0x400; Check(Encode(bad).empty());
+}
+void RepeatedRevoke() {
+    auto sink=std::make_shared<RecordingSink>(); Service host(true,sink),viewer(false);
+    host.Bind("viewer","connection",true); viewer.Bind("host","connection",true);
+    auto pump=[&] {
+        for(auto& packet:host.Drain("viewer",true,true))viewer.Receive("host",packet.reliable,packet.bytes);
+        for(auto& packet:viewer.Drain("host",true,true))host.Receive("viewer",packet.reliable,packet.bytes);
+    };
+    Check(host.Grant("viewer",Gamepad));
+    Wait([&] {pump();return Read(viewer,"host").granted==Gamepad;});
+    viewer.Revoke(); viewer.Revoke(); viewer.Revoke();
+    Check(Read(viewer,"host").revokePending && !viewer.Request("host",Gamepad));
+    pump(); // Repeated local cleanup must not erase the unsent release.
+    Check(!Read(host).granted && Read(host).reason==Reason::Revoked);
+    pump(); Check(!Read(viewer,"host").revokePending);
+    Check(viewer.Request("host",Gamepad)); pump(); Check(Read(host).requested==Gamepad);
+    Check(host.Grant("viewer",Gamepad));
+    Wait([&] {pump();return Read(viewer,"host").granted==Gamepad;});
 }
 void Safety() {
     auto sink=std::make_shared<RecordingSink>(); Service host(true,sink),viewer(false);
@@ -158,7 +177,27 @@ void Allocation() {
     }
     Service disabled(true); disabled.Bind("viewer","connection",true); Check(!disabled.Grant("viewer",7));
 }
+void DelayedDriverGrant() {
+    class Delayed final : public Sink {
+    public:
+        std::promise<void> entered, unblock;
+        std::shared_future<void> released = unblock.get_future().share();
+        std::atomic<unsigned> neutral{0};
+        bool Grant(const std::string&,uint8_t,int) override { entered.set_value(); released.wait(); return true; }
+        bool Apply(const std::string&,const Event&) override { return true; }
+        void Release(const std::string&) noexcept override { ++neutral; }
+    };
+    auto sink = std::make_shared<Delayed>(); Service host(true,sink);
+    host.Bind("viewer","connection",true);
+    Check(host.Grant("viewer",Gamepad));
+    sink->entered.get_future().wait();
+    auto revoke = std::async(std::launch::async,[&] { host.Revoke(); return Read(host); });
+    const bool responsive = revoke.wait_for(200ms)==std::future_status::ready;
+    sink->unblock.set_value(); // Always drain even if the responsiveness assertion fails.
+    const auto status = revoke.get(); Check(responsive && !status.granted);
+    Wait([&] {return sink->neutral>0;}); Check(!Read(host).granted);
+}
 int main() {
-    try {Protocol();Safety();Allocation();Congestion();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
+    try {Protocol();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

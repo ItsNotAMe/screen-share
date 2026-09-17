@@ -148,15 +148,18 @@ def sha256(path):
 
 def cases(desktop):
     result = [("input-service", "InputServiceTests.exe", None, None),
+              ("gamepad-control", "GamepadControlTests.exe", None, None),
               ("input-media", "RoomInputTests.exe", "media", None),
               ("presentation-worker", "VideoFrameInputTests.exe", None, None),
               ("room-service", "RoomServiceTests.exe", "service", None),
               ("cli-media", "RoomCliTests.exe", "media", None),
               ("ui-media", "RoomUiTests.exe", "media", None),
+              ("controller-ui", "RoomUiTests.exe", "media", "controllers"),
               ("mutation-recovery", "RoomUiTests.exe", "media", "mutation-ack-delay")]
     if desktop:
         result += [("windows-cli", "RoomCliWindowsTests.exe", "windows-media", None),
-                   ("windows-ui", "RoomUiWindowsTests.exe", "windows-media", None)]
+                   ("windows-ui", "RoomUiWindowsTests.exe", "windows-media", None),
+                   ("windows-controller-ui", "RoomUiWindowsTests.exe", "windows-media", "controllers")]
     return result
 
 
@@ -188,7 +191,7 @@ def main(argv=None):
               "plannedRuns": len(selected) * args.repeat, "runs": [],
               "limitations": ["Local Worker uses a loopback plaintext adapter; no remote TLS/NAT acceptance",
                               "Host and viewers share a process within each native scenario",
-                              "Synthetic silent audio; no physical input; no gaming input integration",
+                              "Synthetic silent audio and recording input sinks; no physical controller/driver acceptance",
                               "No matched performance, external latency, hibernation, load or physical driver-loss acceptance"]}
     fixture = ROOT / "signaling-worker/tests/run-native-service.mjs"
     started = time.monotonic()

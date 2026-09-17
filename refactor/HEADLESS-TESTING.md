@@ -1,9 +1,34 @@
 # Headless media checks
 
+## Controller integration — 2026-09-18
+
+The runner now includes `gamepad-control` and a separate `controller-ui` service
+fixture: nine headless cases or twelve with
+`--desktop`. UI and CLI cases include explicit controller requests/grants/revoke
+over real room channels with recording sinks and injected device readers. UI also
+checks focus/panic/source transitions, unplug and failed grant. No physical input
+or audible playback is used. See [CONTROLLERS.md](CONTROLLERS.md) for coverage and
+the separate physical-driver/latency acceptance limits.
+
+The initial combined UI run failed admission when another room scenario was added;
+controller UI now has its own service instance, with unchanged production quotas.
+Subsequent repeated regrant checks exposed a real repeated-revoke race: cleanup
+could clear an unsent release and a request could precede the host acknowledgement.
+The service now preserves pending release and blocks new requests until acknowledgement;
+`RepeatedRevoke` tests this directly. Three independent controller UI repeats pass
+under `build/webrtc/controller-revoke-repeat-{1,2,3}`. Earlier failed artifacts are
+retained and are not counted as passing evidence.
+
+Final Release and Debug desktop-inclusive matrices: **12/12 passed each**,
+`build/webrtc/controller-revoke-release/result.json` and
+`build/webrtc/controller-revoke-debug/result.json`. Release and Debug application
+builds succeeded (`controller-revoke-build-{release,debug}.log`). The focused
+runtime-link/input/controller/AV/UI smoke suite passed **6/6 in each configuration**.
+
 ## Input transport/safety and returning-image proof — 2026-09-18
 
 The normal regression runner now includes `input-service` and `input-media`:
-seven headless cases, or nine with `--desktop`. Both new cases use recording
+at that checkpoint, seven headless cases or nine with `--desktop`. Both cases use recording
 sinks; no physical input is injected and synthetic audio remains discarded.
 
 ```powershell

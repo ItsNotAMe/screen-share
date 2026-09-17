@@ -1,5 +1,6 @@
 #pragma once
 #include "ui/QtRoomSession.h"
+#include "ui/RoomGamepadControl.h"
 #include <QWidget>
 class QLabel;
 class QLineEdit;
@@ -9,21 +10,26 @@ class QCheckBox;
 class QPushButton;
 class VideoFrameWidget;
 class RoomProfile;
+class RoomGamepadControl;
 
 class RoomSessionWindow final : public QWidget {
 public:
     // Optional profile is owned by the browser and must outlive this window.
     // Config-file entry points pass none and remain independent of local defaults.
     explicit RoomSessionWindow(RoomSessionConfig, QtRoomSession::Factory = screenshare::media::WindowsRoomRuntimeFactory,
-                               bool diagnosticLoopback = false, RoomProfile* profile = nullptr);
+                               bool diagnosticLoopback = false, RoomProfile* profile = nullptr,
+                               RoomGamepadControl::Devices = screenshare::ViewerGamepad::ConnectedDevices,
+                               RoomGamepadControl::Read = screenshare::ViewerGamepad::ReadState);
     ~RoomSessionWindow() override;
     QtRoomSession& session() { return session_; }
+    void revokeControl();
     std::function<void()> closed;
 protected:
     void closeEvent(QCloseEvent*) override;
 private:
     screenshare::media::StreamPreferences ReadPreferences() const;
     QtRoomSession session_;
+    RoomGamepadControl* gamepad_ = nullptr;
     QLabel *phase_, *room_, *settingsState_, *error_;
     QSpinBox *width_, *height_, *fps_, *bitrate_;
     QSpinBox* uploadBudget_;

@@ -30,6 +30,7 @@ public:
     bool running() const { return bool(session_); }
     bool settingsPending() const { return pending_.has_value() || applying_.valid(); }
     screenshare::v2::RoomStatus status() const;
+    std::shared_ptr<screenshare::input::Port> input() const { return session_ ? session_->Input() : nullptr; }
     std::function<void(const screenshare::v2::RoomStatus&)> statusChanged;
     std::function<void(screenshare::Nv12VideoFrame)> frameReady;
     LatestRoomVideoFrame::Statistics frameStatistics() const { return frames_ ? frames_->statistics() : lastFrames_; }

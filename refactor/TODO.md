@@ -75,8 +75,8 @@ see [CAPTURE-RECOVERY.md](CAPTURE-RECOVERY.md). Supported-desktop DXGI, physical
 privacy/identity/HDR/driver and latency acceptance remain open. The current
 Screen-saver block was observed in the capture batch; the interactive desktop is
 available again for adoption checks, but DXGI still reports unsupported. Stage 3
-Windows input/mapping and UI/CLI consent/controller integration is next (INPUT.md);
-the shared input service and real-channel headless response are implemented. This is
+mouse/keyboard mapping and UI/CLI consent integration is next (INPUT.md);
+the shared input service, controller integration and headless response are implemented. This is
 needed for full adoption parity; Stage 2 and gaming latency are not complete.
 
 Detected audio startup/live failures now release the endpoint and preserve video
@@ -226,10 +226,14 @@ installer-managed drivers and the three-pad/local-slot policy.
 - [x] Integrate the portable input service, encrypted channels and public input
   port; validate adversarial protocol/safety cases and a test-owned input-to-image
   response with four actual media viewers. See [INPUT.md](INPUT.md).
-- [ ] Complete Windows device/mapping and normal UI/CLI consent/control integration
-  together, including controllers, panic revoke and focus/source transitions.
-  INPUT.md defines this remaining integrated delivery group. Normal v2 control
-  stays disabled until it is connected; Stage 3 and Gate D remain open.
+- [ ] Complete Windows mouse/keyboard mapping, confinement and normal UI/CLI consent
+  together, including panic revoke and focus/source transitions. INPUT.md defines
+  this remaining group. Mouse/keyboard stay disabled until mapping is connected;
+  Stage 3 and Gate D remain open.
+- [x] Deliver controller devices, selected-device polling, UI/CLI consent and
+  revoke, panic/focus/source/unplug handling, and injected end-to-end tests.
+  See [CONTROLLERS.md](CONTROLLERS.md). Next finish mouse/keyboard mapping and
+  confinement as one integrated group; physical controller acceptance stays open.
 
 ## 4. Stability, performance and service acceptance (B + C + E)
 

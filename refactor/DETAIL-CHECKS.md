@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (through `0849e44`, plus shared input transport/safety and real-channel headless response). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
+Last reconciled: 2026-09-18 (through `f119b43`, plus Windows controller/UI/CLI integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -20,11 +20,17 @@ the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
   backend failure with recording sinks and no physical input.
 - [x] Exercise authorized input and a synthetic returning image under four-viewer
   media; watchdog release still works when host/viewer runtime advancement pauses.
-- [ ] Complete Windows injection/controller/mapping, normal UI/CLI consent,
-  indicators, panic revoke, focus/unplug and actual local-slot integration.
+- [x] Implement lazy Windows controller devices, local-slot checks, selected-device
+  polling, normal UI/CLI consent, indicators, panic revoke and focus/source/unplug
+  handling. Injected real-channel tests cover these paths; see [CONTROLLERS.md](CONTROLLERS.md).
+- [ ] Complete mouse/keyboard source-image mapping, confinement and UI/CLI consent.
+- [ ] Validate physical controllers/driver behavior and external input latency.
 
-See [INPUT.md](INPUT.md). Normal v2 sessions remain view-only. Backend safety
+See [INPUT.md](INPUT.md). Normal v2 mouse/keyboard remain disabled. Backend safety
 and internal response samples do not close Gate D or physical latency acceptance.
+Controller closeout: final Release/Debug desktop-inclusive matrices passed 12/12
+each, plus 6/6 focused smoke checks each and three isolated controller UI repeats.
+Exact artifacts and the fixed revoke/regrant race are in HEADLESS-TESTING.md.
 
 ## Guarded normal-home/CLI adoption — 2026-09-18
 
@@ -570,17 +576,21 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 - [x] Implement reliable ordered control, unreliable unordered input state and replaceable telemetry channels.
 - [x] Implement explicit versioned input serialization and validation.
 - [x] Include connection/permission generations and sequence checks.
-- [ ] Implement pointer coalescing, gamepad polling and 100 ms state keepalives.
-  Coalescing, transport rate ceiling and complete pad/heartbeat keepalives are
-  implemented; physical controller polling remains in the Windows/frontend group.
+- [x] Implement pointer coalescing, selected-device gamepad polling and 100 ms state
+  keepalives. Pointer OS/frontend mapping remains separate work below.
 - [x] Bound reliable queues and handle backpressure without stale input replay.
 - [ ] Preserve exclusive mouse/keyboard ownership and up to three remote gamepads with local-slot reservation.
-  Service ownership/allocation policy is tested. Physical local-slot discovery,
-  device lifecycle and normal frontend integration remain open.
+  Service policy, Windows local-slot discovery, controller device lifecycle and
+  normal frontend integration are implemented and tested with injected devices.
+  Physical slot preservation and mouse/keyboard integration remain open.
 - [x] Implement 300 ms watchdog neutralization and fresh-generation recovery at the service/sink boundary; physical sink integration remains below.
 - [ ] Preserve consent, persistent indicators, panic revoke and window confinement.
+  Controller consent/indicators/panic are integrated; mouse/keyboard and window
+  confinement remain open. Controller focus/source revoke uses recording tests.
 - [ ] Neutralize input on source change and rebuild active-image coordinate mapping.
 - [ ] Preserve XInput/PlayStation reports and installer-only virtual-driver lifecycle.
+  The v2 poller reuses existing report readers; runtime creation is lazy and never
+  installs drivers. Physical XInput/PlayStation compatibility remains to validate.
 
 ### UI/input validation
 
@@ -588,9 +598,13 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 - [ ] Verify no input backlog under video saturation, retransmissions or keyframe bursts.
 - [ ] Verify lost/late/reordered states and reliable events after watchdog expiry.
 - [ ] Verify revoke, disconnect, controller unplug and backend failure neutralization.
+  Controller and service cases pass with recording sinks. Physical devices remain open.
 - [ ] Verify window focus/confinement, letterboxing and source-change mapping.
 - [ ] Verify independent remote pads and preserved local slots.
+  Injected-device tests cover three independent pads, occupied local slots and collisions.
 - [ ] Verify missing driver disables only unavailable gamepad functionality.
+  Missing-backend/failed-grant recording tests preserve media; fresh-machine driver
+  acceptance remains open.
 
 **Gate D**
 
