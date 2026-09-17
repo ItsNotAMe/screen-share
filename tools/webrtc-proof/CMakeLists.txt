@@ -31,6 +31,7 @@ add_library(MfWebRTCCodecs STATIC
     "${nativeRoot}/codec/H264Bitstream.cpp"
     "${nativeRoot}/video/Nv12Convert.cpp"
     "${nativeRoot}/capture/DesktopCapturer.cpp"
+    "${nativeRoot}/capture/DxgiCursor.cpp"
     "${nativeRoot}/codec/H264StreamDecoder.cpp")
 target_include_directories(MfWebRTCCodecs PUBLIC "${nativeRoot}")
 target_link_libraries(MfWebRTCCodecs PUBLIC ScreenShare::WebRTC ScreenShareMediaAdapters
@@ -134,6 +135,10 @@ option(SCREENSHARE_TEST_HARDWARE "Run proofs requiring a supported D3D11/MF GPU"
 add_executable(LiveCaptureTest LiveCaptureTest.cpp)
 add_executable(CaptureProcessExitTest CaptureProcessExitTest.cpp)
 add_executable(CaptureRecoveryTest CaptureRecoveryTest.cpp)
+add_executable(CaptureBackendTest CaptureBackendTest.cpp)
+target_link_libraries(CaptureBackendTest PRIVATE MfWebRTCCodecs gdi32)
+add_test(NAME capture-backend-cursor-policy COMMAND CaptureBackendTest)
+set_tests_properties(capture-backend-cursor-policy PROPERTIES TIMEOUT 20)
 target_link_libraries(CaptureRecoveryTest PRIVATE MfWebRTCCodecs gdi32)
 add_test(NAME capture-recovery-policy COMMAND CaptureRecoveryTest)
 set_tests_properties(capture-recovery-policy PROPERTIES TIMEOUT 10)
@@ -165,6 +170,8 @@ if(SCREENSHARE_NODE_EXECUTABLE AND TARGET PublicRoomSessionProof)
 endif()
 if(SCREENSHARE_TEST_LIVE_CAPTURE)
     add_test(NAME capture-automatic-recovery COMMAND CaptureRecoveryTest --live)
+    add_test(NAME capture-window-lifecycle COMMAND CaptureBackendTest --live)
+    set_tests_properties(capture-window-lifecycle PROPERTIES TIMEOUT 30)
     set_tests_properties(capture-automatic-recovery PROPERTIES TIMEOUT 45)
     add_test(NAME presentation-gpu-recovery COMMAND PresentationRecoveryTest --gpu)
     set_tests_properties(presentation-gpu-recovery PROPERTIES TIMEOUT 20)
@@ -187,6 +194,7 @@ if(SCREENSHARE_TEST_HARDWARE)
 endif()
 add_executable(MfCodecProbe MfCodecProbe.cpp
     "${nativeRoot}/capture/DesktopCapturer.cpp"
+    "${nativeRoot}/capture/DxgiCursor.cpp"
     "${nativeRoot}/codec/H264Bitstream.cpp"
     "${nativeRoot}/codec/H264StreamEncoder.cpp"
     "${nativeRoot}/codec/H264StreamDecoder.cpp"

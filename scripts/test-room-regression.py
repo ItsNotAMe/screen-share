@@ -16,6 +16,38 @@ ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP = "import subprocess,sys; gate=sys.stdin.buffer.read(1); sys.exit(subprocess.call(sys.argv[1:]) if gate == b'1' else 125)"
 
 
+def desktop_unavailable():
+    """Read desktop identity only; never unlock, dismiss a saver, or send input."""
+    if os.name != "nt":
+        return "Windows desktop presentation requires Windows"
+    user = ctypes.WinDLL("user32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetCurrentThreadId.restype = wintypes.DWORD
+    user.GetThreadDesktop.argtypes, user.GetThreadDesktop.restype = [wintypes.DWORD], wintypes.HANDLE
+    user.OpenInputDesktop.argtypes, user.OpenInputDesktop.restype = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD], wintypes.HANDLE
+    user.CloseDesktop.argtypes, user.CloseDesktop.restype = [wintypes.HANDLE], wintypes.BOOL
+    user.GetUserObjectInformationW.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    user.GetUserObjectInformationW.restype = wintypes.BOOL
+
+    def name(handle):
+        value, needed = ctypes.create_unicode_buffer(256), wintypes.DWORD()
+        if not handle or not user.GetUserObjectInformationW(handle, 2, value, ctypes.sizeof(value), ctypes.byref(needed)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return value.value
+
+    active = user.OpenInputDesktop(0, False, 1)  # DESKTOP_READOBJECTS
+    if not active:
+        return f"Input desktop is unavailable (Windows error {ctypes.get_last_error()}); it may be locked or secure"
+    try:
+        current_name = name(user.GetThreadDesktop(kernel.GetCurrentThreadId()))
+        active_name = name(active)
+        if current_name.casefold() != active_name.casefold():
+            return f"Desktop presentation unavailable: test desktop '{current_name}', input desktop '{active_name}'"
+    finally:
+        user.CloseDesktop(active)
+    return None
+
+
 class WindowsJob:
     """The bootstrap cannot spawn until it belongs to our kill-on-close job."""
     def __init__(self):
@@ -161,6 +193,13 @@ def main(argv=None):
     try:
         report["runnerSha256"] = sha256(Path(__file__))
         report["fixtureSha256"] = sha256(fixture)
+        if args.desktop:
+            reason = desktop_unavailable()
+            if reason:
+                report["blocked"] = True
+                report["error"] = reason
+                print(f"BLOCKED: {reason}. Run without --desktop for headless checks.", flush=True)
+                return 2
         hashes = {program: sha256(build / program) for _, program, _, _ in selected}
         for iteration in range(args.repeat):
             for name, program, mode, fault in selected:

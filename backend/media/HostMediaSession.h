@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace screenshare::media {
-enum class HostMediaState { Idle, Starting, WaitingForViewers, Running, Recovering, Stopping, Stopped, Failed };
+enum class HostMediaState { Idle, Starting, WaitingForViewers, Running, Recovering, Stopping, Stopped, Failed, Minimized, SourceClosed };
 enum class HostOperationError { None, InvalidState, StaleGeneration, InvalidViewer, Capacity, Cancelled, Internal };
 struct HostOperationResult {
     uint64_t operation = 0, generation = 0;
@@ -25,6 +25,7 @@ struct HostMediaSnapshot {
     std::vector<HostViewerSnapshot> viewers;
     uint64_t activeOperation = 0;
     uint64_t lastFailedConnectionGeneration = 0;
+    CaptureSourceInfo captureSource;
 };
 // Host capture/membership lifecycle, independent of Qt and WebRTC. Peer creation
 // and signaling remain the next integration layer. Lifecycle commands execute

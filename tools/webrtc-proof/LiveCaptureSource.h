@@ -54,6 +54,8 @@ private:
             return source_.Poll();
         }
         bool Closed() const override { return source_.Closed(); }
+        bool Minimized() const override { return source_.Minimized(); }
+        screenshare::media::CaptureSourceInfo Info() const override { return source_.Info(); }
         void Retire() noexcept override { source_.Retire(); }
         void Rebuild() override { source_.Rebuild(); }
     private:

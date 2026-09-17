@@ -72,12 +72,15 @@ struct HostMediaSession::Impl {
         const auto status = capture->status();
         current.sourceGeneration = status.generation;
         current.captureFailure = status.failure;
+        current.captureSource = status.source;
         switch (status.state) {
         case CaptureState::Starting: current.state = HostMediaState::Starting; break;
         case CaptureState::Recovering: current.state = HostMediaState::Recovering; break;
         case CaptureState::Running:
             current.state = viewers.empty() ? HostMediaState::WaitingForViewers : HostMediaState::Running; break;
+        case CaptureState::Minimized: current.state = HostMediaState::Minimized; break;
         case CaptureState::Closed:
+            Teardown(); current.state = HostMediaState::SourceClosed; break;
         case CaptureState::Stopped:
             Teardown(); current.state = HostMediaState::Stopped; break;
         case CaptureState::Failed:

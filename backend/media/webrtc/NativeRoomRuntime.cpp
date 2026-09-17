@@ -61,7 +61,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
     // Destroy the registry before native entries it references.
     std::unique_ptr<HostPeerRegistry> owner_;
     bool stopping_ = false, stopped_ = false;
-    const std::chrono::steady_clock::time_point startupDeadline_ = std::chrono::steady_clock::now() + 20s;
+    std::chrono::steady_clock::time_point startupDeadline_ = std::chrono::steady_clock::now() + 20s;
     std::promise<void> stoppedPromise_;
     std::shared_future<void> stoppedFuture_ = stoppedPromise_.get_future().share();
 public:
@@ -176,7 +176,7 @@ public:
         if (!identity_.host) return result;
         result.requestedRevision = settingsRevision_; result.preferences = options_.preferences;
         const auto capture = capture_.snapshot();
-        result.capture = {capture.state, capture.captureFailure, capture.sourceGeneration};
+        result.capture = {capture.state, capture.captureFailure, capture.sourceGeneration, capture.captureSource};
         if (options_.codecStatus) result.codec = options_.codecStatus();
         for (const auto& [id, entry] : peers_) {
             if (entry->removing || entry->retired) continue;
@@ -224,9 +224,14 @@ public:
         if (!owner_) return;
         if (identity_.host) {
             const auto captureStatus = capture_.snapshot();
+            if (captureStatus.state == HostMediaState::SourceClosed) throw std::runtime_error("Selected capture source closed");
             if (captureStatus.state == HostMediaState::Failed || captureStatus.state == HostMediaState::Stopped)
                 throw std::runtime_error("Capture source stopped");
             if (!engine_) {
+                if (captureStatus.state == HostMediaState::Minimized) {
+                    startupDeadline_ = std::chrono::steady_clock::now() + 20s;
+                    return;
+                }
                 if (options_.engineReady && !options_.engineReady()) {
                     if (std::chrono::steady_clock::now() >= startupDeadline_) throw std::runtime_error("Capture device startup timed out");
                     return;

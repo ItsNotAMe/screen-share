@@ -22,7 +22,8 @@ inline QJsonObject StreamApplicationJson(const screenshare::v2::StreamStatus& st
 }
 inline QJsonObject PipelineDiagnosticsJson(const screenshare::v2::StreamStatus& stream) {
     if (!stream.requestedRevision) return {{"captureState", "unknown"}, {"captureFailure", "unknown"},
-        {"sourceGeneration", QJsonValue(QJsonValue::Null)}, {"hardwarePipeline", QJsonValue(QJsonValue::Null)}};
+        {"sourceGeneration", QJsonValue(QJsonValue::Null)}, {"captureBackend", "unknown"},
+        {"captureFallback", QJsonValue(QJsonValue::Null)}, {"hardwarePipeline", QJsonValue(QJsonValue::Null)}};
     using namespace screenshare::media;
     const char* state = "unknown"; const char* failure = "unknown";
     switch (stream.capture.state) {
@@ -30,6 +31,7 @@ inline QJsonObject PipelineDiagnosticsJson(const screenshare::v2::StreamStatus& 
     case HostMediaState::WaitingForViewers: state = "waiting-for-viewers"; break; case HostMediaState::Running: state = "running"; break;
     case HostMediaState::Recovering: state = "recovering"; break; case HostMediaState::Stopping: state = "stopping"; break;
     case HostMediaState::Stopped: state = "stopped"; break; case HostMediaState::Failed: state = "failed"; break;
+    case HostMediaState::Minimized: state = "minimized"; break; case HostMediaState::SourceClosed: state = "source-closed"; break;
     }
     switch (stream.capture.failure) {
     case CaptureFailure::None: failure = "none"; break; case CaptureFailure::Source: failure = "source"; break;
@@ -37,7 +39,12 @@ inline QJsonObject PipelineDiagnosticsJson(const screenshare::v2::StreamStatus& 
     case CaptureFailure::Consumer: failure = "consumer"; break;
     }
     const auto& codec = stream.codec;
+    const auto implementation = stream.capture.source.implementation;
+    const char* backend = implementation == CaptureImplementation::WindowsGraphicsCapture ? "wgc" :
+        implementation == CaptureImplementation::DesktopDuplication ? "dxgi" : "unknown";
     return {{"captureState", state}, {"captureFailure", failure}, {"sourceGeneration", qint64(stream.capture.generation)},
+        {"captureBackend", backend}, {"captureFallback", implementation == CaptureImplementation::Unknown ?
+            QJsonValue(QJsonValue::Null) : QJsonValue(stream.capture.source.fallback)},
         {"hardwarePipeline", codec.available ? QJsonValue(QJsonObject{{"hardwareFrames", qint64(codec.hardwareFrames)},
             {"softwareFallbacks", qint64(codec.softwareFallbacks)}, {"quarantined", codec.quarantined}, {"retired", codec.retired},
             {"fallbackState", codec.retired ? "device-retired" : codec.quarantined ? "hardware-quarantined" : "none"}}) : QJsonValue(QJsonValue::Null)}};

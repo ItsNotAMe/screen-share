@@ -78,6 +78,8 @@ void PreviewLifecycle() {
         while (preview.framesPresented() < goal) {
             if (!preview.PumpMessages() || std::chrono::steady_clock::now() >= deadline) {
                 const auto stats = preview.presentationStats();
+                RECT windowRect{}, clientRect{};
+                GetWindowRect(preview.windowHandle(), &windowRect); GetClientRect(preview.windowHandle(), &clientRect);
                 throw std::runtime_error("Preview presentation timeout from line " + std::to_string(caller.line()) +
                     "; frames=" + std::to_string(preview.framesPresented()) + "; errors=" + std::to_string(stats.errors) +
                     "; recoveries=" + std::to_string(stats.recoveries) + "; terminal=" + std::to_string(stats.terminal) +
@@ -85,7 +87,11 @@ void PreviewLifecycle() {
                     "; lastError=" + std::to_string(uint32_t(stats.lastError)) +
                     "; busy=" + std::to_string(stats.busyDrops) + "; occluded=" + std::to_string(stats.occludedDrops) +
                     "; visible=" + std::to_string(IsWindowVisible(preview.windowHandle())) +
-                    "; minimized=" + std::to_string(IsIconic(preview.windowHandle())));
+                    "; minimized=" + std::to_string(IsIconic(preview.windowHandle())) +
+                    "; rect=" + std::to_string(windowRect.left) + "," + std::to_string(windowRect.top) + "," +
+                        std::to_string(windowRect.right) + "," + std::to_string(windowRect.bottom) +
+                    "; client=" + std::to_string(clientRect.right) + "x" + std::to_string(clientRect.bottom) +
+                    "; onMonitor=" + std::to_string(MonitorFromWindow(preview.windowHandle(), MONITOR_DEFAULTTONULL) != nullptr));
             }
             preview.PresentFrame(frame); std::this_thread::sleep_for(5ms);
         }

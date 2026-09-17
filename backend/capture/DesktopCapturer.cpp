@@ -1,5 +1,7 @@
 #include "capture/DesktopCapturer.h"
 #include "capture/WindowsCaptureDispatcher.h"
+#include "capture/CaptureBackendPolicy.h"
+#include "capture/DxgiCursor.h"
 
 #include <Windows.h>
 #include <d3dcompiler.h>
@@ -63,13 +65,15 @@ void ThrowIfFailed(HRESULT hr, const char* operation)
 {
     if (FAILED(hr)) {
         if (hr == E_ACCESSDENIED && std::string(operation).find("DuplicateOutput") != std::string::npos) {
-            throw std::runtime_error(
+            throw CaptureBackendError(hr,
                 std::string(operation) +
                 " failed: Access is denied. Desktop Duplication requires an interactive desktop session; "
                 "close other screen-capture apps, avoid secure/admin desktops, or use the Windows Graphics Capture backend.");
         }
 
-        throw std::runtime_error(std::string(operation) + " failed: " + HResultMessage(hr));
+        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_HUNG)
+            throw CaptureDeviceLostError(hr);
+        throw CaptureBackendError(hr, std::string(operation) + " failed: " + HResultMessage(hr));
     }
 }
 
@@ -464,7 +468,21 @@ void DesktopCapturer::Start(const CaptureConfig& config)
         }
         CreateWindowsGraphicsCaptureForWindow(config.windowHandle);
     } else if (config.backend == CaptureBackend::WindowsGraphicsCapture) {
-        CreateWindowsGraphicsCaptureForDisplay(config.displayIndex);
+        SelectDisplay(config.displayIndex);
+        StartDisplayCapture(config.allowDisplayFallback, [&] {
+            try { CreateWindowsGraphicsCaptureForDisplay(config.displayIndex); }
+            catch (const winrt::hresult_error& error) { throw CaptureBackendError(error.code(), "WGC display startup failed"); }
+        }, [&] {
+            // Retain the selected output through fallback; never enumerate again.
+            const auto adapter = selectedAdapter_;
+            const auto output = selectedOutput_;
+            const auto description = selectedDisplay_;
+            Stop(); // Also close any partially constructed WGC session/pool.
+            selectedAdapter_ = adapter; selectedOutput_ = output; selectedDisplay_ = description;
+            CreateSelectedDuplication();
+            displayFallback_ = true;
+            config_.backend = CaptureBackend::DesktopDuplication;
+        });
     } else {
         CreateDuplicationForDisplay(config.displayIndex);
     }
@@ -499,6 +517,8 @@ void DesktopCapturer::Stop()
     }
     wgc_.reset();
     ResetGraphicsResources();
+    selectedOutput_.Reset(); selectedAdapter_.Reset(); selectedDisplay_ = {};
+    displayFallback_ = false;
     dispatcher_.reset();
     if (winrtInitialized_) {
         winrt::clear_factory_cache();
@@ -509,6 +529,7 @@ void DesktopCapturer::Stop()
 
 void DesktopCapturer::ResetGraphicsResources()
 {
+    cursor_.reset();
     duplication_.Reset();
     sourceTexture_.Reset();
     sourceView_.Reset();
@@ -544,7 +565,29 @@ void DesktopCapturer::RebuildWindowDevice()
 {
     if (!config_.ownedNv12 || config_.sourceType != CaptureSourceType::Window || !wgc_)
         throw std::logic_error("Device rebuild requires an active owned WGC window source");
+    RebuildDevice();
+}
+
+void DesktopCapturer::RebuildDevice()
+{
+    if (!config_.ownedNv12) throw std::logic_error("Device rebuild requires owned frames");
+    if (config_.sourceType == CaptureSourceType::Display) {
+        ValidateSelectedDisplay();
+        if (!wgc_) {
+            ResetGraphicsResources();
+            CreateSelectedDuplication();
+            sourceState_ = CaptureSourceState::Active;
+            return;
+        }
+    }
+    if (!wgc_) throw std::logic_error("Capture source is not available for recovery");
     const auto validateSource = [&] {
+        if (config_.sourceType == CaptureSourceType::Display) {
+            ValidateSelectedDisplay();
+            if (!wgc_->closed->load()) return;
+            sourceState_ = CaptureSourceState::Closed;
+            throw std::runtime_error("Selected display closed during recovery");
+        }
         DWORD process = 0;
         const auto thread = GetWindowThreadProcessId(reinterpret_cast<HWND>(config_.windowHandle), &process);
         if (sourceState_ == CaptureSourceState::Closed || wgc_->closed->load() || !thread ||
@@ -569,8 +612,9 @@ void DesktopCapturer::RebuildWindowDevice()
         try { if (wgc_->framePool) wgc_->framePool.Close(); } catch (const winrt::hresult_error&) {}
         wgc_->session = nullptr; wgc_->framePool = nullptr; wgc_->device = nullptr;
         ResetGraphicsResources();
-        CreateDevice(nullptr);
-        DetectOutputColorSpaceForMonitor(MonitorFromWindow(reinterpret_cast<HWND>(config_.windowHandle), MONITOR_DEFAULTTONEAREST));
+        CreateDevice(selectedAdapter_.Get());
+        if (selectedOutput_) DetectOutputColorSpace(selectedOutput_.Get());
+        else DetectOutputColorSpaceForMonitor(MonitorFromWindow(reinterpret_cast<HWND>(config_.windowHandle), MONITOR_DEFAULTTONEAREST));
         Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
         ThrowIfFailed(device_.As(&dxgiDevice), "Recovery DXGI device");
         winrt::com_ptr<IInspectable> inspectable;
@@ -588,7 +632,9 @@ void DesktopCapturer::RebuildWindowDevice()
         validateSource();
         sourceState_ = CaptureSourceState::Active;
     } catch (...) {
+        const bool closed = sourceState_ == CaptureSourceState::Closed;
         Stop(); // Failed reconstruction is terminal; explicit Start is required.
+        if (closed) sourceState_ = CaptureSourceState::Closed;
         throw;
     }
 }
@@ -596,6 +642,7 @@ void DesktopCapturer::RebuildWindowDevice()
 std::optional<CapturedFrame> DesktopCapturer::TryCaptureFrame(std::chrono::milliseconds timeout)
 {
     if (wgc_) WindowsCaptureDispatcher::Pump();
+    if (config_.ownedNv12 && selectedOutput_) ValidateSelectedDisplay();
     if (config_.ownedNv12 && device_) {
         const HRESULT reason = device_->GetDeviceRemovedReason();
         if (FAILED(reason)) throw CaptureDeviceLostError(reason);
@@ -611,9 +658,11 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureFrame(std::chrono::milli
                 sourceState_ = CaptureSourceState::Minimized;
                 // Return queued frames; never republish the pre-minimize image.
                 for (int i = 0; i < 2; ++i) {
-                    auto frame = wgc_->framePool.TryGetNextFrame();
-                    if (!frame) break;
-                    frame.Close();
+                    try {
+                        auto frame = wgc_->framePool.TryGetNextFrame();
+                        if (!frame) break;
+                        frame.Close();
+                    } catch (const winrt::hresult_error& error) { ThrowIfFailed(error.code(), "Minimized capture drain"); throw; }
                 }
                 if (timeout.count() > 0) std::this_thread::sleep_for(std::min(timeout, std::chrono::milliseconds(10)));
                 return std::nullopt;
@@ -626,7 +675,8 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureFrame(std::chrono::milli
         sourceState_ = CaptureSourceState::Active;
     }
     if (wgc_) {
-        return TryCaptureWindowsGraphicsFrame(timeout);
+        try { return TryCaptureWindowsGraphicsFrame(timeout); }
+        catch (const winrt::hresult_error& error) { ThrowIfFailed(error.code(), "WGC acquisition"); throw; }
     }
 
     if (!duplication_) {
@@ -645,6 +695,7 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureFrame(std::chrono::milli
     }
 
     if (acquireResult == DXGI_ERROR_ACCESS_LOST) {
+        if (config_.ownedNv12) throw CaptureDeviceLostError(acquireResult);
         Stop();
         throw std::runtime_error("Display duplication access was lost. Restart capture after display changes.");
     }
@@ -666,6 +717,9 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureFrame(std::chrono::milli
 
     D3D11_TEXTURE2D_DESC sourceDesc{};
     desktopTexture->GetDesc(&sourceDesc);
+
+    if (!cursor_) cursor_ = std::make_unique<DxgiCursor>();
+    cursor_->Update(duplication_.Get(), frameInfo);
 
     return ReadTextureFrame(desktopTexture.Get(), sourceDesc, frameInfo.LastPresentTime.QuadPart);
 }
@@ -721,78 +775,89 @@ void DesktopCapturer::CreateDevice(IDXGIAdapter* adapter)
     }
 }
 
-void DesktopCapturer::CreateDuplicationForDisplay(int displayIndex)
+void DesktopCapturer::SelectDisplay(int displayIndex)
 {
+    if (selectedOutput_) return;
     Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
     ThrowIfFailed(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "CreateDXGIFactory1");
-
     int currentDisplay = 0;
     for (UINT adapterIndex = 0;; ++adapterIndex) {
-        Microsoft::WRL::ComPtr<IDXGIAdapter1> candidateAdapter;
-        HRESULT adapterResult = factory->EnumAdapters1(adapterIndex, &candidateAdapter);
-        if (adapterResult == DXGI_ERROR_NOT_FOUND) {
-            break;
-        }
-        ThrowIfFailed(adapterResult, "IDXGIFactory1::EnumAdapters1");
-
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        const auto adapterResult = factory->EnumAdapters1(adapterIndex, &adapter);
+        if (adapterResult == DXGI_ERROR_NOT_FOUND) break;
+        ThrowIfFailed(adapterResult, "Enumerate capture adapter");
         for (UINT outputIndex = 0;; ++outputIndex) {
             Microsoft::WRL::ComPtr<IDXGIOutput> output;
-            HRESULT outputResult = candidateAdapter->EnumOutputs(outputIndex, &output);
-            if (outputResult == DXGI_ERROR_NOT_FOUND) {
-                break;
-            }
-            ThrowIfFailed(outputResult, "IDXGIAdapter1::EnumOutputs");
-
-            if (currentDisplay == displayIndex) {
-                CreateDevice(candidateAdapter.Get());
-
-                DetectOutputColorSpace(output.Get());
-
-                Microsoft::WRL::ComPtr<IDXGIOutput5> output5;
-                if (SUCCEEDED(output.As(&output5))) {
-                    constexpr DXGI_FORMAT hdrFormats[] = {
-                        DXGI_FORMAT_R16G16B16A16_FLOAT,
-                        DXGI_FORMAT_R10G10B10A2_UNORM,
-                    };
-
-                    if (outputHdrActive_) {
-                        const HRESULT hdrDuplicateResult = output5->DuplicateOutput1(
-                            device_.Get(),
-                            0,
-                            ARRAYSIZE(hdrFormats),
-                            hdrFormats,
-                            &duplication_);
-                        if (SUCCEEDED(hdrDuplicateResult)) {
-                            return;
-                        }
-                    }
-
-                    constexpr DXGI_FORMAT sdrFormats[] = {
-                        DXGI_FORMAT_B8G8R8A8_UNORM,
-                    };
-
-                    const HRESULT sdrDuplicateResult = output5->DuplicateOutput1(
-                        device_.Get(),
-                        0,
-                        ARRAYSIZE(sdrFormats),
-                        sdrFormats,
-                        &duplication_);
-                    if (SUCCEEDED(sdrDuplicateResult)) {
-                        return;
-                    }
-                }
-
-                Microsoft::WRL::ComPtr<IDXGIOutput1> output1;
-                ThrowIfFailed(output.As(&output1), "IDXGIOutput::QueryInterface(IDXGIOutput1)");
-                ThrowIfFailed(output1->DuplicateOutput(device_.Get(), &duplication_), "IDXGIOutput1::DuplicateOutput");
-                return;
-            }
-
-            ++currentDisplay;
+            const auto outputResult = adapter->EnumOutputs(outputIndex, &output);
+            if (outputResult == DXGI_ERROR_NOT_FOUND) break;
+            ThrowIfFailed(outputResult, "Enumerate capture output");
+            if (currentDisplay++ != displayIndex) continue;
+            ThrowIfFailed(output->GetDesc(&selectedDisplay_), "Selected display description");
+            if (!selectedDisplay_.AttachedToDesktop || !selectedDisplay_.Monitor)
+                throw std::runtime_error("Selected display is not attached");
+            selectedAdapter_ = adapter; selectedOutput_ = output;
+            return;
         }
     }
-
     throw std::out_of_range("Display index was not found");
+}
+
+void DesktopCapturer::ValidateSelectedDisplay()
+{
+    DXGI_OUTPUT_DESC current{};
+    if (!selectedOutput_ || FAILED(selectedOutput_->GetDesc(&current)) ||
+        !current.AttachedToDesktop || current.Monitor != selectedDisplay_.Monitor ||
+        std::wstring(current.DeviceName) != selectedDisplay_.DeviceName) {
+        sourceState_ = CaptureSourceState::Closed;
+        throw std::runtime_error("Selected display is no longer available");
+    }
+    // Desktop Duplication exposes an unrotated surface. Do not silently send a
+    // sideways image or incorrect control coordinates until rotation is supported.
+    if (config_.backend == CaptureBackend::DesktopDuplication &&
+        current.Rotation != DXGI_MODE_ROTATION_IDENTITY && current.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED)
+        throw std::runtime_error("Rotated display requires Windows Graphics Capture");
+}
+
+void DesktopCapturer::CreateDuplicationForDisplay(int displayIndex)
+{
+    SelectDisplay(displayIndex);
+    CreateSelectedDuplication();
+}
+
+void DesktopCapturer::CreateSelectedDuplication()
+{
+    ValidateSelectedDisplay();
+    DXGI_OUTPUT_DESC description{};
+    ThrowIfFailed(selectedOutput_->GetDesc(&description), "Duplication display description");
+    if (description.Rotation != DXGI_MODE_ROTATION_IDENTITY && description.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED)
+        throw std::runtime_error("Rotated display requires Windows Graphics Capture");
+    CreateDevice(selectedAdapter_.Get());
+    DetectOutputColorSpace(selectedOutput_.Get());
+    Microsoft::WRL::ComPtr<IDXGIOutput5> output5;
+    if (SUCCEEDED(selectedOutput_.As(&output5))) {
+        if (outputHdrActive_) {
+            constexpr DXGI_FORMAT formats[] = {DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R10G10B10A2_UNORM,
+                DXGI_FORMAT_B8G8R8A8_UNORM}; // DXGI requires the common desktop format in the list.
+            const auto result = output5->DuplicateOutput1(device_.Get(), 0, ARRAYSIZE(formats), formats, &duplication_);
+            if (SUCCEEDED(result)) {
+                DXGI_OUTDUPL_DESC actual{}; duplication_->GetDesc(&actual);
+                if (config_.ownedNv12 && actual.ModeDesc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT &&
+                    actual.ModeDesc.Format != DXGI_FORMAT_R10G10B10A2_UNORM) {
+                    duplication_.Reset();
+                    throw CaptureBackendError(DXGI_ERROR_UNSUPPORTED, "HDR duplication did not preserve a native HDR format");
+                }
+                return;
+            }
+            if (config_.ownedNv12) ThrowIfFailed(result, "HDR display duplication");
+        }
+        constexpr DXGI_FORMAT formats[] = {DXGI_FORMAT_B8G8R8A8_UNORM};
+        if (SUCCEEDED(output5->DuplicateOutput1(device_.Get(), 0, ARRAYSIZE(formats), formats, &duplication_))) return;
+    }
+    if (outputHdrActive_ && config_.ownedNv12)
+        throw std::runtime_error("HDR display duplication requires native HDR format support");
+    Microsoft::WRL::ComPtr<IDXGIOutput1> output1;
+    ThrowIfFailed(selectedOutput_.As(&output1), "Duplication interface");
+    ThrowIfFailed(output1->DuplicateOutput(device_.Get(), &duplication_), "IDXGIOutput1::DuplicateOutput");
 }
 
 void DesktopCapturer::InitializeWinRt()
@@ -830,84 +895,53 @@ void DesktopCapturer::InitializeWinRt()
 
 void DesktopCapturer::CreateWindowsGraphicsCaptureForDisplay(int displayIndex)
 {
+    SelectDisplay(displayIndex);
+    ValidateSelectedDisplay();
     InitializeWinRt();
+    const auto outputDesc = selectedDisplay_;
+    CreateDevice(selectedAdapter_.Get());
+    DetectOutputColorSpace(selectedOutput_.Get());
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+    ThrowIfFailed(device_.As(&dxgiDevice), "ID3D11Device::QueryInterface(IDXGIDevice)");
 
-    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
-    ThrowIfFailed(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "CreateDXGIFactory1");
+    winrt::com_ptr<IInspectable> inspectableDevice;
+    ThrowIfFailed(
+        CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.Get(), inspectableDevice.put()),
+        "CreateDirect3D11DeviceFromDXGIDevice");
 
-    int currentDisplay = 0;
-    for (UINT adapterIndex = 0;; ++adapterIndex) {
-        Microsoft::WRL::ComPtr<IDXGIAdapter1> candidateAdapter;
-        HRESULT adapterResult = factory->EnumAdapters1(adapterIndex, &candidateAdapter);
-        if (adapterResult == DXGI_ERROR_NOT_FOUND) {
-            break;
-        }
-        ThrowIfFailed(adapterResult, "IDXGIFactory1::EnumAdapters1");
+    const auto d3dDevice = inspectableDevice.as<direct3d11::IDirect3DDevice>();
+    auto itemFactory = winrt::get_activation_factory<capture::GraphicsCaptureItem>();
+    const auto itemInterop = itemFactory.as<IGraphicsCaptureItemInterop>();
 
-        for (UINT outputIndex = 0;; ++outputIndex) {
-            Microsoft::WRL::ComPtr<IDXGIOutput> output;
-            HRESULT outputResult = candidateAdapter->EnumOutputs(outputIndex, &output);
-            if (outputResult == DXGI_ERROR_NOT_FOUND) {
-                break;
-            }
-            ThrowIfFailed(outputResult, "IDXGIAdapter1::EnumOutputs");
+    capture::GraphicsCaptureItem item{nullptr};
+    ThrowIfFailed(
+        itemInterop->CreateForMonitor(
+            outputDesc.Monitor,
+            winrt::guid_of<capture::IGraphicsCaptureItem>(),
+            winrt::put_abi(item)),
+        "IGraphicsCaptureItemInterop::CreateForMonitor");
 
-            if (currentDisplay == displayIndex) {
-                DXGI_OUTPUT_DESC outputDesc{};
-                ThrowIfFailed(output->GetDesc(&outputDesc), "IDXGIOutput::GetDesc");
+    const graphics::SizeInt32 captureSize = item.Size();
+    const directx::DirectXPixelFormat pixelFormat =
+        outputHdrActive_ && config_.hdrToSdr
+        ? directx::DirectXPixelFormat::R16G16B16A16Float
+        : directx::DirectXPixelFormat::B8G8R8A8UIntNormalized;
 
-                CreateDevice(candidateAdapter.Get());
-                DetectOutputColorSpace(output.Get());
-
-                Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
-                ThrowIfFailed(device_.As(&dxgiDevice), "ID3D11Device::QueryInterface(IDXGIDevice)");
-
-                winrt::com_ptr<IInspectable> inspectableDevice;
-                ThrowIfFailed(
-                    CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.Get(), inspectableDevice.put()),
-                    "CreateDirect3D11DeviceFromDXGIDevice");
-
-                const auto d3dDevice = inspectableDevice.as<direct3d11::IDirect3DDevice>();
-                auto itemFactory = winrt::get_activation_factory<capture::GraphicsCaptureItem>();
-                const auto itemInterop = itemFactory.as<IGraphicsCaptureItemInterop>();
-
-                capture::GraphicsCaptureItem item{nullptr};
-                ThrowIfFailed(
-                    itemInterop->CreateForMonitor(
-                        outputDesc.Monitor,
-                        winrt::guid_of<capture::IGraphicsCaptureItem>(),
-                        winrt::put_abi(item)),
-                    "IGraphicsCaptureItemInterop::CreateForMonitor");
-
-                const graphics::SizeInt32 captureSize = item.Size();
-                const directx::DirectXPixelFormat pixelFormat =
-                    outputHdrActive_ && config_.hdrToSdr
-                    ? directx::DirectXPixelFormat::R16G16B16A16Float
-                    : directx::DirectXPixelFormat::B8G8R8A8UIntNormalized;
-
-                auto state = std::make_unique<WindowsGraphicsCaptureState>();
-                state->item = item;
-                state->WatchClosure();
-                state->device = d3dDevice;
-                state->size = captureSize;
-                state->framePool = capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
-                    d3dDevice,
-                    pixelFormat,
-                    2,
-                    captureSize);
-                state->session = state->framePool.CreateCaptureSession(item);
-                ConfigureWindowsGraphicsCaptureBorder(state->session, config_.wgcBorderRequired);
-                state->session.StartCapture();
-                wgc_ = std::move(state);
-                sourceState_ = CaptureSourceState::Active;
-                return;
-            }
-
-            ++currentDisplay;
-        }
-    }
-
-    throw std::out_of_range("Display index was not found");
+    auto state = std::make_unique<WindowsGraphicsCaptureState>();
+    state->item = item;
+    state->WatchClosure();
+    state->device = d3dDevice;
+    state->size = captureSize;
+    state->framePool = capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
+        d3dDevice,
+        pixelFormat,
+        2,
+        captureSize);
+    state->session = state->framePool.CreateCaptureSession(item);
+    ConfigureWindowsGraphicsCaptureBorder(state->session, config_.wgcBorderRequired);
+    state->session.StartCapture();
+    wgc_ = std::move(state);
+    sourceState_ = CaptureSourceState::Active;
 }
 
 void DesktopCapturer::CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandle)
@@ -1627,6 +1661,7 @@ std::optional<CapturedFrame> DesktopCapturer::ReadTextureFrame(
     }
     struct Unlock { ID3D10Multithread* value; ~Unlock() { if (value) value->Leave(); } } unlock{protection.Get()};
     ID3D11Texture2D* outputTexture = ScaleFrameIfNeeded(sourceTexture, sourceDesc);
+    if (cursor_) outputTexture = cursor_->Composite(device_.Get(), context_.Get(), outputTexture, sourceDesc.Width, sourceDesc.Height);
 
     D3D11_TEXTURE2D_DESC outputDesc{};
     outputTexture->GetDesc(&outputDesc);
@@ -1677,7 +1712,7 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
         try {
             captureFrame = wgc_->framePool.TryGetNextFrame();
         } catch (const winrt::hresult_error& error) {
-            throw std::runtime_error("Direct3D11CaptureFramePool::TryGetNextFrame failed: " + HResultMessage(error.code()));
+            ThrowIfFailed(error.code(), "Direct3D11CaptureFramePool::TryGetNextFrame");
         }
 
         if (captureFrame) {

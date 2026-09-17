@@ -12,6 +12,7 @@ struct WindowsCaptureResource final : CaptureResource {
 class WindowsCaptureSource final : public ICaptureSource {
 public:
     explicit WindowsCaptureSource(CaptureConfig config) : config_(config) {
+        config_.allowDisplayFallback = true;
         config_.includeNv12 = config_.ownedNv12 = true;
         config_.includeNv12Readback = config_.includeBgraReadback = false;
     }
@@ -27,10 +28,16 @@ public:
             resource->device = device_;
             return CaptureSample{std::move(resource), captured};
         } catch (const CaptureDeviceLostError&) { throw CaptureLost(); }
+        catch (...) { if (Closed()) return std::nullopt; throw; }
     }
     bool Closed() const override { return capture_.sourceState() == CaptureSourceState::Closed; }
+    bool Minimized() const override { return capture_.sourceState() == CaptureSourceState::Minimized; }
+    CaptureSourceInfo Info() const override {
+        return {capture_.config().backend == CaptureBackend::WindowsGraphicsCapture ?
+            CaptureImplementation::WindowsGraphicsCapture : CaptureImplementation::DesktopDuplication, capture_.displayFallback()};
+    }
     void Retire() noexcept override { if (device_) device_->Retire(); }
-    void Rebuild() override { capture_.RebuildWindowDevice(); device_.reset(); }
+    void Rebuild() override { capture_.RebuildDevice(); device_.reset(); }
 private:
     CaptureConfig config_;
     DesktopCapturer capture_;

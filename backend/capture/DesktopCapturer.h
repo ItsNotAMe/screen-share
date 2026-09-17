@@ -58,6 +58,7 @@ private:
 };
 
 struct WindowsGraphicsCaptureState;
+class DxgiCursor;
 
 struct CaptureConfig {
     CaptureSourceType sourceType = CaptureSourceType::Display;
@@ -67,6 +68,7 @@ struct CaptureConfig {
     int targetHeight = 0;
     int targetFps = 60;
     CaptureBackend backend = CaptureBackend::WindowsGraphicsCapture;
+    bool allowDisplayFallback = false;
     bool wgcBorderRequired = false;
     bool includeNv12 = false;
     bool includeNv12Readback = true;
@@ -118,6 +120,9 @@ public:
     // Owner thread only. Preserve the original WGC item, never reselect by HWND.
     // Caller must retire encoders using the old device before invoking this.
     void RebuildWindowDevice();
+    // Rebuild the original WGC item or pinned DXGI output, never an index/HWND lookup.
+    void RebuildDevice();
+    [[nodiscard]] bool displayFallback() const noexcept { return displayFallback_; }
 
     [[nodiscard]] std::optional<CapturedFrame> TryCaptureFrame(std::chrono::milliseconds timeout);
     [[nodiscard]] const CaptureConfig& config() const noexcept { return config_; }
@@ -129,6 +134,9 @@ private:
     void ResetGraphicsResources();
     void CreateDevice(IDXGIAdapter* adapter);
     void CreateDuplicationForDisplay(int displayIndex);
+    void SelectDisplay(int displayIndex);
+    void ValidateSelectedDisplay();
+    void CreateSelectedDuplication();
     void CreateWindowsGraphicsCaptureForDisplay(int displayIndex);
     void CreateWindowsGraphicsCaptureForWindow(uint64_t windowHandle);
     void DetectOutputColorSpace(IDXGIOutput* output);
@@ -151,6 +159,11 @@ private:
 
     CaptureConfig config_{};
     CaptureSourceState sourceState_ = CaptureSourceState::Stopped;
+    Microsoft::WRL::ComPtr<IDXGIAdapter1> selectedAdapter_;
+    Microsoft::WRL::ComPtr<IDXGIOutput> selectedOutput_;
+    DXGI_OUTPUT_DESC selectedDisplay_{};
+    bool displayFallback_ = false;
+    std::unique_ptr<DxgiCursor> cursor_;
     struct Nv12TextureSet {
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> lumaTarget;

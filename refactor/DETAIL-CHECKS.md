@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-17 (through `eaf9c02`, plus GPU receive/recovery integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
+Last reconciled: 2026-09-18 (through `ae6a3e6`, plus capture fallback/cursor/lifecycle integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoint B in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -10,6 +10,21 @@ split into completed implementation and remaining validation. All original
 physical-device, resource, network, cost, latency and cutover gates remain open
 until their own evidence passes. Dated continuation notes at the end are historical;
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
+
+## Capture fallback/cursor/lifecycle implementation — 2026-09-18
+
+- [x] Implement display-only fallback with an unavailable-backend allowlist;
+  retain the selected output and never broaden window capture to a desktop.
+- [x] Rebuild WGC displays and pinned DXGI outputs through bounded retirement;
+  retain original WGC item identity and propagate minimized/closed source states.
+- [x] Compose bounded color/monochrome/masked cursors on the GPU, with clipping,
+  scaling and XOR pixel tests; reject unsupported rotation/HDR format downgrade.
+- [x] Carry source backend/fallback observations through source switching and
+  host/UI/CLI diagnostics; test both Debug and Release generated-window lifecycle.
+- [ ] Pass supported-desktop DXGI fallback/rebuild and both full desktop matrices.
+  The current Screen-saver desktop blocks presentation; runner records blocked.
+- [ ] Complete physical privacy/source identity/HDR/driver/latency acceptance.
+  See CAPTURE-RECOVERY.md for precise evidence and remaining limitations.
 
 ## GPU receive/recovery implementation — 2026-09-17
 
@@ -24,8 +39,8 @@ the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
   with each sample's timestamp instead of the newest resolution declaration.
 - [x] Carry allowlisted hardware decoder telemetry and local GPU/readback counters
   through actual UI/CLI diagnostics.
-- [ ] Complete remaining capture fallback/privacy/source-state behavior and
-  physical adapter/driver/occlusion/latency acceptance. See GPU-RECEIVE.md.
+- [x] Implement remaining capture fallback/cursor/source-state behavior. See CAPTURE-RECOVERY.md.
+- [ ] Complete physical adapter/driver/privacy/HDR/occlusion/latency acceptance.
 
 ## Audio processing/downmix implementation — 2026-09-17
 
@@ -325,9 +340,12 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 ### Windows video and presentation
 
 - [x] Adapt WGC through WindowsRoomRuntimeFactory, including generated-window media tests.
-- [ ] Complete appropriate display-only DXGI fallback in the v2 runtime.
-- [ ] Preserve selected-source privacy, cursor behavior, HDR-to-SDR and source identity.
-- [ ] Handle source closure/minimization/resize and D3D device loss explicitly.
+- [x] Implement display-only DXGI fallback in v2, restricted to unavailable WGC errors.
+- [x] Pin source identity, forbid window-to-display fallback and compose DXGI cursors;
+  retain HDR-to-SDR conversion and reject unsupported HDR negotiation/rotation.
+- [x] Handle source closure/minimization/resize and bounded D3D device rebuilding explicitly.
+- [ ] Accept these capture paths across supported desktop modes, physical source
+  replacement/HDR/adapters and actual driver loss. See CAPTURE-RECOVERY.md.
 - [x] Implement per-viewer GPU scaling and owned GPU frames; bounded submission, fallback and hardware-encode integration are documented in GPU-SCALING.md.
 - [x] Implement encoder worker/event handling and one pending raw-frame slot; burst/ownership evidence is recorded under A and CHECKPOINT-B.md.
 - [x] Honor WebRTC rates, keyframes and timestamps without custom congestion logic.

@@ -14,12 +14,18 @@ struct CaptureSample {
     std::chrono::steady_clock::time_point capturedAt;
     uint64_t session = 0, generation = 0, sequence = 0;
 };
-enum class CaptureState { Starting, Running, Recovering, Closed, Failed, Stopped };
+enum class CaptureState { Starting, Running, Recovering, Closed, Failed, Stopped, Minimized };
 enum class CaptureFailure { None, Source, StartupTimeout, Recovery, Consumer };
+enum class CaptureImplementation { Unknown, WindowsGraphicsCapture, DesktopDuplication };
+struct CaptureSourceInfo {
+    CaptureImplementation implementation = CaptureImplementation::Unknown;
+    bool fallback = false;
+};
 struct CaptureStatus {
     CaptureState state = CaptureState::Starting;
     uint64_t session = 0, generation = 1, delivered = 0;
     CaptureFailure failure = CaptureFailure::None;
+    CaptureSourceInfo source;
 };
 struct CaptureLost : std::runtime_error { CaptureLost() : std::runtime_error("Capture device lost") {} };
 class ICaptureSource {
@@ -28,6 +34,8 @@ public:
     virtual void Start() = 0;
     virtual std::optional<CaptureSample> Poll() = 0;
     virtual bool Closed() const = 0;
+    virtual bool Minimized() const { return false; }
+    virtual CaptureSourceInfo Info() const { return {}; }
     virtual void Retire() noexcept = 0;
     virtual void Rebuild() = 0;
 };

@@ -281,6 +281,12 @@ void ProfileSettingsScenario() {
     Check(pipeline["captureState"] == "recovering" && pipeline["captureFailure"] == "source" &&
         pipeline["hardwarePipeline"].toObject()["fallbackState"] == "hardware-quarantined");
     Check(PipelineDiagnosticsJson(StreamStatus{})["hardwarePipeline"].isNull());
+    partial.capture.state = HostMediaState::Minimized;
+    partial.capture.source = {CaptureImplementation::DesktopDuplication, true};
+    Check(PipelineDiagnosticsJson(partial)["captureState"] == "minimized" &&
+        PipelineDiagnosticsJson(partial)["captureBackend"] == "dxgi" && PipelineDiagnosticsJson(partial)["captureFallback"] == true);
+    partial.capture.state = HostMediaState::SourceClosed;
+    Check(PipelineDiagnosticsJson(partial)["captureState"] == "source-closed");
     QTemporaryDir files; Check(files.isValid()); const auto path = files.filePath("profile.ini");
     RoomProfile profile(path);
     const auto guest = profile.nickname(); Check(guest.startsWith("Guest-") && guest.size() == 14);

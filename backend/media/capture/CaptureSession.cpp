@@ -21,6 +21,7 @@ struct CaptureSession::Impl {
             source = factory();
             if (!source) throw std::runtime_error("Missing capture source");
             source->Start();
+            { std::lock_guard lock(mutex); status.source = source->Info(); }
             CaptureRecovery recovery;
             bool awaitingFrame = true;
             auto deadline = std::chrono::steady_clock::now() + startupTimeout;
@@ -44,7 +45,15 @@ struct CaptureSession::Impl {
                         continue;
                     }
                     if (source->Closed()) { finalState = CaptureState::Closed; break; }
-                    if (sample) {
+                    { std::lock_guard lock(mutex); status.source = source->Info(); }
+                    if (source->Minimized()) {
+                        // A selected minimized window is an intentional pause,
+                        // including before its first frame. Resume gets a fresh
+                        // startup deadline; do not deliver queued old pixels.
+                        deadline = std::chrono::steady_clock::now() + startupTimeout;
+                        std::lock_guard lock(mutex);
+                        status.state = CaptureState::Minimized;
+                    } else if (sample) {
                         if (!sample->resource) throw std::runtime_error("Missing captured resource");
                         awaitingFrame = false;
                         bool send;
@@ -73,7 +82,7 @@ struct CaptureSession::Impl {
                 std::unique_lock lock(mutex);
                 wake.wait_for(lock, stop, std::chrono::milliseconds(1), [] { return false; });
             }
-        } catch (...) { finalState = CaptureState::Failed; }
+        } catch (...) { finalState = source && source->Closed() ? CaptureState::Closed : CaptureState::Failed; }
         // Normal stop preserves already-published owned frames until consumers
         // release them. Only failed devices invalidate outstanding resources.
         if (source && finalState == CaptureState::Failed) source->Retire();

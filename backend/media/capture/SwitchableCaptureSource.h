@@ -58,7 +58,7 @@ public:
                 }
                 auto sample = candidate_->Poll();
                 if (candidate_->Closed()) throw std::runtime_error("Replacement capture source closed");
-                if (sample) {
+                if (sample && !candidate_->Minimized()) {
                     if (!sample->resource) throw std::runtime_error("Missing replacement frame resource");
                     current_ = std::move(candidate_); // Normal retirement retains already-owned frames.
                     Finish(CaptureUpdateError::None);
@@ -70,6 +70,8 @@ public:
         return current_->Poll();
     }
     bool Closed() const override { return current_->Closed(); }
+    bool Minimized() const override { return current_->Minimized(); }
+    CaptureSourceInfo Info() const override { return current_->Info(); }
     void Retire() noexcept override { current_->Retire(); }
     void Rebuild() override { current_->Rebuild(); }
 };

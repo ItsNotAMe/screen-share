@@ -10,7 +10,7 @@ implementation continues in complete batches, not one checkbox per user turn.
 | Group | What remains | Completion evidence |
 | --- | --- | --- |
 | Normal UI/CLI adoption | Route ordinary create/join/share/watch and room operations through shared v2 interfaces. Preserve existing functionality, settings and shutdown behavior. Prepare adoption without enabling an unsafe default. | Real normal-entry-point tests, upgrade/configuration behavior, and feature parity. Opt-in RoomSessionWindow/RoomBrowserWindow alone do not complete this. |
-| Video capture completion and acceptance | Display-only fallback, source identity/privacy/cursor/HDR and capture-state/device-loss completion; historical preview occlusion and physical driver acceptance. Hardware decode, retained GPU presentation, visible-aperture receive cropping, live receive resize and bounded software recovery are implemented. | Finish source failure/privacy tests and device-specific acceptance. GPU-RECEIVE.md records receive-path coverage; its GPU surface ownership copy is not strict zero-copy. |
+| Video acceptance | Display fallback, pinned-source rebuild, GPU cursor composition and minimized/closed states are implemented. Remaining: supported-desktop DXGI acceptance, rotation support if required, physical source identity/privacy/HDR/driver validation, occlusion and latency measurements. | CAPTURE-RECOVERY.md records policy/GPU/window tests and a WGC display rebuild. Full desktop checks are currently blocked by the Screen-saver desktop; DXGI returned unsupported. GPU-RECEIVE.md records receive coverage, not strict zero-copy. |
 | Audio acceptance | Physical mono/stereo/surround format negotiation, microphone quality, device switch/unplug/recovery and measured buffering/latency. Microphone-only processing and explicit multichannel conversion are implemented. | Silent PCM/Opus/UI/CLI checks cover the software paths; physical-device evidence remains required. Native driver hangs remain unpreemptible. See AUDIO-PROCESSING.md. |
 
 These are substantial groups. No reliable percentage or turn
@@ -28,6 +28,11 @@ count follows from counting the historical checklist entries.
   the current refactor. Necessary integration/error/retry UI is allowed now.
 
 ## Already integrated; do not rebuild
+
+Display-only WGC fallback, pinned output/item recovery, bounded GPU cursor
+composition, explicit minimized/closed states and backend diagnostics are
+implemented. See [CAPTURE-RECOVERY.md](CAPTURE-RECOVERY.md). Continue with normal
+UI/CLI adoption as the next implementation group; keep physical acceptance open.
 
 The receive pipeline now keeps D3D11-decoded NV12 textures through Qt/CLI display,
 with bounded ownership, explicit cached readback, hardware telemetry and software

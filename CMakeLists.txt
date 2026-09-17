@@ -158,6 +158,7 @@ add_library(ScreenShareCore STATIC
     backend/audio/WasapiCapture.cpp
     backend/audio/WasapiRenderer.cpp
     backend/capture/DesktopCapturer.cpp
+    backend/capture/DxgiCursor.cpp
     backend/codec/H264Bitstream.cpp
     backend/codec/H264FileEncoder.cpp
     backend/codec/H264EncoderProbe.cpp

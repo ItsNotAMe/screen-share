@@ -7,6 +7,7 @@ struct CapturePipelineStatus {
     HostMediaState state = HostMediaState::Idle;
     CaptureFailure failure = CaptureFailure::None;
     uint64_t generation = 0;
+    CaptureSourceInfo source;
 };
 struct CodecPipelineStatus {
     bool available = false, quarantined = false, retired = false;

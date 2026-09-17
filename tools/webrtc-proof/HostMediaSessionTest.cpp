@@ -53,8 +53,44 @@ void CheckSourceSwitching() {
         "Stop did not cancel pending capture selection");
     Require(living == 0 && !wrongThread, "Switched source leaked or was destroyed off its owner");
 }
+void CheckSourceStates() {
+    struct StateSource final : ICaptureSource {
+        std::atomic<bool>& minimized;
+        std::atomic<bool>& closed;
+        SyntheticCaptureSource pixels{64, 36, 120};
+        StateSource(std::atomic<bool>& paused, std::atomic<bool>& gone) : minimized(paused), closed(gone) {}
+        void Start() override { pixels.Start(); }
+        std::optional<CaptureSample> Poll() override { return pixels.Poll(); }
+        bool Closed() const override { return closed; }
+        bool Minimized() const override { return minimized; }
+        CaptureSourceInfo Info() const override { return {CaptureImplementation::DesktopDuplication, true}; }
+        void Retire() noexcept override {} void Rebuild() override { pixels.Rebuild(); }
+    };
+    std::atomic<bool> minimized{true}, closed{false};
+    HostMediaSession host;
+    auto control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
+    const auto started = host.Start([&] {
+        return std::make_unique<SwitchableCaptureSource>([&] { return std::make_unique<StateSource>(minimized, closed); }, control);
+    }).get();
+    Wait([&] { return host.snapshot().state == HostMediaState::Minimized; });
+    Require(host.snapshot().captureSource.fallback && host.snapshot().captureSource.implementation == CaptureImplementation::DesktopDuplication,
+        "Source wrapper/coordinator dropped backend diagnostics");
+    minimized = false;
+    Wait([&] { return host.snapshot().state == HostMediaState::WaitingForViewers; });
+    auto switched = control->Submit({}, [] { return std::make_unique<SyntheticCaptureSource>(64, 36, 120); });
+    // Observation follows the committed source, not the original backend.
+    Wait([&] { return host.snapshot().captureSource.implementation == CaptureImplementation::Unknown; });
+    Require(switched.get().error == CaptureUpdateError::None, "Observed source switch did not commit");
+    host.Stop(started.generation).get();
+    host.Start([&] { return std::make_unique<StateSource>(minimized, closed); }).get();
+    Wait([&] { return host.snapshot().state == HostMediaState::WaitingForViewers; });
+    closed = true;
+    Wait([&] { return host.snapshot().state == HostMediaState::SourceClosed; });
+    Require(host.snapshot().captureFailure == CaptureFailure::None, "Closed source became host failure");
+}
 int main() try {
     CheckSourceSwitching();
+    CheckSourceStates();
     std::atomic<int> living{0};
     std::atomic<bool> wrongThread{false};
     auto factory = [&] { return std::make_unique<OwnedSource>(living, wrongThread); };

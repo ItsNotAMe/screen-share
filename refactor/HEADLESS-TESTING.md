@@ -1,5 +1,40 @@
 # Headless media checks
 
+## Capture fallback/cursor/lifecycle — 2026-09-18
+
+- Release/Debug application and focused capture builds pass:
+  `build/webrtc/capture-app-{release,debug}.log` and
+  `build/webrtc/capture-build-{release,debug}.log`.
+- Both silent headless room matrices pass **5/5**:
+  `build/webrtc/capture-headless-{release,debug}/result.json`.
+- Final application rebuilds and offscreen runtime/UI/diagnostics smoke tests pass
+  **4/4 in each build**: `capture-final-app-{release,debug}.log` and
+  `capture-final-smoke-{release,debug}.log`. The final rebuild adds explicit standard
+  includes and preview failure geometry; media behavior matches the matrix builds.
+- Focused CTest checks pass **4/4 in both builds**: capture-session-headless,
+  host-media-session-coordinator, capture-backend-cursor-policy and
+  capture-recovery-policy. GPU cursor tests use WARP and synthetic pixels;
+  no desktop or physical pointer is needed.
+- `CaptureBackendTest.exe --live` and `CaptureRecoveryTest.exe --live` pass in
+  both builds, using generated windows and no audio/input. The new lifecycle
+  test exercises the production switchable-source wrapper and minimized startup.
+- `CaptureBackendTest.exe --display` passes the Release WGC pinned-display
+  rebuild. DXGI is explicitly reported unavailable (`DXGI_ERROR_UNSUPPORTED`),
+  **not passed**, on the current desktop. No display pixels are read back or saved.
+- The initial seven-case Release run passed five cases, then native CLI preview
+  could not present. Debug reproduced it. A read-only Windows query confirmed
+  test desktop `Default` versus input desktop `Screen-saver`, explaining this
+  observed occlusion. This does not prove the cause of all historical reports.
+- `--desktop` now checks that the input desktop matches the test desktop before
+  running. An unavailable/locked/screensaver desktop produces `passed:false`,
+  `blocked:true`, a reason and exit code 2, with no simulated success. The runner
+  never dismisses the saver, unlocks Windows or sends physical input. Its
+  `capture-desktop-preflight/result.json` records the tested blocked condition.
+
+Rerun the full desktop matrices after an interactive desktop is available.
+Headless checks remain usable meanwhile. See [CAPTURE-RECOVERY.md](CAPTURE-RECOVERY.md)
+for source, cursor, HDR, recovery contracts and the remaining physical gates.
+
 ## GPU receive/recovery — 2026-09-17
 
 - Release/Debug application and focused proof builds pass:

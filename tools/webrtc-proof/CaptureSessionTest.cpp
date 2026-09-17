@@ -19,6 +19,7 @@ template<class Predicate> void Wait(Predicate predicate) {
 struct Evidence {
     std::atomic<int> living{0}, retired{0}, rebuilt{0};
     std::atomic<bool> loss{false}, closed{false}, wrongThread{false}, silent{false};
+    std::atomic<bool> minimized{false}, closeOnPoll{false}, closeOnRebuild{false};
 };
 class ObservedSource final : public ICaptureSource {
 public:
@@ -27,13 +28,19 @@ public:
     void Start() override { Check(); source_.Start(); }
     std::optional<CaptureSample> Poll() override {
         Check();
+        if (evidence_.closeOnPoll.exchange(false)) { evidence_.closed = true; throw std::runtime_error("Closed during acquisition"); }
         if (evidence_.loss.exchange(false)) throw CaptureLost();
         if (evidence_.silent) return std::nullopt;
         return source_.Poll();
     }
     bool Closed() const override { return evidence_.closed; }
+    bool Minimized() const override { return evidence_.minimized; }
     void Retire() noexcept override { Check(); ++evidence_.retired; }
-    void Rebuild() override { Check(); ++evidence_.rebuilt; source_.Rebuild(); }
+    void Rebuild() override {
+        Check();
+        if (evidence_.closeOnRebuild.exchange(false)) { evidence_.closed = true; throw std::runtime_error("Closed during rebuild"); }
+        ++evidence_.rebuilt; source_.Rebuild();
+    }
 private:
     void Check() noexcept { if (owner_ != std::this_thread::get_id()) evidence_.wrongThread = true; }
     Evidence& evidence_;
@@ -118,6 +125,24 @@ int main() try {
     callbackOwner = &callbackStop;
     callbackStop.EnableDelivery();
     Wait([&] { return callbackStop.status().state == CaptureState::Stopped; }); callbackStop.Stop();
+    evidence.silent = false; evidence.minimized = true;
+    CaptureSession paused(149, [&] { return std::make_unique<ObservedSource>(evidence); }, [](auto) {},
+                          std::chrono::milliseconds(50));
+    paused.EnableDelivery();
+    Wait([&] { return paused.status().state == CaptureState::Minimized; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    Require(paused.status().state == CaptureState::Minimized && paused.status().delivered == 0,
+            "Minimized startup timed out or published stale pixels");
+    evidence.minimized = false;
+    Wait([&] { return paused.status().delivered > 0; });
+    evidence.closeOnPoll = true;
+    Wait([&] { return paused.status().state == CaptureState::Closed; }); paused.Stop();
+    Require(paused.status().failure == CaptureFailure::None, "Source closure classified as failure");
+    evidence.closed = false;
+    CaptureSession closedRecovery(150, [&] { return std::make_unique<ObservedSource>(evidence); }, [](auto) {});
+    Wait([&] { return closedRecovery.status().state == CaptureState::Running; });
+    evidence.closeOnRebuild = true; evidence.loss = true;
+    Wait([&] { return closedRecovery.status().state == CaptureState::Closed; }); closedRecovery.Stop();
     Require(evidence.living == 0 && !evidence.wrongThread, "Leaked source or wrong destruction thread");
     std::sort(ages.begin(), ages.end());
     auto percentile = [&](double p) { return ages[static_cast<size_t>((ages.size() - 1) * p)]; };
