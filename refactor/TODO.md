@@ -258,8 +258,15 @@ latency. See [COMPARISON.md](COMPARISON.md).
   connections), provide a repeatable typed-handle trace and separate bounded
   post-stop observations from restart acceptance. See [CAPTURE-HANDLES.md](CAPTURE-HANDLES.md).
   Normal-policy handles return below warm-up during idle; do not repeat that
-  investigation. Continue with full-room memory/soak and impairment work while
+  investigation. Continue with full-room soak and network impairment work while
   preserving the immediate capture failure as an open acceptance issue.
+- [x] Add full-room weak-owner/endpoint/capture-resource accounting, read-only heap
+  and virtual-memory snapshots, separate post-stop observations, and slow consumption
+  through the actual UI/CLI presentation buffer. Validate per-viewer progress,
+  one pending frame, replacement and recovery without catch-up bursts. See
+  [ROOM-STRESS.md](ROOM-STRESS.md) for measured results and remaining limitations.
+  The 180-second scenario exposes later receive-rate degradation even in isolation;
+  diagnose that failure before claiming sustained recovery or two-hour acceptance.
 - [ ] Pass implementation-side stress and service/resource acceptance, including
   capture handle retention, full-room memory accounting, the complete two-hour
   four-viewer soak and impairment. Do not rebuild the completed stress harnesses.

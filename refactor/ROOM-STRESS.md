@@ -9,6 +9,8 @@ fall back to physical capture, playback or input injection.
 ```powershell
 python scripts/test-room-lifecycle.py build/sdk-app-release build/webrtc/room-restarts-NEW
 python scripts/test-room-lifecycle.py build/sdk-app-release build/webrtc/room-soak-NEW --cycles 1 --soak-seconds 7200
+python scripts/test-room-lifecycle.py build/sdk-app-release build/webrtc/room-accounting-NEW --idle-seconds 60 --memory-accounting
+python scripts/test-room-lifecycle.py build/sdk-app-release build/webrtc/room-slow-NEW --cycles 1 --soak-seconds 180 --slow-viewer --idle-seconds 30 --memory-accounting
 ```
 
 Build `RoomLifecycleStress` first. The default is 100 restarts; soak duration is
@@ -23,10 +25,19 @@ as the two-hour acceptance run. Output directories must be new.
 - All four viewers must decode video and synthetic audio. Shutdown alternates
   host-first and viewer-first. Every runtime must be destroyed; video/audio
   callbacks must stop, and retained input ports must reject new requests.
+  Each cycle also checks destruction of audio endpoints, capture sources/resources
+  and 24 weakly observed dependencies, including all four presentation buffers.
+  Weak references do not keep the tested objects alive. Synthetic capture resources
+  use an owning wrapper, without copying pixels or collecting an unbounded history.
 - Continuous runs check every five seconds that all viewers continue receiving
   valid video/audio and the host retains four healthy peers. They record capture
-  handoff age separately from external latency. Full decoder/presentation queue
-  age, slow-viewer isolation and network impairment are not established here.
+  handoff age separately from external latency. Each viewer reports its own video,
+  audio and presentation counters; aggregate progress cannot conceal a stalled peer.
+  Full decoder queue age and network impairment are not established here.
+  Progress records also include the existing public sender/delivery snapshots
+  (encode rate/time, bandwidth estimate, payload rate, loss/RTT, limiting reason,
+  source drops and delivery replacement). Missing measurements remain null; reading
+  this snapshot adds no signaling requests and changes no adaptation policy.
 - Native stdout records cycle/progress/completion messages; resource records use
   a separate stderr stream. They must not be concatenated before parsing because
   separate pipe chunks can interleave within a resource JSON record. The first
@@ -44,7 +55,118 @@ as the two-hour acceptance run. Output directories must be new.
 The original public-session proof and the stress target share
 `PublicRoomSessionFixture.h`; no second media implementation was introduced.
 
+## Ownership, heap accounting and slow presentation
+
+The stress target now consumes the actual UI/CLI `LatestRoomVideoFrame` buffer.
+During `--slow-viewer`, viewer 0 takes one frame every 250 ms from active second
+15 through 35; the other viewers keep consuming normally. The decoder callback
+continues publishing into the one-frame buffer. Every sampled queue must satisfy
+`received = consumed + replaced + pending`, with at most one pending frame.
+Old frames must be replaced during impairment. Healthy viewers and recovered
+viewers must sustain at least 70% of their own baseline rate; the impaired viewer
+must fall below 50%. A maximum 36 presented frames/second for the fixed 30 fps source
+rejects catch-up bursts, including the transition interval. This is presentation
+impairment, not packet loss, congestion, decoder stalls or external latency proof.
+
+`--idle-seconds` records separate post-stop samples (0..600 seconds). They never
+replace immediate restart measurements. `--memory-accounting` performs read-only
+Windows heap walks and virtual-memory classification at baseline, every ten cycles,
+the final cycle, and every ten idle seconds including the final sample. It runs
+after media shutdown, uses no heap compaction, and unlocks each heap before logging.
+Unsupported/incomplete scans fail accounting validation; an outer process watchdog
+still guards native calls that cannot be interrupted internally.
+
+Heap busy/free bytes distinguish live allocations from heap space marked free.
+VirtualQuery separately classifies private, mapped and image committed regions.
+These are observations, not exhaustive allocation stacks: custom allocators and
+image copy-on-write accounting can differ from process private bytes. Successful
+weak-owner checks do not prove every internal library allocation was freed. Full
+memory acceptance and the two-hour soak remain open; `soakAcceptanceComplete` stays
+false. Schema 2 evidence now requires ownership, per-viewer progress and requested
+idle/accounting records; historical schema 1 artifacts retain their earlier scope.
+Heap free/region totals are not interchangeable with currently committed private
+bytes: in these runs, heap free totals remain high even after VirtualQuery and
+process counters show decommit. Do not subtract them to invent live process usage.
+
+An initial diagnostic (`room-accounting-slow-release`) delayed the raw WebRTC sink
+instead of presentation consumption. It produced a catch-up burst and extra memory,
+but bypassed the app's existing bounded buffer. Its earlier harness pass is not
+app slow-viewer evidence. The corrected scenario above reuses the real buffer;
+no additional production queue or speculative memory cleanup was added.
+
 ## Verified runs — 2026-09-18
+
+### Ownership/accounting follow-up
+
+| Run | Result | Evidence under `build/webrtc/` |
+| --- | --- | --- |
+| Release, 100 rooms + 60 seconds idle | Ownership/accounting and handle bound pass; median handles 347 → 350 (+3) | `room-accounting-restarts-final-release/result.json` |
+| Debug, 100 rooms + 60 seconds idle | Ownership/accounting and handle bound pass; median handles 347 → 349 (+2) | `room-accounting-restarts-final-debug/result.json` |
+| Release, 180-second slow presentation alongside other media stress jobs | Failed final frame-rate recovery; retained as a failure, not acceptance | `room-accounting-presentation-release/result.json` |
+| Release, isolated 180-second slow presentation | Also failed the unchanged final recovery threshold; competing tests cannot explain the entire issue | `room-accounting-presentation-isolated-release/result.json` |
+| Debug, isolated 180-second slow presentation with sender snapshots | Passed the local isolation/recovery checks; this does not waive the Release failures or establish latency | `room-accounting-presentation-debug/result.json` |
+| Release, isolated 180-second run with sender and remote receiver snapshots | Failed final rate recovery again; receiver buffering/drop growth recorded | `room-accounting-receiver-release/result.json` |
+
+Every restart released all 24 observed dependencies and audio/capture endpoints;
+peak shared capture resources was one (budget ten). Release live heap bytes were
+1,617,687 at cycle 10 and 1,588,583 at cycle 100, while heap space marked free grew
+105,446,608 → 115,417,312. Debug live heap bytes were 1,877,731 → 1,924,082 and free
+heap space 88,823,168 → 117,335,776. This supports retained free heap space as a major
+contributor to the variable process footprint, not a demonstrated growing set of
+these application-owned objects. It is not exhaustive allocation attribution.
+
+Immediate private-byte median growth remains visible: Release +16,302,080 and
+Debug +99,954,688. Debug post-stop private bytes fell 127,209,472 → 19,066,880 over
+60 seconds, whereas Release remained about 126.5 MB. Idle cleanup timing is not
+guaranteed, and neither observation waives an immediate memory gate. No heap
+compaction, allocator policy, bitrate floor or production queue was introduced.
+
+Both configurations build and pass the original public-room input/media regression.
+The Windows proof compile check exposed missing desktop/gamepad input objects in
+its standalone link composition. Those existing production sources and `dwmapi`
+are now linked into the proof support library; recording input remains explicitly
+injected by the fixture. Both Windows proof configurations build again. No physical
+input test is inferred from that compile check.
+Fourteen Python lifecycle evidence tests cover missing counters/owners, invalid
+timing, incomplete accounting, unbounded presentation, absent impairment and
+recovery bursts. A failed concurrent-load run must not be silently replaced by an
+isolated pass; controlled load/performance acceptance remains separate.
+
+The isolated Release run retained the one-frame bound and continued audio/video,
+but its final two samples included viewer rates below 70% of baseline (viewer 1:
+20.39 and 20.38 fps). Initial recovery after the deliberate slowdown was faster;
+later degradation must be investigated before a long soak can count as acceptance.
+Sender/delivery and remote decoder snapshots have been added for that follow-up.
+Do not lower the threshold, treat aggregate progress as sufficient, or attribute
+the failure to resource contention without evidence.
+The Debug run's baseline was about 29.3–29.7 fps, the impaired viewer about 3.93
+fps, healthy viewers about 28.3 fps, and final recovery about 22.2–23.2 fps. It
+passes the 70% threshold but still shows lower sustained rates. At active second
+145 its source had delivered roughly 4,380 frames per viewer with zero source or
+delivery drops, while presentation had received roughly 3,140–3,280. Sender
+snapshots still reported 30 encoded fps, zero loss and 0 ms RTT. This narrows the
+investigation beyond capture delivery; it does not identify the root cause.
+
+The next investigation should compare each viewer's `sender.delivered`,
+`sender.encodedFps`, `receiver.framesDecoded`/`decoderDrops`/`jitterBufferMeanMs`
+and presentation `received`/`replaced` over time. Snapshot samples can be older
+than the local presentation counters; compare trends, not exact equality across
+different sampling clocks. Only presentation accounting uses an atomic snapshot
+from the same buffer. `limitingReason` uses the public `VideoLimitReason` enum;
+null remains unmeasured. These reports avoid credentials, SDP and addresses.
+
+The final receiver-instrumented Release artifact is
+`room-accounting-receiver-release/result.json`. At active second 165, remote
+reports show 619–764 dropped frames and cumulative mean jitter-buffer delay of
+1,398–1,436 ms across all four viewers. Source/delivery drops, NACK/PLI counts,
+retransmissions and reported packet loss are zero at that sample; encoded rate is
+29–30 fps and mean encode time about 0.35 ms. Presentation retains at most one
+pending frame. These are internal receiver statistics, not external image latency
+or proof of an MF decoder defect. The next group must diagnose receive buffering,
+timing and synchronization before the two-hour/low-latency acceptance run. A
+passing final rate ratio alone cannot override this buffering evidence.
+
+### Earlier harness runs
 
 | Run | Result | Evidence under `build/webrtc/` |
 | --- | --- | --- |
@@ -93,7 +215,7 @@ rejected apartment/thread-reuse hypotheses and separate post-stop observations.
 The explicit RPC cleanup experiment also fails the unchanged immediate bound;
 later OS releases cannot replace restart samples. No new production fix is claimed.
 
-Remaining: complete capture resource acceptance, explain restart memory
-variability, then run the full two-hour four-viewer soak
-and impairment tests. Physical media/input, TLS/NAT, external latency, service cost,
+Remaining: complete capture resource acceptance and full allocation/queue-age
+acceptance, then run the full two-hour four-viewer soak and network/decoder
+impairment tests. Physical media/input, TLS/NAT, external latency, service cost,
 matched legacy comparison and default cutover remain separate open gates.

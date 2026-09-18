@@ -14,8 +14,13 @@ continuous runners are also implemented; see [ROOM-STRESS.md](../refactor/ROOM-S
 The reproduced retained handles are WGC/RPC ALPC ports; typed tracing and separate
 idle observations are implemented (CAPTURE-HANDLES.md). Normal-policy handles
 return below warm-up after five minutes idle. Do not repeat that investigation or
-add speculative apartment/thread changes. Next account for variable room memory,
-then complete the two-hour soak and impairment work. Keep the immediate +8 bound; delayed OS cleanup
+add speculative apartment/thread changes. Full-room ownership/heap accounting and
+the real UI/CLI one-frame presentation impairment scenario are now implemented.
+See ROOM-STRESS.md for results and limitations. The 180-second presentation run
+fails its final recovery-rate threshold even in isolation; diagnose the sustained
+receive-rate decline using the added sender/receiver snapshots before two-hour soak
+and network impairment acceptance. Do not add another frame queue or compact memory to
+improve the measurements. Keep the immediate +8 bound; delayed OS cleanup
 does not waive it. Preserve Stage 2
 physical/parity and Stage 3 physical input gates. Recording-device integration
 does not establish physical confinement, controller behavior or gaming latency.

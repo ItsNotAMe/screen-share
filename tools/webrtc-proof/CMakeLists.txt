@@ -44,10 +44,15 @@ add_library(MfWebRTCCodecs STATIC
     "${nativeRoot}/video/Nv12Convert.cpp"
     "${nativeRoot}/capture/DesktopCapturer.cpp"
     "${nativeRoot}/capture/DxgiCursor.cpp"
+    "${nativeRoot}/input/RemoteInputInjector.cpp"
+    "${nativeRoot}/input/v2/DesktopSink.cpp"
+    "${nativeRoot}/input/v2/GamepadSink.cpp"
+    "${nativeRoot}/input/VirtualGamepadBackend.cpp"
+    "${nativeRoot}/input/XInputGamepad.cpp"
     "${nativeRoot}/codec/H264StreamDecoder.cpp")
 target_include_directories(MfWebRTCCodecs PUBLIC "${nativeRoot}")
 target_link_libraries(MfWebRTCCodecs PUBLIC ScreenShare::WebRTC ScreenShareMediaAdapters
-    d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging)
+    d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 dwmapi windowsapp CoreMessaging)
 target_link_libraries(WebRTCProof PRIVATE MfWebRTCCodecs ScreenShareNegotiation)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/RoomTransport.cmake")
 add_executable(RoomNetworkTest RoomNetworkTest.cpp)

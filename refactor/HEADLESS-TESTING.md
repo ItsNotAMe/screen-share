@@ -1,5 +1,25 @@
 # Headless media checks
 
+## Room ownership, memory and slow presentation — 2026-09-18
+
+The full-room runner now observes 24 weak dependencies, live synthetic audio
+endpoints and capture resources per cycle. Optional `--memory-accounting` performs
+read-only post-stop heap/virtual-memory scans; `--idle-seconds` records cleanup
+separately. `--slow-viewer` slows consumption through the actual UI/CLI one-frame
+buffer and checks each viewer, frame replacement, queue bounds and recovery without
+catch-up bursts. All audio is discarded; no physical input is injected.
+
+Release/Debug 100-room accounting runs pass ownership and the unchanged handle
+bound (+3/+2). Live heap allocations remain roughly 1.6/1.9 MB after warm-up;
+much larger heap free-space totals and variable later decommit explain part of the
+private-byte variation. They do not establish full memory acceptance. Both builds'
+public input/media regression and fourteen evidence tests pass. See
+[ROOM-STRESS.md](ROOM-STRESS.md) for commands, exact artifacts, failed trials and
+interpretation. The isolated Release 180-second presentation run fails sustained
+rate recovery; Debug passes the ratio check but also slows over time. The two-hour
+soak and network/decoder impairment remain open. Investigate receiver buffering/
+drops before treating short functional progress as gaming-latency evidence.
+
 ## Typed capture handles and idle cleanup — 2026-09-18
 
 `scripts/trace-capture-handles.py` now captures typed outstanding handles and

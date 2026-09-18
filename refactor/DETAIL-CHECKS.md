@@ -797,6 +797,24 @@ Historical continuation evidence is in HEADLESS-TESTING.md and CHECKPOINT-A.md; 
 - [x] Wire initial bandwidth settings, aggregate upload allocation and public/UI per-peer sender/source-observed revisions.
 - [ ] Complete capability failure recovery and remote displayed-state acceptance; sender/source application is not a remote-display acknowledgement.
 - [ ] Verify real congestion-driven adaptation and GPU scaling performance; controlled sink requests alone do not satisfy impairment/latency gates.
+# Full-room ownership and presentation stress — 2026-09-18
+
+- [x] Observe destruction of capture resources, audio endpoints and 24 session/
+  presentation dependencies on every full-room restart; preserve host/viewer-first
+  shutdown, stale input rejection and callback-drain checks.
+- [x] Add explicit read-only heap/virtual-memory snapshots and separate idle
+  samples without replacing the immediate restart bound or compacting heaps.
+- [x] Exercise slow consumption through the actual UI/CLI presentation buffer,
+  with per-viewer video/audio progress, one pending frame, replacement, healthy-peer
+  isolation and recovery checks that reject catch-up bursts.
+- [ ] Complete allocation/queue-age acceptance and the full two-hour four-viewer
+  soak; local presentation impairment does not establish network/decoder impairment
+  or external image/input latency. See ROOM-STRESS.md for exact evidence.
+- [ ] Resolve sustained receive-rate degradation exposed by the 180-second room
+  scenario. Capture/source delivery remains healthy; sender and receiver statistics
+  are now recorded to investigate the growing buffering/drop counts. Retain failed
+  runs and unchanged recovery/latency criteria.
+
 # Integration update — 2026-09-16
 
 Execution now follows grouped milestones in [TODO.md](TODO.md). Original detailed

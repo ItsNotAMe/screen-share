@@ -71,7 +71,12 @@ quality, security and stability requirements. A smaller latency number alone
 does not establish improvement. Known native handle growth must be resolved or
 fully accounted for against the required teardown/soak criteria before cutover.
 
-Next: connect both real session paths to a matched-workload harness as B's
-facade/peer integration becomes available. The current headless suite is useful
+Full-room accounting now checks application-owned dependencies and separates busy
+heap allocations, free heap space and later decommit. Slow consumption uses the
+actual UI/CLI bounded presentation buffer. These are v2-only diagnostics; see
+ROOM-STRESS.md for passes, retained failures and limitations. They establish neither
+a legacy comparison nor the two-hour/network/latency acceptance gates.
+
+Next: connect both integrated session paths to a matched-workload harness. The current headless suite is useful
 regression evidence and must remain easy to run, but is not a substitute for
 the paired runs or external measurements above.

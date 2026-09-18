@@ -15,10 +15,12 @@ struct AudioEvidence {
     std::atomic<int> lastPeak{0};
     std::atomic<bool> captureUnavailable{false}, outputUnavailable{false};
     std::atomic<unsigned> captureStarts{0}, outputStarts{0};
+    std::atomic<unsigned> liveCaptures{0}, liveOutputs{0};
 };
 class ToneCapture final : public screenshare::media::PcmCaptureEndpoint {
 public:
-    explicit ToneCapture(bool silent = false, std::shared_ptr<AudioEvidence> evidence = {}) : silent_(silent), evidence_(std::move(evidence)) {}
+    explicit ToneCapture(bool silent = false, std::shared_ptr<AudioEvidence> evidence = {}) : silent_(silent), evidence_(std::move(evidence)) { if (evidence_) ++evidence_->liveCaptures; }
+    ~ToneCapture() override { if (evidence_) --evidence_->liveCaptures; }
     void Start() override {
         if (evidence_) { ++evidence_->captureStarts; if (evidence_->captureUnavailable) throw std::runtime_error("Injected capture startup failure"); }
         next_ = std::chrono::steady_clock::now();
@@ -44,7 +46,8 @@ private:
 };
 class MeasuredPlayout final : public screenshare::media::PcmPlayoutEndpoint {
 public:
-    explicit MeasuredPlayout(std::shared_ptr<AudioEvidence> evidence) : evidence_(std::move(evidence)) {}
+    explicit MeasuredPlayout(std::shared_ptr<AudioEvidence> evidence) : evidence_(std::move(evidence)) { ++evidence_->liveOutputs; }
+    ~MeasuredPlayout() override { --evidence_->liveOutputs; }
     void Start() override {
         ++evidence_->outputStarts;
         if (evidence_->outputUnavailable) throw std::runtime_error("Injected output startup failure");

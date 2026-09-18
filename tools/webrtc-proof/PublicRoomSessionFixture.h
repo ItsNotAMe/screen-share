@@ -15,6 +15,7 @@
 #include "media/webrtc/MfVideoDecoderFactory.h"
 #include "media/webrtc/PcmAudioDeviceModule.h"
 #include "SyntheticAudio.h"
+#include "ObservedCaptureSource.h"
 #include "api/make_ref_counted.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
@@ -53,6 +54,7 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<bool> pauseAdvance{false};
     std::atomic<unsigned> offers{0};
     std::atomic<unsigned> smallFrames{0};
+    std::shared_ptr<proof::CaptureLifetime> capture = std::make_shared<proof::CaptureLifetime>();
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     void OnFrame(const webrtc::VideoFrame& frame) override {
         auto pixels = frame.video_frame_buffer()->ToI420();
@@ -71,7 +73,8 @@ class Runtime final : public RoomRuntime {
     RoomSend send_;
     std::string remote_, connection_;
 public:
-    Runtime(RoomIdentity identity, RoomSend send, std::shared_ptr<Evidence> evidence)
+    Runtime(RoomIdentity identity, RoomSend send, std::shared_ptr<Evidence> evidence,
+        std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames = {})
         : evidence_(std::move(evidence)), send_(send) {
 #ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
         WindowsRoomRuntimeOptions windows;
@@ -83,7 +86,7 @@ public:
         windows.audioEndpoints = proof::SyntheticAudio(evidence_->audio);
         windows.audioForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
         windows.playbackForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
-        windows.frames = evidence_;
+        windows.frames = frames ? std::move(frames) : evidence_;
         windows.inputSink = evidence_->input;
         native_ = WindowsRoomRuntimeFactory(std::move(windows))(identity, std::move(send));
 #else
@@ -103,7 +106,7 @@ public:
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
                 std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
         };
-        options.capture = [] { return std::make_unique<SyntheticCaptureSource>(640, 360, 30); };
+        options.capture = [lifetime = evidence_->capture] { return std::make_unique<proof::ObservedCaptureSource>(lifetime); };
         options.deliver = [evidence = evidence_](auto& source, const auto& sample) {
             if (evidence->failDelivery.exchange(false)) throw std::runtime_error("Injected viewer delivery failure");
             if (evidence->input->pressed) {
@@ -113,7 +116,7 @@ public:
             }
             source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
         };
-        options.frames = evidence_;
+        options.frames = frames ? std::move(frames) : evidence_;
         options.preferences.resolution = ResolutionMode::Fixed;
         options.preferences.width = 640; options.preferences.height = 360; options.preferences.fps = 30;
         native_ = CreateNativeRoomRuntime(std::move(identity), std::move(send), std::move(options));

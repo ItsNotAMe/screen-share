@@ -31,6 +31,9 @@ count follows from counting the historical checklist entries.
   Reproduced retained handles are now traced to WGC/RPC ALPC ports; see
   CAPTURE-HANDLES.md. Later OS cleanup is observed separately and does not waive
   the immediate restart bound.
+  Full-room ownership/heap accounting and bounded slow-presentation scenarios now
+  exist too (ROOM-STRESS.md). They do not complete the two-hour soak, network
+  impairment or physical latency gates.
 - Default enablement and obsolete-code removal remain gated **Stage 5** work.
   Stage 2 integration readiness and the final production cutover are distinct.
 - The visual/usability redesign requested by the user remains **Stage 6**, after
