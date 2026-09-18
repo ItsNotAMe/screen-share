@@ -17,6 +17,21 @@ int main() {
                 try { MediaEngine invalid(nullptr, nullptr, nullptr); }
                 catch (const std::invalid_argument&) { rejected = true; }
                 Require(rejected, "Missing engine dependencies accepted");
+                for (bool throws : {false, true}) {
+                    auto evidence = std::make_shared<proof::AudioEvidence>();
+                    MediaEngine engine(CreatePcmAudioDeviceModule(proof::SyntheticAudio(evidence),
+                        std::make_shared<PcmAudioDiagnostics>()),
+                        std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>(), {},
+                        [throws]() -> std::unique_ptr<webrtc::RtcEventLogOutput> {
+                            if (throws) throw std::runtime_error("Injected output failure");
+                            return nullptr;
+                        });
+                    Peer observer;
+                    rejected = false;
+                    try { engine.CreatePeer(observer); }
+                    catch (const std::runtime_error&) { rejected = true; }
+                    Require(rejected, "Requested log failure silently accepted");
+                }
                 for (int cycle = 0; cycle < 10; ++cycle) {
                     auto evidence = std::make_shared<proof::AudioEvidence>();
                     MediaEngine engine(CreatePcmAudioDeviceModule(proof::SyntheticAudio(evidence),

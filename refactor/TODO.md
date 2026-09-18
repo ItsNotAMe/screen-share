@@ -26,9 +26,14 @@ devices and external-latency tests are still open.
 The expanded Release desktop matrix passes 17/17, including delayed viewer,
 generated-window capture, hardware presentation and native UI/CLI control flows.
 The unattended batch results are in [UNATTENDED-RESULTS.md](UNATTENDED-RESULTS.md):
-two-hour software evidence is collected; Stage 4 still has a Release bandwidth-
-recovery failure and the documented device/resource/field gates. Do not repeat
+two-hour software evidence is collected; its Release bandwidth-recovery failure
+was investigated in the following batch. Device/resource/field gates remain. Do not repeat
 completed reporting, input diagnostics or cost-model implementation.
+The subsequent investigation found the missing connection bitrate budget behind
+the 5 Mbps probe ceiling; see [CONGESTION-RECOVERY.md](CONGESTION-RECOVERY.md).
+Corrected Release packet scenarios pass 5/5 and Debug collapse passes, with traced
+before/after evidence. Receiver latency, full queue age and
+the original hardware/resource/field gates remain separate acceptance items.
 Decoded-frame handoff ownership/timing now covers failed conversion, stop discard
 and in-flight work, with shared UI/CLI diagnostics and strict stress/network
 evidence checks. See [FRAME-HANDOFF.md](FRAME-HANDOFF.md). This measures one local

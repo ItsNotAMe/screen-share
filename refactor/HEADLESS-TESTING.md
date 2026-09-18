@@ -1,5 +1,9 @@
 # Headless media checks
 
+Silent congestion diagnosis now supports bounded per-peer RTC logs and restricted
+probe/ALR summaries. See [CONGESTION-RECOVERY.md](CONGESTION-RECOVERY.md) for the
+one-command workflow, corrected transport budget and remaining latency boundary.
+
 Live HTTPS/WSS lifecycle checks now pass on desktop and laptop with silent
 four-viewer media, recovery and shutdown. See [LIVE-SERVICE.md](LIVE-SERVICE.md)
 for the bounded one-command runner and its exact network/latency scope.

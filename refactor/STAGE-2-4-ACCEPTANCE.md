@@ -26,7 +26,7 @@ input-response checks now pass; see TWO-MACHINE.md for the exact scope.
 | --- | --- | --- |
 | 2: user experience | Normal-shell opt-in share/join, pushed directory, profiles, settings, capture/audio recovery, GPU receive, and redacted UI/CLI reports. Release/Debug headless matrices pass 12/12 each. | Physical audio formats/quality/unplug, source privacy/identity/HDR/adapters, supported-desktop DXGI and occlusion. Final legacy command/default cutover remains Stage 5. |
 | 3: gaming input | Consent, source-bound mapping, per-peer ownership, controllers, queues/watchdogs, neutralization, UI/CLI input diagnostics, recording-sink real-channel tests. | Physical mouse/keyboard confinement and foreground/UIPI behavior, XInput/PlayStation and virtual-driver/local-slot behavior; measured external input response. |
-| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, bidirectional LAN software media/recovery through live TLS, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Release bandwidth-recovery failure, original immediate capture-handle failure, full sustained-memory/queue-age acceptance, hardware 1080p60 cross-machine load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched legacy comparison, actual billed usage/account headroom and production hibernation. |
+| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, corrected Release 5/5 packet impairment and Debug bandwidth recovery, bidirectional LAN software media/recovery through live TLS, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Receiver buffering/recovery latency, original immediate capture-handle failure, full sustained-memory/queue-age acceptance, hardware 1080p60 cross-machine load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched legacy comparison, actual billed usage/account headroom and production hibernation. |
 
 ## Physical checks that cannot be replaced by this fixture
 
@@ -58,5 +58,8 @@ The production-code eight-hour steady-operation model now passes both alarm
 orderings (SERVICE-COST.md). Real packet/network and separate-process tests pass
 6/6 in both configurations in the initial batch; later stricter/final runs retain
 a Release recovery failure (NETWORK-IMPAIRMENT.md and UNATTENDED-RESULTS.md).
+The subsequent connection-budget correction is documented in CONGESTION-RECOVERY.md;
+its traced collapse/loss checks pass, while receiver buffering and external latency
+remain unresolved. Earlier failed evidence remains preserved.
 The desktop later became available: the expanded Release generated-window/UI/CLI
 matrix now passes 17/17 (TWO-MACHINE.md). No unlock or physical input was sent.

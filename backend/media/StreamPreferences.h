@@ -24,6 +24,7 @@ struct StreamLimits {
     int maxVideoBitrateBps, initialVideoBitrateBps;
     StreamDegradation degradation;
 };
+inline constexpr int kViewerAudioAllowanceBps = 128000;
 inline StreamLimits ValidateStreamPreferences(const StreamPreferences& value) {
     if ((value.preset != StreamPreset::Gaming && value.preset != StreamPreset::Quality) ||
         (value.resolution != ResolutionMode::Auto && value.resolution != ResolutionMode::Fixed && value.resolution != ResolutionMode::Native) ||
@@ -51,8 +52,7 @@ inline int AllocateViewerVideo(const StreamPreferences& preferences, size_t view
     if (viewers > 63) throw std::invalid_argument("Invalid viewer count");
     const auto individual = ValidateStreamPreferences(preferences).maxVideoBitrateBps;
     if (!preferences.aggregateUploadLimitBps || !viewers) return individual;
-    constexpr int64_t audioPerViewer = 128000;
-    const auto available = std::max<int64_t>(0, int64_t(*preferences.aggregateUploadLimitBps) * 4 / 5 - int64_t(viewers) * audioPerViewer);
+    const auto available = std::max<int64_t>(0, int64_t(*preferences.aggregateUploadLimitBps) * 4 / 5 - int64_t(viewers) * kViewerAudioAllowanceBps);
     const auto share = available / int64_t(viewers);
     return share < 1000 ? 0 : int(std::min<int64_t>(individual, share));
 }

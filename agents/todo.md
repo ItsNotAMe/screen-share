@@ -16,9 +16,12 @@ UI/CLI redacted JSON reports and input pressure/local timing diagnostics are
 implemented and verified (SESSION-REPORTS.md); do not reimplement them.
 Unattended results: refactor/UNATTENDED-RESULTS.md. The two-hour software run is now
 collected and validated after a timing-check correction; final short runtime
-checks pass both builds. Final network evidence retains a Release recovery failure.
-Continue that performance investigation and the listed physical/resource/field
+checks pass both builds. The earlier network failure is preserved as baseline evidence.
+Continue receiver-latency investigation and the listed physical/resource/field
 gates, not another reporting/cost-harness implementation or an unqualified soak rerun.
+The connection-budget fix now removes WebRTC's unintended 5 Mbps probing fallback;
+see refactor/CONGESTION-RECOVERY.md. Continue receiver buffering/full queue-age and
+external-latency acceptance rather than repeating the rejected pacing/smoothing trials.
 Decoded-frame handoff accounting/timing is implemented (refactor/FRAME-HANDOFF.md).
 Continue from its measured queue scope; do not mistake it for full pipeline latency.
 Laptop SSH now works through the dedicated local test account and a pinned host

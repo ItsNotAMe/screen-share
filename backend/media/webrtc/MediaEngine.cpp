@@ -6,20 +6,23 @@
 #include "api/create_modular_peer_connection_factory.h"
 #include "api/enable_media.h"
 #include "api/environment/environment_factory.h"
+#include "api/rtc_event_log/rtc_event_log_factory.h"
 #include <stdexcept>
 
 namespace screenshare::media {
 MediaEngine::MediaEngine(webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio,
     std::unique_ptr<webrtc::VideoEncoderFactory> encoder,
-    std::unique_ptr<webrtc::VideoDecoderFactory> decoder, PacketFactory packetFactory)
+    std::unique_ptr<webrtc::VideoDecoderFactory> decoder, PacketFactory packetFactory, EventLogFactory eventLogFactory)
     : signaling_(webrtc::Thread::Current()),
-      network_(webrtc::Thread::CreateWithSocketServer()), worker_(webrtc::Thread::Create()) {
+      network_(webrtc::Thread::CreateWithSocketServer()), worker_(webrtc::Thread::Create()),
+      eventLogFactory_(std::move(eventLogFactory)) {
     if (!signaling_ || !audio || !encoder || !decoder)
         throw std::invalid_argument("Media engine requires signaling and media dependencies");
     if (!network_->Start() || !worker_->Start())
         throw std::runtime_error("Media engine threads failed");
     webrtc::PeerConnectionFactoryDependencies dependencies;
     dependencies.env = webrtc::CreateEnvironment();
+    if (eventLogFactory_) dependencies.event_log_factory = std::make_unique<webrtc::RtcEventLogFactory>();
     dependencies.network_thread = network_.get();
     dependencies.worker_thread = worker_.get();
     dependencies.signaling_thread = signaling_;
@@ -53,7 +56,18 @@ webrtc::scoped_refptr<webrtc::PeerConnectionInterface> MediaEngine::CreatePeer(
     config.bundle_policy = webrtc::PeerConnectionInterface::kBundlePolicyMaxBundle;
     auto result = factory_->CreatePeerConnectionOrError(config, webrtc::PeerConnectionDependencies(&observer));
     if (!result.ok()) throw std::runtime_error(result.error().message());
-    return result.MoveValue();
+    auto peer = result.MoveValue();
+    if (eventLogFactory_) {
+        try {
+            auto output = eventLogFactory_();
+            if (!output || !output->IsActive() || !peer->StartRtcEventLog(std::move(output), 100))
+                throw std::runtime_error("Requested RTC event logging unavailable");
+        } catch (...) {
+            peer->Close();
+            throw;
+        }
+    }
+    return peer;
 }
 webrtc::scoped_refptr<webrtc::AudioTrackInterface> MediaEngine::CreateAudioTrack() {
     CheckThread();

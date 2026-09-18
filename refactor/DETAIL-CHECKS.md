@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (including receiver pacing, UI/CLI redacted reports, input diagnostics and decoded-frame handoff accounting/timing). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D field acceptance remains open**.
+Last reconciled: 2026-09-18 (including transport-budget recovery, bounded RTC traces, two-machine checks, UI/CLI reports and decoded-frame handoff timing). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D field acceptance remains open**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -18,6 +18,12 @@ input-response samples per direction pass (TWO-MACHINE.md). Physical latency,
 controller, NAT/interface and resource/congestion gates remain open.
 The expanded Release desktop integration matrix passes 17/17; original failed
 validator/JSON-output runs remain preserved alongside the corrected results.
+
+Congestion follow-up: opt-in bounded RTC traces identified an unset connection
+maximum despite higher RTP video allowances. The runtime now applies each
+viewer's video allocation plus its audio reservation to WebRTC's transport budget.
+The traced collapse and loss checks pass without changing acceptance thresholds.
+See CONGESTION-RECOVERY.md for rejected trials and remaining receiver-latency gates.
 
 Checked implementation rows below apply to the shared v2 backend and opt-in
 frontends, not default-shell cutover or field acceptance. Mixed requirements are
@@ -657,9 +663,14 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
   actual impairment/isolation/recovery checks and independent receiver processes.
   See NETWORK-IMPAIRMENT.md; the 640x360 software proof is not full field acceptance.
 - [ ] Run healthy 1080p60 with one viewer and four viewers.
-- [ ] Run one-viewer-path bandwidth collapse/recovery: 20 → 4 → 20 Mbps.
+- [x] Run one-viewer-path bandwidth collapse/recovery: 20 → 4 → 20 Mbps with
+  640×360@30 software media, actual offered load and healthy-viewer isolation;
+  corrected Release and Debug pass. See CONGESTION-RECOVERY.md.
+- [ ] Repeat impairment acceptance under reference 1080p60 hardware load;
+  synthetic software throughput does not close receiver/external latency gates.
 - [ ] Run 2% and 5% loss with up to 50 ms jitter.
-- [ ] Run reordering/duplication without injected loss.
+- [x] Run reordering/duplication without injected loss in the software packet
+  harness; final Release scenarios pass. Reference-load acceptance remains above.
 - [x] Run slow presentation on one viewer through the actual one-frame frontend handoff; verify replacement and healthy-viewer progress.
 - [ ] Run delayed decoder output on one viewer under sustained reference load (slow presentation does not replace this check).
 - [ ] Run host encoder exhaustion/hardware failure.

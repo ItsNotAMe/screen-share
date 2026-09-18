@@ -54,8 +54,11 @@ try {
   mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, host: '127.0.0.1', port: 0, compatibilityDate: '2026-05-21', durableObjects: {
     V2_ROOMS: { className: 'V2Room', useSQLite: true }, V2_CONTROL: { className: 'V2Control', useSQLite: true }, V2_DIRECTORY: { className: 'V2Directory', useSQLite: true } } });
   const origin = (await mf.ready).origin;
-  const experiment = impairment && process.argv[6] === '--fast-audio-experiment';
-  child = spawn(executable, [origin, ...(fault ? [fault] : []), ...(experiment ? ['--fast-audio-experiment'] : [])], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const extra = process.argv.slice(6);
+  if (extra.some(value => !impairment || fault === 'processes' || !['--fast-audio-experiment', '--event-logs'].includes(value)) || new Set(extra).size !== extra.length)
+    throw new Error('Unknown or duplicate impairment option');
+  const nativeExtra = extra.flatMap(value => value === '--event-logs' ? [value, join(artifact, 'rtc-events')] : [value]);
+  child = spawn(executable, [origin, ...(fault ? [fault] : []), ...nativeExtra], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', chunk => { stdout += chunk.toString(); });
   for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => {
     log += chunk.toString();

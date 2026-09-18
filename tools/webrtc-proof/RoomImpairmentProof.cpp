@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <set>
 #include "RoomProcessProof.h"
+#include "BoundedRtcEventLog.h"
 
 // Enough changing detail to exercise bandwidth adaptation, unlike the low-rate
 // gradient used by lifecycle tests. This never captures the user's desktop.
@@ -42,8 +43,15 @@ int main(int argc, char** argv) {
         if (argc == 4 && std::string(argv[1]) == "--process-viewer") { ProcessViewer(argv[2], argv[3]); webrtc::CleanupSSL(); return 0; }
         if (argc == 3 && std::string(argv[2]) == "processes") { SeparateProcessProof(argv[1]); webrtc::CleanupSSL(); return 0; }
         proof::CheckImpairedPacketSocket();
-        Check(argc == 3 || (argc == 4 && std::string(argv[3]) == "--fast-audio-experiment"));
-        const bool fastAudioExperiment = argc == 4;
+        Check(argc >= 3);
+        bool fastAudioExperiment = false;
+        std::filesystem::path eventLogDirectory;
+        for (int i = 3; i < argc; ++i) {
+            const std::string flag = argv[i];
+            if (flag == "--fast-audio-experiment" && !fastAudioExperiment) fastAudioExperiment = true;
+            else if (flag == "--event-logs" && eventLogDirectory.empty() && i + 1 < argc) eventLogDirectory = argv[++i];
+            else throw std::invalid_argument("Unknown or duplicate impairment option");
+        }
         const std::string scenario = argv[2];
         Check(scenario == "collapse" || scenario == "loss2" || scenario == "loss5" || scenario == "reorder" || scenario == "duplicate");
         auto link = std::make_shared<proof::LinkControl>(12345);
@@ -52,6 +60,15 @@ int main(int argc, char** argv) {
         initialNetwork.link_capacity = webrtc::DataRate::KilobitsPerSec(healthyCapacityKbps);
         link->Set(initialNetwork);
         auto hostEvidence = std::make_shared<Evidence>();
+        auto eventLogs = std::make_shared<proof::EventLogEvidence>();
+        if (!eventLogDirectory.empty()) {
+            Check(std::filesystem::create_directory(eventLogDirectory));
+            hostEvidence->eventLogFactory = [eventLogDirectory, eventLogs] {
+                const auto index = eventLogs->opened.load();
+                Check(index < 4);
+                return std::make_unique<proof::BoundedRtcEventLog>(eventLogDirectory / ("host-" + std::to_string(index) + ".rtc"), eventLogs);
+            };
+        }
         hostEvidence->localizedInputResponse = true;
         hostEvidence->captureFactory = [] { return std::make_unique<NoiseCapture>(); };
         StreamPreferences preferences;
@@ -188,6 +205,7 @@ int main(int argc, char** argv) {
         }
         for (auto& viewer : viewers) { auto stop = viewer->Stop(); Get(stop); viewer.reset(); }
         auto stop = host.Stop(); Get(stop);
+        if (!eventLogDirectory.empty()) Check(eventLogs->opened == 4 && eventLogs->closed == 4 && !eventLogs->failed);
         for (auto& frames : presentation) frames->Stop();
         Check(!link->queued && !link->bytes && !link->liveSockets && !link->invalid && link->received > 0);
         for (const auto& e : evidence) Check(e->destroyed == 1 && e->invalid == 0);

@@ -1,5 +1,9 @@
 # Real-packet impairment and separate-process proof
 
+Latest correction: [CONGESTION-RECOVERY.md](CONGESTION-RECOVERY.md) identifies the
+missing connection bitrate budget and records corrected runs. Earlier failures
+below remain historical evidence; receiver latency is still an open gate.
+
 `RoomImpairmentProof` uses the actual public RoomSession, authenticated local Worker,
 H.264/Opus and encrypted WebRTC transport. A test-only packet-socket factory applies
 the pinned upstream `SimulatedNetwork` to one receiver's UDP ingress. The remaining

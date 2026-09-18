@@ -4,6 +4,7 @@
 #include "api/video_codecs/video_encoder_factory.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "rtc_base/thread.h"
+#include "api/rtc_event_log_output.h"
 #include <array>
 #include <memory>
 #include <functional>
@@ -17,10 +18,12 @@ public:
     // Optional native transport injection. Construct the packet factory on the
     // owned network thread; its sockets must obey WebRTC's thread/lifetime rules.
     using PacketFactory = std::function<std::unique_ptr<webrtc::PacketSocketFactory>(webrtc::SocketFactory*)>;
+    // Opt-in diagnostic sink per peer. No event log is created by default.
+    using EventLogFactory = std::function<std::unique_ptr<webrtc::RtcEventLogOutput>()>;
     MediaEngine(webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio,
                 std::unique_ptr<webrtc::VideoEncoderFactory> encoder,
                 std::unique_ptr<webrtc::VideoDecoderFactory> decoder,
-                PacketFactory packetFactory = {});
+                PacketFactory packetFactory = {}, EventLogFactory eventLogFactory = {});
     ~MediaEngine();
     MediaEngine(const MediaEngine&) = delete;
     MediaEngine& operator=(const MediaEngine&) = delete;
@@ -39,5 +42,6 @@ private:
     webrtc::Thread* signaling_;
     std::unique_ptr<webrtc::Thread> network_, worker_;
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory_;
+    EventLogFactory eventLogFactory_;
 };
 }

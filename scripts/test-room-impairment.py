@@ -161,7 +161,10 @@ def main():
     parser.add_argument('output', type=Path)
     parser.add_argument('--scenario', choices=SCENARIOS, action='append', help='May be repeated; default runs every case')
     parser.add_argument('--fast-audio-experiment', action='store_true', help='Proof-only NetEq acceleration experiment; not production policy')
+    parser.add_argument('--event-logs', action='store_true', help='Bounded synthetic host RTC traces and probe/ALR summaries')
     args = parser.parse_args()
+    if args.event_logs and (not args.scenario or 'processes' in args.scenario):
+        parser.error('Event logs require explicit packet scenarios (not processes)')
     if args.fast_audio_experiment and (not args.scenario or 'processes' in args.scenario):
         parser.error('Audio experiment requires explicit packet scenarios (not processes)')
     args.output.mkdir(parents=True, exist_ok=False)
@@ -172,6 +175,8 @@ def main():
         raise RuntimeError('Node is required')
     report = {'schema': 1, 'passed': False, 'scenarios': {}, 'externalLatencyVerified': False,
               'fastAudioExperiment': args.fast_audio_experiment,
+              'eventLogs': args.event_logs,
+              'probeValidatorSha256': runner.sha256(ROOT / 'scripts/rtc_probe_evidence.py') if args.event_logs else None,
               'runnerSha256': runner.sha256(Path(__file__)),
               'handoffValidatorSha256': runner.sha256(ROOT / 'scripts/frame_handoff_evidence.py'),
               'fixtureSha256': runner.sha256(ROOT / 'signaling-worker/tests/run-native-service.mjs'),
@@ -186,10 +191,17 @@ def main():
             output = args.output / scenario
             output.mkdir()
             process = runner.run_process([node, ROOT / 'signaling-worker/tests/run-native-service.mjs', executable,
-                output, 'network-impairment', scenario, *(['--fast-audio-experiment'] if args.fast_audio_experiment else [])],
+                output, 'network-impairment', scenario, *(['--fast-audio-experiment'] if args.fast_audio_experiment else []),
+                *(['--event-logs'] if args.event_logs else [])],
                 output / 'runner.log', os.environ.copy(), timeout=110)
             report['scenarios'][scenario] = {'process': process}
             try:
+                if args.event_logs:
+                    import rtc_probe_evidence
+                    traces = sorted(output.glob('native-service-*/rtc-events/host-*.rtc'))
+                    if len(traces) != 4:
+                        raise ValueError('Missing or ambiguous RTC traces')
+                    report['scenarios'][scenario]['probeTraces'] = [rtc_probe_evidence.read(path) for path in traces]
                 if not process['passed']:
                     raise ValueError('Native process failed; inspect retained logs')
                 files = list(output.glob('native-service-*/result.json'))

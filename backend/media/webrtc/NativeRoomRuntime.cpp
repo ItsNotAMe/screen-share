@@ -6,6 +6,7 @@
 #include "InputChannels.h"
 #include "media/capture/SwitchableCaptureSource.h"
 #include "api/make_ref_counted.h"
+#include "api/transport/bitrate_settings.h"
 #include <map>
 #include <set>
 
@@ -288,8 +289,22 @@ public:
                 entry.attemptedRevision = settingsRevision_;
                 entry.settingsError = entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, settingsRevision_,
                     AllocateViewerVideo(options_.preferences, allocatedViewers_));
+                if (entry.settingsError == SettingsApplyError::None) {
+                    // RTP limits alone leave GoogCC's probing maximum at its
+                    // 5 Mbps fallback. Match the connection budget to this
+                    // viewer's video allowance plus the reserved audio budget.
+                    // Never reset its start estimate or impose a bitrate floor.
+                    webrtc::BitrateSettings transport;
+                    transport.max_bitrate_bps = entry.settings.appliedVideoBitrateBps() + kViewerAudioAllowanceBps;
+                    if (!entry.peer->connection->SetBitrate(transport).ok()) {
+                        // RTP/source settings have committed: do not continue
+                        // with a partially applied transport contract.
+                        entry.settingsError = SettingsApplyError::SenderRejected;
+                        failed_.insert(it->first);
+                    }
+                }
                 entry.settingsRejected = entry.settingsError != SettingsApplyError::None;
-                // A live update rejection preserves the previously working sender.
+                // An RTP update rejection preserves the previously working sender.
                 // An initial rejection cannot satisfy the initial stream contract.
                 if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
             }
