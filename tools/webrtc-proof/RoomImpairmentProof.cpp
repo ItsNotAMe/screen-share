@@ -130,6 +130,7 @@ int main(int argc, char** argv) {
         std::optional<int64_t> inputResponseInternalMs;
         QJsonArray samples;
         QJsonObject phaseResponses;
+        QJsonObject phaseResponseStages;
         std::array<unsigned, 4> previous{};
         auto previousBytes = link->deliveredBytes.load();
         for (auto phase : {"baseline", "impaired", "recovery"}) {
@@ -140,6 +141,7 @@ int main(int argc, char** argv) {
                 Wait([&] { consume(); return granted(); });
             }
             QJsonArray responses;
+            QJsonArray responseStages;
             auto config = webrtc::BuiltInNetworkBehaviorConfig{};
             config.queue_length_packets = 256; config.link_capacity = webrtc::DataRate::KilobitsPerSec(healthyCapacityKbps);
             const bool impaired = std::string(phase) == "impaired";
@@ -150,6 +152,7 @@ int main(int argc, char** argv) {
                 config.allow_reordering = scenario == "reorder";
             }
             link->Set(config, impaired && scenario == "duplicate" ? 50 : 0);
+            link->maximumResidenceUs = 0;
             for (auto& p : previous) p = 0;
             for (size_t i = 0; i < 4; ++i) previous[i] = evidence[i]->frames;
             auto previousSampleAt = std::chrono::steady_clock::now();
@@ -191,6 +194,7 @@ int main(int argc, char** argv) {
                     {"delayStddevMs", config.delay_standard_deviation_ms}, {"configuredLossPercent", config.loss_percent},
                     {"allowReordering", config.allow_reordering}, {"duplicateEvery", impaired && scenario == "duplicate" ? 50 : 0},
                     {"lost", qint64(link->lost.load())}, {"overflow", qint64(link->overflow.load())}, {"queued", qint64(link->queued.load())},
+                    {"phaseMaximumLinkResidenceUs", qint64(link->maximumResidenceUs.load())},
                     {"duplicated", qint64(link->duplicated.load())}, {"reordered", qint64(link->reordered.load())}, {"peers", peers}};
                 previousBytes = bytes; samples.append(sample);
                 std::cerr << QJsonDocument(sample).toJson(QJsonDocument::Compact).toStdString() << std::endl;
@@ -201,10 +205,15 @@ int main(int argc, char** argv) {
                     screenshare::input::Event key; key.kind = screenshare::input::Kind::Key; key.key = 65; key.down = true;
                     Check(viewers[0]->Input()->Submit(hostId, key));
                     Wait([&] { consume(); return hostEvidence->input->applied > 0 && hostEvidence->input->pressed; });
+                    const auto appliedAt = std::chrono::steady_clock::now();
                     inputApplied = true;
                     Wait([&] { consume(); return responseVisible[0]; });
                     const auto responseMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - inputStarted).count();
                     responses.append(qint64(responseMs));
+                    const auto inputMs = std::chrono::duration_cast<std::chrono::milliseconds>(appliedAt - inputStarted).count();
+                    responseStages.append(QJsonObject{{"inputDeliveryMs", qint64(inputMs)},
+                        {"returnImageMs", qint64(responseMs - inputMs)}, {"totalMs", qint64(responseMs)},
+                        {"phaseMaximumLinkResidenceUs", qint64(link->maximumResidenceUs.load())}});
                     if (impaired && second == 6) inputResponseInternalMs = responseMs;
                     if (second == 10) {
                         host.Input()->Revoke();
@@ -219,6 +228,7 @@ int main(int argc, char** argv) {
                 }
             }
             phaseResponses.insert(phase, responses);
+            phaseResponseStages.insert(phase, responseStages);
         }
         for (auto& viewer : viewers) { auto stop = viewer->Stop(); Get(stop); viewer.reset(); }
         auto stop = host.Stop(); Get(stop);
@@ -228,6 +238,7 @@ int main(int argc, char** argv) {
         for (const auto& e : evidence) Check(e->destroyed == 1 && e->invalid == 0);
         std::cout << QJsonDocument(QJsonObject{{"schema", 3}, {"scenario", QString::fromStdString(scenario)}, {"seed", 12345},
             {"inputResponseByPhaseMs", phaseResponses},
+            {"inputResponseStagesByPhase", phaseResponseStages},
             {"samples", samples}, {"warmupIngressBps", warmupIngress}, {"fastAudioExperiment", fastAudioExperiment},
             {"peakQueued", qint64(link->peakQueued.load())}, {"peakBytes", qint64(link->peakBytes.load())},
             {"maximumSchedulingDelayUs", qint64(link->maximumSchedulingDelayUs.load())},

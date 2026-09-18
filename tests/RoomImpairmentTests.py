@@ -37,6 +37,28 @@ def evidence(scenario='collapse'):
 
 
 class ImpairmentEvidenceTests(unittest.TestCase):
+    def test_response_stage_integrity(self):
+        import copy
+        report = evidence()
+        metrics = report['metrics']; metrics['schema'] = 3
+        metrics['inputResponseByPhaseMs'] = {p: [100] * 5 for p in ('baseline', 'impaired', 'recovery')}
+        with self.assertRaises(ValueError):
+            module.validate(report, 'collapse', 'hash', require_response_stages=True)
+        metrics['inputResponseStagesByPhase'] = {p: [dict(inputDeliveryMs=10, returnImageMs=90,
+            totalMs=100, phaseMaximumLinkResidenceUs=50000) for _ in range(5)] for p in metrics['inputResponseByPhaseMs']}
+        self.assertIsNotNone(module.validate(report, 'collapse', 'hash', require_response_stages=True)['inputResponseStagesByPhase'])
+        for key, bad in (('inputDeliveryMs', True), ('returnImageMs', -1), ('totalMs', 99),
+                         ('phaseMaximumLinkResidenceUs', None)):
+            changed = copy.deepcopy(report)
+            changed['metrics']['inputResponseStagesByPhase']['impaired'][0][key] = bad
+            with self.assertRaises(ValueError): module.validate(changed, 'collapse', 'hash')
+        changed = copy.deepcopy(report)
+        changed['metrics']['inputResponseStagesByPhase']['recovery'].pop()
+        with self.assertRaises(ValueError): module.validate(changed, 'collapse', 'hash')
+        changed = copy.deepcopy(report)
+        changed['metrics']['inputResponseStagesByPhase']['baseline'][0].update(totalMs=99, returnImageMs=89)
+        with self.assertRaises(ValueError): module.validate(changed, 'collapse', 'hash')
+
     def test_repeated_phase_responses(self):
         report = evidence()
         with self.assertRaises(ValueError): module.validate(report, 'collapse', 'hash', require_phase_response=True)

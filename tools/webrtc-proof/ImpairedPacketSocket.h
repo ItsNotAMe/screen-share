@@ -19,6 +19,7 @@ struct LinkControl {
     std::atomic<uint64_t> received{0}, delivered{0}, deliveredBytes{0}, lost{0}, overflow{0}, duplicated{0}, reordered{0};
     std::atomic<uint64_t> queued{0}, bytes{0}, peakQueued{0}, peakBytes{0}, liveSockets{0}, socketSerial{0};
     std::atomic<uint64_t> maximumSchedulingDelayUs{0};
+    std::atomic<uint64_t> maximumResidenceUs{0};
     std::atomic<bool> invalid{false};
     explicit LinkControl(uint64_t value) : seed(value) { settings.network.link_capacity = webrtc::DataRate::KilobitsPerSec(20000); settings.network.queue_length_packets = 256; }
     Settings Read() const { std::lock_guard lock(mutex); return settings; }
@@ -31,7 +32,7 @@ struct LinkControl {
 };
 
 class ImpairedPacketSocket final : public webrtc::AsyncPacketSocket {
-    struct Packet { std::vector<uint8_t> data; webrtc::SocketAddress source; webrtc::ReceivedIpPacket::DecryptionInfo decryption; uint64_t sequence; };
+    struct Packet { std::vector<uint8_t> data; webrtc::SocketAddress source; webrtc::ReceivedIpPacket::DecryptionInfo decryption; uint64_t sequence; int64_t enqueuedUs; };
     std::unique_ptr<webrtc::AsyncPacketSocket> socket_;
     std::shared_ptr<LinkControl> control_;
     webrtc::SimulatedNetwork network_;
@@ -52,7 +53,7 @@ class ImpairedPacketSocket final : public webrtc::AsyncPacketSocket {
         if (packets_.size() >= 256 || packet.payload().size() > 65536 || bytes_ + packet.payload().size() > maxBytes) { ++control_->overflow; return; }
         const auto id = ++next_;
         if (!network_.EnqueuePacket(webrtc::PacketInFlightInfo(packet.payload().size(), webrtc::TimeMicros(), id, packet.ecn()))) { ++control_->overflow; return; }
-        Packet stored{{packet.payload().begin(), packet.payload().end()}, packet.source_address(), packet.decryption_info(), sequence};
+        Packet stored{{packet.payload().begin(), packet.payload().end()}, packet.source_address(), packet.decryption_info(), sequence, webrtc::TimeMicros()};
         bytes_ += stored.data.size(); control_->bytes += stored.data.size(); ++control_->queued;
         packets_.emplace(id, std::move(stored));
         LinkControl::Peak(control_->peakQueued, control_->queued); LinkControl::Peak(control_->peakBytes, control_->bytes);
@@ -70,6 +71,8 @@ class ImpairedPacketSocket final : public webrtc::AsyncPacketSocket {
             if (packet.sequence < lastDelivered_) ++control_->reordered;
             lastDelivered_ = std::max(lastDelivered_, packet.sequence);
             ++control_->delivered; control_->deliveredBytes += packet.data.size();
+            LinkControl::Peak(control_->maximumResidenceUs,
+                uint64_t(std::max<int64_t>(0, delivery.receive_time_us - packet.enqueuedUs)));
             // Match upstream LinkEmulation::Process: the model owns arrival
             // timestamps. Polling wake-up jitter must not become an additional,
             // unconfigured congestion signal. Record that lateness separately.

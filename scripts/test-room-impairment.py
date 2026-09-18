@@ -22,7 +22,7 @@ def numeric(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def validate(report, scenario, executable_hash, fast_audio=False, require_handoff=False, require_phase_response=False):
+def validate(report, scenario, executable_hash, fast_audio=False, require_handoff=False, require_phase_response=False, require_response_stages=False):
     if report.get('passed') is not True or report.get('timedOut') is not False or report.get('exitCode') != 0 or \
        report.get('logLimitExceeded', False) or report.get('executableSha256') != executable_hash:
         raise ValueError('Native process failed, timed out, or executable identity differs')
@@ -53,6 +53,21 @@ def validate(report, scenario, executable_hash, fast_audio=False, require_handof
         raise ValueError('Audio experiment configuration differs from request')
     response_measured = metrics['schema'] >= 2
     phase_response = metrics.get('inputResponseByPhaseMs')
+    response_stages = metrics.get('inputResponseStagesByPhase')
+    if require_response_stages or response_stages is not None:
+        if not isinstance(response_stages, dict) or set(response_stages) != {'baseline', 'impaired', 'recovery'}:
+            raise ValueError('Missing response stage phases')
+        for phase, stages in response_stages.items():
+            if not isinstance(stages, list) or len(stages) != 5:
+                raise ValueError('Missing response stage samples')
+            for stage in stages:
+                if not isinstance(stage, dict) or any(type(stage.get(k)) is not int or stage[k] < 0 for k in
+                        ('inputDeliveryMs', 'returnImageMs', 'totalMs', 'phaseMaximumLinkResidenceUs')):
+                    raise ValueError('Invalid response stage measurements')
+                if stage['inputDeliveryMs'] + stage['returnImageMs'] != stage['totalMs']:
+                    raise ValueError('Response stage sum differs from total')
+            if not isinstance(phase_response, dict) or [s['totalMs'] for s in stages] != phase_response.get(phase):
+                raise ValueError('Response stage totals differ from phase samples')
     if require_phase_response and metrics['schema'] < 3:
         raise ValueError('Missing repeated phase response evidence')
     if metrics['schema'] >= 3:
@@ -151,6 +166,7 @@ def validate(report, scenario, executable_hash, fast_audio=False, require_handof
     recent_tails = {phase: [[s['peers'][i]['jitterBufferRecentMs'] for s in samples[-5:]
         if s['peers'][i]['jitterBufferRecentMs'] is not None] for i in range(4)] for phase, samples in phases.items()}
     return {'healthyViewerIsolation': True, 'recovered': True,
+            'inputResponseStagesByPhase': response_stages,
             'inputResponseByPhaseMs': phase_response if metrics['schema'] >= 3 else None,
             'decodedFrameHandoff': handoff.summarize(handoffs),
             'internalInputResponseMeasured': response_measured,
@@ -219,7 +235,7 @@ def main():
                 files = list(output.glob('native-service-*/result.json'))
                 if len(files) != 1:
                     raise ValueError('Missing or ambiguous native result')
-                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment, require_handoff=True, require_phase_response=True)
+                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment, require_handoff=True, require_phase_response=True, require_response_stages=True)
             except Exception as error:
                 report['scenarios'][scenario]['error'] = str(error)
                 failures.append(scenario)

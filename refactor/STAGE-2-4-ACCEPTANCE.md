@@ -27,6 +27,10 @@ every configuration and hardware CPU, but four-viewer software CPU/private
 memory and hardware private memory still exceed legacy. Total resource,
 congestion and physical acceptance remain open; do not advance the default
 cutover on the basis of image-age results alone.
+User update: relative memory optimization is deferred to BACKLOG.md. The latest
+combined host/four-receiver fixture uses about 522 MiB hardware / 924 MiB software
+private memory. Lower memory than legacy is no longer a gate. Leak/unbounded
+growth, normal desktop/laptop usability and congestion responsiveness still are.
 The decoded-frame handoff now has exact ownership and local wait/age measurements
 ([FRAME-HANDOFF.md](FRAME-HANDOFF.md)); this is one measured queue, not full pipeline
 queue-age or physical latency acceptance.

@@ -34,6 +34,15 @@ legacy. Four-viewer software CPU/memory and hardware memory still exceed legacy;
 keep these resource gates open. Earlier software FPS and latency deficits above
 are historical, not the latest comparative result. Full-color/matched-bitrate,
 GPU presentation, game load, congestion and physical latency gates remain.
+User update: memory optimization relative to legacy is backlogged (BACKLOG.md);
+only practical resource usability, leaks/unbounded growth and lifecycle safety
+remain acceptance requirements. Do not treat the relative memory score as a
+reason by itself to delay frontend work.
+Initial-congestion attribution now has measured input/return-image stages and
+modeled link residence (CONGESTION-STAGES.md). Two production experiments were
+reverted after leaving a >1 second transient. The production policy is unchanged;
+the new required evidence prevents a fast input leg or successful recovery from
+being mistaken for low-latency return-video acceptance.
 
 Laptop continuation: real two-PC video/resize was confirmed by the user, exposing
 a logical/native pixel sizing mismatch behind misleading busy/presentation counts.

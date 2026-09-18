@@ -9,7 +9,7 @@ checks are implementation details, **not separate user turns**.
 Backend feature scope is frozen for closeout. Finish these groups in order:
 
 1. Paired legacy/v2 measurements and an explicit per-metric scorecard (COMPARISON.md).
-2. Resolve measured regressions, initial congestion backlog and resource acceptance.
+2. Resolve initial congestion backlog and stability; memory optimization is backlogged.
 3. One consolidated two-PC/device/network acceptance pass, preserving physical latency gates.
 4. Stage 5 default cutover and obsolete-code removal, then Stage 6 frontend redesign.
 
@@ -25,7 +25,7 @@ codec/timer/pacing choices. Portable precise waits and the single-submission
 hardware deadline are now shared with legacy; its old raw encoder queue is
 removed. Use the updated controls in COMPARISON.md / HARDWARE-ENCODING.md.
 The latency and software-throughput follow-ups below resolve the main reference
-delivery regressions. Prioritize four-viewer resources, then normal GPU/two-PC
+delivery regressions. Prioritize congestion responsiveness, then normal GPU/two-PC
 and physical acceptance. Do not rebuild the comparison harness or claim an
 architectural win from fixes that also improve legacy.
 
@@ -34,7 +34,7 @@ v2's modular owned-frame interface. Capture-only measurements did not reproduce
 the whole-pipeline gap. Codec-stage traces instead found a retained decoder
 frame; the complete-picture input and verified low-latency fix are shared with
 legacy. See CAPTURE-LATENCY.md and the newest COMPARISON.md scorecard. Continue
-four-viewer resources and the existing acceptance gates without
+congestion responsiveness and the existing acceptance gates without
 reopening the capture rewrite merely from whole-pipeline latency numbers.
 
 Software-throughput group completed: shared software CABAC, stable cadence and
@@ -45,6 +45,22 @@ See SOFTWARE-THROUGHPUT.md and COMPARISON.md. Next measured resource issue:
 four software viewers still use 43% more CPU and 85% more private memory than
 legacy; four hardware viewers use 31% more private memory. Keep resource,
 congestion and physical acceptance open before cutover/frontend redesign.
+
+User priority update: lower memory than legacy is not a release requirement.
+Backlog further footprint optimization: the reference host plus four local
+receivers measured approximately 522 MiB private memory with hardware and
+924 MiB with software. Those are combined fixture-process measurements, not a
+per-viewer requirement or total GPU/system usage. Continue basic normal-PC
+usability and leak/unbounded-growth checks; do not hold up frontend work solely
+to remove the relative memory difference. See BACKLOG.md.
+
+Congestion attribution now separates input application, return-image response
+and modeled link residence (CONGESTION-STAGES.md). Input applies within about
+15 ms in the traced initial stall; the return image takes roughly 1.5 seconds,
+with up to 565 ms modeled link residence. Prerender bypass/zero-minimum playout
+and rate-cut keyframe trials did not remove the spike and were reverted. Keep
+the production policy and this acceptance item open; target return-path loss
+recovery next, not input dispatch or another capture rewrite.
 
 Current priority: finish Stage 2–4, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).

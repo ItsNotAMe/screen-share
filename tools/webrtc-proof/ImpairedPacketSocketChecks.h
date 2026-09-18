@@ -47,6 +47,14 @@ inline void CheckImpairedPacketSocket() {
         Wait([&] { return received == 40; });
         Check(link->duplicated == 20 && !link->queued && !link->bytes);
         thread->BlockingCall([&] {
+            auto config = link->Read().network; config.queue_delay_ms = 100;
+            link->Set(config); send(1);
+        });
+        Wait([&] { return received == 41; });
+        // Modeled link residence excludes pump wake-up lateness. The synthetic
+        // link itself must account for its configured delay.
+        Check(link->maximumResidenceUs >= 100000 && !link->queued && !link->bytes);
+        thread->BlockingCall([&] {
             auto config = link->Read().network; config.queue_delay_ms = 1000; link->Set(config); send(300);
             Check(link->queued == 256 && link->bytes == 256 * 1200 && link->overflow == 44);
             wrapped->Close(); Check(!link->queued && !link->bytes);

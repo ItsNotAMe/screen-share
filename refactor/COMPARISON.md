@@ -9,6 +9,12 @@ architectural win or permission to waive the remaining acceptance gates.
 User requested comparative validation as part of B on 2026-09-15. Passing a
 component test or Gate A is not a comparative performance result.
 
+User priority update (2026-09-18): memory optimization relative to legacy is
+deferred to [BACKLOG.md](BACKLOG.md). The measured 522/924 MiB hardware/software
+private footprint covers the host plus four local receivers. Practical usability
+and absence of unbounded growth remain required; beating legacy's memory number
+does not. Congestion responsiveness is the next active performance group.
+
 ## Latest scorecard — software efficiency and bounded readback allocation
 
 All **16 new uninstrumented runs** pass workload and actual-codec validation.

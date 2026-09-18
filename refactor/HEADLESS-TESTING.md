@@ -1,5 +1,12 @@
 # Headless media checks
 
+Congestion diagnostics now split each synthetic response into observed input
+application and return-image consumption, with exact total consistency checks.
+They also record the affected link's modeled packet residence separately from
+pump scheduling lateness. See [CONGESTION-STAGES.md](CONGESTION-STAGES.md) for
+commands, rejected trials and interpretation limits. Fresh runner output requires
+all stage records; the congestion load and existing recovery gates are unchanged.
+
 The impairment runner now records five synthetic input/image responses in each
 of baseline, impairment and recovery, with explicit release and revoke checks.
 See [PLAYOUT-RECOVERY.md](PLAYOUT-RECOVERY.md) for the Gaming/Quality policy and
