@@ -37,6 +37,7 @@ def main():
         'backend/media/webrtc/D3dVideoFrameBuffer.cpp', 'backend/media/webrtc/D3dVideoFrameBuffer.h',
         'backend/capture/DesktopCapturer.cpp', 'backend/runtime/ScreenShareRuntimeExecution.cpp',
         'backend/runtime/ScreenShareSessionOptions.cpp', 'backend/media/webrtc/MediaEngine.cpp',
+        'backend/media/webrtc/MediaNetworkPolicy.h',
         'backend/media/webrtc/MfVideoEncoderFactory.cpp', 'backend/media/webrtc/WindowsRoomRuntime.cpp',
         'backend/media/webrtc/WindowsRoomRuntime.h', 'backend/media/audio/PcmBlockPacer.h'):
         source = ROOT / relative

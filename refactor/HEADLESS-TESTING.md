@@ -1,5 +1,15 @@
 # Headless media checks
 
+Continuous displayed-image age is now part of fresh packet-impairment reports.
+The generated scene carries a frame ID and checksum through the real codec;
+the consumer also measures the age of an image held during a freeze. Run the
+closeout collapse checks with `--require-settling` to require freshness within
+three seconds, including zero unreadable markers. See
+[CONGESTION-WINDOW.md](CONGESTION-WINDOW.md) for the full Release/Debug commands,
+matched failing old controls and measurement limits. All audio is discarded and
+input goes to the recording sink. This does not measure physical display/input.
+`python tests/RoomImpairmentTests.py` now covers 24 evidence checks.
+
 Congestion diagnostics now split each synthetic response into observed input
 application and return-image consumption, with exact total consistency checks.
 They also record the affected link's modeled packet residence separately from

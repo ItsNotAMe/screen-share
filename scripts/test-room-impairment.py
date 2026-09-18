@@ -22,7 +22,7 @@ def numeric(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def validate(report, scenario, executable_hash, fast_audio=False, require_handoff=False, require_phase_response=False, require_response_stages=False):
+def validate(report, scenario, executable_hash, fast_audio=False, require_handoff=False, require_phase_response=False, require_response_stages=False, require_freshness=False, require_settling=False):
     if report.get('passed') is not True or report.get('timedOut') is not False or report.get('exitCode') != 0 or \
        report.get('logLimitExceeded', False) or report.get('executableSha256') != executable_hash:
         raise ValueError('Native process failed, timed out, or executable identity differs')
@@ -52,6 +52,30 @@ def validate(report, scenario, executable_hash, fast_audio=False, require_handof
     if metrics.get('fastAudioExperiment') is not fast_audio:
         raise ValueError('Audio experiment configuration differs from request')
     response_measured = metrics['schema'] >= 2
+    freshness = metrics.get('imageFreshnessByPhase')
+    if require_freshness or require_settling or freshness is not None:
+        if metrics.get('staleImageThresholdMs') != 150 or not isinstance(freshness, dict) or set(freshness) != {'baseline', 'impaired', 'recovery'}:
+            raise ValueError('Missing visual image freshness evidence')
+        for phase, peers in freshness.items():
+            if not isinstance(peers, list) or len(peers) != 4:
+                raise ValueError('Missing visual freshness peers')
+            for index, peer in enumerate(peers):
+                if not isinstance(peer, dict) or type(peer.get('viewer')) is not int or peer['viewer'] != index or \
+                   type(peer.get('validMarkers')) is not int or peer['validMarkers'] < 50 or \
+                   type(peer.get('invalidMarkers')) is not int or not 0 <= peer['invalidMarkers'] <= peer['validMarkers'] / 20 or \
+                   not numeric(peer.get('maximumDisplayedImageAgeMs')) or not 0 < peer['maximumDisplayedImageAgeMs'] < 60000 or \
+                   not numeric(peer.get('lastStaleAtPhaseMs')) or peer['lastStaleAtPhaseMs'] > 60000:
+                    raise ValueError('Invalid or insufficient visual freshness samples')
+                if require_settling and scenario == 'collapse' and peer['lastStaleAtPhaseMs'] > 3000:
+                    raise ValueError('Displayed image did not settle within three seconds')
+                if (peer['maximumDisplayedImageAgeMs'] > 150) != (peer['lastStaleAtPhaseMs'] > 0):
+                    raise ValueError('Inconsistent displayed-image stale interval')
+                if 'maximumSettledImageAgeMs' in peer and (not numeric(peer['maximumSettledImageAgeMs']) or
+                        not 0 < peer['maximumSettledImageAgeMs'] <= peer['maximumDisplayedImageAgeMs'] or
+                        (peer['maximumSettledImageAgeMs'] > 150) != (peer['lastStaleAtPhaseMs'] > 3000)):
+                    raise ValueError('Inconsistent displayed-image age after settling period')
+                if require_settling and scenario == 'collapse' and peer['invalidMarkers']:
+                    raise ValueError('Unknown displayed-image age cannot certify settling')
     phase_response = metrics.get('inputResponseByPhaseMs')
     response_stages = metrics.get('inputResponseStagesByPhase')
     if require_response_stages or response_stages is not None:
@@ -166,6 +190,7 @@ def validate(report, scenario, executable_hash, fast_audio=False, require_handof
     recent_tails = {phase: [[s['peers'][i]['jitterBufferRecentMs'] for s in samples[-5:]
         if s['peers'][i]['jitterBufferRecentMs'] is not None] for i in range(4)] for phase, samples in phases.items()}
     return {'healthyViewerIsolation': True, 'recovered': True,
+            'imageFreshnessByPhase': freshness, 'settlingRequired': require_settling and scenario == 'collapse',
             'inputResponseStagesByPhase': response_stages,
             'inputResponseByPhaseMs': phase_response if metrics['schema'] >= 3 else None,
             'decodedFrameHandoff': handoff.summarize(handoffs),
@@ -190,6 +215,7 @@ def main():
     parser.add_argument('--scenario', choices=SCENARIOS, action='append', help='May be repeated; default runs every case')
     parser.add_argument('--fast-audio-experiment', action='store_true', help='Proof-only NetEq acceleration experiment; not production policy')
     parser.add_argument('--event-logs', action='store_true', help='Bounded synthetic host RTC traces and probe/ALR summaries')
+    parser.add_argument('--require-settling', action='store_true', help='Require collapse displayed-image freshness to settle within three seconds')
     args = parser.parse_args()
     if args.event_logs and (not args.scenario or 'processes' in args.scenario):
         parser.error('Event logs require explicit packet scenarios (not processes)')
@@ -204,6 +230,11 @@ def main():
     report = {'schema': 1, 'passed': False, 'scenarios': {}, 'externalLatencyVerified': False,
               'fastAudioExperiment': args.fast_audio_experiment,
               'eventLogs': args.event_logs,
+              'requireSettling': args.require_settling,
+              'sourceHashes': {str(p): runner.sha256(ROOT / p) for p in (
+                  'backend/media/webrtc/MediaNetworkPolicy.h', 'backend/media/webrtc/MediaEngine.cpp',
+                  'tools/webrtc-proof/RoomImpairmentProof.cpp', 'tools/webrtc-proof/FrameAgeMarker.h',
+                  'tools/webrtc-proof/ImpairedPacketSocket.h')},
               'probeValidatorSha256': runner.sha256(ROOT / 'scripts/rtc_probe_evidence.py') if args.event_logs else None,
               'runnerSha256': runner.sha256(Path(__file__)),
               'handoffValidatorSha256': runner.sha256(ROOT / 'scripts/frame_handoff_evidence.py'),
@@ -235,7 +266,7 @@ def main():
                 files = list(output.glob('native-service-*/result.json'))
                 if len(files) != 1:
                     raise ValueError('Missing or ambiguous native result')
-                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment, require_handoff=True, require_phase_response=True, require_response_stages=True)
+                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment, require_handoff=True, require_phase_response=True, require_response_stages=True, require_freshness=True, require_settling=args.require_settling)
             except Exception as error:
                 report['scenarios'][scenario]['error'] = str(error)
                 failures.append(scenario)

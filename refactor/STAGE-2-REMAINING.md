@@ -16,6 +16,10 @@ HTTPS/WSS lifecycle runs pass on both PCs. See [LIVE-SERVICE.md](LIVE-SERVICE.md
 for the remaining NAT, device and latency boundaries.
 Gaming/Quality playout is now frame-scoped; PLAYOUT-RECOVERY.md records software
 buffering improvements and remaining transient-backlog/reference-load/physical gates.
+The later CONGESTION-WINDOW.md follow-up closes local capacity-drop settling with
+five strict Release/Debug runs and preserves rejected candidates. Normal-load fair
+comparisons are in COMPARISON.md. Continue the consolidated field/resource gates;
+do not repeat the completed capture rewrite decision or local congestion diagnosis.
 
 | Group | What remains | Completion evidence |
 | --- | --- | --- |

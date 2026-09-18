@@ -9,7 +9,7 @@ checks are implementation details, **not separate user turns**.
 Backend feature scope is frozen for closeout. Finish these groups in order:
 
 1. Paired legacy/v2 measurements and an explicit per-metric scorecard (COMPARISON.md).
-2. Resolve initial congestion backlog and stability; memory optimization is backlogged.
+2. Local congestion settling is complete (CONGESTION-WINDOW.md); memory optimization is backlogged.
 3. One consolidated two-PC/device/network acceptance pass, preserving physical latency gates.
 4. Stage 5 default cutover and obsolete-code removal, then Stage 6 frontend redesign.
 
@@ -59,8 +59,15 @@ and modeled link residence (CONGESTION-STAGES.md). Input applies within about
 15 ms in the traced initial stall; the return image takes roughly 1.5 seconds,
 with up to 565 ms modeled link residence. Prerender bypass/zero-minimum playout
 and rate-cut keyframe trials did not remove the spike and were reverted. Keep
-the production policy and this acceptance item open; target return-path loss
-recovery next, not input dispatch or another capture rewrite.
+those rejected experiments as historical evidence. The follow-up in
+CONGESTION-WINDOW.md reduces the pinned WebRTC congestion window's additional
+in-flight allowance from 350 to 50 ms, using RTT-aware upstream bitrate pushback.
+Continuous displayed-image age now exposes freezes before the first input probe;
+matched old-policy controls fail the new three-second settling check. Five
+retained-policy collapse runs settle by 1.29–1.63 seconds; all four other packet
+scenarios pass. The local congestion group is complete. Final validation and
+the latest fair comparison are recorded in that follow-up. Next: the consolidated
+real-device/two-PC/network and remaining resource acceptance group.
 
 Current priority: finish Stage 2–4, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).

@@ -31,6 +31,17 @@ User update: relative memory optimization is deferred to BACKLOG.md. The latest
 combined host/four-receiver fixture uses about 522 MiB hardware / 924 MiB software
 private memory. Lower memory than legacy is no longer a gate. Leak/unbounded
 growth, normal desktop/laptop usability and congestion responsiveness still are.
+The subsequent congestion-window follow-up is in CONGESTION-WINDOW.md. It retains
+upstream RTT-aware bitrate pushback with a 50 ms additional in-flight allowance and adds
+continuous held-image age to the packet fixture. The matched old controls fail
+three-second settling despite eventual recovery. The latest 16 normal-load fair
+controls pass with portable fixes still shared by legacy. Local settling evidence
+does not replace physical latency, cross-machine GPU load or Internet/NAT checks.
+Local congestion settling is now accepted: five retained-policy collapse runs
+clear stale images by 1.29–1.63 seconds and remain at 117–129 ms maximum age after
+three seconds. All four other Release packet cases pass, as do 34 native and 24
+evidence tests. The failed drop-only candidate remains in the evidence. Next is
+the consolidated physical/device/network and remaining resource pass below.
 The decoded-frame handoff now has exact ownership and local wait/age measurements
 ([FRAME-HANDOFF.md](FRAME-HANDOFF.md)); this is one measured queue, not full pipeline
 queue-age or physical latency acceptance.
@@ -54,7 +65,7 @@ input-response checks now pass; see TWO-MACHINE.md for the exact scope.
 | --- | --- | --- |
 | 2: user experience | Normal-shell opt-in share/join, pushed directory, profiles, settings, capture/audio recovery, GPU receive, and redacted UI/CLI reports. Release/Debug headless matrices pass 12/12 each. | Physical audio formats/quality/unplug, source privacy/identity/HDR/adapters, supported-desktop DXGI and occlusion. Final legacy command/default cutover remains Stage 5. |
 | 3: gaming input | Consent, source-bound mapping, per-peer ownership, controllers, queues/watchdogs, neutralization, UI/CLI input diagnostics, recording-sink real-channel tests. | Physical mouse/keyboard confinement and foreground/UIPI behavior, XInput/PlayStation and virtual-driver/local-slot behavior; measured external input response. |
-| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, corrected Release 5/5 packet impairment and Debug bandwidth recovery, bidirectional LAN software media/recovery through live TLS, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Receiver buffering/recovery latency, original immediate capture-handle failure, full sustained-memory/queue-age acceptance, hardware 1080p60 cross-machine load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched legacy comparison, actual billed usage/account headroom and production hibernation. |
+| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, five strict collapse-settling runs plus four other packet cases, normal-load tuned legacy comparisons, bidirectional LAN software media/recovery through live TLS, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Original immediate capture-handle failure, sustained leak/unbounded-growth and full queue-age acceptance, hardware 1080p60 cross-machine load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched impaired-network comparison, actual billed usage/account headroom and production hibernation. Relative memory optimization is backlogged. |
 
 ## Physical checks that cannot be replaced by this fixture
 

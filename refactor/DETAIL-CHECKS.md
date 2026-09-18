@@ -1,8 +1,25 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (including preset playout/resize regressions, transport-budget recovery, bounded RTC traces, two-machine checks, UI/CLI reports and decoded-frame handoff timing). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D field acceptance remains open**.
+Last reconciled: 2026-09-19 (including congestion-window settling, continuous displayed-image age, fair legacy controls, preset playout/resize regressions, transport-budget recovery, two-machine checks and UI/CLI reports). Implementation status: **Gate A passed for native integration/build proof; local congestion settling passed; Checkpoints B/D field acceptance remains open**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
+
+Latest congestion follow-up: [CONGESTION-WINDOW.md](CONGESTION-WINDOW.md).
+The retained policy uses upstream RTT-aware bitrate pushback with 50 ms
+additional in-flight allowance instead of 350 ms; default loss/delay estimators,
+receiver playout and screen pacing remain unchanged. Matched visual markers now
+measure held-image age continuously, including freezes before the first input
+probe. Old controls fail the three-second settling check despite passing eventual
+recovery. The fresh 16-run fair comparison passes; hardware v2 retains its local
+age/CPU advantage, while four-viewer software CPU remains higher. This does not
+close physical input/display, device, network or sustained-resource acceptance.
+The drop-only candidate's late-stale failure is preserved; the final policy feeds
+the reduced target to the encoder instead of limiting pushback to half the frames.
+Local congestion settling is complete: all five final collapse runs pass the
+unchanged three-second/150 ms diagnostic check, with last stale observations at
+1.29–1.63 seconds. All four other Release packet scenarios pass. Selected native
+regressions pass 34/34 across Release/Debug; evidence tests pass 24/24. Continue
+the consolidated field/resource acceptance in STAGE-2-4-ACCEPTANCE.md.
 
 Paired comparison: COMPARISON.md records the corrected Release 1080p workload
 and its measurement boundaries. The first 24-run matrix is superseded because

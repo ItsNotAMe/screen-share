@@ -1,5 +1,9 @@
 # Initial congestion spike — 2026-09-18
 
+Historical attribution and rejected experiments. The subsequent retained fix
+and stronger continuous-age checks are in
+[CONGESTION-WINDOW.md](CONGESTION-WINDOW.md); use that follow-up for current status.
+
 Memory optimization relative to legacy is now backlogged at the user's request;
 see BACKLOG.md. This investigation focuses on the initial return-image stall
 under a sudden bandwidth collapse. It does not change the production media

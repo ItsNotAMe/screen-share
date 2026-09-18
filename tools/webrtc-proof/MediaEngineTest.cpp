@@ -1,5 +1,7 @@
 #include "ProofPeer.h"
 #include "media/webrtc/MediaEngine.h"
+#include "media/webrtc/MediaNetworkPolicy.h"
+#include "rtc_base/experiments/rate_control_settings.h"
 #include "media/webrtc/MediaPeer.h"
 #include "media/SignalingExecutor.h"
 using namespace screenshare::media;
@@ -9,6 +11,12 @@ int main() {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int status = 0;
     try {
+        MediaNetworkPolicy policy;
+        const webrtc::RateControlSettings rates(policy);
+        Require(rates.UseCongestionWindow() && rates.UseCongestionWindowPushback() &&
+            !rates.UseCongestionWindowDropFrameOnly() && rates.GetCongestionWindowAdditionalTimeMs() == 50 &&
+            rates.CongestionWindowMinPushbackTargetBitrateBps() == 30000,
+            "Pinned SDK did not parse the bounded in-flight/bitrate-pushback policy");
         SignalingExecutor executor;
         std::exception_ptr failure;
         auto operation = executor.Post([&] {

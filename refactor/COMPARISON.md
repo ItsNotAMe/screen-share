@@ -13,9 +13,35 @@ User priority update (2026-09-18): memory optimization relative to legacy is
 deferred to [BACKLOG.md](BACKLOG.md). The measured 522/924 MiB hardware/software
 private footprint covers the host plus four local receivers. Practical usability
 and absence of unbounded growth remain required; beating legacy's memory number
-does not. Congestion responsiveness is the next active performance group.
+does not. The congestion follow-up is documented in CONGESTION-WINDOW.md.
 
-## Latest scorecard — software efficiency and bounded readback allocation
+## Latest scorecard — congestion-window follow-up
+
+All 16 uninstrumented 1080p60/12 Mbps controls pass again after reducing v2's
+additional in-flight allowance to 50 ms with bitrate pushback. Forward/reverse repeats preserve the
+earlier local image-age and hardware CPU improvements. Portable codec/timer fixes
+remain in both backends; legacy has no WebRTC congestion controller to configure.
+These runs check normal-load regressions, not matched impaired-network superiority.
+
+| Viewers / encoder | Legacy age p95 / v2 (ms) | Legacy fresh FPS / v2 | Legacy CPU / v2 (one core = 100%) | Legacy private MiB / v2 |
+| --- | --- | --- | --- | --- |
+| 1 / software | 45.3 / 29.8 | 52.5 / 52.5 | 184 / 119 | 435 / 311 |
+| 1 / hardware | 44.5 / 29.2 | 53.1 / 52.1 | 57 / 24 | 333 / 239 |
+| 4 / software | 49.9 / 41.5 | 49.2 / 46.1 | 406 / 530 | 492 / 912 |
+| 4 / hardware | 48.7 / 33.0 | 49.9 / 51.9 | 274 / 95 | 407 / 531 |
+
+Numbers are means of two runs, same-process generated WGC capture to CPU image
+consumption. Legacy still decodes in software; v2 prefers hardware decode.
+Configured ceilings are equal, actual rate/quality are not: one-viewer software
+luma PSNR is 26.7 dB legacy versus 23.1 dB v2. Four-viewer software CPU remains
+higher and fresh FPS is about 6% lower than legacy in this matrix, though both pass
+the unchanged workload gate. Do not call this a universal quality/resource win.
+Relative memory optimization remains backlogged. Raw reports:
+`build/congestion-rate-fair`; the compact
+[congestion evidence](evidence/congestion-window-2026-09-19.json) retains hashes,
+per-run metrics and limitations, including the earlier drop-only candidate.
+
+## Previous scorecard — software efficiency and bounded readback allocation
 
 All **16 new uninstrumented runs** pass workload and actual-codec validation.
 Both backends receive shared software CABAC and unchanged-bitrate fixes. V2

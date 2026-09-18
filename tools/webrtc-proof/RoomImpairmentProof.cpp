@@ -9,13 +9,16 @@
 #include <set>
 #include "RoomProcessProof.h"
 #include "BoundedRtcEventLog.h"
+#include "FrameAgeMarker.h"
 
 // Enough changing detail to exercise bandwidth adaptation, unlike the low-rate
 // gradient used by lifecycle tests. This never captures the user's desktop.
 class NoiseCapture final : public ICaptureSource {
     SyntheticCaptureSource source_{640, 360, 30};
     uint32_t state_ = 12345;
+    std::shared_ptr<proof::FrameAgeMarker> marker_;
 public:
+    explicit NoiseCapture(std::shared_ptr<proof::FrameAgeMarker> marker) : marker_(std::move(marker)) {}
     void Start() override { source_.Start(); }
     std::optional<CaptureSample> Poll() override {
         auto sample = source_.Poll();
@@ -25,6 +28,7 @@ public:
                 state_ ^= state_ << 13; state_ ^= state_ >> 17; state_ ^= state_ << 5;
                 pixel = uint8_t(70 + state_ % 100);
             }
+            marker_->Stamp(frame->luma, frame->width, sample->capturedAt);
         }
         return sample;
     }
@@ -43,6 +47,20 @@ int main(int argc, char** argv) {
         if (argc == 4 && std::string(argv[1]) == "--process-viewer") { ProcessViewer(argv[2], argv[3]); webrtc::CleanupSSL(); return 0; }
         if (argc == 3 && std::string(argv[2]) == "processes") { SeparateProcessProof(argv[1]); webrtc::CleanupSSL(); return 0; }
         proof::CheckImpairedPacketSocket();
+        {
+            auto marker = std::make_shared<proof::FrameAgeMarker>();
+            std::vector<uint8_t> pixels(640 * 16);
+            const auto captured = std::chrono::steady_clock::now() - 100ms;
+            marker->Stamp(pixels, 640, captured);
+            const auto original = pixels;
+            Check(marker->Read(pixels, 640) == captured);
+            marker->Stamp(pixels, 640, captured + 10ms);
+            Check(marker->Read(pixels, 640) == captured + 10ms && marker->Read(original, 640) == captured);
+            // Flip a whole complemented data bit; the checksum must reject it.
+            for (int y = 0; y < 16; ++y) for (int x = 0; x < 8; ++x)
+                pixels[y * 640 + x] = pixels[y * 640 + x] == 230 ? 25 : 230;
+            Check(!marker->Read(pixels, 640) && !marker->Read({}, 640));
+        }
         Check(argc >= 3);
         bool fastAudioExperiment = false;
         std::filesystem::path eventLogDirectory;
@@ -70,7 +88,8 @@ int main(int argc, char** argv) {
             };
         }
         hostEvidence->localizedInputResponse = true;
-        hostEvidence->captureFactory = [] { return std::make_unique<NoiseCapture>(); };
+        auto ageMarker = std::make_shared<proof::FrameAgeMarker>();
+        hostEvidence->captureFactory = [ageMarker] { return std::make_unique<NoiseCapture>(ageMarker); };
         StreamPreferences preferences;
         preferences.resolution = ResolutionMode::Fixed; preferences.width = 640; preferences.height = 360;
         preferences.fps = 30; preferences.bitrateMode = SettingMode::Manual; preferences.bitrateLimitBps = 20000000;
@@ -84,6 +103,11 @@ int main(int argc, char** argv) {
         std::array<std::shared_ptr<LatestRoomVideoFrame>, 4> presentation;
         std::array<std::unique_ptr<RoomSession>, 4> viewers;
         std::array<bool, 4> responseVisible{};
+        using Clock = std::chrono::steady_clock;
+        std::array<std::optional<Clock::time_point>, 4> displayedCapture;
+        std::array<double, 4> maximumImageAge{}, maximumSettledImageAge{}, lastStaleAt{};
+        std::array<unsigned, 4> validMarkers{}, invalidMarkers{};
+        std::optional<Clock::time_point> phaseStarted;
         for (size_t i = 0; i < viewers.size(); ++i) {
             evidence[i] = std::make_shared<Evidence>();
             evidence[i]->fastAudioExperiment = fastAudioExperiment;
@@ -101,6 +125,17 @@ int main(int argc, char** argv) {
                 for (unsigned y = 178; y < 182; ++y) for (unsigned x = 318; x < 322; ++x)
                     marker += frame->pixels()[640 * y + x];
                 responseVisible[i] = marker > 16 * 195; // Recording input makes the existing response scene white.
+                displayedCapture[i] = ageMarker->Read(frame->pixels(), 640);
+                if (phaseStarted) { if (displayedCapture[i]) ++validMarkers[i]; else ++invalidMarkers[i]; }
+            }
+            if (phaseStarted) for (size_t i = 0; i < 4; ++i) if (displayedCapture[i]) {
+                const auto now = Clock::now();
+                const double age = std::chrono::duration<double, std::milli>(now - *displayedCapture[i]).count();
+                Check(age >= 0 && age < 60000);
+                maximumImageAge[i] = std::max(maximumImageAge[i], age);
+                if (now - *phaseStarted > 3s) maximumSettledImageAge[i] = std::max(maximumSettledImageAge[i], age);
+                // Include a frozen displayed image, not just newly decoded frames.
+                if (age > 150) lastStaleAt[i] = std::chrono::duration<double, std::milli>(now - *phaseStarted).count();
             }
         };
         Wait([&] { consume(); for (auto& e : evidence) if (e->frames < 30 || e->audio->audibleBlocks < 10) return false; return host.Status().activePeers == 4; });
@@ -131,6 +166,7 @@ int main(int argc, char** argv) {
         QJsonArray samples;
         QJsonObject phaseResponses;
         QJsonObject phaseResponseStages;
+        QJsonObject phaseFreshness;
         std::array<unsigned, 4> previous{};
         auto previousBytes = link->deliveredBytes.load();
         for (auto phase : {"baseline", "impaired", "recovery"}) {
@@ -151,6 +187,8 @@ int main(int argc, char** argv) {
                 config.loss_percent = scenario == "loss2" ? 2 : scenario == "loss5" ? 5 : 0;
                 config.allow_reordering = scenario == "reorder";
             }
+            maximumImageAge.fill(0); maximumSettledImageAge.fill(0); lastStaleAt.fill(0); validMarkers.fill(0); invalidMarkers.fill(0);
+            phaseStarted = Clock::now();
             link->Set(config, impaired && scenario == "duplicate" ? 50 : 0);
             link->maximumResidenceUs = 0;
             for (auto& p : previous) p = 0;
@@ -229,6 +267,12 @@ int main(int argc, char** argv) {
             }
             phaseResponses.insert(phase, responses);
             phaseResponseStages.insert(phase, responseStages);
+            QJsonArray freshness;
+            for (size_t i = 0; i < 4; ++i) freshness.append(QJsonObject{{"viewer", int(i)},
+                {"validMarkers", int(validMarkers[i])}, {"invalidMarkers", int(invalidMarkers[i])},
+                {"maximumDisplayedImageAgeMs", maximumImageAge[i]}, {"maximumSettledImageAgeMs", maximumSettledImageAge[i]},
+                {"lastStaleAtPhaseMs", lastStaleAt[i]}});
+            phaseFreshness.insert(phase, freshness); phaseStarted.reset();
         }
         for (auto& viewer : viewers) { auto stop = viewer->Stop(); Get(stop); viewer.reset(); }
         auto stop = host.Stop(); Get(stop);
@@ -239,6 +283,7 @@ int main(int argc, char** argv) {
         std::cout << QJsonDocument(QJsonObject{{"schema", 3}, {"scenario", QString::fromStdString(scenario)}, {"seed", 12345},
             {"inputResponseByPhaseMs", phaseResponses},
             {"inputResponseStagesByPhase", phaseResponseStages},
+            {"imageFreshnessByPhase", phaseFreshness}, {"staleImageThresholdMs", 150},
             {"samples", samples}, {"warmupIngressBps", warmupIngress}, {"fastAudioExperiment", fastAudioExperiment},
             {"peakQueued", qint64(link->peakQueued.load())}, {"peakBytes", qint64(link->peakBytes.load())},
             {"maximumSchedulingDelayUs", qint64(link->maximumSchedulingDelayUs.load())},

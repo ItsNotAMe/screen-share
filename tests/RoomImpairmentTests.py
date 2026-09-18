@@ -37,6 +37,32 @@ def evidence(scenario='collapse'):
 
 
 class ImpairmentEvidenceTests(unittest.TestCase):
+    def test_visual_freshness_and_settling(self):
+        import copy
+        report = evidence()
+        with self.assertRaises(ValueError): module.validate(report, 'collapse', 'hash', require_freshness=True)
+        metrics = report['metrics']; metrics['staleImageThresholdMs'] = 150
+        metrics['imageFreshnessByPhase'] = {p: [dict(viewer=i, validMarkers=300, invalidMarkers=0,
+            maximumDisplayedImageAgeMs=90, lastStaleAtPhaseMs=0) for i in range(4)] for p in ('baseline','impaired','recovery')}
+        self.assertTrue(module.validate(report, 'collapse', 'hash', require_settling=True)['settlingRequired'])
+        peer = metrics['imageFreshnessByPhase']['impaired'][0]
+        peer.update(maximumDisplayedImageAgeMs=1400, lastStaleAtPhaseMs=3500)
+        # Recovery alone cannot certify the three-second transient requirement.
+        self.assertTrue(module.validate(report, 'collapse', 'hash')['recovered'])
+        with self.assertRaises(ValueError): module.validate(report, 'collapse', 'hash', require_settling=True)
+        peer['lastStaleAtPhaseMs'] = 1800
+        self.assertTrue(module.validate(report, 'collapse', 'hash', require_settling=True)['settlingRequired'])
+        peer['maximumSettledImageAgeMs'] = 100
+        self.assertTrue(module.validate(report, 'collapse', 'hash', require_settling=True)['settlingRequired'])
+        for key, bad in (('validMarkers', 0), ('invalidMarkers', -1), ('maximumDisplayedImageAgeMs', float('nan')),
+                         ('lastStaleAtPhaseMs', True), ('viewer', True), ('lastStaleAtPhaseMs', 0),
+                         ('maximumSettledImageAgeMs', 151), ('maximumSettledImageAgeMs', float('nan'))):
+            changed = copy.deepcopy(report)
+            changed['metrics']['imageFreshnessByPhase']['impaired'][0][key] = bad
+            with self.assertRaises(ValueError): module.validate(changed, 'collapse', 'hash', require_settling=True)
+        peer['invalidMarkers'] = 1
+        with self.assertRaises(ValueError): module.validate(report, 'collapse', 'hash', require_settling=True)
+
     def test_response_stage_integrity(self):
         import copy
         report = evidence()
