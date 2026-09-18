@@ -2,6 +2,7 @@
 #include "ImpairedPacketSocket.h"
 #include "ImpairedPacketSocketChecks.h"
 #include "../../frontend/shared/LatestRoomVideoFrame.h"
+#include "../../frontend/shared/FrameQueueDiagnostics.h"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -141,7 +142,8 @@ int main(int argc, char** argv) {
                     QJsonObject observation{{"viewer", int(i)}, {"audioBlocks", qint64(evidence[i]->audio->audibleBlocks.load())}};
                     const auto queue = presentation[i]->statistics();
                     Check(queue.received >= queue.delivered + queue.replaced && queue.received - queue.delivered - queue.replaced <= 1);
-                    observation.insert("pending", qint64(queue.received - queue.delivered - queue.replaced));
+                    observation.insert("pending", qint64(queue.pending));
+                    observation.insert("handoff", FrameQueueDiagnostics(queue));
                     for (const auto& peer : status.stream.peers) if (peer.peerId == viewers[i]->Status().peerId) {
                         auto number = [](const auto& value) -> QJsonValue { return value ? QJsonValue(double(*value)) : QJsonValue(QJsonValue::Null); };
                         observation.insert("payloadBps", number(peer.sender.payloadBps));

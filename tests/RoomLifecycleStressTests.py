@@ -9,6 +9,19 @@ lifecycle = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lifecycle)
 
 class EvidenceTests(unittest.TestCase):
+    def test_handoff_required_and_cross_checked(self):
+        value = self.continuous()
+        with self.assertRaises(ValueError): lifecycle.evaluate(value, 1, 30, 'binary', require_handoff=True)
+        for entry in value['progress']:
+            for viewer in entry['viewers']:
+                viewer['handoff'] = {'schema': 1, 'scope': 'decoded-frame-handoff',
+                    'received': viewer['received'], 'delivered': viewer['frames'], 'replaced': viewer['replaced'],
+                    'pending': viewer['pending'], 'failed': 0, 'discardedOnStop': 0, 'inFlight': 0,
+                    'pendingAgeMs': 1 if viewer['pending'] else None, 'lastWaitMs': 2, 'maxWaitMs': 3}
+        self.assertTrue(lifecycle.evaluate(value, 1, 30, 'binary', require_handoff=True)['decodedFrameHandoff']['measured'])
+        value['progress'][0]['viewers'][0]['handoff']['received'] += 1
+        with self.assertRaises(ValueError): lifecycle.evaluate(value, 1, 30, 'binary', require_handoff=True)
+
     def sample(self, cycle, seconds=1):
         return {'cycle': cycle, 'seconds': seconds, 'handles': 300, 'privateBytes': 1000000,
                 'workingSetBytes': 2000000, 'gdiObjects': 3, 'userObjects': 2}

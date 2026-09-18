@@ -37,6 +37,39 @@ def evidence(scenario='collapse'):
 
 
 class ImpairmentEvidenceTests(unittest.TestCase):
+    def test_handoff_measurement_and_missing_data(self):
+        report = evidence('loss2')
+        with self.assertRaises(ValueError):
+            module.validate(report, 'loss2', 'hash', require_handoff=True)
+        self.assertFalse(module.validate(report, 'loss2', 'hash')['decodedFrameHandoff']['measured'])
+        for sample in report['metrics']['samples']:
+            for peer in sample['peers']:
+                peer['handoff'] = {'schema': 1, 'scope': 'decoded-frame-handoff',
+                    'received': 10, 'delivered': 10, 'replaced': 0, 'failed': 0,
+                    'discardedOnStop': 0, 'inFlight': 0, 'pending': 0,
+                    'pendingAgeMs': None, 'lastWaitMs': 2, 'maxWaitMs': 3}
+        result = module.validate(report, 'loss2', 'hash', require_handoff=True)
+        self.assertEqual(result['decodedFrameHandoff']['samples'], 144)
+        self.assertFalse(result['decodedFrameHandoff']['externalLatencyVerified'])
+        report['metrics']['samples'][5]['peers'][0]['handoff']['received'] += 1
+        with self.assertRaises(ValueError): module.validate(report, 'loss2', 'hash', require_handoff=True)
+
+    def test_invalid_handoff_evidence(self):
+        valid = {'schema': 1, 'scope': 'decoded-frame-handoff', 'received': 11,
+                 'delivered': 10, 'replaced': 0, 'failed': 0, 'discardedOnStop': 0,
+                 'inFlight': 0, 'pending': 1, 'pendingAgeMs': 2, 'lastWaitMs': 3, 'maxWaitMs': 4}
+        module.handoff.validate(valid)
+        for key, bad in (('schema', True), ('received', True), ('pending', 2), ('inFlight', 1),
+                         ('failed', 1), ('discardedOnStop', 1), ('pendingAgeMs', None),
+                         ('lastWaitMs', None), ('lastWaitMs', 5), ('maxWaitMs', None),
+                         ('pendingAgeMs', float('nan')), ('maxWaitMs', float('inf'))):
+            with self.subTest(key=key, bad=bad), self.assertRaises(ValueError):
+                module.handoff.validate({**valid, key: bad})
+        for key in valid:
+            malformed = dict(valid); malformed.pop(key)
+            with self.subTest(missing=key), self.assertRaises(ValueError): module.handoff.validate(malformed)
+        with self.assertRaises(ValueError): module.handoff.validate(valid, {**valid, 'maxWaitMs': 5})
+
     def reject(self, mutate, scenario='collapse'):
         report = evidence(scenario)
         mutate(report)

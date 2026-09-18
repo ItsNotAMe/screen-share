@@ -13,6 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('room_runner', ROOT / 'scripts/test-room-regression.py')
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+spec = importlib.util.spec_from_file_location('handoff_evidence', ROOT / 'scripts/frame_handoff_evidence.py')
+handoff = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(handoff)
 
 
 def trends(samples):
@@ -122,7 +125,7 @@ def progress_samples(progress, active, seconds, slow_viewer):
     return isolation
 
 
-def evaluate(detail, cycles, seconds, identity, idle_seconds=0, slow_viewer=False, memory_accounting=False):
+def evaluate(detail, cycles, seconds, identity, idle_seconds=0, slow_viewer=False, memory_accounting=False, require_handoff=False):
     if detail.get('schema') != 2 or detail.get('passed') is not True or detail.get('executableSha256') != identity or \
        detail.get('cycles') != cycles or detail.get('soakSeconds') != seconds or \
        detail.get('idleSeconds') != idle_seconds or detail.get('slowViewer') is not slow_viewer or \
@@ -149,6 +152,17 @@ def evaluate(detail, cycles, seconds, identity, idle_seconds=0, slow_viewer=Fals
     if any(s['cycle'] != -1 for s in active):
         raise ValueError('Unexpected active cycle')
     isolation = progress_samples(detail.get('progress', []), active, seconds, slow_viewer)
+    handoffs = []
+    previous_handoffs = [None] * 4
+    for entry in detail.get('progress', []):
+        for index, viewer in enumerate(entry['viewers']):
+            if require_handoff or 'handoff' in viewer:
+                value = viewer.get('handoff')
+                handoff.validate(value, previous_handoffs[index])
+                if any(value[key] != viewer[key] for key in ('pending', 'received', 'replaced')) or value['delivered'] != viewer['frames']:
+                    raise ValueError('Handoff counters differ from presentation')
+                previous_handoffs[index] = value
+                handoffs.append(value)
     idle = detail.get('idleSamples', [])
     resource_samples(idle)
     expected_idle = list(range(idle_seconds + 1)) if idle_seconds else []
@@ -174,6 +188,7 @@ def evaluate(detail, cycles, seconds, identity, idle_seconds=0, slow_viewer=Fals
             if type(sample.get(key)) is not int or sample[key] < 0:
                 raise ValueError('Missing heap/virtual memory measurement')
     return {'restartResources': resource, 'activeResources': trends(active),
+            'decodedFrameHandoff': handoff.summarize(handoffs),
             'restartByShutdownOrder': {'hostFirst': trends(finished[2::2]), 'viewerFirst': trends(finished[1::2])},
             'idleObservation': {'seconds': idle_seconds, 'resources': trends(idle)},
             'ownershipVerified': True, 'slowViewerIsolation': isolation,
@@ -208,6 +223,7 @@ def main():
               'idleSeconds': args.idle_seconds, 'slowViewer': args.slow_viewer,
               'memoryAccounting': args.memory_accounting,
               'executableSha256': runner.sha256(executable), 'runnerSha256': runner.sha256(Path(__file__)),
+              'handoffValidatorSha256': runner.sha256(ROOT / 'scripts/frame_handoff_evidence.py'),
               'fixtureSha256': runner.sha256(fixture),
               'limitations': ['Synthetic capture/audio and recording input; no physical output or injection',
                 'Fresh service fixture per restart; native process remains alive across all cycles',
@@ -220,7 +236,7 @@ def main():
         detail = json.loads((output / 'native/result.json').read_text(encoding='utf-8'))
         report['observations'] = detail
         report.update(evaluate(detail, args.cycles, args.soak_seconds, report['executableSha256'],
-                               args.idle_seconds, args.slow_viewer, args.memory_accounting))
+                               args.idle_seconds, args.slow_viewer, args.memory_accounting, require_handoff=True))
         report['passed'] = report['process']['passed']
     except Exception as error:
         report['error'] = str(error)

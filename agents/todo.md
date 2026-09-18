@@ -19,6 +19,10 @@ collected and validated after a timing-check correction; final short runtime
 checks pass both builds. Final network evidence retains a Release recovery failure.
 Continue that performance investigation and the listed physical/resource/field
 gates, not another reporting/cost-harness implementation or an unqualified soak rerun.
+Decoded-frame handoff accounting/timing is implemented (refactor/FRAME-HANDOFF.md).
+Continue from its measured queue scope; do not mistake it for full pipeline latency.
+The user is setting up laptop SSH; it is not connected yet. The separate service
+deployment question remains pending.
 
 Current continuation: the shared input service, controller and mouse/keyboard
 UI/CLI/device groups are implemented. See [DESKTOP-INPUT.md](../refactor/DESKTOP-INPUT.md).

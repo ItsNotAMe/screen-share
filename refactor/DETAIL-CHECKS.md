@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (including receiver pacing, UI/CLI redacted reports and input diagnostics). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D field acceptance remains open**.
+Last reconciled: 2026-09-18 (including receiver pacing, UI/CLI redacted reports, input diagnostics and decoded-frame handoff accounting/timing). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D field acceptance remains open**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -12,6 +12,11 @@ until their own evidence passes. Dated continuation notes at the end are histori
 the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
 
 ## Input transport, safety and headless response — 2026-09-18
+
+Decoded-frame handoff follow-up: [FRAME-HANDOFF.md](FRAME-HANDOFF.md) records exact
+pending/in-flight/delivered/replaced/failed/stop-discard ownership and local wait
+ages in the shared UI/CLI path and native stress/network evidence. This closes
+the accounting/measurement implementation, not the full queue-age or latency gates.
 
 - [x] Integrate a portable, versioned input service and dedicated input owner with
   actual encrypted channels and the public RoomSession input port.

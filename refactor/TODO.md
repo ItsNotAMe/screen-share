@@ -15,6 +15,10 @@ The unattended batch results are in [UNATTENDED-RESULTS.md](UNATTENDED-RESULTS.m
 two-hour software evidence is collected; Stage 4 still has a Release bandwidth-
 recovery failure and the documented device/resource/field gates. Do not repeat
 completed reporting, input diagnostics or cost-model implementation.
+Decoded-frame handoff ownership/timing now covers failed conversion, stop discard
+and in-flight work, with shared UI/CLI diagnostics and strict stress/network
+evidence checks. See [FRAME-HANDOFF.md](FRAME-HANDOFF.md). This measures one local
+queue; complete queue-age and external latency acceptance remain open.
 UI/CLI reports and local input timing/pressure diagnostics are now implemented
 and pass both 12-case headless matrices; see [SESSION-REPORTS.md](SESSION-REPORTS.md).
 

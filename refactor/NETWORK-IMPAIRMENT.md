@@ -152,6 +152,12 @@ and its preset-specific tests were reverted; **it is not in the shipped code**.
 No pacing/jitter field trial or alternate controller was adopted. Original and
 experimental executable identities remain in their respective native reports.
 
+New packet-proof runs also record decoded-frame handoff ownership and local wait
+ages for every viewer/sample. The evaluator requires complete, consistent fields;
+the same instrumentation is used by UI/CLI and lifecycle stress. Historical files
+without it remain explicitly unmeasured. See FRAME-HANDOFF.md; network recovery
+and physical latency gates are unchanged.
+
 The production change in this batch is the independently tested MF unavailable-FPS
 resume fix and optional sender diagnostics. It is not a demonstrated solution to
 bandwidth convergence. The native source remains screen content in both presets.

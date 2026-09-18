@@ -7,6 +7,7 @@
 #include "shared/PresentationDiagnostics.h"
 #include "shared/PipelineDiagnostics.h"
 #include "shared/RoomDiagnosticReport.h"
+#include "shared/FrameQueueDiagnostics.h"
 #include "ui/UiReportPath.h"
 #include <QClipboard>
 #include "ui/VideoFrameWidget.h"
@@ -63,7 +64,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         const auto file = configured.isEmpty() ? "room-v2-" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".json" : configured;
         const auto path = ResolveUiReportPath(file);
         const auto input = session_.input();
-        const auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
+        auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
+        report["decodedFrameHandoff"] = FrameQueueDiagnostics(session_.frameStatistics());
         reportResult->setText(WriteRoomDiagnosticReport(path, report) ? "Saved diagnostic report: " + path : "Could not save diagnostic report. Check the destination is writable.");
     });
     auto* roomForm = new QFormLayout;
@@ -363,7 +365,11 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
                 .arg(renderer.busyDrops).arg(renderer.occludedDrops).arg(renderer.minimizedDrops).arg(renderer.unavailableDrops)
                 .arg(renderer.backoffDrops).arg(renderer.errors).arg(renderer.recoveries)
                 .arg(fields["lastErrorCode"].isNull() ? "none" : fields["lastErrorCode"].toString())
-                .arg(frames.gpuRetained).arg(frames.gpuReadbacks));
+                .arg(frames.gpuRetained).arg(frames.gpuReadbacks) +
+                QString("\nDecoded-frame handoff: pending age %1 ms; last wait %2 ms; maximum wait %3 ms; conversion failures %4.")
+                    .arg(frames.pendingAgeUs ? QString::number(double(*frames.pendingAgeUs) / 1000, 'f', 1) : "none")
+                    .arg(frames.lastWaitUs ? QString::number(double(*frames.lastWaitUs) / 1000, 'f', 1) : "unknown")
+                    .arg(double(frames.maxWaitUs) / 1000, 0, 'f', 1).arg(frames.failed));
             if (!stats.terminal) return;
             error_->setText("Video presentation failed. Leave and rejoin the room to retry. Audio and room controls remain available.");
         });

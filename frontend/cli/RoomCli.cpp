@@ -1,4 +1,5 @@
 #include "cli/RoomCli.h"
+#include "shared/FrameQueueDiagnostics.h"
 #include "shared/LatestRoomVideoFrame.h"
 #include "shared/RoomStreamDiagnostics.h"
 #include "shared/PresentationDiagnostics.h"
@@ -302,6 +303,7 @@ int RunRoomCli(int argc, char** argv) {
             {"recoveries", qint64(preview ? preview->presentationStats().recoveries : 0)},
             {"terminal", preview && preview->presentationStats().terminal}};
         auto finalPresentation = presentation;
+        finalPresentation["handoff"] = FrameQueueDiagnostics(statistics);
         finalPresentation["diagnostics"] = PresentationDiagnosticsJson(preview ? preview->presentationStats() : FramePresentationSession::Statistics{});
         std::cout << QJsonDocument(finalPresentation).toJson(QJsonDocument::Compact).constData() << std::endl;
         return result;

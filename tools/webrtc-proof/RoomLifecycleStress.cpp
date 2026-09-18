@@ -2,6 +2,7 @@
 #include "LifecycleDiagnostics.h"
 #include "MemoryAccounting.h"
 #include "../../frontend/shared/LatestRoomVideoFrame.h"
+#include "../../frontend/shared/FrameQueueDiagnostics.h"
 #include "core/WindowsMediaRuntime.h"
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -86,7 +87,8 @@ CycleLifetime RunCycle(const std::string& origin, int cycle, int seconds, bool s
                 QJsonObject viewer{{"viewer", int(i)}, {"frames", double(received)},
                     {"frameDelta", double(received - before[i])}, {"audioBlocks", double(audible)},
                     {"audioDelta", double(audible - audioBefore[i])}, {"received", double(queue.received)},
-                    {"replaced", double(queue.replaced)}, {"pending", double(queue.received - queue.delivered - queue.replaced)}};
+                    {"replaced", double(queue.replaced)}, {"pending", double(queue.pending)},
+                    {"handoff", FrameQueueDiagnostics(queue)}};
                 // Reuse the scheduled public snapshot; do not add stats requests
                 // or change encoder/transport policy to make a stress result pass.
                 const auto peerId = viewers[i]->Status().peerId;
@@ -142,6 +144,9 @@ CycleLifetime RunCycle(const std::string& origin, int cycle, int seconds, bool s
         viewers[i].reset();
         presentation[i]->Stop();
         Check(!presentation[i]->Take());
+        const auto finalQueue = presentation[i]->statistics();
+        Check(!finalQueue.pending && !finalQueue.inFlight && !finalQueue.failed &&
+            finalQueue.received == finalQueue.delivered + finalQueue.replaced + finalQueue.discardedOnStop);
         lifetime.dependencies.push_back(presentation[i]);
         presentation[i].reset();
     }

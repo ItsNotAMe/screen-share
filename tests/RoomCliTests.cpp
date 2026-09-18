@@ -1,5 +1,6 @@
 #include "cli/RoomCli.h"
 #include "shared/LatestRoomVideoFrame.h"
+#include "shared/FrameQueueDiagnostics.h"
 #include "shared/RoomLaunch.h"
 #include "shared/RoomInputCommands.h"
 #include "RecordingGamepadSink.h"
@@ -194,6 +195,8 @@ public:
 };
 void PresentationOwnership() {
     LatestRoomVideoFrame sink;
+    Check(!sink.statistics().pendingAgeUs && !sink.statistics().lastWaitUs);
+    Check(FrameQueueDiagnostics(sink.statistics())["lastWaitMs"].isNull());
     std::atomic<int> destroyed{0};
     auto buffer = webrtc::make_ref_counted<CheckedNv12>(destroyed, 4); const auto* pixels = buffer->DataY();
     sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer).set_timestamp_us(9).build());
@@ -212,14 +215,56 @@ void PresentationOwnership() {
     Check(sink.statistics().retained == 1 && sink.statistics().repacked == 1 && sink.statistics().converted == 1);
     sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(planar).set_rotation(webrtc::kVideoRotation_90).build());
     bool rejected = false; try { sink.Take(); } catch (const std::runtime_error&) { rejected = true; } Check(rejected);
+    Check(sink.statistics().failed == 1 && !sink.statistics().inFlight && !sink.statistics().pending);
     for (int i = 0; i < 100; ++i) {
         auto pending = webrtc::make_ref_counted<CheckedNv12>(destroyed, 4);
         sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(pending).build());
     }
     Check(destroyed == 101 && sink.statistics().replaced == 99);
+    Check(sink.statistics().pending == 1 && sink.statistics().pendingAgeUs.has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    Check(*sink.statistics().pendingAgeUs >= 1000);
     sink.Stop(); Check(destroyed == 102 && !sink.Take());
+    sink.Stop(); // Idempotent stop must not count a second discarded frame.
     sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(planar).build());
     Check(!sink.Take() && sink.statistics().rejectedAfterStop == 1);
+    const auto stats = sink.statistics();
+    Check(stats.discardedOnStop == 1 && !stats.pending && !stats.pendingAgeUs && !stats.inFlight);
+    Check(stats.received == stats.delivered + stats.failed + stats.replaced + stats.discardedOnStop);
+    Check(stats.lastWaitUs && stats.maxWaitUs >= *stats.lastWaitUs);
+
+    // Observe a conversion in flight, then retire while that consumer owns it.
+    // Stop discards queued work; it cannot revoke a frame already taken.
+    struct BlockingNv12 : CheckedNv12 {
+        std::promise<void>& entered;
+        std::shared_future<void> resume;
+        mutable bool first = true;
+        BlockingNv12(std::atomic<int>& destroyed, std::promise<void>& signal, std::shared_future<void> wait)
+            : CheckedNv12(destroyed, 4), entered(signal), resume(std::move(wait)) {}
+        const uint8_t* DataY() const override {
+            if (first) { first = false; entered.set_value(); resume.wait(); }
+            return CheckedNv12::DataY();
+        }
+    };
+    LatestRoomVideoFrame retiring;
+    std::promise<void> entered, release;
+    auto enteredFuture = entered.get_future();
+    auto blocking = webrtc::make_ref_counted<BlockingNv12>(destroyed, entered, release.get_future().share());
+    retiring.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(blocking).build());
+    auto taking = std::async(std::launch::async, [&] { return retiring.Take(); });
+    const bool reached = enteredFuture.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    // Always release before an assertion could unwind into std::future's join.
+    if (!reached) { release.set_value(); Check(reached); }
+    const auto during = retiring.statistics();
+    retiring.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(planar).build());
+    retiring.Stop();
+    const auto stopped = retiring.statistics();
+    release.set_value();
+    Check(taking.get().has_value());
+    Check(during.inFlight == 1 && !during.pending && during.received == 1 && !during.delivered);
+    Check(stopped.inFlight == 1 && !stopped.pending && stopped.discardedOnStop == 1);
+    const auto finished = retiring.statistics();
+    Check(finished.received == 2 && finished.delivered == 1 && finished.discardedOnStop == 1 && !finished.inFlight);
 }
 RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proof::AudioEvidence> audio,
                            std::shared_ptr<LatestRoomVideoFrame> frames = {}) {

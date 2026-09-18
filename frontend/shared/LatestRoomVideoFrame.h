@@ -10,6 +10,8 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <chrono>
+#include <algorithm>
 
 class RetainedRoomGpuFrame final : public screenshare::NativeNv12Frame {
 public:
@@ -43,20 +45,52 @@ private:
 class LatestRoomVideoFrame final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
     struct Statistics { uint64_t received = 0, replaced = 0, delivered = 0, retained = 0, converted = 0, repacked = 0, rejectedAfterStop = 0,
-        gpuRetained = 0, gpuReadbacks = 0; };
+        gpuRetained = 0, gpuReadbacks = 0, discardedOnStop = 0, failed = 0, inFlight = 0, pending = 0;
+        std::optional<uint64_t> pendingAgeUs, lastWaitUs;
+        uint64_t maxWaitUs = 0;
+    };
     void OnFrame(const webrtc::VideoFrame& frame) override {
         std::lock_guard lock(mutex_);
         if (stopped_) { ++stats_.rejectedAfterStop; return; }
         ++stats_.received;
         if (pending_) ++stats_.replaced;
         pending_ = frame;
+        pendingAt_ = std::chrono::steady_clock::now();
     }
-    Statistics statistics() const { std::lock_guard lock(mutex_); auto result = stats_; result.gpuReadbacks = *readbacks_; return result; }
-    void Stop() { std::lock_guard lock(mutex_); stopped_ = true; pending_.reset(); }
+    Statistics statistics() const {
+        std::lock_guard lock(mutex_);
+        auto result = stats_; result.gpuReadbacks = *readbacks_;
+        result.pending = pending_ ? 1 : 0;
+        if (pending_) result.pendingAgeUs = Age(pendingAt_);
+        return result;
+    }
+    void Stop() {
+        std::lock_guard lock(mutex_); stopped_ = true;
+        if (pending_) ++stats_.discardedOnStop;
+        pending_.reset();
+    }
     std::optional<screenshare::Nv12VideoFrame> Take() {
         std::optional<webrtc::VideoFrame> frame;
-        { std::lock_guard lock(mutex_); frame.swap(pending_); }
+        {
+            std::lock_guard lock(mutex_); frame.swap(pending_);
+            if (frame) {
+                ++stats_.inFlight;
+                stats_.lastWaitUs = Age(pendingAt_);
+                stats_.maxWaitUs = std::max(stats_.maxWaitUs, *stats_.lastWaitUs);
+            }
+        }
         if (!frame) return {};
+        // Keep ownership accounting exact even when validation/conversion throws.
+        struct Completion {
+            LatestRoomVideoFrame& owner;
+            bool success = false;
+            ~Completion() {
+                std::lock_guard lock(owner.mutex_);
+                --owner.stats_.inFlight;
+                if (success) ++owner.stats_.delivered;
+                else ++owner.stats_.failed;
+            }
+        } completion{*this};
         const int width = frame->width(), height = frame->height();
         if (width < 2 || height < 2 || width > 3840 || height > 2160 || width % 2 || height % 2 ||
             frame->rotation() != webrtc::kVideoRotation_0 || frame->timestamp_us() > std::numeric_limits<int64_t>::max() / 10 ||
@@ -70,7 +104,8 @@ public:
             result.timestamp100ns = frame->timestamp_us() * 10;
             result.inputMapping = mapping;
             result.native = std::make_shared<RetainedRoomGpuFrame>(webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer>(gpu), readbacks_);
-            { std::lock_guard lock(mutex_); ++stats_.delivered; ++stats_.retained; ++stats_.gpuRetained; }
+            { std::lock_guard lock(mutex_); ++stats_.retained; ++stats_.gpuRetained; }
+            completion.success = true;
             return result;
         }
         webrtc::scoped_refptr<webrtc::NV12Buffer> converted;
@@ -97,12 +132,18 @@ public:
             if (libyuv::NV12Copy(pixels->DataY(), pixels->StrideY(), pixels->DataUV(), pixels->StrideUV(), result.nv12.data(), width,
                 result.nv12.data() + size_t(width) * height, width, width, height)) throw std::runtime_error("Preview packing failed");
         }
-        { std::lock_guard lock(mutex_); ++stats_.delivered; stats_.retained += !conversion && !repack; stats_.converted += conversion; stats_.repacked += repack; }
+        { std::lock_guard lock(mutex_); stats_.retained += !conversion && !repack; stats_.converted += conversion; stats_.repacked += repack; }
+        completion.success = true;
         return result;
     }
 private:
+    static uint64_t Age(std::chrono::steady_clock::time_point began) {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - began).count());
+    }
     mutable std::mutex mutex_;
     std::optional<webrtc::VideoFrame> pending_;
+    std::chrono::steady_clock::time_point pendingAt_;
     Statistics stats_;
     const std::shared_ptr<std::atomic<uint64_t>> readbacks_ = std::make_shared<std::atomic<uint64_t>>(0);
     bool stopped_ = false;

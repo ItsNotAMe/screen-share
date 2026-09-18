@@ -221,7 +221,9 @@ rejected apartment/thread-reuse hypotheses and separate post-stop observations.
 The explicit RPC cleanup experiment also fails the unchanged immediate bound;
 later OS releases cannot replace restart samples. No new production fix is claimed.
 
-Remaining: complete capture resource acceptance and full allocation/queue-age
-acceptance, then run the full two-hour four-viewer soak and network/decoder
-impairment tests. Physical media/input, TLS/NAT, external latency, service cost,
-matched legacy comparison and default cutover remain separate open gates.
+The two-hour four-viewer software run is now collected; see UNATTENDED-RESULTS.md.
+Decoded-frame handoff accounting and local wait/age measurements are integrated
+into the same runner; see FRAME-HANDOFF.md. Remaining: capture resource acceptance,
+full allocation/pipeline queue-age acceptance and unresolved network recovery.
+Physical media/input, TLS/NAT, external latency, service cost, matched legacy
+comparison and default cutover remain separate open gates.

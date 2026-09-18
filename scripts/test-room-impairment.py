@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('room_runner', ROOT / 'scripts/test-room-regression.py')
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+spec = importlib.util.spec_from_file_location('handoff_evidence', ROOT / 'scripts/frame_handoff_evidence.py')
+handoff = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(handoff)
 SCENARIOS = ('collapse', 'loss2', 'loss5', 'reorder', 'duplicate', 'processes')
 
 
@@ -19,7 +22,7 @@ def numeric(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def validate(report, scenario, executable_hash, fast_audio=False):
+def validate(report, scenario, executable_hash, fast_audio=False, require_handoff=False):
     if report.get('passed') is not True or report.get('timedOut') is not False or report.get('exitCode') != 0 or \
        report.get('logLimitExceeded', False) or report.get('executableSha256') != executable_hash:
         raise ValueError('Native process failed, timed out, or executable identity differs')
@@ -64,6 +67,7 @@ def validate(report, scenario, executable_hash, fast_audio=False):
         raise ValueError('Missing phase samples')
     previous = None
     phases = {name: [] for name in ('baseline', 'impaired', 'recovery')}
+    handoffs = []
     for index, sample in enumerate(samples):
         phase = ('baseline', 'impaired', 'recovery')[index // 12]
         if sample.get('phase') != phase or sample.get('second') != index % 12 + 1:
@@ -84,6 +88,11 @@ def validate(report, scenario, executable_hash, fast_audio=False):
         if not isinstance(peers, list) or len(peers) != 4:
             raise ValueError('Missing peer telemetry')
         for i, peer in enumerate(peers):
+            if require_handoff or 'handoff' in peer:
+                handoff.validate(peer.get('handoff'), previous['peers'][i].get('handoff') if previous else None)
+                if peer['handoff']['pending'] != peer.get('pending'):
+                    raise ValueError('Handoff pending count differs from presentation')
+                handoffs.append(peer['handoff'])
             if peer.get('viewer') != i or not all(numeric(peer.get(key)) for key in
                 ('audioBlocks', 'payloadBps', 'rttMs', 'lossFraction', 'jitterBufferMeanMs')):
                 raise ValueError('Missing peer observations')
@@ -131,6 +140,7 @@ def validate(report, scenario, executable_hash, fast_audio=False):
     recent_tails = {phase: [[s['peers'][i]['jitterBufferRecentMs'] for s in samples[-5:]
         if s['peers'][i]['jitterBufferRecentMs'] is not None] for i in range(4)] for phase, samples in phases.items()}
     return {'healthyViewerIsolation': True, 'recovered': True,
+            'decodedFrameHandoff': handoff.summarize(handoffs),
             'internalInputResponseMeasured': response_measured,
             'inputResponseInternalMs': metrics.get('inputResponseInternalMs') if response_measured else None,
             'inputResponseScene': metrics.get('inputResponseScene', 'full-frame') if response_measured else None,
@@ -163,6 +173,7 @@ def main():
     report = {'schema': 1, 'passed': False, 'scenarios': {}, 'externalLatencyVerified': False,
               'fastAudioExperiment': args.fast_audio_experiment,
               'runnerSha256': runner.sha256(Path(__file__)),
+              'handoffValidatorSha256': runner.sha256(ROOT / 'scripts/frame_handoff_evidence.py'),
               'fixtureSha256': runner.sha256(ROOT / 'signaling-worker/tests/run-native-service.mjs'),
               'pinnedWebRtc': json.loads((ROOT / 'refactor/webrtc-source.json').read_text())['commit'],
               'limitations': ['640x360@30 software H264; synthetic noise and discarded audio',
@@ -184,7 +195,7 @@ def main():
                 files = list(output.glob('native-service-*/result.json'))
                 if len(files) != 1:
                     raise ValueError('Missing or ambiguous native result')
-                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment)
+                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment, require_handoff=True)
             except Exception as error:
                 report['scenarios'][scenario]['error'] = str(error)
                 failures.append(scenario)

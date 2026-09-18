@@ -3,6 +3,9 @@
 The requested scope is to finish Stages 2–4 before cutover or the later UI redesign.
 Implementation and locally reproducible evidence are separate from field acceptance.
 No unchecked physical requirement is waived by the unattended test run.
+The decoded-frame handoff now has exact ownership and local wait/age measurements
+([FRAME-HANDOFF.md](FRAME-HANDOFF.md)); this is one measured queue, not full pipeline
+queue-age or physical latency acceptance.
 
 Continuation: the user has a Windows laptop and GameSir Nova Lite. FIELD-TESTING.md
 contains the prepared five-minute first pass and test-scene/package instructions.

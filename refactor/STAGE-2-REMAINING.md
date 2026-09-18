@@ -32,7 +32,9 @@ count follows from counting the historical checklist entries.
   The capture-only resource matrix and production-owner lifecycle checks are now
   implemented; see RESOURCE-STRESS.md. Full-room restart/continuous runners now
   exist too (ROOM-STRESS.md), but longer capture testing fails the handle bound
-  and full memory/two-hour soak acceptance remains open.
+  and full memory/pipeline queue-age acceptance remains open. The two-hour
+  software soak is collected; decoded-frame handoff measurement now covers one
+  queue (FRAME-HANDOFF.md), not all buffering in the pipeline.
   Reproduced retained handles are now traced to WGC/RPC ALPC ports; see
   CAPTURE-HANDLES.md. Later OS cleanup is observed separately and does not waive
   the immediate restart bound.
