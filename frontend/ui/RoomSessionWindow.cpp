@@ -49,7 +49,21 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     : session_(nullptr, std::move(factory), loopback) {
     setWindowTitle(config.room.host ? "ScreenShare — Share room" : "ScreenShare — Watch room");
     setStyleSheet(uiStyleSheet()); resize(960, 720);
-    auto* layout = new QVBoxLayout(this);
+    auto* pageLayout = new QVBoxLayout(this);
+    pageLayout->setContentsMargins(0, 0, 0, 0);
+    auto* scroll = new QScrollArea(this);
+    scroll->setObjectName("roomSessionScroll");
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    // The D3D surface intentionally does not create native ancestors. Give it
+    // a scrolling native parent and a native viewport so Windows moves and
+    // clips the swap-chain window with the Qt content.
+    scroll->viewport()->setAttribute(Qt::WA_NativeWindow);
+    auto* content = new QWidget;
+    content->setAttribute(Qt::WA_NativeWindow);
+    auto* layout = new QVBoxLayout(content);
+    scroll->setWidget(content);
+    pageLayout->addWidget(scroll);
     phase_ = new QLabel("Starting…"); phase_->setObjectName("roomPhase"); layout->addWidget(phase_);
     room_ = new QLabel; room_->setTextFormat(Qt::PlainText); room_->setTextInteractionFlags(Qt::TextSelectableByMouse); layout->addWidget(room_);
     roomLink_ = new QLineEdit; roomLink_->setReadOnly(true); roomLink_->setObjectName("roomLink"); layout->addWidget(roomLink_);
@@ -252,7 +266,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     layout->addWidget(gamepad_);
     gamepad_->SetVideo(video_);
     gamepad_->prepareGrant=[this](uint8_t caps){return session_.prepareInputGrant(caps);};
-    auto* controls = new QLabel("Input requires explicit consent. Window sharing permits mouse control only; source changes revoke control."); layout->addWidget(controls);
+    auto* controls = new QLabel("Input requires explicit consent. Window sharing permits mouse control only; source changes revoke control.");
+    controls->setWordWrap(true); layout->addWidget(controls);
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { session_.stop(); stop_->setEnabled(false); apply_->setEnabled(false); });
     connect(apply_, &QPushButton::clicked, this, [this] {

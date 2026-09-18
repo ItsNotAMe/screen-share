@@ -1,5 +1,13 @@
 # Shared-backend room UI
 
+Field check (2026-09-19): the laptop user confirmed that the GameSir is listed.
+The session page now scrolls on constrained-height displays. Its content and
+viewport have native window boundaries so the D3D video surface moves and clips
+with the page rather than covering the controls. The user confirmed the corrected
+scrolling on the deployed laptop build; the Release `room-v2-qt-ui` test passes.
+Controller detection alone does not establish remote button delivery or release;
+those physical checks remain pending.
+
 The existing join form now includes **Video decoding (when joining)**:
 Automatic (prefer hardware), or Software (compatibility). It saves only this
 local preference for future joins; it never changes the host's encoder or room
