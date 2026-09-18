@@ -1,5 +1,12 @@
 # Headless media checks
 
+For actual desktop/laptop 1080p hardware load, use the one-command SSH workflow in
+[HARDWARE-LAN.md](HARDWARE-LAN.md). It stages a hash-verified private test build,
+captures only a generated window, discards audio, validates actual codec paths
+and fresh pixels, and gathers per-machine resources. The five-minute media run
+passes; its laptop resource-growth finding remains open. This is not physical
+display/input timing, and no OS input is injected.
+
 Continuous displayed-image age is now part of fresh packet-impairment reports.
 The generated scene carries a frame ID and checksum through the real codec;
 the consumer also measures the age of an image held during a freeze. Run the

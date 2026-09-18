@@ -28,7 +28,8 @@ def main():
                ROOT / 'backend/media/webrtc/WindowsRoomRuntime.cpp', ROOT / 'backend/media/webrtc/WindowsRoomRuntime.h',
                ROOT / 'backend/codec/H264StreamDecoder.cpp', ROOT / 'backend/capture/DesktopCapturer.cpp',
                ROOT / 'backend/codec/H264StreamEncoder.cpp', ROOT / 'backend/media/webrtc/MfVideoEncoderFactory.cpp',
-               ROOT / 'backend/media/webrtc/MediaEngine.cpp', ROOT / 'backend/media/webrtc/MediaNetworkPolicy.h',
+                 ROOT / 'backend/media/webrtc/MediaEngine.cpp', ROOT / 'backend/media/webrtc/MediaNetworkPolicy.h',
+                 ROOT / 'tools/backend-comparison/ComparisonScene.h',
                ROOT / 'backend/media/webrtc/D3dVideoFrameBuffer.cpp', ROOT / 'backend/media/webrtc/D3dVideoFrameBuffer.h',
                ROOT / 'backend/media/capture/CaptureSession.cpp']
     report = {'schema': 1, 'passed': False, 'performanceAcceptancePassed': False,

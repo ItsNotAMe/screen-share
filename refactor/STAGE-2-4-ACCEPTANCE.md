@@ -3,6 +3,13 @@
 The requested scope is to finish Stages 2–4 before cutover or the later UI redesign.
 Implementation and locally reproducible evidence are separate from field acceptance.
 No unchecked physical requirement is waived by the unattended test run.
+
+Latest group: [HARDWARE-LAN.md](HARDWARE-LAN.md) verifies one actual desktop WGC
+host and laptop hardware decoder at 1080p60/12 Mbps for five minutes: 52.8 fresh
+FPS, no fallback and no invalid images. Resource sampling exposes laptop viewer
+growth (118→157 MiB median private memory; 645→833 median handles), so sustained
+resource acceptance remains open. Its cause and long-term bound are the next
+priority. This is not a physical GPU-display/input latency or four-viewer pass.
 The paired 1080p legacy/v2 workload is documented in COMPARISON.md. Its first matrix
 is superseded because an unpaced silent sink distorted CPU and synchronized-video
 measurements. Use the corrected paced-sink comparison and sender-pacing/timer fixes;
@@ -65,7 +72,7 @@ input-response checks now pass; see TWO-MACHINE.md for the exact scope.
 | --- | --- | --- |
 | 2: user experience | Normal-shell opt-in share/join, pushed directory, profiles, settings, capture/audio recovery, GPU receive, and redacted UI/CLI reports. Release/Debug headless matrices pass 12/12 each. | Physical audio formats/quality/unplug, source privacy/identity/HDR/adapters, supported-desktop DXGI and occlusion. Final legacy command/default cutover remains Stage 5. |
 | 3: gaming input | Consent, source-bound mapping, per-peer ownership, controllers, queues/watchdogs, neutralization, UI/CLI input diagnostics, recording-sink real-channel tests. | Physical mouse/keyboard confinement and foreground/UIPI behavior, XInput/PlayStation and virtual-driver/local-slot behavior; measured external input response. |
-| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, five strict collapse-settling runs plus four other packet cases, normal-load tuned legacy comparisons, bidirectional LAN software media/recovery through live TLS, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Original immediate capture-handle failure, sustained leak/unbounded-growth and full queue-age acceptance, hardware 1080p60 cross-machine load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched impaired-network comparison, actual billed usage/account headroom and production hibernation. Relative memory optimization is backlogged. |
+| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, five strict collapse-settling runs plus four other packet cases, normal-load tuned legacy comparisons, bidirectional LAN software media/recovery through live TLS, five-minute one-viewer desktop-to-laptop 1080p hardware delivery, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Laptop receiver memory/handle growth, original immediate capture-handle failure, sustained leak/unbounded-growth and full queue-age acceptance, four-viewer/other-direction hardware load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched impaired-network comparison, actual billed usage/account headroom and production hibernation. Relative memory optimization is backlogged. |
 
 ## Physical checks that cannot be replaced by this fixture
 

@@ -1,5 +1,10 @@
 # Two-machine room acceptance — 2026-09-18
 
+Follow-up on 2026-09-19: [HARDWARE-LAN.md](HARDWARE-LAN.md) adds real generated
+WGC capture at 1080p60 and verified hardware on both endpoints for five minutes.
+It passes delivery but exposes laptop resource growth. The smaller software
+lifecycle/rejoin and synthetic-input checks below remain separate evidence.
+
 The silent native scenario passes in both LAN directions: desktop host → laptop
 viewer and laptop host → desktop viewer. Both use the approved HTTPS/WSS service,
 the production RoomSession/NativeRoomRuntime, and software H.264/Opus endpoints.

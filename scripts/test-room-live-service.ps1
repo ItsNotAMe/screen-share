@@ -2,11 +2,12 @@ param(
     [Parameter(Mandatory=$true)][string]$Executable,
     [Parameter(Mandatory=$true)][string]$Origin,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
-    [ValidateSet('public-session', 'cli', 'cross-host', 'cross-viewer')][string]$Scenario = 'public-session',
+    [ValidateSet('public-session', 'cli', 'cross-host', 'cross-viewer', 'load-host', 'load-viewer')][string]$Scenario = 'public-session',
     [string]$RoomId,
-    [string]$ReadyFile
+    [string]$ReadyFile,
+    [ValidateRange(10,300)][int]$Seconds = 60
 )
-# Silent synthetic endpoints: no speaker output, screen capture or OS input.
+# Silent endpoints; load-host captures only its own generated window. No OS input.
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'RoomLiveEvidence.ps1')
 $uri = [Uri]$Origin
@@ -15,8 +16,8 @@ if (-not $uri.IsAbsoluteUri -or $uri.Scheme -ne 'https' -or $uri.UserInfo -or
     throw 'Supply an HTTPS service origin without credentials, path, query or fragment.'
 }
 $binary = (Resolve-Path -LiteralPath $Executable).Path
-if ($Scenario -eq 'cross-viewer' -and $RoomId -notmatch '^[A-Za-z0-9_-]{1,128}$') { throw 'Supply a valid room ID.' }
-if ($Scenario -eq 'cross-host') {
+if ($Scenario -in @('cross-viewer','load-viewer') -and $RoomId -notmatch '^[A-Za-z0-9_-]{1,128}$') { throw 'Supply a valid room ID.' }
+if ($Scenario -in @('cross-host','load-host')) {
     if (-not $ReadyFile -or $ReadyFile.Contains('"')) { throw 'Supply a readiness file path without quotes.' }
     $ReadyFile = [IO.Path]::GetFullPath($ReadyFile)
     if (Test-Path -LiteralPath $ReadyFile) { throw 'Readiness file already exists.' }
@@ -40,6 +41,12 @@ $process.StartInfo.Arguments = $report.origin
 if ($Scenario -eq 'cross-host') { $process.StartInfo.Arguments = 'host ' + $report.origin + ' "' + $ReadyFile + '"' }
 if ($Scenario -eq 'cross-viewer') { $process.StartInfo.Arguments = 'viewer ' + $report.origin + ' ' + $RoomId }
 if ($Scenario.StartsWith('cross-')) { $report.mediaScope = 'cross-machine scenario; endpoint placement recorded by launcher' }
+if ($Scenario.StartsWith('load-')) {
+    $report.mediaScope = 'generated 1080p WGC window to remote CPU pixel consumer; no physical latency'
+    $report.requestedSeconds = $Seconds
+    $argument = if ($Scenario -eq 'load-host') { '"' + $ReadyFile + '"' } else { $RoomId }
+    $process.StartInfo.Arguments = $Scenario + ' ' + $report.origin + ' ' + $argument + ' ' + $Seconds
+}
 $process.StartInfo.WorkingDirectory = Split-Path -Parent $binary
 $process.StartInfo.UseShellExecute = $false
 $process.StartInfo.CreateNoWindow = $true
@@ -50,7 +57,8 @@ try {
     if (-not $process.Start()) { throw 'Unable to start proof.' }
     $outTask = $process.StandardOutput.ReadToEndAsync()
     $errTask = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(120000)) {
+    $deadlineMs = if ($Scenario.StartsWith('load-')) { ($Seconds + 110) * 1000 } else { 120000 }
+    if (-not $process.WaitForExit($deadlineMs)) {
         $report.timedOut = $true
         $process.Kill()
         $process.WaitForExit()
@@ -62,6 +70,8 @@ try {
     $metrics = $stdout | ConvertFrom-Json
     $assertions = if ($Scenario -eq 'cli') {
         @('passed', 'cli_session', 'command_options', 'live_settings', 'bounded_presentation', 'silent_audio')
+    } elseif ($Scenario.StartsWith('load-')) {
+        @('passed', 'runtimeReleased')
     } elseif ($Scenario.StartsWith('cross-')) {
         @('passed', 'freshRejoin', 'runtimeReleased', 'productionTls')
     } else {
@@ -71,6 +81,7 @@ try {
     foreach ($name in $assertions) {
         if ($metrics.$name -isnot [bool] -or $metrics.$name -ne $true) { throw "Missing/failed assertion: $name" }
     }
+    if ($Scenario.StartsWith('load-')) { Assert-RoomLoadEvidence $metrics $Scenario.Substring(5) $Seconds }
     if ($Scenario -eq 'public-session' -and
         ($metrics.diagnostic_plaintext -isnot [bool] -or $metrics.diagnostic_plaintext -ne $false -or
         $metrics.viewers -ne 4 -or $metrics.decoded_frames -lt 180)) {

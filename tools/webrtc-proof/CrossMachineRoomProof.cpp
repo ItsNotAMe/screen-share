@@ -6,6 +6,7 @@
 #include <QSaveFile>
 #include <QSslSocket>
 #include <QUrl>
+#include "CrossMachineLoadProof.h"
 
 namespace {
 // Actual room/media transport; all endpoints remain synthetic and silent.
@@ -160,12 +161,18 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
-        Check(argc == 4);
+        Check(argc == 4 || argc == 5);
         const QUrl origin(QString::fromUtf8(argv[2]));
         Check(origin.isValid() && origin.scheme() == "https" && !origin.host().isEmpty() && origin.userInfo().isEmpty() &&
             !origin.hasQuery() && !origin.hasFragment() && (origin.path().isEmpty() || origin.path() == "/") && QSslSocket::supportsSsl());
         const std::string role = argv[1];
-        if (role == "host") Host(argv[2], QString::fromUtf8(argv[3]));
+        if (role == "load-host" || role == "load-viewer") {
+            Check(argc == 5);
+            bool valid = false; const int seconds = QString::fromUtf8(argv[4]).toInt(&valid); Check(valid);
+            const auto metrics = loadproof::Run(role == "load-host", argv[2], QString::fromUtf8(argv[3]), seconds);
+            Print(metrics); Check(metrics["passed"].toBool());
+        }
+        else if (role == "host") { Check(argc == 4); Host(argv[2], QString::fromUtf8(argv[3])); }
         else { Check(role == "viewer"); Viewer(argv[2], argv[3]); }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL(); return result;

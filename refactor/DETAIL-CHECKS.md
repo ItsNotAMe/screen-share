@@ -4,6 +4,15 @@ Last reconciled: 2026-09-19 (including congestion-window settling, continuous di
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+Two-machine hardware acceptance: [HARDWARE-LAN.md](HARDWARE-LAN.md) records a
+five-minute real WGC desktop host → laptop hardware decoder run at 52.8 fresh
+1080p FPS, with zero fallback/invalid images. The silent runner verifies endpoint
+placement and binary/validator hashes and preserves failed runs. Hardware delivery
+passes; laptop private-memory/handle growth remains an explicit resource issue,
+not a waived memory optimization. Next isolate that trend before claiming
+sustained stability. Physical presentation/input, four-viewer remote hardware,
+Internet/NAT and device acceptance remain separate.
+
 Latest congestion follow-up: [CONGESTION-WINDOW.md](CONGESTION-WINDOW.md).
 The retained policy uses upstream RTT-aware bitrate pushback with 50 ms
 additional in-flight allowance instead of 350 ms; default loss/delay estimators,

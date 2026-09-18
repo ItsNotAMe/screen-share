@@ -133,10 +133,12 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     shutil.copyfile(__file__, args.output / 'runner-source.py')
     shutil.copyfile(ROOT / 'tools/backend-comparison/BackendComparison.cpp', args.output / 'benchmark-source.cpp')
+    shutil.copyfile(ROOT / 'tools/backend-comparison/ComparisonScene.h', args.output / 'ComparisonScene.h')
     digest = sha(executable)
     report = {'schema': 1, 'passed': False, 'legacyComparisonComplete': False,
               'executableSha256': digest, 'runnerSha256': sha(pathlib.Path(__file__)),
               'sourceSha256': sha(ROOT / 'tools/backend-comparison/BackendComparison.cpp'),
+              'sceneSha256': sha(ROOT / 'tools/backend-comparison/ComparisonScene.h'),
               'gitCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
               'runs': [], 'summary': {}, 'limitations': [
                   'Same-process local transport, not two-machine/NAT or physical display/input latency',

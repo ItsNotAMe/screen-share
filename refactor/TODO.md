@@ -15,6 +15,16 @@ Backend feature scope is frozen for closeout. Finish these groups in order:
 
 Do not add unrelated backend features or repeat completed v2-only harness work.
 
+Latest acceptance group (2026-09-19): [HARDWARE-LAN.md](HARDWARE-LAN.md) passes
+five-minute desktop-to-laptop 1080p60 hardware delivery at 52.8 fresh FPS, with
+zero fallback/invalid images. The new one-command runner stages and verifies the
+exact build and collects both machines' evidence silently. **Next priority is
+laptop receiver resource growth**: private-memory medians rise 118→157 MiB and
+handle medians 645→833 during that run. Hardware delivery is accepted; sustained
+resources are not. This is separate from relative footprint optimization in
+BACKLOG.md. After attribution/validation, continue the physical/device/network
+requirements rather than repeating the completed normal-load comparisons.
+
 The first paired comparison is superseded: its custom unpaced silent sink distorted
 CPU and synchronized-video measurements (COMPARISON.md). Use the corrected shared
 paced sink and repeat the comparisons. Default-pacing high-motion sender delay

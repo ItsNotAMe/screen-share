@@ -31,6 +31,7 @@ def main():
     # distinguishable from the preceding baseline at the same git commit.
     source_hashes = {}
     for relative in (
+        'tools/backend-comparison/ComparisonScene.h',
         'backend/core/ShortWait.h', 'backend/codec/HardwareFrameWait.h',
         'backend/codec/H264StreamEncoder.cpp', 'backend/codec/H264StreamEncoder.h',
         'backend/codec/H264StreamDecoder.cpp', 'backend/codec/H264StreamDecoder.h',
