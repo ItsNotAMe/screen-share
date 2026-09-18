@@ -426,7 +426,7 @@ int main(int argc, char** argv) {
             else Require(metrics["uniqueMarkers"].toInt() >= seconds * 5 && metrics["invalidMarkers"].toInt() <= metrics["frames"].toInt() / 20, "Insufficient valid generated-scene delivery");
         }
         result["receivers"] = received; result["resourceSamples"] = resourceSamples;
-        if (trace) result["pipelineStages"] = trace->End();
+        if (trace) { result["pipelineStages"] = trace->End(); result["encoderControlTrace"] = trace->Control(); }
         result["sourceUpdates"] = int(scene.count() - sourceBefore); result["measuredSeconds"] = elapsed;
         if (!rooms.empty()) {
             const auto state = rooms.front()->Status();

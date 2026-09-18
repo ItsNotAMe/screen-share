@@ -34,6 +34,7 @@ public:
     }
     uint64_t readbackCount() const noexcept { return readbackCount_; }
     uint64_t readbackMicroseconds() const noexcept { return readbackMicroseconds_; }
+    uint64_t readbackStagingAllocations() const noexcept { return readbackStagingAllocations_; }
     uint64_t scalingFailures() const noexcept { return scalingFailures_; }
     unsigned maximumPendingScales() const noexcept { return maximumPendingScales_; }
 private:
@@ -43,6 +44,10 @@ private:
     std::unique_ptr<webrtc::Thread> owner_;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
+    // Only the serialized owner uses this scratch texture; published pixels
+    // remain independently owned. Keep one size, not an unbounded size cache.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> readbackStaging_;
+    std::atomic<uint64_t> readbackStagingAllocations_{0};
     std::atomic<uint64_t> readbackCount_{0}, readbackMicroseconds_{0};
     std::atomic<bool> retired_{false};
     std::unique_ptr<D3dNv12Scaler> scaler_;

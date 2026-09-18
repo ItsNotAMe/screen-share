@@ -164,6 +164,11 @@ void ConfigureLowLatencyEncoderOptions(IMFTransform* transform, const H264Stream
     }
 
     TrySetCodecApiBool(codecApi.Get(), CODECAPI_AVLowLatencyMode, true);
+    // Our output profile is High. The inbox software default disables CABAC,
+    // wasting the constrained real-time budget on dense motion and forcing the
+    // transport controller to drop frames. Keep hardware's existing policy.
+    if (config.backend == H264StreamEncoderBackend::Software)
+        TrySetCodecApiBool(codecApi.Get(), CODECAPI_AVEncH264CABACEnable, true);
     TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncCommonMeanBitRate, config.bitrate);
     TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncMPVDefaultBPictureCount, 0);
     if (config.keyframeIntervalFrames > 0) {
@@ -748,6 +753,8 @@ bool H264StreamEncoder::TryUpdateBitrate(uint32_t bitrate)
     if (!transform_ || bitrate == 0) {
         return false;
     }
+
+    if (config_.bitrate == bitrate) return true;
 
     Microsoft::WRL::ComPtr<ICodecAPI> codecApi = QueryCodecApi(transform_.Get());
     if (!codecApi) {

@@ -63,6 +63,7 @@ D3dVideoDevice::~D3dVideoDevice() {
     // The scaler owns only free-threaded D3D COM references and bookkeeping;
     // destruction after the join performs no immediate-context operations.
     scaler_.reset();
+    readbackStaging_.Reset();
     context_.Reset(); device_.Reset();
 }
 webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::UploadNv12(int width, int height, std::span<const uint8_t> pixels) {
@@ -92,17 +93,24 @@ webrtc::scoped_refptr<webrtc::I420BufferInterface> D3dVideoDevice::Readback(ID3D
         description.Usage = D3D11_USAGE_STAGING;
         description.BindFlags = description.MiscFlags = 0;
         description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        Microsoft::WRL::ComPtr<ID3D11Texture2D> staging;
-        Check(device_->CreateTexture2D(&description, nullptr, &staging));
+        D3D11_TEXTURE2D_DESC current{};
+        if (readbackStaging_) readbackStaging_->GetDesc(&current);
+        if (!readbackStaging_ || current.Width != description.Width || current.Height != description.Height ||
+            current.Format != description.Format) {
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> staging;
+            Check(device_->CreateTexture2D(&description, nullptr, &staging));
+            readbackStaging_ = std::move(staging);
+            ++readbackStagingAllocations_;
+        }
         auto output = webrtc::I420Buffer::Create(width, height);
-        context_->CopyResource(staging.Get(), texture);
+        context_->CopyResource(readbackStaging_.Get(), texture);
         D3D11_MAPPED_SUBRESOURCE mapped{};
-        Check(context_->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped));
+        Check(context_->Map(readbackStaging_.Get(), 0, D3D11_MAP_READ, 0, &mapped));
         const auto* y = static_cast<const uint8_t*>(mapped.pData);
         const int result = libyuv::NV12ToI420(y, mapped.RowPitch, y + size_t(mapped.RowPitch) * height,
             mapped.RowPitch, output->MutableDataY(), output->StrideY(), output->MutableDataU(), output->StrideU(),
             output->MutableDataV(), output->StrideV(), width, height);
-        context_->Unmap(staging.Get(), 0);
+        context_->Unmap(readbackStaging_.Get(), 0);
         if (result != 0) throw std::runtime_error("GPU NV12 readback conversion failed");
         ++readbackCount_;
         readbackMicroseconds_ += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count();

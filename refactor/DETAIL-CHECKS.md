@@ -13,8 +13,8 @@ gates remain separate from local image-consumer evidence.
 The fairness follow-up also ports the precise frame/WGC waits and single-frame
 hardware output deadline to legacy, removing its raw encoder queue. Keep the
 pre-fix hardware symptom baseline separate from the updated codec controls in
-COMPARISON.md and HARDWARE-ENCODING.md. V2 hardware's local CPU advantage does not
-waive its latency gap against tuned legacy or software-fallback throughput.
+COMPARISON.md and HARDWARE-ENCODING.md. The local CPU advantage did not waive
+the latency/software-throughput deficits investigated in the follow-ups below.
 
 Capture/decoder attribution: [CAPTURE-LATENCY.md](CAPTURE-LATENCY.md) records
 matched capture-only measurements and codec-stage traces. Both backends already
@@ -24,6 +24,16 @@ H264 and verifies the correctly typed low-latency property. The retained-frame
 regression requires immediate output rather than accepting a frame left pending
 until the next input. New fair controls in COMPARISON.md include this fix on
 both backends; shared improvements are not exclusive architectural wins.
+
+Software-throughput follow-up: [SOFTWARE-THROUGHPUT.md](SOFTWARE-THROUGHPUT.md)
+records shared CABAC, stable encoder cadence, bounded readback staging and the
+rejected rate-control experiments. The latest sixteen fair controls restore v2
+software delivery to 52.9/48.2 fresh FPS at one/four viewers, and favor v2 local
+image age in all four configuration groups. Hardware CPU is 52–62% below tuned
+legacy. Four-viewer software CPU/memory and hardware memory still exceed legacy;
+keep these resource gates open. Earlier software FPS and latency deficits above
+are historical, not the latest comparative result. Full-color/matched-bitrate,
+GPU presentation, game load, congestion and physical latency gates remain.
 
 Laptop continuation: real two-PC video/resize was confirmed by the user, exposing
 a logical/native pixel sizing mismatch behind misleading busy/presentation counts.

@@ -210,7 +210,31 @@ void Run() {
     Require(heldLifetime.expired(), "Released frame retained its GPU owner thread");
 }
 }
+void ReadbackReuse() {
+    using namespace screenshare::media;
+    auto device = std::make_shared<D3dVideoDevice>();
+    std::vector<webrtc::scoped_refptr<webrtc::I420BufferInterface>> retained;
+    for (unsigned i = 0; i < 12; ++i) {
+        std::vector<uint8_t> pixels(640 * 360 * 3 / 2, 128);
+        std::fill_n(pixels.begin(), 640 * 360, uint8_t(40 + i));
+        auto frame = device->UploadNv12(640, 360, pixels);
+        retained.push_back(frame->ToI420());
+        Require(bool(retained.back()), "Readback failed");
+    }
+    Require(device->readbackCount() == 12 && device->readbackStagingAllocations() == 1,
+        "Same-size readback allocates staging resources per frame");
+    for (unsigned i = 0; i < retained.size(); ++i)
+        Require(retained[i]->DataY()[0] == 40 + i && retained[i]->DataU()[0] == 128,
+            "Reusing scratch texture overwrote retained pixels");
+    for (int width : {320, 640}) {
+        const int height = width * 9 / 16;
+        std::vector<uint8_t> pixels(size_t(width) * height * 3 / 2, 128);
+        Require(bool(device->UploadNv12(width, height, pixels)->ToI420()), "Resized readback failed");
+    }
+    Require(device->readbackStagingAllocations() == 3, "Readback size replacement is not bounded");
+    std::cout << "Readback scratch reuse, size replacement and immutable pixel ownership passed.\n";
+}
 int main() {
-    try { Run(); return 0; }
+    try { ReadbackReuse(); Run(); return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

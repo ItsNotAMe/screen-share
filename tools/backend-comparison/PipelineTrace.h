@@ -4,6 +4,7 @@
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "rtc_base/time_utils.h"
 #include <QJsonObject>
+#include <QJsonArray>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -18,8 +19,17 @@ struct PipelineTrace {
     std::mutex mutex;
     bool enabled = false;
     std::map<uint32_t, Frame> frames;
+    QJsonArray rates;
+    int encodedFrames = 0, keyframes = 0;
+    double began = 0;
     static double Now() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
-    void Begin() { std::lock_guard lock(mutex); frames.clear(); enabled = true; }
+    void Begin() { std::lock_guard lock(mutex); frames.clear(); rates = {}; encodedFrames = keyframes = 0; began = Now(); enabled = true; }
+    void Rate(uint32_t bitrate, double fps) {
+        std::lock_guard lock(mutex);
+        if (enabled && rates.size() < 256) rates.append(QJsonObject{{"atMs", Now() - began}, {"bitrate", double(bitrate)}, {"fps", fps}});
+    }
+    void Output(bool keyframe) { std::lock_guard lock(mutex); if (enabled) { ++encodedFrames; keyframes += keyframe; } }
+    QJsonObject Control() { std::lock_guard lock(mutex); return {{"encodedFrames", encodedFrames}, {"keyframes", keyframes}, {"rates", rates}}; }
     void Record(Stage stage, uint32_t rtp, double handoffMs = 0) {
         const double now = Now();
         std::lock_guard lock(mutex);
@@ -65,11 +75,13 @@ public:
         trace_->Record(PipelineTrace::EncoderInput, frame.rtp_timestamp(), (webrtc::TimeMicros() - frame.timestamp_us()) / 1000.0);
         return inner_->Encode(frame, types);
     }
-    void SetRates(const RateControlParameters& rates) override { inner_->SetRates(rates); }
+    void SetRates(const RateControlParameters& rates) override { trace_->Rate(rates.bitrate.get_sum_bps(), rates.framerate_fps); inner_->SetRates(rates); }
     EncoderInfo GetEncoderInfo() const override { return inner_->GetEncoderInfo(); }
 private:
     Result OnEncodedImage(const webrtc::EncodedImage& image, const webrtc::CodecSpecificInfo* info) override {
-        trace_->Record(PipelineTrace::Encoded, image.RtpTimestamp()); return callback_->OnEncodedImage(image, info);
+        trace_->Record(PipelineTrace::Encoded, image.RtpTimestamp());
+        trace_->Output(image._frameType == webrtc::VideoFrameType::kVideoFrameKey);
+        return callback_->OnEncodedImage(image, info);
     }
     void OnFrameDropped(uint32_t rtp, int layer, bool last) override { callback_->OnFrameDropped(rtp, layer, last); }
 };

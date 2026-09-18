@@ -13,6 +13,12 @@ v2 now use the complete-picture subtype and a verified low-latency property.
 COMPARISON.md contains the newer fair controls. Numbers below describe the
 earlier encoder investigation and are preserved as historical evidence.
 
+The subsequent [software throughput fix](SOFTWARE-THROUGHPUT.md) enables CABAC
+in the shared software encoder, stabilizes cadence changes and reuses readback
+staging. Use COMPARISON.md's latest matrix for the updated hardware/software
+choice; the historical 36–37 FPS software result below is no longer current.
+Hardware recovery remains enabled, and software remains a tested fallback.
+
 ## Reproduced legacy delay before portable fixes
 
 At 1080p with a 60 FPS / 12 Mbps ceiling, tuned legacy hardware measures

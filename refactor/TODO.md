@@ -24,18 +24,27 @@ favors v2 on image age and CPU, but does not isolate architecture from hardware
 codec/timer/pacing choices. Portable precise waits and the single-submission
 hardware deadline are now shared with legacy; its old raw encoder queue is
 removed. Use the updated controls in COMPARISON.md / HARDWARE-ENCODING.md.
-Prioritize the measured v2 latency gap against improved legacy, software-fallback
-throughput and four-viewer memory, then normal GPU/two-PC resource and physical
-acceptance. Do not rebuild the comparison harness or claim an architectural win
-from fixes that also improve legacy.
+The latency and software-throughput follow-ups below resolve the main reference
+delivery regressions. Prioritize four-viewer resources, then normal GPU/two-PC
+and physical acceptance. Do not rebuild the comparison harness or claim an
+architectural win from fixes that also improve legacy.
 
 Capture decision completed: retain the already-shared `DesktopCapturer` behind
 v2's modular owned-frame interface. Capture-only measurements did not reproduce
 the whole-pipeline gap. Codec-stage traces instead found a retained decoder
 frame; the complete-picture input and verified low-latency fix are shared with
 legacy. See CAPTURE-LATENCY.md and the newest COMPARISON.md scorecard. Continue
-software delivery, four-viewer memory and the existing acceptance gates without
+four-viewer resources and the existing acceptance gates without
 reopening the capture rewrite merely from whole-pipeline latency numbers.
+
+Software-throughput group completed: shared software CABAC, stable cadence and
+bounded GPU readback scratch restore reference delivery to 52.9/48.2 fresh FPS
+for one/four v2 viewers. All sixteen fair controls pass with CABAC in legacy too;
+hardware v2 now has lower local image age and CPU than tuned hardware legacy.
+See SOFTWARE-THROUGHPUT.md and COMPARISON.md. Next measured resource issue:
+four software viewers still use 43% more CPU and 85% more private memory than
+legacy; four hardware viewers use 31% more private memory. Keep resource,
+congestion and physical acceptance open before cutover/frontend redesign.
 
 Current priority: finish Stage 2–4, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).

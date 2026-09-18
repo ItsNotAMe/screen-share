@@ -109,7 +109,13 @@ public:
                 // by RateControlParameters. Clamp before integer conversion.
                 const double targetFps = std::isfinite(rates.framerate_fps) && rates.framerate_fps > 0
                     ? rates.framerate_fps : double(maximumFps_);
-                const int fps = static_cast<int>(std::round(std::clamp(targetFps, 1.0, 60.0)));
+                const int requestedFps = static_cast<int>(std::round(std::clamp(targetFps, 1.0, 60.0)));
+                // This is WebRTC's measured input cadence, not a new user FPS
+                // setting. Restarting MF on 54/55 FPS jitter discards rate-control
+                // history and emits unnecessary IDRs. Real cadence changes still
+                // reconfigure; capture/WebRTC continue to enforce the user cap.
+                const int fps = std::abs(requestedFps - config_.fps) >= std::max(3, config_.fps / 10)
+                    ? requestedFps : config_.fps;
                 const bool restart = !encoder_->isRunning() || fps != config_.fps;
                 config_.fps = fps;
                 config_.bitrate = bitrate;

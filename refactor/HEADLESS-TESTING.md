@@ -1159,6 +1159,18 @@ for the capture decision and the shared complete-picture decoder fix.
 `MfDecoderAdapterTest` now requires immediate output for every complete frame,
 including across CPU/GPU resize and reset; successful drain alone cannot pass.
 
+Software-throughput diagnostics add bounded `encoderControlTrace` rate/FPS and
+keyframe records to `--case codecs`. Run `MfCodecProbe --rates` for the direct
+1080p60 software codec's 12/6/3/12 Mbps assignments; an optional second argument
+writes only its generated H264 scene. Its bitrate is measured against the codec
+timeline, not network delivery, and successful completion does not certify a
+hard bitrate ceiling. See [SOFTWARE-THROUGHPUT.md](SOFTWARE-THROUGHPUT.md).
+The encoder lifecycle test parses the actual software PPS to require CABAC,
+rejects transform restarts for small FPS jitter, and requires a keyframe on a
+real 60-to-30 change. GPU fallback/lifetime tests verify twelve readbacks reuse
+one staging allocation, retained images stay unchanged, and resizing replaces
+the scratch texture instead of accumulating a cache. All remain silent.
+
 Run WGC/live-admission comparisons with access to the active Windows capture
 desktop and authorized test service. A restricted process can build and pass
 component tests while failing WGC activation or room admission. Preserve those

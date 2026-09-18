@@ -1,18 +1,62 @@
 # Before/after validation scorecard
 
-Status: **Capture is retained; a shared decoder fix substantially reduces latency.
-V2 is not yet a demonstrated overall performance improvement over improved legacy.**
-The original corrected matrix compared software/default-paced legacy against
-hardware-preferred Gaming v2. The final controls compare both encoder choices
-after giving legacy the portable timer, sender-mode, hardware-queue and decoder
-fixes. Legacy remains faster with one viewer; hardware results are close with
-four. V2 hardware uses less CPU, but neither that nor the original matrix proves
-an intrinsic architectural advantage. Full physical/network/resource acceptance
-remains open.
+Status: **Retain modular capture. V2 now has lower local image age in all four
+matched configuration groups, and hardware uses substantially less CPU.
+Four-viewer resources and physical/network acceptance remain open.** Legacy
+receives the portable timer, sender-mode, hardware-queue, decoder and software
+CABAC fixes too. These are measured workload results, not a universal
+architectural win or permission to waive the remaining acceptance gates.
 User requested comparative validation as part of B on 2026-09-15. Passing a
 component test or Gate A is not a comparative performance result.
 
-## Latest scorecard — complete-picture decoder on both backends
+## Latest scorecard — software efficiency and bounded readback allocation
+
+All **16 new uninstrumented runs** pass workload and actual-codec validation.
+Both backends receive shared software CABAC and unchanged-bitrate fixes. V2
+additionally preserves codec history across small input-cadence changes and
+reuses its GPU readback staging allocation. See
+[SOFTWARE-THROUGHPUT.md](SOFTWARE-THROUGHPUT.md) for diagnosis and rejected experiments.
+
+| Variant | Viewers | Image-age p95 ms | Fresh-marker FPS | CPU, one-core % | Private MiB |
+|---|---:|---:|---:|---:|---:|
+| Improved legacy software | 1 | 46.0 | 51.5 | 181.4 | 437.1 |
+| Improved legacy hardware | 1 | 43.0 | 53.0 | 53.6 | 333.8 |
+| V2 software | 1 | 29.6 | 52.9 | 141.6 | 306.5 |
+| V2 hardware | 1 | 27.8 | 52.9 | 25.7 | 244.3 |
+| Improved legacy software | 4 | 48.8 | 49.6 | 391.9 | 500.5 |
+| Improved legacy hardware | 4 | 48.2 | 51.5 | 262.3 | 397.6 |
+| V2 software | 4 | 40.7 | 48.2 | 559.3 | 923.7 |
+| V2 hardware | 4 | 30.8 | 52.1 | 99.4 | 522.4 |
+
+Same 1080p, 60 FPS / 12 Mbps ceilings, generated motion, five-second warmup,
+twenty-second measurement, forward/reverse order and requested timer policy.
+Each cell is the median of two runs; image age uses each run's worst viewer.
+CPU covers host plus receivers, minus the scene thread, and is not GPU load.
+Image age ends at CPU consumption, not physical display. Equal configured
+ceilings are not equal measured bitrate or identical codec/decoder scheduling.
+
+**Verdict:** hardware v2 is approximately 35–36% lower in local image age and
+52–62% lower in measured CPU than improved hardware legacy, at similar fresh
+delivery. Software v2 rises from 36.7/35.9 to 52.9/48.2 fresh FPS for one/four
+viewers; local image age falls from 61.1/65.8 to 29.6/40.7 ms. Keep the modular
+capture/ownership wrapper; these fixes do not require reverting it.
+
+**Remaining tradeoff:** four software viewers use about 43% more CPU and 85%
+more private memory than software legacy. Four hardware viewers use about 31%
+more private memory than hardware legacy. V2 has independent per-peer encoders
+and GPU decoders; legacy shares an encoder and decodes in software. Bounded
+readback scratch reuse removes allocation churn, but does not close total-memory
+acceptance. Do not present all modes as better on every metric.
+
+Sampled luma PSNR is 26.1/26.3 dB for v2 software versus legacy's 26.7/26.8,
+and 28.0/28.0 for v2 hardware versus 28.2/28.2. These samples do not establish
+equal full-color quality at matched actual bitrate. Raw controls are preserved
+in `build/software-memory-fair`; compact evidence is in
+[software-throughput-2026-09-18.json](evidence/software-throughput-2026-09-18.json).
+Normal GPU presentation, game load, sustained resources, congestion latency and
+physical image/input acceptance remain open before default cutover.
+
+## Earlier scorecard — complete-picture decoder on both backends
 
 All **16 new uninstrumented runs** pass workload and codec validation. The
 workload and alternating order below are unchanged. Both backends now use

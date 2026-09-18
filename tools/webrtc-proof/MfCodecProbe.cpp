@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -13,6 +14,39 @@ void Require(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
 }
 
+void ProbeRates(const char* dump = nullptr) {
+    std::ofstream output;
+    if (dump) { output.open(dump, std::ios::binary); Require(bool(output), "Rate dump open failed"); }
+    screenshare::H264StreamEncoder encoder;
+    screenshare::H264StreamEncoderConfig config;
+    config.width = 1920; config.height = 1080; config.fps = 60; config.bitrate = 12'000'000;
+    encoder.Start(config);
+    screenshare::CapturedFrame frame; frame.width = frame.sourceWidth = config.width;
+    frame.height = frame.sourceHeight = config.height;
+    frame.nv12Pixels.assign(size_t(config.width) * config.height * 3 / 2, std::byte{128});
+    unsigned id = 0;
+    auto next = std::chrono::steady_clock::now();
+    for (uint32_t rate : {12'000'000u, 6'000'000u, 3'000'000u, 12'000'000u}) {
+        Require(encoder.TryUpdateBitrate(rate), "Software rate assignment rejected");
+        uint64_t bytes = 0; unsigned keys = 0;
+        for (unsigned i = 0; i < 180; ++i) {
+            ++id;
+            for (int y = 0; y < config.height; ++y) for (int x = 0; x < config.width; ++x) {
+                const unsigned hash = (unsigned(x / 8) * 73856093u) ^ (unsigned(y / 8) * 19349663u) ^ (id * 83492791u);
+                frame.nv12Pixels[size_t(y) * config.width + x] = std::byte(30 + (hash ^ (hash >> 13)) % 196);
+            }
+            const auto packets = encoder.EncodeFrame(frame);
+            Require(packets.size() == 1, "Software rate probe retained output");
+            if (dump) output.write(reinterpret_cast<const char*>(packets.front().bytes.data()), packets.front().bytes.size());
+            if (i >= 60) { bytes += packets.front().bytes.size(); keys += packets.front().isKeyframe; }
+            next += std::chrono::microseconds(16'667);
+            std::this_thread::sleep_until(next);
+        }
+        std::cout << "scope=codec-timeline assigned_bps=" << rate << " measured_bps=" << bytes * 8 / 2
+            << " measured_frames=120 keyframes=" << keys << std::endl;
+    }
+    if (dump) { output.flush(); Require(bool(output), "Rate dump write failed"); }
+}
 void Probe(bool hardware) {
     using Clock = std::chrono::steady_clock;
     constexpr int width = 640;
@@ -103,6 +137,10 @@ void Probe(bool hardware) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc >= 2 && std::string(argv[1]) == "--rates") {
+            Require(argc <= 3, "Usage: MfCodecProbe --rates [generated.h264]");
+            ProbeRates(argc == 3 ? argv[2] : nullptr); return 0;
+        }
         Probe(argc == 2 && std::string(argv[1]) == "--hardware");
         return 0;
     } catch (const std::exception& error) {

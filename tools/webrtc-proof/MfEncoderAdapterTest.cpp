@@ -6,6 +6,7 @@
 #include "api/video/i420_buffer.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "common_video/h264/h264_common.h"
+#include "common_video/h264/pps_parser.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -94,7 +95,7 @@ void Run(bool useHardware, bool gpuInput) {
         Rate(*encoder, 400'000);
         Require(sink.images.back()._frameType == webrtc::VideoFrameType::kVideoFrameKey, "Keyframe request lost");
         Require(sink.images.back().PlayoutDelay() == webrtc::VideoPlayoutDelay(webrtc::TimeDelta::Millis(10), webrtc::TimeDelta::Millis(10)), "Gaming playout policy lost");
-        bool foundSps = false;
+        bool foundSps = false, foundCabac = false;
         const auto& key = sink.images.back();
         for (const auto& nalu : webrtc::H264::FindNaluIndices(std::span(key.data(), key.size()))) {
             if (nalu.payload_size >= 4 && (key.data()[nalu.payload_start_offset] & 31) == 7) {
@@ -102,8 +103,13 @@ void Run(bool useHardware, bool gpuInput) {
                 Require(sps[1] == 100 && sps[3] <= 42, "Encoded SPS exceeds negotiated High level 4.2");
                 foundSps = true;
             }
+            if (nalu.payload_size > 1 && (key.data()[nalu.payload_start_offset] & 31) == 8) {
+                const auto pps = webrtc::PpsParser::ParsePps(std::span(key.data() + nalu.payload_start_offset + 1, nalu.payload_size - 1));
+                foundCabac = pps && pps->entropy_coding_mode_flag;
+            }
         }
         Require(foundSps, "Requested keyframe omitted SPS");
+        Require(useHardware || foundCabac, "Software High-profile output did not enable CABAC");
         Require(sink.images.back().RtpTimestamp() == 100 && sink.images.back().NtpTimeMs() == 123456,
             "Encoder timestamps lost");
         {
@@ -133,6 +139,34 @@ void Run(bool useHardware, bool gpuInput) {
     Require(!hardware || (!hardware->quarantined && hardware->hardwareFrames == 12), "Hardware lifecycle lost frames or failed");
     Require(!gpuInput || hardware->device->readbackCount() == 0, "Owned GPU encoding performed CPU readback");
     std::cout << "MF encoder: zero-rate/resume, keyframe, 100-frame burst coalescing and three reset/release cycles passed.\n";
+}
+void StableFrameRate(bool useHardware) {
+    auto hardware = useHardware ? std::make_shared<screenshare::media::MfHardwareSession>(
+        std::make_shared<screenshare::media::D3dVideoDevice>()) : nullptr;
+    screenshare::media::MfVideoEncoderFactory factory(hardware);
+    auto encoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    Sink sink;
+    struct Cleanup { webrtc::VideoEncoder& encoder; ~Cleanup() { encoder.Release(); } } cleanup{*encoder};
+    webrtc::VideoCodec codec; codec.codecType = webrtc::kVideoCodecH264;
+    codec.width = 640; codec.height = 360; codec.maxFramerate = 60; codec.startBitrate = 1000;
+    Require(encoder->InitEncode(&codec, {webrtc::VideoEncoder::Capabilities(false), 2, 1200}) == 0,
+        "Stable cadence initialization failed");
+    encoder->RegisterEncodeCompleteCallback(&sink);
+    unsigned timestamp = 0;
+    for (double fps : {60.0, 59.0, 58.0, 60.0, 30.0, 29.0, 31.0}) {
+        webrtc::VideoBitrateAllocation allocation; allocation.SetBitrate(0, 0, 1000000);
+        encoder->SetRates({allocation, fps});
+        Require(encoder->Encode(Frame(++timestamp), nullptr) == 0, "Stable cadence encode failed");
+        sink.Wait(timestamp);
+        // SetRates is a worker barrier; output cannot still be mutating here.
+        encoder->SetRates({allocation, fps});
+        const bool mustBeKey = timestamp == 1 || timestamp == 5;
+        Require((sink.images.back()._frameType == webrtc::VideoFrameType::kVideoFrameKey) == mustBeKey,
+            "FPS jitter restarted codec or real cadence change lost IDR");
+    }
+    Require(!useHardware || encoder->GetEncoderInfo().is_hardware_accelerated,
+        "Stable cadence test unexpectedly fell back");
+    std::cout << "Small FPS variation preserves codec history; 60-to-30 change emits IDR.\n";
 }
 void UnavailableFrameRate() {
     screenshare::media::MfVideoEncoderFactory factory;
@@ -176,6 +210,7 @@ int main(int argc, char** argv) {
         }
         Require(!gpuInput || hardware, "--gpu-input requires --hardware");
         if (!hardware) UnavailableFrameRate();
+        StableFrameRate(hardware);
         proof::LifecycleSample(0, 0);
         for (int cycle = 1; cycle <= cycles; ++cycle) {
             const auto started = std::chrono::steady_clock::now();
