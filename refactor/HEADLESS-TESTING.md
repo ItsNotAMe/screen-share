@@ -1120,6 +1120,21 @@ driver failures, end-to-end latency and the earlier intermittent timeout cause
 remain open; local renderer counters do not close those gates.
 ## Stage 2–4 unattended closeout additions — 2026-09-18
 
+### Paired legacy/v2 comparison
+
+Build the `BackendComparison` Release target and run `scripts/compare-backends.py`;
+the exact command and measurement boundaries are in COMPARISON.md. It captures
+only an owned generated window, injects no input, and emits no audio. It needs
+an active Windows capture desktop but no mouse/keyboard interaction. The runner
+uses fresh processes, bounded deadlines, preserved failed logs, alternating
+backend order and strict workload/measurement validation. The default is 24
+short runs across three scenes and one/four viewers. `backend-comparison-evidence`
+tests reject mismatched settings, incomplete samples and unsupported conclusions.
+
+Do not call its scene-to-CPU-consumer age physical display latency. CPU readback,
+codec defaults, configured ceilings versus measured bitrate and source update
+rates are explicit comparison boundaries, not hidden normalization assumptions.
+
 Release/Debug `stage23-final-*/result.json` pass **12/12 each**, including input
 pressure/timing and redacted report export. See SESSION-REPORTS.md.
 `network-timestamps-{release,debug}/result.json` pass **6/6 each** with encrypted

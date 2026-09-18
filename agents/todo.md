@@ -6,6 +6,12 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — grouped delivery work
 
+Feature scope is frozen for backend closeout. The matched 24-run 1080p legacy/v2
+matrix now exists and is collected; see refactor/COMPARISON.md. Prioritize the
+repeated v2 high-motion image-age regression and four-viewer resource cost.
+Separate CPU readback from normal GPU presentation before attributing the latter.
+Do not rebuild the comparison harness or claim overall improvement from v2-only tests.
+
 Priority correction: the user requests Stage 2–4 completion before
 cutover. Read refactor/STAGE-2-4-ACCEPTANCE.md for the remaining acceptance boundary.
 The user returned with a Windows laptop and GameSir Nova Lite. The read-only field

@@ -4,6 +4,13 @@ Last reconciled: 2026-09-18 (including preset playout/resize regressions, transp
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+Paired comparison: 24 Release 1080p workloads now measure the retained legacy
+session API against the v2 production room runtime, with alternating order,
+three generated scenes and one/four viewers. COMPARISON.md records mixed results:
+lower one-viewer private memory, but high-motion v2 image-age and four-viewer
+CPU-consumer resource regressions. Fix these before claiming overall improvement;
+physical display/input, GPU presentation, audio and matched network gates remain.
+
 Laptop continuation: real two-PC video/resize was confirmed by the user, exposing
 a logical/native pixel sizing mismatch behind misleading busy/presentation counts.
 The native adapter fix passes a generated-window regression (3/90 before, 89/90

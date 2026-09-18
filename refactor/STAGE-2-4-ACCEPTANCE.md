@@ -3,6 +3,10 @@
 The requested scope is to finish Stages 2–4 before cutover or the later UI redesign.
 Implementation and locally reproducible evidence are separate from field acceptance.
 No unchecked physical requirement is waived by the unattended test run.
+The paired 1080p legacy/v2 matrix now covers 24 local generated-window workloads
+(COMPARISON.md). It exposes a high-motion image-age regression and four-viewer
+CPU/private-memory cost in the CPU-consumer path. These are closeout priorities;
+the matrix is not physical latency, GPU-display or matched network acceptance.
 The decoded-frame handoff now has exact ownership and local wait/age measurements
 ([FRAME-HANDOFF.md](FRAME-HANDOFF.md)); this is one measured queue, not full pipeline
 queue-age or physical latency acceptance.

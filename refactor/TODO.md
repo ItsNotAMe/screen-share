@@ -6,6 +6,21 @@ checks are implementation details, **not separate user turns**.
 
 ## Working agreement
 
+Backend feature scope is frozen for closeout. Finish these groups in order:
+
+1. Paired legacy/v2 measurements and an explicit per-metric scorecard (COMPARISON.md).
+2. Resolve measured regressions, initial congestion backlog and resource acceptance.
+3. One consolidated two-PC/device/network acceptance pass, preserving physical latency gates.
+4. Stage 5 default cutover and obsolete-code removal, then Stage 6 frontend redesign.
+
+Do not add unrelated backend features or repeat completed v2-only harness work.
+
+The 24-run paired 1080p comparison is collected (COMPARISON.md). Next priority is
+the reproduced high-motion image-age regression (~365–380 ms v2 versus ~82–93 ms
+legacy in the CPU-consumer workload), then four-viewer CPU/memory cost after
+separating readback from the normal GPU display path. Re-run affected pairs after
+fixes; do not repeat the benchmark implementation or call v2 better overall yet.
+
 Current priority: finish Stage 2–4, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).
 The user is back with a Windows laptop and GameSir Nova Lite. Use the concise

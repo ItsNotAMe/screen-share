@@ -262,6 +262,10 @@ if(MSVC)
             target_link_libraries(RoomInputTests PRIVATE ScreenShareCore ScreenShareRoomSession)
             add_executable(RoomLifecycleStress tools/webrtc-proof/RoomLifecycleStress.cpp)
             target_link_libraries(RoomLifecycleStress PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_executable(BackendComparison tools/backend-comparison/BackendComparison.cpp)
+            target_link_libraries(BackendComparison PRIVATE ScreenShareAPI ScreenShareRoomSession psapi)
+            find_package(Python3 REQUIRED COMPONENTS Interpreter)
+            add_test(NAME backend-comparison-evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/BackendComparisonTests.py")
             add_test(NAME native-room-runtime-link COMMAND NativeRoomRuntimeTests)
             set_tests_properties(native-room-runtime-link PROPERTIES TIMEOUT 15)
         endif()
@@ -271,6 +275,7 @@ if(MSVC)
         if(TARGET RoomInputTests)
             add_dependencies(RoomInputTests RoomSocketTests) # Deploy the same Qt networking DLLs.
             add_dependencies(RoomLifecycleStress RoomSocketTests)
+            add_dependencies(BackendComparison RoomSocketTests)
         endif()
         add_executable(RoomAdmissionTests tests/RoomAdmissionTests.cpp)
         add_executable(RoomServiceTests tests/RoomServiceTests.cpp)
@@ -415,6 +420,15 @@ if(TARGET ScreenShareRoomSession)
             -DWINDEPLOYQT_HEADLESS=ON
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
         COMMENT "Deploying Qt networking runtime next to ScreenShare.exe" VERBATIM)
+    if(TARGET BackendComparison)
+        add_custom_command(TARGET BackendComparison POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE}"
+                "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:BackendComparison>"
+                "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>" -DWINDEPLOYQT_HEADLESS=ON
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
+            COMMENT "Deploying Qt networking runtime for the backend comparison" VERBATIM)
+    endif()
     if(BUILD_TESTING)
         add_executable(RoomCliTests tests/RoomCliTests.cpp)
         add_test(NAME room-v2-cli-entry COMMAND "${CMAKE_COMMAND}"
