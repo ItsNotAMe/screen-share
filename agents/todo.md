@@ -9,8 +9,10 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 Current continuation: the shared input service, controller and mouse/keyboard
 UI/CLI/device groups are implemented. See [DESKTOP-INPUT.md](../refactor/DESKTOP-INPUT.md).
 Capture stress now has a four-mode runner and production Windows owner checks;
-see [RESOURCE-STRESS.md](../refactor/RESOURCE-STRESS.md). Next complete Stage 4
-full-room restart, sustained-memory, four-viewer soak and impairment work. Preserve Stage 2
+see [RESOURCE-STRESS.md](../refactor/RESOURCE-STRESS.md). Full-room restart and
+continuous runners are also implemented; see [ROOM-STRESS.md](../refactor/ROOM-STRESS.md).
+Next resolve/account for the 500-cycle capture handle failure (+226) and variable
+room memory, then complete the two-hour soak and impairment work. Preserve Stage 2
 physical/parity and Stage 3 physical input gates. Recording-device integration
 does not establish physical confinement, controller behavior or gaming latency.
 

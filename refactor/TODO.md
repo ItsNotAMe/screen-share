@@ -250,8 +250,13 @@ latency. See [COMPARISON.md](COMPARISON.md).
   four-mode resource matrix, retaining the +8 handle bound. See
   [RESOURCE-STRESS.md](RESOURCE-STRESS.md); repeated handle passes do not establish
   private-memory or complete room-session acceptance.
+- [x] Add same-process full-room restart and continuous four-viewer harnesses;
+  validate 100 complete rooms in both builds and short continuous media runs.
+  See [ROOM-STRESS.md](ROOM-STRESS.md). The 500-cycle capture extension exposed
+  delayed handle retention (+226); this failure remains an acceptance blocker.
 - [ ] Pass implementation-side stress and service/resource acceptance, including
-  full-room restarts, sustained memory trends, four-viewer soak and impairment.
+  capture handle retention, full-room memory accounting, the complete two-hour
+  four-viewer soak and impairment. Do not rebuild the completed stress harnesses.
 - [ ] Complete required real-machine/network/external latency measurements.
 
 ## 5. Cutover, removal and release readiness (E)

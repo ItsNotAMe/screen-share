@@ -107,9 +107,9 @@ int main(int argc, char** argv) {
     try {
         int cycles = 3;
         if (argc != 1) {
-            Require(argc == 3 && std::string(argv[1]) == "--cycles", "Usage: WindowsCaptureLifecycleTest [--cycles 1..100]");
+            Require(argc == 3 && std::string(argv[1]) == "--cycles", "Usage: WindowsCaptureLifecycleTest [--cycles 1..1000]");
             size_t used = 0; cycles = std::stoi(argv[2], &used);
-            Require(used == std::string(argv[2]).size() && cycles >= 1 && cycles <= 100, "Invalid cycle count");
+            Require(used == std::string(argv[2]).size() && cycles >= 1 && cycles <= 1000, "Invalid cycle count");
         }
         WindowsMediaRuntime runtime;
         Require(SUCCEEDED(runtime.result()), "MTA lifetime initialization failed");

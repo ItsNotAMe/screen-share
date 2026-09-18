@@ -6,6 +6,10 @@ module pin, frame ownership or teardown ordering. The earlier failures remain va
 historical evidence. A passing repeat does not identify why they differed, and no
 new production leak fix is claimed by this batch.
 
+Follow-up: [ROOM-STRESS.md](ROOM-STRESS.md) records full-room restart testing and a
+longer **500-cycle capture failure (+226 handles)**. The 100-cycle passes below
+remain valid, but do not establish sustained handle stability.
+
 ## One-command reproduction
 
 Build `LiveCaptureTest` and `WindowsCaptureLifecycleTest` in the proof build, then:
@@ -101,8 +105,9 @@ requirements open:
 
 - Account for retained private memory and reproduce long-duration trends; driver
   caches and leaks must not be treated as interchangeable explanations.
-- Run 100 complete room start/stops, including networking, audio, peer shutdown and
-  callback barriers; capture-owner cycles alone do not prove this.
+- Full-room start/stops now pass 100 functional/handle-bound cycles in each build;
+  networking/audio/runtime destruction and callback barriers are covered in
+  ROOM-STRESS.md. Memory accounting and complete resource acceptance remain open.
 - Run a continuous two-hour four-viewer soak with memory, queue-age and delivery
   observations, plus slow-viewer/network-impairment isolation.
 - Complete physical media/input, hibernation/driver-loss, NAT/TLS, service-cost and

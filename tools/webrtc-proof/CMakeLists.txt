@@ -6,6 +6,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME capture-stress-evidence COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_LIST_DIR}/../../tests/LiveCaptureStressTests.py")
     set_tests_properties(capture-stress-evidence PROPERTIES TIMEOUT 20)
+    add_test(NAME room-lifecycle-evidence COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_LIST_DIR}/../../tests/RoomLifecycleStressTests.py")
+    set_tests_properties(room-lifecycle-evidence PROPERTIES TIMEOUT 20)
 endif()
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/WebRTC.cmake")
 screenshare_import_webrtc()

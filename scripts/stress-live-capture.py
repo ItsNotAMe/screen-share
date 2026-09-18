@@ -93,7 +93,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     parser.add_argument("output", type=Path, help="New evidence directory (must not already exist)")
-    parser.add_argument("--cycles", type=int, default=100, choices=range(1, 101))
+    parser.add_argument("--cycles", type=int, default=100, choices=range(1, 1001), metavar="1..1000")
     parser.add_argument("--timeout", type=float, default=1200, help="Total run deadline in seconds")
     parser.add_argument("--max-log-bytes", type=int, default=8 * 1024 * 1024, help="Combined native stdout/stderr bound; exceeding it fails and stops the child")
     parser.add_argument("--capture-only", action="store_true", help="Isolate capture teardown from hardware encoder/device-recovery work")
@@ -128,6 +128,8 @@ def main():
         parser.error("private-memory checking requires a nonnegative limit and at least 20 cycles")
     if args.production_owner and (args.capture_only or args.hardware_only or args.fresh_owner_thread):
         parser.error("--production-owner cannot be combined with direct-capture modes")
+    if args.cycles > 100 and not args.production_owner:
+        parser.error("More than 100 cycles requires --production-owner")
     executable = args.executable.resolve(strict=True)
     if args.production_owner != (executable.stem.lower() == "windowscapturelifecycletest"):
         parser.error("WindowsCaptureLifecycleTest requires --production-owner; direct capture proofs must omit it")

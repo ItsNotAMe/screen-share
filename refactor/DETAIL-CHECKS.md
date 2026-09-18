@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (through `3987f4a`, plus production capture-owner resource stress). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
+Last reconciled: 2026-09-18 (through `75abe0d`, plus full-room restart/soak harnesses and longer capture investigation). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -230,7 +230,7 @@ dated continuation notes preserve historical evidence rather than defining new b
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Stage 4 full-room restart, sustained-memory, four-viewer soak and impairment acceptance, while preserving Stage 2 physical/parity and Stage 3 physical input gates.** Capture-owner resource stress is now automated; see [RESOURCE-STRESS.md](RESOURCE-STRESS.md). Historical +76/+10 handle failures are retained; passing repeats do not establish a new production fix or complete resource acceptance. See [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) and [COMPARISON.md](COMPARISON.md).
+Current next action: **Resolve/account for delayed capture handle retention and room memory, then complete the two-hour soak and impairment acceptance.** Full-room restart/continuous runners are implemented; 100 rooms pass in both builds. A longer 500-cycle capture run fails at +226 handles. See [ROOM-STRESS.md](ROOM-STRESS.md). Preserve Stage 2 physical/parity and Stage 3 input gates; no production leak fix or full resource acceptance is claimed.
 
 ## Planning handoff
 
@@ -656,9 +656,13 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [ ] Verify upward adaptation resumes without repeated resolution/encoder oscillation.
 - [ ] Verify one impaired viewer does not lower healthy viewers without a documented shared resource/budget constraint.
 - [ ] Complete a two-hour four-viewer soak without deadlock, sustained memory growth or accumulating queues.
+  The continuous native runner supports 7200 seconds; Release 180-second and Debug
+  30-second runs pass functional checks. Neither is the required two-hour run.
 - [ ] Complete 100 start/stop cycles without retained sessions, sockets, devices or callbacks.
-  Windows capture-owner cycles now check join, resource release and input-target
-  cleanup. Full room/network/audio ownership remains separate acceptance work.
+  Full RoomSession create/join/media/stop now passes 100 cycles in both builds,
+  with four viewers, both shutdown orders, callback barriers, runtime destruction
+  and stale-port rejection. Handle growth is +5 each; memory accounting remains
+  unresolved, so this complete resource-acceptance row stays open. See ROOM-STRESS.md.
 - [ ] Verify healthy room/list changes appear within two seconds.
 - [ ] Verify zero periodic HTTP membership/list polling.
 - [ ] Verify zero per-room listing verification and zero per-peer heartbeat writes.

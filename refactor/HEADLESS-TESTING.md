@@ -1,5 +1,24 @@
 # Headless media checks
 
+## Full-room lifecycle and continuous media — 2026-09-18
+
+`scripts/test-room-lifecycle.py` now runs complete room restarts in one native
+process or a bounded continuous four-viewer run. Production quotas are unchanged;
+each restart gets a new local Worker fixture. Synthetic audio is discarded and
+input sinks are recording-only. See [ROOM-STRESS.md](ROOM-STRESS.md) for commands,
+resource measurements, retained failed attempts and remaining acceptance.
+
+Release/Debug **100-room** runs pass with +5 median handle growth each. Release
+**180-second** and Debug **30-second** continuous runs pass. Both builds' original
+room input/media regression passes after extracting the shared test fixture.
+Five room-evidence and seventeen capture-evidence/watchdog tests pass.
+
+The longer capture test completed **500 cycles but FAILED resource acceptance**:
+median handles 300 → 526 (+226), peak 558. Memory was roughly bounded over that
+run; neither its ownership nor the delayed handle growth is resolved. This is
+not a two-hour soak or a production leak fix. Full memory/queue/impairment and
+physical/network/latency gates remain open.
+
 ## Capture lifecycle/resource batch — 2026-09-18
 
 `python scripts/test-capture-lifecycle.py build/sdk-proof-release build/webrtc/NEW`
