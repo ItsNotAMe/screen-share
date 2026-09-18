@@ -7,6 +7,7 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class QPushButton;
+class VideoFrameWidget;
 
 class RoomGamepadControl final : public QWidget {
 public:
@@ -18,6 +19,8 @@ public:
         Read = screenshare::ViewerGamepad::ReadState);
     ~RoomGamepadControl() override;
     void Revoke();
+    void SetVideo(VideoFrameWidget*);
+    std::function<bool(uint8_t)> prepareGrant;
 protected:
     bool eventFilter(QObject*, QEvent*) override;
 private:
@@ -25,11 +28,14 @@ private:
     bool host_, armed_ = false;
     std::string requestedPeer_;
     uint64_t requestPermission_ = 0;
+    QString actionError_;
     std::function<std::shared_ptr<screenshare::input::Port>()> port_;
     std::function<screenshare::v2::RoomStatus()> room_;
     Read read_;
     QComboBox* peers_;
     QComboBox* devices_;
+    QComboBox* capabilities_;
+    VideoFrameWidget* video_ = nullptr;
     QCheckBox* consent_;
     QPushButton* action_;
     QLabel* status_;

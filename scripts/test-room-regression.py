@@ -149,17 +149,20 @@ def sha256(path):
 def cases(desktop):
     result = [("input-service", "InputServiceTests.exe", None, None),
               ("gamepad-control", "GamepadControlTests.exe", None, None),
+              ("desktop-input", "DesktopInputTests.exe", None, None),
               ("input-media", "RoomInputTests.exe", "media", None),
               ("presentation-worker", "VideoFrameInputTests.exe", None, None),
               ("room-service", "RoomServiceTests.exe", "service", None),
               ("cli-media", "RoomCliTests.exe", "media", None),
               ("ui-media", "RoomUiTests.exe", "media", None),
               ("controller-ui", "RoomUiTests.exe", "media", "controllers"),
+              ("desktop-input-ui", "RoomUiTests.exe", "media", "desktop-input"),
               ("mutation-recovery", "RoomUiTests.exe", "media", "mutation-ack-delay")]
     if desktop:
         result += [("windows-cli", "RoomCliWindowsTests.exe", "windows-media", None),
                    ("windows-ui", "RoomUiWindowsTests.exe", "windows-media", None),
-                   ("windows-controller-ui", "RoomUiWindowsTests.exe", "windows-media", "controllers")]
+                   ("windows-controller-ui", "RoomUiWindowsTests.exe", "windows-media", "controllers"),
+                   ("windows-desktop-input-ui", "RoomUiWindowsTests.exe", "windows-media", "desktop-input")]
     return result
 
 

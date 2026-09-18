@@ -31,7 +31,7 @@ QJsonObject RoomInputCommands::Poll(const std::shared_ptr<screenshare::input::Po
         {"operation", object["operation"].toString()}, {"peer", object["peer"].toString()}};
     if (!doc.isObject() || !sequence || sequence <= sequence_) return result;
     sequence_ = sequence; // Invalid/unavailable commands are consumed, never retried.
-    const QSet<QString> keys{"sequence", "operation", "peer", "consent"};
+    const QSet<QString> keys{"sequence", "operation", "peer", "consent", "capabilities"};
     for (auto it = object.begin(); it != object.end(); ++it) if (!keys.contains(it.key())) return result;
     if (!object["operation"].isString() || (object.contains("peer") && !object["peer"].isString()) ||
         (object.contains("consent") && !object["consent"].isBool())) return result;
@@ -39,10 +39,14 @@ QJsonObject RoomInputCommands::Poll(const std::shared_ptr<screenshare::input::Po
     if (peer.size() > 128 || peer.find('\0') != std::string::npos) return result;
     if (operation == "revoke") { port->Revoke(peer); result["accepted"] = true; return result; }
     if (peer.empty() || object["consent"] != QJsonValue(true)) return result;
+    const auto selected=object.value("capabilities").toString("gamepad");
+    if(object.contains("capabilities") && !object["capabilities"].isString())return result;
+    const uint8_t caps=selected=="gamepad"?4:selected=="mouse"?1:selected=="keyboard"?2:selected=="mouse-keyboard"?3:0;
+    if(!caps)return result;result["capabilities"]=caps;
     bool known = false;
-    for (const auto& state : port->Read()) if (state.ready && state.peer == peer && (!host || (state.requested & screenshare::input::Gamepad))) known = true;
+    for (const auto& state : port->Read()) if (state.ready && state.peer == peer && (!host || (state.requested & caps)==caps)) known = true;
     if (!known) return result;
-    result["accepted"] = host && operation == "grant" ? port->Grant(peer, screenshare::input::Gamepad) :
-        !host && operation == "request" && port->Request(peer, screenshare::input::Gamepad);
+    result["accepted"] = host && operation == "grant" ? port->Grant(peer, caps) :
+        !host && operation == "request" && port->Request(peer, caps);
     return result;
 }

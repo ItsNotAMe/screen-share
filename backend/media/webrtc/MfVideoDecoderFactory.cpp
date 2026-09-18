@@ -1,6 +1,8 @@
 #include "media/webrtc/MfVideoDecoderFactory.h"
 #include "media/webrtc/OwnedNv12Buffer.h"
 #include "media/webrtc/D3dVideoFrameBuffer.h"
+#include "media/webrtc/MappedVideoBuffer.h"
+#include "codec/InputMappingSei.h"
 #include "api/make_ref_counted.h"
 
 #include "codec/H264StreamDecoder.h"
@@ -125,7 +127,8 @@ public:
                 packet.isKeyframe = image._frameType == webrtc::VideoFrameType::kVideoFrameKey;
                 packet.bytes.resize(image.size());
                 std::memcpy(packet.bytes.data(), image.data(), image.size());
-                timestamps_.emplace(packet.timestamp100ns, Timing{image.RtpTimestamp(), image.NtpTimeMs(), maxWidth_, maxHeight_});
+                timestamps_.emplace(packet.timestamp100ns, Timing{image.RtpTimestamp(), image.NtpTimeMs(), maxWidth_, maxHeight_,
+                    input::ReadMappingSei({image.data(),image.size()})});
                 for (auto& output : decoder_->DecodePacket(packet)) {
                     auto timestamp = timestamps_.find(output.timestamp100ns);
                     if (timestamp == timestamps_.end()) throw std::runtime_error("MF decoder lost timestamp association");
@@ -139,6 +142,7 @@ public:
                         buffer = webrtc::make_ref_counted<DecodedGpuBuffer>(gpu_, std::move(output.texture), output.width, output.height, retained_);
                     }
                     else buffer = webrtc::make_ref_counted<OwnedNv12Buffer>(output.width, output.height, std::move(output.data));
+                    buffer = WithMapping(std::move(buffer),timestamp->second.mapping);
                     frames.push_back(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer)
                         .set_rtp_timestamp(timestamp->second.rtp).set_ntp_time_ms(timestamp->second.ntp).build());
                     timestamps_.erase(timestamp);
@@ -203,7 +207,7 @@ private:
     std::chrono::steady_clock::time_point retryAfter_{};
     // Decoder output can lag an incoming resize keyframe. Validate against the
     // declaration attached to that output, never the newest stream dimensions.
-    struct Timing { uint32_t rtp; int64_t ntp; int width, height; };
+    struct Timing { uint32_t rtp; int64_t ntp; int width, height; input::FrameMapping mapping; };
     std::map<int64_t, Timing> timestamps_;
     int maxWidth_ = 4096;
     int maxHeight_ = 4096;

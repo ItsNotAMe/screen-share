@@ -1,5 +1,9 @@
 #include "ui/RoomSessionWindow.h"
 #include "RecordingGamepadSink.h"
+#include "RecordingDesktopInput.h"
+#include <QMouseEvent>
+#include <QKeyEvent>
+#include <QWheelEvent>
 #include "shared/RoomLink.h"
 #include "shared/StreamPreferencesJson.h"
 #include "shared/RoomStreamDiagnostics.h"
@@ -173,13 +177,17 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio) {
                     std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
             };
             options.capture = [] { return std::make_unique<SyntheticCaptureSource>(320, 180, 30); };
+            if(windows.inputTarget)options.capture=[target=windows.inputTarget] {return std::make_unique<MappedSyntheticCapture>(320,180,30,target);};
             options.captureForSelection = [](CaptureSelection selection) -> CaptureSession::Factory {
                 return [selection]() -> std::unique_ptr<ICaptureSource> {
                     if (selection.display == 63 || selection.window == 1) throw std::runtime_error("Injected capture startup failure");
                     return std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps);
                 };
             };
-            options.deliver = [](auto& source, const auto& sample) { source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt); };
+            if(windows.inputTarget)options.captureForSelection=[target=windows.inputTarget](auto selection)->CaptureSession::Factory {
+                return [target,selection] {return std::make_unique<MappedSyntheticCapture>(640,360,selection.fps,target);};
+            };
+            options.deliver = [](auto& source, const auto& sample) { source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt,sample.resource->inputGeneration); };
             return CreateNativeRoomRuntime(identity, std::move(send), std::move(options));
         };
 #endif
@@ -847,6 +855,79 @@ void ControllerScenario(const std::string& origin) {
     viewer.session().stop(); host.session().stop();
     Wait([&] { return !viewer.session().running() && !host.session().running(); });
 }
+class RecordingInputPresentation final:public FramePresentationBackend {
+public:
+    bool Present(HWND,uint32_t,uint32_t,bool,bool,const screenshare::Nv12D3D11Presenter::FrameView& frame,screenshare::Nv12D3D11Presenter::ScaleMode) override {return frame.width>0 && (frame.texture || frame.dataSize>0);}
+    void Reset() noexcept override {}
+    void Update(HWND,uint32_t,uint32_t,bool,bool,screenshare::Nv12D3D11Presenter::ScaleMode) override {}
+    uint32_t MaximumFrameLatency() const noexcept override {return 1;}
+};
+void DesktopInputScenario(const std::string& origin) {
+    auto target=std::make_shared<screenshare::input::DesktopTargetState>();
+    auto evidence=std::make_shared<DesktopInputEvidence>();
+    RoomSessionConfig config;config.room.origin=origin;config.room.host=true;config.room.name="Mapped input";config.room.nickname="Input host";
+    config.media.inputTarget=target;
+    config.media.inputSink=std::make_shared<screenshare::input::DesktopSink>(target,nullptr,
+        [evidence](auto,uint8_t){return std::make_unique<RecordingDesktopDevice>(evidence);});
+    config.media.preferences.resolution=ResolutionMode::Fixed;config.media.preferences.width=640;config.media.preferences.height=480;
+    RoomSessionWindow host(config,Factory(std::make_shared<proof::AudioEvidence>()),true);host.setAttribute(Qt::WA_ShowWithoutActivating);host.show();
+    Wait([&]{return host.session().status().phase==RoomPhase::Active;});
+    config.room.host=false;config.room.roomId=host.session().status().roomId;config.room.nickname="Input viewer";
+    config.media.inputSink.reset();
+    FramePresentationFactory presentation;
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    presentation=[] {return std::make_unique<RecordingInputPresentation>();};
+#endif
+    RoomSessionWindow viewer(config,Factory(std::make_shared<proof::AudioEvidence>()),true,nullptr,
+        [] {return std::vector<screenshare::ViewerGamepadDevice>{};},[](auto)->std::optional<screenshare::RemoteGamepadState>{return {};},presentation);
+    viewer.setAttribute(Qt::WA_ShowWithoutActivating);viewer.show();
+    auto* video=dynamic_cast<VideoFrameWidget*>(viewer.findChild<QWidget*>("roomVideo"));Check(video!=nullptr);
+    Wait([&]{return video->presentedInputMapping().Valid();});
+    const auto original=video->presentedInputMapping();Check(original.width==640 && original.height==480);
+    auto* viewerCaps=viewer.findChild<QComboBox*>("inputCapabilities");auto* hostCaps=host.findChild<QComboBox*>("inputCapabilities");
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+    constexpr uint8_t caps=screenshare::input::Mouse;
+#else
+    constexpr uint8_t caps=screenshare::input::Mouse|screenshare::input::Keyboard;
+    Check(original.top>0); // Encoded padding, in addition to widget letterboxing.
+#endif
+    viewerCaps->setCurrentIndex(viewerCaps->findData(caps));hostCaps->setCurrentIndex(hostCaps->findData(caps));
+    auto authorize=[&] {
+        Wait([&]{return viewer.findChild<QComboBox*>("controllerPeer")->count()==1 && host.findChild<QComboBox*>("controllerPeer")->count()==1;});
+        viewer.findChild<QCheckBox*>("controllerConsent")->setChecked(true);
+        auto* request=viewer.findChild<QPushButton*>("controllerAction");Wait([&]{return request->isEnabled();});request->click();
+        auto* grant=host.findChild<QPushButton*>("controllerAction");Check(!grant->isEnabled());
+        host.findChild<QCheckBox*>("controllerConsent")->setChecked(true);Wait([&]{return grant->isEnabled();});grant->click();
+        Wait([&]{for(const auto& state:viewer.session().input()->Read())if(state.granted==caps)return true;return false;});
+        // Drive the real preview event route after the panel's grant observation.
+        Wait([&]{return video->hasMouseTracking();});
+    };
+    auto move=[&](QPointF point) {QMouseEvent event(QEvent::MouseMove,point,point,Qt::NoButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(video,&event);};
+    authorize();move(QPointF(video->width()/2.0,video->height()/2.0));
+    Wait([&]{return evidence->applied>0;});Check(std::abs(evidence->x-.5f)<.02f && std::abs(evidence->y-.5f)<.02f);
+    const auto before=evidence->applied.load();move({0,0});
+    const auto until=std::chrono::steady_clock::now()+80ms;Wait([&]{return std::chrono::steady_clock::now()>until;});Check(evidence->applied==before);
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    QKeyEvent key(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,0x1e,0x41,0);QApplication::sendEvent(video,&key);
+    Wait([&]{return evidence->keys==1;});
+#endif
+    QEvent inactive(QEvent::WindowDeactivate);QApplication::sendEvent(&viewer,&inactive);
+    Wait([&]{return evidence->released>0 && !viewer.findChild<QCheckBox*>("controllerConsent")->isChecked();});
+    authorize();
+    CaptureSelection selection;
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+    selection.kind=CaptureKind::Window;selection.window=reinterpret_cast<uint64_t>(captureWindow);
+#else
+    selection.display=1;
+#endif
+    host.session().switchCapture(selection);
+    Wait([&]{return !host.session().capturePending() && video->presentedInputMapping().generation!=original.generation && video->presentedInputMapping().Valid();});
+    Wait([&]{return !viewer.findChild<QCheckBox*>("controllerConsent")->isChecked();});authorize();
+    const auto applied=evidence->applied.load();screenshare::input::Event stale;stale.kind=screenshare::input::Kind::Pointer;stale.sourceGeneration=original.generation;
+    const auto peer=viewer.session().input()->Read().front().peer;Check(viewer.session().input()->Submit(peer,stale));
+    Wait([&]{return !viewer.session().input()->Read().front().granted;});Check(evidence->applied==applied);
+    viewer.session().stop();host.session().stop();Wait([&]{return !viewer.session().running() && !host.session().running();});
+}
 int main(int argc, char** argv) {
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString&) {});
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
@@ -855,13 +936,16 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
-        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers")));
+        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "desktop-input")));
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         NativePresentationRecovery();
         proof::TestWindow capture; captureWindow = capture.handle();
 #endif
-        if (argc == 3 && std::string(argv[2]) == "controllers") {
+        if(argc==3 && std::string(argv[2])=="desktop-input") {
+            DesktopInputScenario(argv[1]);std::cout<<"{\"passed\":true,\"mapped_input\":true,\"physical_input\":false}\n";
+        }
+        else if (argc == 3 && std::string(argv[2]) == "controllers") {
             ControllerScenario(argv[1]);
             std::cout << "{\"passed\":true,\"controllers\":true,\"physical_input\":false}\n";
         }

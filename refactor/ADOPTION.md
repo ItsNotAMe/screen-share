@@ -19,8 +19,9 @@ ScreenShare --backend v2 --signal-server https://your-worker.example --join-room
 The UI uses the current HomeWindow, AppShell and existing v2 form/session pages,
 not another top-level application window or the later visual redesign. The
 ordinary update-check scheduling and app version remain in this launch path.
-The home states that controllers require host permission and mouse/keyboard remain
-unavailable. See [CONTROLLERS.md](CONTROLLERS.md) for UI/CLI controller integration.
+The home states that remote input requires host permission and window shares
+prohibit keyboard control. See [CONTROLLERS.md](CONTROLLERS.md) and
+[DESKTOP-INPUT.md](DESKTOP-INPUT.md) for UI/CLI integration.
 
 CLI create returns a server-issued room ID in its JSON status. Join accepts that
 ID or `screenshare://room/v2/ROOM_ID`. The configured HTTPS origin remains
@@ -96,7 +97,7 @@ Release and Debug desktop-inclusive matrices pass **7/7 each** at
 checks pass **4/4 each**. See HEADLESS-TESTING.md for evidence and the corrected
 test that originally selected the first room row instead of the intended room ID.
 
-Default cutover remains blocked by remote keyboard/mouse/controller parity
+Default cutover remains blocked by physical keyboard/mouse/controller acceptance
 (Stage 3), physical media/latency/resource/network acceptance (Stages 2/4), and
 the final compatibility/reporting/updater audit and obsolete-path removal
 (Stage 5). Legacy diagnostic ZIP reports and direct/invite CLI workflows must be

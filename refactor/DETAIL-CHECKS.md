@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (through `f119b43`, plus Windows controller/UI/CLI integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
+Last reconciled: 2026-09-18 (through `a76c10b`, plus mouse/keyboard mapping, confinement and UI/CLI integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -23,14 +23,19 @@ the reconciled checkpoint rows and [TODO.md](TODO.md) define current work.
 - [x] Implement lazy Windows controller devices, local-slot checks, selected-device
   polling, normal UI/CLI consent, indicators, panic revoke and focus/source/unplug
   handling. Injected real-channel tests cover these paths; see [CONTROLLERS.md](CONTROLLERS.md).
-- [ ] Complete mouse/keyboard source-image mapping, confinement and UI/CLI consent.
+- [x] Complete mouse/keyboard source-image mapping, confinement and UI/CLI consent.
+  Exact-frame metadata, displayed mapping, Windows target identity and recorded
+  UI/CLI tests are documented in [DESKTOP-INPUT.md](DESKTOP-INPUT.md).
 - [ ] Validate physical controllers/driver behavior and external input latency.
 
-See [INPUT.md](INPUT.md). Normal v2 mouse/keyboard remain disabled. Backend safety
+See [INPUT.md](INPUT.md). Opt-in v2 mouse/keyboard now require explicit consent. Backend safety
 and internal response samples do not close Gate D or physical latency acceptance.
 Controller closeout: final Release/Debug desktop-inclusive matrices passed 12/12
 each, plus 6/6 focused smoke checks each and three isolated controller UI repeats.
 Exact artifacts and the fixed revoke/regrant race are in HEADLESS-TESTING.md.
+Subsequent mouse/keyboard closeout: final Release/Debug desktop-inclusive matrices
+passed 15/15 each (all 11 headless cases included), plus 9/9 focused CTest checks
+each. See HEADLESS-TESTING.md for artifacts and the SEI/header-ordering regression.
 
 ## Guarded normal-home/CLI adoption — 2026-09-18
 
@@ -225,7 +230,7 @@ dated continuation notes preserve historical evidence rather than defining new b
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Stage 3 input/consent/controller integration for full adoption parity, while preserving Stage 2 physical acceptance in STAGE-2-REMAINING.md.** Shared media, capture/receive recovery and guarded normal-home/CLI routing are implemented. Physical-device/resource/remote acceptance remains open; the +76/+10 capture-handle regressions block cutover. See [CHECKPOINT-B.md](CHECKPOINT-B.md), [CLOSEOUT-A.md](CLOSEOUT-A.md), [ADOPTION.md](ADOPTION.md) and [COMPARISON.md](COMPARISON.md).
+Current next action: **Stage 4 stress/resource and impairment acceptance, while preserving Stage 2 physical/parity and Stage 3 physical input gates.** Shared media, capture/receive recovery, guarded normal-home/CLI routing and mouse/keyboard/controller integration are implemented. Physical-device/resource/remote acceptance remains open; the +76/+10 capture-handle regressions block cutover. See [DESKTOP-INPUT.md](DESKTOP-INPUT.md), [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) and [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -339,7 +344,7 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 - [x] Separate session, media, capture/audio, presentation and diagnostic boundaries.
 - [x] Implement the v2 input service and authenticated transport boundary with a recording sink.
-- [ ] Complete Windows input, source mapping and frontend consent boundaries (INPUT.md).
+- [x] Complete Windows input, source mapping and frontend consent boundaries (DESKTOP-INPUT.md).
 - [x] Keep Windows/WebRTC types out of the v2 public RoomSession control API and portable settings/status/frame ownership types. Native render/capture adapters remain explicitly Windows-specific.
 - [x] Add profile, room policy, stream preferences, per-peer status, operation results, session snapshots and owned frame types.
 - [x] Implement the serialized control executor and session/viewer generations.
@@ -424,9 +429,9 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [x] Implement the documented Auto maximum calculation and conservative startup rate.
 - [x] Map all resolution/FPS mode combinations to the intended WebRTC adaptation preference.
 - [x] Keep manual resolution fixed and manual bitrate subject to congestion control.
-- [ ] Fit/letterbox fixed dimensions and expose the active image rectangle for input mapping.
-  CPU/GPU fitting and backend/UI/CLI rectangle exposure are implemented. Receiver
-  generation binding and actual input-coordinate mapping remain in milestone 3.
+- [x] Fit/letterbox fixed dimensions and expose the active image rectangle for input mapping.
+  CPU/GPU fitting, exact-frame receiver generation binding and UI/CLI input
+  coordinate mapping are implemented; see DESKTOP-INPUT.md.
 - [x] Preserve manual settings when switching presets; actual UI controls/profile
   roundtrip and native sender adaptation checks are covered in DIAGNOSTICS.md.
 - [x] Add settings revisions, prevalidation and per-viewer pending/applied/error state.
@@ -577,17 +582,17 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 - [x] Implement explicit versioned input serialization and validation.
 - [x] Include connection/permission generations and sequence checks.
 - [x] Implement pointer coalescing, selected-device gamepad polling and 100 ms state
-  keepalives. Pointer OS/frontend mapping remains separate work below.
+  keepalives. Pointer OS/frontend mapping is integrated through the same port.
 - [x] Bound reliable queues and handle backpressure without stale input replay.
-- [ ] Preserve exclusive mouse/keyboard ownership and up to three remote gamepads with local-slot reservation.
+- [x] Preserve exclusive mouse/keyboard ownership and up to three remote gamepads with local-slot reservation.
   Service policy, Windows local-slot discovery, controller device lifecycle and
   normal frontend integration are implemented and tested with injected devices.
-  Physical slot preservation and mouse/keyboard integration remain open.
+  Physical slot preservation and physical input acceptance remain open below.
 - [x] Implement 300 ms watchdog neutralization and fresh-generation recovery at the service/sink boundary; physical sink integration remains below.
-- [ ] Preserve consent, persistent indicators, panic revoke and window confinement.
-  Controller consent/indicators/panic are integrated; mouse/keyboard and window
-  confinement remain open. Controller focus/source revoke uses recording tests.
-- [ ] Neutralize input on source change and rebuild active-image coordinate mapping.
+- [x] Preserve consent, persistent indicators, panic revoke and window confinement.
+  Controllers and mouse/keyboard are integrated, with recording-sink focus/source
+  revoke tests. Physical foreground/occlusion/UIPI validation remains open below.
+- [x] Neutralize input on source change and rebuild active-image coordinate mapping.
 - [ ] Preserve XInput/PlayStation reports and installer-only virtual-driver lifecycle.
   The v2 poller reuses existing report readers; runtime creation is lazy and never
   installs drivers. Physical XInput/PlayStation compatibility remains to validate.
@@ -600,6 +605,8 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 - [ ] Verify revoke, disconnect, controller unplug and backend failure neutralization.
   Controller and service cases pass with recording sinks. Physical devices remain open.
 - [ ] Verify window focus/confinement, letterboxing and source-change mapping.
+  Recording-sink UI/CLI, metadata and source-generation cases pass. Physical
+  injection/foreground/occlusion behavior still requires separate acceptance.
 - [ ] Verify independent remote pads and preserved local slots.
   Injected-device tests cover three independent pads, occupied local slots and collisions.
 - [ ] Verify missing driver disables only unavailable gamepad functionality.

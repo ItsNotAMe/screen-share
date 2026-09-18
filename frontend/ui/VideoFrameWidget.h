@@ -29,6 +29,8 @@ public:
         std::uint64_t recoveries = 0;
         bool terminal = false;
         FramePresentationSession::Statistics renderer;
+        screenshare::input::FrameMapping inputMapping;
+        uint32_t inputViewportWidth = 0, inputViewportHeight = 0;
     };
 
     explicit VideoFrameWidget(QWidget* parent = nullptr, FramePresentationFactory factory = {});
@@ -43,6 +45,7 @@ public:
     [[nodiscard]] std::uint64_t presentedFrameCount() const;
     [[nodiscard]] PresentationStats presentationStats() const;
     void clearFrame();
+    [[nodiscard]] screenshare::input::FrameMapping presentedInputMapping() const;
 
     // Remote control: when capture is active, mouse/keyboard events over the
     // preview are mapped to normalized frame coordinates and forwarded to the
@@ -83,4 +86,6 @@ private:
     bool controlActive_ = false;
     bool controlMouse_ = false;
     bool controlKeyboard_ = false;
+    screenshare::input::FrameMapping pendingImageMapping_, paintedMapping_;
+    mutable screenshare::input::FrameMapping mappedForInput_;
 };

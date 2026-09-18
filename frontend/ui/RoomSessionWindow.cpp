@@ -42,7 +42,7 @@ QString Phase(RoomPhase phase) {
 }
 }
 RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback, RoomProfile* profile,
-    RoomGamepadControl::Devices devices, RoomGamepadControl::Read read)
+    RoomGamepadControl::Devices devices, RoomGamepadControl::Read read, FramePresentationFactory presentation)
     : session_(nullptr, std::move(factory), loopback) {
     setWindowTitle(config.room.host ? "ScreenShare — Share room" : "ScreenShare — Watch room");
     setStyleSheet(uiStyleSheet()); resize(960, 720);
@@ -100,7 +100,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         roomUpdateState_->setText("Updating room…");
         session_.updatePolicy({name_->text().toStdString(), publicRoom_->isChecked(), viewerLimit_->value()}, editRevision_);
     });
-    video_ = new VideoFrameWidget; video_->setMinimumSize(320, 180); video_->setVisible(!config.room.host && config.preview);
+    video_ = new VideoFrameWidget(nullptr,std::move(presentation)); video_->setMinimumSize(320, 180); video_->setVisible(!config.room.host && config.preview);
     video_->setObjectName("roomVideo");
     video_->setLowLatency(true);
     layout->addWidget(video_, 1);
@@ -234,7 +234,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     gamepad_ = new RoomGamepadControl(config.room.host, [this] { return session_.input(); },
         [this] { return session_.status(); }, this, std::move(devices), std::move(read));
     layout->addWidget(gamepad_);
-    auto* controls = new QLabel("Mouse and keyboard control is unavailable."); layout->addWidget(controls);
+    gamepad_->SetVideo(video_);
+    gamepad_->prepareGrant=[this](uint8_t caps){return session_.prepareInputGrant(caps);};
+    auto* controls = new QLabel("Input requires explicit consent. Window sharing permits mouse control only; source changes revoke control."); layout->addWidget(controls);
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { session_.stop(); stop_->setEnabled(false); apply_->setEnabled(false); });
     connect(apply_, &QPushButton::clicked, this, [this] {

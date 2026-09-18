@@ -17,7 +17,8 @@ also works without JSON using `--backend v2 --create-room` or `--join-room ID_OR
 and the same service option. See [guarded adoption](refactor/ADOPTION.md) for
 options and limitations. Default launch retains existing remote-control features;
 v2 now supports [controllers with explicit consent](refactor/CONTROLLERS.md).
-V2 mouse/keyboard mapping and production cutover are still pending.
+V2 mouse/keyboard mapping and consent are integrated; physical input acceptance
+and production cutover remain pending. See [desktop input](refactor/DESKTOP-INPUT.md).
 
 ## Current Capabilities
 

@@ -3,6 +3,7 @@
 #include <memory>
 #include <span>
 #include <vector>
+#include "input/v2/FrameMapping.h"
 struct ID3D11Texture2D;
 
 namespace screenshare {
@@ -19,6 +20,7 @@ public:
 struct Nv12VideoFrame {
     int width = 0, height = 0, codedWidth = 0, codedHeight = 0;
     int64_t timestamp100ns = 0, duration100ns = 0;
+    input::FrameMapping inputMapping;
     std::vector<uint8_t> nv12;
     std::shared_ptr<const uint8_t> retainedPixels;
     size_t retainedBytes = 0;

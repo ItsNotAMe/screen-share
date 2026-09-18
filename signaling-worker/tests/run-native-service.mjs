@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const workerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const executable = resolve(process.argv[2] ?? '');
 const fault = process.argv[5] ?? '';
-if (fault && fault !== 'mutation-ack-delay' && fault !== 'controllers') throw new Error('Unknown native service scenario');
+if (fault && fault !== 'mutation-ack-delay' && fault !== 'controllers' && fault !== 'desktop-input') throw new Error('Unknown native service scenario');
 if (!process.argv[2] || !process.argv[3]) throw new Error('Usage: node run-native-service.mjs <RoomServiceTests.exe> <artifact-root>');
 const artifact = join(resolve(process.argv[3]), 'native-service-' + randomUUID());
 await mkdir(artifact, { recursive: true });

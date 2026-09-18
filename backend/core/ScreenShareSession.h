@@ -244,6 +244,7 @@ struct RemoteInputEvent {
     int scancode = 0;
     uint32_t requestedCapabilities = 0; // for RequestControl
     RemoteGamepadState gamepad;
+    input::FrameMapping sourceMapping; // Empty for the legacy transport.
 };
 
 struct SessionViewer {

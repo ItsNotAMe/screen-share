@@ -1,6 +1,8 @@
 #include "media/webrtc/MfVideoEncoderFactory.h"
 #include "media/webrtc/MfHardwareSession.h"
 #include "media/webrtc/HardwareFrameWait.h"
+#include "media/webrtc/MappedVideoBuffer.h"
+#include "codec/InputMappingSei.h"
 #include "codec/H264StreamEncoder.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
@@ -184,7 +186,7 @@ private:
     CapturedFrame RawFrame(const webrtc::VideoFrame& frame) {
         if (IsRetiredFrame(frame)) throw RetiredVideoFrame{};
         if (hardwareActive_) {
-            if (auto* native = dynamic_cast<D3dVideoFrameBuffer*>(frame.video_frame_buffer().get())) {
+            if (auto* native = dynamic_cast<D3dVideoFrameBuffer*>(Unwrap(frame.video_frame_buffer()).get())) {
                 auto raw = native->RetainedNv12();
                 if (raw.d3dDevice.Get() == config_.d3dDevice.Get()) return raw;
             }
@@ -234,7 +236,7 @@ private:
         failed_ = true;
     }
     bool IsRetiredFrame(const webrtc::VideoFrame& frame) {
-        const auto* native = dynamic_cast<D3dVideoFrameBuffer*>(frame.video_frame_buffer().get());
+        const auto* native = dynamic_cast<D3dVideoFrameBuffer*>(Unwrap(frame.video_frame_buffer()).get());
         return native && native->retired();
     }
     void Process(uint64_t generation) {
@@ -264,6 +266,7 @@ private:
                 if (Cancelled(generation)) throw HardwareFrameCancelled();
                 if (IsRetiredFrame(*frame)) throw RetiredVideoFrame{};
                 webrtc::EncodedImage image;
+                input::InsertMappingSei(packet.bytes,Mapping(frame->video_frame_buffer()));
                 image.SetEncodedData(webrtc::EncodedImageBuffer::Create(
                     reinterpret_cast<const uint8_t*>(packet.bytes.data()), packet.bytes.size()));
                 image.SetRtpTimestamp(frame->rtp_timestamp());

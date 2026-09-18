@@ -67,6 +67,7 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
     std::unique_ptr<input::GamepadPoller> controller;
     std::string requestedPeer;
     uint64_t requestPermission = 0;
+    uint8_t requestedCapabilities = 0;
     auto starting = session.Start(config.room);
     std::future<StreamUpdateResult> updating;
     std::future<CaptureUpdateResult> captureUpdate;
@@ -94,6 +95,7 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
                 if (!config.room.host && result["accepted"].toBool()) {
                     if (result["operation"] == "request") {
                         requestedPeer = result["peer"].toString().toStdString();
+                        requestedCapabilities = uint8_t(result["capabilities"].toInt());
                         for (const auto& state : input->Read()) if (state.peer == requestedPeer) requestPermission = state.permission;
                     }
                     else if (result["operation"] == "revoke") { controller.reset(); requestedPeer.clear(); }
@@ -101,14 +103,18 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
             }
         }
         bool controllerGranted = false;
+        uint8_t desktopGranted = 0;
         if (hooks.controlActive && !hooks.controlActive()) {
             controller.reset(); requestedPeer.clear();
             if (input) input->Revoke();
         }
         if (input) for (const auto& state : input->Read()) if (state.peer == requestedPeer) {
-            if (state.granted & input::Gamepad) controllerGranted = true;
+            if (state.granted && state.granted==requestedCapabilities) {controllerGranted=state.granted&input::Gamepad;desktopGranted=state.granted&3;}
             else if (!state.ready || state.permission > requestPermission) requestedPeer.clear();
         }
+        if(hooks.inputCapture)hooks.inputCapture(desktopGranted,[input,peer=requestedPeer](const auto& event) {
+            if(input && !peer.empty() && !input->Submit(peer,event))input->Revoke(peer);
+        });
         if (!config.room.host && controllerGranted && !controller && (hooks.gamepad || (!loopback && !config.gamepadDevice.isEmpty()))) {
             controller = std::make_unique<input::GamepadPoller>(input, requestedPeer, [read = hooks.gamepad, device = config.gamepadDevice.toStdString()]() -> std::optional<input::Event> {
                 if (read) return read();
@@ -172,6 +178,7 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
             audioUpdate = session.SwitchAudioSource(config.audioChanges[nextAudio++].selection);
     }
     controller.reset();
+    if(hooks.inputCapture)hooks.inputCapture(0,{});
     if (auto input = session.Input()) input->Revoke();
     auto stopping = session.Stop();
     // Keep window messages responsive while native delivery and networking drain.
@@ -230,6 +237,7 @@ int RunRoomCli(int argc, char** argv) {
         std::unique_ptr<ReceiverPreviewWindow> preview;
         if (!config.room.host && config.preview) { preview = std::make_unique<ReceiverPreviewWindow>(); preview->SetLowLatency(true); preview->Show(); }
         RoomCliHooks hooks;
+        hooks.inputCapture = [&](uint8_t caps,auto callback) {if(preview)preview->SetRemoteInput(caps,std::move(callback));};
         constexpr int panicId = 0x5353;
         const bool needsControl = !config.inputCommandsFile.isEmpty();
         if (needsControl && !RegisterHotKey(nullptr, panicId, MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_F12))
@@ -273,7 +281,7 @@ int RunRoomCli(int argc, char** argv) {
             }
             return !interrupted.load();
         };
-        if (config.room.host && !config.inputCommandsFile.isEmpty()) config.media.inputSink = input::CreateWindowsGamepadSink();
+        if (config.room.host && !config.inputCommandsFile.isEmpty()) config.media.enableDesktopInput = true;
         const int result = RunRoomCliSession(config, WindowsRoomRuntimeFactory(config.media), std::move(hooks));
         frames->Stop(); const auto statistics = frames->statistics();
         const QJsonObject presentation{{"type", "presentation"}, {"received", qint64(statistics.received)}, {"replaced", qint64(statistics.replaced)},

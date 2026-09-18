@@ -1,4 +1,6 @@
 #include "RoomGamepadControl.h"
+#include "VideoFrameWidget.h"
+#include "shared/MappedInput.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -15,18 +17,22 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
     : QWidget(parent), host_(host), port_(std::move(port)), room_(std::move(room)), read_(std::move(read)) {
     setObjectName("roomGamepadControl");
     auto* layout = new QVBoxLayout(this);
-    status_ = new QLabel("Controller control is off.", this);
+    status_ = new QLabel("Remote input is off.", this);
     status_->setObjectName("controllerStatus"); status_->setTextFormat(Qt::PlainText); status_->setWordWrap(true);
     layout->addWidget(status_);
     peers_ = new QComboBox(this); peers_->setObjectName("controllerPeer"); layout->addWidget(peers_);
+    capabilities_ = new QComboBox(this); capabilities_->setObjectName("inputCapabilities");
+    capabilities_->addItem("Controller",input::Gamepad); capabilities_->addItem("Mouse",input::Mouse);
+    capabilities_->addItem("Keyboard (display sharing only)",input::Keyboard); capabilities_->addItem("Mouse and keyboard (display sharing only)",input::Mouse|input::Keyboard);
+    layout->addWidget(capabilities_);
     devices_ = new QComboBox(this); devices_->setObjectName("controllerDevice");
     devices_->setVisible(!host); layout->addWidget(devices_);
     auto* refresh = new QPushButton("Refresh controllers", this); refresh->setObjectName("refreshControllers");
     refresh->setVisible(!host); layout->addWidget(refresh);
-    consent_ = new QCheckBox(host ? "I allow the selected viewer to control a virtual gamepad." :
-        "Use my selected controller in this room.", this);
+    consent_ = new QCheckBox(host ? "I allow the selected viewer to use the selected input controls." :
+        "Use my selected input controls in this room.", this);
     consent_->setObjectName("controllerConsent"); layout->addWidget(consent_);
-    action_ = new QPushButton(host ? "Grant controller" : "Request controller", this);
+    action_ = new QPushButton(host ? "Grant selected control" : "Request selected control", this);
     action_->setObjectName("controllerAction"); action_->setEnabled(false); layout->addWidget(action_);
     auto* revoke = new QPushButton(host ? "Revoke all control" : "Release control", this);
     revoke->setObjectName("revokeController"); layout->addWidget(revoke);
@@ -48,16 +54,20 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
     });
     connect(peers_, &QComboBox::currentIndexChanged, this, [this] { if (!host_) Revoke(); else consent_->setChecked(false); });
     connect(devices_, &QComboBox::currentIndexChanged, this, [this] { Revoke(); });
-    connect(consent_, &QCheckBox::toggled, this, [this](bool checked) { if (!checked && !host_) Revoke(); Tick(); });
+    connect(capabilities_, &QComboBox::currentIndexChanged, this, [this] { if(!host_)Revoke();else consent_->setChecked(false);Tick(); });
+    connect(consent_, &QCheckBox::toggled, this, [this](bool checked) { if(checked)actionError_.clear(); if (!checked && !host_) Revoke(); Tick(); });
     connect(action_, &QPushButton::clicked, this, [this] {
         auto port = port_(); const auto peer = peers_->currentData().toString().toStdString();
         if (!port || peer.empty() || !consent_->isChecked()) return;
+        const auto caps=uint8_t(capabilities_->currentData().toUInt());
         if (host_) {
-            if (!port->Grant(peer, input::Gamepad)) status_->setText("Controller grant is unavailable.");
+            if ((prepareGrant && !prepareGrant(caps)) || !port->Grant(peer, caps)) {
+                port->Revoke(peer);actionError_="Selected input is unavailable. Keyboard requires display sharing; restore the shared window before granting mouse control.";
+            }
             consent_->setChecked(false); // Consent applies only to this action/peer.
-        } else if (!devices_->currentData().toString().isEmpty()) {
+        } else if (!(caps&input::Gamepad) || !devices_->currentData().toString().isEmpty()) {
             for (const auto& state : port->Read()) if (state.peer == peer) requestPermission_ = state.permission;
-            armed_ = port->Request(peer, input::Gamepad); requestedPeer_ = armed_ ? peer : "";
+            armed_ = port->Request(peer, caps); requestedPeer_ = armed_ ? peer : "";
         }
         Tick();
     });
@@ -66,13 +76,27 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
     qApp->installEventFilter(this);
 }
 RoomGamepadControl::~RoomGamepadControl() { qApp->removeEventFilter(this); Revoke(); }
+void RoomGamepadControl::SetVideo(VideoFrameWidget* video) {
+    video_=video;
+    video_->setRemoteInputHandler([this](const auto& value) {
+        if(value.kind==RemoteInputKind::ReleaseControl) {Revoke();return;}
+        const auto event=MappedInput(value);const auto port=port_();
+        if(!event) {if(value.kind==RemoteInputKind::MouseButton && !value.pressed)Revoke();return;}
+        if(!port || !armed_ || requestedPeer_.empty())return;
+        if(!port->Submit(requestedPeer_,*event))Revoke();
+    });
+}
 void RoomGamepadControl::Revoke() {
+    actionError_.clear();
     armed_ = false; requestedPeer_.clear(); poller_.reset();
+    if(video_)video_->setControlCapture(false,false,false);
     if (auto port = port_()) port->Revoke();
     const QSignalBlocker blocker(consent_); consent_->setChecked(false);
 }
 bool RoomGamepadControl::eventFilter(QObject* watched, QEvent* event) {
     if (!host_ && watched == window() && (event->type() == QEvent::WindowDeactivate || event->type() == QEvent::Hide)) Revoke();
+    if(!host_ && video_ && event->type()==QEvent::FocusOut && (watched==video_ || video_->isAncestorOf(qobject_cast<QWidget*>(watched))))
+        QTimer::singleShot(0,this,[this] {auto* focus=QApplication::focusWidget();if(video_ && focus!=video_ && !video_->isAncestorOf(focus))Revoke();});
     return QWidget::eventFilter(watched, event);
 }
 void RoomGamepadControl::Tick() {
@@ -92,6 +116,7 @@ void RoomGamepadControl::Tick() {
         if (selected != peers_->currentData().toString()) { if (!host_) Revoke(); else consent_->setChecked(false); }
     }
     const auto peer = peers_->currentData().toString().toStdString();
+    const auto caps=uint8_t(capabilities_->currentData().toUInt());
     uint8_t granted = 0, requested = 0; uint64_t permission = 0; input::Reason reason = input::Reason::Unavailable;
     bool pending = false, revoking = false;
     QStringList active;
@@ -100,10 +125,10 @@ void RoomGamepadControl::Tick() {
         if (state.peer == peer) { granted = state.granted; requested = state.requested; permission = state.permission; reason = state.reason; pending = state.grantPending; revoking = state.revokePending; }
     }
     action_->setEnabled(room.phase == v2::RoomPhase::Active && consent_->isChecked() && !peer.empty() &&
-        (host_ ? bool(requested & input::Gamepad) : devices_->count() > 0 && permission && !armed_ && !revoking));
+        (host_ ? (requested&caps)==caps : ((caps&input::Gamepad)?devices_->count()>0:video_ && video_->presentedInputMapping().Valid()) && permission && !armed_ && !revoking));
     if (!host_) {
         if (armed_ && !granted && permission > requestPermission_) Revoke();
-        if (granted && (!armed_ || requestedPeer_ != peer)) { port->Revoke(peer); granted = 0; }
+        if (granted && (!armed_ || requestedPeer_ != peer || granted!=caps)) { port->Revoke(peer); granted = 0; }
         if ((granted & input::Gamepad) && !poller_) {
             const auto device = devices_->currentData().toString().toStdString();
             poller_ = std::make_unique<input::GamepadPoller>(port, peer, [read = read_, device]() -> std::optional<input::Event> {
@@ -114,9 +139,10 @@ void RoomGamepadControl::Tick() {
             });
         }
         if (!granted && poller_) Revoke();
+        if(video_)video_->setControlCapture(bool(granted&3),granted&input::Mouse,granted&input::Keyboard);
     }
-    status_->setText(pending ? "Starting the selected controller…" : !active.empty() ? "Controller control active: " + active.join(", ") :
-        reason == input::Reason::Backend ? "Controller unavailable. Check the host controller driver and free player slots." :
-        reason == input::Reason::Ownership ? "Controller slots are already in use." :
-        armed_ || requested ? "Waiting for explicit host permission." : "Controller control is off.");
+    status_->setText(!actionError_.isEmpty()?actionError_:pending ? "Starting selected input…" : !active.empty() ? "Remote input active: " + active.join(", ") :
+        reason == input::Reason::Backend ? "Input unavailable. Check the shared source, foreground window, or controller driver and slots." :
+        reason == input::Reason::Ownership ? "Selected input is already in use." :
+        revoking ? "Waiting for release acknowledgement…" : armed_ || requested ? "Waiting for explicit host permission." : "Remote input is off.");
 }

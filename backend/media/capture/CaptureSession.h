@@ -8,7 +8,7 @@
 
 namespace screenshare::media {
 // Portable ownership boundary. Platform adapters define the resource subtype.
-struct CaptureResource { virtual ~CaptureResource() = default; };
+struct CaptureResource { virtual ~CaptureResource() = default; uint64_t inputGeneration = 0; };
 struct CaptureSample {
     std::shared_ptr<CaptureResource> resource;
     std::chrono::steady_clock::time_point capturedAt;

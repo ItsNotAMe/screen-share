@@ -83,7 +83,7 @@ struct Service::Impl {
         }
     }
     bool Capacity(Peer& p) {
-        // Every message <=162 bytes, so 64 total queued transitions <16 KiB.
+        // Every message <=170 bytes, so 64 total queued transitions <16 KiB.
         if(p.incoming.size()+p.outgoing.size()<64)return true;
         Revoke(p,Reason::Backpressure); return false;
     }

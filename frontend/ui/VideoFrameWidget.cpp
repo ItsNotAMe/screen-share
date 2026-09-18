@@ -115,7 +115,8 @@ public:
     [[nodiscard]] VideoFrameWidget::PresentationStats stats() const noexcept
     {
         VideoFrameWidget::PresentationStats snapshot;
-        { std::lock_guard lock(diagnosticsMutex_); snapshot.renderer = rendererStatistics_; }
+        { std::lock_guard lock(diagnosticsMutex_); snapshot.renderer = rendererStatistics_; snapshot.inputMapping = inputMapping_;
+          snapshot.inputViewportWidth=inputViewportWidth_;snapshot.inputViewportHeight=inputViewportHeight_; }
         snapshot.enqueuedFrames = enqueuedFrames_.load(std::memory_order_relaxed);
         snapshot.presentedFrames = presentedFrames_.load(std::memory_order_relaxed);
         snapshot.droppedFrames = droppedFrames_.load(std::memory_order_relaxed);
@@ -196,7 +197,9 @@ private:
                 presenter.Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
             }
             const auto status = presenter.statistics();
-            { std::lock_guard lock(diagnosticsMutex_); rendererStatistics_ = status; }
+            { std::lock_guard lock(diagnosticsMutex_); rendererStatistics_ = status;
+              if(work.clearPending || (work.frame && !presented))inputMapping_={};
+              if(presented) {inputMapping_=work.frame->inputMapping;inputViewportWidth_=work.width;inputViewportHeight_=work.height;} }
             presentErrors_ = status.errors;
             recoveries_ = status.recoveries;
             maximumFrameLatency_ = status.maximumFrameLatency;
@@ -215,6 +218,8 @@ private:
     mutable std::mutex mutex_;
     mutable std::mutex diagnosticsMutex_;
     FramePresentationSession::Statistics rendererStatistics_;
+    screenshare::input::FrameMapping inputMapping_;
+    uint32_t inputViewportWidth_=0,inputViewportHeight_=0;
     std::condition_variable condition_;
     std::optional<screenshare::SessionEvent::VideoFrame> pendingFrame_;
     HWND hwnd_ = nullptr;
@@ -357,6 +362,7 @@ bool VideoFrameWidget::setVideoFrame(screenshare::SessionEvent::VideoFrame frame
             return false;
         }
         image_ = std::move(image);
+        pendingImageMapping_ = frame.inputMapping;
         update();
         return true;
     }
@@ -429,8 +435,17 @@ VideoFrameWidget::PresentationStats VideoFrameWidget::presentationStats() const
     return framePresenter_ ? framePresenter_->stats() : PresentationStats{};
 }
 
+screenshare::input::FrameMapping VideoFrameWidget::presentedInputMapping() const
+{
+    if(!d3dSurface_)return paintedMapping_;
+    const auto stats=framePresenter_->stats();
+    if(!d3dSurface_->isVisible() || stats.inputViewportWidth!=d3dWidth_.load() || stats.inputViewportHeight!=d3dHeight_.load())return {};
+    return stats.inputMapping;
+}
+
 void VideoFrameWidget::clearFrame()
 {
+    pendingImageMapping_ = paintedMapping_ = mappedForInput_ = {};
     if (d3dSurface_ != nullptr) {
         d3dSurface_->hide();
     }
@@ -448,6 +463,7 @@ void VideoFrameWidget::setRemoteInputHandler(std::function<void(const screenshar
 
 void VideoFrameWidget::setControlCapture(bool enabled, bool mouse, bool keyboard)
 {
+    if(controlActive_==enabled && controlMouse_==(enabled&&mouse) && controlKeyboard_==(enabled&&keyboard))return;
     controlActive_ = enabled;
     controlMouse_ = enabled && mouse;
     controlKeyboard_ = enabled && keyboard;
@@ -491,7 +507,7 @@ bool VideoFrameWidget::eventFilter(QObject* watched, QEvent* event)
                 input.kind = screenshare::RemoteInputKind::MouseMove;
                 input.normX = normX;
                 input.normY = normY;
-                inputHandler_(input);
+                input.sourceMapping = mappedForInput_; inputHandler_(input);
             }
             return true;
         }
@@ -539,8 +555,9 @@ bool VideoFrameWidget::eventFilter(QObject* watched, QEvent* event)
 
 bool VideoFrameWidget::mapToNormalized(const QPoint& pos, float& normX, float& normY) const
 {
-    const int frameW = frameWidth_.load(std::memory_order_relaxed);
-    const int frameH = frameHeight_.load(std::memory_order_relaxed);
+    mappedForInput_ = presentedInputMapping();
+    const int frameW = mappedForInput_.Valid()?mappedForInput_.width:frameWidth_.load(std::memory_order_relaxed);
+    const int frameH = mappedForInput_.Valid()?mappedForInput_.height:frameHeight_.load(std::memory_order_relaxed);
     if (frameW <= 0 || frameH <= 0 || width() <= 0 || height() <= 0) {
         return false;
     }
@@ -592,6 +609,7 @@ void VideoFrameWidget::emitMouseButton(QMouseEvent* event, bool pressed)
     float normX = 0.0f;
     float normY = 0.0f;
     if (!mapToNormalized(event->position().toPoint(), normX, normY)) {
+        if(!pressed) {screenshare::RemoteInputEvent release;release.kind=screenshare::RemoteInputKind::ReleaseControl;inputHandler_(release);}
         return;
     }
     screenshare::RemoteInputEvent input;
@@ -600,7 +618,7 @@ void VideoFrameWidget::emitMouseButton(QMouseEvent* event, bool pressed)
     input.pressed = pressed;
     input.normX = normX;
     input.normY = normY;
-    inputHandler_(input);
+    input.sourceMapping = mappedForInput_; inputHandler_(input);
 }
 
 void VideoFrameWidget::emitKey(QKeyEvent* event, bool pressed)
@@ -620,7 +638,7 @@ void VideoFrameWidget::emitKey(QKeyEvent* event, bool pressed)
     input.key = static_cast<int>(event->nativeVirtualKey());
     input.scancode = static_cast<int>(event->nativeScanCode());
     input.pressed = pressed;
-    inputHandler_(input);
+    input.sourceMapping = presentedInputMapping(); inputHandler_(input);
 }
 
 void VideoFrameWidget::emitWheel(QWheelEvent* event)
@@ -641,9 +659,10 @@ void VideoFrameWidget::emitWheel(QWheelEvent* event)
     }
     screenshare::RemoteInputEvent input;
     input.kind = screenshare::RemoteInputKind::MouseScroll;
+    if(!mapToNormalized(event->position().toPoint(),input.normX,input.normY))return;
     input.scrollX = delta.x();
     input.scrollY = delta.y();
-    inputHandler_(input);
+    input.sourceMapping = mappedForInput_; inputHandler_(input);
 }
 
 void VideoFrameWidget::mousePressEvent(QMouseEvent* event)
@@ -677,7 +696,7 @@ void VideoFrameWidget::mouseMoveEvent(QMouseEvent* event)
             input.kind = screenshare::RemoteInputKind::MouseMove;
             input.normX = normX;
             input.normY = normY;
-            inputHandler_(input);
+            input.sourceMapping = mappedForInput_; inputHandler_(input);
         }
         event->accept();
         return;
@@ -731,6 +750,7 @@ void VideoFrameWidget::paintEvent(QPaintEvent* event)
             scaled.height());
         painter.setRenderHint(QPainter::SmoothPixmapTransform, smoothScaling_);
         painter.drawImage(target, image_);
+        paintedMapping_ = pendingImageMapping_;
         return;
     }
 
@@ -746,6 +766,7 @@ void VideoFrameWidget::paintEvent(QPaintEvent* event)
 
 void VideoFrameWidget::resizeEvent(QResizeEvent* event)
 {
+    paintedMapping_={};
     QWidget::resizeEvent(event);
     if (d3dSurface_ != nullptr) {
         d3dSurface_->setGeometry(rect());

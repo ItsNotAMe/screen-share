@@ -2,7 +2,8 @@
 
 Controller request/grant, selected-peer/all revoke, indicators, selected-device
 polling and AppShell panic revoke are now integrated. See [CONTROLLERS.md](CONTROLLERS.md)
-for consent/focus/source behavior and silent tests. Mouse/keyboard remain disabled.
+for consent/focus/source behavior and silent tests. Mouse/keyboard now use the same
+panel with explicit capabilities and exact presented-frame mapping; see DESKTOP-INPUT.md.
 
 The existing home screen now supports guarded v2 routing with
 `ScreenShareUi --backend v2 --signal-server HTTPS_ORIGIN`. Start Sharing,
@@ -189,8 +190,8 @@ runtime references are released after stop. Normal lifecycle does not block the
 GUI thread waiting for capture retirement. Destruction is a final synchronous
 fallback; owners should use stop/finished before destruction.
 
-Controller consent/control is integrated into this session page; mouse/keyboard
-mapping and confinement remain. The opt-in browser supplies create/join, persisted
+Controller and mouse/keyboard consent/control are integrated into this session
+page, including source mapping and confinement. The opt-in browser supplies create/join, persisted
 nickname and pushed directory updates inside the normal shell. Live audio-device
 switching and retained GPU presentation are implemented. Physical-device and
 network/latency acceptance remain open.

@@ -2,16 +2,18 @@
 
 The shared v2 input backend is implemented and exercised through actual encrypted
 WebRTC channels with four simultaneous media viewers. **Stage 3 is not complete:**
-controller control is integrated in the normal opt-in UI/CLI with explicit consent
-and a lazy Windows sink; mouse/keyboard injection remains disabled pending source
-mapping and confinement. See [CONTROLLERS.md](CONTROLLERS.md).
+controller and mouse/keyboard control are integrated in the normal opt-in UI/CLI
+with explicit consent and lazy Windows sinks. Physical input and impairment/latency
+acceptance remain. See [CONTROLLERS.md](CONTROLLERS.md) and [DESKTOP-INPUT.md](DESKTOP-INPUT.md).
 
 ## Implemented contract
 
 - `backend/input/v2/InputProtocol.h` owns portable events and explicit big-endian
-  serialization. `SIN`, version 1, kind and connection-ID length precede 64-bit
+  serialization. `SIN`, version 2, kind and connection-ID length precede 64-bit
   permission and sequence numbers, the negotiated connection ID, and an exact
-  kind-specific payload. Messages are at most 162 bytes. Unknown versions/kinds,
+  kind-specific payload. Desktop events include the captured-source generation;
+  wheel events also carry their own position. Messages are at most 170 bytes.
+  Both endpoints must upgrade; v1 input is rejected. Unknown versions/kinds,
   wrong lengths, invalid coordinates, key/button ranges and reserved gamepad bits
   are rejected. Pad slots are assigned by the host, never supplied over the wire.
 - `InputService` owns one input thread per runtime. It sleeps when no grant needs
@@ -54,17 +56,18 @@ mapping and confinement. See [CONTROLLERS.md](CONTROLLERS.md).
   grants are allowed, reduced to `min(3, 4-localPads)`. `Configure` invalidates
   existing grants before changing this policy. The Windows sink also enumerates
   occupied XInput slots and verifies each created device's actual user index.
-- Window-source runtimes refuse keyboard grants. A capture-switch request
-  invalidates all input and restricts fresh grants to gamepads, including after a
-  failed switch. Mouse/keyboard remain disabled until transactional replacement-
-  source mapping is implemented. Invalid source validation does not
-  change grants. There is no fallback to physical injection in tests.
+- Window-source sinks refuse keyboard grants. A capture-switch request invalidates
+  all input, including after a failed switch. Fresh desktop grants require a live
+  target and exact captured generation; geometry changes invalidate the grant.
+  Invalid source validation does not change grants. There is no fallback to physical
+  injection in tests. See DESKTOP-INPUT.md for SEI and presentation mapping.
 
-## Remaining integrated delivery group
+## Integrated delivery and remaining acceptance
 
-Controller portions of items 1, 3, 4 and 5 below are now implemented, including
-UI/CLI factories and recording-device tests. Treat those as foundations; the next
-group is mouse/keyboard geometry, confinement and full frontend integration.
+The implementation items below are now delivered, including controller and desktop
+UI/CLI factories, exact-frame mapping and recording-device tests. The list preserves
+the original implementation contract; physical and impaired-network validation in
+item 5 remains open. Do not rebuild these foundations as a new group.
 
 Build the Windows device adapters and normal UI/CLI interaction together on this
 port; do not introduce another transport, permission service or room workflow.

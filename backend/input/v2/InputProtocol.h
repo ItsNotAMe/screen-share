@@ -20,6 +20,7 @@ struct Event {
     uint16_t key = 0, scan = 0, buttons = 0;
     uint8_t leftTrigger = 0, rightTrigger = 0;
     std::array<int16_t, 4> axes{};
+    uint64_t sourceGeneration = 0;
 };
 struct Message {
     std::string connection;
@@ -36,7 +37,8 @@ inline bool Valid(const Event& e) {
         return std::isfinite(e.x) && std::isfinite(e.y) && e.x >= 0 && e.x <= 1 && e.y >= 0 && e.y <= 1 &&
             (e.kind != Kind::Button || e.button < 5);
     case Kind::Key: return e.key > 0 && e.key <= 255 && e.scan <= 0x1ff;
-    case Kind::Wheel: return e.wheelX >= -1200 && e.wheelX <= 1200 && e.wheelY >= -1200 && e.wheelY <= 1200;
+    case Kind::Wheel: return e.wheelX >= -1200 && e.wheelX <= 1200 && e.wheelY >= -1200 && e.wheelY <= 1200 &&
+        std::isfinite(e.x) && std::isfinite(e.y) && e.x>=0 && e.x<=1 && e.y>=0 && e.y<=1;
     case Kind::Pad: return !(e.buttons & ~uint16_t(0xf3ff));
     default: return true;
     }
@@ -46,17 +48,18 @@ inline bool Valid(const Event& e) {
 inline std::vector<uint8_t> Encode(const Message& m) {
     if (m.connection.empty() || m.connection.size() > 128 || !m.sequence || !Valid(m.event) ||
         (!m.permission && m.event.kind != Kind::Request)) return {};
-    std::vector<uint8_t> b{'S','I','N',1,uint8_t(m.event.kind),uint8_t(m.connection.size())};
+    std::vector<uint8_t> b{'S','I','N',2,uint8_t(m.event.kind),uint8_t(m.connection.size())};
     auto put = [&](uint64_t n, unsigned size) { while (size--) b.push_back(uint8_t(n >> (size * 8))); };
     put(m.permission,8); put(m.sequence,8);
     b.insert(b.end(),m.connection.begin(),m.connection.end());
     const auto& e=m.event;
+    if(e.kind==Kind::Pointer || e.kind==Kind::Button || e.kind==Kind::Wheel || e.kind==Kind::Key)put(e.sourceGeneration,8);
     switch (e.kind) {
     case Kind::Request: case Kind::Permission: put(e.capabilities,1); break;
     case Kind::Pointer: case Kind::Button:
         put(std::bit_cast<uint32_t>(e.x),4); put(std::bit_cast<uint32_t>(e.y),4);
         if(e.kind==Kind::Button) { put(e.button,1); put(e.down,1); } break;
-    case Kind::Wheel: put(uint16_t(e.wheelX),2); put(uint16_t(e.wheelY),2); break;
+    case Kind::Wheel: put(uint16_t(e.wheelX),2); put(uint16_t(e.wheelY),2); put(std::bit_cast<uint32_t>(e.x),4); put(std::bit_cast<uint32_t>(e.y),4); break;
     case Kind::Key: put(e.key,2); put(e.scan,2); put(e.down,1); break;
     case Kind::Pad:
         put(e.buttons,2); put(e.leftTrigger,1); put(e.rightTrigger,1);
@@ -66,20 +69,22 @@ inline std::vector<uint8_t> Encode(const Message& m) {
     return b;
 }
 inline std::optional<Message> Decode(std::span<const uint8_t> b) {
-    if(b.size()<23 || b.size()>162 || b[0]!='S' || b[1]!='I' || b[2]!='N' || b[3]!=1 || b[4]>8 || !b[5] || b[5]>128) return {};
-    constexpr unsigned sizes[]={1,1,0,0,8,10,4,5,12};
+    if(b.size()<23 || b.size()>170 || b[0]!='S' || b[1]!='I' || b[2]!='N' || b[3]!=2 || b[4]>8 || !b[5] || b[5]>128) return {};
+    constexpr unsigned sizes[]={1,1,0,0,16,18,20,13,12};
     if(b.size()!=22+b[5]+sizes[b[4]]) return {};
     size_t at=6;
     auto get=[&](unsigned size) { uint64_t n=0; while(size--) n=(n<<8)|b[at++]; return n; };
     Message m; m.event.kind=Kind(b[4]); m.permission=get(8); m.sequence=get(8);
     m.connection.assign(reinterpret_cast<const char*>(b.data()+at),b[5]); at+=b[5];
     auto& e=m.event;
+    if(e.kind==Kind::Pointer || e.kind==Kind::Button || e.kind==Kind::Wheel || e.kind==Kind::Key)e.sourceGeneration=get(8);
     switch(e.kind) {
     case Kind::Request: case Kind::Permission: e.capabilities=uint8_t(get(1)); break;
     case Kind::Pointer: case Kind::Button:
         e.x=std::bit_cast<float>(uint32_t(get(4))); e.y=std::bit_cast<float>(uint32_t(get(4)));
         if(e.kind==Kind::Button) { e.button=uint8_t(get(1)); const auto down=get(1); if(down>1)return {}; e.down=down!=0; } break;
-    case Kind::Wheel: e.wheelX=std::bit_cast<int16_t>(uint16_t(get(2))); e.wheelY=std::bit_cast<int16_t>(uint16_t(get(2))); break;
+    case Kind::Wheel: e.wheelX=std::bit_cast<int16_t>(uint16_t(get(2))); e.wheelY=std::bit_cast<int16_t>(uint16_t(get(2)));
+        e.x=std::bit_cast<float>(uint32_t(get(4))); e.y=std::bit_cast<float>(uint32_t(get(4))); break;
     case Kind::Key: {
         e.key=uint16_t(get(2)); e.scan=uint16_t(get(2)); const auto down=get(1); if(down>1)return {}; e.down=down!=0; break;
     }

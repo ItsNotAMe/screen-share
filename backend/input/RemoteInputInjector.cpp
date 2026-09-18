@@ -330,25 +330,26 @@ void RemoteInputInjector::RefreshTargetState()
     }
 }
 
-void RemoteInputInjector::InjectMouseMove(float normX, float normY)
+bool RemoteInputInjector::InjectMouseMove(float normX, float normY)
 {
     lastNormX_ = std::clamp(normX, 0.0f, 1.0f);
     lastNormY_ = std::clamp(normY, 0.0f, 1.0f);
     hasLastMousePosition_ = true;
     int absX = 0;
     int absY = 0;
-    if (HostUsingMouseNow() || !ResolveMousePoint(lastNormX_, lastNormY_, absX, absY)) {
+    if (HostUsingMouseNow()) return true; // Physical host activity has priority.
+    if (!ResolveMousePoint(lastNormX_, lastNormY_, absX, absY)) {
         RefreshTargetState();
-        return;
+        return false;
     }
-    static_cast<void>(SendAbsoluteMouse(MOUSEEVENTF_MOVE, absX, absY, 0));
+    return SendAbsoluteMouse(MOUSEEVENTF_MOVE, absX, absY, 0);
 }
 
-void RemoteInputInjector::InjectMouseButton(MouseButton button, bool down, float normX, float normY)
+bool RemoteInputInjector::InjectMouseButton(MouseButton button, bool down, float normX, float normY)
 {
     const std::size_t buttonIndex = static_cast<std::size_t>(button);
     if (buttonIndex >= pressedMouseButtons_.size()) {
-        return;
+        return false;
     }
     lastNormX_ = std::clamp(normX, 0.0f, 1.0f);
     lastNormY_ = std::clamp(normY, 0.0f, 1.0f);
@@ -357,73 +358,79 @@ void RemoteInputInjector::InjectMouseButton(MouseButton button, bool down, float
     DWORD flags = 0;
     DWORD mouseData = 0;
     if (!MouseButtonInput(button, down, flags, mouseData)) {
-        return;
+        return false;
     }
 
     int absX = 0;
     int absY = 0;
     const bool canTarget = ResolveMousePoint(lastNormX_, lastNormY_, absX, absY);
     if (down) {
-        if (HostUsingMouseNow() || !canTarget) {
+        if (HostUsingMouseNow()) return true;
+        if (!canTarget) {
             RefreshTargetState();
-            return;
+            return false;
         }
         if (SendAbsoluteMouse(MOUSEEVENTF_MOVE | flags, absX, absY, mouseData)) {
             pressedMouseButtons_[buttonIndex] = true;
+            return true;
         }
-        return;
+        return false;
     }
 
     // A release must never be suppressed after its matching press; otherwise a
     // focus change or host mouse movement could leave the OS button held down.
     if (!pressedMouseButtons_[buttonIndex]) {
-        return;
+        return true;
     }
+    bool sent = false;
     if (!HostUsingMouseNow() && canTarget) {
-        static_cast<void>(SendAbsoluteMouse(MOUSEEVENTF_MOVE | flags, absX, absY, mouseData));
+        sent = SendAbsoluteMouse(MOUSEEVENTF_MOVE | flags, absX, absY, mouseData);
     } else {
-        static_cast<void>(SendMouseButtonOnly(flags, mouseData));
+        sent = SendMouseButtonOnly(flags, mouseData);
     }
-    pressedMouseButtons_[buttonIndex] = false;
+    if (sent) pressedMouseButtons_[buttonIndex] = false;
+    return sent;
 }
 
-void RemoteInputInjector::InjectMouseScroll(int wheelDeltaX, int wheelDeltaY)
+bool RemoteInputInjector::InjectMouseScroll(int wheelDeltaX, int wheelDeltaY)
 {
     int absX = 0;
     int absY = 0;
-    if (HostUsingMouseNow() || !hasLastMousePosition_ ||
+    if (HostUsingMouseNow()) return true;
+    if (!hasLastMousePosition_ ||
         !ResolveMousePoint(lastNormX_, lastNormY_, absX, absY)) {
         RefreshTargetState();
-        return;
+        return false;
     }
     // Wheel messages are delivered to the window under the cursor. Reposition
     // first so scrolling follows the viewer's cursor instead of the host's.
     if (!SendAbsoluteMouse(MOUSEEVENTF_MOVE, absX, absY, 0)) {
-        return;
+        return false;
     }
     if (wheelDeltaY != 0) {
         INPUT input{};
         input.type = INPUT_MOUSE;
         input.mi.dwFlags = MOUSEEVENTF_WHEEL;
         input.mi.mouseData = static_cast<DWORD>(wheelDeltaY);
-        SendInput(1, &input, sizeof(INPUT));
+        if (SendInput(1, &input, sizeof(INPUT)) != 1) return false;
     }
     if (wheelDeltaX != 0) {
         INPUT input{};
         input.type = INPUT_MOUSE;
         input.mi.dwFlags = MOUSEEVENTF_HWHEEL;
         input.mi.mouseData = static_cast<DWORD>(wheelDeltaX);
-        SendInput(1, &input, sizeof(INPUT));
+        if (SendInput(1, &input, sizeof(INPUT)) != 1) return false;
     }
+    return true;
 }
 
-void RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool down)
+bool RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool down)
 {
     // Keyboard injection remains confined to a full-display share. Window
     // mouse targeting is coordinate-scoped, but SendInput keyboard events go
     // only to the foreground thread and cannot be constrained to a client rect.
     if (!HasTargetBounds()) {
-        return;
+        return false;
     }
     INPUT input{};
     input.type = INPUT_KEYBOARD;
@@ -434,7 +441,7 @@ void RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool
         input.ki.dwFlags |= KEYEVENTF_SCANCODE;
     }
     if (SendInput(1, &input, sizeof(INPUT)) != 1) {
-        return;
+        return false;
     }
     const auto existing = std::find_if(pressedKeys_.begin(), pressedKeys_.end(), [&](const PressedKey& key) {
         return key.virtualKey == virtualKey && key.scancode == scancode;
@@ -446,6 +453,7 @@ void RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool
     } else if (existing != pressedKeys_.end()) {
         pressedKeys_.erase(existing);
     }
+    return true;
 }
 
 } // namespace screenshare

@@ -3,6 +3,7 @@
 #include "codec/H264StreamDecoder.h"
 #include "Nv12VideoFrame.h"
 #include "FramePresentationBackend.h"
+#include "input/v2/InputProtocol.h"
 
 #include <Windows.h>
 
@@ -44,6 +45,8 @@ public:
     void ClearFrame();
     void SetStatusText(std::string_view statusText);
     void SetControlCallbacks(ReceiverPreviewControlCallbacks callbacks);
+    void SetRemoteInput(uint8_t capabilities, std::function<void(const input::Event&)> callback);
+    input::FrameMapping presentedInputMapping() const { return inputMapping_; }
 
     [[nodiscard]] bool closeRequested() const noexcept { return closeRequested_; }
     [[nodiscard]] uint64_t framesPresented() const noexcept { return framesPresented_; }
@@ -86,6 +89,9 @@ private:
     bool lowLatency_ = false;
     std::string statusText_;
     std::wstring renderedTitle_;
+    input::FrameMapping inputMapping_;
+    uint8_t inputCapabilities_ = 0;
+    std::function<void(const input::Event&)> inputCallback_;
 };
 
 } // namespace screenshare

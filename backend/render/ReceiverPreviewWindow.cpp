@@ -144,12 +144,15 @@ bool ReceiverPreviewWindow::PumpMessages()
 
 void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
 {
+    inputMapping_={};
     PresentView({frame.width, frame.height, reinterpret_cast<const uint8_t*>(frame.data.data()), frame.data.size(), frame.texture.Get()});
 }
 void ReceiverPreviewWindow::PresentFrame(const Nv12VideoFrame& frame)
 {
+    const auto before=framesPresented_;
     if (frame.native) PresentView({frame.width, frame.height, nullptr, 0, frame.native->texture()});
     else PresentPixels(frame.width, frame.height, frame.pixels());
+    inputMapping_=framesPresented_>before?frame.inputMapping:input::FrameMapping{};
 }
 void ReceiverPreviewWindow::SetLowLatency(bool enabled) {
     if (hwnd_) throw std::logic_error("Set latency mode before opening preview");
@@ -181,6 +184,7 @@ void ReceiverPreviewWindow::PresentView(const Nv12D3D11Presenter::FrameView& vie
 
 void ReceiverPreviewWindow::ClearFrame()
 {
+    inputMapping_={};
     if (closeRequested_) return;
     presenter_.Clear();
     frameWidth_ = frameHeight_ = 0;
@@ -222,8 +226,46 @@ LRESULT CALLBACK ReceiverPreviewWindow::StaticWindowProc(HWND hwnd, UINT message
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
+void ReceiverPreviewWindow::SetRemoteInput(uint8_t capabilities,std::function<void(const input::Event&)> callback)
+{
+    inputCapabilities_=capabilities&3;inputCallback_=std::move(callback);
+}
+
 LRESULT ReceiverPreviewWindow::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
 {
+    if(message==WM_SIZE || (message==WM_ACTIVATE && LOWORD(wParam)==WA_INACTIVE))inputMapping_={};
+    if(inputCallback_ && inputCapabilities_ && inputMapping_.Valid()) {
+        input::Event event;event.sourceGeneration=inputMapping_.generation;
+        bool send=false,mouse=false;
+        if((inputCapabilities_&input::Keyboard) && (message==WM_KEYDOWN || message==WM_KEYUP || message==WM_SYSKEYDOWN || message==WM_SYSKEYUP)) {
+            event.kind=input::Kind::Key;event.key=uint16_t(wParam);event.scan=uint16_t((lParam>>16)&0x1ff);
+            event.down=message==WM_KEYDOWN || message==WM_SYSKEYDOWN;send=true;
+        } else if(inputCapabilities_&input::Mouse) {
+            if(message==WM_MOUSEMOVE) {event.kind=input::Kind::Pointer;send=mouse=true;}
+            else if(message==WM_LBUTTONDOWN || message==WM_LBUTTONUP || message==WM_RBUTTONDOWN || message==WM_RBUTTONUP || message==WM_MBUTTONDOWN || message==WM_MBUTTONUP || message==WM_XBUTTONDOWN || message==WM_XBUTTONUP) {
+                event.kind=input::Kind::Button;send=mouse=true;
+                event.button=message==WM_LBUTTONDOWN || message==WM_LBUTTONUP?0:message==WM_RBUTTONDOWN || message==WM_RBUTTONUP?1:message==WM_MBUTTONDOWN || message==WM_MBUTTONUP?2:HIWORD(wParam)==XBUTTON1?3:4;
+                event.down=message==WM_LBUTTONDOWN || message==WM_RBUTTONDOWN || message==WM_MBUTTONDOWN || message==WM_XBUTTONDOWN;
+            } else if(message==WM_MOUSEWHEEL || message==WM_MOUSEHWHEEL) {
+                event.kind=input::Kind::Wheel;send=mouse=true;
+                const auto delta=int16_t(std::clamp(int(short(HIWORD(wParam))),-1200,1200));
+                if(message==WM_MOUSEWHEEL)event.wheelY=delta;else event.wheelX=delta;
+            }
+        }
+        if(mouse) {
+            POINT point{short(LOWORD(lParam)),short(HIWORD(lParam))};
+            if(message==WM_MOUSEWHEEL || message==WM_MOUSEHWHEEL)ScreenToClient(hwnd_,&point);
+            const double scale=scaleMode_==PreviewScaleMode::Fit?std::min(double(clientWidth_)/inputMapping_.width,double(clientHeight_)/inputMapping_.height):1.0;
+            const double width=inputMapping_.width*scale,height=inputMapping_.height*scale;
+            const auto mapped=inputMapping_.Point(float((point.x-(clientWidth_-width)/2)/width),float((point.y-(clientHeight_-height)/2)/height));
+            if(!mapped) {
+                if(event.kind==input::Kind::Button && !event.down) {event.kind=input::Kind::Release;inputCallback_(event);}
+                return 0;
+            }
+            event.x=mapped->first;event.y=mapped->second;
+        }
+        if(send) {if(input::Valid(event))inputCallback_(event);return 0;}
+    }
     switch (message) {
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:

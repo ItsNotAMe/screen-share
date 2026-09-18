@@ -13,6 +13,7 @@ public:
                            bool diagnosticLoopback = false);
     ~QtRoomSession() override;
     bool start(RoomSessionConfig);
+    bool prepareInputGrant(uint8_t capabilities);
     void stop();
     void reportPresentation(screenshare::media::ReceiverPresentationObservation value) {
         if (presentation_) presentation_->Publish(value);

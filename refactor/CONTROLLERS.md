@@ -1,7 +1,8 @@
 # Controller integration
 
 The opt-in v2 room UI and CLI now support explicitly authorized controllers.
-Mouse/keyboard control remains disabled. Stage 3/Gate D and physical acceptance
+Mouse/keyboard control is now integrated; see [DESKTOP-INPUT.md](DESKTOP-INPUT.md).
+Stage 3/Gate D and physical acceptance
 remain open; default backend selection and release gates have not changed.
 
 ## Ownership and safety
@@ -79,8 +80,8 @@ window desktop extension. Production rate limits and test deadlines are unchange
 Test windows show without activation; focus-loss is sent explicitly to the owned
 viewer widget. Panic tests invoke the revoke handler, not a global keyboard shortcut.
 
-Next: mouse/keyboard captured-source identity and displayed-generation mapping,
-letterboxing, pinned-window confinement, foreground/occlusion/minimize protection,
-window-share keyboard prohibition, explicit capability consent, and end-to-end
-recording-sink UI/CLI tests. Preserve this controller implementation. Physical pad
-compatibility, real driver behavior and external gaming latency remain acceptance work.
+The subsequent desktop-input group implements source identity, displayed-frame
+mapping, letterboxing, pinned-window checks and explicit UI/CLI capability consent.
+See DESKTOP-INPUT.md; the current matrix is 11 headless / 15 desktop-inclusive.
+Physical pad compatibility, real driver behavior, physical desktop confinement
+and external gaming latency remain acceptance work.

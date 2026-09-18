@@ -169,6 +169,7 @@ add_library(ScreenShareCore STATIC
     backend/core/SessionRuntimeControl.cpp
     backend/input/RemoteInputInjector.cpp
     backend/input/v2/GamepadSink.cpp
+    backend/input/v2/DesktopSink.cpp
     backend/input/v2/GamepadPoller.cpp
     backend/input/ViewerGamepad.cpp
     backend/input/VirtualGamepadBackend.cpp
@@ -328,6 +329,10 @@ if(BUILD_TESTING)
     add_executable(GamepadControlTests tests/GamepadControlTests.cpp)
     target_link_libraries(GamepadControlTests PRIVATE ScreenShareCore)
     add_test(NAME gamepad-control COMMAND GamepadControlTests)
+    add_executable(DesktopInputTests tests/DesktopInputTests.cpp)
+    target_link_libraries(DesktopInputTests PRIVATE ScreenShareCore)
+    add_test(NAME desktop-input COMMAND DesktopInputTests)
+    set_tests_properties(desktop-input PROPERTIES TIMEOUT 15)
     set_tests_properties(gamepad-control PROPERTIES TIMEOUT 15)
     set_tests_properties(input-service PROPERTIES TIMEOUT 20)
     add_executable(ControllerProtocolTests

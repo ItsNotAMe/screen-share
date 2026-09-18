@@ -3,6 +3,7 @@
 #include "media/StreamPreferences.h"
 #include "media/SourceVideoStatus.h"
 #include "D3dVideoFrameBuffer.h"
+#include "MappedVideoBuffer.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_broadcaster.h"
 #include "api/video/video_adapter.h"
@@ -30,18 +31,20 @@ public:
     uint64_t requestedRevision() const { std::lock_guard lock(settingsMutex_); return revision_; }
     SourceSettingsStats settingsStats() const { std::lock_guard lock(settingsMutex_); return stats_; }
     void PushBuffer(webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer,
-                    std::chrono::steady_clock::time_point capturedAt = std::chrono::steady_clock::now()) {
+                    std::chrono::steady_clock::time_point capturedAt = std::chrono::steady_clock::now(), uint64_t sourceGeneration = 0) {
         if (!buffer) throw std::invalid_argument("Missing video frame buffer");
         const auto timestamp = Timestamp(capturedAt);
-        buffer = Adapt(std::move(buffer), timestamp);
+        input::FrameMapping mapping{sourceGeneration,uint16_t(buffer->width()),uint16_t(buffer->height()),0,0,uint16_t(buffer->width()),uint16_t(buffer->height())};
+        buffer = Adapt(std::move(buffer), timestamp, mapping);
         if (!buffer) return;
+        buffer = WithMapping(std::move(buffer),mapping);
         broadcaster_.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(std::move(buffer))
             .set_timestamp_us(timestamp).build());
     }
     explicit CaptureVideoSource(std::shared_ptr<screenshare::media::D3dVideoDevice> device = {})
         : VideoTrackSource(false), device_(std::move(device)) {}
     void Push(const SyntheticCaptureResource& frame,
-              std::chrono::steady_clock::time_point capturedAt = std::chrono::steady_clock::now()) {
+              std::chrono::steady_clock::time_point capturedAt = std::chrono::steady_clock::now(), uint64_t sourceGeneration = 0) {
         if (frame.width <= 0 || frame.height <= 0 || frame.width > 3840 || frame.height > 2160 || frame.width % 2 || frame.height % 2 ||
             frame.luma.size() != static_cast<size_t>(frame.width) * frame.height)
             throw std::invalid_argument("Invalid planar capture frame");
@@ -49,7 +52,7 @@ public:
             std::vector<uint8_t> pixels(frame.luma.size() * 3 / 2, 128);
             std::copy(frame.luma.begin(), frame.luma.end(), pixels.begin());
             auto buffer = device_->UploadNv12(frame.width, frame.height, pixels);
-            PushBuffer(std::move(buffer), capturedAt);
+            PushBuffer(std::move(buffer), capturedAt, sourceGeneration);
             return;
         }
         auto buffer = webrtc::I420Buffer::Create(frame.width, frame.height);
@@ -59,7 +62,7 @@ public:
             std::fill_n(buffer->MutableDataU() + y * buffer->StrideU(), frame.width / 2, uint8_t(128));
             std::fill_n(buffer->MutableDataV() + y * buffer->StrideV(), frame.width / 2, uint8_t(128));
         }
-        PushBuffer(std::move(buffer), capturedAt);
+        PushBuffer(std::move(buffer), capturedAt, sourceGeneration);
     }
 protected:
     webrtc::VideoSourceInterface<webrtc::VideoFrame>* source() override { return &broadcaster_; }
@@ -70,7 +73,7 @@ private:
         return {std::max(2, int(width * scale) & ~1), std::max(2, int(height * scale) & ~1)};
     }
     webrtc::scoped_refptr<webrtc::VideoFrameBuffer> Adapt(
-        webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer, int64_t timestamp) {
+        webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer, int64_t timestamp, input::FrameMapping& mapping) {
         std::optional<StreamPreferences> preferences;
         uint64_t revision;
         { std::lock_guard lock(settingsMutex_); preferences = preferences_; revision = revision_; }
@@ -111,6 +114,7 @@ private:
         const auto fitted = Fit(buffer->width(), buffer->height(), width, height, true);
         const int left = ((width - fitted.first) / 2) & ~1;
         const int top = ((height - fitted.second) / 2) & ~1;
+        mapping = {mapping.generation,uint16_t(width),uint16_t(height),uint16_t(left),uint16_t(top),uint16_t(fitted.first),uint16_t(fitted.second)};
         auto scalingPath = SourceScalingPath::Unchanged;
         if (width != buffer->width() || height != buffer->height()) {
             const bool gpu = buffer->type() == webrtc::VideoFrameBuffer::Type::kNative;

@@ -128,6 +128,8 @@ public:
     [[nodiscard]] const CaptureConfig& config() const noexcept { return config_; }
     // Capture-owner thread only. Minimized sources produce no frames.
     [[nodiscard]] CaptureSourceState sourceState() const noexcept { return sourceState_; }
+    // Physical pixels of the captured surface, not the window client area.
+    [[nodiscard]] std::optional<RECT> InputBounds() const;
 
 private:
     std::unique_ptr<WindowsCaptureDispatcher> dispatcher_;

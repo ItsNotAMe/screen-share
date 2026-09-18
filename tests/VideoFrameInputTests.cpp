@@ -63,14 +63,17 @@ void PresentationRecoveryScenario() {
         widget.setLowLatency(true);
         auto send = [&] {
             screenshare::Nv12VideoFrame frame; frame.width = frame.height = 2; frame.nv12.resize(6);
+            frame.inputMapping={1,2,2,0,0,2,2};
             Require(widget.presentVideoFrameAsync(std::move(frame)));
             Await([&] { auto stats = widget.presentationStats(); return stats.enqueuedFrames == stats.presentedFrames + stats.droppedFrames; });
         };
         send(); Require(widget.presentationStats().presentedFrames == 1);
+        Require(widget.presentationStats().inputMapping.generation==1);
         using enum screenshare::PresentationOutcome;
         for (const auto outcome : {Busy, Occluded, Minimized, Unavailable, Unknown}) {
             state->outcome = outcome; send();
             Require(widget.presentationStats().renderer.outcome == outcome);
+            Require(!widget.presentationStats().inputMapping.Valid());
         }
         const auto drops = widget.presentationStats().renderer;
         Require(drops.busyDrops == 1 && drops.occludedDrops == 1 && drops.minimizedDrops == 1 && drops.unavailableDrops == 1);
@@ -84,6 +87,7 @@ void PresentationRecoveryScenario() {
         screenshare::Nv12VideoFrame blocked; blocked.width = blocked.height = 2; blocked.nv12.resize(6);
         Require(widget.presentVideoFrameAsync(std::move(blocked)));
         Await([&] { return state->entered.load(); });
+        Require(!widget.presentationStats().inputMapping.Valid()); // Queued is not displayed.
         bool bounded = true;
         std::weak_ptr<const uint8_t> previous;
         for (int frame = 0; frame < 1000; ++frame) {
@@ -160,6 +164,9 @@ int main(int argc, char** argv)
         inputs.push_back(input);
     });
     widget.setControlCapture(true, true, true);
+    widget.resize(100,100);
+    screenshare::Nv12VideoFrame preview;preview.width=preview.height=2;preview.nv12.resize(6);
+    widget.setVideoFrame(std::move(preview));
 
     QKeyEvent press(
         QEvent::KeyPress,

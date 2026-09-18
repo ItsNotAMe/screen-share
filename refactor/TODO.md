@@ -75,9 +75,9 @@ see [CAPTURE-RECOVERY.md](CAPTURE-RECOVERY.md). Supported-desktop DXGI, physical
 privacy/identity/HDR/driver and latency acceptance remain open. The current
 Screen-saver block was observed in the capture batch; the interactive desktop is
 available again for adoption checks, but DXGI still reports unsupported. Stage 3
-mouse/keyboard mapping and UI/CLI consent integration is next (INPUT.md);
-the shared input service, controller integration and headless response are implemented. This is
-needed for full adoption parity; Stage 2 and gaming latency are not complete.
+mouse/keyboard mapping, confinement and UI/CLI consent are now integrated; see
+DESKTOP-INPUT.md. Physical input acceptance, full parity and gaming latency remain
+open; Stage 2 is not complete.
 
 Detected audio startup/live failures now release the endpoint and preserve video
 through paced silence/discard. Public health, UI retry feedback and CLI status/
@@ -94,7 +94,7 @@ Per-viewer GPU NV12 scaling/letterboxing is integrated with owned textures, four
 in-flight submissions per device, drop-on-pressure and quarantined CPU fallback.
 UI/CLI show the actual source scaling path and active image rectangle. Dropped
 frames no longer acknowledge unapplied dimensions. [GPU-SCALING.md](GPU-SCALING.md)
-documents ownership and validation; gaming coordinate mapping remains open.
+documents ownership and validation; gaming coordinate mapping is integrated in DESKTOP-INPUT.md.
 
 Device-free **No shared audio** now works at startup and through live host UI/CLI
 changes. Capture factories are bypassed, the old endpoint is released, and failed
@@ -203,8 +203,8 @@ UI and CLI now share the backend-owned renderer/session and recovery policy.
 The duplicate CLI D3D pipeline has been removed; preview controls, legacy frame
 entry points, terminal diagnostics, resize recovery and independent window closure
 are covered by the integrated presentation tests. Do not recreate a second renderer.
-Default-shell adoption, input consent/control, hardware decode/GPU zero-copy
-presentation and physical audio-device loss/recovery acceptance remain.
+Guarded normal-shell adoption, input consent/control and GPU presentation are now
+integrated. Full parity and physical audio-device loss/recovery acceptance remain.
 This milestone is not complete and defaults are unchanged.
 
 Local profile defaults now include all stream modes/limits and viewer volume/mute,
@@ -226,14 +226,15 @@ installer-managed drivers and the three-pad/local-slot policy.
 - [x] Integrate the portable input service, encrypted channels and public input
   port; validate adversarial protocol/safety cases and a test-owned input-to-image
   response with four actual media viewers. See [INPUT.md](INPUT.md).
-- [ ] Complete Windows mouse/keyboard mapping, confinement and normal UI/CLI consent
-  together, including panic revoke and focus/source transitions. INPUT.md defines
-  this remaining group. Mouse/keyboard stay disabled until mapping is connected;
-  Stage 3 and Gate D remain open.
+- [x] Complete Windows mouse/keyboard mapping, confinement and normal UI/CLI consent
+  together, including panic revoke and focus/source transitions. See
+  [DESKTOP-INPUT.md](DESKTOP-INPUT.md) for exact-frame mapping and recording-sink tests.
+- [ ] Complete physical input/confinement and impaired-network/latency acceptance.
+  Stage 3 and Gate D remain open; local integration does not establish these gates.
 - [x] Deliver controller devices, selected-device polling, UI/CLI consent and
   revoke, panic/focus/source/unplug handling, and injected end-to-end tests.
-  See [CONTROLLERS.md](CONTROLLERS.md). Next finish mouse/keyboard mapping and
-  confinement as one integrated group; physical controller acceptance stays open.
+  See [CONTROLLERS.md](CONTROLLERS.md). Physical controller acceptance stays open.
+  Next implementation group: Stage 4 stress/resource and impairment acceptance.
 
 ## 4. Stability, performance and service acceptance (B + C + E)
 

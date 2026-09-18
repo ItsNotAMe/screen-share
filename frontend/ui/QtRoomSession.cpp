@@ -12,6 +12,16 @@ QtRoomSession::QtRoomSession(QObject* parent, Factory factory, bool loopback)
     });
 }
 QtRoomSession::~QtRoomSession() { timer_.stop(); session_.reset(); }
+bool QtRoomSession::prepareInputGrant(uint8_t capabilities) {
+    if(loopback_ || !(capabilities&screenshare::input::Mouse))return true;
+    const auto selected=status().capture.selected;
+    if(selected.kind!=screenshare::media::CaptureKind::Window)return true;
+    const auto window=reinterpret_cast<HWND>(selected.window);
+    // This follows the host's explicit Grant click. Never restore a minimized or
+    // hidden source, and never try to bypass foreground restrictions.
+    return IsWindowVisible(window) && !IsIconic(window) &&
+        (GetForegroundWindow()==GetAncestor(window,GA_ROOT) || SetForegroundWindow(window));
+}
 bool QtRoomSession::start(RoomSessionConfig config) {
     if (session_) return false;
     try {
@@ -23,7 +33,7 @@ bool QtRoomSession::start(RoomSessionConfig config) {
         // Devices are created only after explicit host consent. Diagnostics never
         // substitute a physical sink for a missing recording implementation.
         if (config.room.host && !loopback_ && !config.media.inputSink)
-            config.media.inputSink = screenshare::input::CreateWindowsGamepadSink();
+            config.media.enableDesktopInput = true;
         auto factory = factory_(config.media);
         session_ = std::make_unique<RoomSession>(std::move(factory), loopback_);
         config_ = std::move(config);

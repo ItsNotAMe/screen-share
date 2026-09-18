@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/QtRoomSession.h"
 #include "ui/RoomGamepadControl.h"
+#include "render/FramePresentationBackend.h"
 #include <QWidget>
 class QLabel;
 class QLineEdit;
@@ -19,7 +20,8 @@ public:
     explicit RoomSessionWindow(RoomSessionConfig, QtRoomSession::Factory = screenshare::media::WindowsRoomRuntimeFactory,
                                bool diagnosticLoopback = false, RoomProfile* profile = nullptr,
                                RoomGamepadControl::Devices = screenshare::ViewerGamepad::ConnectedDevices,
-                               RoomGamepadControl::Read = screenshare::ViewerGamepad::ReadState);
+                               RoomGamepadControl::Read = screenshare::ViewerGamepad::ReadState,
+                               FramePresentationFactory = {});
     ~RoomSessionWindow() override;
     QtRoomSession& session() { return session_; }
     void revokeControl();

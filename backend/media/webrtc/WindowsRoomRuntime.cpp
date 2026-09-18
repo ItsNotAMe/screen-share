@@ -6,6 +6,7 @@
 #include "MfVideoEncoderFactory.h"
 #include "MfVideoDecoderFactory.h"
 #include "PcmAudioDeviceModule.h"
+#include "input/v2/DesktopSink.h"
 #include <mutex>
 
 namespace screenshare::media {
@@ -19,7 +20,7 @@ class DeviceCapture final : public ICaptureSource {
     WindowsCaptureSource source_;
     std::shared_ptr<DeviceState> state_;
 public:
-    DeviceCapture(CaptureConfig config, std::shared_ptr<DeviceState> state) : source_(config), state_(std::move(state)) {}
+    DeviceCapture(CaptureConfig config, std::shared_ptr<DeviceState> state, std::shared_ptr<input::DesktopTargetState> target) : source_(config,std::move(target)), state_(std::move(state)) {}
     void Start() override { source_.Start(); }
     std::optional<CaptureSample> Poll() override {
         auto sample = source_.Poll();
@@ -41,6 +42,8 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
     ValidateStreamPreferences(options.preferences);
     return [options = std::move(options)](const v2::RoomIdentity& identity, v2::RoomSend send) {
         auto state = std::make_shared<DeviceState>();
+        auto target = options.inputTarget ? options.inputTarget :
+            options.inputSink || options.enableDesktopInput ? std::make_shared<input::DesktopTargetState>() : nullptr;
         NativeRoomRuntimeOptions native;
         auto endpoints = options.audioEndpoints.value_or(WasapiPcmEndpoints(options.audio, options.playbackDeviceId));
         if (identity.host) {
@@ -75,19 +78,20 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
                 std::make_unique<MfVideoEncoderFactory>(state->Get()), std::make_unique<MfVideoDecoderFactory>(true));
         };
         native.engineReady = [state] { return bool(state->Get()); };
-        native.capture = [capture = options.capture, state] { return std::make_unique<DeviceCapture>(capture, state); };
+        native.capture = [capture = options.capture, state, target] { return std::make_unique<DeviceCapture>(capture, state, target); };
         native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,
             options.capture.displayIndex, options.capture.windowHandle, options.capture.targetFps};
-        native.captureForSelection = [base = options.capture, state](CaptureSelection selection) -> CaptureSession::Factory {
+        native.captureForSelection = [base = options.capture, state, target](CaptureSelection selection) -> CaptureSession::Factory {
             auto config = base; config.sourceType = selection.kind == CaptureKind::Window ? CaptureSourceType::Window : CaptureSourceType::Display;
             config.displayIndex = selection.display; config.windowHandle = selection.window; config.targetFps = selection.fps;
-            return [config, state] { return std::make_unique<DeviceCapture>(config, state); };
+            return [config, state, target] { return std::make_unique<DeviceCapture>(config, state, target); };
         };
         native.deliver = [](CaptureVideoSource& source, const CaptureSample& sample) {
-            source.PushBuffer(std::static_pointer_cast<WindowsCaptureResource>(sample.resource)->buffer, sample.capturedAt);
+            source.PushBuffer(std::static_pointer_cast<WindowsCaptureResource>(sample.resource)->buffer, sample.capturedAt, sample.resource->inputGeneration);
         };
         native.preferences = options.preferences; native.frames = options.frames; native.channel = options.channel;
         native.inputSink = options.inputSink;
+        if(identity.host && options.enableDesktopInput && !native.inputSink)native.inputSink=input::CreateWindowsDesktopSink(target);
         native.presentation = options.presentation;
         native.codecStatus = [state] {
             CodecPipelineStatus value;

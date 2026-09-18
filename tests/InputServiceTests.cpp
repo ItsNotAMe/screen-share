@@ -38,7 +38,7 @@ Status Read(Service& service,const std::string& id="viewer") {
 }
 void Protocol() {
     Message golden{"x",0x0102030405060708ULL,0x1112131415161718ULL,{}};
-    const std::vector<uint8_t> expected{'S','I','N',1,3,1,1,2,3,4,5,6,7,8,17,18,19,20,21,22,23,24,'x'};
+    const std::vector<uint8_t> expected{'S','I','N',2,3,1,1,2,3,4,5,6,7,8,17,18,19,20,21,22,23,24,'x'};
     Check(Encode(golden)==expected);
     for(unsigned k=0;k<=8;++k) {
         Message m{"connection_restart_7",9,12,{}}; auto& e=m.event;
@@ -49,7 +49,7 @@ void Protocol() {
         const auto result=Decode(bytes); Check(result && Encode(*result)==bytes);
         for(size_t n=0;n<bytes.size();++n)Check(!Decode(std::span(bytes).first(n)));
         auto bad=bytes; bad.push_back(0); Check(!Decode(bad));
-        bad=bytes; bad[3]=2; Check(!Decode(bad));
+        bad=bytes; bad[3]=1; Check(!Decode(bad));
         bad=bytes; bad[4]=255; Check(!Decode(bad));
     }
     Message bad{"x",1,1,{}}; bad.event.kind=Kind::Pointer;

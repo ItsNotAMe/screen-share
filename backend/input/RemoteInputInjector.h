@@ -49,13 +49,13 @@ public:
     [[nodiscard]] bool HasTargetWindow() const { return windowHandle_ != 0; }
 
     // normX/normY are [0..1] across the captured surface.
-    void InjectMouseMove(float normX, float normY);
-    void InjectMouseButton(MouseButton button, bool down, float normX, float normY);
-    void InjectMouseScroll(int wheelDeltaX, int wheelDeltaY);
+    bool InjectMouseMove(float normX, float normY);
+    bool InjectMouseButton(MouseButton button, bool down, float normX, float normY);
+    bool InjectMouseScroll(int wheelDeltaX, int wheelDeltaY);
 
     // Virtual-key code (Windows VK_*) and hardware scancode; either may drive the
     // injection (scancode preferred when non-zero).
-    void InjectKey(uint16_t virtualKey, uint16_t scancode, bool down);
+    bool InjectKey(uint16_t virtualKey, uint16_t scancode, bool down);
     void ReleaseInjectedMouseButtons();
     void ReleaseInjectedKeys();
     void ReleaseAllInjectedInput();

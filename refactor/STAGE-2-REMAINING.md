@@ -9,7 +9,7 @@ implementation continues in complete batches, not one checkbox per user turn.
 
 | Group | What remains | Completion evidence |
 | --- | --- | --- |
-| Full adoption parity | Guarded normal Home share/join/quick-join and CLI create/join commands now use v2. Remaining: remote-control/gamepad parity (Stage 3), legacy diagnostic/report/direct-invite disposition and final default-entry-point audit (Stage 5). | ADOPTION.md records routing, shared defaults, actual command/media and normal-home tests. Default launch and existing UDP/control commands remain supported; they are not silently translated. |
+| Full adoption parity | Guarded normal Home share/join/quick-join and CLI create/join commands now use v2, with mouse/keyboard/controller integration. Remaining: physical control acceptance (Stage 3), legacy diagnostic/report/direct-invite disposition and final default-entry-point audit (Stage 5). | ADOPTION.md and DESKTOP-INPUT.md record routing and actual command/media/input tests. Default launch and existing UDP/control commands remain supported; they are not silently translated. |
 | Video acceptance | Display fallback, pinned-source rebuild, GPU cursor composition and minimized/closed states are implemented. Remaining: supported-desktop DXGI acceptance, rotation support if required, physical source identity/privacy/HDR/driver validation, occlusion and latency measurements. | The interactive desktop is available again for adoption regressions; WGC display rebuild passes, but DXGI still reports unsupported in adoption-capture-display.log. CAPTURE-RECOVERY.md and GPU-RECEIVE.md preserve scope limits. |
 | Audio acceptance | Physical mono/stereo/surround format negotiation, microphone quality, device switch/unplug/recovery and measured buffering/latency. Microphone-only processing and explicit multichannel conversion are implemented. | Silent PCM/Opus/UI/CLI checks cover the software paths; physical-device evidence remains required. Native driver hangs remain unpreemptible. See AUDIO-PROCESSING.md. |
 
@@ -19,8 +19,8 @@ count follows from counting the historical checklist entries.
 ## Dependencies that must not be hidden
 
 - Gaming input transport, backend grants/watchdogs and recording-sink real-channel
-  tests are implemented. Windows devices, UI/CLI consent and coordinate mapping
-  remain **Stage 3**; see [INPUT.md](INPUT.md).
+  tests, Windows devices, UI/CLI consent and exact-frame coordinate mapping are
+  implemented. Physical input acceptance remains **Stage 3**; see [DESKTOP-INPUT.md](DESKTOP-INPUT.md).
   Normal adoption cannot silently remove the existing control/gamepad features.
 - Stress, resource-leak, impairment, service-cost, real TLS/NAT and external latency
   acceptance remain **Stage 4**. Those gates have not been passed by localhost tests.
@@ -33,17 +33,17 @@ count follows from counting the historical checklist entries.
 
 The Windows controller/UI/CLI group is now integrated with explicit consent,
 selected-device polling, per-peer release, panic/focus/source/unplug handling and
-recording-device tests. See [CONTROLLERS.md](CONTROLLERS.md). Next Stage 3 work is
-mouse/keyboard source-image mapping, confinement and frontend integration as one
-group; physical controller acceptance remains separate and open.
+recording-device tests. See [CONTROLLERS.md](CONTROLLERS.md). Mouse/keyboard mapping,
+confinement and frontend integration are also implemented; see DESKTOP-INPUT.md.
+Physical input acceptance remains separate and open. Next is Stage 4 stress/resource
+and impairment work, preserving the remaining Stage 2 physical/parity gates.
 
 The guarded normal home workflow and no-JSON CLI create/join commands are
 implemented. Home/form navigation shares one pushed directory connection and
 sessions use the existing media/runtime pages and asynchronous shutdown. See
-[ADOPTION.md](ADOPTION.md). Next substantial implementation work is Stage 3
-Windows input/consent/controller integration on the implemented shared input port,
-required for full adoption parity; keep
-Stage 2 physical acceptance open while progressing that work.
+[ADOPTION.md](ADOPTION.md). Windows input/consent/controller integration now uses
+the shared input port. Keep Stage 2 physical acceptance and the final compatibility
+audit open while progressing Stage 4 stress/resource work.
 
 Display-only WGC fallback, pinned output/item recovery, bounded GPU cursor
 composition, explicit minimized/closed states and backend diagnostics are

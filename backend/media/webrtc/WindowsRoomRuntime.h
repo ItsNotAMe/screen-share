@@ -3,6 +3,7 @@
 #include "capture/DesktopCapturer.h"
 #include "audio/WasapiCapture.h"
 #include "media/audio/PcmAudioEndpoint.h"
+#include "input/v2/DesktopTarget.h"
 
 namespace screenshare::media {
 // Windows binding for the shared runtime. Application owns WindowsMediaRuntime
@@ -22,6 +23,8 @@ struct WindowsRoomRuntimeOptions {
     std::shared_ptr<PresentationTelemetry> presentation;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
     std::shared_ptr<input::Sink> inputSink;
+    bool enableDesktopInput = false; // Explicit frontend opt-in; ignored when an injected sink exists.
+    std::shared_ptr<input::DesktopTargetState> inputTarget;
     // Control/input-state only; receiver telemetry is owned by the runtime.
     std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;
 };

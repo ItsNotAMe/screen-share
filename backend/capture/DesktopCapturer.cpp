@@ -1,4 +1,5 @@
 #include "capture/DesktopCapturer.h"
+#include <dwmapi.h>
 #include "capture/WindowsCaptureDispatcher.h"
 #include "capture/CaptureBackendPolicy.h"
 #include "capture/DxgiCursor.h"
@@ -1861,6 +1862,22 @@ ID3D11Texture2D* DesktopCapturer::ScaleFrameIfNeeded(ID3D11Texture2D* sourceText
     context_->OMSetRenderTargets(1, nullRenderTargets, nullptr);
 
     return scaledTexture_.Get();
+}
+
+std::optional<RECT> DesktopCapturer::InputBounds() const
+{
+    if (sourceState_ != CaptureSourceState::Active) return {};
+    if (config_.sourceType == CaptureSourceType::Display) {
+        DXGI_OUTPUT_DESC current{};
+        if (!selectedOutput_ || FAILED(selectedOutput_->GetDesc(&current)) || !current.AttachedToDesktop ||
+            current.Monitor != selectedDisplay_.Monitor) return {};
+        return current.DesktopCoordinates;
+    }
+    const auto window = reinterpret_cast<HWND>(config_.windowHandle);
+    RECT bounds{};
+    if (!IsWindow(window) || !IsWindowVisible(window) || IsIconic(window) ||
+        FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds)))) return {};
+    return bounds;
 }
 
 std::string Narrow(const std::wstring& text)

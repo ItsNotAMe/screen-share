@@ -158,9 +158,9 @@ public:
         try {
             ValidateCaptureSelection(selection);
             auto factory = options_.captureForSelection(selection);
-            // Revoke every grant. Gamepads have no image coordinates; mouse/key
-            // control stays blocked until a replacement mapping is implemented.
-            input_->Configure(input::Gamepad, 0);
+            // Revoke every grant. The Windows sink additionally requires fresh
+            // captured geometry and refuses keyboard control on window sources.
+            input_->Configure(7, 0);
             return captureSwitch_->Submit(selection, std::move(factory));
         }
         catch (...) { return CaptureUpdateReady(CaptureUpdateError::Invalid); }

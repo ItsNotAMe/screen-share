@@ -1,5 +1,40 @@
 # Headless media checks
 
+## Mouse/keyboard integration — 2026-09-18
+
+Final Release and Debug application builds passed. Both complete desktop-inclusive
+matrices passed **15/15**, including all **11 headless** cases:
+
+- `build/webrtc/desktop-input-final-desktop-release/result.json`
+- `build/webrtc/desktop-input-final-desktop-debug/result.json`
+- Build logs: `build/webrtc/desktop-input-final-build-{release,debug}.log`
+
+Focused CTest checks passed **9/9 in each build**: native runtime linking, input
+service, gamepad control, desktop input, controller protocol, A/V diagnostics,
+report paths, video-frame input and UI self-test. CTest retains LastTest.log in
+each build's Testing/Temporary directory.
+
+The runner adds `desktop-input`, `desktop-input-ui` and
+`windows-desktop-input-ui`. Production encoder/decoder and encrypted channels
+carry source-bound events into recording sinks. UI tests cover displayed mapping,
+encoder padding, explicit capabilities/consent, focus release, source replacement,
+fresh regrant and stale-generation rejection. CLI covers controller-to-mouse
+handoff and test-owned native preview events. No physical keyboard/mouse/controller
+injection or audible playback occurs. Windows cases use generated WGC windows
+and real D3D presentation; offscreen Qt uses a recording presentation backend.
+
+Initial failures are retained under `desktop-input-ui-first`,
+`desktop-input-ui-trace`, `desktop-input-cli-first` and
+`desktop-input-cli-diagnose`. Offscreen D3D could not present, requiring explicit
+test presenter injection. Leading SEI before SPS/PPS hid receiver resize telemetry;
+metadata now follows headers and precedes slices, with an ordering regression.
+These runs are not counted as passes and production quotas/timeouts were not relaxed.
+
+See [DESKTOP-INPUT.md](DESKTOP-INPUT.md). These results complete local input
+integration, not physical confinement/driver behavior, impaired-network acceptance
+or external input-to-photon latency. Stage 4 resource/stress work is next; all
+physical, service-cost, NAT/TLS and default-cutover gates remain open.
+
 ## Controller integration — 2026-09-18
 
 The runner now includes `gamepad-control` and a separate `controller-ui` service

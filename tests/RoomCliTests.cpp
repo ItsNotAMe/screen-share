@@ -3,6 +3,7 @@
 #include "shared/RoomLaunch.h"
 #include "shared/RoomInputCommands.h"
 #include "RecordingGamepadSink.h"
+#include "RecordingDesktopInput.h"
 #include <QTemporaryDir>
 #include <QFile>
 #include "media/webrtc/NativeRoomRuntime.h"
@@ -103,6 +104,17 @@ void PreviewLifecycle() {
         Check(preview.maximumFrameLatency() == 1 && !preview.presentationStats().terminal);
     };
     resume();
+    frame.inputMapping={77,320,180,0,0,320,180};resume();
+    std::vector<screenshare::input::Event> remote;
+    preview.SetRemoteInput(screenshare::input::Mouse|screenshare::input::Keyboard,[&](const auto& event){remote.push_back(event);});
+    RECT inputRect{};GetClientRect(preview.windowHandle(),&inputRect);
+    SendMessageW(preview.windowHandle(),WM_MOUSEMOVE,0,MAKELPARAM(inputRect.right/2,inputRect.bottom/2));
+    SendMessageW(preview.windowHandle(),WM_KEYDOWN,'A',LPARAM(0x1e)<<16);
+    SendMessageW(preview.windowHandle(),WM_KEYUP,'A',LPARAM(0x1e)<<16);
+    Check(remote.size()==3 && remote[0].sourceGeneration==77 && remote[1].kind==screenshare::input::Kind::Key && !remote[2].down);
+    SendMessageW(preview.windowHandle(),WM_LBUTTONUP,0,MAKELPARAM(0xffff,0xffff));
+    Check(remote.back().kind==screenshare::input::Kind::Release);
+    preview.SetRemoteInput(0,{});
     // Only direct messages to our own HWND; no global keyboard/mouse injection.
     const HWND window = preview.windowHandle();
     SendMessageW(window, WM_KEYDOWN, '1', 0);
@@ -220,7 +232,7 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
     options.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
     return WindowsRoomRuntimeFactory(std::move(options));
 #else
-    return [preferences = config.media.preferences, initialAudio = config.media.audio, presentation = config.media.presentation, inputSink = config.media.inputSink, audio, frames](auto identity, auto send) {
+    return [preferences = config.media.preferences, initialAudio = config.media.audio, presentation = config.media.presentation, inputSink = config.media.inputSink, target = config.media.inputTarget, audio, frames](auto identity, auto send) {
         NativeRoomRuntimeOptions options;
         options.preferences = preferences; options.frames = frames; options.presentation = presentation;
         options.inputSink = inputSink;
@@ -241,12 +253,14 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
                 std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
         };
         options.capture = [] { return std::make_unique<SyntheticCaptureSource>(320, 180, 30); };
+        if(target)options.capture=[target] {return std::make_unique<MappedSyntheticCapture>(320,180,30,target);};
         options.captureForSelection = [](CaptureSelection selection) -> CaptureSession::Factory {
             return [selection] { return std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps); };
         };
         options.deliver = [](auto& source, const auto& sample) {
-            source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
+            source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt,sample.resource->inputGeneration);
         };
+        if(target)options.captureForSelection=[target](auto selection)->CaptureSession::Factory {return [target,selection] {return std::make_unique<MappedSyntheticCapture>(640,360,selection.fps,target);};};
         return CreateNativeRoomRuntime(identity, std::move(send), std::move(options));
     };
 #endif
@@ -419,17 +433,20 @@ int main(int argc, char** argv) {
         };
         host.inputCommandsFile = commandFiles.filePath("host.json");
         const auto viewerCommands = commandFiles.filePath("viewer.json");
-        auto writeCommand = [](const QString& path, int sequence, const char* operation, const std::string& peer) {
+        auto writeCommand = [](const QString& path, int sequence, const char* operation, const std::string& peer, const char* caps="gamepad") {
             QFile file(path); Check(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
             const auto data = QJsonDocument(QJsonObject{{"sequence", sequence}, {"operation", operation},
-                {"peer", QString::fromStdString(peer)}, {"consent", true}}).toJson(QJsonDocument::Compact);
+                {"peer", QString::fromStdString(peer)}, {"consent", true}, {"capabilities",caps}}).toJson(QJsonDocument::Compact);
             Check(file.write(data) == data.size()); file.close();
         };
         // These persisted grants/requests must be ignored by a new session.
         writeCommand(host.inputCommandsFile, 1, "grant", "old-peer");
         writeCommand(viewerCommands, 1, "request", "old-host");
-        auto controllerSink = std::make_shared<RecordingGamepadSink>(); host.media.inputSink = controllerSink;
-        bool grantWritten = false, revokeWritten = false;
+        auto controllerSink = std::make_shared<RecordingGamepadSink>();
+        auto desktopEvidence=std::make_shared<DesktopInputEvidence>();host.media.inputTarget=std::make_shared<screenshare::input::DesktopTargetState>();
+        host.media.inputSink=std::make_shared<screenshare::input::DesktopSink>(host.media.inputTarget,controllerSink,
+            [desktopEvidence](auto,uint8_t){return std::make_unique<RecordingDesktopDevice>(desktopEvidence);});
+        bool grantWritten = false, revokeWritten = false, mouseGrantWritten=false;
         hostHooks.input = [&](auto port, const auto&) {
             if (!port) return;
             for (const auto& state : port->Read()) if (state.ready && (state.requested & screenshare::input::Gamepad) && !grantWritten) {
@@ -437,6 +454,9 @@ int main(int argc, char** argv) {
             }
             if (controllerSink->applied && !revokeWritten) {
                 writeCommand(host.inputCommandsFile, 3, "revoke", ""); revokeWritten = true;
+            }
+            for(const auto& state:port->Read())if(state.requested==screenshare::input::Mouse && !mouseGrantWritten) {
+                writeCommand(host.inputCommandsFile,4,"grant",state.peer,"mouse");mouseGrantWritten=true;
             }
         };
         auto hosting = std::async(std::launch::async, [&] { return RunRoomCliSession(host, Factory(host, hostAudio), hostHooks, true); });
@@ -473,15 +493,26 @@ int main(int argc, char** argv) {
 #endif
         RoomCliHooks viewerHooks;
         viewer.inputCommandsFile = viewerCommands;
-        bool requestWritten = false;
+        bool requestWritten = false,mouseRequestWritten=false;
+        screenshare::input::FrameMapping displayedMapping;
         viewerHooks.input = [&](auto port, const auto&) {
-            if (!port || requestWritten) return;
+            if(!port)return;
+            if(requestWritten && !mouseRequestWritten && controllerSink->released && displayedMapping.Valid())
+                for(const auto& state:port->Read())if(state.ready && !state.granted && !state.revokePending) {
+                    writeCommand(viewerCommands,3,"request",state.peer,"mouse");mouseRequestWritten=true;break;
+                }
+            if (requestWritten) return;
             for (const auto& state : port->Read()) if (state.ready && state.permission) {
                 writeCommand(viewerCommands, 2, "request", state.peer); requestWritten = true; break;
             }
         };
         viewerHooks.gamepad = []() -> std::optional<screenshare::input::Event> {
             screenshare::input::Event event; event.kind = screenshare::input::Kind::Pad; event.buttons = 1; return event;
+        };
+        viewerHooks.inputCapture=[&](uint8_t caps,auto submit) {
+            if((caps&screenshare::input::Mouse) && displayedMapping.Valid() && !desktopEvidence->applied) {
+                screenshare::input::Event event;event.kind=screenshare::input::Kind::Pointer;event.x=event.y=.5f;event.sourceGeneration=displayedMapping.generation;submit(event);
+            }
         };
         int playbackChanges = 0;
         bool playbackFailed = false, playbackRecovered = false;
@@ -501,6 +532,7 @@ int main(int argc, char** argv) {
             Check(preview.PumpMessages());
 #endif
             if (auto frame = frames->Take()) {
+                displayedMapping=frame->inputMapping;
                 Check(frame->pixels().size() == frame->width * frame->height * 3 / 2 && frame->nv12.empty());
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
                 Check(bool(frame->native));
@@ -522,7 +554,10 @@ int main(int argc, char** argv) {
         const int viewing = RunRoomCliSession(viewer, Factory(viewer, audio, frames), viewerHooks, true);
         stopHost = true;
         Check(playbackChanges == 3 && playbackFailed && playbackRecovered);
-        Check(hosting.get() == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && senderReported && sourceChanged && audioChanged);
+        const auto hostResult=hosting.get();
+        if(!(hostResult == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && senderReported && sourceChanged && audioChanged))
+            throw std::runtime_error("CLI completion host="+std::to_string(hostResult)+" viewer="+std::to_string(viewing)+" flags="+
+                std::to_string(stopped)+std::to_string(accepted)+std::to_string(applied)+std::to_string(budgetReported)+std::to_string(rateReported)+std::to_string(receiverReported)+std::to_string(senderReported)+std::to_string(sourceChanged)+std::to_string(audioChanged));
         Check(extendedReported && pipelineReported);
         Check(microphoneReported && bypassRestored);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
@@ -549,6 +584,7 @@ int main(int argc, char** argv) {
             if (value["phase"] == "stopped") cancelledStopped = true;
         };
         Check(grantWritten && revokeWritten && requestWritten && controllerSink->applied > 0 && controllerSink->released > 0);
+        Check(mouseGrantWritten && mouseRequestWritten && desktopEvidence->applied && desktopEvidence->released);
         Check(RunRoomCliSession(host, Factory(host, hostAudio), cancelHooks, true) == 0);
         Check(cancelledAdmission && cancelledStopped);
         auto missing = viewer; missing.room.roomId = "nonexistent-room";

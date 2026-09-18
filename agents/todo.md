@@ -6,12 +6,12 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — grouped delivery work
 
-Current continuation: the shared input service and controller UI/CLI/device group
-are implemented. See [CONTROLLERS.md](../refactor/CONTROLLERS.md). Next complete
-mouse/keyboard source-generation mapping, confinement and normal UI/CLI consent
-as one integrated group on the same port. Do not rebuild controller transport or
-enable mouse/keyboard before mapping is wired. Stage 3 remains open; physical
-controller/latency acceptance is not established by recording-device tests.
+Current continuation: the shared input service, controller and mouse/keyboard
+UI/CLI/device groups are implemented. See [DESKTOP-INPUT.md](../refactor/DESKTOP-INPUT.md).
+Next complete Stage 4 stress/resource and impairment work as a cohesive batch,
+starting with the existing capture-handle growth failures. Preserve Stage 2
+physical/parity and Stage 3 physical input gates. Recording-device integration
+does not establish physical confinement, controller behavior or gaming latency.
 
 Use [refactor/TODO.md](../refactor/TODO.md) for delivery milestones and
 [DETAIL-CHECKS.md](../refactor/DETAIL-CHECKS.md) for the full acceptance requirements.
@@ -43,8 +43,8 @@ downmix are implemented; see refactor/AUDIO-PROCESSING.md. Do not repeat these
 software tasks or mark physical format/quality/unplug checks passed synthetically.
 Per-viewer GPU scaling/letterboxing now preserves owned NV12 frames into hardware
 encoding, drops excess GPU submissions, and quarantines to CPU fallback on failure.
-The active image rectangle is exposed in source diagnostics; actual authorized
-input mapping remains open. Hardware decode/GPU presentation and bounded decoder
+The active image rectangle is exposed in source diagnostics; authorized input
+mapping now follows each encoded/decoded/presented frame. Hardware decode/GPU presentation and bounded decoder
 fallback are now integrated; see refactor/GPU-RECEIVE.md. Remaining video work is
 display capture fallback, source identity/privacy/cursor/HDR/state completion and
 physical/occlusion acceptance. Do not recreate the receive pipeline.

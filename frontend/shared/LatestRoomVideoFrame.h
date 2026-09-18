@@ -4,6 +4,7 @@
 #include "render/Nv12VideoFrame.h"
 #include "api/video/nv12_buffer.h"
 #include "media/webrtc/D3dVideoFrameBuffer.h"
+#include "media/webrtc/MappedVideoBuffer.h"
 #include "libyuv/planar_functions.h"
 #include <limits>
 #include <mutex>
@@ -61,11 +62,13 @@ public:
             frame->rotation() != webrtc::kVideoRotation_0 || frame->timestamp_us() > std::numeric_limits<int64_t>::max() / 10 ||
             frame->timestamp_us() < std::numeric_limits<int64_t>::min() / 10)
             throw std::runtime_error("Unsupported preview dimensions");
-        auto buffer = frame->video_frame_buffer();
+        const auto mapping = screenshare::media::Mapping(frame->video_frame_buffer());
+        auto buffer = screenshare::media::Unwrap(frame->video_frame_buffer());
         if (auto* gpu = dynamic_cast<screenshare::media::D3dVideoFrameBuffer*>(buffer.get())) {
             screenshare::Nv12VideoFrame result;
             result.width = result.codedWidth = width; result.height = result.codedHeight = height;
             result.timestamp100ns = frame->timestamp_us() * 10;
+            result.inputMapping = mapping;
             result.native = std::make_shared<RetainedRoomGpuFrame>(webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer>(gpu), readbacks_);
             { std::lock_guard lock(mutex_); ++stats_.delivered; ++stats_.retained; ++stats_.gpuRetained; }
             return result;
@@ -84,6 +87,7 @@ public:
         screenshare::Nv12VideoFrame result;
         result.width = result.codedWidth = width; result.height = result.codedHeight = height;
         result.timestamp100ns = frame->timestamp_us() * 10;
+        result.inputMapping = mapping;
         const auto size = static_cast<size_t>(width) * height * 3 / 2;
         if (pixels->StrideY() == width && pixels->StrideUV() == width && pixels->DataUV() == pixels->DataY() + size_t(width) * height) {
             auto owner = std::make_shared<webrtc::scoped_refptr<webrtc::VideoFrameBuffer>>(std::move(buffer));

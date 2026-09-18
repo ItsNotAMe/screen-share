@@ -111,9 +111,9 @@ RoomSessionConfig ParseRoomCommand(const QStringList& arguments, const RoomProfi
     if ((options.contains("--control-file") && config.inputCommandsFile.isEmpty()) ||
         config.inputCommandsFile.size() > 4096 || config.gamepadDevice.size() > 4096)
         throw std::invalid_argument("Invalid controller command file or device");
-    if (!host && (!config.inputCommandsFile.isEmpty() != !config.gamepadDevice.isEmpty()))
-        throw std::invalid_argument("Viewer controller control requires --control-file and --gamepad together");
-    if (!config.gamepadDevice.isEmpty() && !config.preview)
-        throw std::invalid_argument("Interactive controller control requires a focused preview");
+    if (!config.gamepadDevice.isEmpty() && config.inputCommandsFile.isEmpty())
+        throw std::invalid_argument("Viewer controller control requires --control-file");
+    if (!host && !config.inputCommandsFile.isEmpty() && !config.preview)
+        throw std::invalid_argument("Interactive input control requires a focused preview");
     return config;
 }
