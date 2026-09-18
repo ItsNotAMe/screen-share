@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (through `75abe0d`, plus full-room restart/soak harnesses and longer capture investigation). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
+Last reconciled: 2026-09-18 (through `6583170`, plus WGC/RPC retained-port tracing and post-stop cleanup diagnostics). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -230,7 +230,7 @@ dated continuation notes preserve historical evidence rather than defining new b
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Resolve/account for delayed capture handle retention and room memory, then complete the two-hour soak and impairment acceptance.** Full-room restart/continuous runners are implemented; 100 rooms pass in both builds. A longer 500-cycle capture run fails at +226 handles. See [ROOM-STRESS.md](ROOM-STRESS.md). Preserve Stage 2 physical/parity and Stage 3 input gates; no production leak fix or full resource acceptance is claimed.
+Current next action: **Account for full-room restart memory, then complete the two-hour soak and impairment acceptance.** Full-room restart/continuous runners are implemented; 100 rooms pass in both builds. The immediate capture +8 bound still fails. Reproduced retention is now traced to WGC/RPC ALPC ports, with the normal-policy run returning below its warm-up handle count after five minutes idle. Do not repeat the completed allocation investigation or add speculative apartment/thread changes. See [CAPTURE-HANDLES.md](CAPTURE-HANDLES.md) and [ROOM-STRESS.md](ROOM-STRESS.md). Preserve the immediate +8 bound, Stage 2 physical/parity and Stage 3 input gates; no production leak fix or full resource acceptance is claimed.
 
 ## Planning handoff
 

@@ -10,12 +10,12 @@ struct TeardownMarker {
     const char* name;
     ~TeardownMarker() { std::fprintf(stderr, "Teardown complete: %s\n", name); std::fflush(stderr); }
 };
-inline void LifecycleSample(int cycle, double seconds) {
+inline void LifecycleSample(int cycle, double seconds, const char* label = "LIFECYCLE") {
     PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb = sizeof(memory);
     DWORD handles = 0;
     const bool memoryOk = GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
     const bool handlesOk = GetProcessHandleCount(GetCurrentProcess(), &handles);
-    std::fprintf(stderr, "LIFECYCLE {\"cycle\":%d,\"seconds\":%.6f,\"privateBytes\":", cycle, seconds);
+    std::fprintf(stderr, "%s {\"cycle\":%d,\"seconds\":%.6f,\"privateBytes\":", label, cycle, seconds);
     if (memoryOk) std::fprintf(stderr, "%llu", static_cast<unsigned long long>(memory.PrivateUsage));
     else std::fputs("null", stderr);
     std::fputs(",\"workingSetBytes\":", stderr);

@@ -11,8 +11,12 @@ UI/CLI/device groups are implemented. See [DESKTOP-INPUT.md](../refactor/DESKTOP
 Capture stress now has a four-mode runner and production Windows owner checks;
 see [RESOURCE-STRESS.md](../refactor/RESOURCE-STRESS.md). Full-room restart and
 continuous runners are also implemented; see [ROOM-STRESS.md](../refactor/ROOM-STRESS.md).
-Next resolve/account for the 500-cycle capture handle failure (+226) and variable
-room memory, then complete the two-hour soak and impairment work. Preserve Stage 2
+The reproduced retained handles are WGC/RPC ALPC ports; typed tracing and separate
+idle observations are implemented (CAPTURE-HANDLES.md). Normal-policy handles
+return below warm-up after five minutes idle. Do not repeat that investigation or
+add speculative apartment/thread changes. Next account for variable room memory,
+then complete the two-hour soak and impairment work. Keep the immediate +8 bound; delayed OS cleanup
+does not waive it. Preserve Stage 2
 physical/parity and Stage 3 physical input gates. Recording-device integration
 does not establish physical confinement, controller behavior or gaming latency.
 

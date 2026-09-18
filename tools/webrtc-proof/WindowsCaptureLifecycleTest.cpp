@@ -6,6 +6,7 @@
 #include <iostream>
 #include <mutex>
 #include <thread>
+#include <rpc.h>
 
 using namespace screenshare;
 using namespace screenshare::media;
@@ -105,12 +106,31 @@ int main(int argc, char** argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     SetUnhandledExceptionFilter(proof::ReportUnhandledException);
     try {
-        int cycles = 3;
-        if (argc != 1) {
-            Require(argc == 3 && std::string(argv[1]) == "--cycles", "Usage: WindowsCaptureLifecycleTest [--cycles 1..1000]");
-            size_t used = 0; cycles = std::stoi(argv[2], &used);
-            Require(used == std::string(argv[2]).size() && cycles >= 1 && cycles <= 1000, "Invalid cycle count");
+        int cycles = 3, idleSeconds = 0;
+        bool cleanup = false, cyclesSet = false, idleSet = false;
+        for (int i = 1; i < argc; ++i) {
+            const std::string option = argv[i];
+            if (option == "--rpc-idle-cleanup") {
+                Require(!cleanup, "Duplicate cleanup option"); cleanup = true; continue;
+            }
+            Require((option == "--cycles" || option == "--idle-seconds") && i + 1 < argc,
+                "Usage: WindowsCaptureLifecycleTest [--cycles 1..1000] [--idle-seconds 1..600] [--rpc-idle-cleanup]");
+            const std::string value = argv[++i];
+            size_t used = 0; const int count = std::stoi(value, &used);
+            Require(used == value.size() && count >= 1, "Invalid count");
+            if (option == "--cycles") {
+                Require(!cyclesSet && count <= 1000, "Invalid or duplicate cycle count");
+                cyclesSet = true; cycles = count;
+            } else {
+                Require(!idleSet && count <= 600, "Invalid or duplicate idle duration");
+                idleSet = true; idleSeconds = count;
+            }
         }
+        // Explicit diagnostic experiment, never enabled by the application or
+        // ordinary acceptance runs. RPC cleanup is process-wide and irreversible.
+        if (cleanup) Require(RpcMgmtEnableIdleCleanup() == RPC_S_OK, "RPC idle cleanup initialization failed");
+        std::cerr << "CAPTURE_OPTIONS {\"rpcIdleCleanup\":" << (cleanup ? "true" : "false")
+            << ",\"idleSeconds\":" << idleSeconds << "}\n";
         WindowsMediaRuntime runtime;
         Require(SUCCEEDED(runtime.result()), "MTA lifetime initialization failed");
         proof::LifecycleSample(0, 0);
@@ -119,6 +139,16 @@ int main(int argc, char** argv) {
             Cycle(cycle);
             std::cerr << "Capture cycle " << cycle << " destroyed\n";
             proof::LifecycleSample(cycle, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+        }
+        // Observe delayed OS cleanup after all sources, capture threads and frames have
+        // gone. These samples must never replace the immediate restart samples.
+        if (idleSeconds) {
+            const auto start = std::chrono::steady_clock::now();
+            for (int second = 0; second <= idleSeconds; ++second) {
+                std::this_thread::sleep_until(start + std::chrono::seconds(second));
+                proof::LifecycleSample(second,
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), "CAPTURE_IDLE");
+            }
         }
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

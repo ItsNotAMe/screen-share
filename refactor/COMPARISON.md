@@ -14,7 +14,7 @@ component test or Gate A is not a comparative performance result.
 | Image quality at equal bitrate | No matched reference capture | No matched reference capture | Unmeasured |
 | Sustained delivery and stale queue age | ~60 FPS, 126 ms peak sender queue in old local Debug run | Bounded-frame and recovery proofs, different workload | Not comparable |
 | CPU/GPU/memory efficiency | Old CPU time available, GPU unmeasured | Retained NV12 handoff proven; no matched production run | Not comparable |
-| Native resource lifetime | No matched old-backend soak | 100 full-room restarts pass the handle bound in both builds (+5); extended 500-cycle capture fails (+226). See ROOM-STRESS.md | Delayed capture retention and room memory remain unresolved; relative comparison unavailable |
+| Native resource lifetime | No matched old-backend soak | 100 full-room restarts pass the handle bound in both builds (+5); extended 500-cycle capture fails (+226). Reproduced retained ports trace to WGC/RPC; cleanup experiments still fail the immediate bound. See CAPTURE-HANDLES.md | Allocation origin and delayed cleanup are identified; immediate resource acceptance and room memory remain open. Relative comparison unavailable |
 | Congestion recovery and viewer isolation | No matched impairment run | Controlled sink/source-delay tests and four-peer rejoin pass | Network comparison unmeasured |
 | Room responsiveness/free-tier cost | No matched workload report | Authenticated push transport integrated; no matched service workload/cost report | Unmeasured |
 

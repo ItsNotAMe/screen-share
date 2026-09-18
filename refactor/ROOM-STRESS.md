@@ -87,7 +87,13 @@ exceeded the native first-cycle deadline and produced no useful correlation.
 Neither diagnostic run is an acceptance pass. Further tracing must avoid adding
 breakpoint overhead before the target interval; do not weaken production deadlines.
 
-Remaining: identify/fix or account for this delayed capture handle retention,
-explain restart memory variability, then run the full two-hour four-viewer soak
+Follow-up: [CAPTURE-HANDLES.md](CAPTURE-HANDLES.md) identifies the reproduced
+retained handles as WGC/RPC ALPC ports and records a repeatable typed trace,
+rejected apartment/thread-reuse hypotheses and separate post-stop observations.
+The explicit RPC cleanup experiment also fails the unchanged immediate bound;
+later OS releases cannot replace restart samples. No new production fix is claimed.
+
+Remaining: complete capture resource acceptance, explain restart memory
+variability, then run the full two-hour four-viewer soak
 and impairment tests. Physical media/input, TLS/NAT, external latency, service cost,
 matched legacy comparison and default cutover remain separate open gates.

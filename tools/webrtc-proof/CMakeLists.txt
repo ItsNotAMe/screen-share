@@ -6,6 +6,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME capture-stress-evidence COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_LIST_DIR}/../../tests/LiveCaptureStressTests.py")
     set_tests_properties(capture-stress-evidence PROPERTIES TIMEOUT 20)
+    add_test(NAME capture-handle-trace-evidence COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_LIST_DIR}/../../tests/CaptureHandleTraceTests.py")
+    set_tests_properties(capture-handle-trace-evidence PROPERTIES TIMEOUT 20)
     add_test(NAME room-lifecycle-evidence COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_LIST_DIR}/../../tests/RoomLifecycleStressTests.py")
     set_tests_properties(room-lifecycle-evidence PROPERTIES TIMEOUT 20)
@@ -143,7 +146,7 @@ endif()
 option(SCREENSHARE_TEST_HARDWARE "Run proofs requiring a supported D3D11/MF GPU" OFF)
 add_executable(LiveCaptureTest LiveCaptureTest.cpp)
 add_executable(WindowsCaptureLifecycleTest WindowsCaptureLifecycleTest.cpp)
-target_link_libraries(WindowsCaptureLifecycleTest PRIVATE MfWebRTCCodecs gdi32)
+target_link_libraries(WindowsCaptureLifecycleTest PRIVATE MfWebRTCCodecs gdi32 rpcrt4)
 add_executable(CaptureProcessExitTest CaptureProcessExitTest.cpp)
 add_executable(CaptureRecoveryTest CaptureRecoveryTest.cpp)
 add_executable(CaptureBackendTest CaptureBackendTest.cpp)

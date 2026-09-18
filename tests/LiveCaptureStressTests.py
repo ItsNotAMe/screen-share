@@ -81,6 +81,44 @@ class StressEvidenceTests(unittest.TestCase):
         self.assertFalse(stress.summarize(self.log(range(1, 101)), 100, 0, False, None, 8)['passed'])
 
 
+class IdleObservationTests(unittest.TestCase):
+    resource_log = StressEvidenceTests.resource_log
+    def idle_log(self, seconds, handles=100):
+        return '\n'.join('CAPTURE_IDLE ' + json.dumps({
+            'cycle': second, 'seconds': float(second), 'handles': handles,
+            'privateBytes': 1000, 'workingSetBytes': 2000, 'gdiObjects': 3, 'userObjects': 3})
+            for second in range(seconds + 1))
+
+    def test_idle_return_does_not_erase_restart_failure(self):
+        result = stress.summarize(self.resource_log(1) + '\n' + self.idle_log(3),
+                                 100, 0, False, 8, idle_seconds=3)
+        self.assertTrue(result['idleObservation']['complete'])
+        self.assertFalse(result['passed'])
+        self.assertEqual(result['handleTrend']['growth'], 90)
+
+    def test_complete_idle_observation(self):
+        result = stress.summarize(self.resource_log(0) + '\n' + self.idle_log(3),
+                                 100, 0, False, 8, idle_seconds=3)
+        self.assertTrue(result['passed'])
+        self.assertEqual(len(result['idleObservation']['samples']), 4)
+
+    def test_missing_duplicate_unexpected_or_truncated_idle_samples_fail(self):
+        for log, expected in [('', 3), (self.idle_log(2), 3), (self.idle_log(3), 0),
+                              (self.idle_log(3) + '\n' + self.idle_log(3), 3),
+                              (self.idle_log(3) + '\nCAPTURE_IDLE {', 3)]:
+            self.assertFalse(stress.summarize_idle(log, expected)['complete'])
+
+    def test_invalid_elapsed_or_unknown_resources_fail(self):
+        for key, bad in [('seconds', float('nan')), ('seconds', float('inf')),
+                         ('seconds', True), ('seconds', -1), ('seconds', 0),
+                         ('handles', None), ('handles', True), ('privateBytes', -1)]:
+            lines = self.idle_log(3).splitlines()
+            sample = json.loads(lines[-1].removeprefix('CAPTURE_IDLE '))
+            sample[key] = bad
+            lines[-1] = 'CAPTURE_IDLE ' + json.dumps(sample)
+            self.assertFalse(stress.summarize_idle('\n'.join(lines), 3)['complete'])
+
+
 class WatchdogTests(unittest.TestCase):
     def run_child(self, code, timeout=3, limit=4096):
         with tempfile.TemporaryDirectory() as directory:

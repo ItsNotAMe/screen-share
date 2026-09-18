@@ -28,6 +28,9 @@ count follows from counting the historical checklist entries.
   implemented; see RESOURCE-STRESS.md. Full-room restart/continuous runners now
   exist too (ROOM-STRESS.md), but longer capture testing fails the handle bound
   and full memory/two-hour soak acceptance remains open.
+  Reproduced retained handles are now traced to WGC/RPC ALPC ports; see
+  CAPTURE-HANDLES.md. Later OS cleanup is observed separately and does not waive
+  the immediate restart bound.
 - Default enablement and obsolete-code removal remain gated **Stage 5** work.
   Stage 2 integration readiness and the final production cutover are distinct.
 - The visual/usability redesign requested by the user remains **Stage 6**, after

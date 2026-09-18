@@ -9,6 +9,9 @@ new production leak fix is claimed by this batch.
 Follow-up: [ROOM-STRESS.md](ROOM-STRESS.md) records full-room restart testing and a
 longer **500-cycle capture failure (+226 handles)**. The 100-cycle passes below
 remain valid, but do not establish sustained handle stability.
+Typed allocation tracing now identifies the reproduced retention as WGC/RPC ALPC
+ports; see [CAPTURE-HANDLES.md](CAPTURE-HANDLES.md). The ordinary acceptance mode
+does not enable experimental RPC cleanup or substitute later idle samples.
 
 ## One-command reproduction
 

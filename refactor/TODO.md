@@ -254,6 +254,12 @@ latency. See [COMPARISON.md](COMPARISON.md).
   validate 100 complete rooms in both builds and short continuous media runs.
   See [ROOM-STRESS.md](ROOM-STRESS.md). The 500-cycle capture extension exposed
   delayed handle retention (+226); this failure remains an acceptance blocker.
+- [x] Identify the reproduced retained handle allocation path (WGC/RPC ALPC
+  connections), provide a repeatable typed-handle trace and separate bounded
+  post-stop observations from restart acceptance. See [CAPTURE-HANDLES.md](CAPTURE-HANDLES.md).
+  Normal-policy handles return below warm-up during idle; do not repeat that
+  investigation. Continue with full-room memory/soak and impairment work while
+  preserving the immediate capture failure as an open acceptance issue.
 - [ ] Pass implementation-side stress and service/resource acceptance, including
   capture handle retention, full-room memory accounting, the complete two-hour
   four-viewer soak and impairment. Do not rebuild the completed stress harnesses.

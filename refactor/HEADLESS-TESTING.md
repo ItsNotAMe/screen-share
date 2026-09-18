@@ -1,5 +1,27 @@
 # Headless media checks
 
+## Typed capture handles and idle cleanup — 2026-09-18
+
+`scripts/trace-capture-handles.py` now captures typed outstanding handles and
+correlates successful RPC port allocations in the Debug production-owner proof.
+The actual run completed with five retained WGC/RPC ALPC ports identified. The
+debugger is launched as a test child under a process-tree/log watchdog; it never
+attaches to an existing application. This is diagnostic evidence, not acceptance.
+
+The production-owner stress proof supports separate `--idle-seconds` observations
+and an explicit test-only `--rpc-idle-cleanup` experiment. Neither changes the
+immediate +8 handle check. Missing or invalid idle evidence fails independently.
+The 500-cycle cleanup experiment fails at +254 handles, then releases 173 during
+180 seconds idle. A reused capture thread still fails at +91 over 100 cycles.
+The normal-policy 100-cycle run fails at +92 immediately, then falls from 398 to
+289 handles over 360 seconds idle (warm-up median 304), without enabling the
+cleanup API. The report retains both the failed immediate gate and later recovery.
+See [CAPTURE-HANDLES.md](CAPTURE-HANDLES.md) for artifacts and interpretation.
+
+Both configurations build and pass the three evidence CTests: 21 capture, six
+trace and five room tests. Production policy is unchanged; full resource, soak,
+impairment, physical/network and latency acceptance remain open.
+
 ## Full-room lifecycle and continuous media — 2026-09-18
 
 `scripts/test-room-lifecycle.py` now runs complete room restarts in one native
