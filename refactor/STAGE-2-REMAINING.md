@@ -24,6 +24,8 @@ count follows from counting the historical checklist entries.
   Normal adoption cannot silently remove the existing control/gamepad features.
 - Stress, resource-leak, impairment, service-cost, real TLS/NAT and external latency
   acceptance remain **Stage 4**. Those gates have not been passed by localhost tests.
+  The capture-only resource matrix and production-owner lifecycle checks are now
+  implemented; see RESOURCE-STRESS.md. They do not close full-room or soak acceptance.
 - Default enablement and obsolete-code removal remain gated **Stage 5** work.
   Stage 2 integration readiness and the final production cutover are distinct.
 - The visual/usability redesign requested by the user remains **Stage 6**, after

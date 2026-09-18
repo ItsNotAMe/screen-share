@@ -14,7 +14,7 @@ component test or Gate A is not a comparative performance result.
 | Image quality at equal bitrate | No matched reference capture | No matched reference capture | Unmeasured |
 | Sustained delivery and stale queue age | ~60 FPS, 126 ms peak sender queue in old local Debug run | Bounded-frame and recovery proofs, different workload | Not comparable |
 | CPU/GPU/memory efficiency | Old CPU time available, GPU unmeasured | Retained NV12 handoff proven; no matched production run | Not comparable |
-| Native resource lifetime | No matched old-backend soak | Current full/rapid-close handle bounds fail (+76/+10) | V2 acceptance failed; relative comparison unavailable |
+| Native resource lifetime | No matched old-backend soak | Historical full/rapid-close bounds failed (+76/+10); current capture rechecks and production-owner coverage are recorded in RESOURCE-STRESS.md | Full resource/memory/soak acceptance remains open; relative comparison unavailable |
 | Congestion recovery and viewer isolation | No matched impairment run | Controlled sink/source-delay tests and four-peer rejoin pass | Network comparison unmeasured |
 | Room responsiveness/free-tier cost | No matched workload report | Authenticated push transport integrated; no matched service workload/cost report | Unmeasured |
 

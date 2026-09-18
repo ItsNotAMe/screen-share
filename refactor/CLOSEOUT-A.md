@@ -3,6 +3,11 @@
 Closeout date: 2026-09-15. **Gate A passed for native integration/build proof.**
 **Full resource acceptance FAILED its closeout recheck and remains open in B/E.**
 
+2026-09-18 follow-up: [RESOURCE-STRESS.md](RESOURCE-STRESS.md) records current-binary
+capture rechecks and production-owner lifecycle coverage. The original failures
+below are retained. Passing repeats do not explain the historical discrepancy or
+close sustained-memory, full-room restart and soak acceptance.
+
 The user approved a focused closeout against the original PLAN.md Section 5
 gate: native codec/audio integration and build reproducibility must work before
 wider migration. Full product acceptance is still required in later checkpoints.

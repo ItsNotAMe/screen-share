@@ -1,5 +1,28 @@
 # Headless media checks
 
+## Capture lifecycle/resource batch — 2026-09-18
+
+`python scripts/test-capture-lifecycle.py build/sdk-proof-release build/webrtc/NEW`
+now runs four silent generated-window modes with 100 cycles each: rapid close,
+fresh owner thread, hardware/recovery and the production Windows capture owner.
+It preserves the original +8 handle bound, records memory/GUI trends separately,
+and rejects missing evidence, wrong binary hashes, timeout and excessive logging.
+
+Final Release **400 cycles** and Debug **80 cycles** passed all four modes;
+`build/webrtc/stress-group-final-{release,debug}/result.json` records each result.
+A separate Debug production-owner **100 cycles** also passed, in
+`stress-group-owner-final-debug/result.json`. Rebuilt focused CTest suites passed
+**5/5 each**, including the **17-test** Python evidence/watchdog suite.
+
+Production-owner coverage includes actual WGC/GPU frames, minimize/restore,
+resize, recovery, alternating source-close/active-stop, owner-thread destruction,
+retained-frame release and input geometry/property cleanup. It never injects
+physical input or plays audio. Full room restarts and the two-hour four-viewer
+soak remain separate. Private memory grew despite stable handles; see
+[RESOURCE-STRESS.md](RESOURCE-STRESS.md) for exact measurements and next work.
+This batch adds validation and diagnostics; it does not claim a new production
+leak fix or waive the earlier +76/+10 failures.
+
 ## Mouse/keyboard integration — 2026-09-18
 
 Final Release and Debug application builds passed. Both complete desktop-inclusive

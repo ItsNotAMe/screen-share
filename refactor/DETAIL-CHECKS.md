@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (through `a76c10b`, plus mouse/keyboard mapping, confinement and UI/CLI integration). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
+Last reconciled: 2026-09-18 (through `3987f4a`, plus production capture-owner resource stress). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -230,7 +230,7 @@ dated continuation notes preserve historical evidence rather than defining new b
 7. Record commands, outcomes, artifact paths and limitations in the evidence log. Update the plan if measured evidence requires changing a tuning default.
 8. Keep this checklist and `agents/todo.md` synchronized once implementation begins.
 
-Current next action: **Stage 4 stress/resource and impairment acceptance, while preserving Stage 2 physical/parity and Stage 3 physical input gates.** Shared media, capture/receive recovery, guarded normal-home/CLI routing and mouse/keyboard/controller integration are implemented. Physical-device/resource/remote acceptance remains open; the +76/+10 capture-handle regressions block cutover. See [DESKTOP-INPUT.md](DESKTOP-INPUT.md), [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) and [COMPARISON.md](COMPARISON.md).
+Current next action: **Stage 4 full-room restart, sustained-memory, four-viewer soak and impairment acceptance, while preserving Stage 2 physical/parity and Stage 3 physical input gates.** Capture-owner resource stress is now automated; see [RESOURCE-STRESS.md](RESOURCE-STRESS.md). Historical +76/+10 handle failures are retained; passing repeats do not establish a new production fix or complete resource acceptance. See [STAGE-2-REMAINING.md](STAGE-2-REMAINING.md) and [COMPARISON.md](COMPARISON.md).
 
 ## Planning handoff
 
@@ -338,7 +338,11 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [x] Route four-peer headless capture membership through the coordinator; test 100 restarts, stale operations and stop under queue pressure.
 - [x] Extend coordinator ownership to peer/signaling generations, settings/events, audio and the production RoomSession facade; see the public-session and runtime-composition evidence in CHECKPOINT-B.md.
 
-- [ ] Investigate the current-binary closeout resource regressions: full 100-cycle handles 386 → 462; rapid-close 20-cycle handles 329 → 339. Both exceed the bound of 8. Do not remove the existing MTA/dispatcher/module-lifetime mitigations without evidence.
+- [x] Revisit closeout handle failures (+76/+10) with current binaries and add
+  production capture-owner resource coverage. RESOURCE-STRESS.md preserves exact
+  evidence and scope; existing MTA/dispatcher/module-lifetime mitigations remain.
+- [ ] Explain differing historical resource results and complete sustained-memory/
+  full-session acceptance. Repeat handle passes alone are not a proven leak fix.
 
 - [ ] Verify complete production teardown without retained callbacks, textures, sockets or audio devices; account for native/driver caches separately. Carried from A integration-proof checklist, not marked passed.
 
@@ -349,7 +353,8 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 - [x] Add profile, room policy, stream preferences, per-peer status, operation results, session snapshots and owned frame types.
 - [x] Implement the serialized control executor and session/viewer generations.
 - [x] Implement state transitions, idempotent asynchronous stop, cancellation and joined owner-thread shutdown.
-- [ ] Pass complete production resource acceptance; the capture handle-growth failures remain open.
+- [ ] Pass complete production resource acceptance; capture-only handle repeats
+  do not close full-room restart, sustained-memory or soak gates.
 - [x] Reject stale-generation callbacks and test held-callback/queue-pressure cancellation and asynchronous UI close. Hung native-driver calls remain a separate acceptance limitation.
 - [x] Preserve update-only settings without resetting unrelated fields.
 - [x] Add synthetic video/audio scenarios using the same public session/native runtime as opt-in frontends.
@@ -652,6 +657,8 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [ ] Verify one impaired viewer does not lower healthy viewers without a documented shared resource/budget constraint.
 - [ ] Complete a two-hour four-viewer soak without deadlock, sustained memory growth or accumulating queues.
 - [ ] Complete 100 start/stop cycles without retained sessions, sockets, devices or callbacks.
+  Windows capture-owner cycles now check join, resource release and input-target
+  cleanup. Full room/network/audio ownership remains separate acceptance work.
 - [ ] Verify healthy room/list changes appear within two seconds.
 - [ ] Verify zero periodic HTTP membership/list polling.
 - [ ] Verify zero per-room listing verification and zero per-peer heartbeat writes.
@@ -717,7 +724,7 @@ Do not put passwords, membership tokens, SDP, ICE credentials or peer addresses 
 
 ## Open blockers and handoff notes
 
-Gate A is closed against its original integration/build criterion. The closeout resource checks FAILED their handle-growth bounds despite completed cycles; prior passing runs are historical evidence, not a current no-leak guarantee. Track native resource ownership under B and full acceptance under E. Normal application media remains legacy until validated integration supports switching it. See CLOSEOUT-A.md for exact results and retained release/hardware limitations.
+Gate A is closed against its original integration/build criterion. The 2026-09-15 closeout resource checks FAILED their handle-growth bounds despite completed cycles. RESOURCE-STRESS.md records the subsequent rechecks; neither earlier failures nor passing repeats are a no-leak guarantee. Track native resource ownership under B and full acceptance under E. Normal application media remains legacy until validated integration supports switching it. See CLOSEOUT-A.md for original results and retained release/hardware limitations.
 
 At each checkpoint handoff, record:
 
@@ -743,7 +750,9 @@ See the latest CHECKPOINT-A.md section for the 100-cycle result and exact artifa
 - [x] Complete 100 rapid source-close cycles without the prior StopCapture hang on the reference machine.
 - [x] Extend automated coverage for dispatcher lifecycle and hardware GPU input with FPS restarts.
 - [x] Resolve residual source-close COM event growth with scoped application MTA ownership; 100 rapid-close cycles and 100 fresh-owner-thread cycles both show zero handle growth.
-- [ ] Preserve native-call watchdog coverage and validate production capture-owner/session integration before production cutover; current handle-growth failures are recorded in CLOSEOUT-A.md.
+- [x] Preserve native-call watchdog coverage and validate production capture-owner
+  lifecycle, source transitions and resource release with generated Windows sources.
+  See RESOURCE-STRESS.md. Full session/soak acceptance remains open above.
 
 ### Shared capture session and headless media — 2026-09-15
 

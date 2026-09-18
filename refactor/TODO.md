@@ -242,11 +242,16 @@ installer-managed drivers and the three-pad/local-slot policy.
 legacy/v2 comparison, with failures resolved or explicitly blocking cutover.
 
 Include impairment/slow-viewer/device recovery, 100 start/stops, two-hour four-viewer
-soak, current capture handle-growth failures (+76/+10; bound 8), queue pressure,
+soak, historical capture handle-growth failures (+76/+10; bound 8), queue pressure,
 hibernation, service caps/cost/headroom, real TLS/NAT and external gaming image/input
 latency. See [COMPARISON.md](COMPARISON.md).
 
-- [ ] Pass implementation-side stress and service/resource acceptance.
+- [x] Add production Windows capture-owner lifecycle stress and a one-command
+  four-mode resource matrix, retaining the +8 handle bound. See
+  [RESOURCE-STRESS.md](RESOURCE-STRESS.md); repeated handle passes do not establish
+  private-memory or complete room-session acceptance.
+- [ ] Pass implementation-side stress and service/resource acceptance, including
+  full-room restarts, sustained memory trends, four-viewer soak and impairment.
 - [ ] Complete required real-machine/network/external latency measurements.
 
 ## 5. Cutover, removal and release readiness (E)
