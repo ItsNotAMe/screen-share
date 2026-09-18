@@ -9,6 +9,11 @@ interface Env extends RoomEnv { ALLOWED_ORIGINS?: string; V2_MAX_ROOMS?: string;
 // authoritative global room cap. Missing bindings fail closed at the router.
 export class V2Control {
   constructor(private ctx: DurableObjectState, private env: Pick<Env, 'V2_MAX_ROOMS'> = {}) {}
+  private async schedule(deadline: number, now: number): Promise<void> {
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || current <= now || current > deadline)
+      await this.ctx.storage.setAlarm(deadline);
+  }
   async fetch(request: Request): Promise<Response> {
     return this.ctx.blockConcurrencyWhile(async () => {
       const path = new URL(request.url).pathname;
@@ -22,6 +27,8 @@ export class V2Control {
         if (kind === 'create') ++budget.create;
         if (kind === 'join') ++budget.join;
         await this.ctx.storage.put('budget', budget);
+        // Rate-limit cleanup follows the last request. Reusing an older alarm
+        // could delete the current minute's budget and permit extra admissions.
         await this.ctx.storage.setAlarm(now + 120000);
         return new Response(null, { status: budget.total > 240 || budget.create > 10 || budget.join > 30 ? 429 : 204 });
       }
@@ -41,7 +48,7 @@ export class V2Control {
       } else if (path === '/release') delete rooms[roomId];
       else return new Response(null, { status: 404 });
       await this.ctx.storage.put('rooms', rooms);
-      await this.ctx.storage.setAlarm(now + 60000);
+      await this.schedule(now + 60000, now);
       return new Response(null, { status: 204 });
     });
   }

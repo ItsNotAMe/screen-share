@@ -92,6 +92,8 @@ test('eight-hour steady-room operation model executes the production alarm/outbo
   assert.equal(operations.crossObjectCalls, 9600, 'one directory and capacity renewal per room/minute');
   assert.ok(operations.put <= 35000 && operations.get <= 45000 && operations.listedRows <= 54000,
     'steady-state operation budget regressed; these are model operations, not billed SQL rows');
+  assert.ok(operations.setAlarm <= 10600 && operations.put + operations.delete + operations.setAlarm <= 46000,
+    'redundant alarm writes consume the service storage budget');
   assert.equal(operations.alarms, maintenanceFirst ? 10560 : 9600,
     'due directory/control maintenance can be fulfilled and rescheduled by simultaneous room renewal');
   t.diagnostic(JSON.stringify({ simulatedHours: 8, ordering: maintenanceFirst ? 'maintenance-first' : 'room-renewal-first',
