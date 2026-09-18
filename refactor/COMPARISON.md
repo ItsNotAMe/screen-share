@@ -1,15 +1,67 @@
 # Before/after validation scorecard
 
-Status: **Corrected local reference tests favor v2 on image age and CPU in all six
-workload groups. Full physical/network/resource acceptance is still open.**
-This compares current application configurations, **not an intrinsic architectural
-advantage**. Legacy uses software encoding and its default paced sender; v2 uses
-hardware-preferred codecs and Gaming policy. Timer fixes and lower buffering can
-also benefit legacy. A tuned-legacy control is required before attributing these
-gains to the refactor itself. Shared capture changes already apply to legacy where
-it executes the same branch; v2-only capture/encoder owners do not.
+Status: **Portable fixes also remove legacy hardware lag. V2 is not yet a
+demonstrated overall performance improvement over improved legacy.**
+The original corrected matrix compared software/default-paced legacy against
+hardware-preferred Gaming v2. The final controls compare both encoder choices
+after giving legacy the portable timer, sender-mode and hardware-queue fixes.
+Legacy now has lower local image age with either encoder. V2 hardware uses less
+CPU, but neither that nor the original matrix proves an intrinsic architectural
+advantage. Full physical/network/resource acceptance remains open.
 User requested comparative validation as part of B on 2026-09-15. Passing a
 component test or Gate A is not a comparative performance result.
+
+## Improved-legacy scorecard — final portable-fix controls
+
+All **16 updated runs** pass workload/codec validation, in addition to the sixteen
+pre-fix controls below. Motion scene, 1080p, 60 FPS and 12 Mbps ceilings,
+five-second warmup, twenty-second measurement, one/four viewers, forward/reverse
+variant order and explicit timer policy are unchanged. Legacy hardware now uses
+the exact same one-submission/output-deadline helper as v2; its old input queue
+is removed in production code. Legacy frame-clock, WGC and hardware waits also
+use the precise timer. Both legacy variants select the existing low-latency mode.
+
+| Variant | Viewers | Image-age p95 ms | Fresh-marker FPS | CPU, one-core % | Private MiB |
+|---|---:|---:|---:|---:|---:|
+| Improved legacy software | 1 | 59.7 | 52.9 | 155.7 | 432.0 |
+| Improved legacy hardware | 1 | 59.6 | 53.2 | 53.7 | 335.3 |
+| V2 software | 1 | 109.1 | 36.7 | 84.7 | 314.5 |
+| V2 hardware | 1 | 72.4 | 52.1 | 26.8 | 254.1 |
+| Improved legacy software | 4 | 65.2 | 49.6 | 357.1 | 512.0 |
+| Improved legacy hardware | 4 | 63.9 | 51.7 | 254.1 | 395.7 |
+| V2 software | 4 | 120.9 | 36.9 | 379.6 | 933.3 |
+| V2 hardware | 4 | 78.8 | 51.7 | 106.4 | 574.4 |
+
+Cells are medians of two runs; latency uses each run's worst-viewer p95. CPU
+covers host plus all local receivers, minus the scene thread, and excludes GPU
+utilization. Image age ends at CPU consumption. These are not external latency
+or full color/equal-measured-bitrate quality results.
+
+**Conclusions:**
+
+- The same portable fixes bring legacy hardware from 240.7/244.4 ms to
+  59.6/63.9 ms, while preserving fresh-image delivery. All four final legacy
+  hardware logs report zero queued encoder inputs, versus ten before the fix.
+  The large legacy hardware delay was not an unavoidable cost of hardware encoding.
+- Within v2, hardware remains the better tested choice: about 52 fresh FPS and
+  72–79 ms versus software's 37 FPS and 109–121 ms. Software fallback is functional
+  but does not meet equivalent 1080p60 delivery in this workload.
+- V2 hardware still trails improved legacy hardware by about **13–15 ms**. It
+  uses about 50–58% less measured CPU, but different decoder and per-viewer encoder
+  architectures prevent attributing that solely to framework efficiency. Four-viewer
+  private memory is about **45% higher** than improved legacy hardware.
+- Performance acceptance remains **open**. Next work is the measured v2 latency
+  gap, software-throughput deficit and four-viewer memory—not another claim that
+  unchanged legacy is slower. Retain physical/game-load, GPU-presentation and
+  matched-network acceptance separately.
+
+[Compact before/after evidence](evidence/codec-portable-controls-2026-09-18.json)
+preserves both matrices, hashes, actual codec observations, source snapshots'
+hashes, queue counts, the ten-minute hardware summary and Release/Debug checks.
+Raw final runs: `build/comparison-portable-final`. An earlier restricted attempt
+in `build/comparison-portable-fixes` failed capture/admission and was stopped;
+it remains preserved and is excluded from performance results. The identical
+executable completed the final matrix with the required capture/network access.
 
 ## Matched production-path workload
 
@@ -17,6 +69,63 @@ component test or Gate A is not a comparative performance result.
 `RunWatchSession` APIs and v2 `RoomSession` / `WindowsRoomRuntimeFactory` in an
 optimized application build. It captures only a generated, owned WGC window;
 there is no desktop capture, audible output or physical input injection.
+
+## Codec controls before the additional legacy fixes — 2026-09-18
+
+These controls precede the subsequent shared hardware-queue/frame-wait fixes.
+Preserve them as the symptom baseline, not the final improved-legacy verdict.
+The user's fairness objection was correct: timer precision and less buffering
+are portable improvements. `scripts/compare-codec-controls.py` runs four variants
+in forward/reverse order with one/four viewers, for **16 validated runs**. All
+use the same motion scene, 1080p, 60 FPS ceiling, 12 Mbps ceiling, five-second
+warmup and twenty-second measurement. Every test process explicitly honors its
+requested timer resolution, including when its owned window is occluded. This
+does not change the machine's timer/power policy.
+
+Legacy controls enable its existing low-latency option (no UDP pacing queue).
+The hardware control additionally overrides the typed preset's software choice
+using the existing legacy runtime option. V2 changes only encoder preference;
+its decoder remains hardware-preferred. Actual codec selection is checked, and
+any v2 software fallback invalidates a codec-control run. Legacy still uses a
+software decoder and shares one encoded stream among viewers; v2 has independent
+per-viewer encoders. These are explicit differences, not an isolated architecture
+or equal-wire-bitrate experiment.
+
+| Variant | Viewers | Image-age p95 ms | Fresh-marker FPS | CPU, one-core % | Private MiB |
+|---|---:|---:|---:|---:|---:|
+| Tuned legacy software | 1 | 59.8 | 53.1 | 153.2 | 433.3 |
+| Tuned legacy hardware | 1 | 240.7 | 53.3 | 54.5 | 336.1 |
+| V2 software | 1 | 114.5 | 36.5 | 94.9 | 317.9 |
+| V2 hardware | 1 | 74.8 | 51.8 | 27.2 | 252.4 |
+| Tuned legacy software | 4 | 65.3 | 52.2 | 351.4 | 494.3 |
+| Tuned legacy hardware | 4 | 244.4 | 53.3 | 262.8 | 405.9 |
+| V2 software | 4 | 123.0 | 38.5 | 407.5 | 939.0 |
+| V2 hardware | 4 | 73.1 | 52.1 | 100.0 | 565.5 |
+
+Values are medians of two runs; latency uses each run's worst-viewer p95.
+Fresh-marker FPS counts distinct captured source images, not duplicate delivery.
+The measured age ends at CPU image consumption, not physical presentation.
+Sparse grayscale PSNR is retained in the evidence but is not full image-quality
+acceptance at equal measured bitrate.
+
+**Verdict:** hardware is the better tested encoder choice within v2 on this
+desktop, and its legacy lag is reproducible. However, tuned legacy software is
+about 15 ms faster with one viewer and 8 ms faster with four. V2 software also
+falls well below the requested 60 FPS workload. Lower CPU usage does not waive
+these latency/delivery gaps; four-viewer private memory remains higher for v2
+hardware than tuned legacy software. Do not mark the backend universally better
+or close performance acceptance using the default-configuration table below.
+
+The hardware queue diagnosis, failure checks and sustained-run boundaries are
+in [HARDWARE-ENCODING.md](HARDWARE-ENCODING.md). Next performance work should target
+the measured v2 latency and software-fallback throughput, followed by GPU-display
+and real two-machine gaming load. No additional comparison harness is needed.
+
+```powershell
+python scripts/compare-codec-controls.py build/sdk-app-release/BackendComparison.exe build/codec-controls-NEW --origin https://screenshare-signaling-v2.bit-yeet.workers.dev
+```
+
+## Default-configuration matrix methodology
 
 The first matrix uses 1920×1080, 60 FPS, a 12 Mbps per-viewer video ceiling,
 encrypted loopback transport, five seconds of warmup and twenty measured seconds.
@@ -215,8 +324,8 @@ essentially equal between paths.
 | Gaming input-to-visible-response p95 <120 ms | No external measurement | No external measurement | Unmeasured |
 | Quality capture-to-display p95 <250 ms | No external measurement | No external measurement | Unmeasured |
 | Image quality at equal bitrate | Matched-ceiling grayscale samples above | Same sampled scene; different codec path and actual rate | Full color/equal-wire-rate quality remains unmeasured |
-| Sustained delivery and stale queue age | Paired local 1080p frame/marker counts and image age | Same workload; high-motion age and fresh-FPS regressions | Short-run comparison available; sustained/full-queue and physical gates remain |
-| CPU/GPU/memory efficiency | Paired process CPU/private-memory samples above | Lower one-viewer private memory; four-viewer CPU/private-memory regressions | CPU-consumer result only; normal GPU presentation and GPU utilization remain unmeasured |
+| Sustained delivery and stale queue age | Improved software age 60–65 ms; hardware 60–64 ms | Hardware 72–79 ms, software 109–121 ms with lower fresh FPS; ten-minute hardware evidence available | V2 trails improved legacy latency; full-queue and physical gates remain |
+| CPU/GPU/memory efficiency | Tuned control CPU/private-memory samples above | Hardware uses less CPU; four-viewer private memory is higher; software four-viewer cost is worse | CPU-consumer result only; normal GPU presentation and GPU utilization remain unmeasured |
 | Native resource lifetime | No matched old-backend soak | 100 full-room restarts pass the handle bound in both builds (+5); extended 500-cycle capture fails (+226). Reproduced retained ports trace to WGC/RPC; cleanup experiments still fail the immediate bound. See CAPTURE-HANDLES.md | Allocation origin and delayed cleanup are identified; immediate resource acceptance and room memory remain open. Relative comparison unavailable |
 | Congestion recovery and viewer isolation | No matched impairment run | Packet impairment/recovery and four-peer rejoin pass; initial-collapse backlog remains | Matched network comparison unmeasured |
 | Room responsiveness/free-tier cost | No matched workload report | Authenticated push, heartbeat/listing invariants and eight-hour model verified | Matched deployed usage/billing comparison unmeasured |

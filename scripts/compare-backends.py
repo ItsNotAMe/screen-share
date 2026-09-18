@@ -21,7 +21,9 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def validate(report, backend, scene, viewers, seconds):
+def validate(report, backend, scene, viewers, seconds, variant=None, timer_policy='system'):
+    if report.get('variant', backend) != (variant or backend) or report.get('timerPolicy', 'system') != timer_policy:
+        raise ValueError('Mismatched codec/timer control')
     if report.get('consumer', 'cpu-pixels') != 'cpu-pixels':
         raise ValueError('Retained-only diagnostics cannot establish image latency/quality')
     if report.get('audioPlayoutMode') != ('paced-discard' if backend == 'v2' else 'disabled'):

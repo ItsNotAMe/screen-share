@@ -1141,19 +1141,35 @@ Do not call its scene-to-CPU-consumer age physical display latency. CPU readback
 codec defaults, configured ceilings versus measured bitrate and source update
 rates are explicit comparison boundaries, not hidden normalization assumptions.
 
+For encoder/fairness controls, use `scripts/compare-codec-controls.py` with the
+same executable/origin/output arguments. It runs software and hardware variants
+for both backends, with one/four viewers in forward/reverse order. Legacy uses
+its existing low-latency mode. Both processes honor requested timer precision;
+the production legacy path also shares the precise waits and single-submission
+hardware deadline. Source/binary/report hashes and source snapshots distinguish
+the pre-fix and improved-legacy baselines. See HARDWARE-ENCODING.md.
+
+Run WGC/live-admission comparisons with access to the active Windows capture
+desktop and authorized test service. A restricted process can build and pass
+component tests while failing WGC activation or room admission. Preserve those
+failed attempts, resolve the execution environment, and start a fresh output
+directory; never interpret readiness/admission failure as a latency measurement.
+
 Release/Debug `stage23-final-*/result.json` pass **12/12 each**, including input
 pressure/timing and redacted report export. See SESSION-REPORTS.md.
 `network-timestamps-{release,debug}/result.json` pass **6/6 each** with encrypted
 packet impairment and separate receiver processes. See NETWORK-IMPAIRMENT.md for
 commands, preserved failures and the unresolved latency boundary. SERVICE-COST.md
 records real ten-room heartbeat/listing invariants and the eight-hour operation model.
-The interactive input desktop is currently `Screen-saver`; generated-desktop tests
-are not rerun by unlocking or synthesizing user input. Physical acceptance stays open.
+Earlier runs were blocked while the interactive desktop was `Screen-saver`.
+Do not unlock it or synthesize user input to run generated-desktop tests; wait
+for an available capture desktop. Physical acceptance stays open.
 
 Final batch details are in UNATTENDED-RESULTS.md. Both final `closeout-final-*`
 headless matrices pass 12/12; final rebuilt `lifecycle-latest-*` runs pass 60 seconds
 plus ten-second idle in both builds. The 7200-second software run's original data
 passes reevaluation after fixing an ideal sample-count assumption; raw and derived
-reports are preserved with hashes. Final network results are Release 5/6 and Debug
-6/6, with Release bandwidth recovery still failing. Do not replace that result
-with the historical initial 6/6 runs.
+reports are preserved with hashes. That batch's network results were Release 5/6
+and Debug 6/6, including a retained Release bandwidth-recovery failure. Later
+transport/pacing fixes and fresh packet results are recorded in
+CONGESTION-RECOVERY.md and COMPARISON.md; neither erases the original failure.

@@ -9,6 +9,7 @@
 #include "codec/H264StreamDecoder.h"
 #include "codec/H264StreamEncoder.h"
 #include "core/SessionRuntimeControl.h"
+#include "core/ShortWait.h"
 #include "input/RemoteInputInjector.h"
 #include "input/VirtualGamepadBackend.h"
 #include "input/XInputGamepad.h"
@@ -4458,6 +4459,7 @@ void RunCaptureStats(
         return options.seconds == 0 || Clock::now() - startedAt < std::chrono::seconds(options.seconds);
     };
 
+    screenshare::ShortWait frameTimer;
     while (keepRunning()) {
         if (remoteInputInjector != nullptr) {
             remoteInputInjector->RefreshTargetState();
@@ -4466,12 +4468,12 @@ void RunCaptureStats(
         // wait so it is injected within a couple of ms instead of once per frame
         // (which would otherwise add up to a full frame interval of input lag).
         if (!controlGrants.empty() && udpSender) {
-            while (Clock::now() < nextFrameAt) {
+            while (keepRunning() && Clock::now() < nextFrameAt) {
                 const auto remaining = nextFrameAt - Clock::now();
                 const auto slice = (std::min)(remaining, std::chrono::duration_cast<Clock::duration>(
                     std::chrono::milliseconds(2)));
                 if (slice > Clock::duration::zero()) {
-                    std::this_thread::sleep_for(slice);
+                    frameTimer.Wait(std::chrono::duration_cast<std::chrono::nanoseconds>(slice));
                 }
                 if (remoteInputInjector != nullptr) {
                     remoteInputInjector->RefreshTargetState();
@@ -4481,8 +4483,14 @@ void RunCaptureStats(
                 static_cast<void>(udpSender->ReceiveFeedback(std::chrono::milliseconds(0)));
             }
         } else {
-            std::this_thread::sleep_until(nextFrameAt);
+            while (keepRunning()) {
+                const auto remaining = nextFrameAt - Clock::now();
+                if (remaining <= Clock::duration::zero()) break;
+                frameTimer.Wait((std::min)(std::chrono::duration_cast<std::chrono::nanoseconds>(remaining),
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds(10))));
+            }
         }
+        if (!keepRunning()) break;
         nextFrameAt += targetFrameTime;
         drainLiveSignalingSendTargets();
         applyRuntimeStreamSettingsControl();

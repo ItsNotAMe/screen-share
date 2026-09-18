@@ -1,6 +1,7 @@
 #include "codec/H264StreamEncoder.h"
 
 #include "codec/H264Bitstream.h"
+#include "codec/HardwareFrameWait.h"
 
 #include "video/Nv12Convert.h"
 
@@ -19,7 +20,6 @@
 #include <cstring>
 #include <iterator>
 #include <stdexcept>
-#include <thread>
 #include <utility>
 
 namespace screenshare {
@@ -639,10 +639,7 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     dxgiDeviceManager_.Reset();
     pendingAsyncInputs_ = 0;
     pendingAsyncOutputs_ = 0;
-    queuedAsyncInputs_.clear();
     senderQpcBySampleTime_.clear();
-    droppedAsyncInputs_ = 0;
-    maxQueuedAsyncInputs_ = std::clamp<size_t>(static_cast<size_t>((config_.fps + 5) / 6), 4, 12);
     asyncDrainComplete_ = false;
     frameIndex_ = config_.startFrameIndex;
     frameDuration100ns_ = 10'000'000 / config_.fps;
@@ -695,11 +692,20 @@ std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& f
     if (backend_ == H264StreamEncoderBackend::Hardware) {
         ++frameIndex_;
 
-        auto packets = PumpAsyncEvents();
-        AppendPackets(packets, SubmitQueuedAsyncInputs());
-        AppendPackets(packets, QueueAsyncInput(std::move(sample)));
-        AppendPackets(packets, PumpAsyncEvents());
-        AppendPackets(packets, SubmitQueuedAsyncInputs());
+        // Share the v2 submission/output bound with legacy. Do not accumulate
+        // raw frames behind the MFT; complete this frame before capturing another.
+        auto packet = WaitForHardwareFrame(sampleTime,
+            [&] { return PumpAsyncEvents(); },
+            [&] {
+                if (!pendingAsyncInputs_) return false;
+                const HRESULT result = transform_->ProcessInput(inputStreamId_, sample.Get(), 0);
+                if (result == MF_E_NOTACCEPTING) { pendingAsyncInputs_ = 0; return false; }
+                ThrowIfFailed(result, "IMFTransform::ProcessInput");
+                --pendingAsyncInputs_;
+                return true;
+            }, [] { return false; });
+        std::vector<EncodedPacket> packets;
+        packets.push_back(std::move(packet));
         return packets;
     }
 
@@ -728,10 +734,6 @@ std::vector<EncodedPacket> H264StreamEncoder::Drain()
     }
 
     std::vector<EncodedPacket> packets;
-    if (backend_ == H264StreamEncoderBackend::Hardware) {
-        AppendPackets(packets, WaitForAsyncQueue());
-    }
-
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0), "IMFTransform::ProcessMessage(END_OF_STREAM)");
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0), "IMFTransform::ProcessMessage(DRAIN)");
     if (backend_ == H264StreamEncoderBackend::Hardware) {
@@ -825,10 +827,7 @@ void H264StreamEncoder::Stop()
     config_.d3dDevice.Reset();
     pendingAsyncInputs_ = 0;
     pendingAsyncOutputs_ = 0;
-    queuedAsyncInputs_.clear();
     senderQpcBySampleTime_.clear();
-    maxQueuedAsyncInputs_ = 8;
-    droppedAsyncInputs_ = 0;
     asyncDrainComplete_ = false;
     lastInputMode_ = H264StreamEncoderInputMode::Memory;
     encoderName_.clear();
@@ -1022,48 +1021,12 @@ std::vector<EncodedPacket> H264StreamEncoder::PumpAsyncEvents()
     return packets;
 }
 
-std::vector<EncodedPacket> H264StreamEncoder::QueueAsyncInput(Microsoft::WRL::ComPtr<IMFSample> sample)
-{
-    std::vector<EncodedPacket> packets;
-
-    if (queuedAsyncInputs_.size() >= maxQueuedAsyncInputs_) {
-        queuedAsyncInputs_.pop_front();
-        ++droppedAsyncInputs_;
-    }
-    queuedAsyncInputs_.push_back(std::move(sample));
-
-    AppendPackets(packets, SubmitQueuedAsyncInputs());
-    return packets;
-}
-
-std::vector<EncodedPacket> H264StreamEncoder::SubmitQueuedAsyncInputs()
-{
-    std::vector<EncodedPacket> packets;
-
-    while (pendingAsyncInputs_ > 0 && !queuedAsyncInputs_.empty()) {
-        auto sample = std::move(queuedAsyncInputs_.front());
-        queuedAsyncInputs_.pop_front();
-
-        const HRESULT inputResult = transform_->ProcessInput(inputStreamId_, sample.Get(), 0);
-        if (inputResult == MF_E_NOTACCEPTING) {
-            queuedAsyncInputs_.push_front(std::move(sample));
-            pendingAsyncInputs_ = 0;
-            break;
-        }
-
-        ThrowIfFailed(inputResult, "IMFTransform::ProcessInput");
-        --pendingAsyncInputs_;
-
-        AppendPackets(packets, PumpAsyncEvents());
-    }
-
-    return packets;
-}
 
 std::vector<EncodedPacket> H264StreamEncoder::WaitForAsyncInputRequest()
 {
     std::vector<EncodedPacket> packets;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    ShortWait timer;
 
     while (pendingAsyncInputs_ == 0) {
         AppendPackets(packets, PumpAsyncEvents());
@@ -1074,33 +1037,12 @@ std::vector<EncodedPacket> H264StreamEncoder::WaitForAsyncInputRequest()
         if (std::chrono::steady_clock::now() >= deadline) {
             throw std::runtime_error("Timed out waiting for hardware H.264 encoder input request");
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        timer.Wait();
     }
 
     return packets;
 }
 
-std::vector<EncodedPacket> H264StreamEncoder::WaitForAsyncQueue()
-{
-    std::vector<EncodedPacket> packets;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-
-    while (!queuedAsyncInputs_.empty()) {
-        AppendPackets(packets, PumpAsyncEvents());
-        AppendPackets(packets, SubmitQueuedAsyncInputs());
-
-        if (queuedAsyncInputs_.empty()) {
-            break;
-        }
-        if (std::chrono::steady_clock::now() >= deadline) {
-            throw std::runtime_error("Timed out waiting for hardware H.264 encoder queued input");
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-
-    AppendPackets(packets, PumpAsyncEvents());
-    return packets;
-}
 
 std::vector<EncodedPacket> H264StreamEncoder::WaitForAsyncDrain()
 {
@@ -1108,6 +1050,7 @@ std::vector<EncodedPacket> H264StreamEncoder::WaitForAsyncDrain()
     asyncDrainComplete_ = false;
     pendingAsyncInputs_ = 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    ShortWait timer;
 
     while (!asyncDrainComplete_) {
         auto eventPackets = PumpAsyncEvents();
@@ -1122,7 +1065,7 @@ std::vector<EncodedPacket> H264StreamEncoder::WaitForAsyncDrain()
         if (std::chrono::steady_clock::now() >= deadline) {
             throw std::runtime_error("Timed out waiting for hardware H.264 encoder drain");
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        timer.Wait();
     }
 
     auto remainingPackets = PumpAsyncEvents();

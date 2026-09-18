@@ -20,6 +20,9 @@ struct WindowsRoomRuntimeOptions {
     // Test/embedding override. Never fall back to physical capture when supplied.
     std::function<AudioSwitchControl::Factory(AudioSelection)> audioForSelection;
     StreamPreferences preferences;
+    // Embedding/diagnostic codec control. Hardware remains preferred by default;
+    // software mode keeps the same room/transport/capture pipeline for comparison.
+    bool preferHardwareEncoding = true;
     std::shared_ptr<PresentationTelemetry> presentation;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
     std::shared_ptr<input::Sink> inputSink;

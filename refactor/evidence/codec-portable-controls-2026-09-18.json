@@ -1,0 +1,3189 @@
+{
+  "schema": 1,
+  "date": "2026-09-18",
+  "workloadValidationPassed": true,
+  "performanceAcceptancePassed": false,
+  "externalLatencyVerified": false,
+  "scope": "Owned WGC motion scene, 1920x1080, 60 FPS ceiling, 12 Mbps per viewer ceiling, encrypted same-process loopback, CPU pixel consumer, no physical input or audible output",
+  "controlMethod": "5 second warmup, 20 second measurement, four codec variants in forward/reverse order, one and four viewers; same timer policy",
+  "beforePortableFixes": {
+    "executableSha256": "8b408f4394a8953ceced0eb3f1d9401ba9e2bbb9e2a38a10b5074df5ce5d4d8f",
+    "runnerSha256": "5806ff4864eed6a6ff9de4b319eaaec34c9f110f35b8747cb8981d083c3d9395",
+    "validatorSha256": "e17af6dc5bde8178512fb8858e2f87f56fe17cb5533c266941c68ccb3497999c",
+    "sourceSha256": "f662edeb34f27b839502641ecf21173a4e85300435dc6e8175ae9aa31ee97832",
+    "gitCommit": "1686db376ed0817b5e364eeddc8f0680e6332a16",
+    "summary": {
+      "1": {
+        "legacy-lowlatency": {
+          "runs": 2,
+          "imageAgeP95Ms": 59.75814999639988,
+          "freshFps": 53.09783477325368,
+          "lumaPsnrDb": 23.13117926322561,
+          "cpuCorePercent": 153.19686844951158,
+          "privateMiB": 433.28125
+        },
+        "legacy-hardware": {
+          "runs": 2,
+          "imageAgeP95Ms": 240.74739998579025,
+          "freshFps": 53.34762109904946,
+          "lumaPsnrDb": 28.151275811599106,
+          "cpuCorePercent": 54.450680258092035,
+          "privateMiB": 336.0595703125
+        },
+        "v2-software": {
+          "runs": 2,
+          "imageAgeP95Ms": 114.46054998040199,
+          "freshFps": 36.523607178697134,
+          "lumaPsnrDb": 22.50037352573382,
+          "cpuCorePercent": 94.87920333859773,
+          "privateMiB": 317.90625
+        },
+        "v2": {
+          "runs": 2,
+          "imageAgeP95Ms": 74.8272999972105,
+          "freshFps": 51.797353244188926,
+          "lumaPsnrDb": 27.24684389990836,
+          "cpuCorePercent": 27.22515383833875,
+          "privateMiB": 252.439453125
+        }
+      },
+      "4": {
+        "legacy-lowlatency": {
+          "runs": 2,
+          "imageAgeP95Ms": 65.30299998819828,
+          "freshFps": 52.19775569573713,
+          "lumaPsnrDb": 23.21097381513669,
+          "cpuCorePercent": 351.4302369884258,
+          "privateMiB": 494.2763671875
+        },
+        "legacy-hardware": {
+          "runs": 2,
+          "imageAgeP95Ms": 244.35549999773502,
+          "freshFps": 53.273469125164794,
+          "lumaPsnrDb": 28.160179986370025,
+          "cpuCorePercent": 262.76588652601606,
+          "privateMiB": 405.900390625
+        },
+        "v2-software": {
+          "runs": 2,
+          "imageAgeP95Ms": 123.0012499988079,
+          "freshFps": 38.54406217929145,
+          "lumaPsnrDb": 22.97822796373392,
+          "cpuCorePercent": 407.4773957758696,
+          "privateMiB": 939.0361328125
+        },
+        "v2": {
+          "runs": 2,
+          "imageAgeP95Ms": 73.09635001420975,
+          "freshFps": 52.072898241842225,
+          "lumaPsnrDb": 27.418950149235833,
+          "cpuCorePercent": 100.03503387845663,
+          "privateMiB": 565.5400390625
+        }
+      }
+    },
+    "limitations": [
+      "Current legacy with its existing lowLatency mode; hardware variant overrides only existing encoder selection",
+      "All test processes honor their requested timer precision; not a machine-wide setting",
+      "Legacy decoder remains software; v2 decoder remains hardware-preferred in both encoder variants",
+      "Same configured ceiling, not equal measured bitrate or identical encoder scheduling",
+      "No physical presentation/input, Internet impairment or long-term driver stability claim"
+    ],
+    "sourceHashes": {},
+    "rawReportSha256": "30b563625e3b5b8d367257a6cba5e647080ba14731a16543eeaa96b9d02feabf",
+    "rawDirectory": "build/comparison-codec-controls",
+    "runs": [
+      {
+        "name": "1-0-legacy-lowlatency",
+        "variant": "legacy-lowlatency",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "7074b9d6ca36e6bd5bdc0642ccf896c90688930552a0cfb590ee00848c0b1ab7",
+        "metricsSha256": "4cac824941ad0c2de5756feffb991c566584c817c6721019cd496661836ddd89",
+        "viewers": 1,
+        "measuredSeconds": 20.0007011,
+        "sourceUpdates": 1198,
+        "mediaCpuCorePercent": 150.22910871859386,
+        "receivers": [
+          {
+            "fps": 60.2478880102858,
+            "frames": 1205,
+            "imageAgeP50Ms": 48.73819997906685,
+            "imageAgeP95Ms": 60.07989999651909,
+            "imageAgeP99Ms": 63.10280001163483,
+            "invalidMarkers": 0,
+            "lumaMse": 313.6826530058703,
+            "lumaSamples": 4346784,
+            "sampledLumaPsnrDb": 23.165898584664205,
+            "uniqueMarkerFps": 52.648154418946845,
+            "uniqueMarkers": 1053
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.046125,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 449359872,
+            "last": 450519040,
+            "median": 450283520.0,
+            "max": 458231808
+          },
+          "handles": {
+            "first": 864,
+            "last": 864,
+            "median": 864.0,
+            "max": 864
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "1-1-legacy-hardware",
+        "variant": "legacy-hardware",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "91d8d6a428ed5f0198afe19040d87df19704d5ba5d73df4d4192c80be1942d31",
+        "metricsSha256": "fcf2cdcd098ec2a76266bfcae17c913af2cc42ad59d130dc5938cd11abe374d8",
+        "viewers": 1,
+        "measuredSeconds": 20.0005467,
+        "sourceUpdates": 1198,
+        "mediaCpuCorePercent": 52.96730213879603,
+        "receivers": [
+          {
+            "fps": 60.19835447798034,
+            "frames": 1204,
+            "imageAgeP50Ms": 230.80779999494553,
+            "imageAgeP95Ms": 241.54139998555183,
+            "imageAgeP99Ms": 244.41870000958443,
+            "invalidMarkers": 0,
+            "lumaMse": 99.24730307636624,
+            "lumaSamples": 4363296,
+            "sampledLumaPsnrDb": 28.163616466918597,
+            "uniqueMarkerFps": 52.84855538473855,
+            "uniqueMarkers": 1057
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0381539,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 348418048,
+            "last": 349663232,
+            "median": 349437952.0,
+            "max": 357314560
+          },
+          "handles": {
+            "first": 860,
+            "last": 860,
+            "median": 860.0,
+            "max": 860
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          10
+        ]
+      },
+      {
+        "name": "1-2-v2-software",
+        "variant": "v2-software",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "41cda130e5993f0fca3d6e0c1c1160b167f6a90afd4d9d841d8811091883fe7b",
+        "viewers": 1,
+        "measuredSeconds": 20.0011043,
+        "sourceUpdates": 1193,
+        "mediaCpuCorePercent": 88.66697925274056,
+        "receivers": [
+          {
+            "fps": 35.39804549691789,
+            "frames": 708,
+            "imageAgeP50Ms": 45.491200000047684,
+            "imageAgeP95Ms": 110.51909998059273,
+            "imageAgeP99Ms": 134.48849999904633,
+            "invalidMarkers": 0,
+            "lumaMse": 393.51701024939456,
+            "lumaSamples": 2835936,
+            "sampledLumaPsnrDb": 22.181168508620782,
+            "uniqueMarkerFps": 34.34810346946693,
+            "uniqueMarkers": 687
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.2292212,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 340148224,
+            "last": 339726336,
+            "median": 330635264.0,
+            "max": 341286912
+          },
+          "handles": {
+            "first": 1178,
+            "last": 1177,
+            "median": 1176.0,
+            "max": 1178
+          }
+        },
+        "hardwareEncodedFrames": 0,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 3.656810982048574,
+            "meanPacketSendDelayMs": 9.701037141206902,
+            "receiverJitterRecentMs": 4,
+            "targetVideoBps": 5659424,
+            "transportSendBps": 11513051,
+            "videoPayloadBps": 11020015,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "1-3-v2",
+        "variant": "v2",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "ae57e58312436251107e45825a704a17c81a3b3346f75d8f8abbe3de9990e1af",
+        "viewers": 1,
+        "measuredSeconds": 20.0013331,
+        "sourceUpdates": 1194,
+        "mediaCpuCorePercent": 28.123125453072927,
+        "receivers": [
+          {
+            "fps": 52.94647085298529,
+            "frames": 1059,
+            "imageAgeP50Ms": 38.696200013160706,
+            "imageAgeP95Ms": 74.34099999070168,
+            "imageAgeP99Ms": 100.82039999961853,
+            "invalidMarkers": 0,
+            "lumaMse": 118.88101870474804,
+            "lumaSamples": 4239456,
+            "sampledLumaPsnrDb": 27.379678429174668,
+            "uniqueMarkerFps": 51.34657749387715,
+            "uniqueMarkers": 1027
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.258829,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 262701056,
+            "last": 267685888,
+            "median": 267253760.0,
+            "max": 276598784
+          },
+          "handles": {
+            "first": 1175,
+            "last": 1175,
+            "median": 1175.0,
+            "max": 1176
+          }
+        },
+        "hardwareEncodedFrames": 1346,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 2.6472392638036806,
+            "meanPacketSendDelayMs": 2.466770941953423,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 9792215,
+            "transportSendBps": 11055170,
+            "videoPayloadBps": 10636833,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "1-4-v2",
+        "variant": "v2",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "e5fa0eb4f15ee3618df25e995ef49abe3b6c980a454fabfb8cb4fac1bd0106b2",
+        "viewers": 1,
+        "measuredSeconds": 20.0007162,
+        "sourceUpdates": 1196,
+        "mediaCpuCorePercent": 26.327182223604574,
+        "receivers": [
+          {
+            "fps": 54.09806274837298,
+            "frames": 1082,
+            "imageAgeP50Ms": 38.958000004291534,
+            "imageAgeP95Ms": 75.31360000371933,
+            "imageAgeP99Ms": 96.21570000052452,
+            "invalidMarkers": 0,
+            "lumaMse": 126.38031217888006,
+            "lumaSamples": 4313760,
+            "sampledLumaPsnrDb": 27.11400937064205,
+            "uniqueMarkerFps": 52.24812899450071,
+            "uniqueMarkers": 1045
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.2300696,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 260788224,
+            "last": 261754880,
+            "median": 262150144.0,
+            "max": 278310912
+          },
+          "handles": {
+            "first": 1175,
+            "last": 1175,
+            "median": 1175.0,
+            "max": 1176
+          }
+        },
+        "hardwareEncodedFrames": 1376,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 2.647590361445783,
+            "meanPacketSendDelayMs": 3.3103872998494595,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 7892602,
+            "transportSendBps": 8727290,
+            "videoPayloadBps": 8387577,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "1-5-v2-software",
+        "variant": "v2-software",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "c20b33e39224e07ef01ee3a71bf283eff581253b4c9338fa19d936882cb6d99b",
+        "viewers": 1,
+        "measuredSeconds": 20.0004595,
+        "sourceUpdates": 1197,
+        "mediaCpuCorePercent": 101.0914274244549,
+        "receivers": [
+          {
+            "fps": 39.44909365707323,
+            "frames": 789,
+            "imageAgeP50Ms": 42.834100008010864,
+            "imageAgeP95Ms": 118.40199998021126,
+            "imageAgeP99Ms": 142.09389999508858,
+            "invalidMarkers": 0,
+            "lumaMse": 339.72108822289476,
+            "lumaSamples": 3195072,
+            "sampledLumaPsnrDb": 22.819578542846855,
+            "uniqueMarkerFps": 38.69911088792735,
+            "uniqueMarkers": 774
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.2690076,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 335032320,
+            "last": 336052224,
+            "median": 336062464.0,
+            "max": 345223168
+          },
+          "handles": {
+            "first": 1176,
+            "last": 1177,
+            "median": 1176.0,
+            "max": 1177
+          }
+        },
+        "hardwareEncodedFrames": 0,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 3.753578732106339,
+            "meanPacketSendDelayMs": 8.913725388196738,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 5653604,
+            "transportSendBps": 11824191,
+            "videoPayloadBps": 11283096,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "1-6-legacy-hardware",
+        "variant": "legacy-hardware",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e440efb32fb499b8c38983f1c0253e9a69a026a681eabd8f7885b4e4867fd4bb",
+        "metricsSha256": "d23e95d027d5ef51950fb7ad929c9cb25ad21c16958cab28359fe335a11b140a",
+        "viewers": 1,
+        "measuredSeconds": 20.0012306,
+        "sourceUpdates": 1197,
+        "mediaCpuCorePercent": 55.93405837738804,
+        "receivers": [
+          {
+            "fps": 60.19629612189962,
+            "frames": 1204,
+            "imageAgeP50Ms": 228.0131999850273,
+            "imageAgeP95Ms": 239.95339998602867,
+            "imageAgeP99Ms": 243.18379998207092,
+            "invalidMarkers": 0,
+            "lumaMse": 99.81293937400187,
+            "lumaSamples": 4445856,
+            "sampledLumaPsnrDb": 28.13893515627962,
+            "uniqueMarkerFps": 53.84668681336038,
+            "uniqueMarkers": 1077
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0385819,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 350679040,
+            "last": 356032512,
+            "median": 355330048.0,
+            "max": 364318720
+          },
+          "handles": {
+            "first": 860,
+            "last": 860,
+            "median": 860.0,
+            "max": 860
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          10
+        ]
+      },
+      {
+        "name": "1-7-legacy-lowlatency",
+        "variant": "legacy-lowlatency",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "99fa3628d82cacb2ea2e3899896cdc26be66f222d93e2a127ce4b7bb7a5e207f",
+        "metricsSha256": "738dc0378657645805feb7d8a9bf94ce41514e8455ea0cf810888389a7d7adf8",
+        "viewers": 1,
+        "measuredSeconds": 20.0009281,
+        "sourceUpdates": 1194,
+        "mediaCpuCorePercent": 156.1646281804293,
+        "receivers": [
+          {
+            "fps": 60.19720654863011,
+            "frames": 1204,
+            "imageAgeP50Ms": 46.337500005960464,
+            "imageAgeP95Ms": 59.43639999628067,
+            "imageAgeP99Ms": 63.05480000376701,
+            "invalidMarkers": 0,
+            "lumaMse": 318.73838418228826,
+            "lumaSamples": 4421088,
+            "sampledLumaPsnrDb": 23.096459941787018,
+            "uniqueMarkerFps": 53.54751512756051,
+            "uniqueMarkers": 1071
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0508291,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 457269248,
+            "last": 458448896,
+            "median": 458373120.0,
+            "max": 466386944
+          },
+          "handles": {
+            "first": 864,
+            "last": 864,
+            "median": 864.0,
+            "max": 864
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "4-0-legacy-lowlatency",
+        "variant": "legacy-lowlatency",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "2c9529ce96360f40c8259015871254e31250a1a8e2cdd7984e18b530a20a3abf",
+        "metricsSha256": "71d124d1d200bcaf73bcd60260ced7f8cdf75c78aa54304f89b98d38f1749db3",
+        "viewers": 4,
+        "measuredSeconds": 20.0002766,
+        "sourceUpdates": 1198,
+        "mediaCpuCorePercent": 352.9638685096985,
+        "receivers": [
+          {
+            "fps": 60.2491667540238,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.86830002069473,
+            "imageAgeP95Ms": 64.86110001802444,
+            "imageAgeP99Ms": 68.11100000143051,
+            "invalidMarkers": 0,
+            "lumaMse": 311.8837146113083,
+            "lumaSamples": 4313760,
+            "sampledLumaPsnrDb": 23.190876627349887,
+            "uniqueMarkerFps": 52.24927739249366,
+            "uniqueMarkers": 1045
+          },
+          {
+            "fps": 60.2491667540238,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.98230001330376,
+            "imageAgeP95Ms": 64.88139998912811,
+            "imageAgeP99Ms": 68.02290001511574,
+            "invalidMarkers": 0,
+            "lumaMse": 311.8837146113083,
+            "lumaSamples": 4313760,
+            "sampledLumaPsnrDb": 23.190876627349887,
+            "uniqueMarkerFps": 52.24927739249366,
+            "uniqueMarkers": 1045
+          },
+          {
+            "fps": 60.2491667540238,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.951299995183945,
+            "imageAgeP95Ms": 64.7606999874115,
+            "imageAgeP99Ms": 68.10350000858307,
+            "invalidMarkers": 0,
+            "lumaMse": 311.8837146113083,
+            "lumaSamples": 4313760,
+            "sampledLumaPsnrDb": 23.190876627349887,
+            "uniqueMarkerFps": 52.24927739249366,
+            "uniqueMarkers": 1045
+          },
+          {
+            "fps": 60.2491667540238,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.926099985837936,
+            "imageAgeP95Ms": 64.61599999666214,
+            "imageAgeP99Ms": 68.21139997243881,
+            "invalidMarkers": 0,
+            "lumaMse": 311.8837146113083,
+            "lumaSamples": 4313760,
+            "sampledLumaPsnrDb": 23.190876627349887,
+            "uniqueMarkerFps": 52.24927739249366,
+            "uniqueMarkers": 1045
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0349461,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 510853120,
+            "last": 521465856,
+            "median": 512430080.0,
+            "max": 524546048
+          },
+          "handles": {
+            "first": 1059,
+            "last": 1059,
+            "median": 1059.0,
+            "max": 1059
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "4-1-legacy-hardware",
+        "variant": "legacy-hardware",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e11bc33b808c7075cdde8a6eb5bd74cbbd1f1c99fc994b29beebf2386350b98c",
+        "metricsSha256": "113863aa5acaeea5bbe529a40290eaf03ac0cf3ac4be7254bf5c4b5e1ba687da",
+        "viewers": 4,
+        "measuredSeconds": 20.0005938,
+        "sourceUpdates": 1195,
+        "mediaCpuCorePercent": 262.4922066063858,
+        "receivers": [
+          {
+            "fps": 60.24821123060856,
+            "frames": 1205,
+            "imageAgeP50Ms": 230.5383000075817,
+            "imageAgeP95Ms": 244.33540001511574,
+            "imageAgeP99Ms": 247.29490000009537,
+            "invalidMarkers": 0,
+            "lumaMse": 99.06100595138808,
+            "lumaSamples": 4392192,
+            "sampledLumaPsnrDb": 28.171776269961683,
+            "uniqueMarkerFps": 53.1984205388942,
+            "uniqueMarkers": 1064
+          },
+          {
+            "fps": 60.24821123060856,
+            "frames": 1205,
+            "imageAgeP50Ms": 230.6995000243187,
+            "imageAgeP95Ms": 244.27489998936653,
+            "imageAgeP99Ms": 247.14410001039505,
+            "invalidMarkers": 0,
+            "lumaMse": 99.06100595138808,
+            "lumaSamples": 4392192,
+            "sampledLumaPsnrDb": 28.171776269961683,
+            "uniqueMarkerFps": 53.1984205388942,
+            "uniqueMarkers": 1064
+          },
+          {
+            "fps": 60.24821123060856,
+            "frames": 1205,
+            "imageAgeP50Ms": 230.61340001225471,
+            "imageAgeP95Ms": 244.2994999885559,
+            "imageAgeP99Ms": 247.2199999988079,
+            "invalidMarkers": 0,
+            "lumaMse": 99.06100595138808,
+            "lumaSamples": 4392192,
+            "sampledLumaPsnrDb": 28.171776269961683,
+            "uniqueMarkerFps": 53.1984205388942,
+            "uniqueMarkers": 1064
+          },
+          {
+            "fps": 60.24821123060856,
+            "frames": 1205,
+            "imageAgeP50Ms": 230.45529997348785,
+            "imageAgeP95Ms": 244.1536000072956,
+            "imageAgeP99Ms": 247.44699999690056,
+            "invalidMarkers": 0,
+            "lumaMse": 99.06100595138808,
+            "lumaSamples": 4392192,
+            "sampledLumaPsnrDb": 28.171776269961683,
+            "uniqueMarkerFps": 53.1984205388942,
+            "uniqueMarkers": 1064
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0447291,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 423661568,
+            "last": 443736064,
+            "median": 441081856.0,
+            "max": 452775936
+          },
+          "handles": {
+            "first": 1055,
+            "last": 1055,
+            "median": 1055.0,
+            "max": 1055
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          10
+        ]
+      },
+      {
+        "name": "4-2-v2-software",
+        "variant": "v2-software",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "759e5ba8b540da08c01d7a5eccbe3607e682f49582570ad3d6d34bd25361d4ad",
+        "viewers": 4,
+        "measuredSeconds": 20.0012132,
+        "sourceUpdates": 1203,
+        "mediaCpuCorePercent": 434.1142916270699,
+        "receivers": [
+          {
+            "fps": 42.147443336087235,
+            "frames": 843,
+            "imageAgeP50Ms": 47.9607999920845,
+            "imageAgeP95Ms": 114.68369999527931,
+            "imageAgeP99Ms": 136.98610001802444,
+            "invalidMarkers": 0,
+            "lumaMse": 322.71677263528426,
+            "lumaSamples": 3327168,
+            "sampledLumaPsnrDb": 23.042588231874195,
+            "uniqueMarkerFps": 40.29755555028032,
+            "uniqueMarkers": 806
+          },
+          {
+            "fps": 42.697409975110915,
+            "frames": 854,
+            "imageAgeP50Ms": 47.53610000014305,
+            "imageAgeP95Ms": 116.5014000236988,
+            "imageAgeP99Ms": 134.1875,
+            "invalidMarkers": 0,
+            "lumaMse": 306.6190819216375,
+            "lumaSamples": 3389088,
+            "sampledLumaPsnrDb": 23.264811819236023,
+            "uniqueMarkerFps": 41.04751005803988,
+            "uniqueMarkers": 821
+          },
+          {
+            "fps": 41.29749489395974,
+            "frames": 826,
+            "imageAgeP50Ms": 47.97909998893738,
+            "imageAgeP95Ms": 122.80219998955727,
+            "imageAgeP99Ms": 141.36549997329712,
+            "invalidMarkers": 0,
+            "lumaMse": 317.5586146374395,
+            "lumaSamples": 3285888,
+            "sampledLumaPsnrDb": 23.112564622190277,
+            "uniqueMarkerFps": 39.797585878440614,
+            "uniqueMarkers": 796
+          },
+          {
+            "fps": 40.697531287752085,
+            "frames": 814,
+            "imageAgeP50Ms": 48.27430000901222,
+            "imageAgeP95Ms": 118.82159999012947,
+            "imageAgeP99Ms": 137.21619999408722,
+            "invalidMarkers": 0,
+            "lumaMse": 319.97980568584404,
+            "lumaSamples": 3203328,
+            "sampledLumaPsnrDb": 23.07957790535346,
+            "uniqueMarkerFps": 38.797646534761206,
+            "uniqueMarkers": 776
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.6646246,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 964861952,
+            "last": 1016012800,
+            "median": 979843072.0,
+            "max": 1016012800
+          },
+          "handles": {
+            "first": 2217,
+            "last": 2214,
+            "median": 2214.5,
+            "max": 2217
+          }
+        },
+        "hardwareEncodedFrames": 0,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 7.328185328185328,
+            "meanPacketSendDelayMs": 11.01648379052369,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5656544,
+            "transportSendBps": 12130634,
+            "videoPayloadBps": 11613572,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 7.256457564575646,
+            "meanPacketSendDelayMs": 10.400998176408486,
+            "receiverJitterRecentMs": 9,
+            "targetVideoBps": 5659364,
+            "transportSendBps": 10469468,
+            "videoPayloadBps": 10037134,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 7.213160333642262,
+            "meanPacketSendDelayMs": 11.72004132231405,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5656552,
+            "transportSendBps": 11117029,
+            "videoPayloadBps": 10645716,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 7.258734655335222,
+            "meanPacketSendDelayMs": 10.857919158333539,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5659380,
+            "transportSendBps": 11158533,
+            "videoPayloadBps": 10685641,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "4-3-v2",
+        "variant": "v2",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "7ce3a2f5ee51586f8590f3ffcc9ffc24ddd7383204917e2968902a1db2ff86ed",
+        "viewers": 4,
+        "measuredSeconds": 20.0010573,
+        "sourceUpdates": 1195,
+        "mediaCpuCorePercent": 99.29162594819425,
+        "receivers": [
+          {
+            "fps": 54.34712693913436,
+            "frames": 1087,
+            "imageAgeP50Ms": 40.51530000567436,
+            "imageAgeP95Ms": 74.13530001044273,
+            "imageAgeP99Ms": 89.95289999246597,
+            "invalidMarkers": 0,
+            "lumaMse": 116.62082607346184,
+            "lumaSamples": 4317888,
+            "sampledLumaPsnrDb": 27.463042474848613,
+            "uniqueMarkerFps": 52.297235306655516,
+            "uniqueMarkers": 1046
+          },
+          {
+            "fps": 54.397124296024096,
+            "frames": 1088,
+            "imageAgeP50Ms": 40.25159999728203,
+            "imageAgeP95Ms": 66.1710000038147,
+            "imageAgeP99Ms": 92.31469997763634,
+            "invalidMarkers": 0,
+            "lumaMse": 118.70450695290201,
+            "lumaSamples": 4322016,
+            "sampledLumaPsnrDb": 27.386131523798987,
+            "uniqueMarkerFps": 52.34723266354524,
+            "uniqueMarkers": 1047
+          },
+          {
+            "fps": 53.39717715822953,
+            "frames": 1068,
+            "imageAgeP50Ms": 40.66650000214577,
+            "imageAgeP95Ms": 71.38940000534058,
+            "imageAgeP99Ms": 91.71889999508858,
+            "invalidMarkers": 0,
+            "lumaMse": 122.31068152694809,
+            "lumaSamples": 4239456,
+            "sampledLumaPsnrDb": 27.256159747584885,
+            "uniqueMarkerFps": 51.347285525750685,
+            "uniqueMarkers": 1027
+          },
+          {
+            "fps": 54.19713486846518,
+            "frames": 1084,
+            "imageAgeP50Ms": 40.86489999294281,
+            "imageAgeP95Ms": 73.49210000038147,
+            "imageAgeP99Ms": 93.325100004673,
+            "invalidMarkers": 0,
+            "lumaMse": 124.00546602789419,
+            "lumaSamples": 4313760,
+            "sampledLumaPsnrDb": 27.196395320489586,
+            "uniqueMarkerFps": 52.24723794976579,
+            "uniqueMarkers": 1045
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.7031017,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 608194560,
+            "last": 607354880,
+            "median": 601108480.0,
+            "max": 612614144
+          },
+          "handles": {
+            "first": 2054,
+            "last": 2054,
+            "median": 2055.0,
+            "max": 2067
+          }
+        },
+        "hardwareEncodedFrames": 5545,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.0606060606060606,
+            "meanPacketSendDelayMs": 2.449228215767635,
+            "receiverJitterRecentMs": 4,
+            "targetVideoBps": 9821031,
+            "transportSendBps": 14562313,
+            "videoPayloadBps": 14027326,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.257700976709241,
+            "meanPacketSendDelayMs": 2.1476991091164845,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 7930456,
+            "transportSendBps": 8715387,
+            "videoPayloadBps": 8376302,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.384731670445956,
+            "meanPacketSendDelayMs": 2.5986685523093374,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 9881766,
+            "transportSendBps": 15137379,
+            "videoPayloadBps": 14586193,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 3.9175475687103596,
+            "meanPacketSendDelayMs": 2.1082103790384124,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 8940994,
+            "transportSendBps": 9752543,
+            "videoPayloadBps": 9375208,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "4-4-v2",
+        "variant": "v2",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "c481d55ff251cd19fc198f641fb7eaefe69c5b654729c5442ded88961849b3db",
+        "viewers": 4,
+        "measuredSeconds": 20.0005573,
+        "sourceUpdates": 1193,
+        "mediaCpuCorePercent": 100.778441808719,
+        "receivers": [
+          {
+            "fps": 53.148519016517604,
+            "frames": 1063,
+            "imageAgeP50Ms": 40.58930000662804,
+            "imageAgeP95Ms": 64.70649999380112,
+            "imageAgeP99Ms": 89.76150000095367,
+            "invalidMarkers": 0,
+            "lumaMse": 116.29494712260707,
+            "lumaSamples": 4297248,
+            "sampledLumaPsnrDb": 27.475195153092095,
+            "uniqueMarkerFps": 52.04854966716352,
+            "uniqueMarkers": 1041
+          },
+          {
+            "fps": 52.948524589362314,
+            "frames": 1059,
+            "imageAgeP50Ms": 41.04399999976158,
+            "imageAgeP95Ms": 71.76399999856949,
+            "imageAgeP99Ms": 99.00499999523163,
+            "invalidMarkers": 0,
+            "lumaMse": 115.22308633362091,
+            "lumaSamples": 4280736,
+            "sampledLumaPsnrDb": 27.515408569301087,
+            "uniqueMarkerFps": 51.84855524000824,
+            "uniqueMarkers": 1037
+          },
+          {
+            "fps": 53.29851483688407,
+            "frames": 1066,
+            "imageAgeP50Ms": 41.12780001759529,
+            "imageAgeP95Ms": 64.84620001912117,
+            "imageAgeP99Ms": 91.83630001544952,
+            "invalidMarkers": 0,
+            "lumaMse": 112.1524397165941,
+            "lumaSamples": 4309632,
+            "sampledLumaPsnrDb": 27.6327163538825,
+            "uniqueMarkerFps": 52.19854548752999,
+            "uniqueMarkers": 1044
+          },
+          {
+            "fps": 53.34851344367289,
+            "frames": 1067,
+            "imageAgeP50Ms": 41.26420000195503,
+            "imageAgeP95Ms": 72.05740001797676,
+            "imageAgeP99Ms": 93.3944000005722,
+            "invalidMarkers": 0,
+            "lumaMse": 117.60482927166827,
+            "lumaSamples": 4313760,
+            "sampledLumaPsnrDb": 27.4265520508889,
+            "uniqueMarkerFps": 52.24854409431881,
+            "uniqueMarkers": 1045
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.6608208,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 576933888,
+            "last": 603381760,
+            "median": 584914944.0,
+            "max": 603381760
+          },
+          "handles": {
+            "first": 2055,
+            "last": 2058,
+            "median": 2056.0,
+            "max": 2058
+          }
+        },
+        "hardwareEncodedFrames": 5530,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.098654708520179,
+            "meanPacketSendDelayMs": 1.5652488093282968,
+            "receiverJitterRecentMs": 2,
+            "targetVideoBps": 7981617,
+            "transportSendBps": 10111057,
+            "videoPayloadBps": 9726083,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.3744292237442925,
+            "meanPacketSendDelayMs": 1.8609198945169352,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 7343094,
+            "transportSendBps": 8019238,
+            "videoPayloadBps": 7697938,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 3.9350838803792847,
+            "meanPacketSendDelayMs": 1.445582241385118,
+            "receiverJitterRecentMs": 3,
+            "targetVideoBps": 9978992,
+            "transportSendBps": 10785054,
+            "videoPayloadBps": 10375552,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.334059549745824,
+            "meanPacketSendDelayMs": 1.268054866964138,
+            "receiverJitterRecentMs": 2,
+            "targetVideoBps": 7367055,
+            "transportSendBps": 11021537,
+            "videoPayloadBps": 10608247,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "4-5-v2-software",
+        "variant": "v2-software",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "499a6dfef89a979110592b8478df0abf4d1dfa18c4bc04fafba1f3875608db21",
+        "viewers": 4,
+        "measuredSeconds": 20.005094,
+        "sourceUpdates": 1198,
+        "mediaCpuCorePercent": 380.8404999246692,
+        "receivers": [
+          {
+            "fps": 35.74089679358667,
+            "frames": 715,
+            "imageAgeP50Ms": 52.39190000295639,
+            "imageAgeP95Ms": 115.97210001945496,
+            "imageAgeP99Ms": 141.66259998083115,
+            "invalidMarkers": 0,
+            "lumaMse": 383.1889061913504,
+            "lumaSamples": 2848320,
+            "sampledLumaPsnrDb": 22.29667433659792,
+            "uniqueMarkerFps": 34.49121508751721,
+            "uniqueMarkers": 690
+          },
+          {
+            "fps": 40.43970000840786,
+            "frames": 809,
+            "imageAgeP50Ms": 48.65329998731613,
+            "imageAgeP95Ms": 123.20030000805855,
+            "imageAgeP99Ms": 142.76669999957085,
+            "invalidMarkers": 0,
+            "lumaMse": 300.7447082265181,
+            "lumaSamples": 3186816,
+            "sampledLumaPsnrDb": 23.34882366446191,
+            "uniqueMarkerFps": 38.590171083425055,
+            "uniqueMarkers": 772
+          },
+          {
+            "fps": 38.99006922936728,
+            "frames": 780,
+            "imageAgeP50Ms": 49.77350002527237,
+            "imageAgeP95Ms": 118.14419999718666,
+            "imageAgeP99Ms": 139.39809998869896,
+            "invalidMarkers": 0,
+            "lumaMse": 337.3184697516528,
+            "lumaSamples": 3083616,
+            "sampledLumaPsnrDb": 22.850402393892963,
+            "uniqueMarkerFps": 37.34048937735559,
+            "uniqueMarkers": 747
+          },
+          {
+            "fps": 39.73987825300896,
+            "frames": 795,
+            "imageAgeP50Ms": 49.15990000963211,
+            "imageAgeP95Ms": 115.91099998354912,
+            "imageAgeP99Ms": 135.62029999494553,
+            "invalidMarkers": 0,
+            "lumaMse": 338.877150991451,
+            "lumaSamples": 3137280,
+            "sampledLumaPsnrDb": 22.83038073626464,
+            "uniqueMarkerFps": 37.99032386451171,
+            "uniqueMarkers": 760
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.6774577,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 1010851840,
+            "last": 1038979072,
+            "median": 989458432.0,
+            "max": 1038979072
+          },
+          "handles": {
+            "first": 2214,
+            "last": 2213,
+            "median": 2213.0,
+            "max": 2215
+          }
+        },
+        "hardwareEncodedFrames": 0,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 7.275568181818182,
+            "meanPacketSendDelayMs": 12.617872615905581,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 5656540,
+            "transportSendBps": 11315056,
+            "videoPayloadBps": 11006479,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 7.281730769230769,
+            "meanPacketSendDelayMs": 9.18501092685435,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5656296,
+            "transportSendBps": 11350225,
+            "videoPayloadBps": 10868083,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 7.251024590163934,
+            "meanPacketSendDelayMs": 10.121576895731693,
+            "receiverJitterRecentMs": 8,
+            "targetVideoBps": 5656592,
+            "transportSendBps": 10346552,
+            "videoPayloadBps": 9914105,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 7.334004024144869,
+            "meanPacketSendDelayMs": 12.557932710374025,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5654320,
+            "transportSendBps": 11491856,
+            "videoPayloadBps": 11003425,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "4-6-legacy-hardware",
+        "variant": "legacy-hardware",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "7c4ed62461228f381cfba5c79f037dc84cced8a6a18e33ddd233665d14e15e1c",
+        "metricsSha256": "6260175a95ad6fde374b7d78bf49b8caef6cf33c51107bb3c261ada1d03d2f9e",
+        "viewers": 4,
+        "measuredSeconds": 20.0005557,
+        "sourceUpdates": 1198,
+        "mediaCpuCorePercent": 263.03956644564636,
+        "receivers": [
+          {
+            "fps": 60.198327389473484,
+            "frames": 1204,
+            "imageAgeP50Ms": 230.19220000505447,
+            "imageAgeP95Ms": 244.13040000200272,
+            "imageAgeP99Ms": 247.0339000225067,
+            "invalidMarkers": 0,
+            "lumaMse": 99.59143511041073,
+            "lumaSamples": 4404576,
+            "sampledLumaPsnrDb": 28.148583702778364,
+            "uniqueMarkerFps": 53.34851771143539,
+            "uniqueMarkers": 1067
+          },
+          {
+            "fps": 60.198327389473484,
+            "frames": 1204,
+            "imageAgeP50Ms": 230.4181999862194,
+            "imageAgeP95Ms": 244.3755999803543,
+            "imageAgeP99Ms": 247.1487999856472,
+            "invalidMarkers": 0,
+            "lumaMse": 99.59143511041073,
+            "lumaSamples": 4404576,
+            "sampledLumaPsnrDb": 28.148583702778364,
+            "uniqueMarkerFps": 53.34851771143539,
+            "uniqueMarkers": 1067
+          },
+          {
+            "fps": 60.198327389473484,
+            "frames": 1204,
+            "imageAgeP50Ms": 230.42759999632835,
+            "imageAgeP95Ms": 244.2814000248909,
+            "imageAgeP99Ms": 247.14179998636246,
+            "invalidMarkers": 0,
+            "lumaMse": 99.59143511041073,
+            "lumaSamples": 4404576,
+            "sampledLumaPsnrDb": 28.148583702778364,
+            "uniqueMarkerFps": 53.34851771143539,
+            "uniqueMarkers": 1067
+          },
+          {
+            "fps": 60.198327389473484,
+            "frames": 1204,
+            "imageAgeP50Ms": 230.25450000166893,
+            "imageAgeP95Ms": 244.167199999094,
+            "imageAgeP99Ms": 246.99459999799728,
+            "invalidMarkers": 0,
+            "lumaMse": 99.59143511041073,
+            "lumaSamples": 4404576,
+            "sampledLumaPsnrDb": 28.148583702778364,
+            "uniqueMarkerFps": 53.34851771143539,
+            "uniqueMarkers": 1067
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0514227,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 416800768,
+            "last": 427417600,
+            "median": 410152960.0,
+            "max": 427417600
+          },
+          "handles": {
+            "first": 1055,
+            "last": 1055,
+            "median": 1055.0,
+            "max": 1055
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          10
+        ]
+      },
+      {
+        "name": "4-7-legacy-lowlatency",
+        "variant": "legacy-lowlatency",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "94a2524460036074ff04d11b65b0dc1bfb8104ffc26706c6596aabf9619e349f",
+        "metricsSha256": "2c617d82216059211289d9a7f37440f64f61a2efd1d5033ff8f28d793e7309d1",
+        "viewers": 4,
+        "measuredSeconds": 20.0014444,
+        "sourceUpdates": 1202,
+        "mediaCpuCorePercent": 349.89660546715317,
+        "receivers": [
+          {
+            "fps": 60.29564544848571,
+            "frames": 1206,
+            "imageAgeP50Ms": 53.161900013685226,
+            "imageAgeP95Ms": 65.68510001897812,
+            "imageAgeP99Ms": 70.46669998764992,
+            "invalidMarkers": 0,
+            "lumaMse": 309.01051694988263,
+            "lumaSamples": 4305504,
+            "sampledLumaPsnrDb": 23.23107100292349,
+            "uniqueMarkerFps": 52.14623399898059,
+            "uniqueMarkers": 1043
+          },
+          {
+            "fps": 60.29564544848571,
+            "frames": 1206,
+            "imageAgeP50Ms": 53.058800011873245,
+            "imageAgeP95Ms": 65.72459998726845,
+            "imageAgeP99Ms": 70.71860000491142,
+            "invalidMarkers": 0,
+            "lumaMse": 309.01051694988263,
+            "lumaSamples": 4305504,
+            "sampledLumaPsnrDb": 23.23107100292349,
+            "uniqueMarkerFps": 52.14623399898059,
+            "uniqueMarkers": 1043
+          },
+          {
+            "fps": 60.29564544848571,
+            "frames": 1206,
+            "imageAgeP50Ms": 53.31370002031326,
+            "imageAgeP95Ms": 65.66429999470711,
+            "imageAgeP99Ms": 70.84119999408722,
+            "invalidMarkers": 0,
+            "lumaMse": 309.01051694988263,
+            "lumaSamples": 4305504,
+            "sampledLumaPsnrDb": 23.23107100292349,
+            "uniqueMarkerFps": 52.14623399898059,
+            "uniqueMarkers": 1043
+          },
+          {
+            "fps": 60.29564544848571,
+            "frames": 1206,
+            "imageAgeP50Ms": 53.34900000691414,
+            "imageAgeP95Ms": 65.37529999017715,
+            "imageAgeP99Ms": 70.69179999828339,
+            "invalidMarkers": 0,
+            "lumaMse": 309.01051694988263,
+            "lumaSamples": 4305504,
+            "sampledLumaPsnrDb": 23.23107100292349,
+            "uniqueMarkerFps": 52.14623399898059,
+            "uniqueMarkers": 1043
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0322421,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 538525696,
+            "last": 507793408,
+            "median": 524142592.0,
+            "max": 547741696
+          },
+          "handles": {
+            "first": 1059,
+            "last": 1059,
+            "median": 1059.0,
+            "max": 1059
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      }
+    ]
+  },
+  "afterPortableFixes": {
+    "executableSha256": "6a1faadbb80980672dce52239a45f8ffe6e54ebd425dd453483448fde2ab436a",
+    "runnerSha256": "b8013876d0bd6dc87e1a13202a733aae5a9722afc4a19e3c806f7ff371a1c148",
+    "validatorSha256": "e17af6dc5bde8178512fb8858e2f87f56fe17cb5533c266941c68ccb3497999c",
+    "sourceSha256": "f662edeb34f27b839502641ecf21173a4e85300435dc6e8175ae9aa31ee97832",
+    "gitCommit": "1686db376ed0817b5e364eeddc8f0680e6332a16",
+    "summary": {
+      "1": {
+        "legacy-lowlatency": {
+          "runs": 2,
+          "imageAgeP95Ms": 59.69609999656677,
+          "freshFps": 52.87333496388851,
+          "lumaPsnrDb": 23.15705997637088,
+          "cpuCorePercent": 155.6591573785876,
+          "privateMiB": 431.955078125
+        },
+        "legacy-hardware": {
+          "runs": 2,
+          "imageAgeP95Ms": 59.618000000715256,
+          "freshFps": 53.19703476700725,
+          "lumaPsnrDb": 28.159631180685462,
+          "cpuCorePercent": 53.66890310337152,
+          "privateMiB": 335.333984375
+        },
+        "v2-software": {
+          "runs": 2,
+          "imageAgeP95Ms": 109.11315001547337,
+          "freshFps": 36.67350881309366,
+          "lumaPsnrDb": 22.499286839755783,
+          "cpuCorePercent": 84.72316038871722,
+          "privateMiB": 314.509765625
+        },
+        "v2": {
+          "runs": 2,
+          "imageAgeP95Ms": 72.433100014925,
+          "freshFps": 52.12286412360797,
+          "lumaPsnrDb": 26.990089439105667,
+          "cpuCorePercent": 26.834851203496218,
+          "privateMiB": 254.119140625
+        }
+      },
+      "4": {
+        "legacy-lowlatency": {
+          "runs": 2,
+          "imageAgeP95Ms": 65.23710000514984,
+          "freshFps": 49.59756851323931,
+          "lumaPsnrDb": 23.448589451346574,
+          "cpuCorePercent": 357.05288784627817,
+          "privateMiB": 512.0419921875
+        },
+        "legacy-hardware": {
+          "runs": 2,
+          "imageAgeP95Ms": 63.89425000548363,
+          "freshFps": 51.723577082939705,
+          "lumaPsnrDb": 28.172233866146133,
+          "cpuCorePercent": 254.05550213945963,
+          "privateMiB": 395.703125
+        },
+        "v2-software": {
+          "runs": 2,
+          "imageAgeP95Ms": 120.91744999587536,
+          "freshFps": 36.86717464700409,
+          "lumaPsnrDb": 22.64344258472121,
+          "cpuCorePercent": 379.5539566496368,
+          "privateMiB": 933.2568359375
+        },
+        "v2": {
+          "runs": 2,
+          "imageAgeP95Ms": 78.79070000350475,
+          "freshFps": 51.673877249998284,
+          "lumaPsnrDb": 26.982412070814632,
+          "cpuCorePercent": 106.36487005708094,
+          "privateMiB": 574.3583984375
+        }
+      }
+    },
+    "limitations": [
+      "Current legacy with its existing lowLatency mode; hardware variant overrides only existing encoder selection",
+      "All test processes honor their requested timer precision; not a machine-wide setting",
+      "Legacy decoder remains software; v2 decoder remains hardware-preferred in both encoder variants",
+      "Same configured ceiling, not equal measured bitrate or identical encoder scheduling",
+      "No physical presentation/input, Internet impairment or long-term driver stability claim"
+    ],
+    "sourceHashes": {
+      "backend/core/ShortWait.h": "214818e2977168f161c5d72f899467a9b23b479fc06095f6bb39f0b3209bf4ce",
+      "backend/codec/HardwareFrameWait.h": "bf974f44a72babeb587544351a8c5be7cab794ebe0ec698844ed02c26553fcab",
+      "backend/codec/H264StreamEncoder.cpp": "fc8d1f0e06dd9d49a371a13d778b3dcdaa1db1642e0f949b5fec692c1a4f4963",
+      "backend/codec/H264StreamEncoder.h": "1bcd7b7aeec43542853e3c2125694902876a8054e40bb34fed067b1f3c652017",
+      "backend/capture/DesktopCapturer.cpp": "b629119ac4ade5229ed71a5a8b657d760bf4ec98f4abba99ed4cc05df22d7ebe",
+      "backend/runtime/ScreenShareRuntimeExecution.cpp": "e79a517c847eb4bacf9eac84901a5c55c6e290d6c7d4c87a04fc33a1fe80026e",
+      "backend/runtime/ScreenShareSessionOptions.cpp": "dd72183e8ababfb5751e28cd35286356dccf606d23b534d1692cf6b3f90e692c",
+      "backend/media/webrtc/MediaEngine.cpp": "1796c8616b8e62a68b77aab7eb5a0cf6ed3832fb3a55c29c5ec1c6f7b9981dd7",
+      "backend/media/webrtc/MfVideoEncoderFactory.cpp": "b8f38624a674e23c28640914ff3665fbf8ba5a3019174ab569bc8b5ae75e62a0",
+      "backend/media/webrtc/WindowsRoomRuntime.cpp": "12f5748bb8a3f0a26be050985184d2effd4591729fd4c9ebe2d9163509c58251",
+      "backend/media/webrtc/WindowsRoomRuntime.h": "3ab8394f18b1911e2b3d231991c8bba7fecfeb93c778d84528c4fe2fca7e58cf",
+      "backend/media/audio/PcmBlockPacer.h": "6eff0f49901eb0f8aaedb6e33ff330349ef32ba70ce119964c4728595373ecab"
+    },
+    "rawReportSha256": "85d7dfc8a443184ed964e7f3fe9bc3ba9d62aeced67ed5fd989cd958bee1b2cf",
+    "rawDirectory": "build/comparison-portable-final",
+    "runs": [
+      {
+        "name": "1-0-legacy-lowlatency",
+        "variant": "legacy-lowlatency",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "9b24bcaa88f7017deb4f286973b6c281f5106321917d8eab2bc98d142a9267f5",
+        "metricsSha256": "b685e057d755a12ed7a4ba4c35b5ed94be5952d42fd8a619c98a95d1ed85582a",
+        "viewers": 1,
+        "measuredSeconds": 20.0006797,
+        "sourceUpdates": 1199,
+        "mediaCpuCorePercent": 157.1821581643548,
+        "receivers": [
+          {
+            "fps": 60.197954172527446,
+            "frames": 1204,
+            "imageAgeP50Ms": 49.98860001564026,
+            "imageAgeP95Ms": 60.56369999051094,
+            "imageAgeP99Ms": 64.1283999979496,
+            "invalidMarkers": 0,
+            "lumaMse": 316.1551020485141,
+            "lumaSamples": 4371552,
+            "sampledLumaPsnrDb": 23.131801661036583,
+            "uniqueMarkerFps": 52.94820055540413,
+            "uniqueMarkers": 1059
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0298535,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 457121792,
+            "last": 458121216,
+            "median": 458096640.0,
+            "max": 466272256
+          },
+          "handles": {
+            "first": 865,
+            "last": 865,
+            "median": 865.0,
+            "max": 865
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "1-1-legacy-hardware",
+        "variant": "legacy-hardware",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "d71b6ced1639835a82a0b72081885b8a05413f5c0715a405c48349e33b6dc06f",
+        "metricsSha256": "c177f964e736b450251fcf4294ea17d01de563808c79372b806bae1480100151",
+        "viewers": 1,
+        "measuredSeconds": 20.0009686,
+        "sourceUpdates": 1198,
+        "mediaCpuCorePercent": 56.403518377604975,
+        "receivers": [
+          {
+            "fps": 60.197084655190146,
+            "frames": 1204,
+            "imageAgeP50Ms": 49.51500001549721,
+            "imageAgeP95Ms": 59.30720001459122,
+            "imageAgeP99Ms": 61.753600001335144,
+            "invalidMarkers": 0,
+            "lumaMse": 99.20642899893095,
+            "lumaSamples": 4396320,
+            "sampledLumaPsnrDb": 28.165405436704994,
+            "uniqueMarkerFps": 53.24742122738996,
+            "uniqueMarkers": 1065
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0348724,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 359313408,
+            "last": 360304640,
+            "median": 351610880.0,
+            "max": 360304640
+          },
+          "handles": {
+            "first": 862,
+            "last": 862,
+            "median": 862.0,
+            "max": 862
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "1-2-v2-software",
+        "variant": "v2-software",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "22f4b1ba02e974cbfb154d6250e85c65a9102e197c695b9ede8f0fd1f1284e4f",
+        "viewers": 1,
+        "measuredSeconds": 20.0006637,
+        "sourceUpdates": 1198,
+        "mediaCpuCorePercent": 86.09089307371335,
+        "receivers": [
+          {
+            "fps": 35.59881865320299,
+            "frames": 712,
+            "imageAgeP50Ms": 45.39530000090599,
+            "imageAgeP95Ms": 104.96380001306534,
+            "imageAgeP99Ms": 135.84860000014305,
+            "invalidMarkers": 0,
+            "lumaMse": 392.0059982009616,
+            "lumaSamples": 2860704,
+            "sampledLumaPsnrDb": 22.197876485269198,
+            "uniqueMarkerFps": 34.648850177906844,
+            "uniqueMarkers": 693
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.2729742,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 335122432,
+            "last": 333357056,
+            "median": 332312576.0,
+            "max": 344649728
+          },
+          "handles": {
+            "first": 1178,
+            "last": 1178,
+            "median": 1178.0,
+            "max": 1180
+          }
+        },
+        "hardwareEncodedFrames": 0,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 3.5781420765027323,
+            "meanPacketSendDelayMs": 7.551419179797558,
+            "receiverJitterRecentMs": 15,
+            "targetVideoBps": 5656508,
+            "transportSendBps": 11799848,
+            "videoPayloadBps": 11335306,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "1-3-v2",
+        "variant": "v2",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "9d7c328b22f8683fe5690c523d645ebcd1ffa6a9874521713c4a366833fce97a",
+        "viewers": 1,
+        "measuredSeconds": 20.0002107,
+        "sourceUpdates": 1195,
+        "mediaCpuCorePercent": 27.109089405743106,
+        "receivers": [
+          {
+            "fps": 53.54943585669325,
+            "frames": 1071,
+            "imageAgeP50Ms": 38.687200009822845,
+            "imageAgeP95Ms": 74.65330001711845,
+            "imageAgeP99Ms": 106.3458999991417,
+            "invalidMarkers": 0,
+            "lumaMse": 137.06563401329115,
+            "lumaSamples": 4276608,
+            "sampledLumaPsnrDb": 26.76151781565471,
+            "uniqueMarkerFps": 51.799454292749026,
+            "uniqueMarkers": 1036
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.2973313,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 267583488,
+            "last": 277901312,
+            "median": 267872256.0,
+            "max": 280010752
+          },
+          "handles": {
+            "first": 1179,
+            "last": 1179,
+            "median": 1179.0,
+            "max": 1180
+          }
+        },
+        "hardwareEncodedFrames": 1358,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 2.660045836516425,
+            "meanPacketSendDelayMs": 3.102666027002947,
+            "receiverJitterRecentMs": 3,
+            "targetVideoBps": 8914975,
+            "transportSendBps": 13379080,
+            "videoPayloadBps": 12888184,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "1-4-v2",
+        "variant": "v2",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "cbc49c9dab0556d15694a97f96e1002fe3d856e50e214c22991b863058a139f5",
+        "viewers": 1,
+        "measuredSeconds": 20.0014209,
+        "sourceUpdates": 1195,
+        "mediaCpuCorePercent": 26.56061300124933,
+        "receivers": [
+          {
+            "fps": 53.6961851545257,
+            "frames": 1074,
+            "imageAgeP50Ms": 38.671400010585785,
+            "imageAgeP95Ms": 70.21290001273155,
+            "imageAgeP99Ms": 98.1341000199318,
+            "invalidMarkers": 0,
+            "lumaMse": 123.37133226050922,
+            "lumaSamples": 4330272,
+            "sampledLumaPsnrDb": 27.21866106255662,
+            "uniqueMarkerFps": 52.4462739544669,
+            "uniqueMarkers": 1049
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.2305704,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 262926336,
+            "last": 261459968,
+            "median": 265054208.0,
+            "max": 278511616
+          },
+          "handles": {
+            "first": 1179,
+            "last": 1184,
+            "median": 1179.0,
+            "max": 1184
+          }
+        },
+        "hardwareEncodedFrames": 1378,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 2.63280662151994,
+            "meanPacketSendDelayMs": 2.7000136855070482,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 8983989,
+            "transportSendBps": 10068441,
+            "videoPayloadBps": 9682117,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "1-5-v2-software",
+        "variant": "v2-software",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "8adb8dd5d5b9d61b8c81a8690082615182493ee302456e27dadc3d4b0cb564d2",
+        "viewers": 1,
+        "measuredSeconds": 20.0009471,
+        "sourceUpdates": 1198,
+        "mediaCpuCorePercent": 83.35542770372109,
+        "receivers": [
+          {
+            "fps": 39.64812246316075,
+            "frames": 793,
+            "imageAgeP50Ms": 41.420300006866455,
+            "imageAgeP95Ms": 113.2625000178814,
+            "imageAgeP99Ms": 136.73969998955727,
+            "invalidMarkers": 0,
+            "lumaMse": 341.20127191611823,
+            "lumaSamples": 3195072,
+            "sampledLumaPsnrDb": 22.800697194242364,
+            "uniqueMarkerFps": 38.698167448280486,
+            "uniqueMarkers": 774
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.2492727,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 332279808,
+            "last": 328343552,
+            "median": 327262208.0,
+            "max": 342986752
+          },
+          "handles": {
+            "first": 1180,
+            "last": 1180,
+            "median": 1180.0,
+            "max": 1181
+          }
+        },
+        "hardwareEncodedFrames": 0,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 3.547430830039526,
+            "meanPacketSendDelayMs": 7.651607925129431,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5659104,
+            "transportSendBps": 11993155,
+            "videoPayloadBps": 11480916,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "1-6-legacy-hardware",
+        "variant": "legacy-hardware",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "dc764ee846bfe644606db18a5270abcc9afc8f1678eb07555ec41c1365bc5143",
+        "metricsSha256": "24abbad1d965753089977cc1c0dd663f911774ab9ed70b43fc1028ed22c909f2",
+        "viewers": 1,
+        "measuredSeconds": 20.0012613,
+        "sourceUpdates": 1199,
+        "mediaCpuCorePercent": 50.93428782913806,
+        "receivers": [
+          {
+            "fps": 60.29619742030969,
+            "frames": 1206,
+            "imageAgeP50Ms": 48.078599989414215,
+            "imageAgeP95Ms": 59.928799986839294,
+            "imageAgeP99Ms": 63.25569999217987,
+            "invalidMarkers": 0,
+            "lumaMse": 99.47058415423407,
+            "lumaSamples": 4388064,
+            "sampledLumaPsnrDb": 28.15385692466593,
+            "uniqueMarkerFps": 53.14664830662454,
+            "uniqueMarkers": 1063
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0352331,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 350642176,
+            "last": 351797248,
+            "median": 351635456.0,
+            "max": 359718912
+          },
+          "handles": {
+            "first": 862,
+            "last": 862,
+            "median": 862.0,
+            "max": 862
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "1-7-legacy-lowlatency",
+        "variant": "legacy-lowlatency",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "fdf076c6b6407e92f406e117129a512092a39410970bd3b2f18520df0b73e51a",
+        "metricsSha256": "c03973eb043aee1c3f6955441ace3a2445096b7a9b72b1c13f6937603c729dc1",
+        "viewers": 1,
+        "measuredSeconds": 20.0005798,
+        "sourceUpdates": 1197,
+        "mediaCpuCorePercent": 154.13615659282038,
+        "receivers": [
+          {
+            "fps": 60.248253403133845,
+            "frames": 1205,
+            "imageAgeP50Ms": 48.10040000081062,
+            "imageAgeP95Ms": 58.828500002622604,
+            "imageAgeP99Ms": 61.617900013923645,
+            "invalidMarkers": 0,
+            "lumaMse": 312.4989278731022,
+            "lumaSamples": 4359168,
+            "sampledLumaPsnrDb": 23.182318291705183,
+            "uniqueMarkerFps": 52.79846937237289,
+            "uniqueMarkers": 1056
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0268356,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 455344128,
+            "last": 448188416,
+            "median": 447778816.0,
+            "max": 456441856
+          },
+          "handles": {
+            "first": 865,
+            "last": 865,
+            "median": 865.0,
+            "max": 865
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "4-0-legacy-lowlatency",
+        "variant": "legacy-lowlatency",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "ad973834ac27238f5303e0a6001100b151a94868f7a1b03a3e192291e630ff86",
+        "metricsSha256": "2ec934d4dd5242213f503292a5c8acbd463f974d20009f96e3c21ef7e1262373",
+        "viewers": 4,
+        "measuredSeconds": 20.0011046,
+        "sourceUpdates": 1199,
+        "mediaCpuCorePercent": 356.1522047137336,
+        "receivers": [
+          {
+            "fps": 60.29666981492612,
+            "frames": 1206,
+            "imageAgeP50Ms": 53.55479997396469,
+            "imageAgeP95Ms": 64.45590001344681,
+            "imageAgeP99Ms": 68.52639999985695,
+            "invalidMarkers": 0,
+            "lumaMse": 305.54720807031265,
+            "lumaSamples": 4227072,
+            "sampledLumaPsnrDb": 23.28002041148497,
+            "uniqueMarkerFps": 51.19717238016944,
+            "uniqueMarkers": 1024
+          },
+          {
+            "fps": 60.29666981492612,
+            "frames": 1206,
+            "imageAgeP50Ms": 53.709799975156784,
+            "imageAgeP95Ms": 64.43880000710487,
+            "imageAgeP99Ms": 68.2930999994278,
+            "invalidMarkers": 0,
+            "lumaMse": 305.54720807031265,
+            "lumaSamples": 4227072,
+            "sampledLumaPsnrDb": 23.28002041148497,
+            "uniqueMarkerFps": 51.19717238016944,
+            "uniqueMarkers": 1024
+          },
+          {
+            "fps": 60.29666981492612,
+            "frames": 1206,
+            "imageAgeP50Ms": 53.78650000691414,
+            "imageAgeP95Ms": 64.38319998979568,
+            "imageAgeP99Ms": 68.34580001235008,
+            "invalidMarkers": 0,
+            "lumaMse": 305.54720807031265,
+            "lumaSamples": 4227072,
+            "sampledLumaPsnrDb": 23.28002041148497,
+            "uniqueMarkerFps": 51.19717238016944,
+            "uniqueMarkers": 1024
+          },
+          {
+            "fps": 60.29666981492612,
+            "frames": 1206,
+            "imageAgeP50Ms": 53.6899000108242,
+            "imageAgeP95Ms": 64.45879998803139,
+            "imageAgeP99Ms": 68.5527999997139,
+            "invalidMarkers": 0,
+            "lumaMse": 305.54720807031265,
+            "lumaSamples": 4227072,
+            "sampledLumaPsnrDb": 23.28002041148497,
+            "uniqueMarkerFps": 51.19717238016944,
+            "uniqueMarkers": 1024
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0368799,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 546025472,
+            "last": 525611008,
+            "median": 533852160.0,
+            "max": 553693184
+          },
+          "handles": {
+            "first": 1060,
+            "last": 1060,
+            "median": 1060.0,
+            "max": 1060
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "4-1-legacy-hardware",
+        "variant": "legacy-hardware",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "96e0ccede5ef7af5c264e080b65ffecc25977299b103724e13e8ec00b13212af",
+        "metricsSha256": "c37a339c42374599c78e93f373deb22fe63c24a52f12bdbc075abc8fc2653c6b",
+        "viewers": 4,
+        "measuredSeconds": 20.0005316,
+        "sourceUpdates": 1197,
+        "mediaCpuCorePercent": 246.00908607849206,
+        "receivers": [
+          {
+            "fps": 60.248398597565284,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.145599991083145,
+            "imageAgeP95Ms": 63.56530001759529,
+            "imageAgeP99Ms": 65.56710001826286,
+            "invalidMarkers": 0,
+            "lumaMse": 99.06853193918536,
+            "lumaSamples": 4293120,
+            "sampledLumaPsnrDb": 28.171446334808394,
+            "uniqueMarkerFps": 51.99861787673684,
+            "uniqueMarkers": 1040
+          },
+          {
+            "fps": 60.248398597565284,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.4142000079155,
+            "imageAgeP95Ms": 63.5237999856472,
+            "imageAgeP99Ms": 65.78489997982979,
+            "invalidMarkers": 0,
+            "lumaMse": 99.06853193918536,
+            "lumaSamples": 4293120,
+            "sampledLumaPsnrDb": 28.171446334808394,
+            "uniqueMarkerFps": 51.99861787673684,
+            "uniqueMarkers": 1040
+          },
+          {
+            "fps": 60.248398597565284,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.308100014925,
+            "imageAgeP95Ms": 63.51739999651909,
+            "imageAgeP99Ms": 65.79379999637604,
+            "invalidMarkers": 0,
+            "lumaMse": 99.06853193918536,
+            "lumaSamples": 4293120,
+            "sampledLumaPsnrDb": 28.171446334808394,
+            "uniqueMarkerFps": 51.99861787673684,
+            "uniqueMarkers": 1040
+          },
+          {
+            "fps": 60.248398597565284,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.30019998550415,
+            "imageAgeP95Ms": 63.45390000939369,
+            "imageAgeP99Ms": 65.79689997434616,
+            "invalidMarkers": 0,
+            "lumaMse": 99.06853193918536,
+            "lumaSamples": 4293120,
+            "sampledLumaPsnrDb": 28.171446334808394,
+            "uniqueMarkerFps": 51.99861787673684,
+            "uniqueMarkers": 1040
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0429761,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 433446912,
+            "last": 427790336,
+            "median": 426803200.0,
+            "max": 435372032
+          },
+          "handles": {
+            "first": 1057,
+            "last": 1057,
+            "median": 1057.0,
+            "max": 1057
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "4-2-v2-software",
+        "variant": "v2-software",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "e2c04ed8c423880f51f03a35fa9737641ef5f6d70a01236efe29ebee976ada07",
+        "viewers": 4,
+        "measuredSeconds": 20.0006169,
+        "sourceUpdates": 1196,
+        "mediaCpuCorePercent": 366.08245818657724,
+        "receivers": [
+          {
+            "fps": 36.248881903237695,
+            "frames": 725,
+            "imageAgeP50Ms": 51.14599999785423,
+            "imageAgeP95Ms": 124.76389998197556,
+            "imageAgeP99Ms": 138.25170001387596,
+            "invalidMarkers": 0,
+            "lumaMse": 350.67862024400273,
+            "lumaSamples": 2910240,
+            "sampledLumaPsnrDb": 22.681710717274687,
+            "uniqueMarkerFps": 35.24891274728631,
+            "uniqueMarkers": 705
+          },
+          {
+            "fps": 39.39878474448456,
+            "frames": 788,
+            "imageAgeP50Ms": 47.49289998412132,
+            "imageAgeP95Ms": 113.90329998731613,
+            "imageAgeP99Ms": 140.19480001926422,
+            "invalidMarkers": 0,
+            "lumaMse": 357.4793899911901,
+            "lumaSamples": 3137280,
+            "sampledLumaPsnrDb": 22.598293526919772,
+            "uniqueMarkerFps": 37.998827926152615,
+            "uniqueMarkers": 760
+          },
+          {
+            "fps": 36.99885877020123,
+            "frames": 740,
+            "imageAgeP50Ms": 49.200100004673004,
+            "imageAgeP95Ms": 119.51780000329018,
+            "imageAgeP99Ms": 144.11079999804497,
+            "invalidMarkers": 0,
+            "lumaMse": 361.59137596509714,
+            "lumaSamples": 2943264,
+            "sampledLumaPsnrDb": 22.548622969612488,
+            "uniqueMarkerFps": 35.648900409666865,
+            "uniqueMarkers": 713
+          },
+          {
+            "fps": 39.09879399769914,
+            "frames": 782,
+            "imageAgeP50Ms": 48.16769999265671,
+            "imageAgeP95Ms": 116.55770000815392,
+            "imageAgeP99Ms": 142.57330000400543,
+            "invalidMarkers": 0,
+            "lumaMse": 334.8604874230246,
+            "lumaSamples": 3124896,
+            "sampledLumaPsnrDb": 22.882164558079698,
+            "uniqueMarkerFps": 37.84883255275991,
+            "uniqueMarkers": 757
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.6464204,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 993419264,
+            "last": 979275776,
+            "median": 978139136.0,
+            "max": 1009389568
+          },
+          "handles": {
+            "first": 2226,
+            "last": 2218,
+            "median": 2226.0,
+            "max": 2232
+          }
+        },
+        "hardwareEncodedFrames": 0,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 6.699699699699699,
+            "meanPacketSendDelayMs": 10.877078831726916,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5656596,
+            "transportSendBps": 11690491,
+            "videoPayloadBps": 11406837,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 6.7192622950819665,
+            "meanPacketSendDelayMs": 8.131975333602911,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5656528,
+            "transportSendBps": 12290928,
+            "videoPayloadBps": 11768865,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 6.755124056094929,
+            "meanPacketSendDelayMs": 10.981112070028356,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5659356,
+            "transportSendBps": 11879410,
+            "videoPayloadBps": 11374087,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 6.595623215984777,
+            "meanPacketSendDelayMs": 7.6343039738599785,
+            "receiverJitterRecentMs": 8,
+            "targetVideoBps": 5654948,
+            "transportSendBps": 10968943,
+            "videoPayloadBps": 10507670,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "4-3-v2",
+        "variant": "v2",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "426ab97ec2c0c887cf450251a259956884752a7316a17f7e5f3117cad9f0d168",
+        "viewers": 4,
+        "measuredSeconds": 20.0003898,
+        "sourceUpdates": 1191,
+        "mediaCpuCorePercent": 103.7479779519097,
+        "receivers": [
+          {
+            "fps": 53.64895438187909,
+            "frames": 1073,
+            "imageAgeP50Ms": 40.4375,
+            "imageAgeP95Ms": 74.9273000061512,
+            "imageAgeP99Ms": 102.7054999768734,
+            "invalidMarkers": 0,
+            "lumaMse": 133.21132202703185,
+            "lumaSamples": 4272480,
+            "sampledLumaPsnrDb": 26.88539222483337,
+            "uniqueMarkerFps": 51.74899141215737,
+            "uniqueMarkers": 1035
+          },
+          {
+            "fps": 53.94894853499305,
+            "frames": 1079,
+            "imageAgeP50Ms": 40.65150001645088,
+            "imageAgeP95Ms": 68.7873999774456,
+            "imageAgeP99Ms": 87.68520000576973,
+            "invalidMarkers": 0,
+            "lumaMse": 119.79853447443081,
+            "lumaSamples": 4293120,
+            "sampledLumaPsnrDb": 27.34628855615626,
+            "uniqueMarkerFps": 51.99898653975234,
+            "uniqueMarkers": 1040
+          },
+          {
+            "fps": 53.498957305322115,
+            "frames": 1070,
+            "imageAgeP50Ms": 40.60519999265671,
+            "imageAgeP95Ms": 71.28790000081062,
+            "imageAgeP99Ms": 111.27500000596046,
+            "invalidMarkers": 0,
+            "lumaMse": 138.37543154842157,
+            "lumaSamples": 4255968,
+            "sampledLumaPsnrDb": 26.720213725543495,
+            "uniqueMarkerFps": 51.5489953100814,
+            "uniqueMarkers": 1031
+          },
+          {
+            "fps": 53.79895145843607,
+            "frames": 1076,
+            "imageAgeP50Ms": 40.87729999423027,
+            "imageAgeP95Ms": 71.63490000367165,
+            "imageAgeP99Ms": 95.44920000433922,
+            "invalidMarkers": 0,
+            "lumaMse": 122.40362355151281,
+            "lumaSamples": 4280736,
+            "sampledLumaPsnrDb": 27.25286086317081,
+            "uniqueMarkerFps": 51.84898946319536,
+            "uniqueMarkers": 1037
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.6515599,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 606294016,
+            "last": 599592960,
+            "median": 600936448.0,
+            "max": 607887360
+          },
+          "handles": {
+            "first": 2068,
+            "last": 2065,
+            "median": 2066.0,
+            "max": 2172
+          }
+        },
+        "hardwareEncodedFrames": 5568,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.002148997134671,
+            "meanPacketSendDelayMs": 2.637502789911679,
+            "receiverJitterRecentMs": 3,
+            "targetVideoBps": 7843891,
+            "transportSendBps": 11858095,
+            "videoPayloadBps": 11413601,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.183333333333334,
+            "meanPacketSendDelayMs": 1.8856875146404308,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 9979004,
+            "transportSendBps": 10260203,
+            "videoPayloadBps": 9871360,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.399410464259395,
+            "meanPacketSendDelayMs": 2.193657574761748,
+            "receiverJitterRecentMs": 4,
+            "targetVideoBps": 9979360,
+            "transportSendBps": 15726013,
+            "videoPayloadBps": 15156785,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.25830258302583,
+            "meanPacketSendDelayMs": 2.0716201190398325,
+            "receiverJitterRecentMs": 1,
+            "targetVideoBps": 7992030,
+            "transportSendBps": 11848822,
+            "videoPayloadBps": 11410003,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "4-4-v2",
+        "variant": "v2",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "8782e7d0acea9aa52a3e1a5189cd78eac5f7741ffa147726e5bb995907cae766",
+        "viewers": 4,
+        "measuredSeconds": 20.0004795,
+        "sourceUpdates": 1196,
+        "mediaCpuCorePercent": 108.98176216225215,
+        "receivers": [
+          {
+            "fps": 53.64871377208731,
+            "frames": 1073,
+            "imageAgeP50Ms": 40.214800000190735,
+            "imageAgeP95Ms": 69.96920001506805,
+            "imageAgeP99Ms": 103.09319999814034,
+            "invalidMarkers": 0,
+            "lumaMse": 131.71059589241946,
+            "lumaSamples": 4264224,
+            "sampledLumaPsnrDb": 26.93459646251588,
+            "uniqueMarkerFps": 51.648761720937735,
+            "uniqueMarkers": 1033
+          },
+          {
+            "fps": 53.298722163136134,
+            "frames": 1066,
+            "imageAgeP50Ms": 40.691199988126755,
+            "imageAgeP95Ms": 75.65479999780655,
+            "imageAgeP99Ms": 94.8948999941349,
+            "invalidMarkers": 0,
+            "lumaMse": 124.2175326656197,
+            "lumaSamples": 4243584,
+            "sampledLumaPsnrDb": 27.18897462269346,
+            "uniqueMarkerFps": 51.39876771454404,
+            "uniqueMarkers": 1028
+          },
+          {
+            "fps": 53.19872456057866,
+            "frames": 1064,
+            "imageAgeP50Ms": 40.726099997758865,
+            "imageAgeP95Ms": 80.03010001778603,
+            "imageAgeP99Ms": 102.97119998931885,
+            "invalidMarkers": 0,
+            "lumaMse": 124.74395793791862,
+            "lumaSamples": 4243584,
+            "sampledLumaPsnrDb": 27.170608414243365,
+            "uniqueMarkerFps": 51.39876771454404,
+            "uniqueMarkers": 1028
+          },
+          {
+            "fps": 53.69871257336605,
+            "frames": 1074,
+            "imageAgeP50Ms": 40.88729998469353,
+            "imageAgeP95Ms": 82.6541000008583,
+            "imageAgeP99Ms": 108.23309999704361,
+            "invalidMarkers": 0,
+            "lumaMse": 150.32949243412764,
+            "lumaSamples": 4276608,
+            "sampledLumaPsnrDb": 26.360361697360425,
+            "uniqueMarkerFps": 51.798758124773954,
+            "uniqueMarkers": 1036
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.6420164,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 606089216,
+            "last": 604651520,
+            "median": 603580416.0,
+            "max": 622452736
+          },
+          "handles": {
+            "first": 2069,
+            "last": 2068,
+            "median": 2069.0,
+            "max": 2172
+          }
+        },
+        "hardwareEncodedFrames": 5503,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 3.992114695340502,
+            "meanPacketSendDelayMs": 2.0466321243523313,
+            "receiverJitterRecentMs": 2,
+            "targetVideoBps": 7937366,
+            "transportSendBps": 12121714,
+            "videoPayloadBps": 11668386,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.271048744460857,
+            "meanPacketSendDelayMs": 3.8867505796621393,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 7122474,
+            "transportSendBps": 7940793,
+            "videoPayloadBps": 7624015,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.233060312732688,
+            "meanPacketSendDelayMs": 2.8812175949155376,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 7945786,
+            "transportSendBps": 9344127,
+            "videoPayloadBps": 8980594,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-hardware",
+            "height": 1080,
+            "meanEncodeMs": 4.2526395173454,
+            "meanPacketSendDelayMs": 2.331007413868295,
+            "receiverJitterRecentMs": 0,
+            "targetVideoBps": 7112871,
+            "transportSendBps": 8357812,
+            "videoPayloadBps": 8025341,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "4-5-v2-software",
+        "variant": "v2-software",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "metricsSha256": "ec269dc3c53d42aa438b3ea872854e3ab62953731ca16966ef3d0d82a73d1a2d",
+        "viewers": 4,
+        "measuredSeconds": 20.00109,
+        "sourceUpdates": 1197,
+        "mediaCpuCorePercent": 393.02545511269636,
+        "receivers": [
+          {
+            "fps": 37.29796726078428,
+            "frames": 746,
+            "imageAgeP50Ms": 49.950700014829636,
+            "imageAgeP95Ms": 113.68029999732971,
+            "imageAgeP99Ms": 140.2295000255108,
+            "invalidMarkers": 0,
+            "lumaMse": 375.05913712324684,
+            "lumaSamples": 2963904,
+            "sampledLumaPsnrDb": 22.38980610736381,
+            "uniqueMarkerFps": 35.89804355662616,
+            "uniqueMarkers": 718
+          },
+          {
+            "fps": 38.99787461583343,
+            "frames": 780,
+            "imageAgeP50Ms": 49.169100016355515,
+            "imageAgeP95Ms": 117.0450000166893,
+            "imageAgeP99Ms": 144.22409999370575,
+            "invalidMarkers": 0,
+            "lumaMse": 345.6056458912492,
+            "lumaSamples": 3100128,
+            "sampledLumaPsnrDb": 22.744995322711624,
+            "uniqueMarkerFps": 37.547953636526806,
+            "uniqueMarkers": 751
+          },
+          {
+            "fps": 39.547844642466984,
+            "frames": 791,
+            "imageAgeP50Ms": 48.81129997968674,
+            "imageAgeP95Ms": 116.12379997968674,
+            "imageAgeP99Ms": 138.3328999876976,
+            "invalidMarkers": 0,
+            "lumaMse": 347.87304831014364,
+            "lumaSamples": 3129024,
+            "sampledLumaPsnrDb": 22.716595780633966,
+            "uniqueMarkerFps": 37.897934562566334,
+            "uniqueMarkers": 758
+          },
+          {
+            "fps": 38.44790458919989,
+            "frames": 769,
+            "imageAgeP50Ms": 49.97299998998642,
+            "imageAgeP95Ms": 117.07100000977516,
+            "imageAgeP99Ms": 136.42669999599457,
+            "invalidMarkers": 0,
+            "lumaMse": 358.54625555813266,
+            "lumaSamples": 3042336,
+            "sampledLumaPsnrDb": 22.585351695173642,
+            "uniqueMarkerFps": 36.84799178444774,
+            "uniqueMarkers": 737
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "paced-discard",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.6728968,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 960708608,
+            "last": 993271808,
+            "median": 979042304.0,
+            "max": 1020387328
+          },
+          "handles": {
+            "first": 2224,
+            "last": 2225,
+            "median": 2225.0,
+            "max": 2227
+          }
+        },
+        "hardwareEncodedFrames": 0,
+        "softwareFallbacks": 0,
+        "senders": [
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 6.7524012806830305,
+            "meanPacketSendDelayMs": 8.629571794558986,
+            "receiverJitterRecentMs": 8,
+            "targetVideoBps": 5659340,
+            "transportSendBps": 10702794,
+            "videoPayloadBps": 10254858,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 6.800411522633746,
+            "meanPacketSendDelayMs": 9.935337892196298,
+            "receiverJitterRecentMs": 8,
+            "targetVideoBps": 5656724,
+            "transportSendBps": 10625001,
+            "videoPayloadBps": 10179626,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 6.643916913946588,
+            "meanPacketSendDelayMs": 9.739220022112775,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5656592,
+            "transportSendBps": 12585410,
+            "videoPayloadBps": 12050286,
+            "width": 1920
+          },
+          {
+            "allocatedVideoBps": 12000000,
+            "decoder": "mf-h264-hardware",
+            "encoder": "mf-h264-software",
+            "height": 1080,
+            "meanEncodeMs": 6.593269230769231,
+            "meanPacketSendDelayMs": 8.193297717338513,
+            "receiverJitterRecentMs": 5,
+            "targetVideoBps": 5656472,
+            "transportSendBps": 11471816,
+            "videoPayloadBps": 10986576,
+            "width": 1920
+          }
+        ]
+      },
+      {
+        "name": "4-6-legacy-hardware",
+        "variant": "legacy-hardware",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "782b84d067ea52613024e693f44c054cc867ec6abf78e079f4ce14897410d42e",
+        "metricsSha256": "8666c3445f3316a523ee934984910ac880ee552b733ba38de03c1ce6d0b5c496",
+        "viewers": 4,
+        "measuredSeconds": 20.000569,
+        "sourceUpdates": 1194,
+        "mediaCpuCorePercent": 262.1019182004272,
+        "receivers": [
+          {
+            "fps": 60.19828735872465,
+            "frames": 1204,
+            "imageAgeP50Ms": 52.53249999880791,
+            "imageAgeP95Ms": 64.04129999876022,
+            "imageAgeP99Ms": 68.41159999370575,
+            "invalidMarkers": 0,
+            "lumaMse": 99.03260911229923,
+            "lumaSamples": 4247712,
+            "sampledLumaPsnrDb": 28.173021397483872,
+            "uniqueMarkerFps": 51.448536289142574,
+            "uniqueMarkers": 1029
+          },
+          {
+            "fps": 60.19828735872465,
+            "frames": 1204,
+            "imageAgeP50Ms": 52.743000000715256,
+            "imageAgeP95Ms": 64.22319999337196,
+            "imageAgeP99Ms": 68.48189997673035,
+            "invalidMarkers": 0,
+            "lumaMse": 99.03260911229923,
+            "lumaSamples": 4247712,
+            "sampledLumaPsnrDb": 28.173021397483872,
+            "uniqueMarkerFps": 51.448536289142574,
+            "uniqueMarkers": 1029
+          },
+          {
+            "fps": 60.19828735872465,
+            "frames": 1204,
+            "imageAgeP50Ms": 52.4384999871254,
+            "imageAgeP95Ms": 64.15100002288818,
+            "imageAgeP99Ms": 68.17639997601509,
+            "invalidMarkers": 0,
+            "lumaMse": 99.03260911229923,
+            "lumaSamples": 4247712,
+            "sampledLumaPsnrDb": 28.173021397483872,
+            "uniqueMarkerFps": 51.448536289142574,
+            "uniqueMarkers": 1029
+          },
+          {
+            "fps": 60.19828735872465,
+            "frames": 1204,
+            "imageAgeP50Ms": 52.603399991989136,
+            "imageAgeP95Ms": 64.09419998526573,
+            "imageAgeP99Ms": 68.63699999451637,
+            "invalidMarkers": 0,
+            "lumaMse": 99.03260911229923,
+            "lumaSamples": 4247712,
+            "sampledLumaPsnrDb": 28.173021397483872,
+            "uniqueMarkerFps": 51.448536289142574,
+            "uniqueMarkers": 1029
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0524279,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 410083328,
+            "last": 403628032,
+            "median": 403046400.0,
+            "max": 411766784
+          },
+          "handles": {
+            "first": 1057,
+            "last": 1057,
+            "median": 1057.0,
+            "max": 1057
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      },
+      {
+        "name": "4-7-legacy-lowlatency",
+        "variant": "legacy-lowlatency",
+        "validated": true,
+        "exitCode": 0,
+        "logSha256": "f070789bbb7aa5deb90a2240bfdc3890e9ea367ece552b5252818d0cd198b68f",
+        "metricsSha256": "03bf4d1a026fcf46e6b3f0aaa3dca795cde0a50ef34be8d2d417a825a1c817ae",
+        "viewers": 4,
+        "measuredSeconds": 20.0008481,
+        "sourceUpdates": 1195,
+        "mediaCpuCorePercent": 357.95357097882265,
+        "receivers": [
+          {
+            "fps": 60.247445207085995,
+            "frames": 1205,
+            "imageAgeP50Ms": 52.6875,
+            "imageAgeP95Ms": 65.5067999958992,
+            "imageAgeP99Ms": 70.56389999389648,
+            "invalidMarkers": 0,
+            "lumaMse": 282.7251946522974,
+            "lumaSamples": 3962880,
+            "sampledLumaPsnrDb": 23.61715849120818,
+            "uniqueMarkerFps": 47.99796464630918,
+            "uniqueMarkers": 960
+          },
+          {
+            "fps": 60.247445207085995,
+            "frames": 1205,
+            "imageAgeP50Ms": 52.86640000343323,
+            "imageAgeP95Ms": 65.69949999451637,
+            "imageAgeP99Ms": 71.075100004673,
+            "invalidMarkers": 0,
+            "lumaMse": 282.7251946522974,
+            "lumaSamples": 3962880,
+            "sampledLumaPsnrDb": 23.61715849120818,
+            "uniqueMarkerFps": 47.99796464630918,
+            "uniqueMarkers": 960
+          },
+          {
+            "fps": 60.247445207085995,
+            "frames": 1205,
+            "imageAgeP50Ms": 53.035199999809265,
+            "imageAgeP95Ms": 66.0154000222683,
+            "imageAgeP99Ms": 70.10209998488426,
+            "invalidMarkers": 0,
+            "lumaMse": 282.7251946522974,
+            "lumaSamples": 3962880,
+            "sampledLumaPsnrDb": 23.61715849120818,
+            "uniqueMarkerFps": 47.99796464630918,
+            "uniqueMarkers": 960
+          },
+          {
+            "fps": 60.247445207085995,
+            "frames": 1205,
+            "imageAgeP50Ms": 52.90639999508858,
+            "imageAgeP95Ms": 66.00830000638962,
+            "imageAgeP99Ms": 71.15869998931885,
+            "invalidMarkers": 0,
+            "lumaMse": 282.7251946522974,
+            "lumaSamples": 3962880,
+            "sampledLumaPsnrDb": 23.61715849120818,
+            "uniqueMarkerFps": 47.99796464630918,
+            "uniqueMarkers": 960
+          }
+        ],
+        "timerPolicy": "honor-resolution",
+        "audioPlayoutMode": "disabled",
+        "consumer": "cpu-pixels",
+        "teardownSeconds": 0.0343198,
+        "resourceSummary": {
+          "privateBytes": {
+            "first": 539676672,
+            "last": 542539776,
+            "median": 539977728.0,
+            "max": 548818944
+          },
+          "handles": {
+            "first": 1062,
+            "last": 1062,
+            "median": 1062.0,
+            "max": 1062
+          }
+        },
+        "queuedEncoderInputsAtStop": [
+          0
+        ]
+      }
+    ]
+  },
+  "sustainedV2HardwareBeforePortableFixes": {
+    "measuredSeconds": 600.0008369,
+    "hardwareEncodedFrames": 129512,
+    "softwareFallbacks": 0,
+    "mediaCpuCorePercent": 100.42954741751963,
+    "receivers": [
+      {
+        "fps": 53.14825920036979,
+        "frames": 31889,
+        "imageAgeP50Ms": 40.87090000510216,
+        "imageAgeP95Ms": 71.95239999890327,
+        "imageAgeP99Ms": 114.95729997754097,
+        "invalidMarkers": 0,
+        "lumaMse": 127.14054580412228,
+        "lumaSamples": 127257984,
+        "sampledLumaPsnrDb": 27.08796289378241,
+        "uniqueMarkerFps": 51.3799283335633,
+        "uniqueMarkers": 30828
+      },
+      {
+        "fps": 53.69325844018669,
+        "frames": 32216,
+        "imageAgeP50Ms": 40.810499995946884,
+        "imageAgeP95Ms": 71.6283999979496,
+        "imageAgeP99Ms": 98.27799999713898,
+        "invalidMarkers": 0,
+        "lumaMse": 126.82159644762486,
+        "lumaSamples": 128541792,
+        "sampledLumaPsnrDb": 27.09887145024141,
+        "uniqueMarkerFps": 51.89826094390903,
+        "uniqueMarkers": 31139
+      },
+      {
+        "fps": 53.724925062683695,
+        "frames": 32235,
+        "imageAgeP50Ms": 40.817900002002716,
+        "imageAgeP95Ms": 70.48199999332428,
+        "imageAgeP99Ms": 97.12119999527931,
+        "invalidMarkers": 0,
+        "lumaMse": 124.37810788599987,
+        "lumaSamples": 128620224,
+        "sampledLumaPsnrDb": 27.183364150869785,
+        "uniqueMarkerFps": 51.929927566406036,
+        "uniqueMarkers": 31158
+      },
+      {
+        "fps": 53.15325919339564,
+        "frames": 31892,
+        "imageAgeP50Ms": 40.95780000090599,
+        "imageAgeP95Ms": 70.71149998903275,
+        "imageAgeP99Ms": 114.0101999938488,
+        "invalidMarkers": 0,
+        "lumaMse": 125.9253022565087,
+        "lumaSamples": 127253856,
+        "sampledLumaPsnrDb": 27.129673589067437,
+        "uniqueMarkerFps": 51.37826166922135,
+        "uniqueMarkers": 30827
+      }
+    ],
+    "senders": [
+      {
+        "allocatedVideoBps": 12000000,
+        "decoder": "mf-h264-hardware",
+        "encoder": "mf-h264-hardware",
+        "height": 1080,
+        "meanEncodeMs": 4.109834050399509,
+        "meanPacketSendDelayMs": 2.245734418554022,
+        "receiverJitterRecentMs": 0,
+        "targetVideoBps": 8815282,
+        "transportSendBps": 10030400,
+        "videoPayloadBps": 9646208,
+        "width": 1920
+      },
+      {
+        "allocatedVideoBps": 12000000,
+        "decoder": "mf-h264-hardware",
+        "encoder": "mf-h264-hardware",
+        "height": 1080,
+        "meanEncodeMs": 4.220162331673123,
+        "meanPacketSendDelayMs": 2.0948106219735996,
+        "receiverJitterRecentMs": 2,
+        "targetVideoBps": 8903408,
+        "transportSendBps": 9675163,
+        "videoPayloadBps": 9300167,
+        "width": 1920
+      },
+      {
+        "allocatedVideoBps": 12000000,
+        "decoder": "mf-h264-hardware",
+        "encoder": "mf-h264-hardware",
+        "height": 1080,
+        "meanEncodeMs": 4.183695652173913,
+        "meanPacketSendDelayMs": 2.1392205310483914,
+        "receiverJitterRecentMs": 3,
+        "targetVideoBps": 8945454,
+        "transportSendBps": 11117697,
+        "videoPayloadBps": 10694637,
+        "width": 1920
+      },
+      {
+        "allocatedVideoBps": 12000000,
+        "decoder": "mf-h264-hardware",
+        "encoder": "mf-h264-hardware",
+        "height": 1080,
+        "meanEncodeMs": 4.281799540172745,
+        "meanPacketSendDelayMs": 2.0444894720474807,
+        "receiverJitterRecentMs": 0,
+        "targetVideoBps": 9031726,
+        "transportSendBps": 11356497,
+        "videoPayloadBps": 10927713,
+        "width": 1920
+      }
+    ],
+    "afterStopResources": {
+      "handles": 554,
+      "privateBytes": 309800960,
+      "workingSetBytes": 209645568
+    },
+    "teardownSeconds": 0.6275072,
+    "resources": {
+      "privateBytes": {
+        "first": 600403968,
+        "last": 635658240,
+        "min": 587440128,
+        "max": 657219584,
+        "median": 624791552.0
+      },
+      "workingSetBytes": {
+        "first": 334458880,
+        "last": 374800384,
+        "min": 326381568,
+        "max": 398745600,
+        "median": 366231552.0
+      },
+      "handles": {
+        "first": 2060,
+        "last": 2065,
+        "min": 2031,
+        "max": 2290,
+        "median": 2055.0
+      }
+    },
+    "validated": true,
+    "metricsSha256": "e969554748da877dce6672d51e556e82579b03ab4d16f9e3ccfcaace03801fbb",
+    "executableSha256": "8b408f4394a8953ceced0eb3f1d9401ba9e2bbb9e2a38a10b5074df5ce5d4d8f"
+  },
+  "verification": {
+    "release-hardware": {
+      "passed": true,
+      "reportSha256": "b51c29f66a10f09e9a8f4ae942dcaecef372e7c46f4e15dfecd6ce05cf7c03c7",
+      "tests": [
+        {
+          "name": "mf-hardware-output-deadline",
+          "status": "run",
+          "seconds": 0.787137
+        },
+        {
+          "name": "mf-hardware-decoder-recovery",
+          "status": "run",
+          "seconds": 2.60988
+        },
+        {
+          "name": "mf-hardware-fallback-and-gpu-lifetime",
+          "status": "run",
+          "seconds": 1.19149
+        },
+        {
+          "name": "webrtc-direct-hardware-h264",
+          "status": "run",
+          "seconds": 2.67409
+        },
+        {
+          "name": "mf-hardware-encoder-lifecycle",
+          "status": "run",
+          "seconds": 0.549847
+        },
+        {
+          "name": "mf-hardware-owned-gpu-lifecycle",
+          "status": "run",
+          "seconds": 0.568573
+        }
+      ]
+    },
+    "release-app": {
+      "passed": true,
+      "reportSha256": "3885c2e410bdd1c2be6218fa651656878f59c69ead425faa060b5d47397acafd",
+      "tests": [
+        {
+          "name": "backend-comparison-evidence",
+          "status": "run",
+          "seconds": 0.0964394
+        },
+        {
+          "name": "native-room-runtime-link",
+          "status": "run",
+          "seconds": 0.0553112
+        },
+        {
+          "name": "room-v2-cli-media",
+          "status": "run",
+          "seconds": 6.85311
+        },
+        {
+          "name": "room-v2-qt-ui",
+          "status": "run",
+          "seconds": 10.9508
+        }
+      ]
+    },
+    "debug-hardware": {
+      "passed": true,
+      "reportSha256": "39a90c4ea4ae945c8907efef243852a273450673f8c5f6ae60601edf78b677ff",
+      "tests": [
+        {
+          "name": "mf-hardware-output-deadline",
+          "status": "run",
+          "seconds": 0.787414
+        },
+        {
+          "name": "mf-hardware-decoder-recovery",
+          "status": "run",
+          "seconds": 2.64621
+        },
+        {
+          "name": "mf-hardware-fallback-and-gpu-lifetime",
+          "status": "run",
+          "seconds": 1.17126
+        },
+        {
+          "name": "webrtc-direct-hardware-h264",
+          "status": "run",
+          "seconds": 2.48809
+        },
+        {
+          "name": "mf-hardware-encoder-lifecycle",
+          "status": "run",
+          "seconds": 0.528416
+        },
+        {
+          "name": "mf-hardware-owned-gpu-lifecycle",
+          "status": "run",
+          "seconds": 0.573835
+        }
+      ]
+    },
+    "debug-app": {
+      "passed": true,
+      "reportSha256": "26466b69ee39094d93d7ce483c6725cb445e2212ca6beb52de87ec18ea1d39ad",
+      "tests": [
+        {
+          "name": "backend-comparison-evidence",
+          "status": "run",
+          "seconds": 0.0888995
+        },
+        {
+          "name": "native-room-runtime-link",
+          "status": "run",
+          "seconds": 0.0621348
+        },
+        {
+          "name": "room-v2-cli-media",
+          "status": "run",
+          "seconds": 6.84255
+        },
+        {
+          "name": "room-v2-qt-ui",
+          "status": "run",
+          "seconds": 12.7458
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Local CPU-image age is not physical capture-to-display/input latency",
+    "Two repeats per control; no confidence interval or universal GPU/driver claim",
+    "Equal configured ceiling is not equal actual bitrate; grayscale PSNR is not full-color quality acceptance",
+    "Legacy software decoder and shared encoder differ from v2 hardware-preferred decoding and independent per-viewer encoders",
+    "Ten-minute sustained run predates legacy portability patch; no concurrent build/performance tests; development tools still active",
+    "Sustained fixture accumulates marker IDs/age samples; its process memory trend is not an isolated production leak test",
+    "Sustained age percentiles cover whole interval, not per-window growth or game GPU contention",
+    "Physical devices, external latency, cross-machine GPU load and existing resource/network acceptance remain open"
+  ],
+  "portableFixes": [
+    "Legacy frame-clock/control-input and WGC short waits use ShortWait",
+    "Shared codec HardwareFrameWait enforces one submitted frame with timestamp association and 500 ms output deadline",
+    "Legacy raw hardware-input queue removed; readiness/drain waits use precise timer",
+    "Legacy existing low-latency sender option selected for all controls"
+  ],
+  "excludedSandboxAttempt": {
+    "rawDirectory": "build/comparison-portable-fixes",
+    "reportSha256": "d2045c5bd3e6f0893394f40345745c0cabc7d72c5ac37d72907c68d7833d593f",
+    "reason": "Restricted execution could not access WGC capture / v2 admission; stopped after six completed failures; repeated outside sandbox with identical executable. Not performance evidence."
+  }
+}

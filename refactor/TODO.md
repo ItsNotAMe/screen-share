@@ -21,8 +21,13 @@ paced sink and repeat the comparisons. Default-pacing high-motion sender delay
 still reproduces after that correction. Reference-load pacing and background-timer
 fixes pass final local validation. The corrected 24-run configuration comparison
 favors v2 on image age and CPU, but does not isolate architecture from hardware
-codec/timer/pacing choices. Finish tuned-legacy controls, then normal GPU/two-PC
-resource and physical acceptance; do not rebuild the comparison harness.
+codec/timer/pacing choices. Portable precise waits and the single-submission
+hardware deadline are now shared with legacy; its old raw encoder queue is
+removed. Use the updated controls in COMPARISON.md / HARDWARE-ENCODING.md.
+Prioritize the measured v2 latency gap against improved legacy, software-fallback
+throughput and four-viewer memory, then normal GPU/two-PC resource and physical
+acceptance. Do not rebuild the comparison harness or claim an architectural win
+from fixes that also improve legacy.
 
 Current priority: finish Stage 2–4, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).

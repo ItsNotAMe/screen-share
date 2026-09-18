@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "causalAttribution": "Current application configurations only: software/default-paced legacy versus hardware-preferred Gaming v2. Portable timing/pacing fixes are not architecture-specific. Tuned-legacy control pending.",
+  "causalAttribution": "Historical default-configuration comparison only. Portable timing/queue fixes also improve legacy; final controls in codec-portable-controls-2026-09-18.json find improved legacy has lower local image age. These figures do not establish an architectural latency advantage.",
   "releaseApplicationIntegrationTests": 3,
   "debugApplicationIntegrationTests": 3,
   "passed": true,

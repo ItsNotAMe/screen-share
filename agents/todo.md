@@ -10,8 +10,12 @@ Feature scope is frozen for backend closeout. See refactor/COMPARISON.md: the fi
 matrix is superseded because its unpaced silent sink spun viewer audio workers.
 The corrected shared paced sink is mandatory. Default-pacing sender delay still
 reproduces with it; pacing/background-timer fixes pass final local validation.
-Corrected configuration comparisons favor v2 on CPU/age; tuned-legacy controls
-are next because hardware codec/timer/pacing choices are not architecture-specific.
+Corrected default-configuration comparisons favor v2 on CPU/age, but portable
+timer/queue fixes also improve legacy. The shared single-frame hardware deadline
+and precise frame/WGC waits now apply to legacy; its raw encoder queue is removed.
+Use the updated COMPARISON.md / HARDWARE-ENCODING.md controls. Prioritize v2's
+remaining latency gap, software-fallback throughput and four-viewer memory before
+normal GPU/two-PC physical acceptance; do not claim an intrinsic architecture win.
 Retained-only resource diagnostics cannot establish GPU presentation or image
 latency/quality. Do not rebuild the harness or reuse superseded performance claims.
 

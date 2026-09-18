@@ -10,6 +10,11 @@ its unpaced silent sink distorted CPU and synchronized-video results. The shared
 paced sink is now mandatory. Sender pacing and capture/codec/silent-audio waits
 are corrected; physical display/input, GPU presentation, audio and matched network
 gates remain separate from local image-consumer evidence.
+The fairness follow-up also ports the precise frame/WGC waits and single-frame
+hardware output deadline to legacy, removing its raw encoder queue. Keep the
+pre-fix hardware symptom baseline separate from the updated codec controls in
+COMPARISON.md and HARDWARE-ENCODING.md. V2 hardware's local CPU advantage does not
+waive its latency gap against tuned legacy or software-fallback throughput.
 
 Laptop continuation: real two-PC video/resize was confirmed by the user, exposing
 a logical/native pixel sizing mismatch behind misleading busy/presentation counts.

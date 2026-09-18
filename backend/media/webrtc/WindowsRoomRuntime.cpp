@@ -73,9 +73,9 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
                 return WasapiPcmEndpoints({}, selection.deviceId).playout;
             };
         }
-        native.engine = [endpoints = std::move(endpoints), state] {
+        native.engine = [endpoints = std::move(endpoints), state, preferHardware = options.preferHardwareEncoding] {
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, std::make_shared<PcmAudioDiagnostics>()),
-                std::make_unique<MfVideoEncoderFactory>(state->Get()), std::make_unique<MfVideoDecoderFactory>(true));
+                std::make_unique<MfVideoEncoderFactory>(preferHardware ? state->Get() : nullptr), std::make_unique<MfVideoDecoderFactory>(true));
         };
         native.engineReady = [state] { return bool(state->Get()); };
         native.capture = [capture = options.capture, state, target] { return std::make_unique<DeviceCapture>(capture, state, target); };

@@ -1,6 +1,6 @@
 #include "media/webrtc/MfVideoEncoderFactory.h"
 #include "media/webrtc/MfHardwareSession.h"
-#include "media/webrtc/HardwareFrameWait.h"
+#include "codec/HardwareFrameWait.h"
 #include "media/webrtc/MappedVideoBuffer.h"
 #include "codec/InputMappingSei.h"
 #include "codec/H264StreamEncoder.h"

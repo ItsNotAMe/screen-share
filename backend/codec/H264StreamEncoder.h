@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <map>
 #include <string>
 #include <vector>
@@ -72,18 +71,16 @@ public:
     [[nodiscard]] uint32_t bitrate() const noexcept { return config_.bitrate; }
     [[nodiscard]] const std::string& encoderName() const noexcept { return encoderName_; }
     [[nodiscard]] H264StreamEncoderInputMode lastInputMode() const noexcept { return lastInputMode_; }
-    [[nodiscard]] size_t queuedInputCount() const noexcept { return queuedAsyncInputs_.size(); }
-    [[nodiscard]] uint64_t droppedInputFrames() const noexcept { return droppedAsyncInputs_; }
+    // EncodeFrame completes one submission; no internal raw-frame queue remains.
+    [[nodiscard]] size_t queuedInputCount() const noexcept { return 0; }
+    [[nodiscard]] uint64_t droppedInputFrames() const noexcept { return 0; }
 
 private:
     std::vector<EncodedPacket> ReadAvailablePackets();
     std::vector<EncodedPacket> ReadSyncAvailablePackets();
     std::vector<EncodedPacket> ReadAsyncAvailablePackets();
     std::vector<EncodedPacket> PumpAsyncEvents();
-    std::vector<EncodedPacket> QueueAsyncInput(Microsoft::WRL::ComPtr<IMFSample> sample);
-    std::vector<EncodedPacket> SubmitQueuedAsyncInputs();
     std::vector<EncodedPacket> WaitForAsyncInputRequest();
-    std::vector<EncodedPacket> WaitForAsyncQueue();
     std::vector<EncodedPacket> WaitForAsyncDrain();
     void AttachSenderQpc(EncodedPacket& packet);
 
@@ -102,10 +99,7 @@ private:
     int64_t frameDuration100ns_ = 0;
     uint32_t pendingAsyncInputs_ = 0;
     uint32_t pendingAsyncOutputs_ = 0;
-    std::deque<Microsoft::WRL::ComPtr<IMFSample>> queuedAsyncInputs_;
     std::map<int64_t, int64_t> senderQpcBySampleTime_;
-    size_t maxQueuedAsyncInputs_ = 8;
-    uint64_t droppedAsyncInputs_ = 0;
     bool asyncDrainComplete_ = false;
     bool comInitialized_ = false;
     bool mfStarted_ = false;

@@ -1,4 +1,4 @@
-#include "media/webrtc/HardwareFrameWait.h"
+#include "codec/HardwareFrameWait.h"
 #include "media/audio/PcmBlockPacer.h"
 #include <iostream>
 #include <algorithm>
@@ -7,6 +7,7 @@
 namespace {
 void Require(bool value) { if (!value) throw std::runtime_error("Hardware wait contract failed"); }
 void Run() {
+    using namespace screenshare;
     using namespace screenshare::media;
     unsigned submissions = 0, polls = 0;
     auto packet = WaitForHardwareFrame(99, [&] {

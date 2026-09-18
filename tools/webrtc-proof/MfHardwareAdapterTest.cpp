@@ -50,6 +50,32 @@ void Run() {
     std::vector<uint8_t> pixels(640 * 360 * 3 / 2, 128);
     std::fill_n(pixels.begin(), 640 * 360, uint8_t(80));
     auto original = device->UploadNv12(640, 360, pixels);
+    // Legacy now uses the same one-submission deadline as the v2 adapter.
+    // Every call must return its own completed frame, including after restart;
+    // the former asynchronous queue returned empty/older packets here.
+    {
+        screenshare::H264StreamEncoder legacy;
+        screenshare::H264StreamEncoderConfig config;
+        config.width = 640; config.height = 360; config.fps = 60;
+        config.backend = screenshare::H264StreamEncoderBackend::Hardware;
+        config.d3dDevice = device->device();
+        for (int cycle = 0; cycle < 2; ++cycle) {
+            legacy.Start(config);
+            for (int frame = 0; frame < 8; ++frame) {
+                if (frame == 4) Require(legacy.TryUpdateBitrate(6'000'000) && legacy.RequestKeyframe(),
+                    "Legacy bitrate/keyframe request failed");
+                const auto packets = legacy.EncodeFrame(original->RetainedNv12());
+                Require(packets.size() == 1 && packets.front().timestamp100ns == frame * (10'000'000 / 60),
+                    "Legacy hardware retained output or returned a stale frame");
+                Require(!packets.front().bytes.empty() && packets.front().senderQpc100ns > 0 &&
+                    legacy.queuedInputCount() == 0, "Legacy output lost bytes/timestamp or queued input");
+                if (frame == 4) Require(packets.front().isKeyframe, "Legacy keyframe recovery failed");
+            }
+            Require(legacy.Drain().empty(), "Legacy retained unexpected output at drain");
+            legacy.Stop();
+        }
+        Require(device->readbackCount() == 0, "Legacy hardware used CPU readback");
+    }
     // A later upload must never mutate a frame retained by another viewer.
     std::fill_n(pixels.begin(), 640 * 360, uint8_t(170));
     // The production GPU scaler's output must remain native all the way into MF.

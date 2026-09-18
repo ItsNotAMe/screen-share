@@ -2,6 +2,7 @@
 #include "media/webrtc/WindowsRoomRuntime.h"
 #include "core/WindowsMediaRuntime.h"
 #include "runtime/ScreenShareSessionRunner.h"
+#include "runtime/ScreenShareRuntimeInternal.h"
 #include "media/audio/SilentPcmCapture.h"
 #include "media/audio/DiscardPcmPlayout.h"
 #include "rtc_base/ssl_adapter.h"
@@ -241,16 +242,32 @@ bool Listening(unsigned port) {
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     QJsonObject result{{"schema", 1}, {"passed", false}, {"externalLatencyVerified", false}, {"physicalInput", false}, {"audibleOutput", false}};
-    if (argc != 8 && argc != 9) { std::cerr << "backend origin scene viewers seconds port output.json [retained-only]\n"; return 2; }
+    if (argc < 8 || argc > 10) { std::cerr << "backend origin scene viewers seconds port output.json [retained-only] [honor-timers]\n"; return 2; }
     const QString output = argv[7];
     try {
-        const bool retainedOnly = argc == 9;
-        Require(!retainedOnly || std::string(argv[8]) == "retained-only", "Invalid consumer mode");
+        bool retainedOnly = false, honorTimers = false;
+        for (int i = 8; i < argc; ++i) {
+            if (std::string(argv[i]) == "retained-only" && !retainedOnly) retainedOnly = true;
+            else if (std::string(argv[i]) == "honor-timers" && !honorTimers) honorTimers = true;
+            else throw std::invalid_argument("Invalid or duplicate diagnostic option");
+        }
+        if (honorTimers) {
+            // Test-process-only control: give ordinary legacy waits the same
+            // requested timer precision even when the owned scene is occluded.
+            PROCESS_POWER_THROTTLING_STATE state{};
+            state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+            state.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+            Require(SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &state, sizeof(state)) != 0, "Timer control failed");
+        }
+        result["timerPolicy"] = honorTimers ? "honor-resolution" : "system";
         result["consumer"] = retainedOnly ? "retained-only" : "cpu-pixels";
-        const std::string backend = argv[1], mode = argv[3]; const int viewers = std::stoi(argv[4]), seconds = std::stoi(argv[5]), port = std::stoi(argv[6]);
+        const std::string variant = argv[1], backend = variant.starts_with("legacy") ? "legacy" : "v2", mode = argv[3];
+        const int viewers = std::stoi(argv[4]), seconds = std::stoi(argv[5]), port = std::stoi(argv[6]);
+        result["variant"] = QString::fromStdString(variant);
         result["audioPlayoutMode"] = backend == "v2" ? "paced-discard" : "disabled";
-        Require((backend == "legacy" || backend == "v2") && (mode == "static" || mode == "scroll" || mode == "motion") &&
-            (viewers == 1 || viewers == 4) && seconds >= 5 && seconds <= 120 && port >= 1024 && port <= 65000, "Invalid comparison configuration");
+        Require((variant == "legacy" || variant == "legacy-lowlatency" || variant == "legacy-hardware" || variant == "v2" || variant == "v2-software") &&
+            (mode == "static" || mode == "scroll" || mode == "motion") &&
+            (viewers == 1 || viewers == 4) && seconds >= 5 && seconds <= 900 && port >= 1024 && port <= 65000, "Invalid comparison configuration");
         WindowsMediaRuntime runtime; Require(SUCCEEDED(runtime.result()), "Windows media startup failed");
         webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false); webrtc::InitializeLogging(std::move(logging));
         webrtc::WinsockInitializer winsock; Require(!winsock.error() && webrtc::InitializeSSL(), "WebRTC network startup failed");
@@ -276,12 +293,25 @@ int main(int argc, char** argv) {
                 config.udpAccessCode = "comparison-generated-scene-only"; config.captureSystemAudio = false;
                 config.stream.outputResolution = SessionResolution{Width, Height}; config.stream.fps = 60; config.stream.bitrateBps = 12000000;
                 config.stream.adaptBitrate = config.stream.adaptResolution = false;
+                config.stream.lowLatency = variant != "legacy";
                 for (int i = 0; i < viewers; ++i) config.targets.push_back("127.0.0.1:" + std::to_string(port + i));
+                if (variant == "legacy-hardware") {
+                    // Existing legacy runtime/encoder, not the v2 adapter. The
+                    // typed application preset forces software, so override only
+                    // the already-supported encoder selection after validation.
+                    using namespace screenshare_runtime_internal;
+                    SavedReportContext report; report.sessionId = GenerateSessionId();
+                    auto options = BuildShareSessionOptions(config, report.sessionId);
+                    options.streamEncoderPreference = StreamEncoderPreference::Hardware;
+                    options.streamEncoderPreferenceProvided = true;
+                    return ExecuteSessionRuntimeOptions(options, report, {&stop, {}, {}});
+                }
                 return RunShareSession(config, {&stop, {}, {}});
             }));
         } else {
             for (int i = -1; i < viewers; ++i) {
                 WindowsRoomRuntimeOptions options;
+                options.preferHardwareEncoding = variant != "v2-software";
                 options.capture.sourceType = CaptureSourceType::Window; options.capture.windowHandle = uint64_t(scene.window());
                 options.capture.targetWidth = Width; options.capture.targetHeight = Height; options.capture.targetFps = 60;
                 options.audioEndpoints = PcmEndpointFactories{[] { return std::make_unique<SilentPcmCapture>(); }, [] { return std::make_unique<DiscardPcmPlayout>(); }};

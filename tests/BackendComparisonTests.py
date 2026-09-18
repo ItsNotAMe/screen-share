@@ -40,6 +40,13 @@ class ComparisonTests(unittest.TestCase):
         r = evidence('v2'); r['audioPlayoutMode'] = 'unpaced-discard'
         with self.assertRaises(ValueError): comparison.validate(r, 'v2', 'scroll', 1, 20)
 
+    def test_codec_and_timer_controls_cannot_be_mixed(self):
+        r = evidence(); r.update(variant='legacy-hardware', timerPolicy='honor-resolution')
+        with self.assertRaises(ValueError): self.validate(r)
+        comparison.validate(r, 'legacy', 'scroll', 1, 20, 'legacy-hardware', 'honor-resolution')
+        r['variant'] = 'legacy-lowlatency'
+        with self.assertRaises(ValueError): comparison.validate(r, 'legacy', 'scroll', 1, 20, 'legacy-hardware', 'honor-resolution')
+
     def test_lossless_quality_is_not_missing_evidence(self):
         r = evidence(); r['receivers'][0].update(lumaMse=0, sampledLumaPsnrDb=None)
         self.validate(r)

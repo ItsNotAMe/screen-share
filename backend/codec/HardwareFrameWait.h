@@ -4,7 +4,7 @@
 #include <chrono>
 #include <stdexcept>
 
-namespace screenshare::media {
+namespace screenshare {
 class HardwareFrameCancelled : public std::runtime_error {
 public: HardwareFrameCancelled() : std::runtime_error("Hardware frame cancelled") {}
 };

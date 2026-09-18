@@ -1777,7 +1777,8 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
             return std::nullopt;
         }
 
-        Sleep(1);
+        thread_local ShortWait frameTimer;
+        frameTimer.Wait();
     }
 }
 

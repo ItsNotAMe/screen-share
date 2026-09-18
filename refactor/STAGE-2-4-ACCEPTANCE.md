@@ -8,6 +8,13 @@ is superseded because an unpaced silent sink distorted CPU and synchronized-vide
 measurements. Use the corrected paced-sink comparison and sender-pacing/timer fixes;
 local CPU-image consumption is not physical latency, GPU-display or matched network
 acceptance.
+Fairness/hardware follow-up: the portable timer and one-submission encoder fixes
+are also applied to legacy, and COMPARISON.md separates pre-fix from improved
+legacy controls. The earlier default-configuration latency win is not an
+architecture verdict. Tuned legacy remains a real latency competitor; v2
+software throughput and four-viewer private memory are outstanding performance
+work. HARDWARE-ENCODING.md records the reproduced legacy queue delay, its shared
+fix, hardware recovery checks and the bounded ten-minute v2 hardware evidence.
 The decoded-frame handoff now has exact ownership and local wait/age measurements
 ([FRAME-HANDOFF.md](FRAME-HANDOFF.md)); this is one measured queue, not full pipeline
 queue-age or physical latency acceptance.
