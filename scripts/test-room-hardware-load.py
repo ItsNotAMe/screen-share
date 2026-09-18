@@ -49,11 +49,15 @@ def main():
     def run(command, timeout=60):
         completed = subprocess.run(command, capture_output=True, timeout=timeout, creationflags=flags)
         if completed.returncode:
-            raise RuntimeError(completed.stderr.decode('utf-8', errors='replace')[-4000:] or 'Command failed')
+            # PowerShell can write only module-loading CLIXML to stderr while
+            # the useful native failure/report is on stdout. Preserve both.
+            stdout = completed.stdout.decode('utf-8-sig', errors='replace')[-4000:]
+            stderr = completed.stderr.decode('utf-8', errors='replace')[-4000:]
+            raise RuntimeError(f'Command exited {completed.returncode}\nstdout: {stdout}\nstderr: {stderr}')
         return completed.stdout.decode('utf-8-sig', errors='replace').strip()
 
     def remote(script, timeout=60):
-        encoded = base64.b64encode(("$ErrorActionPreference='Stop'; " + script).encode('utf-16le')).decode('ascii')
+        encoded = base64.b64encode(("$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; " + script).encode('utf-16le')).decode('ascii')
         return run(['ssh', *ssh_options, args.peer, 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -EncodedCommand ' + encoded], timeout)
 
     try:

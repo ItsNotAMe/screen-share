@@ -156,6 +156,12 @@ void Viewer(const std::string& origin, const std::string& room) {
 }
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
+    if (argc == 3 && std::string_view(argv[1]) == "gpu-resources") {
+        try {
+            bool valid = false; const int seconds = QString::fromUtf8(argv[2]).toInt(&valid); Check(valid);
+            Print(loadproof::GpuResources(seconds)); return 0;
+        } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+    }
     webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false);
     webrtc::InitializeLogging(std::move(logging)); webrtc::WinsockInitializer winsock;
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;

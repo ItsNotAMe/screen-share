@@ -4,11 +4,31 @@
 #include "core/WindowsMediaRuntime.h"
 #include "media/audio/SilentPcmCapture.h"
 #include "media/audio/DiscardPcmPlayout.h"
+#include "media/webrtc/D3dVideoFrameBuffer.h"
 #include <psapi.h>
+#include <processsnapshot.h>
 #include <set>
+#include <string_view>
+#include <vector>
 
 namespace loadproof {
 using Clock = std::chrono::steady_clock;
+inline QJsonObject HandleTypes() {
+    HPSS snapshot{};
+    Check(PssCaptureSnapshot(GetCurrentProcess(), PSS_CAPTURE_HANDLES | PSS_CAPTURE_HANDLE_NAME_INFORMATION, 0, &snapshot) == ERROR_SUCCESS);
+    struct Snapshot { HPSS value; ~Snapshot() { PssFreeSnapshot(GetCurrentProcess(), value); } } owned{snapshot};
+    HPSSWALK marker{}; Check(PssWalkMarkerCreate(nullptr, &marker) == ERROR_SUCCESS);
+    struct Marker { HPSSWALK value; ~Marker() { PssWalkMarkerFree(value); } } walk{marker};
+    QJsonObject types;
+    PSS_HANDLE_ENTRY entry{}; DWORD status;
+    while ((status = PssWalkSnapshot(snapshot, PSS_WALK_HANDLES, marker, &entry, sizeof(entry))) == ERROR_SUCCESS) {
+        auto type = entry.TypeName ? QString::fromWCharArray(entry.TypeName, entry.TypeNameLength / sizeof(wchar_t)) : QStringLiteral("Unknown");
+        while (type.endsWith(QChar(0))) type.chop(1);
+        types[type] = types[type].toInt() + 1;
+    }
+    Check(status == ERROR_NO_MORE_ITEMS);
+    return types; // Object names/addresses are deliberately not retained.
+}
 class Sink final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::mutex mutex_;
     unsigned frames_ = 0, invalid_ = 0;
@@ -47,6 +67,46 @@ inline double CpuSeconds() {
     auto number = [](FILETIME t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
     return double(number(kernel) + number(user)) / 1e7;
 }
+// Attribution only: isolates graphics allocation/readback from MF, WebRTC and
+// signaling. These measurements are never a streaming acceptance result.
+inline QJsonObject GpuResources(int seconds) {
+    Check(seconds >= 10 && seconds <= 120);
+    auto device = std::make_shared<screenshare::media::D3dVideoDevice>();
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgi; Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+    Check(SUCCEEDED(device->device()->QueryInterface(IID_PPV_ARGS(&dxgi))));
+    Check(SUCCEEDED(dxgi->GetAdapter(&adapter))); DXGI_ADAPTER_DESC description{};
+    Check(SUCCEEDED(adapter->GetDesc(&description)));
+    const auto adapterName = QString::fromWCharArray(description.Description);
+    adapter.Reset(); dxgi.Reset();
+    std::vector<uint8_t> pixels(1920 * 1080 * 3 / 2, 128);
+    QJsonArray phases;
+    for (const char* mode : {"idle", "raw-upload", "upload", "upload-readback"}) {
+        QJsonObject phase{{"mode", mode}, {"before", Resources()}, {"handleTypesBefore", HandleTypes()}};
+        const auto start = Clock::now(); unsigned frames = 0;
+        while (Clock::now() - start < std::chrono::seconds(seconds)) {
+            if (std::string_view(mode) == "raw-upload") {
+                D3D11_TEXTURE2D_DESC description{};
+                description.Width = 1920; description.Height = 1080;
+                description.MipLevels = description.ArraySize = description.SampleDesc.Count = 1;
+                description.Format = DXGI_FORMAT_NV12; description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                D3D11_SUBRESOURCE_DATA initial{}; initial.pSysMem = pixels.data(); initial.SysMemPitch = 1920;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+                Check(SUCCEEDED(device->device()->CreateTexture2D(&description, &initial, &texture)));
+            } else if (std::string_view(mode) != "idle") {
+                auto frame = device->UploadNv12(1920, 1080, pixels);
+                if (std::string_view(mode) == "upload-readback") {
+                    const auto image = frame->ToI420(); Check(image && image->DataY()[0] == 128);
+                }
+            }
+            std::this_thread::sleep_until(start + std::chrono::microseconds(++frames * 16667LL));
+        }
+        phase["iterations"] = int(frames); phase["after"] = Resources();
+        phase["handleTypesAfter"] = HandleTypes(); phases.append(phase);
+    }
+    const auto staging = device->readbackStagingAllocations(); device.reset();
+    return {{"diagnosticOnly", true}, {"adapter", adapterName}, {"phases", phases}, {"stagingAllocations", qint64(staging)},
+        {"afterStop", Resources()}, {"handleTypesStopped", HandleTypes()}};
+}
 inline QJsonObject Run(bool host, const std::string& origin, const QString& invitation, int seconds) {
     Check(seconds >= 10 && seconds <= 300);
     screenshare::WindowsMediaRuntime media;
@@ -78,6 +138,7 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
     } else Wait([&] { return sink->Read()["freshFrames"].toInt() >= 60; });
     // Let rate/telemetry settle before collecting load samples.
     std::this_thread::sleep_for(5s);
+    const auto handlesBefore = HandleTypes();
     sink->Reset(); const auto began = Clock::now(); const double cpu = CpuSeconds();
     QJsonArray samples; bool hardwareEncoder = false, hardwareDecoder = false, hardwareOnly = true;
     const auto deadline = began + std::chrono::seconds(seconds + 30);
@@ -117,7 +178,9 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
     result["freshFps"] = result["freshFrames"].toInt() / elapsed;
     result["width"] = 1920; result["height"] = 1080; result["fpsLimit"] = 60; result["bitrateLimitBps"] = 12000000;
     result["physicalInput"] = false; result["audibleOutput"] = false; result["externalLatencyVerified"] = false;
+    result["handleTypesBefore"] = handlesBefore; result["handleTypesAfter"] = HandleTypes();
     auto stop = room.Stop(); Get(stop); scene.reset(); result["afterStopResources"] = Resources();
+    result["handleTypesStopped"] = HandleTypes();
     result["runtimeReleased"] = true;
     result["passed"] = host ? hardwareOnly && hardwareEncoder && hardwareDecoder && measured >= unsigned(seconds) :
         result["freshFps"].toDouble() >= 45 && result["invalidFrames"].toInt() == 0;

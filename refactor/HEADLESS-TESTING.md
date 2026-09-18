@@ -7,6 +7,12 @@ and fresh pixels, and gathers per-machine resources. The five-minute media run
 passes; its laptop resource-growth finding remains open. This is not physical
 display/input timing, and no OS input is injected.
 
+For graphics resource attribution without a room or network, run
+`CrossMachineRoomProof.exe gpu-resources 30`. Four bounded phases separate idle,
+direct D3D allocation, owned-frame upload, and CPU pixel readback. Reports have
+`diagnosticOnly: true`; they do not pass streaming or resource acceptance.
+See [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md).
+
 Continuous displayed-image age is now part of fresh packet-impairment reports.
 The generated scene carries a frame ID and checksum through the real codec;
 the consumer also measures the age of an image held during a freeze. Run the

@@ -13,6 +13,13 @@ not a waived memory optimization. Next isolate that trend before claiming
 sustained stability. Physical presentation/input, four-viewer remote hardware,
 Internet/NAT and device acceptance remain separate.
 
+Receiver resource attribution: [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md)
+records typed handle snapshots and a graphics-only reproducer. Direct D3D
+creation reproduces Section growth outside the frame wrapper; no speculative
+production ownership change or resource waiver was made. A failed 90-second
+LAN diagnostic (five invalid markers) is retained separately from the earlier
+passing five-minute hardware-delivery result.
+
 Latest congestion follow-up: [CONGESTION-WINDOW.md](CONGESTION-WINDOW.md).
 The retained policy uses upstream RTT-aware bitrate pushback with 50 ms
 additional in-flight allowance instead of 350 ms; default loss/delay estimators,

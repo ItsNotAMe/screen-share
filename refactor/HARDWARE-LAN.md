@@ -74,6 +74,9 @@ does not establish a flat steady-state trend or full cleanup. The desktop stays
 roughly flat. No speculative decoder/driver fix was applied from aggregate
 counters alone. Next isolate laptop receiver allocations, then finish the
 consolidated physical/device/network acceptance pass.
+The subsequent [resource attribution](RECEIVER-RESOURCES.md) reproduces Section
+handle growth with direct D3D texture creation, outside decoding/networking and
+the v2 frame wrapper. It does not yet establish a long-term bound.
 
 Release and Debug proof builds pass; the comparison executable builds after the
 unchanged scene extraction. Evidence tests pass in PowerShell 5.1 and 7: valid

@@ -25,6 +25,13 @@ resources are not. This is separate from relative footprint optimization in
 BACKLOG.md. After attribution/validation, continue the physical/device/network
 requirements rather than repeating the completed normal-load comparisons.
 
+Resource attribution update: [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md)
+reproduces the increasing Section handles with direct D3D texture creation,
+without capture, decoder or networking, and outside the owned-frame wrapper.
+The graphics-level reproducer is available; the laptop's long-term bound is
+still unverified. Do not replace the modular decoder or waive the resource gate
+on the basis of this attribution alone.
+
 The first paired comparison is superseded: its custom unpaced silent sink distorted
 CPU and synchronized-video measurements (COMPARISON.md). Use the corrected shared
 paced sink and repeat the comparisons. Default-pacing high-motion sender delay

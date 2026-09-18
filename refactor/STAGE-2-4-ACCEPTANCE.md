@@ -10,6 +10,11 @@ FPS, no fallback and no invalid images. Resource sampling exposes laptop viewer
 growth (118→157 MiB median private memory; 645→833 median handles), so sustained
 resource acceptance remains open. Its cause and long-term bound are the next
 priority. This is not a physical GPU-display/input latency or four-viewer pass.
+Follow-up [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md) attributes increasing
+Section handles to a reproducible graphics-level path: direct D3D texture
+creation has the same trend without the v2 frame wrapper, decoder or network.
+The long-term resource gate remains open. The 90-second diagnostic LAN run had
+five invalid scene markers and is retained as a failure.
 The paired 1080p legacy/v2 workload is documented in COMPARISON.md. Its first matrix
 is superseded because an unpaced silent sink distorted CPU and synchronized-video
 measurements. Use the corrected paced-sink comparison and sender-pacing/timer fixes;
