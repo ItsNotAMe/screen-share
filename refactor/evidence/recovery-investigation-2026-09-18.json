@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "date": "2026-09-18",
+  "performanceAcceptanceComplete": false,
+  "externalLatencyVerified": false,
+  "motionPolicyAdopted": false,
+  "cases": {
+    "diagnosticBaseline": {
+      "artifact": "return-target-baseline",
+      "nativeReportSha256": "a91e36e7c78939cc121beb7d1cc954db6dcd81981ee9f8b5d4df3e200cd730f8",
+      "executableSha256": "ed4ebc2cf04f05e4cbda8be61e6a85b899dcfb73f7aa063a15932ae3c0e2adfa",
+      "nativePassed": true,
+      "evaluationPassed": true,
+      "error": null,
+      "inputResponseInternalMs": 340,
+      "inputResponseSamples": 1,
+      "tailIngressBps": {
+        "baseline": 19274933.87635216,
+        "impaired": 2525644.360076301,
+        "recovery": 6149555.250913811
+      },
+      "recoveryRecentBufferMeanMs": 192
+    },
+    "revertedMotionExperiment": {
+      "artifact": "return-motion-collapse",
+      "nativeReportSha256": "a5a2f99bae5306b6af0804e99259314102b0c76bf9577d099809cf6d787e68f9",
+      "executableSha256": "fafe6c619b035aa0bda46faa917a7b98be8b29cb425f46ebbfe30be723c4df0e",
+      "nativePassed": true,
+      "evaluationPassed": false,
+      "error": "Failed scenarios: collapse",
+      "inputResponseInternalMs": 446,
+      "inputResponseSamples": 1,
+      "tailIngressBps": {
+        "baseline": 15946248.72683033,
+        "impaired": 1948053.4098261672,
+        "recovery": 1992063.3542849855
+      },
+      "recoveryRecentBufferMeanMs": 375.2
+    }
+  }
+}

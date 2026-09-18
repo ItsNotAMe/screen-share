@@ -10,6 +10,7 @@ implementation continues in complete batches, not one checkbox per user turn.
 Current closeout evidence and exact field requirements are consolidated in
 [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md). V2 report export and input
 diagnostics are now implemented; see [SESSION-REPORTS.md](SESSION-REPORTS.md).
+The laptop/GameSir first-pass workflow is ready in [FIELD-TESTING.md](FIELD-TESTING.md).
 
 | Group | What remains | Completion evidence |
 | --- | --- | --- |
@@ -36,8 +37,8 @@ count follows from counting the historical checklist entries.
   CAPTURE-HANDLES.md. Later OS cleanup is observed separately and does not waive
   the immediate restart bound.
   Full-room ownership/heap accounting and bounded slow-presentation scenarios now
-  exist too (ROOM-STRESS.md). They do not complete the two-hour soak, network
-  impairment or physical latency gates.
+  exist too (ROOM-STRESS.md). The two-hour software run is collected; full memory,
+  queue-age, network-recovery and physical latency acceptance remains open.
   The reproduced growing receiver buffer is corrected at the capture audio output
   cadence, with normal A/V sync preserved; see RECEIVER-PACING.md. Continue sustained
   soak/network testing rather than adding another decoder or presentation queue.

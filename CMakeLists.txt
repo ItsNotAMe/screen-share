@@ -13,6 +13,7 @@ option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to Screen
 option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
 option(SCREENSHARE_BUILD_INSTALLER "Create an elevated ScreenShare Setup that provisions controller support" OFF)
 option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets and Svg are available" ON)
+option(SCREENSHARE_BUILD_FIELD_TEST "Build the silent, read-only physical acceptance scene" OFF)
 option(SCREENSHARE_ENABLE_RELEASE_LTO "Enable compiler-supported link-time optimization for Release builds" ON)
 option(SCREENSHARE_BUILD_PINNED_VIGEMCLIENT "Build the pinned ViGEm user-mode client from source" ON)
 set(SCREENSHARE_VIGEMCLIENT_DLL "" CACHE FILEPATH
@@ -575,6 +576,12 @@ if(SCREENSHARE_BUILD_QT_UI)
 
         add_library(ScreenShareUiShell STATIC frontend/ui/AppShellWindow.cpp frontend/ui/ScreenAwakeGuard.cpp frontend/ui/Toast.cpp
             frontend/ui/HomeWindow.cpp frontend/ui/RoomAccessCheck.cpp frontend/ui/UiReportPath.cpp)
+        if(SCREENSHARE_BUILD_FIELD_TEST)
+            add_executable(ScreenShareFieldScene WIN32 tools/field-test/FieldScene.cpp)
+            target_link_libraries(ScreenShareFieldScene PRIVATE ScreenShareCore Qt6::Widgets)
+            add_test(NAME field-scene-self-test COMMAND ScreenShareFieldScene --self-test)
+            set_tests_properties(field-scene-self-test PROPERTIES TIMEOUT 15 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        endif()
         target_include_directories(ScreenShareUiShell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/frontend ${CMAKE_CURRENT_SOURCE_DIR}/backend)
         target_link_libraries(ScreenShareUiShell PUBLIC Qt6::Widgets Qt6::Svg Qt6::Network)
         target_compile_features(ScreenShareUiShell PUBLIC cxx_std_20)
@@ -877,6 +884,9 @@ set(SCREENSHARE_PACKAGE_ARGS
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PackagePortable.cmake"
 )
 set(SCREENSHARE_PACKAGE_DEPENDS ScreenShare ScreenShareUpdater)
+if(TARGET ScreenShareFieldScene)
+    list(APPEND SCREENSHARE_PACKAGE_DEPENDS ScreenShareFieldScene)
+endif()
 if(TARGET ScreenShareUi)
     list(APPEND SCREENSHARE_PACKAGE_DEPENDS ScreenShareUi)
 endif()

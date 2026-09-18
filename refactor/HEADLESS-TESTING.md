@@ -1,5 +1,11 @@
 # Headless media checks
 
+Latest continuation: [FIELD-TESTING.md](FIELD-TESTING.md) records the final 12/12
+Release/Debug headless checks, earlier 16/16 desktop run, blocked final desktop
+attempt, FPS-resume fix, rejected pacing experiment and concise laptop handoff.
+The optional field scene also has a silent `--self-test`; physical acceptance
+remains separate from these automation results.
+
 ## Receiver buffering regression — 2026-09-18
 
 `SwitchablePcmCapture` now emits exactly one PCM-or-silence block per output slot;

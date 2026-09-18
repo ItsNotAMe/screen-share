@@ -649,6 +649,9 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 
 ### Real-machine acceptance
 
+- [x] Prepare a silent, read-only host test scene and a concise two-machine
+  controller/privacy test package workflow. See FIELD-TESTING.md. Actual laptop,
+  GameSir, Xbox/PlayStation and external latency results are still required.
 - [ ] Complete missing legacy GPU utilization, external display/input latency and available multi-viewer comparative baseline; existing one-viewer CPU/queue evidence is in CLOSEOUT-A.md.
 - [ ] Validate forced HWND reuse and actual device-loss recovery on hardware; injected recovery is proven, actual driver removal remains untested.
 

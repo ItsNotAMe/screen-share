@@ -4,6 +4,13 @@ The requested scope is to finish Stages 2–4 before cutover or the later UI red
 Implementation and locally reproducible evidence are separate from field acceptance.
 No unchecked physical requirement is waived by the unattended test run.
 
+Continuation: the user has a Windows laptop and GameSir Nova Lite. FIELD-TESTING.md
+contains the prepared five-minute first pass and test-scene/package instructions.
+The desktop became available and a 16-case Release matrix plus WGC window/display
+checks passed, but it later returned to Screen-saver and blocked the final desktop
+rerun. DXGI still reports unsupported on the current HDR desktop. This is not a
+passing DXGI fallback result. Isolated v2 deployment approval is pending.
+
 | Stage | Implemented / locally verified | Remaining acceptance |
 | --- | --- | --- |
 | 2: user experience | Normal-shell opt-in share/join, pushed directory, profiles, settings, capture/audio recovery, GPU receive, and redacted UI/CLI reports. Release/Debug headless matrices pass 12/12 each. | Physical audio formats/quality/unplug, source privacy/identity/HDR/adapters, supported-desktop DXGI and occlusion. Final legacy command/default cutover remains Stage 5. |

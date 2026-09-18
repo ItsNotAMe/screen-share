@@ -6,8 +6,12 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — grouped delivery work
 
-Priority correction: the user requests Stage 2–4 completion unattended before
+Priority correction: the user requests Stage 2–4 completion before
 cutover. Read refactor/STAGE-2-4-ACCEPTANCE.md for the remaining acceptance boundary.
+The user returned with a Windows laptop and GameSir Nova Lite. The read-only field
+scene and concise portable-test workflow are prepared; see refactor/FIELD-TESTING.md.
+Isolated ten-room v2 deployment needs the pending explicit approval. Do not deploy
+the v1 service or install a controller driver.
 UI/CLI redacted JSON reports and input pressure/local timing diagnostics are
 implemented and verified (SESSION-REPORTS.md); do not reimplement them.
 Unattended results: refactor/UNATTENDED-RESULTS.md. The two-hour software run is now
