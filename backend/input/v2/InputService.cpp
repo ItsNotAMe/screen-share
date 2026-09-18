@@ -43,6 +43,7 @@ struct Service::Impl {
         bool release = false, removed = false;
         int padSlot = -1;
         Clock::time_point lastInput{}, lastSend{}, lastStateDrain{}, blocked{};
+        Clock::time_point measured{};
     };
     bool host, closed = false;
     uint8_t allowed = 7;
@@ -58,6 +59,7 @@ struct Service::Impl {
     void Clear(Peer& p) {
         p.incoming.clear(); p.outgoing.clear();
         p.incomingState = {}; p.outgoingState = {}; p.lastPad.reset(); p.blocked = {};
+        p.status.queueWaitUs.reset(); p.status.backendApplyUs.reset(); p.measured = {};
     }
     void Queue(Peer& p, Event e) {
         Message m{p.connection,p.status.permission,++p.sent,e};
@@ -96,9 +98,15 @@ struct Service::Impl {
         const auto permission = p.status.permission;
         const auto peer = p.status.peer;
         try {
+            const auto began = Clock::now();
             const bool applied = sink && External(lock, [&] { return sink->Apply(peer,e); });
             if (p.status.permission != permission || closed) return;
-            if(applied) { ++p.status.applied; return; }
+            if(applied) {
+                const auto completed = Clock::now();
+                p.status.queueWaitUs = std::chrono::duration_cast<std::chrono::microseconds>(began - pending.received).count();
+                p.status.backendApplyUs = std::chrono::duration_cast<std::chrono::microseconds>(completed - began).count();
+                p.measured = completed; ++p.status.applied; return;
+            }
         } catch(...) {}
         if (p.status.permission != permission || closed) return;
         Revoke(p,Reason::Backend);
@@ -196,6 +204,7 @@ void Service::Bind(const std::string& id,const std::string& connection,bool read
     if(p.connection!=connection || p.status.ready!=ready) {
         impl_->Revoke(p,Reason::Disconnected,false);
         p.connection=connection; p.status.ready=ready; p.sent=p.controlSeen=0; p.stateSeen={};
+        p.status.applied = p.status.rejected = p.status.coalesced = 0;
         if(!impl_->host)p.status.permission=0;
         else if(ready) { Event e; e.kind=Kind::Permission; impl_->Queue(p,e); }
     }
@@ -291,6 +300,16 @@ void Service::TransportFailed(const std::string& id) {
 }
 std::vector<Status> Service::Read() const {
     std::lock_guard lock(impl_->mutex); std::vector<Status> result;
-    for(const auto& [id,p]:impl_->peers)result.push_back(p.status); return result;
+    const auto now = Clock::now();
+    for(const auto& [id,p]:impl_->peers) {
+        auto status = p.status;
+        status.reliableQueued = unsigned(p.incoming.size() + p.outgoing.size());
+        status.stateQueued = unsigned(std::count_if(p.incomingState.begin(), p.incomingState.end(), [](const auto& value) { return bool(value); }) +
+            std::count_if(p.outgoingState.begin(), p.outgoingState.end(), [](const auto& value) { return bool(value); }));
+        status.transportBlocked = p.blocked != Clock::time_point{};
+        if (p.measured == Clock::time_point{} || now - p.measured >= 1s) { status.queueWaitUs.reset(); status.backendApplyUs.reset(); }
+        result.push_back(std::move(status));
+    }
+    return result;
 }
 }

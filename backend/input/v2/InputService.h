@@ -13,6 +13,11 @@ struct Status {
     bool grantPending = false;
     bool revokePending = false; // Viewer waits for host permission acknowledgement.
     Reason reason = Reason::None;
+    // Local service observations only, never network or input-to-photon latency.
+    // Timings expire after one second and reset on permission/connection changes.
+    std::optional<uint64_t> queueWaitUs, backendApplyUs;
+    unsigned reliableQueued = 0, stateQueued = 0;
+    bool transportBlocked = false;
 };
 // Invoked exclusively on the service's owned input thread, outside the public
 // mailbox mutex. Driver operations must return promptly; hung native calls cannot

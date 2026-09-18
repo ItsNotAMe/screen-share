@@ -6,6 +6,8 @@
 #include "ui/PeerDiagnosticsWidget.h"
 #include "shared/PresentationDiagnostics.h"
 #include "shared/PipelineDiagnostics.h"
+#include "shared/RoomDiagnosticReport.h"
+#include "ui/UiReportPath.h"
 #include <QClipboard>
 #include "ui/VideoFrameWidget.h"
 #include "ui/UiStyle.h"
@@ -54,6 +56,16 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     copyLink_ = new QPushButton("Copy room link"); copyLink_->setObjectName("copyRoomLink"); copyLink_->setEnabled(false); layout->addWidget(copyLink_);
     connect(copyLink_, &QPushButton::clicked, this, [this] { if (!roomLink_->text().isEmpty()) QApplication::clipboard()->setText(roomLink_->text()); });
     error_ = new QLabel; error_->setObjectName("roomError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
+    auto* exportReport = new QPushButton("Save diagnostic report", this); exportReport->setObjectName("saveRoomReport"); layout->addWidget(exportReport);
+    auto* reportResult = new QLabel(this); reportResult->setObjectName("roomReportResult"); reportResult->setTextFormat(Qt::PlainText);
+    reportResult->setWordWrap(true); reportResult->setTextInteractionFlags(Qt::TextSelectableByMouse); layout->addWidget(reportResult);
+    connect(exportReport, &QPushButton::clicked, this, [this, reportResult, configured = config.reportFile] {
+        const auto file = configured.isEmpty() ? "room-v2-" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".json" : configured;
+        const auto path = ResolveUiReportPath(file);
+        const auto input = session_.input();
+        const auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
+        reportResult->setText(WriteRoomDiagnosticReport(path, report) ? "Saved diagnostic report: " + path : "Could not save diagnostic report. Check the destination is writable.");
+    });
     auto* roomForm = new QFormLayout;
     nickname_ = new QLineEdit; nickname_->setObjectName("liveNickname"); nickname_->setMaxLength(128);
     name_ = new QLineEdit; name_->setObjectName("liveRoomName"); name_->setMaxLength(256);

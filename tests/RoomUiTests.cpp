@@ -953,12 +953,17 @@ int main(int argc, char** argv) {
         else {
         RoomSessionConfig config; config.room.origin = argv[1]; config.room.host = true;
         config.room.nickname = "UiHost"; config.room.name = "UI media";
+        QTemporaryDir reports; Check(reports.isValid()); config.reportFile = reports.filePath("room-report.json");
         config.media.preferences.resolution = ResolutionMode::Fixed;
         config.media.preferences.width = 320; config.media.preferences.height = 180; config.media.preferences.fps = 30;
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
         Wait([&] { return host.session().status().phase == RoomPhase::Active; });
         Check(!host.session().start(config));
+        host.findChild<QPushButton*>("saveRoomReport")->click();
+        { QFile saved(config.reportFile); Check(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll();
+          Check(!bytes.contains("UiHost") && !bytes.contains("UI media"));
+          Check(host.findChild<QLabel*>("roomReportResult")->text().startsWith("Saved diagnostic report:")); }
         config.room.host = false; config.room.roomId = host.session().status().roomId; config.room.nickname = "UiHost";
         auto viewerAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow viewer(config, Factory(viewerAudio), true); viewer.show();

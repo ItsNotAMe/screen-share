@@ -148,6 +148,7 @@ def sha256(path):
 
 def cases(desktop):
     result = [("input-service", "InputServiceTests.exe", None, None),
+              ("diagnostic-report", "RoomDiagnosticReportTests.exe", None, None),
               ("gamepad-control", "GamepadControlTests.exe", None, None),
               ("desktop-input", "DesktopInputTests.exe", None, None),
               ("input-media", "RoomInputTests.exe", "media", None),

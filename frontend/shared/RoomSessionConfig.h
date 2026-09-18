@@ -15,6 +15,7 @@ struct RoomSessionConfig {
     bool preview = true;
     QString inputCommandsFile;
     QString gamepadDevice;
+    QString reportFile;
     std::vector<RoomSettingsChange> changes;
     struct CaptureChange { std::chrono::milliseconds at; screenshare::media::CaptureSelection selection; };
     std::vector<CaptureChange> captureChanges;

@@ -197,7 +197,38 @@ void DelayedDriverGrant() {
     const auto status = revoke.get(); Check(responsive && !status.granted);
     Wait([&] {return sink->neutral>0;}); Check(!Read(host).granted);
 }
+void Observations() {
+    auto sink = std::make_shared<RecordingSink>(); Service host(true, sink), viewer(false);
+    host.Bind("viewer", "first", true); viewer.Bind("host", "first", true);
+    host.Bind("other", "isolated", true);
+    auto pump = [&] {
+        for (const auto& packet : host.Drain("viewer", true, true)) viewer.Receive("host", packet.reliable, packet.bytes);
+        for (const auto& packet : viewer.Drain("host", true, true)) host.Receive("viewer", packet.reliable, packet.bytes);
+    };
+    Check(!Read(host).queueWaitUs && !Read(host).backendApplyUs);
+    Check(host.Grant("viewer", Mouse | Keyboard));
+    Wait([&] { pump(); return Read(viewer, "host").granted == (Mouse | Keyboard); });
+    Event key; key.kind = Kind::Key; key.key = 65;
+    Check(viewer.Submit("host", key));
+    Check(Read(viewer, "host").reliableQueued == 1);
+    Wait([&] { pump(); return Read(host).applied == 1; });
+    Check(Read(host).queueWaitUs && Read(host).backendApplyUs && !Read(host, "other").queueWaitUs);
+    // Heartbeats maintain the grant but must not refresh measurements of actual input.
+    Wait([&] { pump(); return !Read(host).queueWaitUs; });
+    Check(Read(host).granted && !Read(host).backendApplyUs);
+    Event pointer; pointer.kind = Kind::Pointer; pointer.x = pointer.y = .5f;
+    for (int i = 0; i < 10000; ++i) Check(viewer.Submit("host", pointer));
+    Check(Read(viewer, "host").stateQueued <= 3 && Read(viewer, "host").coalesced >= 9999);
+    viewer.Drain("host", false, false);
+    Check(Read(viewer, "host").transportBlocked && !Read(viewer, "host").stateQueued);
+    viewer.Drain("host", true, true); Check(!Read(viewer, "host").transportBlocked);
+    Check(viewer.Submit("host", key));
+    Wait([&] { pump(); return Read(host).queueWaitUs.has_value(); });
+    host.Revoke(); Check(!Read(host).queueWaitUs && !Read(host).backendApplyUs && !Read(host).stateQueued);
+    host.Bind("viewer", "replacement", true);
+    Check(!Read(host).applied && !Read(host).rejected && !Read(host).coalesced && !Read(host).queueWaitUs);
+}
 int main() {
-    try {Protocol();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
+    try {Protocol();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();Observations();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

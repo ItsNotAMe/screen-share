@@ -6,6 +6,11 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — grouped delivery work
 
+Priority correction: the user requests Stage 2–4 completion unattended before
+cutover. Read refactor/STAGE-2-4-ACCEPTANCE.md for the remaining acceptance boundary.
+UI/CLI redacted JSON reports and input pressure/local timing diagnostics are
+implemented and verified (SESSION-REPORTS.md); do not reimplement them.
+
 Current continuation: the shared input service, controller and mouse/keyboard
 UI/CLI/device groups are implemented. See [DESKTOP-INPUT.md](../refactor/DESKTOP-INPUT.md).
 Capture stress now has a four-mode runner and production Windows owner checks;

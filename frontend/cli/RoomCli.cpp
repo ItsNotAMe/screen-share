@@ -4,6 +4,8 @@
 #include "shared/PresentationDiagnostics.h"
 #include "shared/RoomLaunch.h"
 #include "shared/RoomInputCommands.h"
+#include "shared/RoomInputStatus.h"
+#include "shared/RoomDiagnosticReport.h"
 #include "input/v2/GamepadSink.h"
 #include "input/v2/GamepadPoller.h"
 #include "input/ViewerGamepad.h"
@@ -80,6 +82,7 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
     const auto started = std::chrono::steady_clock::now();
     auto nextReport = started;
     QJsonObject lastReport;
+    QJsonObject diagnosticReport;
     auto report = [&](QJsonObject value) { if (hooks.report) hooks.report(value); };
     while (true) {
         const auto now = std::chrono::steady_clock::now();
@@ -126,11 +129,11 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
         }
         if (!controllerGranted && controller) { controller.reset(); requestedPeer.clear(); }
         if (now >= nextReport) {
+            if (!config.reportFile.isEmpty() && (status.phase == RoomPhase::Active || diagnosticReport.isEmpty()))
+                diagnosticReport = RoomDiagnosticReport(status, input ? input->Read() : std::vector<input::Status>{});
             auto value = Status(status);
             QJsonArray controls;
-            if (input) for (const auto& state : input->Read()) controls.append(QJsonObject{
-                {"peer", QString::fromStdString(state.peer)}, {"ready", state.ready},
-                {"requested", state.requested}, {"granted", state.granted}, {"pending", state.grantPending}, {"reason", int(state.reason)}});
+            if (input) for (const auto& state : input->Read()) controls.append(screenshare::frontend::InputStatus(state));
             value["input"] = controls;
             if (value != lastReport) { report(value); lastReport = value; }
             nextReport = now + 100ms;
@@ -201,6 +204,12 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
         report({{"type", "admission-ended"}, {"error", int(result.error)}, {"outcomeUnconfirmed", result.outcomeUnconfirmed}});
     }
     const auto status = session.Status(); report(Status(status));
+    if (!config.reportFile.isEmpty()) {
+        if (diagnosticReport.isEmpty()) diagnosticReport = RoomDiagnosticReport(status);
+        const bool saved = WriteRoomDiagnosticReport(config.reportFile, diagnosticReport);
+        report({{"type", "diagnostic-report"}, {"saved", saved}});
+        if (!saved) failed = true;
+    }
     return failed || status.error != RoomError::None ? 1 : 0;
 }
 

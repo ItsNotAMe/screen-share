@@ -54,7 +54,7 @@ RoomSessionConfig ParseRoomCommand(const QStringList& arguments, const RoomProfi
     const auto options = Options(arguments, {"--create-room", "--private", "--no-preview", "--mute", "--unmute"},
         {"--backend", "--signal-server", "--join-room", "--nickname", "--name", "--password-file", "--viewer-limit",
          "--seconds", "--display", "--window", "--audio", "--audio-device", "--process-id", "--playback-device", "--volume",
-         "--preset", "--resolution", "--fps", "--bitrate", "--upload-bps", "--control-file", "--gamepad"});
+         "--preset", "--resolution", "--fps", "--bitrate", "--upload-bps", "--control-file", "--gamepad", "--report"});
     const bool host = options.contains("--create-room");
     if (host == options.contains("--join-room")) throw std::invalid_argument("Choose exactly one of --create-room or --join-room");
     const QSet<QString> hostOnly{"--private", "--name", "--viewer-limit", "--display", "--window", "--audio", "--audio-device",
@@ -108,6 +108,9 @@ RoomSessionConfig ParseRoomCommand(const QStringList& arguments, const RoomProfi
     auto config = ParseRoomSessionConfig(input, loopback);
     config.inputCommandsFile = options.value("--control-file");
     config.gamepadDevice = options.value("--gamepad");
+    config.reportFile = options.value("--report");
+    if (options.contains("--report") && (config.reportFile.trimmed().isEmpty() || config.reportFile.size() > 4096 || config.reportFile.contains(QChar(0))))
+        throw std::invalid_argument("Invalid diagnostic report path");
     if ((options.contains("--control-file") && config.inputCommandsFile.isEmpty()) ||
         config.inputCommandsFile.size() > 4096 || config.gamepadDevice.size() > 4096)
         throw std::invalid_argument("Invalid controller command file or device");

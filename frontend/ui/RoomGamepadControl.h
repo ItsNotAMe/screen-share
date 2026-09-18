@@ -39,5 +39,6 @@ private:
     QCheckBox* consent_;
     QPushButton* action_;
     QLabel* status_;
+    QLabel* diagnostics_;
     std::unique_ptr<screenshare::input::GamepadPoller> poller_;
 };

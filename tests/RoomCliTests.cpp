@@ -364,7 +364,7 @@ int main(int argc, char** argv) {
         const auto passwordPath = commandFiles.filePath("password.txt");
         { QFile file(passwordPath); Check(file.open(QIODevice::WriteOnly)); Check(file.write("test-only-password") == 18); }
         QStringList hostArguments{"--backend", "v2", "--signal-server", argv[1], "--create-room", "--name", "CLI media", "--nickname", "CliHost",
-            "--password-file", passwordPath, "--seconds", "15", "--resolution", "320x180", "--fps", "30", "--upload-bps", "2000000", "--audio", "none"};
+            "--password-file", passwordPath, "--seconds", "15", "--resolution", "320x180", "--fps", "30", "--upload-bps", "2000000", "--audio", "none", "--report", commandFiles.filePath("report.json")};
         auto host = ParseRoomCommand(hostArguments, nullptr, true);
         host.changes = scripted.changes; host.captureChanges = scripted.captureChanges; host.audioChanges = scripted.audioChanges;
         std::mutex mutex; std::string roomId;
@@ -555,6 +555,9 @@ int main(int argc, char** argv) {
         stopHost = true;
         Check(playbackChanges == 3 && playbackFailed && playbackRecovered);
         const auto hostResult=hosting.get();
+        { QFile saved(host.reportFile); Check(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll();
+          Check(!bytes.contains("test-only-password") && !bytes.contains("CliHost"));
+          Check(QJsonDocument::fromJson(bytes).object()["backend"] == "v2"); }
         if(!(hostResult == 0 && viewing == 0 && stopped && accepted && applied && budgetReported && rateReported && receiverReported && senderReported && sourceChanged && audioChanged))
             throw std::runtime_error("CLI completion host="+std::to_string(hostResult)+" viewer="+std::to_string(viewing)+" flags="+
                 std::to_string(stopped)+std::to_string(accepted)+std::to_string(applied)+std::to_string(budgetReported)+std::to_string(rateReported)+std::to_string(receiverReported)+std::to_string(senderReported)+std::to_string(sourceChanged)+std::to_string(audioChanged));

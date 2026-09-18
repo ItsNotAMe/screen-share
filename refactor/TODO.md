@@ -6,6 +6,11 @@ checks are implementation details, **not separate user turns**.
 
 ## Working agreement
 
+Current priority: finish all available Stage 2–4 work unattended, preserving the
+physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).
+UI/CLI reports and local input timing/pressure diagnostics are now implemented
+and pass both 12-case headless matrices; see [SESSION-REPORTS.md](SESSION-REPORTS.md).
+
 Native code is organized into root-level `backend/` and `frontend/`; the room
 service remains `signaling-worker/`. Backend targets must not depend on frontend
 headers. Folder organization does not imply the legacy runtime has been replaced.

@@ -391,6 +391,12 @@ if(TARGET ScreenShareRoomSession)
     add_library(ScreenShareRoomFrontend STATIC frontend/shared/RoomSessionConfig.cpp frontend/shared/RoomProfile.cpp frontend/shared/RoomLaunch.cpp frontend/shared/RoomInputCommands.cpp)
     target_include_directories(ScreenShareRoomFrontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
     target_link_libraries(ScreenShareRoomFrontend PUBLIC ScreenShareCore ScreenShareRoomSession)
+    if(BUILD_TESTING)
+        add_executable(RoomDiagnosticReportTests tests/RoomDiagnosticReportTests.cpp)
+        target_link_libraries(RoomDiagnosticReportTests PRIVATE ScreenShareRoomFrontend)
+        add_test(NAME room-diagnostic-report COMMAND RoomDiagnosticReportTests)
+        set_tests_properties(room-diagnostic-report PROPERTIES TIMEOUT 15)
+    endif()
     add_library(ScreenShareRoomCli STATIC frontend/cli/RoomCli.cpp)
     target_include_directories(ScreenShareRoomCli PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
     target_link_libraries(ScreenShareRoomCli PUBLIC ScreenShareRoomFrontend)
@@ -567,7 +573,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         endif()
 
         add_library(ScreenShareUiShell STATIC frontend/ui/AppShellWindow.cpp frontend/ui/ScreenAwakeGuard.cpp frontend/ui/Toast.cpp
-            frontend/ui/HomeWindow.cpp frontend/ui/RoomAccessCheck.cpp)
+            frontend/ui/HomeWindow.cpp frontend/ui/RoomAccessCheck.cpp frontend/ui/UiReportPath.cpp)
         target_include_directories(ScreenShareUiShell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/frontend ${CMAKE_CURRENT_SOURCE_DIR}/backend)
         target_link_libraries(ScreenShareUiShell PUBLIC Qt6::Widgets Qt6::Svg Qt6::Network)
         target_compile_features(ScreenShareUiShell PUBLIC cxx_std_20)
@@ -582,7 +588,6 @@ if(SCREENSHARE_BUILD_QT_UI)
             frontend/ui/UiStyle.cpp
             frontend/ui/UpdateManager.cpp
             frontend/ui/UpdatePackageSelection.cpp
-            frontend/ui/UiReportPath.cpp
             frontend/ui/VideoFrameWidget.cpp
             frontend/ui/resources.qrc
             ${SCREENSHARE_UI_ICON_RC}

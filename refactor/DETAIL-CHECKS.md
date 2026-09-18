@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (through `6583170`, plus WGC/RPC retained-port tracing and post-stop cleanup diagnostics). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D in progress**.
+Last reconciled: 2026-09-18 (including receiver pacing, UI/CLI redacted reports and input diagnostics). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D field acceptance remains open**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -576,8 +576,11 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
   invalid/missing values, expire measurements and replace mailboxes across negotiation.
 - [x] Add current capture/recovery and receiver presentation outcomes with honest
   unknown-valued metrics; do not infer bottlenecks from low bitrate or frame rate.
-- [ ] Add input limiting/timing reasons with Stage 3 input; capture/presentation
-  rate and encoder pending-age instrumentation remain Stage 4 measurement work.
+- [x] Add local input queue/backend timings, expiring measurements, queue counts,
+  transport blocking and typed stopping reasons in UI/CLI. See SESSION-REPORTS.md.
+- [ ] Complete capture/presentation rate and encoder pending-age instrumentation.
+- [x] Add shared redacted v2 UI/CLI diagnostic reports, atomic writes, peer aliases
+  and report-location behavior. Physical latency remains unmeasured.
 - [ ] Preserve fullscreen/preview interaction, report paths and signed updater behavior.
 - [ ] Redact secrets/SDP/addresses and reset rate baselines across generations.
 

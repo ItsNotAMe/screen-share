@@ -7,6 +7,10 @@ implementation continues in complete batches, not one checkbox per user turn.
 
 ## Remaining delivery groups
 
+Current closeout evidence and exact field requirements are consolidated in
+[STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md). V2 report export and input
+diagnostics are now implemented; see [SESSION-REPORTS.md](SESSION-REPORTS.md).
+
 | Group | What remains | Completion evidence |
 | --- | --- | --- |
 | Full adoption parity | Guarded normal Home share/join/quick-join and CLI create/join commands now use v2, with mouse/keyboard/controller integration. Remaining: physical control acceptance (Stage 3), legacy diagnostic/report/direct-invite disposition and final default-entry-point audit (Stage 5). | ADOPTION.md and DESKTOP-INPUT.md record routing and actual command/media/input tests. Default launch and existing UDP/control commands remain supported; they are not silently translated. |

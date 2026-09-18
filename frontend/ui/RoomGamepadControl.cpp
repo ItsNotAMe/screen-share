@@ -1,6 +1,7 @@
 #include "RoomGamepadControl.h"
 #include "VideoFrameWidget.h"
 #include "shared/MappedInput.h"
+#include "shared/RoomInputStatus.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -20,6 +21,12 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
     status_ = new QLabel("Remote input is off.", this);
     status_->setObjectName("controllerStatus"); status_->setTextFormat(Qt::PlainText); status_->setWordWrap(true);
     layout->addWidget(status_);
+    auto* showDiagnostics = new QCheckBox("Show input diagnostics", this);
+    showDiagnostics->setObjectName("showInputDiagnostics"); layout->addWidget(showDiagnostics);
+    diagnostics_ = new QLabel(this); diagnostics_->setObjectName("inputDiagnostics");
+    diagnostics_->setTextFormat(Qt::PlainText); diagnostics_->setWordWrap(true);
+    diagnostics_->setTextInteractionFlags(Qt::TextSelectableByMouse); diagnostics_->hide(); layout->addWidget(diagnostics_);
+    connect(showDiagnostics, &QCheckBox::toggled, diagnostics_, &QWidget::setVisible);
     peers_ = new QComboBox(this); peers_->setObjectName("controllerPeer"); layout->addWidget(peers_);
     capabilities_ = new QComboBox(this); capabilities_->setObjectName("inputCapabilities");
     capabilities_->addItem("Controller",input::Gamepad); capabilities_->addItem("Mouse",input::Mouse);
@@ -120,9 +127,17 @@ void RoomGamepadControl::Tick() {
     uint8_t granted = 0, requested = 0; uint64_t permission = 0; input::Reason reason = input::Reason::Unavailable;
     bool pending = false, revoking = false;
     QStringList active;
+    diagnostics_->setText("No selected peer observations.");
     for (const auto& state : states) {
         if (state.granted) active << QString::fromStdString(state.peer);
-        if (state.peer == peer) { granted = state.granted; requested = state.requested; permission = state.permission; reason = state.reason; pending = state.grantPending; revoking = state.revokePending; }
+        if (state.peer == peer) {
+            granted = state.granted; requested = state.requested; permission = state.permission; reason = state.reason; pending = state.grantPending; revoking = state.revokePending;
+            auto time = [](auto value) { return value ? QString::number(*value) + " us" : QString("unknown"); };
+            diagnostics_->setText(QString("Selected peer: %1\nReason: %2; transport blocked: %3\nQueued transitions: %4; states: %5\nApplied: %6; rejected: %7; coalesced: %8\nLocal queue wait: %9; backend apply: %10\nLocal timings only; not network or input-to-display latency.")
+                .arg(QString::fromStdString(state.peer), frontend::InputReason(state.reason), state.transportBlocked ? "yes" : "no")
+                .arg(state.reliableQueued).arg(state.stateQueued).arg(state.applied).arg(state.rejected).arg(state.coalesced)
+                .arg(time(state.queueWaitUs), time(state.backendApplyUs)));
+        }
     }
     action_->setEnabled(room.phase == v2::RoomPhase::Active && consent_->isChecked() && !peer.empty() &&
         (host_ ? (requested&caps)==caps : ((caps&input::Gamepad)?devices_->count()>0:video_ && video_->presentedInputMapping().Valid()) && permission && !armed_ && !revoking));
@@ -141,8 +156,12 @@ void RoomGamepadControl::Tick() {
         if (!granted && poller_) Revoke();
         if(video_)video_->setControlCapture(bool(granted&3),granted&input::Mouse,granted&input::Keyboard);
     }
-    status_->setText(!actionError_.isEmpty()?actionError_:pending ? "Starting selected input…" : !active.empty() ? "Remote input active: " + active.join(", ") :
+    status_->setText(!actionError_.isEmpty()?actionError_:pending ? "Starting selected input…" : granted ? "Remote input active: " + active.join(", ") :
         reason == input::Reason::Backend ? "Input unavailable. Check the shared source, foreground window, or controller driver and slots." :
         reason == input::Reason::Ownership ? "Selected input is already in use." :
+        reason == input::Reason::Backpressure ? "Input stopped because the connection is congested. Request fresh permission to resume." :
+        reason == input::Reason::Watchdog ? "Input stopped because updates timed out. Request fresh permission to resume." :
+        reason == input::Reason::SourceChanged ? "The shared source changed. Request fresh permission to resume." :
         revoking ? "Waiting for release acknowledgement…" : armed_ || requested ? "Waiting for explicit host permission." : "Remote input is off.");
+    if (!granted && !active.empty()) status_->setText(status_->text() + "\nOther active peers: " + active.join(", "));
 }
