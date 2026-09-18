@@ -34,6 +34,13 @@ at `build/webrtc/laptop-live-window/host.stdout.log`. The updated viewer is inst
 beside the original as `ScreenShareUi-sizing-fix.exe`, with its own source-diff and
 binary identity manifest. The original package manifest is not relabeled.
 
-The updated two-PC check is pending. Neither the local regression nor a user
-confirmation of visible motion establishes physical latency, HDR/privacy, controller
-acceptance or completion of Stages 2–4.
+The user confirmed the updated two-PC viewer works. The final fresh receiver sample
+in `host-fixed.stdout.log` records 8,977 presented frames, 836 presentation drops,
+no queued frames, and 59 fps hardware decoding at 1920x1080 (10,073 decoded frames).
+The sample's recent jitter-buffer mean is 18 ms; this is not physical image latency.
+The completed log SHA256 is
+`5cb33ba4827331bd79609d5ba837463df5314e8285cc213dff12ccf60c79782b`.
+These observations verify the counter improvement on the laptop; neither this nor
+visible motion establishes physical latency, HDR/privacy, controller acceptance or
+completion of Stages 2–4. The controller is currently connected to the desktop by
+Bluetooth, not the laptop viewer, so laptop controller discovery is untested.

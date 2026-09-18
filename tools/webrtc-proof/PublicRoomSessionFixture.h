@@ -163,11 +163,13 @@ public:
     }
     std::shared_future<void> BeginStop() override { return native_->BeginStop(); }
 };
-template<class Predicate> void Wait(Predicate condition) {
+template<class Predicate> void Wait(Predicate condition, std::source_location location = std::source_location::current()) {
     auto deadline = std::chrono::steady_clock::now() + 20s;
-    while (!condition()) { Check(std::chrono::steady_clock::now() < deadline); std::this_thread::sleep_for(5ms); }
+    while (!condition()) { Check(std::chrono::steady_clock::now() < deadline, location); std::this_thread::sleep_for(5ms); }
 }
-template<class Future> auto Get(Future& future) { Check(future.wait_for(20s) == std::future_status::ready); return future.get(); }
+template<class Future> auto Get(Future& future, std::source_location location = std::source_location::current()) {
+    Check(future.wait_for(20s) == std::future_status::ready, location); return future.get();
+}
 class HeldRuntime final : public RoomRuntime {
     std::shared_future<void> barrier_;
     std::shared_ptr<Evidence> evidence_;

@@ -1,4 +1,5 @@
 #include "PublicRoomSessionFixture.h"
+#include <QSslSocket>
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false);
@@ -8,6 +9,11 @@ int main(int argc, char** argv) {
     std::optional<int64_t> inputResponseMs;
     try {
         Check(argc == 2);
+        // HTTPS runs exercise the production transport policy. Only the local
+        // Worker fixture needs the diagnostic plaintext exception.
+        const bool diagnosticPlaintext = std::string(argv[1]).starts_with("http://");
+        if (!diagnosticPlaintext && !QSslSocket::supportsSsl())
+            throw std::runtime_error("Qt TLS backend unavailable; deploy the networking runtime before live-service testing");
 #ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
         screenshare::WindowsMediaRuntime windowsRuntime;
         Check(SUCCEEDED(windowsRuntime.result()));
@@ -17,15 +23,18 @@ int main(int argc, char** argv) {
         auto hostEvidence = std::make_shared<Evidence>();
         auto factory = [](auto evidence) { return [evidence](auto identity, auto send) { return std::make_unique<Runtime>(identity, std::move(send), evidence); }; };
         RoomOptions hostOptions; hostOptions.origin = argv[1]; hostOptions.host = true; hostOptions.nickname = "FacadeHost"; hostOptions.name = "Facade media";
-        RoomSession host(factory(hostEvidence), true);
+        RoomSession host(factory(hostEvidence), diagnosticPlaintext);
         auto start = host.Start(hostOptions); auto duplicate = host.Start(hostOptions);
-        Check(Get(duplicate).error == RoomError::Busy); Check(Get(start).error == RoomError::None);
+        Check(Get(duplicate).error == RoomError::Busy);
+        const auto started = Get(start);
+        if (started.error != RoomError::None) std::cerr << "Host admission error " << int(started.error) << '\n';
+        Check(started.error == RoomError::None);
         std::array<std::unique_ptr<RoomSession>, 4> viewers;
         std::array<std::shared_ptr<Evidence>, 4> evidence;
         auto options = hostOptions; options.host = false; options.roomId = host.Status().roomId;
         for (size_t i = 0; i < viewers.size(); ++i) {
             evidence[i] = std::make_shared<Evidence>(); options.nickname = "FacadeViewer" + std::to_string(i);
-            viewers[i] = std::make_unique<RoomSession>(factory(evidence[i]), true);
+            viewers[i] = std::make_unique<RoomSession>(factory(evidence[i]), diagnosticPlaintext);
             auto joining = viewers[i]->Start(options); const auto joined = Get(joining);
             if (joined.error != RoomError::None) std::cerr << "Join error " << int(joined.error) << "; host error " << int(host.Status().error) << '\n';
             Check(joined.error == RoomError::None);
@@ -209,7 +218,7 @@ int main(int argc, char** argv) {
         });
         auto retiredEvidence = evidence[3];
         evidence[3] = std::make_shared<Evidence>();
-        viewers[3] = std::make_unique<RoomSession>(factory(evidence[3]), true);
+        viewers[3] = std::make_unique<RoomSession>(factory(evidence[3]), diagnosticPlaintext);
         auto rejoining = viewers[3]->Start(options); Check(Get(rejoining).error == RoomError::None);
         Wait([&] { return host.Status().activePeers == 4 && evidence[3]->smallFrames >= 30 && evidence[3]->audio->audibleBlocks >= 20; });
         Wait([&] { const auto status = host.Status().stream;
@@ -251,12 +260,12 @@ int main(int argc, char** argv) {
         unsigned frames = 0;
         for (auto& value : evidence) { Check(value->invalid == 0 && value->destroyed == 1); frames += value->frames; }
         // Cancellation is ordered even when the admission command has not run.
-        RoomSession cancelled(factory(std::make_shared<Evidence>()), true);
+        RoomSession cancelled(factory(std::make_shared<Evidence>()), diagnosticPlaintext);
         auto pending = cancelled.Start(hostOptions); auto cancelledStop = cancelled.Stop(); Get(cancelledStop);
         Check(Get(pending).error == RoomError::Cancelled);
         std::promise<void> release; auto barrier = release.get_future().share();
         auto heldEvidence = std::make_shared<Evidence>();
-        RoomSession held([&](auto, auto) { return std::make_unique<HeldRuntime>(barrier, heldEvidence); }, true);
+        RoomSession held([&](auto, auto) { return std::make_unique<HeldRuntime>(barrier, heldEvidence); }, diagnosticPlaintext);
         hostOptions.publicRoom = false;
         std::shared_future<void> heldStop;
         try {
@@ -268,7 +277,9 @@ int main(int argc, char** argv) {
         release.set_value(); Get(heldStop); Check(heldEvidence->destroyed == 1);
         // Production transport rejects the diagnostic plaintext origin.
         RoomSession secure(factory(std::make_shared<Evidence>()));
-        auto rejected = secure.Start(hostOptions); Check(Get(rejected).error == RoomError::Admission);
+        auto plaintextOptions = hostOptions;
+        plaintextOptions.origin = "http://127.0.0.1:12345";
+        auto rejected = secure.Start(plaintextOptions); Check(Get(rejected).error == RoomError::Admission);
         auto secureStop = secure.Stop(); Get(secureStop);
         RoomSession failedCapture([](auto identity, auto send) {
             NativeRoomRuntimeOptions options;
@@ -276,14 +287,15 @@ int main(int argc, char** argv) {
             options.capture = []() -> std::unique_ptr<ICaptureSource> { throw std::runtime_error("Injected capture startup failure"); };
             options.deliver = [](auto&, const auto&) {};
             return CreateNativeRoomRuntime(identity, std::move(send), std::move(options));
-        }, true);
+        }, diagnosticPlaintext);
         auto failedStart = failedCapture.Start(hostOptions); Get(failedStart);
         Wait([&] { return failedCapture.Status().phase == RoomPhase::Failed; });
         Check(failedCapture.Status().error == RoomError::Media);
         auto failedStop = failedCapture.Stop(); Get(failedStop);
         std::cout << "{\"passed\":true,\"public_session\":true,\"native_runtime\":true,\"rejoin\":true,\"viewers\":4,\"decoded_frames\":" << frames
             << ",\"authorized_input\":true,\"input_response_internal_ms\":" << (inputResponseMs ? std::to_string(*inputResponseMs) : "null")
-            << ",\"cancel_admission\":true,\"coalesced_stop\":true,\"media_drain_barrier\":true,\"production_tls_required\":true}\n";
+            << ",\"cancel_admission\":true,\"coalesced_stop\":true,\"media_drain_barrier\":true,\"production_tls_required\":true,\"diagnostic_plaintext\":"
+            << (diagnosticPlaintext ? "true" : "false") << "}\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL(); return result;
 }

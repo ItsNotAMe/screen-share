@@ -7,7 +7,12 @@ Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tra
 Laptop continuation: real two-PC video/resize was confirmed by the user, exposing
 a logical/native pixel sizing mismatch behind misleading busy/presentation counts.
 The native adapter fix passes a generated-window regression (3/90 before, 89/90
-after); updated laptop validation is pending. See PRESENTATION-SIZING.md.
+after); the user confirmed the updated laptop viewer works, with 8,977 counted
+presents and 59 fps hardware decoding in its final fresh telemetry sample.
+See PRESENTATION-SIZING.md; this is not external latency/controller acceptance.
+Live-service four-viewer lifecycle/recovery now passes with production TLS policy
+on desktop and laptop (LIVE-SERVICE.md). Earlier timed CLI failures remain open;
+the new proof uses same-machine media peers with remote HTTPS/WSS signaling.
 
 Checked implementation rows below apply to the shared v2 backend and opt-in
 frontends, not default-shell cutover or field acceptance. Mixed requirements are

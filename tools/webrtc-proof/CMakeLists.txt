@@ -109,9 +109,18 @@ endif()
   if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../signaling-worker/node_modules/miniflare/package.json")
       add_executable(PublicRoomSessionProof PublicRoomSessionProof.cpp)
       target_link_libraries(PublicRoomSessionProof PRIVATE MfWebRTCCodecs ScreenShareRoomSession)
+      get_filename_component(proofQtBin "${Qt6_DIR}/../../../bin" ABSOLUTE)
+      find_program(PROOF_WINDEPLOYQT_EXECUTABLE NAMES windeployqt6 windeployqt
+          PATHS "${proofQtBin}" NO_DEFAULT_PATH REQUIRED)
       add_custom_command(TARGET PublicRoomSessionProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
           "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>"
           "$<TARGET_FILE_DIR:PublicRoomSessionProof>" VERBATIM)
+      add_custom_command(TARGET PublicRoomSessionProof POST_BUILD COMMAND "${CMAKE_COMMAND}"
+          "-DWINDEPLOYQT_EXECUTABLE=${PROOF_WINDEPLOYQT_EXECUTABLE}"
+          "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:PublicRoomSessionProof>"
+          "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
+          -DWINDEPLOYQT_HEADLESS=ON
+          -P "${CMAKE_CURRENT_LIST_DIR}/../../cmake/RunWindeployQt.cmake" VERBATIM)
       add_test(NAME public-room-session-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
           "${CMAKE_CURRENT_LIST_DIR}/../../signaling-worker/tests/run-native-service.mjs"
           "$<TARGET_FILE:PublicRoomSessionProof>" "${CMAKE_CURRENT_BINARY_DIR}/public-room-evidence" media)

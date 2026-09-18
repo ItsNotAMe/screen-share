@@ -103,9 +103,12 @@ claimed by these local checks.
   and `native-checks-3`, with the transferred package verification alongside. Deployed
   service logs: `build/webrtc/v2-staging-deploy-authenticated.log`.
 
-Next: user-visible two-PC video/privacy/controller checks and interactive GPU
-capability. SSH software tests and successful HTTPS health do not establish
-physical presentation, cross-machine media, Internet/NAT or external latency.
+Continuation: two-PC video/resize and the corrected laptop presentation counters
+are verified (PRESENTATION-SIZING.md). Event-driven live HTTPS/WSS lifecycle now
+passes on each PC (LIVE-SERVICE.md); earlier timed CLI failures remain unresolved.
+The GameSir is Bluetooth-connected to the desktop, so laptop controller discovery
+is not yet tested. Privacy, physical controls, Internet/NAT and external latency
+still need their own evidence.
 
 ## Removing the temporary connection later
 

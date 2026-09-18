@@ -15,6 +15,10 @@ rerun. DXGI still reports unsupported on the current HDR desktop. This is not a
 passing DXGI fallback result. The isolated ten-room v2 service is now approved
 and deployed, with HTTPS health verified from both PCs. Laptop software codec
 checks pass; SSH-session hardware encoding falls back. See FIELD-TESTING.md.
+The updated two-PC viewer is confirmed working (PRESENTATION-SIZING.md). The full
+event-driven native lifecycle passes live HTTPS/WSS on both PCs (LIVE-SERVICE.md),
+using same-machine media peers. NAT/interface-change and external-latency gates
+remain open, as do the earlier timed CLI failures.
 
 | Stage | Implemented / locally verified | Remaining acceptance |
 | --- | --- | --- |

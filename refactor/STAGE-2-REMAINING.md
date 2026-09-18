@@ -11,6 +11,9 @@ Current closeout evidence and exact field requirements are consolidated in
 [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md). V2 report export and input
 diagnostics are now implemented; see [SESSION-REPORTS.md](SESSION-REPORTS.md).
 The laptop/GameSir first-pass workflow is ready in [FIELD-TESTING.md](FIELD-TESTING.md).
+LAN viewing/resize and corrected presentation counters are confirmed; live
+HTTPS/WSS lifecycle runs pass on both PCs. See [LIVE-SERVICE.md](LIVE-SERVICE.md)
+for the remaining NAT, device and latency boundaries.
 
 | Group | What remains | Completion evidence |
 | --- | --- | --- |

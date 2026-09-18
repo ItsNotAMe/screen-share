@@ -1,5 +1,9 @@
 # Headless media checks
 
+Live HTTPS/WSS lifecycle checks now pass on desktop and laptop with silent
+four-viewer media, recovery and shutdown. See [LIVE-SERVICE.md](LIVE-SERVICE.md)
+for the bounded one-command runner and its exact network/latency scope.
+
 Latest continuation: [FIELD-TESTING.md](FIELD-TESTING.md) records the final 12/12
 Release/Debug headless checks, earlier 16/16 desktop run, blocked final desktop
 attempt, FPS-resume fix, rejected pacing experiment and concise laptop handoff.

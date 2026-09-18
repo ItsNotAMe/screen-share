@@ -14,7 +14,12 @@ ten-room v2 service is now approved and deployed; both PCs pass HTTPS health.
 Laptop SSH and portable startup work; see FIELD-TESTING.md for actual test limits.
 First two-PC viewing/resize works by user observation. It exposed a native sizing
 bug with misleading presentation counters, reproduced and fixed locally; see
-[PRESENTATION-SIZING.md](PRESENTATION-SIZING.md). Updated laptop verification is pending.
+[PRESENTATION-SIZING.md](PRESENTATION-SIZING.md). The user confirmed the updated viewer
+works; fresh laptop telemetry now records 8,977 presented frames and 59 fps hardware
+decoding. Physical latency and controller acceptance remain open.
+The event-driven four-viewer native lifecycle now passes against the deployed
+HTTPS/WSS service on both PCs; see [LIVE-SERVICE.md](LIVE-SERVICE.md). Earlier
+timed CLI failures remain unresolved; NAT/interface-change tests are still open.
 The unattended batch results are in [UNATTENDED-RESULTS.md](UNATTENDED-RESULTS.md):
 two-hour software evidence is collected; Stage 4 still has a Release bandwidth-
 recovery failure and the documented device/resource/field gates. Do not repeat

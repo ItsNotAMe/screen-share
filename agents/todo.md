@@ -24,7 +24,10 @@ Continue from its measured queue scope; do not mistake it for full pipeline late
 Laptop SSH now works through the dedicated local test account and a pinned host
 key. Field build startup and software codec checks pass. SSH-session GPU encoder
 falls back; the real-service CLI regression still fails. FIELD-TESTING.md records
-the limits. Continue interactive two-machine checks without claiming those passed.
+the limits. The later event-driven four-viewer HTTPS/WSS proof passes on both PCs
+(refactor/LIVE-SERVICE.md), and user-visible LAN video/resize plus the presentation
+fix are verified (refactor/PRESENTATION-SIZING.md). Physical controller, privacy,
+NAT/interface and external-latency gates remain; the controller is on the desktop.
 
 Current continuation: the shared input service, controller and mouse/keyboard
 UI/CLI/device groups are implemented. See [DESKTOP-INPUT.md](../refactor/DESKTOP-INPUT.md).
