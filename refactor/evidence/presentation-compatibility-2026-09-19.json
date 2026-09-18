@@ -1,0 +1,516 @@
+{
+  "schema": 1,
+  "date": "2026-09-19",
+  "scope": "Desktop hardware encoder to laptop software decoder, production one-frame handoff and native D3D presentation. Not full Qt UI, photon timing or physical input/audio acceptance.",
+  "driverFileVersion": "32.0.101.8517",
+  "physicalInput": false,
+  "audibleOutput": false,
+  "externalLatencyVerified": false,
+  "validation": {
+    "proofBuilds": ["Release", "Debug"],
+    "uiCliTestsPassed": {"Release": 3, "Debug": 3},
+    "malformedEvidenceCasesRejected": 51,
+    "powershellVersions": ["5.1", "7"]
+  },
+  "cleanup": {"remainingLaptopProofTasks": 0, "remainingLaptopProofProcesses": 0},
+  "runs": [
+    {
+      "path": "build/presentation-laptop-smoke",
+      "passed": false,
+      "reportSha256": "3806f295814f13d603f71a1cbe8973f35513c8d439cf10a824f55b44ebf636e7",
+      "executableSha256": "1275c50584c35aafe4f5ed8fbf3bc0c6e437d1b3b52d43aa29fb59b047fedb91",
+      "error": "Command exited 1",
+      "host": {
+        "stdoutSha256": "18e3478170cb9d380de460a92a62cd49079143529ab0a3ee10a40f79c6fa3584",
+        "measuredSeconds": 23.0151022,
+        "cpuCorePercent": 43.72129183940795,
+        "freshFps": 0,
+        "invalidFrames": 0,
+        "windowSeconds": 11,
+        "privateMiBFirst": 172.58984375,
+        "privateMiBLast": 170.06640625,
+        "privateMiBPeak": 180.5234375,
+        "handlesFirst": 911,
+        "handlesLast": 906,
+        "sections": [
+          13,
+          13,
+          10
+        ],
+        "afterStopResources": {
+          "handles": 504,
+          "privateBytes": 128258048,
+          "workingSetBytes": 76914688
+        }
+      },
+      "viewer": {
+        "stdoutSha256": "c7aa9d11aad849691db7a2131bba9ce5cee3820c7ce634704be23754f407d10a",
+        "measuredSeconds": 20.0059701,
+        "cpuCorePercent": 129.9612059302238,
+        "freshFps": 46.43613858045305,
+        "invalidFrames": 0,
+        "windowSeconds": 10,
+        "privateMiBFirst": 37.634765625,
+        "privateMiBLast": 37.75390625,
+        "privateMiBPeak": 40.78125,
+        "handlesFirst": 605,
+        "handlesLast": 604,
+        "sections": [
+          5,
+          5,
+          5
+        ],
+        "afterStopResources": {
+          "handles": 487,
+          "privateBytes": 9609216,
+          "workingSetBytes": 39247872
+        },
+        "presentation": {
+          "busyDrops": 0,
+          "errors": 0,
+          "maxWaitUs": 16493,
+          "maximumFrameLatency": 0,
+          "measuredPresented": 0,
+          "occludedDrops": 0,
+          "pending": 0,
+          "presented": 0,
+          "presentedFps": 0,
+          "recoveries": 0,
+          "replaced": 19
+        }
+      }
+    },
+    {
+      "path": "build/presentation-laptop-smoke2",
+      "passed": false,
+      "reportSha256": "b7caf4c9f9e2c028d93e6c32cb543d989427249e700bffd59132cb6dcb3eeeac",
+      "executableSha256": "1eeb9c8525fe08f4267f5d49a105609fa78c7ce905d44e706f1620d024331eb2",
+      "error": "Command exited 1",
+      "host": {
+        "stdoutSha256": "90e5b2d1dcd158baf93da235aab886ab12d7477c266291419888021e0167ffcd",
+        "measuredSeconds": 23.00996,
+        "cpuCorePercent": 42.23714426274535,
+        "freshFps": 0,
+        "invalidFrames": 0,
+        "windowSeconds": 11,
+        "privateMiBFirst": 174.8515625,
+        "privateMiBLast": 172.93359375,
+        "privateMiBPeak": 182.77734375,
+        "handlesFirst": 911,
+        "handlesLast": 906,
+        "sections": [
+          13,
+          13,
+          10
+        ],
+        "afterStopResources": {
+          "handles": 504,
+          "privateBytes": 130220032,
+          "workingSetBytes": 76468224
+        }
+      },
+      "viewer": {
+        "stdoutSha256": "9f0cc87f18276f46c186a6b3a4b83cdbbeef1cb445bab0f84f1a753487cc62fb",
+        "measuredSeconds": 20.0033788,
+        "cpuCorePercent": 123.33853818735862,
+        "freshFps": 47.841917586442946,
+        "invalidFrames": 0,
+        "windowSeconds": 10,
+        "privateMiBFirst": 37.1953125,
+        "privateMiBLast": 37.45703125,
+        "privateMiBPeak": 40.4296875,
+        "handlesFirst": 606.5,
+        "handlesLast": 606,
+        "sections": [
+          5,
+          5,
+          5
+        ],
+        "afterStopResources": {
+          "handles": 489,
+          "privateBytes": 9826304,
+          "workingSetBytes": 39055360
+        },
+        "presentation": {
+          "busyDrops": 0,
+          "clientHeight": 501,
+          "clientWidth": 944,
+          "errors": 0,
+          "maxWaitUs": 16019,
+          "maximumFrameLatency": 0,
+          "measuredPresented": 0,
+          "minimizedDrops": 0,
+          "occludedDrops": 0,
+          "pending": 1,
+          "presented": 0,
+          "presentedFps": 0,
+          "recoveries": 0,
+          "replaced": 25,
+          "unavailableDrops": 1277,
+          "visible": false
+        }
+      }
+    },
+    {
+      "path": "build/presentation-laptop-interactive-smoke",
+      "passed": false,
+      "reportSha256": "24ce379185e90695d2f6391cdb90bb384c36f95334cfe7164c21be254d3c5d6f",
+      "executableSha256": "1eeb9c8525fe08f4267f5d49a105609fa78c7ce905d44e706f1620d024331eb2",
+      "error": "Failed or mismatched viewer evidence",
+      "host": {
+        "stdoutSha256": "ccb2840430e98d621668176ad55da607626c9b1140bd9a4aa9d95f56838d4b31",
+        "measuredSeconds": 23.0059611,
+        "cpuCorePercent": 41.36156259083651,
+        "freshFps": 0,
+        "invalidFrames": 0,
+        "windowSeconds": 11,
+        "privateMiBFirst": 174.00390625,
+        "privateMiBLast": 170.15234375,
+        "privateMiBPeak": 177.90234375,
+        "handlesFirst": 909,
+        "handlesLast": 904,
+        "sections": [
+          13,
+          13,
+          10
+        ],
+        "afterStopResources": {
+          "handles": 502,
+          "privateBytes": 128090112,
+          "workingSetBytes": 75169792
+        }
+      },
+      "viewer": {
+        "stdoutSha256": "92f444dfeca6df14a474b1039b65b44c5dfc083bc313388edc6e541a3f8a00a6",
+        "measuredSeconds": 20.0140227,
+        "cpuCorePercent": 69.24832257734973,
+        "freshFps": 50.864337232914195,
+        "invalidFrames": 0,
+        "windowSeconds": 10,
+        "privateMiBFirst": 89.9296875,
+        "privateMiBLast": 90.1484375,
+        "privateMiBPeak": 94.04296875,
+        "handlesFirst": 667.5,
+        "handlesLast": 666.5,
+        "sections": [
+          11,
+          11,
+          9
+        ],
+        "afterStopResources": {
+          "handles": 494,
+          "privateBytes": 50544640,
+          "workingSetBytes": 95502336
+        },
+        "presentation": {
+          "busyDrops": 23,
+          "clientHeight": 501,
+          "clientWidth": 944,
+          "errors": 0,
+          "maxWaitUs": 16107,
+          "maximumFrameLatency": 1,
+          "measuredPresented": 132,
+          "minimizedDrops": 0,
+          "occludedDrops": 1048,
+          "pending": 0,
+          "presented": 245,
+          "presentedFps": 6.595375751222666,
+          "recoveries": 0,
+          "replaced": 73,
+          "unavailableDrops": 0,
+          "visible": true
+        }
+      }
+    },
+    {
+      "path": "build/presentation-laptop-sustained",
+      "passed": false,
+      "reportSha256": "3980ff7fd5238d17cb956aae6fac2daaca09c6e7b934431ef827193b5ab12411",
+      "executableSha256": "08e177bc16f210208ceb531713f9d93946be193a5e5d8d93c562bca2a7a5a799",
+      "error": "Host rejected the hardware run; inspect host evidence"
+    },
+    {
+      "path": "build/presentation-laptop-recovery-smoke",
+      "passed": false,
+      "reportSha256": "9eee8addfa7838ca9028e4fd6fe598236280a24be81528fe198adce5e5698da2",
+      "executableSha256": "20aef370a450c83979221012359268235faf248e30247d9f8e4ddd9561bc8f20",
+      "error": "Failed or mismatched viewer evidence",
+      "host": {
+        "stdoutSha256": "bc97a2bb0a2c382abe0d2e7ffad7c4a63e24c44edf028aa580c71916b2413aaf",
+        "measuredSeconds": 34.0138101,
+        "cpuCorePercent": 42.124434039807845,
+        "freshFps": 0,
+        "invalidFrames": 0,
+        "windowSeconds": 17,
+        "privateMiBFirst": 168.58984375,
+        "privateMiBLast": 168.921875,
+        "privateMiBPeak": 190.94921875,
+        "handlesFirst": 911,
+        "handlesLast": 897,
+        "sections": [
+          13,
+          13,
+          10
+        ],
+        "afterStopResources": {
+          "handles": 504,
+          "privateBytes": 125616128,
+          "workingSetBytes": 75890688
+        },
+        "sessionHealthy": true
+      },
+      "viewer": {
+        "stdoutSha256": "5d3e4bc23e9d9ed89d0f7d6ac6871156960fab70a4424f835f709e562d0291ab",
+        "measuredSeconds": 30.0006939,
+        "cpuCorePercent": 73.07122652919705,
+        "freshFps": 49.0321992185654,
+        "invalidFrames": 0,
+        "windowSeconds": 15,
+        "privateMiBFirst": 89.30859375,
+        "privateMiBLast": 89.82421875,
+        "privateMiBPeak": 99.74609375,
+        "handlesFirst": 667,
+        "handlesLast": 658,
+        "sections": [
+          11,
+          11,
+          9
+        ],
+        "afterStopResources": {
+          "handles": 485,
+          "privateBytes": 50319360,
+          "workingSetBytes": 86024192
+        },
+        "presentation": {
+          "busyDrops": 83,
+          "clientHeight": 501,
+          "clientWidth": 944,
+          "errors": 0,
+          "hardwareAccelerated": true,
+          "maxWaitUs": 16129,
+          "maximumFrameLatency": 1,
+          "measuredPresented": 763,
+          "minimizedDrops": 0,
+          "occludedDrops": 741,
+          "pending": 1,
+          "presented": 970,
+          "presentedFps": 25.43274507393977,
+          "recoveries": 0,
+          "replaced": 41,
+          "unavailableDrops": 0,
+          "visible": true
+        },
+        "presentationRecovery": {
+          "minimizedBounded": true,
+          "passed": true,
+          "resizeLarge": true,
+          "resizeSmall": true,
+          "restored": true
+        },
+        "sessionHealthy": true
+      }
+    },
+    {
+      "path": "build/presentation-laptop-final",
+      "passed": false,
+      "reportSha256": "816d8880de0cdf71fdaddd005177ca4ca71f0fcefe4ebc945d916df89a8b5432",
+      "executableSha256": "411ac1e504a53f021292730ad56d2a23c3545780dfb5ca9cf290685cea531f47",
+      "error": "Command exited 1"
+    },
+    {
+      "path": "build/presentation-laptop-final2",
+      "passed": false,
+      "reportSha256": "9dac4f5e02c310e4d12d528f261d003a7d49bbf1d579f050e482749a31d8a439",
+      "executableSha256": "411ac1e504a53f021292730ad56d2a23c3545780dfb5ca9cf290685cea531f47",
+      "error": "Command exited 1"
+    },
+    {
+      "path": "build/presentation-laptop-final3",
+      "passed": false,
+      "reportSha256": "ba6cb77c5153985f30158ca18788f0c98b76129016719851a953462f6271f230",
+      "executableSha256": "411ac1e504a53f021292730ad56d2a23c3545780dfb5ca9cf290685cea531f47",
+      "error": "Failed or mismatched viewer evidence",
+      "host": {
+        "stdoutSha256": "df2ec57631e5e987795f385a65fcbb771c679c6264d6cd714db61064dc76ff6d",
+        "measuredSeconds": 305.0023162,
+        "cpuCorePercent": 41.367513719884336,
+        "freshFps": 0,
+        "invalidFrames": 0,
+        "windowSeconds": 30,
+        "privateMiBFirst": 177.8203125,
+        "privateMiBLast": 179.00390625,
+        "privateMiBPeak": 186.9375,
+        "handlesFirst": 906,
+        "handlesLast": 895.5,
+        "sections": [
+          13,
+          13,
+          10
+        ],
+        "afterStopResources": {
+          "handles": 498,
+          "privateBytes": 137682944,
+          "workingSetBytes": 76820480
+        },
+        "sessionHealthy": true
+      },
+      "viewer": {
+        "stdoutSha256": "d7ebb116c88bbad15a0bbf81ce19c87f663bd7ad5b4a1014a76e3619de959771",
+        "measuredSeconds": 300.0156104,
+        "cpuCorePercent": 69.97552551352175,
+        "freshFps": 47.62418855788978,
+        "invalidFrames": 0,
+        "windowSeconds": 30,
+        "privateMiBFirst": 89.3671875,
+        "privateMiBLast": 90.83203125,
+        "privateMiBPeak": 100.796875,
+        "handlesFirst": 670,
+        "handlesLast": 656,
+        "sections": [
+          11,
+          11,
+          9
+        ],
+        "afterStopResources": {
+          "handles": 478,
+          "privateBytes": 52580352,
+          "workingSetBytes": 76144640
+        },
+        "presentation": {
+          "busyDrops": 1254,
+          "clientHeight": 501,
+          "clientWidth": 944,
+          "errors": 0,
+          "hardwareAccelerated": true,
+          "maxWaitUs": 28321,
+          "maximumFrameLatency": 1,
+          "measuredPresented": 13331,
+          "minimizedDrops": 0,
+          "occludedDrops": 0,
+          "pending": 1,
+          "presented": 13563,
+          "presentedFps": 44.43435453983964,
+          "recoveries": 0,
+          "replaced": 454,
+          "unavailableDrops": 0,
+          "visible": true
+        },
+        "presentationRecovery": {
+          "minimizedBounded": true,
+          "passed": true,
+          "resizeLarge": true,
+          "resizeSmall": true,
+          "restored": true
+        },
+        "postRecoveryVideo": {
+          "frames": 15054,
+          "freshFrames": 14343,
+          "invalidFrames": 0
+        },
+        "sessionHealthy": true
+      }
+    },
+    {
+      "path": "build/presentation-laptop-event-driven",
+      "passed": true,
+      "reportSha256": "19cd843a7e476bd407bdf5fd1bc3a40c780e187a80299dc70593997b63e6d4f5",
+      "executableSha256": "1dbba0888cf7a3365a6f83e30c527f386922e74b151f2c62840206746e649046",
+      "host": {
+        "stdoutSha256": "8222d397d0e4b478454262221a3726376452a6d3be51f6c230ed08c6a0ff7df2",
+        "measuredSeconds": 303.0129879,
+        "cpuCorePercent": 41.46377548722888,
+        "freshFps": 0,
+        "invalidFrames": 0,
+        "windowSeconds": 30,
+        "privateMiBFirst": 182.125,
+        "privateMiBLast": 187.56640625,
+        "privateMiBPeak": 204.79296875,
+        "handlesFirst": 898,
+        "handlesLast": 887,
+        "sections": [
+          13,
+          13,
+          10
+        ],
+        "afterStopResources": {
+          "handles": 495,
+          "privateBytes": 146612224,
+          "workingSetBytes": 82599936
+        },
+        "sessionHealthy": true
+      },
+      "viewer": {
+        "stdoutSha256": "ab77efa7844801ef1be95849d2cbd5b3a326110101388cb214ae13dc10c5dfd0",
+        "measuredSeconds": 300.0054711,
+        "cpuCorePercent": 68.72270503736156,
+        "freshFps": 48.31245225914148,
+        "invalidFrames": 0,
+        "windowSeconds": 30,
+        "privateMiBFirst": 89.08203125,
+        "privateMiBLast": 90.52734375,
+        "privateMiBPeak": 94.796875,
+        "handlesFirst": 659,
+        "handlesLast": 645,
+        "sections": [
+          11,
+          11,
+          9
+        ],
+        "afterStopResources": {
+          "handles": 478,
+          "privateBytes": 52916224,
+          "workingSetBytes": 74981376
+        },
+        "presentation": {
+          "busyDrops": 979,
+          "clientHeight": 501,
+          "clientWidth": 944,
+          "errors": 0,
+          "hardwareAccelerated": true,
+          "maxWaitUs": 15873,
+          "maximumFrameLatency": 1,
+          "measuredPresented": 14308,
+          "minimizedDrops": 0,
+          "occludedDrops": 0,
+          "pending": 1,
+          "presented": 14590,
+          "presentedFps": 47.69246356587528,
+          "recoveries": 0,
+          "replaced": 8,
+          "unavailableDrops": 0,
+          "visible": true
+        },
+        "presentationRecovery": {
+          "minimizedBounded": true,
+          "passed": true,
+          "resizeLarge": true,
+          "resizeSmall": true,
+          "restored": true
+        },
+        "postRecoveryVideo": {
+          "frames": 15306,
+          "freshFrames": 14545,
+          "invalidFrames": 0
+        },
+        "sessionHealthy": true
+      }
+    }
+  ],
+  "finalSourceHashes": {
+    "tools/webrtc-proof/CrossMachineRoomProof.cpp": "3ab91089d3bb27319f7c289979fa3c4a7352196eed87c97b55fd38d59025a8ea",
+    "tools/webrtc-proof/CrossMachineLoadProof.h": "d5daab60633319070c1acbf0ce8b79a07f8a3cc98a9ec0c1bc3f5d4e5e4b2c01",
+    "tools/backend-comparison/ComparisonScene.h": "ae72688139b994f6b9e4e4931c602cd6523cc12ab8a31424241048479f41eed1",
+    "backend/media/webrtc/MediaNetworkPolicy.h": "1fd96b567699c1bc074049852ca54fc8c144f2721798a7de92b2f66e146d72c9",
+    "backend/media/webrtc/WindowsRoomRuntime.h": "45b8ec94668aa9b7df2ec6565d89ca58787c7017c540de5f6dc1c4a96c484077",
+    "backend/media/webrtc/WindowsRoomRuntime.cpp": "802bc66309364854cc3f3abb2e4200ec981ba4385f8640673e7411dcefbd4bde",
+    "backend/media/webrtc/MfVideoDecoderFactory.cpp": "b81eb593db1071879ff9a36b739ce1790c2dfaa7798d8c7d091fa5b9d1ef578d",
+    "frontend/shared/LatestRoomVideoFrame.h": "f428c85cb24d0c0015bc76f64c03b4bbe914d034a903da0f1de0d867495c2f50",
+    "backend/render/FramePresentationBackend.cpp": "0ab1c7c07851162f4d1eb8c1545db932775257fa99ac04e5259bc7c0957f9a47",
+    "backend/render/FramePresentationBackend.h": "f57809d7620f8a0fbf8902957a210bebd9e3d7a9f6cdf23777186006f863a6af",
+    "backend/render/PresentationTarget.h": "77fbf0c29faea6a338550a9e39c07f1cc23b02d3bea83061a47c867474acc64f",
+    "backend/render/Nv12D3D11Presenter.cpp": "4c72db6179d936d821216978cd0c790a389bd55b009b5370875ad646312d9e60",
+    "scripts/test-room-hardware-load.py": "cd35fb68cef0e2918e190801caab6d29f203af5567a684c99f9ad7f540fa8a2b",
+    "scripts/test-room-live-service.ps1": "90c36e8c202f72bb15920861bb04a79ccb1278c1a7ce225a48c758caa8b12f0b",
+    "scripts/RoomLiveEvidence.ps1": "e77ca1906d00613a83fcec42f8b4eb398cf2d25211912d008fac1b5331afe6fc"
+  }
+}

@@ -33,6 +33,13 @@ software on the receiver. The default remains `--decoder hardware`, with the
 original hardware-only requirements. A software-mode pass never closes hardware
 decode acceptance. Both modes retain the same fresh-FPS and invalid-image gates.
 
+For sustained native presentation and automatic resize/minimize/restore checks,
+add `--consumer presentation --interactive-viewer --runtime-name presentation-runtime`.
+The test account must already have an unlocked desktop; the runner uses a
+temporary standard-user task, not the invisible SSH window station. Reusing the
+runtime path avoids assigning a new firewall application path for every run.
+See [HEADLESS-TESTING.md](HEADLESS-TESTING.md) for prerequisites and limits.
+
 The host waits for the viewer, and the viewer warms up before a timed load interval.
 Both record one-second private-memory, working-set and handle samples, process
 CPU and post-stop resources. The host records actual hardware encode counters,

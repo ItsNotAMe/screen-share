@@ -46,6 +46,7 @@ public:
     }
     void Reset() noexcept override { presenter_.Reset(); }
     uint32_t MaximumFrameLatency() const noexcept override { return presenter_.maximumFrameLatency(); }
+    bool HardwareAccelerated() const noexcept override { return presenter_.isHardwareAccelerated(); }
     screenshare::PresentationOutcome LastOutcome() const noexcept override { return outcome_; }
 };
 }
@@ -70,6 +71,7 @@ void FramePresentationSession::Clear() noexcept {
     recovery_ = {};
     statistics_.recoveries = 0;
     statistics_.maximumFrameLatency = 0;
+    statistics_.hardwareAccelerated = false;
     statistics_.terminal = false;
     statistics_.lastError = S_OK;
     statistics_.outcome = screenshare::PresentationOutcome::Unknown;

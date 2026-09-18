@@ -6,7 +6,8 @@ param(
     [string]$RoomId,
     [string]$ReadyFile,
     [ValidateRange(10,300)][int]$Seconds = 60,
-    [ValidateSet('hardware','software')][string]$Decoder = 'hardware'
+    [ValidateSet('hardware','software')][string]$Decoder = 'hardware',
+    [ValidateSet('pixels','presentation')][string]$Consumer = 'pixels'
 )
 # Silent endpoints; load-host captures only its own generated window. No OS input.
 $ErrorActionPreference = 'Stop'
@@ -46,8 +47,10 @@ if ($Scenario.StartsWith('load-')) {
     $report.mediaScope = 'generated 1080p WGC window to remote CPU pixel consumer; no physical latency'
     $report.requestedSeconds = $Seconds
     $report.decoderMode = $Decoder
+    $report.consumerMode = $Consumer
+    if ($Consumer -eq 'presentation') { $report.mediaScope = 'generated 1080p WGC window to production frame handoff and D3D presenter; no external latency' }
     $argument = if ($Scenario -eq 'load-host') { '"' + $ReadyFile + '"' } else { $RoomId }
-    $process.StartInfo.Arguments = $Scenario + ' ' + $report.origin + ' ' + $argument + ' ' + $Seconds + ' ' + $Decoder
+    $process.StartInfo.Arguments = $Scenario + ' ' + $report.origin + ' ' + $argument + ' ' + $Seconds + ' ' + $Decoder + ' ' + $Consumer
 }
 $process.StartInfo.WorkingDirectory = Split-Path -Parent $binary
 $process.StartInfo.UseShellExecute = $false
@@ -83,7 +86,7 @@ try {
     foreach ($name in $assertions) {
         if ($metrics.$name -isnot [bool] -or $metrics.$name -ne $true) { throw "Missing/failed assertion: $name" }
     }
-    if ($Scenario.StartsWith('load-')) { Assert-RoomLoadEvidence $metrics $Scenario.Substring(5) $Seconds $Decoder }
+    if ($Scenario.StartsWith('load-')) { Assert-RoomLoadEvidence $metrics $Scenario.Substring(5) $Seconds $Decoder $Consumer }
     if ($Scenario -eq 'public-session' -and
         ($metrics.diagnostic_plaintext -isnot [bool] -or $metrics.diagnostic_plaintext -ne $false -or
         $metrics.viewers -ne 4 -or $metrics.decoded_frames -lt 180)) {

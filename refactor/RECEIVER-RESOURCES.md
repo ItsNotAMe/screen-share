@@ -1,5 +1,47 @@
 # Laptop receiver resource attribution
 
+## Native presentation and recovery — 2026-09-19
+
+The final five-minute desktop hardware-host → laptop software-viewer run now
+**passes native GPU presentation**, using the production `LatestRoomVideoFrame`
+handoff and `FramePresentationSession` backend. It delivers **47.7 rendered FPS**
+and **48.3 fresh decoded FPS**, with zero invalid markers, zero rendering errors,
+no occlusion and a hardware graphics device with maximum frame latency one.
+The stream is 1920×1080; the initial test-window client is 944×501, not a
+full-screen or complete Qt UI measurement. Automatic resizing to two sizes,
+bounded dropping while minimized, and fresh rendering after restore all pass.
+
+The viewer uses 68.7% of one CPU core. First/last 30-second median private memory
+is **89.1 / 90.5 MiB**, peak **94.8 MiB**; handle medians fall **659→645**.
+Section counts are **11→11→9** (warm-up, after streaming/recovery, after stop).
+The previously identified Intel graphics DLL reports version **32.0.101.8517**.
+This qualifies the finite native presentation run in compatibility mode, not
+hardware decoding, indefinite resource bounds or external gaming latency.
+
+The runner uses an existing signed-in desktop through a temporary non-admin
+task, removed afterward. A stable, hash-verified runtime path avoids creating a
+new firewall application path on every run; evidence/ZIPs stay separate. No
+firewall rule, driver, password, physical input or audible output is changed.
+The test window temporarily requests display wakefulness and releases it on exit.
+
+Earlier failures are retained in the [compact evidence](evidence/presentation-compatibility-2026-09-19.json):
+two invisible SSH-window runs, an occluded interactive run, an interrupted
+four-minute run without native samples, and a recovery smoke affected by a
+network prompt that the user confirmed. Two later attempts failed before media
+in runtime-staging preflight. The corrected stable-path five-minute run had no
+occlusion and stable resources but only **44.4 rendered FPS**, failing the same
+45-FPS gate. Replacing the proof's coarse polling sleep with frame-ready/message
+wakeups produced the final passing run without lowering that gate. The production
+Qt renderer already wakes on work; this is a fixture scheduling correction,
+not a new legacy/v2 performance win. Connection-state failures now retain samples
+and room phase/error instead of throwing away the measurements.
+
+Raw final evidence: `build/presentation-laptop-event-driven`. The retained
+polling control is `build/presentation-laptop-final3`. Release/Debug proof builds
+and UI/CLI tests pass. PowerShell 5.1 and 7 reject all 51 malformed timing/load/
+decoder/presentation cases, including missing recovery and false GPU claims.
+Repeat instructions: [HEADLESS-TESTING.md](HEADLESS-TESTING.md).
+
 ## Decoder compatibility path
 
 The receiver now supports a local, explicit software-decoder choice without

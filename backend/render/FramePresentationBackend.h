@@ -20,6 +20,7 @@ public:
     virtual void Update(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
         screenshare::Nv12D3D11Presenter::ScaleMode scale = screenshare::Nv12D3D11Presenter::ScaleMode::Fit) = 0;
     virtual uint32_t MaximumFrameLatency() const noexcept = 0;
+    virtual bool HardwareAccelerated() const noexcept { return false; }
     virtual screenshare::PresentationOutcome LastOutcome() const noexcept { return screenshare::PresentationOutcome::Unknown; }
 };
 using FramePresentationFactory = std::function<std::unique_ptr<FramePresentationBackend>()>;
@@ -30,6 +31,7 @@ public:
     struct Statistics {
         uint64_t errors = 0, recoveries = 0;
         uint32_t maximumFrameLatency = 0;
+        bool hardwareAccelerated = false;
         bool terminal = false;
         HRESULT lastError = S_OK;
         screenshare::PresentationOutcome outcome = screenshare::PresentationOutcome::Unknown;
@@ -81,11 +83,13 @@ private:
             }
             statistics_.recoveries = recovery_.recoveries();
             statistics_.maximumFrameLatency = backend_ ? backend_->MaximumFrameLatency() : 0;
+            statistics_.hardwareAccelerated = backend_ && backend_->HardwareAccelerated();
             return result;
         } catch (...) {
             if (backend_) backend_->Reset();
             statistics_.recoveries = recovery_.recoveries();
             statistics_.maximumFrameLatency = 0;
+            statistics_.hardwareAccelerated = false;
             statistics_.terminal = true;
             return false;
         }

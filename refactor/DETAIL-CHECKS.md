@@ -4,6 +4,17 @@ Last reconciled: 2026-09-19 (including congestion-window settling, continuous di
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+Native presentation acceptance (RECEIVER-RESOURCES.md): the five-minute laptop
+software-decoder/GPU-renderer run passes at 47.7 rendered / 48.3 fresh decoded
+FPS, zero invalid images/render errors, stable 11 Section handles and 89→91 MiB
+median private memory. Automatic resize/minimize/restore passes. The runner uses
+the signed-in test desktop, verified reusable runtime paths, frame-ready wakeups
+and strict presentation/recovery evidence; earlier failures remain recorded.
+Release/Debug UI/CLI tests and 51 malformed-evidence cases pass. This completes
+native rendering/recovery for this mode, not full Qt field, physical device,
+hardware-decoder resource or external latency gates. Remaining groups are indexed
+at the top of TODO.md.
+
 Decoder compatibility closeout (RECEIVER-RESOURCES.md): backend receiver choice,
 strict viewer-only CLI/JSON parsing, saved join-form preference, corrupt-setting
 and failed-write handling, and actual decoder-mode evidence are implemented.
@@ -19,7 +30,7 @@ five-minute real WGC desktop host → laptop hardware decoder run at 52.8 fresh
 placement and binary/validator hashes and preserves failed runs. Hardware delivery
 passes; laptop private-memory/handle growth remains an explicit resource issue,
 not a waived memory optimization. The software workaround above does not establish
-sustained stability. Physical presentation/input, four-viewer remote hardware,
+hardware-decoder stability. Physical presentation/input, four-viewer remote hardware,
 Internet/NAT and device acceptance remain separate.
 
 Receiver resource attribution: [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md)

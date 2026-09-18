@@ -6,24 +6,48 @@ checks are implementation details, **not separate user turns**.
 
 ## Working agreement
 
-Backend feature scope is frozen for closeout. Finish these groups in order:
+Backend feature scope is frozen for closeout. **This section is the remaining-group
+index before frontend work.** The detailed gates and evidence live in
+[STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).
 
-1. Paired legacy/v2 measurements and an explicit per-metric scorecard (COMPARISON.md).
-2. Local congestion settling is complete (CONGESTION-WINDOW.md); memory optimization is backlogged.
-3. One consolidated two-PC/device/network acceptance pass, preserving physical latency gates.
-4. Stage 5 default cutover and obsolete-code removal, then Stage 6 frontend redesign.
+| Remaining group | Done when | Status |
+| --- | --- | --- |
+| 1. Presentation, devices and gaming acceptance | Sustained GPU presentation and recovery are verified; source privacy/HDR/adapters, audio switching/unplug, controller/input release and external image/input/A-V timing have recorded results. | Native presentation portion passed: five minutes of software decoding plus GPU rendering and automatic window recovery. Physical device/source and external timing checks remain; full Qt field acceptance is separate. |
+| 2. Resource, network and service closeout | Resolve or explicitly scope the hardware receiver growth and original capture-handle failure; finish multi-viewer/reverse hardware load, matched impaired legacy comparison, Internet/NAT/interface recovery, billed usage/headroom and hibernation evidence. | Open. The software workaround does not itself close hardware resource acceptance. |
+| 3. Stage 5 cutover and cleanup | After the acceptance gates pass, make v2 the normal path, remove superseded legacy code/commands, verify packaging and the final regression matrix. | Waiting for groups 1–2. |
+
+**Then Stage 6: frontend look-and-feel redesign.** No new backend features are
+planned between these groups. A failed check belongs to its existing group,
+not a new milestone or a separate user turn. Relative memory optimization is
+backlogged; leak/unbounded-growth checks remain required.
+
+Completed foundations: the corrected fair normal-load legacy/v2 scorecard
+([COMPARISON.md](COMPARISON.md)), shared capture/codec fixes, and local congestion
+settling ([CONGESTION-WINDOW.md](CONGESTION-WINDOW.md)). Do not repeat these to
+substitute for the remaining field gates.
 
 Do not add unrelated backend features or repeat completed v2-only harness work.
 
-Latest completed group (2026-09-19): explicit viewer decoder compatibility,
+Latest completed work (2026-09-19): native presentation/recovery acceptance in
+software-decoder compatibility mode. The actual laptop delivers 47.7 rendered /
+48.3 fresh decoded FPS for five minutes with zero invalid images/render errors.
+Resize/minimize/restore pass, viewer private-memory medians are 89→91 MiB and
+Section handles stay at 11 while streaming. The runner now supports a signed-in
+desktop, stable verified executable paths to avoid repeated firewall prompts,
+event-driven frame wakeups and preserved connection-failure samples. Release/Debug
+UI/CLI checks and 51 malformed-evidence rejection cases pass. See
+[RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md). This closes the native presentation
+portion of group 1, not its physical device or external latency requirements.
+
+Earlier completed group: explicit viewer decoder compatibility,
 including the backend option, existing join-screen preference, CLI/JSON inputs,
 strict actual-codec evidence and Release/Debug UI/CLI tests. The five-minute
 laptop software receiver passes at 45.4 fresh FPS with no invalid images,
 31→33 MiB private-memory medians and Section handles fixed at five. Hardware
 host encoding is retained. See [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md).
 This supplies a measured workaround; the graphics/kernel hardware issue is not
-fixed or silently waived. Continue the consolidated physical/device/network
-acceptance group, including sustained actual presentation in compatibility mode.
+fixed or silently waived. The newer native presentation result above extends
+this CPU-consumer evidence; the remaining physical/device/network gates still apply.
 
 Earlier hardware acceptance: [HARDWARE-LAN.md](HARDWARE-LAN.md) passes
 five-minute desktop-to-laptop 1080p60 hardware delivery at 52.8 fresh FPS, with

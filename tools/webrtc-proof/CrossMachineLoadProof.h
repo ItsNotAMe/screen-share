@@ -5,6 +5,8 @@
 #include "media/audio/SilentPcmCapture.h"
 #include "media/audio/DiscardPcmPlayout.h"
 #include "media/webrtc/D3dVideoFrameBuffer.h"
+#include "../../frontend/shared/LatestRoomVideoFrame.h"
+#include "render/FramePresentationBackend.h"
 #include <psapi.h>
 #include <processsnapshot.h>
 #include <set>
@@ -34,7 +36,10 @@ class Sink final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     unsigned frames_ = 0, invalid_ = 0;
     std::set<unsigned> ids_;
 public:
+    std::shared_ptr<LatestRoomVideoFrame> presentation;
+    HANDLE presentationReady = nullptr; // Owned until the room's callbacks drain.
     void OnFrame(const webrtc::VideoFrame& frame) override {
+        if (presentation) { presentation->OnFrame(frame); SetEvent(presentationReady); }
         const auto pixels = frame.video_frame_buffer()->ToI420();
         std::lock_guard lock(mutex_); ++frames_;
         if (!pixels || frame.width() != 1920 || frame.height() != 1080) { ++invalid_; return; }
@@ -53,6 +58,81 @@ public:
     QJsonObject Read() {
         std::lock_guard lock(mutex_);
         return {{"frames", int(frames_)}, {"freshFrames", int(ids_.size())}, {"invalidFrames", int(invalid_)}};
+    }
+};
+// Uses the production bounded handoff and presentation backend on its window
+// owner thread. No OS input is sent; successful Present is not photon timing.
+class Presentation {
+    HWND window_ = nullptr;
+    HANDLE ready_ = nullptr;
+    FramePresentationSession backend_;
+    std::shared_ptr<LatestRoomVideoFrame> frames_;
+    uint64_t presented_ = 0;
+    EXECUTION_STATE previousExecutionState_ = 0;
+public:
+    explicit Presentation(std::shared_ptr<LatestRoomVideoFrame> frames) : frames_(std::move(frames)) {
+        WNDCLASSW type{}; type.lpfnWndProc = DefWindowProcW;
+        type.hInstance = GetModuleHandle(nullptr); type.lpszClassName = L"ScreenShareLoadPresentation";
+        Check(RegisterClassW(&type) || GetLastError() == ERROR_CLASS_ALREADY_EXISTS);
+        window_ = CreateWindowExW(WS_EX_NOACTIVATE, type.lpszClassName, L"ScreenShare silent presentation test",
+            WS_OVERLAPPEDWINDOW, 50, 50, 960, 540, nullptr, nullptr, type.hInstance, nullptr);
+        Check(window_ != nullptr); ShowWindow(window_, SW_SHOWNOACTIVATE);
+        Check(SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
+        previousExecutionState_ = SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+        ready_ = CreateEventW(nullptr, FALSE, FALSE, nullptr); Check(ready_ != nullptr);
+    }
+    ~Presentation() {
+        frames_->Stop(); backend_.Release(); DestroyWindow(window_);
+        CloseHandle(ready_);
+        if (previousExecutionState_) SetThreadExecutionState(previousExecutionState_);
+    }
+    HANDLE readyEvent() const { return ready_; }
+    void WaitForFrame() {
+        Check(MsgWaitForMultipleObjectsEx(1, &ready_, 10, QS_ALLINPUT, MWMO_INPUTAVAILABLE) != WAIT_FAILED);
+    }
+    void Pump() {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+        Check(IsWindow(window_));
+        if (auto frame = frames_->Take()) {
+            RECT client{}; Check(GetClientRect(window_, &client));
+            const auto pixels = frame->native ? std::span<const uint8_t>{} : frame->pixels();
+            screenshare::Nv12D3D11Presenter::FrameView view{frame->width, frame->height,
+                pixels.data(), pixels.size(), frame->native ? frame->native->texture() : nullptr};
+            if (backend_.Present(window_, client.right, client.bottom, false, true, view)) ++presented_;
+            Check(!backend_.statistics().terminal);
+        }
+    }
+    QJsonObject Read() const {
+        const auto stats = backend_.statistics(); const auto queue = frames_->statistics();
+        RECT client{}; GetClientRect(window_, &client);
+        return {{"presented", qint64(presented_)}, {"errors", qint64(stats.errors)},
+            {"hardwareAccelerated", stats.hardwareAccelerated},
+            {"visible", bool(IsWindowVisible(window_))}, {"clientWidth", int(client.right)}, {"clientHeight", int(client.bottom)},
+            {"recoveries", qint64(stats.recoveries)}, {"maximumFrameLatency", int(stats.maximumFrameLatency)},
+            {"busyDrops", qint64(stats.busyDrops)}, {"occludedDrops", qint64(stats.occludedDrops)},
+            {"unavailableDrops", qint64(stats.unavailableDrops)}, {"minimizedDrops", qint64(stats.minimizedDrops)},
+            {"pending", qint64(queue.pending)}, {"replaced", qint64(queue.replaced)}, {"maxWaitUs", qint64(queue.maxWaitUs)}};
+    }
+    QJsonObject ExerciseRecovery() {
+        auto advance = [&] {
+            const auto target = presented_ + 8; const auto deadline = Clock::now() + 3s;
+            while (presented_ < target && Clock::now() < deadline) { Pump(); WaitForFrame(); }
+            return presented_ >= target;
+        };
+        auto resize = [&](int width, int height) {
+            return SetWindowPos(window_, nullptr, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) && advance();
+        };
+        const bool resizedSmall = resize(640, 360), resizedLarge = resize(1280, 720);
+        ShowWindow(window_, SW_MINIMIZE); Pump();
+        const auto before = presented_; const auto dropped = backend_.statistics().minimizedDrops;
+        const auto until = Clock::now() + 500ms;
+        do { Pump(); WaitForFrame(); } while (Clock::now() < until);
+        const bool minimized = presented_ == before && backend_.statistics().minimizedDrops > dropped && frames_->statistics().pending <= 1;
+        ShowWindow(window_, SW_SHOWNOACTIVATE);
+        const bool restored = advance();
+        return {{"resizeSmall", resizedSmall}, {"resizeLarge", resizedLarge}, {"minimizedBounded", minimized},
+            {"restored", restored}, {"passed", resizedSmall && resizedLarge && minimized && restored && backend_.statistics().errors == 0}};
     }
 };
 inline QJsonObject Resources() {
@@ -112,12 +192,22 @@ inline QJsonObject GpuResources(int seconds) {
     return {{"diagnosticOnly", true}, {"adapter", adapterName}, {"phases", phases}, {"stagingAllocations", qint64(staging)},
         {"afterStop", Resources()}, {"handleTypesStopped", HandleTypes()}};
 }
-inline QJsonObject Run(bool host, const std::string& origin, const QString& invitation, int seconds, bool hardwareDecode = true) {
+inline QJsonObject Run(bool host, const std::string& origin, const QString& invitation, int seconds, bool hardwareDecode = true, bool present = false) {
     Check(seconds >= 10 && seconds <= 300);
     screenshare::WindowsMediaRuntime media;
     std::unique_ptr<proof1080::Scene> scene;
     if (host) scene = std::make_unique<proof1080::Scene>("motion");
     auto sink = std::make_shared<Sink>();
+    std::unique_ptr<Presentation> presentation;
+    if (present && !host) {
+        sink->presentation = std::make_shared<LatestRoomVideoFrame>();
+        presentation = std::make_unique<Presentation>(sink->presentation);
+        sink->presentationReady = presentation->readyEvent();
+    }
+    auto waitUntil = [&](Clock::time_point until) {
+        if (!presentation) { std::this_thread::sleep_until(until); return; }
+        do { presentation->Pump(); presentation->WaitForFrame(); } while (Clock::now() < until);
+    };
     WindowsRoomRuntimeOptions runtime;
     runtime.preferHardwareDecoding = hardwareDecode;
     runtime.capture.sourceType = screenshare::CaptureSourceType::Window;
@@ -129,7 +219,7 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
     runtime.preferences.bitrateMode = SettingMode::Manual; runtime.preferences.bitrateLimitBps = 12000000;
     runtime.audioEndpoints = PcmEndpointFactories{[] { return std::make_unique<SilentPcmCapture>(); },
         [] { return std::make_unique<DiscardPcmPlayout>(); }};
-    runtime.frames = sink; // No OS input sink, audio capture, speakers or viewer window.
+    runtime.frames = sink; // No OS input sink, audio capture or speakers.
     RoomSession room(WindowsRoomRuntimeFactory(std::move(runtime)));
     RoomOptions options; options.origin = origin; options.host = host; options.publicRoom = false; options.viewerLimit = 1;
     options.name = "1080p hardware acceptance"; options.nickname = host ? "LoadHost" : "LoadViewer";
@@ -141,19 +231,23 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
         Check(ready.write(bytes) == bytes.size() && ready.commit());
         const auto deadline = Clock::now() + 60s;
         while (room.Status().activePeers != 1) { Check(Clock::now() < deadline && room.Status().phase == RoomPhase::Active); std::this_thread::sleep_for(10ms); }
-    } else Wait([&] { return sink->Read()["freshFrames"].toInt() >= 60; });
+    } else Wait([&] { if (presentation) presentation->Pump(); return sink->Read()["freshFrames"].toInt() >= 60; });
     // Let rate/telemetry settle before collecting load samples.
-    std::this_thread::sleep_for(5s);
+    waitUntil(Clock::now() + 5s);
+    const auto presentationBefore = presentation ? presentation->Read()["presented"].toInteger() : 0;
     const auto handlesBefore = HandleTypes();
     sink->Reset(); const auto began = Clock::now(); const double cpu = CpuSeconds();
     QJsonArray samples; bool hardwareEncoder = false, hardwareDecoder = false, hardwareOnly = hardwareDecode;
-    bool decoderObserved = false, decoderMatched = true, encoderHardwareOnly = true;
+    bool decoderObserved = false, decoderMatched = true, encoderHardwareOnly = true, sessionHealthy = true;
     const auto deadline = began + std::chrono::seconds(seconds + 30);
     unsigned measured = 0;
     do {
-        std::this_thread::sleep_until(began + std::chrono::seconds(++measured));
-        const auto state = room.Status(); Check(state.phase == RoomPhase::Active && state.failedPeers == 0);
+        waitUntil(began + std::chrono::seconds(++measured));
+        const auto state = room.Status();
+        sessionHealthy = state.phase == RoomPhase::Active && state.failedPeers == 0;
         auto sample = Resources(); sample["second"] = int(measured); sample["activePeers"] = int(state.activePeers);
+        sample["roomPhase"] = int(state.phase); sample["failedPeers"] = int(state.failedPeers);
+        sample["roomError"] = int(state.error); sample["pendingPeers"] = int(state.pendingPeers);
         if (host) {
             sample["hardwareFrames"] = qint64(state.stream.codec.hardwareFrames);
             sample["softwareFallbacks"] = qint64(state.stream.codec.softwareFallbacks);
@@ -175,8 +269,12 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
                         (hardwareDecode ? CodecImplementation::MfH264Hardware : CodecImplementation::MfH264Software);
                 }
             }
-        } else sample["video"] = sink->Read();
+        } else {
+            sample["video"] = sink->Read();
+            if (presentation) sample["presentation"] = presentation->Read();
+        }
         samples.append(sample);
+        if (!sessionHealthy) break; // Preserve measured evidence on disconnect/failure.
         if (host && state.activePeers == 0) break;
         Check(Clock::now() < deadline);
     } while (host || measured < unsigned(seconds));
@@ -187,17 +285,35 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
     result["hardwareDecoderObserved"] = hardwareDecoder;
     result["hardwareOnly"] = hardwareOnly;
     result["decoderMode"] = hardwareDecode ? "hardware" : "software";
+    result["consumerMode"] = present ? "presentation" : "pixels";
+    bool presentationPassed = true;
+    if (presentation) {
+        auto stats = presentation->Read();
+        const auto count = stats["presented"].toInteger() - presentationBefore;
+        stats["measuredPresented"] = count; stats["presentedFps"] = count / elapsed;
+        result["presentation"] = stats;
+        presentationPassed = count / elapsed >= 45 && stats["errors"].toInteger() == 0 &&
+            stats["maximumFrameLatency"].toInt() == 1 && stats["hardwareAccelerated"].toBool();
+    }
     result["decoderObserved"] = decoderObserved;
     result["freshFps"] = result["freshFrames"].toInt() / elapsed;
     result["width"] = 1920; result["height"] = 1080; result["fpsLimit"] = 60; result["bitrateLimitBps"] = 12000000;
     result["physicalInput"] = false; result["audibleOutput"] = false; result["externalLatencyVerified"] = false;
+    if (presentation && sessionHealthy) {
+        result["presentationRecovery"] = presentation->ExerciseRecovery();
+        result["postRecoveryVideo"] = sink->Read();
+        presentationPassed = presentationPassed && result["presentationRecovery"].toObject()["passed"].toBool() &&
+            result["postRecoveryVideo"].toObject()["invalidFrames"].toInt() == 0 &&
+            result["postRecoveryVideo"].toObject()["freshFrames"].toInt() > result["freshFrames"].toInt();
+    }
     result["handleTypesBefore"] = handlesBefore; result["handleTypesAfter"] = HandleTypes();
-    auto stop = room.Stop(); Get(stop); scene.reset(); result["afterStopResources"] = Resources();
+    auto stop = room.Stop(); Get(stop); scene.reset(); presentation.reset(); result["afterStopResources"] = Resources();
     result["handleTypesStopped"] = HandleTypes();
     result["runtimeReleased"] = true;
-    result["passed"] = host ? hardwareEncoder && decoderObserved && decoderMatched &&
+    result["sessionHealthy"] = sessionHealthy;
+    result["passed"] = sessionHealthy && (host ? hardwareEncoder && decoderObserved && decoderMatched &&
         encoderHardwareOnly && measured >= unsigned(seconds) :
-        result["freshFps"].toDouble() >= 45 && result["invalidFrames"].toInt() == 0;
+        result["freshFps"].toDouble() >= 45 && result["invalidFrames"].toInt() == 0 && presentationPassed);
     return result;
 }
 }

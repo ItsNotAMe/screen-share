@@ -9,6 +9,14 @@ one controller cannot establish their physical compatibility.
 
 ## Reproducible private package
 
+Current laptop package (2026-09-19): the **ScreenShare v2 Compatibility Test**
+desktop shortcut points to `ScreenShareTests/decoder-compat-4f0f5fc/ScreenShare-release-windows-x64`
+in the test account. It includes the saved **Software (compatibility)** viewer
+decoder option; host encoding is unchanged. Source commit `4f0f5fc` was clean.
+All manifest hashes were checked after extraction; deployment evidence is
+`build/decoder-compat-deployment.json`. Earlier deployment records below remain
+historical. The shortcut was created without launching the app.
+
 Configure Release against a verified exported WebRTC SDK containing its generated
 notices (not the raw source build). Enable `SCREENSHARE_BUILD_FIELD_TEST=ON`,
 then build the `package-portable` target. `ScreenShareFieldScene` is an optional Qt target

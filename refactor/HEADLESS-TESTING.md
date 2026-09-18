@@ -7,6 +7,40 @@ and fresh pixels, and gathers per-machine resources. The five-minute media run
 passes; its laptop resource-growth finding remains open. This is not physical
 display/input timing, and no OS input is injected.
 
+To include the production one-frame handoff and native D3D presentation, add
+`--consumer presentation --interactive-viewer` to that runner. Use
+`--decoder software` to qualify the compatibility choice while keeping hardware
+host encoding. The laptop test account must already be signed in with its screen
+on and unlocked. A temporary non-elevated scheduled task starts the viewer in
+that account's desktop and is removed afterward; no password is stored and no
+unlock, driver installation or system-policy change is performed. The owned
+test window stays above other windows without taking input focus and closes
+when the bounded run ends. Plain SSH runs can decode but have an invisible
+window, which must fail presentation acceptance rather than silently pass.
+The test temporarily requests that Windows keep the display awake on its owner
+thread and restores the previous execution state on exit; it does not change
+the machine's power settings.
+
+Use `--runtime-name presentation-runtime` (or an existing approved test-runtime
+folder name) to keep the executable path stable across runs. Windows may show
+its normal network prompt on first use. The runner verifies every staged runtime
+file, refuses to overwrite a running proof and keeps each run's original ZIP,
+logs and hashes in a fresh evidence directory. Only the selected runtime copy
+is reused; firewall rules are not changed. Run one test at a time in that slot.
+
+Presentation mode additionally requires increasing per-second presentation,
+at least 45 rendered FPS over the measured interval, an actual hardware graphics
+device, maximum frame latency of one, a bounded pending slot and zero rendering
+errors. It records queue wait/replacements, busy/occluded/unavailable drops and
+resources. The independent scene-marker check still requires 45 fresh decoded
+FPS and no invalid images. Successful DXGI submission is not measured photons,
+external input latency or proof of the complete Qt window flow.
+After the timed interval, the proof resizes its own window twice, minimizes it
+for half a second and verifies bounded dropping, then restores and requires
+fresh rendered frames within three seconds. Connection-state failures preserve
+the collected samples and enum-valued room phase/error instead of discarding
+all measurements. The strict validator still rejects an interrupted run.
+
 For graphics resource attribution without a room or network, run
 `CrossMachineRoomProof.exe gpu-resources 30`. Four bounded phases separate idle,
 direct D3D allocation, owned-frame upload, and CPU pixel readback. Reports have

@@ -4,7 +4,23 @@ The requested scope is to finish Stages 2–4 before cutover or the later UI red
 Implementation and locally reproducible evidence are separate from field acceptance.
 No unchecked physical requirement is waived by the unattended test run.
 
-Latest completed group: [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md) adds an
+For the short list of remaining backend groups and the frontend boundary, use
+the **Working agreement** table at the top of [TODO.md](TODO.md). This document
+keeps the detailed acceptance requirements; its historical updates are not
+additional milestones.
+
+Latest completed portion: five-minute native presentation in software-decoder
+compatibility mode passes at 47.7 rendered / 48.3 fresh decoded FPS. Real GPU
+rendering, one-frame latency configuration, resize/minimize/restore and valid
+post-recovery images are verified; viewer median private memory is 89→91 MiB
+and Section handles stay at 11 during streaming. This is the production handoff/
+renderer in an owned test window, not full Qt field or external-latency acceptance.
+Earlier failures and the 44.4-FPS polling control are retained in
+[RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md). The event-driven fixture passes
+the unchanged 45-FPS gate. Continue physical device/source/input/audio checks
+and group 2 closeout from TODO.md; do not repeat this completed native renderer pass.
+
+Earlier completed group: [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md) adds an
 explicit local software-decoder compatibility setting in the runtime, UI and
 CLI. A five-minute desktop hardware-host → laptop software-viewer run passes
 at 45.4 fresh FPS with no invalid images, flat Section handles (five), and
@@ -88,7 +104,7 @@ input-response checks now pass; see TWO-MACHINE.md for the exact scope.
 | --- | --- | --- |
 | 2: user experience | Normal-shell opt-in share/join, pushed directory, profiles, settings, capture/audio recovery, GPU receive, and redacted UI/CLI reports. Release/Debug headless matrices pass 12/12 each. | Physical audio formats/quality/unplug, source privacy/identity/HDR/adapters, supported-desktop DXGI and occlusion. Final legacy command/default cutover remains Stage 5. |
 | 3: gaming input | Consent, source-bound mapping, per-peer ownership, controllers, queues/watchdogs, neutralization, UI/CLI input diagnostics, recording-sink real-channel tests. | Physical mouse/keyboard confinement and foreground/UIPI behavior, XInput/PlayStation and virtual-driver/local-slot behavior; measured external input response. |
-| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, five strict collapse-settling runs plus four other packet cases, normal-load tuned legacy comparisons, bidirectional LAN software media/recovery through live TLS, five-minute one-viewer desktop-to-laptop 1080p hardware delivery, five-minute software-decoder compatibility with stable laptop resources, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Laptop hardware-decoder/kernel resource retention (software workaround verified only for CPU consumption), original immediate capture-handle failure, sustained physical-presentation/full queue-age acceptance, four-viewer/other-direction hardware load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched impaired-network comparison, actual billed usage/account headroom and production hibernation. Relative memory optimization is backlogged. |
+| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, five strict collapse-settling runs plus four other packet cases, normal-load tuned legacy comparisons, bidirectional LAN software media/recovery through live TLS, five-minute one-viewer desktop-to-laptop 1080p hardware delivery, five-minute software-decoder compatibility with stable laptop resources and native GPU presentation/recovery, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Laptop hardware-decoder/kernel resource retention (software workaround now verified with native GPU presentation), original immediate capture-handle failure, full Qt/physical presentation and full pipeline queue-age acceptance, four-viewer/other-direction hardware load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched impaired-network comparison, actual billed usage/account headroom and production hibernation. Relative memory optimization is backlogged. |
 
 ## Physical checks that cannot be replaced by this fixture
 

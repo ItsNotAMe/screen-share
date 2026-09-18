@@ -126,6 +126,7 @@ endif()
       find_program(PROOF_WINDEPLOYQT_EXECUTABLE NAMES windeployqt6 windeployqt
           PATHS "${proofQtBin}" NO_DEFAULT_PATH REQUIRED)
       add_executable(CrossMachineRoomProof CrossMachineRoomProof.cpp)
+      target_sources(CrossMachineRoomProof PRIVATE "${nativeRoot}/render/FramePresentationBackend.cpp")
       target_link_libraries(CrossMachineRoomProof PRIVATE MfWebRTCCodecs ScreenShareRoomSession gdi32 psapi winmm)
       add_custom_command(TARGET CrossMachineRoomProof POST_BUILD COMMAND "${CMAKE_COMMAND}"
           "-DWINDEPLOYQT_EXECUTABLE=${PROOF_WINDEPLOYQT_EXECUTABLE}"
