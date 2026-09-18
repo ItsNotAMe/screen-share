@@ -44,6 +44,32 @@ template<class F> void Reject(F fn) {
     Check(rejected);
 }
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+void NativePresentationSizing() {
+    struct Window {
+        HWND value = CreateWindowExW(0, L"STATIC", L"ScreenShare native sizing regression",
+            WS_OVERLAPPEDWINDOW, 40, 40, 640, 480, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~Window() { if (value) DestroyWindow(value); }
+    } window;
+    Check(window.value != nullptr);
+    ShowWindow(window.value, SW_SHOWNOACTIVATE);
+    auto renderer = CreateNativeFramePresentation();
+    std::vector<uint8_t> pixels(320 * 180 * 3 / 2, 128);
+    unsigned presented = 0;
+    for (unsigned index = 0; index < 90; ++index) {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&message); DispatchMessageW(&message);
+        }
+        if (index == 45) SetWindowPos(window.value, nullptr, 0, 0, 800, 540, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        // Deliberately supply logical/stale hints. Actual HWND pixels must win,
+        // otherwise Prepare redraws the previous frame before every new frame.
+        presented += renderer->Present(window.value, 17, 13, true, true,
+            {320, 180, pixels.data(), pixels.size(), nullptr});
+        std::this_thread::sleep_for(17ms);
+    }
+    std::cout << "Native sizing: " << presented << "/90 new-frame presents\n";
+    Check(presented >= 30 && renderer->MaximumFrameLatency() == 1);
+}
 struct PreviewEvidence {
     bool failPresent = false, failUpdate = false;
     unsigned calls = 0, resets = 0;
@@ -358,11 +384,17 @@ int main(int argc, char** argv) {
     int exitCode = 0;
     try {
         Check(argc == 2);
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+        if (std::string(argv[1]) == "--presentation-sizing-test") {
+            NativePresentationSizing(); webrtc::CleanupSSL(); return 0;
+        }
+#endif
         CommandScenario();
         PresentationOwnership();
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime;
         Check(SUCCEEDED(mediaRuntime.result()));
+        NativePresentationSizing();
         PreviewLifecycle();
         proof::TestWindow capture;
         captureWindow = capture.handle();

@@ -1,5 +1,6 @@
 #include "render/FramePresentationBackend.h"
 #include "render/PresentationTarget.h"
+#include <algorithm>
 
 namespace {
 class NativeFramePresentation final : public FramePresentationBackend {
@@ -31,6 +32,14 @@ public:
             presenter_.Reset(); presenter_.SetLowLatency(lowLatency); lowLatency_ = lowLatency;
         }
         presenter_.Attach(window);
+        // Qt supplies logical dimensions; DXGI uses actual HWND client pixels.
+        // Feeding a different size on every frame triggers Resize's redraw of
+        // the old image, consuming the one-frame queue before TryPresent runs.
+        RECT client{};
+        if (GetClientRect(window, &client)) {
+            width = static_cast<uint32_t>(std::max<LONG>(1, client.right - client.left));
+            height = static_cast<uint32_t>(std::max<LONG>(1, client.bottom - client.top));
+        }
         presenter_.Resize(width, height);
         presenter_.SetLinearSampling(smooth);
         presenter_.SetScaleMode(scale);

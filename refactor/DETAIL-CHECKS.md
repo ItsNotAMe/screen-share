@@ -4,6 +4,11 @@ Last reconciled: 2026-09-18 (including receiver pacing, UI/CLI redacted reports,
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+Laptop continuation: real two-PC video/resize was confirmed by the user, exposing
+a logical/native pixel sizing mismatch behind misleading busy/presentation counts.
+The native adapter fix passes a generated-window regression (3/90 before, 89/90
+after); updated laptop validation is pending. See PRESENTATION-SIZING.md.
+
 Checked implementation rows below apply to the shared v2 backend and opt-in
 frontends, not default-shell cutover or field acceptance. Mixed requirements are
 split into completed implementation and remaining validation. All original
