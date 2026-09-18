@@ -1,4 +1,4 @@
-"""Silent generated-window hardware load across an already-authorized Windows SSH peer."""
+"""Silent hardware-encoded window load with selectable decoding on an authorized Windows SSH peer."""
 import argparse
 import base64
 import hashlib
@@ -30,6 +30,7 @@ def main():
     p.add_argument('--known-hosts', type=Path, required=True)
     p.add_argument('--origin', required=True)
     p.add_argument('--seconds', type=int, default=60)
+    p.add_argument('--decoder', choices=('hardware','software'), default='hardware', help='Expected viewer decoder; host encoding stays hardware')
     args = p.parse_args()
     if not 10 <= args.seconds <= 300 or not args.origin.startswith('https://') or args.peer.startswith('-'):
         p.error('Use HTTPS, an SSH destination and 10..300 seconds')
@@ -39,10 +40,12 @@ def main():
     ssh_options = ['-i', str(args.identity.resolve()), '-o', 'UserKnownHostsFile=' + str(args.known_hosts.resolve()),
                    '-o', 'StrictHostKeyChecking=yes', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8']
     report = dict(schema=1, passed=False, physicalInput=False, audibleOutput=False, externalLatencyVerified=False,
-                  requestedSeconds=args.seconds, executableSha256=sha(executable),
+                  requestedSeconds=args.seconds, decoderMode=args.decoder, executableSha256=sha(executable),
                   sourceHashes={s: sha(ROOT / s) for s in (
                       'tools/webrtc-proof/CrossMachineRoomProof.cpp', 'tools/webrtc-proof/CrossMachineLoadProof.h',
                       'tools/backend-comparison/ComparisonScene.h', 'backend/media/webrtc/MediaNetworkPolicy.h',
+                      'backend/media/webrtc/WindowsRoomRuntime.h', 'backend/media/webrtc/WindowsRoomRuntime.cpp',
+                      'backend/media/webrtc/MfVideoDecoderFactory.cpp',
                       'scripts/test-room-hardware-load.py', 'scripts/test-room-live-service.ps1', 'scripts/RoomLiveEvidence.ps1')})
     host = None
 
@@ -85,7 +88,7 @@ def main():
         with (output / 'host-runner.log').open('wb') as log:
             host = subprocess.Popen([powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', str(ROOT / 'scripts/test-room-live-service.ps1'),
                 '-Executable', str(executable), '-Origin', args.origin, '-Scenario', 'load-host', '-Seconds', str(args.seconds),
-                '-ReadyFile', str(ready), '-OutputDirectory', str(output / 'host')], stdout=log, stderr=subprocess.STDOUT,
+                '-ReadyFile', str(ready), '-Decoder', args.decoder, '-OutputDirectory', str(output / 'host')], stdout=log, stderr=subprocess.STDOUT,
                 env=env, creationflags=flags)
             deadline = time.monotonic() + 60
             while not ready.exists():
@@ -95,7 +98,7 @@ def main():
             room = json.loads(ready.read_text())['roomId']
             remote_script = ('& ' + quote(remote_root + '/test-room-live-service.ps1') + ' -Executable ' +
                 quote(remote_root + '/CrossMachineRoomProof.exe') + ' -Origin ' + quote(args.origin) +
-                ' -Scenario load-viewer -Seconds ' + str(args.seconds) + ' -RoomId ' + quote(room) +
+                ' -Scenario load-viewer -Decoder ' + args.decoder + ' -Seconds ' + str(args.seconds) + ' -RoomId ' + quote(room) +
                 ' -OutputDirectory ' + quote(remote_root + '/viewer'))
             # Copy evidence even if the endpoint fails; never discard a rejected run.
             try:
@@ -115,6 +118,7 @@ def main():
         reports = {role: json.loads((output / role / 'result.json').read_text(encoding='utf-8-sig')) for role in ('host', 'viewer')}
         for role, value in reports.items():
             if value.get('passed') is not True or value.get('timedOut') is not False or value.get('exitCode') != 0 or \
+                    value.get('decoderMode') != args.decoder or \
                     value.get('executableSha256') != report['executableSha256'] or \
                     value.get('validatorSha256') != sha(ROOT / 'scripts/RoomLiveEvidence.ps1') or \
                     value.get('runnerSha256') != sha(ROOT / 'scripts/test-room-live-service.ps1'):

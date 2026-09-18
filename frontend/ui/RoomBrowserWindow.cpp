@@ -42,6 +42,12 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     roomId_->setToolTip("Links use the service shown above. Enter the room password separately.");
     password_ = new QLineEdit; password_->setObjectName("roomPassword"); password_->setEchoMode(QLineEdit::Password); password_->setMaxLength(256);
     form->addRow("Room password (create or join)", password_);
+    decoder_ = new QComboBox; decoder_->setObjectName("roomDecoder");
+    decoder_->addItem("Automatic (prefer hardware)", "auto");
+    decoder_->addItem("Software (compatibility)", "software");
+    decoder_->setCurrentIndex(decoder_->findData(profile_.decoder()));
+    decoder_->setToolTip("Used when joining. Software decoding avoids GPU decoder issues but uses more CPU. Saved for future joins.");
+    form->addRow("Video decoding (when joining)", decoder_);
     auto* join = new QPushButton("Join room"); join->setObjectName("joinV2Room"); form->addRow(join); layout->addLayout(form);
     status_ = new QLabel; layout->addWidget(status_);
     error_ = new QLabel; error_->setObjectName("browserError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
@@ -133,12 +139,14 @@ void RoomBrowserWindow::Launch(bool host) {
     auto capture = input["capture"].toObject();
     if (capture.contains("window")) capture["window"] = QString::number(source_->currentData().toMap()["window"].toULongLong());
     input["capture"] = capture;
+    if (!host) input["decoder"] = decoder_->currentData().toString();
     try {
         auto config = ParseRoomSessionConfig(input, loopback_);
         config.media.preferences = profile_.streamPreferences();
         const auto playback = profile_.playback();
         config.media.playbackVolume = playback.volume; config.media.playbackMuted = playback.muted;
         if (!profile_.saveNickname(*nickname)) { error_->setText("Could not save the nickname."); return; }
+        if (!host && !profile_.saveDecoder(decoder_->currentData().toString())) { error_->setText("Could not save the decoding preference."); return; }
         nickname_->setText(*nickname); error_->clear();
         active_ = std::make_unique<RoomSessionWindow>(std::move(config), factory_, loopback_, &profile_);
         active_->closed = [this] { QTimer::singleShot(0, this, [this] {

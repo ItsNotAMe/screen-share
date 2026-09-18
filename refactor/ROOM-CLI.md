@@ -1,5 +1,12 @@
 # Opt-in v2 room CLI
 
+Viewers can use `--decoder software` (or `"decoder": "software"` in room JSON)
+to avoid hardware-decoder compatibility problems. `auto` is the default and
+prefers hardware with the existing failure recovery. This is a local pre-join
+choice, independent of host encoding and room settings. CLI overrides apply to
+that run; normal joins inherit the saved UI preference. Host use, unknown values
+and non-string JSON values are rejected. Software decoding uses more CPU.
+
 Controllers use explicit `--control-file PATH` commands and viewer `--gamepad DEVICE_ID`
 with a focused preview. See [CONTROLLERS.md](CONTROLLERS.md) for the command schema,
 fresh-consent rules, panic shortcut and recording-device tests. Mouse/keyboard

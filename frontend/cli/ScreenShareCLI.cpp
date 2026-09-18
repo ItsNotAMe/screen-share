@@ -55,7 +55,7 @@ void PrintHelp()
 #ifdef SCREENSHARE_HAS_ROOM_V2_CLI
         << "  ScreenShare --room-v2 CONFIG.json  (opt-in v2 room media; see refactor/ROOM-CLI.md)\n"
         << "  ScreenShare --backend v2 --signal-server HTTPS_ORIGIN --create-room [--name NAME] [--nickname NAME]\n"
-        << "  ScreenShare --backend v2 --signal-server HTTPS_ORIGIN --join-room ID_OR_LINK [--password-file PATH]\n"
+        << "  ScreenShare --backend v2 --signal-server HTTPS_ORIGIN --join-room ID_OR_LINK [--password-file PATH] [--decoder auto|software]\n"
         << "              See refactor/ADOPTION.md for media options; remote control is not available in v2.\n"
 #endif
         << "  ScreenShare --list\n"

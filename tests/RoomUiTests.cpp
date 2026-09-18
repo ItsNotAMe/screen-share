@@ -331,10 +331,14 @@ void ProfileSettingsScenario() {
     }
     { QSettings raw(path, QSettings::IniFormat); raw.setValue("playback/v1", QByteArray("{\"volume\":50.5,\"muted\":true}")); raw.sync(); }
     Check(RoomProfile(path).playback().volume == 100 && !RoomProfile(path).playback().muted);
+    Check(profile.saveDecoder("software") && RoomProfile(path).decoder() == "software");
+    { QSettings raw(path, QSettings::IniFormat); raw.setValue("decoder/v1", "unsupported"); raw.sync(); }
+    Check(RoomProfile(path).decoder() == "auto");
     // A directory cannot be a settings file. Failed writes must not change the
     // in-memory defaults later consumed by browser sessions.
     RoomProfile unwritable(files.path());
     Check(!unwritable.savePlayback({12, true})); Check(unwritable.playback().volume == 100);
+    Check(!unwritable.saveDecoder("software") && unwritable.decoder() == "auto");
     auto valid = automatic; valid.width = 1280;
     Check(!unwritable.saveStreamPreferences(valid)); Check(unwritable.streamPreferences().width == 1920);
 }
@@ -414,7 +418,10 @@ void BrowserScenario(const QUrl& origin) {
     Check(RoomProfile(hostFile).nickname() == QStringLiteral("Caf\u00e9"));
     auto audio = std::make_shared<proof::AudioEvidence>();
     RoomApplication hostApp(origin, Factory(audio), true, hostFile, false);
-    RoomApplication viewerApp(origin, Factory(audio), true, viewerFile, false);
+    bool softwareDecoderSelected = false;
+    RoomApplication viewerApp(origin, [factory = Factory(audio), &softwareDecoderSelected](WindowsRoomRuntimeOptions options) {
+        softwareDecoderSelected = !options.preferHardwareDecoding; return factory(std::move(options));
+    }, true, viewerFile, false);
     auto& host = *hostApp.browser(); auto& viewer = *viewerApp.browser();
     Directory audit(true); Check(audit.Start(origin)); hostApp.show(); viewerApp.show();
     auto* hostStack = hostApp.window().findChild<QStackedWidget*>("AppPageStack");
@@ -463,14 +470,17 @@ void BrowserScenario(const QUrl& origin) {
     viewer.findChild<QLineEdit*>("roomNickname")->setText(" Browser viewer ");
     viewer.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret"); list->selectRow(0);
     viewer.findChild<QLineEdit*>("joinRoomId")->setText(roomLink);
+    viewer.findChild<QComboBox*>("roomDecoder")->setCurrentIndex(1);
     viewer.findChild<QPushButton*>("joinV2Room")->click(); Check(viewer.activeSession());
+    Check(softwareDecoderSelected && RoomProfile(viewerFile).decoder() == "software");
     unsigned frames = 0; auto present = viewer.activeSession()->session().frameReady;
     viewer.activeSession()->session().frameReady = [&](auto frame) { ++frames; present(std::move(frame)); };
     Wait([&] { return frames >= 10 && !viewer.directory().running() && audit.status().rooms.size() == 1 && audit.status().rooms[0].viewers == 1; });
     Check(host.directory().connectionAttempts() == hostAttempts); // Hidden browser never reopens.
     Check(viewer.findChild<QLineEdit*>("roomPassword")->text().isEmpty());
     Check(RoomProfile(viewerFile).nickname() == "Browser viewer");
-    for (const auto& path : {hostFile, viewerFile}) { QSettings saved(path, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"nickname"}); }
+    { QSettings saved(hostFile, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"nickname"}); }
+    { QSettings saved(viewerFile, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"decoder/v1", "nickname"}); }
     auto* hostWindow = host.activeSession(); auto* viewerWindow = viewer.activeSession();
     const auto streamRevision = hostWindow->session().status().stream.requestedRevision;
     hostWindow->findChild<QSpinBox*>("streamWidth")->setValue(1280);
@@ -560,7 +570,7 @@ void BrowserScenario(const QUrl& origin) {
     Check(viewer.activeSession()->session().status().playback.selected.muted);
     for (const auto& path : {hostFile, viewerFile}) {
         QSettings saved(path, QSettings::IniFormat);
-        for (const auto& key : saved.allKeys()) Check(key == "nickname" || key == "stream/v1" || key == "playback/v1");
+        for (const auto& key : saved.allKeys()) Check(key == "nickname" || key == "stream/v1" || key == "playback/v1" || key == "decoder/v1");
     }
     host.activeSession()->close(); viewer.activeSession()->close();
     Wait([&] { return !host.activeSession() && !viewer.activeSession() && viewer.directory().status().phase == Directory::Phase::Ready; });

@@ -69,6 +69,9 @@ inline double CpuSeconds() {
 }
 // Attribution only: isolates graphics allocation/readback from MF, WebRTC and
 // signaling. These measurements are never a streaming acceptance result.
+__declspec(noinline) inline void GpuResourcePhase(unsigned phase) {
+    volatile unsigned observed = phase; (void)observed; // Debugger boundary, no production hook.
+}
 inline QJsonObject GpuResources(int seconds) {
     Check(seconds >= 10 && seconds <= 120);
     auto device = std::make_shared<screenshare::media::D3dVideoDevice>();
@@ -80,7 +83,9 @@ inline QJsonObject GpuResources(int seconds) {
     adapter.Reset(); dxgi.Reset();
     std::vector<uint8_t> pixels(1920 * 1080 * 3 / 2, 128);
     QJsonArray phases;
+    unsigned phaseIndex = 0;
     for (const char* mode : {"idle", "raw-upload", "upload", "upload-readback"}) {
+        GpuResourcePhase(phaseIndex++);
         QJsonObject phase{{"mode", mode}, {"before", Resources()}, {"handleTypesBefore", HandleTypes()}};
         const auto start = Clock::now(); unsigned frames = 0;
         while (Clock::now() - start < std::chrono::seconds(seconds)) {
@@ -107,13 +112,14 @@ inline QJsonObject GpuResources(int seconds) {
     return {{"diagnosticOnly", true}, {"adapter", adapterName}, {"phases", phases}, {"stagingAllocations", qint64(staging)},
         {"afterStop", Resources()}, {"handleTypesStopped", HandleTypes()}};
 }
-inline QJsonObject Run(bool host, const std::string& origin, const QString& invitation, int seconds) {
+inline QJsonObject Run(bool host, const std::string& origin, const QString& invitation, int seconds, bool hardwareDecode = true) {
     Check(seconds >= 10 && seconds <= 300);
     screenshare::WindowsMediaRuntime media;
     std::unique_ptr<proof1080::Scene> scene;
     if (host) scene = std::make_unique<proof1080::Scene>("motion");
     auto sink = std::make_shared<Sink>();
     WindowsRoomRuntimeOptions runtime;
+    runtime.preferHardwareDecoding = hardwareDecode;
     runtime.capture.sourceType = screenshare::CaptureSourceType::Window;
     runtime.capture.windowHandle = scene ? uint64_t(scene->window()) : 0;
     runtime.capture.targetWidth = 1920; runtime.capture.targetHeight = 1080; runtime.capture.targetFps = 60;
@@ -140,7 +146,8 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
     std::this_thread::sleep_for(5s);
     const auto handlesBefore = HandleTypes();
     sink->Reset(); const auto began = Clock::now(); const double cpu = CpuSeconds();
-    QJsonArray samples; bool hardwareEncoder = false, hardwareDecoder = false, hardwareOnly = true;
+    QJsonArray samples; bool hardwareEncoder = false, hardwareDecoder = false, hardwareOnly = hardwareDecode;
+    bool decoderObserved = false, decoderMatched = true, encoderHardwareOnly = true;
     const auto deadline = began + std::chrono::seconds(seconds + 30);
     unsigned measured = 0;
     do {
@@ -151,10 +158,11 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
             sample["hardwareFrames"] = qint64(state.stream.codec.hardwareFrames);
             sample["softwareFallbacks"] = qint64(state.stream.codec.softwareFallbacks);
             hardwareOnly = hardwareOnly && state.stream.codec.softwareFallbacks == 0;
+            encoderHardwareOnly = encoderHardwareOnly && state.stream.codec.softwareFallbacks == 0;
             for (const auto& peer : state.stream.peers) {
                 sample["encoder"] = CodecImplementationName(peer.sender.encoder);
                 if (peer.sender.encoder == CodecImplementation::MfH264Hardware) hardwareEncoder = true;
-                else hardwareOnly = false;
+                else { hardwareOnly = false; encoderHardwareOnly = false; }
                 if (peer.receiver.observation && !peer.receiver.stale) {
                     sample["decoder"] = CodecImplementationName(peer.receiver.observation->decoder);
                     sample["receiverWidth"] = int(peer.receiver.observation->width);
@@ -162,6 +170,9 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
                     sample["decodedFrames"] = int(peer.receiver.observation->framesDecoded);
                     if (peer.receiver.observation->decoder == CodecImplementation::MfH264Hardware) hardwareDecoder = true;
                     else hardwareOnly = false;
+                    decoderObserved = true;
+                    decoderMatched = decoderMatched && peer.receiver.observation->decoder ==
+                        (hardwareDecode ? CodecImplementation::MfH264Hardware : CodecImplementation::MfH264Software);
                 }
             }
         } else sample["video"] = sink->Read();
@@ -175,6 +186,8 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
     result["samples"] = samples; result["hardwareEncoderObserved"] = hardwareEncoder;
     result["hardwareDecoderObserved"] = hardwareDecoder;
     result["hardwareOnly"] = hardwareOnly;
+    result["decoderMode"] = hardwareDecode ? "hardware" : "software";
+    result["decoderObserved"] = decoderObserved;
     result["freshFps"] = result["freshFrames"].toInt() / elapsed;
     result["width"] = 1920; result["height"] = 1080; result["fpsLimit"] = 60; result["bitrateLimitBps"] = 12000000;
     result["physicalInput"] = false; result["audibleOutput"] = false; result["externalLatencyVerified"] = false;
@@ -182,7 +195,8 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
     auto stop = room.Stop(); Get(stop); scene.reset(); result["afterStopResources"] = Resources();
     result["handleTypesStopped"] = HandleTypes();
     result["runtimeReleased"] = true;
-    result["passed"] = host ? hardwareOnly && hardwareEncoder && hardwareDecoder && measured >= unsigned(seconds) :
+    result["passed"] = host ? hardwareEncoder && decoderObserved && decoderMatched &&
+        encoderHardwareOnly && measured >= unsigned(seconds) :
         result["freshFps"].toDouble() >= 45 && result["invalidFrames"].toInt() == 0;
     return result;
 }

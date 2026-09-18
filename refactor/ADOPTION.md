@@ -38,9 +38,9 @@ uses the existing asynchronous shutdown; `--seconds N` bounds a CLI session.
 | Host capture | `--display INDEX` or `--window HWND` (not both) |
 | Host video | `--preset gaming\|quality`, `--resolution auto\|native\|WIDTHxHEIGHT`, `--fps auto\|N`, `--bitrate auto\|BPS`, `--upload-bps BPS` |
 | Host audio | `--audio system\|microphone\|process\|none`, `--audio-device ID`, `--process-id PID` as appropriate to the source |
-| Viewer | `--no-preview`, `--playback-device ID`, `--volume 0..100`, `--mute` or `--unmute` |
+| Viewer | `--no-preview`, `--playback-device ID`, `--volume 0..100`, `--mute` or `--unmute`, `--decoder auto\|software` |
 
-Nickname, stream and playback defaults come from the existing versioned RoomV2Profile.
+Nickname, stream, playback and viewer-decoder defaults come from the existing versioned RoomV2Profile.
 CLI overrides apply only to that invocation; they do not rewrite saved defaults.
 Manual numeric video choices stay Manual; `auto` explicitly selects Auto.
 `--bitrate auto` removes an inherited manual bitrate value. Existing backend

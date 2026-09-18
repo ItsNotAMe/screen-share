@@ -167,15 +167,17 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
-        Check(argc == 4 || argc == 5);
+        Check(argc == 4 || argc == 5 || argc == 6);
         const QUrl origin(QString::fromUtf8(argv[2]));
         Check(origin.isValid() && origin.scheme() == "https" && !origin.host().isEmpty() && origin.userInfo().isEmpty() &&
             !origin.hasQuery() && !origin.hasFragment() && (origin.path().isEmpty() || origin.path() == "/") && QSslSocket::supportsSsl());
         const std::string role = argv[1];
         if (role == "load-host" || role == "load-viewer") {
-            Check(argc == 5);
+            Check(argc == 5 || argc == 6);
+            const std::string decoder = argc == 6 ? argv[5] : "hardware";
+            Check(decoder == "hardware" || decoder == "software");
             bool valid = false; const int seconds = QString::fromUtf8(argv[4]).toInt(&valid); Check(valid);
-            const auto metrics = loadproof::Run(role == "load-host", argv[2], QString::fromUtf8(argv[3]), seconds);
+            const auto metrics = loadproof::Run(role == "load-host", argv[2], QString::fromUtf8(argv[3]), seconds, decoder == "hardware");
             Print(metrics); Check(metrics["passed"].toBool());
         }
         else if (role == "host") { Check(argc == 4); Host(argv[2], QString::fromUtf8(argv[3])); }

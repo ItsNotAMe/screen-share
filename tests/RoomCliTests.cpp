@@ -368,6 +368,15 @@ void CommandScenario() {
         write(invalid); Reject([&] { ParseRoomCommand(base + QStringList{"--password-file", secretFile}); });
     }
     const QStringList join{"--backend", "v2", "--signal-server", "https://example.test", "--join-room", "screenshare://room/v2/room_1"};
+    Check(ParseRoomCommand(join).media.preferHardwareDecoding);
+    Check(!ParseRoomCommand(join + QStringList{"--decoder", "software"}).media.preferHardwareDecoding);
+    Check(profile.saveDecoder("software") && RoomProfile(files.filePath("defaults.ini")).decoder() == "software");
+    Check(!ParseRoomCommand(join, &profile).media.preferHardwareDecoding);
+    Check(ParseRoomCommand(join + QStringList{"--decoder", "auto"}, &profile).media.preferHardwareDecoding);
+    Check(profile.decoder() == "software" && !profile.saveDecoder("invalid"));
+    Reject([&] { ParseRoomCommand(join + QStringList{"--decoder", "invalid"}); });
+    Reject([&] { ParseRoomCommand(base + QStringList{"--decoder", "software"}); });
+    Reject([&] { ParseRoomSessionConfig({{"origin", "https://example.test"}, {"roomId", "test"}, {"decoder", true}}); });
     Check(ParseRoomCommand(join + QStringList{"--no-preview", "--volume", "25", "--mute"}).media.playbackMuted);
     Check(profile.savePlayback({25, true}));
     Check(!ParseRoomCommand(join + QStringList{"--unmute"}, &profile).media.playbackMuted && profile.playback().muted);

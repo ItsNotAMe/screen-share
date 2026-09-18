@@ -44,7 +44,7 @@ private:
     std::unique_ptr<RoomSessionWindow> active_;
     QLineEdit *nickname_, *name_, *roomId_, *password_;
     QCheckBox* public_;
-    QComboBox *source_, *audio_;
+    QComboBox *source_, *audio_, *decoder_;
     QTableWidget* rooms_;
     QLabel *status_, *error_;
     QPushButton* joinSelected_;

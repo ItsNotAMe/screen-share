@@ -70,7 +70,7 @@ QJsonObject StreamPreferencesJson(const StreamPreferences& value) {
     return result;
 }
 RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopback) {
-    Keys(object, {"origin", "host", "roomId", "nickname", "name", "password", "public", "viewerLimit", "seconds", "preview", "capture", "audio", "stream", "changes", "captureChanges", "audioChanges", "playbackChanges", "reportFile"});
+    Keys(object, {"origin", "host", "roomId", "nickname", "name", "password", "public", "viewerLimit", "seconds", "preview", "capture", "audio", "stream", "changes", "captureChanges", "audioChanges", "playbackChanges", "reportFile", "decoder"});
     RoomSessionConfig result;
     result.reportFile = String(object, "reportFile");
     if (object.contains("reportFile") && (result.reportFile.trimmed().isEmpty() || result.reportFile.contains(QChar(0))))
@@ -80,6 +80,10 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
         (!url.path().isEmpty() && url.path() != "/") || (url.scheme() != "https" && !(loopback && url.scheme() == "http" && url.host() == "127.0.0.1")))
         throw std::invalid_argument("A HTTPS service origin is required");
     result.room.origin = origin.toStdString(); result.room.host = Boolean(object, "host", false);
+    const auto decoder = String(object, "decoder", "auto");
+    if ((decoder != "auto" && decoder != "software") || (result.room.host && object.contains("decoder")))
+        throw std::invalid_argument("Decoder must be auto or software and applies only when joining");
+    result.media.preferHardwareDecoding = decoder == "auto";
     result.room.roomId = String(object, "roomId").toStdString(); result.room.nickname = String(object, "nickname").toStdString();
     result.room.name = String(object, "name").toStdString(); result.room.password = String(object, "password").toStdString();
     result.room.publicRoom = Boolean(object, "public", true); result.room.viewerLimit = Integer(object, "viewerLimit", 4, 1, 63);

@@ -74,9 +74,10 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
             };
         }
         native.engine = [endpoints = std::move(endpoints), state, preferHardware = options.preferHardwareEncoding,
+                         hardwareDecode = options.preferHardwareDecoding,
                          encoderDecorator = options.encoderDecorator, decoderDecorator = options.decoderDecorator] {
             std::unique_ptr<webrtc::VideoEncoderFactory> encoder = std::make_unique<MfVideoEncoderFactory>(preferHardware ? state->Get() : nullptr);
-            std::unique_ptr<webrtc::VideoDecoderFactory> decoder = std::make_unique<MfVideoDecoderFactory>(true);
+            std::unique_ptr<webrtc::VideoDecoderFactory> decoder = std::make_unique<MfVideoDecoderFactory>(hardwareDecode);
             if (encoderDecorator) encoder = encoderDecorator(std::move(encoder));
             if (decoderDecorator) decoder = decoderDecorator(std::move(decoder));
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, std::make_shared<PcmAudioDiagnostics>()),

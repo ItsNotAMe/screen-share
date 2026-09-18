@@ -15,11 +15,21 @@ Backend feature scope is frozen for closeout. Finish these groups in order:
 
 Do not add unrelated backend features or repeat completed v2-only harness work.
 
-Latest acceptance group (2026-09-19): [HARDWARE-LAN.md](HARDWARE-LAN.md) passes
+Latest completed group (2026-09-19): explicit viewer decoder compatibility,
+including the backend option, existing join-screen preference, CLI/JSON inputs,
+strict actual-codec evidence and Release/Debug UI/CLI tests. The five-minute
+laptop software receiver passes at 45.4 fresh FPS with no invalid images,
+31→33 MiB private-memory medians and Section handles fixed at five. Hardware
+host encoding is retained. See [RECEIVER-RESOURCES.md](RECEIVER-RESOURCES.md).
+This supplies a measured workaround; the graphics/kernel hardware issue is not
+fixed or silently waived. Continue the consolidated physical/device/network
+acceptance group, including sustained actual presentation in compatibility mode.
+
+Earlier hardware acceptance: [HARDWARE-LAN.md](HARDWARE-LAN.md) passes
 five-minute desktop-to-laptop 1080p60 hardware delivery at 52.8 fresh FPS, with
 zero fallback/invalid images. The new one-command runner stages and verifies the
-exact build and collects both machines' evidence silently. **Next priority is
-laptop receiver resource growth**: private-memory medians rise 118→157 MiB and
+exact build and collects both machines' evidence silently. **Hardware-specific
+laptop receiver resource growth remains open**: private-memory medians rise 118→157 MiB and
 handle medians 645→833 during that run. Hardware delivery is accepted; sustained
 resources are not. This is separate from relative footprint optimization in
 BACKLOG.md. After attribution/validation, continue the physical/device/network

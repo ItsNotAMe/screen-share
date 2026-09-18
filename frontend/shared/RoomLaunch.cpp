@@ -54,12 +54,12 @@ RoomSessionConfig ParseRoomCommand(const QStringList& arguments, const RoomProfi
     const auto options = Options(arguments, {"--create-room", "--private", "--no-preview", "--mute", "--unmute"},
         {"--backend", "--signal-server", "--join-room", "--nickname", "--name", "--password-file", "--viewer-limit",
          "--seconds", "--display", "--window", "--audio", "--audio-device", "--process-id", "--playback-device", "--volume",
-         "--preset", "--resolution", "--fps", "--bitrate", "--upload-bps", "--control-file", "--gamepad", "--report"});
+         "--preset", "--resolution", "--fps", "--bitrate", "--upload-bps", "--control-file", "--gamepad", "--report", "--decoder"});
     const bool host = options.contains("--create-room");
     if (host == options.contains("--join-room")) throw std::invalid_argument("Choose exactly one of --create-room or --join-room");
     const QSet<QString> hostOnly{"--private", "--name", "--viewer-limit", "--display", "--window", "--audio", "--audio-device",
         "--process-id", "--preset", "--resolution", "--fps", "--bitrate", "--upload-bps"};
-    const QSet<QString> viewerOnly{"--no-preview", "--mute", "--unmute", "--playback-device", "--volume", "--gamepad"};
+    const QSet<QString> viewerOnly{"--no-preview", "--mute", "--unmute", "--playback-device", "--volume", "--gamepad", "--decoder"};
     if (options.contains("--mute") && options.contains("--unmute")) throw std::invalid_argument("Choose either --mute or --unmute");
     for (auto it = options.begin(); it != options.end(); ++it)
         if ((!host && hostOnly.contains(it.key())) || (host && viewerOnly.contains(it.key())))
@@ -70,6 +70,7 @@ RoomSessionConfig ParseRoomCommand(const QStringList& arguments, const RoomProfi
         {"name", options.value("--name", "My room")}, {"public", !options.contains("--private")},
         {"preview", !options.contains("--no-preview")}};
     if (!host) input["roomId"] = options.value("--join-room");
+    if (!host) input["decoder"] = options.value("--decoder", defaults ? defaults->decoder() : QStringLiteral("auto"));
     if (options.contains("--password-file")) input["password"] = Password(options.value("--password-file"));
     for (const auto& pair : {std::pair{"--viewer-limit", "viewerLimit"}, {"--seconds", "seconds"}})
         if (options.contains(pair.first)) input[pair.second] = Number(options.value(pair.first));

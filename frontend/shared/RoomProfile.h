@@ -16,6 +16,8 @@ public:
     struct Playback { int volume = 100; bool muted = false; };
     Playback playback() const;
     bool savePlayback(Playback);
+    QString decoder() const;
+    bool saveDecoder(const QString&);
     static std::optional<QString> normalizeNickname(const QString&);
 private:
     bool saveValue(const QString&, const QVariant&);

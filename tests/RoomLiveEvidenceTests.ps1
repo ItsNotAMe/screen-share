@@ -20,6 +20,7 @@ function LoadFixture([string]$role) {
     $metrics = [ordered]@{passed=$true; runtimeReleased=$true; role=$role; width=1920; height=1080; fpsLimit=60; bitrateLimitBps=12000000
         physicalInput=$false; audibleOutput=$false; externalLatencyVerified=$false; measuredSeconds=10.0; cpuCorePercent=30.0
         frames=500; freshFrames=500; freshFps=50.0; invalidFrames=0; hardwareEncoderObserved=$true; hardwareDecoderObserved=$true; hardwareOnly=$true
+        decoderMode='hardware'; decoderObserved=$true
         afterStopResources=@{privateBytes=100000;workingSetBytes=100000;handles=100}
         samples=@(1..10 | ForEach-Object { @{second=$_;privateBytes=100000;workingSetBytes=100000;handles=100;activePeers=1
             hardwareFrames=100+$_*50;softwareFallbacks=0;encoder='mf-h264-hardware';decoder='mf-h264-hardware';receiverWidth=1920;receiverHeight=1080
@@ -60,3 +61,18 @@ foreach ($change in @(
 }
 if ($loadRejected -ne 18) { throw "Load validator accepted malformed evidence ($loadRejected/18 rejected)." }
 Write-Output 'Load evidence: host/viewer accepted; eighteen malformed, fallback and stalled cases rejected.'
+$software = LoadFixture 'host'; $software.decoderMode='software'; $software.hardwareDecoderObserved=$false; $software.hardwareOnly=$false
+foreach ($sample in $software.samples) { $sample.decoder='mf-h264-software' }
+Assert-RoomLoadEvidence $software 'host' 10 'software'
+$modeRejected=0
+try { Assert-RoomLoadEvidence $software 'host' 10 } catch { ++$modeRejected }
+$software.samples[3].decoder='mf-h264-hardware'
+try { Assert-RoomLoadEvidence $software 'host' 10 'software' } catch { ++$modeRejected }
+$software.samples[3].decoder='mf-h264-software'; $software.decoderObserved=$false
+try { Assert-RoomLoadEvidence $software 'host' 10 'software' } catch { ++$modeRejected }
+$software.decoderObserved=$true; $software.decoderMode=$true
+try { Assert-RoomLoadEvidence $software 'host' 10 'software' } catch { ++$modeRejected }
+$software.decoderMode='software'; $software.samples[3].decoder=$true
+try { Assert-RoomLoadEvidence $software 'host' 10 'software' } catch { ++$modeRejected }
+if ($modeRejected -ne 5) { throw 'Decoder mode evidence accepted mislabeled or missing observations.' }
+Write-Output 'Explicit software decode accepted; five mislabeled/missing decoder cases rejected.'

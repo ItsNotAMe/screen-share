@@ -1,5 +1,69 @@
 # Laptop receiver resource attribution
 
+## Decoder compatibility path
+
+The receiver now supports a local, explicit software-decoder choice without
+changing the host encoder, capture or transport. The existing join form saves
+Automatic / Software (compatibility); CLI viewers use `--decoder software`,
+and room JSON uses `"decoder": "software"`. Automatic remains the default.
+Wrong-role, malformed and unknown values are rejected before joining. CLI
+overrides do not rewrite the saved preference. No codec choice is sent as a
+host room mutation or inherited from a room link.
+
+Release/Debug builds and UI/CLI integration checks pass, including propagation
+to the runtime, saved settings, corrupt preferences and failed writes. Evidence
+validation explicitly distinguishes hardware encoding plus software decoding
+from hardware on both endpoints, checks every active host sample, and rejects
+mislabelled mode values. The same fresh-image requirements apply to both modes.
+
+The final local real-runtime smoke passes at 47.9 fresh 1080p FPS with zero
+invalid images and about 54% of one CPU core on the receiver. This is a local
+CPU pixel-consumer result, not a laptop resource or physical presentation pass.
+The first laptop attempt timed out during SSH setup before media started;
+the user woke the laptop, and the subsequent 20-second laptop smoke passed at
+47.6 fresh FPS, no invalid images, and 1.39 CPU cores. Its Section count stayed
+5→5.
+
+The five-minute laptop run **passes the same media checks**, with hardware
+encoding observed on the host and software decoding in every active receiver
+telemetry sample. It delivers **45.4 fresh FPS**, zero invalid images, and uses
+about **1.35 CPU cores**. Viewer Section handles stay **5→5→5** (warm-up, end,
+after stop). First/last 30-second private-memory medians are **31.3 / 32.7 MiB**,
+peak 38.7 MiB; handle medians fall **601 / 582**. This avoids the earlier
+five-minute hardware receiver's 118→157 MiB and 645→833-handle trend in the
+measured CPU-consumer path. It does not prove an indefinite bound or qualify
+hardware decoding, GPU presentation, 60 delivered FPS or external gaming latency.
+
+Raw runs are `build/receiver-software-laptop-smoke` and
+`build/receiver-software-laptop-sustained`; the final local control is
+`build/receiver-software-local-final`. The
+[compact evidence](evidence/decoder-compatibility-2026-09-19.json) retains their
+binary/source/runner/report hashes, resource windows and the kernel trace.
+The initial SSH failure is preserved separately. Final evidence tests pass in
+PowerShell 5.1 and 7: the previous 18 malformed load cases plus five decoder-mode
+cases are rejected, and both explicit modes are accepted only when matched.
+
+The software path avoids the hardware decoder's per-frame owned NV12 texture
+allocation. The existing UI's CPU-frame presenter reuses its luma/chroma
+textures, but these CPU-consumer media tests do not validate sustained physical
+GPU presentation. Software decoding is a compatibility choice with a CPU
+tradeoff, not a claim that hardware decoding is universally slower or broken.
+
+## Kernel allocation trace
+
+The bounded debugger run in `build/receiver-section-trace/native-v3.log` captures
+the direct-creation interval. Seven retained unnamed Section handles have
+opening process ID **4 (System)** and zero granted access in the test process.
+The other four retained handles are application events/I/O completions. This
+supports a graphics/kernel retention issue, not a missing application
+`CloseHandle` call. Allocation call stacks are unavailable; the trace does not
+identify an exact driver function or establish that Intel alone is responsible.
+The first two debugger attempts did not collect a valid interval and remain
+preserved. Debugger timings are not performance evidence. No driver, system
+service, account or machine policy was changed.
+
+## Earlier hardware diagnostics
+
 The five-minute hardware LAN delivery result remains valid, but it does not
 close sustained resource acceptance. This investigation separates the increasing
 Windows handle count from the deferred goal of using less memory than legacy.
@@ -68,5 +132,5 @@ not claim streaming, physical latency, or resource acceptance.
 For streaming reproduction, use the hash-verified laptop command in
 [HARDWARE-LAN.md](HARDWARE-LAN.md). Its runner preserves both stdout and stderr
 on remote failure; PowerShell module startup messages no longer hide the native
-report. No production codec or ownership policy has been changed on the basis
-of aggregate handle counts.
+report. The compatibility choice is explicit; there is no speculative texture
+ownership change or automatic vendor-wide hardware blacklist.

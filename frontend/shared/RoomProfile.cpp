@@ -50,6 +50,14 @@ bool RoomProfile::saveNickname(const QString& value) {
     if (!canonical) return false;
     return saveValue("nickname", *canonical);
 }
+QString RoomProfile::decoder() const {
+    const auto value = settings_->value("decoder/v1").toString();
+    return value == "software" ? value : QStringLiteral("auto");
+}
+bool RoomProfile::saveDecoder(const QString& value) {
+    if (value != "auto" && value != "software") return false;
+    return saveValue("decoder/v1", value);
+}
 bool RoomProfile::saveValue(const QString& key, const QVariant& value) {
     const bool existed = settings_->contains(key);
     const auto previous = settings_->value(key);

@@ -15,7 +15,9 @@ function Assert-RoomLoadNumber($Value) {
     if (($Value -isnot [double] -and $Value -isnot [decimal] -and $Value -isnot [int] -and $Value -isnot [long]) -or
         [double]::IsNaN($Value) -or [double]::IsInfinity($Value) -or $Value -lt 0) { throw 'Invalid load number.' }
 }
-function Assert-RoomLoadEvidence($Metrics, [string]$Role, [int]$Seconds) {
+function Assert-RoomLoadEvidence($Metrics, [string]$Role, [int]$Seconds, [string]$Decoder = 'hardware') {
+    if ($Decoder -cnotin @('hardware','software') -or $Metrics.decoderMode -isnot [string] -or $Metrics.decoderMode -cne $Decoder) { throw 'Unexpected decoder selection.' }
+    if ($Metrics.hardwareOnly -isnot [bool] -or $Metrics.hardwareOnly -ne ($Decoder -eq 'hardware')) { throw 'Mislabeled codec mode.' }
     foreach ($name in @('passed','runtimeReleased')) {
         if ($Metrics.$name -isnot [bool] -or -not $Metrics.$name) { throw 'Missing completed load assertion.' }
     }
@@ -39,7 +41,8 @@ function Assert-RoomLoadEvidence($Metrics, [string]$Role, [int]$Seconds) {
             Assert-RoomLoadNumber $sample.softwareFallbacks
             if ($sample.softwareFallbacks -ne 0 -or $sample.hardwareFrames -le 0) { throw 'Hardware encoder fell back.' }
             if ($sample.activePeers -eq 1) {
-                if ($sample.encoder -cne 'mf-h264-hardware' -or $sample.decoder -cne 'mf-h264-hardware' -or
+                if ($sample.encoder -isnot [string] -or $sample.decoder -isnot [string] -or
+                    $sample.encoder -cne 'mf-h264-hardware' -or $sample.decoder -cne "mf-h264-$Decoder" -or
                     $sample.receiverWidth -ne 1920 -or $sample.receiverHeight -ne 1080) { throw 'Missing hardware endpoint evidence.' }
             } elseif ($sample.activePeers -ne 0 -or $index -ne $Metrics.samples.Count) { throw 'Unexpected peer loss.' }
         } else {
@@ -51,8 +54,11 @@ function Assert-RoomLoadEvidence($Metrics, [string]$Role, [int]$Seconds) {
         }
     }
     if ($Role -eq 'host') {
-        foreach ($name in @('hardwareEncoderObserved','hardwareDecoderObserved','hardwareOnly')) {
+        foreach ($name in @('hardwareEncoderObserved','decoderObserved')) {
             if ($Metrics.$name -isnot [bool] -or -not $Metrics.$name) { throw 'Missing hardware use.' }
+        }
+        foreach ($name in @('hardwareDecoderObserved','hardwareOnly')) {
+            if ($Metrics.$name -isnot [bool] -or $Metrics.$name -ne ($Decoder -eq 'hardware')) { throw 'Mislabeled decoder evidence.' }
         }
     } elseif ($Role -eq 'viewer') {
         if ($Metrics.freshFrames -gt $Metrics.frames -or $Metrics.freshFps -lt 45 -or $Metrics.invalidFrames -ne 0 -or

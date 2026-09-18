@@ -27,6 +27,12 @@ both endpoints. It preserves failed evidence and rejects same-machine endpoints.
 The launcher uses a process-only RemoteSigned policy for these local scripts;
 it does not change persistent account policy, firewall rules or driver installation.
 
+Add `--decoder software` for the viewer compatibility check. Host encoding stays
+hardware; the report and strict per-sample decoder assertions explicitly require
+software on the receiver. The default remains `--decoder hardware`, with the
+original hardware-only requirements. A software-mode pass never closes hardware
+decode acceptance. Both modes retain the same fresh-FPS and invalid-image gates.
+
 The host waits for the viewer, and the viewer warms up before a timed load interval.
 Both record one-second private-memory, working-set and handle samples, process
 CPU and post-stop resources. The host records actual hardware encode counters,

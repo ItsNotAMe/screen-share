@@ -1,5 +1,12 @@
 # Shared-backend room UI
 
+The existing join form now includes **Video decoding (when joining)**:
+Automatic (prefer hardware), or Software (compatibility). It saves only this
+local preference for future joins; it never changes the host's encoder or room
+settings. Use Software to work around an incompatible hardware decoder, with
+the validation status recorded in RECEIVER-RESOURCES.md. This small control
+belongs to backend compatibility work; the visual redesign is still later.
+
 Controller request/grant, selected-peer/all revoke, indicators, selected-device
 polling and AppShell panic revoke are now integrated. See [CONTROLLERS.md](CONTROLLERS.md)
 for consent/focus/source behavior and silent tests. Mouse/keyboard now use the same

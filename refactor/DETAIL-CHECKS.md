@@ -4,12 +4,21 @@ Last reconciled: 2026-09-19 (including congestion-window settling, continuous di
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+Decoder compatibility closeout (RECEIVER-RESOURCES.md): backend receiver choice,
+strict viewer-only CLI/JSON parsing, saved join-form preference, corrupt-setting
+and failed-write handling, and actual decoder-mode evidence are implemented.
+Release/Debug UI/CLI tests pass. The five-minute laptop software receiver stays
+at five Section handles and 31→33 MiB median private memory, with 45.4 fresh FPS
+and zero invalid images. Hardware host encoding remains in use. The retained
+hardware/kernel issue and physical presentation/latency requirements are not
+waived; continue the consolidated field acceptance group.
+
 Two-machine hardware acceptance: [HARDWARE-LAN.md](HARDWARE-LAN.md) records a
 five-minute real WGC desktop host → laptop hardware decoder run at 52.8 fresh
 1080p FPS, with zero fallback/invalid images. The silent runner verifies endpoint
 placement and binary/validator hashes and preserves failed runs. Hardware delivery
 passes; laptop private-memory/handle growth remains an explicit resource issue,
-not a waived memory optimization. Next isolate that trend before claiming
+not a waived memory optimization. The software workaround above does not establish
 sustained stability. Physical presentation/input, four-viewer remote hardware,
 Internet/NAT and device acceptance remain separate.
 
