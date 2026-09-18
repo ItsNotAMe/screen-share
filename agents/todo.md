@@ -10,8 +10,8 @@ Priority correction: the user requests Stage 2–4 completion before
 cutover. Read refactor/STAGE-2-4-ACCEPTANCE.md for the remaining acceptance boundary.
 The user returned with a Windows laptop and GameSir Nova Lite. The read-only field
 scene and concise portable-test workflow are prepared; see refactor/FIELD-TESTING.md.
-Isolated ten-room v2 deployment needs the pending explicit approval. Do not deploy
-the v1 service or install a controller driver.
+The user approved isolated ten-room v2 deployment; it is live and both PCs pass
+HTTPS health. Do not deploy the v1 service or install a controller driver.
 UI/CLI redacted JSON reports and input pressure/local timing diagnostics are
 implemented and verified (SESSION-REPORTS.md); do not reimplement them.
 Unattended results: refactor/UNATTENDED-RESULTS.md. The two-hour software run is now
@@ -21,8 +21,10 @@ Continue that performance investigation and the listed physical/resource/field
 gates, not another reporting/cost-harness implementation or an unqualified soak rerun.
 Decoded-frame handoff accounting/timing is implemented (refactor/FRAME-HANDOFF.md).
 Continue from its measured queue scope; do not mistake it for full pipeline latency.
-The user is setting up laptop SSH; it is not connected yet. The separate service
-deployment question remains pending.
+Laptop SSH now works through the dedicated local test account and a pinned host
+key. Field build startup and software codec checks pass. SSH-session GPU encoder
+falls back; the real-service CLI regression still fails. FIELD-TESTING.md records
+the limits. Continue interactive two-machine checks without claiming those passed.
 
 Current continuation: the shared input service, controller and mouse/keyboard
 UI/CLI/device groups are implemented. See [DESKTOP-INPUT.md](../refactor/DESKTOP-INPUT.md).

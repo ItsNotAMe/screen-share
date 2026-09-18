@@ -10,7 +10,8 @@ Current priority: finish Stage 2–4, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).
 The user is back with a Windows laptop and GameSir Nova Lite. Use the concise
 [FIELD-TESTING.md](FIELD-TESTING.md) handoff for real-machine acceptance. An isolated
-ten-room v2 service dry run is prepared; deployment approval is pending.
+ten-room v2 service is now approved and deployed; both PCs pass HTTPS health.
+Laptop SSH and portable startup work; see FIELD-TESTING.md for actual test limits.
 The unattended batch results are in [UNATTENDED-RESULTS.md](UNATTENDED-RESULTS.md):
 two-hour software evidence is collected; Stage 4 still has a Release bandwidth-
 recovery failure and the documented device/resource/field gates. Do not repeat

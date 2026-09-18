@@ -384,7 +384,8 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(invalidAudio, true); });
         invalidAudio["audioChanges"] = QJsonArray{QJsonObject{{"atMs", 100}, {"source", "system"}, {"processId", 1}}};
         Reject([&] { ParseRoomSessionConfig(invalidAudio, true); });
-        Reject([&] { ParseRoomSessionConfig(object); }); // Production cannot opt into plaintext.
+        auto plaintext = object; plaintext["origin"] = "http://127.0.0.1:12345";
+        Reject([&] { ParseRoomSessionConfig(plaintext); }); // Production cannot opt into plaintext, even when this test uses real TLS.
         for (const auto& extra : {QJsonObject{{"deviceId", "default"}}, QJsonObject{{"processId", 1}}}) {
             auto forbidden = extra; forbidden["source"] = "none";
             auto invalid = object; invalid["audio"] = forbidden;
@@ -423,6 +424,8 @@ int main(int argc, char** argv) {
         RoomCliHooks hostHooks;
         hostHooks.pump = [&] { return !stopHost; };
         hostHooks.report = [&](const QJsonObject& value) {
+            if (value["type"] == "admission-error" || value["type"] == "admission-ended")
+                std::cerr << "Host admission error=" << value["error"].toInt() << '\n';
             const auto encoded = QJsonDocument(value).toJson();
             Check(!encoded.contains("test-only-password") && !encoded.contains("token"));
             if (value["type"] == "settings") { Check(value["error"].toInt() == 0); accepted = true; }
@@ -562,6 +565,8 @@ int main(int argc, char** argv) {
         int playbackChanges = 0;
         bool playbackFailed = false, playbackRecovered = false;
         viewerHooks.report = [&](const QJsonObject& value) {
+            if (value["type"] == "admission-error" || value["type"] == "admission-ended")
+                std::cerr << "Viewer admission error=" << value["error"].toInt() << '\n';
             const auto health = value["playbackHealth"].toObject();
             if (health["state"] == "failed") {
                 Check(health["failures"].toInteger() == 1); playbackFailed = true; audio->outputUnavailable = false;
@@ -598,7 +603,10 @@ int main(int argc, char** argv) {
         };
         const int viewing = RunRoomCliSession(viewer, Factory(viewer, audio, frames), viewerHooks, true);
         stopHost = true;
-        Check(playbackChanges == 3 && playbackFailed && playbackRecovered);
+        if (!(playbackChanges == 3 && playbackFailed && playbackRecovered))
+            throw std::runtime_error("Playback integration failed: viewerExit=" + std::to_string(viewing) +
+                " changes=" + std::to_string(playbackChanges) + " failed=" + std::to_string(playbackFailed) +
+                " recovered=" + std::to_string(playbackRecovered) + " frames=" + std::to_string(original + changed));
         const auto hostResult=hosting.get();
         { QFile saved(host.reportFile); Check(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll();
           Check(!bytes.contains("test-only-password") && !bytes.contains("CliHost"));

@@ -12,7 +12,9 @@ contains the prepared five-minute first pass and test-scene/package instructions
 The desktop became available and a 16-case Release matrix plus WGC window/display
 checks passed, but it later returned to Screen-saver and blocked the final desktop
 rerun. DXGI still reports unsupported on the current HDR desktop. This is not a
-passing DXGI fallback result. Isolated v2 deployment approval is pending.
+passing DXGI fallback result. The isolated ten-room v2 service is now approved
+and deployed, with HTTPS health verified from both PCs. Laptop software codec
+checks pass; SSH-session hardware encoding falls back. See FIELD-TESTING.md.
 
 | Stage | Implemented / locally verified | Remaining acceptance |
 | --- | --- | --- |
