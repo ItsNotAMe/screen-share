@@ -70,5 +70,6 @@ are recorded in [PRESENTATION-SIZING.md](PRESENTATION-SIZING.md).
 The internal input-marker times (57 ms desktop, 90 ms laptop) are single synthetic
 observations, not physical input-to-image latency percentiles. Physical devices,
 external latency, congestion/resource gates and billed service usage remain open.
-Earlier `RoomCliTests` live-service failures remain unresolved and preserved in
-FIELD-TESTING.md; this event-driven fixture does not turn those failures into passes.
+At this checkpoint, `RoomCliTests` live-service failures remained unresolved.
+They were subsequently reproduced and corrected independently, with all assertions
+retained; see TWO-MACHINE.md for the readiness fix and actual bidirectional LAN run.

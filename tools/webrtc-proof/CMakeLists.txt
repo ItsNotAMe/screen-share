@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.24)
 project(ScreenShareWebRTCProof LANGUAGES CXX)
 include(CTest)
+find_program(SCREENSHARE_POWERSHELL_EXECUTABLE NAMES powershell pwsh)
+if(SCREENSHARE_POWERSHELL_EXECUTABLE)
+    add_test(NAME room-live-timing-evidence COMMAND "${SCREENSHARE_POWERSHELL_EXECUTABLE}"
+        -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_LIST_DIR}/../../tests/RoomLiveEvidenceTests.ps1")
+    set_tests_properties(room-live-timing-evidence PROPERTIES TIMEOUT 20)
+endif()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME capture-stress-evidence COMMAND "${Python3_EXECUTABLE}"
@@ -112,6 +118,14 @@ endif()
       get_filename_component(proofQtBin "${Qt6_DIR}/../../../bin" ABSOLUTE)
       find_program(PROOF_WINDEPLOYQT_EXECUTABLE NAMES windeployqt6 windeployqt
           PATHS "${proofQtBin}" NO_DEFAULT_PATH REQUIRED)
+      add_executable(CrossMachineRoomProof CrossMachineRoomProof.cpp)
+      target_link_libraries(CrossMachineRoomProof PRIVATE MfWebRTCCodecs ScreenShareRoomSession)
+      add_custom_command(TARGET CrossMachineRoomProof POST_BUILD COMMAND "${CMAKE_COMMAND}"
+          "-DWINDEPLOYQT_EXECUTABLE=${PROOF_WINDEPLOYQT_EXECUTABLE}"
+          "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:CrossMachineRoomProof>"
+          "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
+          -DWINDEPLOYQT_HEADLESS=ON
+          -P "${CMAKE_CURRENT_LIST_DIR}/../../cmake/RunWindeployQt.cmake" VERBATIM)
       add_custom_command(TARGET PublicRoomSessionProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
           "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>"
           "$<TARGET_FILE_DIR:PublicRoomSessionProof>" VERBATIM)

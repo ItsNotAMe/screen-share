@@ -155,6 +155,7 @@ def cases(desktop):
               ("presentation-worker", "VideoFrameInputTests.exe", None, None),
               ("room-service", "RoomServiceTests.exe", "service", None),
               ("cli-media", "RoomCliTests.exe", "media", None),
+              ("cli-delayed-viewer", "RoomCliTests.exe", "media", "delayed-viewer"),
               ("ui-media", "RoomUiTests.exe", "media", None),
               ("controller-ui", "RoomUiTests.exe", "media", "controllers"),
               ("desktop-input-ui", "RoomUiTests.exe", "media", "desktop-input"),

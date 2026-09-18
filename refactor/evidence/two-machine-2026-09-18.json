@@ -1,0 +1,543 @@
+{
+  "schema": 1,
+  "date": "2026-09-18",
+  "externalLatencyVerified": false,
+  "runs": [
+    {
+      "schema": 1,
+      "scenario": "live-service-cli",
+      "passed": false,
+      "origin": "https://screenshare-signaling-v2.bit-yeet.workers.dev",
+      "startedUtc": "2026-09-18T13:05:07.7281786Z",
+      "executableSha256": "464f5e8a1ec7a0eddb941e9e4e16a6881da35afece6966c9600a09969320bb13",
+      "runnerSha256": "2d46bb4b1c867751286d222c8066febcd8deca2b60f61d38ab2a87ae2a634dec",
+      "mediaScope": "four peers on this machine; remote HTTPS/WSS signaling",
+      "physicalInput": false,
+      "audibleOutput": false,
+      "timedOut": false,
+      "exitCode": 1,
+      "error": "Native proof failed or exceeded its deadline.",
+      "elapsedMs": 8051,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "6b5031292764e438b387de7dadafb0031778a68de4bab4a2aef975077bfde659",
+      "artifact": "build/webrtc/cli-live-baseline-desktop",
+      "endpoint": "desktop"
+    },
+    {
+      "schema": 1,
+      "scenario": "live-service-cli",
+      "passed": true,
+      "origin": "https://screenshare-signaling-v2.bit-yeet.workers.dev",
+      "startedUtc": "2026-09-18T13:07:00.1214205Z",
+      "executableSha256": "fd4516660464e8dce693f22d35d23d727af644b2db83152a0890e655a122c4c8",
+      "runnerSha256": "3c25ccaa3116496464c5fff8f793f841b7d38402ee96d3a4cde161a7509d29a2",
+      "mediaScope": "same-machine media peers; remote HTTPS/WSS signaling",
+      "physicalInput": false,
+      "audibleOutput": false,
+      "timedOut": false,
+      "exitCode": 0,
+      "metrics": {
+        "passed": true,
+        "cli_session": true,
+        "command_options": true,
+        "live_settings": true,
+        "bounded_presentation": true,
+        "silent_audio": true,
+        "original_frames": 100,
+        "changed_frames": 42
+      },
+      "elapsedMs": 8971,
+      "stdoutSha256": "353c24c3a6b84be2d172f2f72c78a014376b620bfbfc4d4c178c013ad8607552",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "artifact": "build/webrtc/cli-live-ready-desktop",
+      "endpoint": "desktop"
+    },
+    {
+      "schema": 1,
+      "scenario": "live-service-cli",
+      "passed": true,
+      "origin": "https://screenshare-signaling-v2.bit-yeet.workers.dev",
+      "startedUtc": "2026-09-18T13:08:24.9145660Z",
+      "executableSha256": "fd4516660464e8dce693f22d35d23d727af644b2db83152a0890e655a122c4c8",
+      "runnerSha256": "3c25ccaa3116496464c5fff8f793f841b7d38402ee96d3a4cde161a7509d29a2",
+      "mediaScope": "same-machine media peers; remote HTTPS/WSS signaling",
+      "physicalInput": false,
+      "audibleOutput": false,
+      "timedOut": false,
+      "exitCode": 0,
+      "metrics": {
+        "passed": true,
+        "cli_session": true,
+        "command_options": true,
+        "live_settings": true,
+        "bounded_presentation": true,
+        "silent_audio": true,
+        "original_frames": 100,
+        "changed_frames": 43
+      },
+      "elapsedMs": 8848,
+      "stdoutSha256": "e8b63b4ad8930bfc576346a8f892694df63741db0b0da92a0fec34e91d03348a",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "artifact": "build/webrtc/cli-live-ready-laptop",
+      "endpoint": "laptop"
+    },
+    {
+      "schema": 1,
+      "scenario": "live-service-cross-viewer",
+      "passed": false,
+      "origin": "https://screenshare-signaling-v2.bit-yeet.workers.dev",
+      "startedUtc": "2026-09-18T13:15:23.1398584Z",
+      "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+      "runnerSha256": "3c038499558a34381994a4a41872def9210f8af6b755f24bb884c7e7c960afae",
+      "mediaScope": "cross-machine scenario; endpoint placement recorded by launcher",
+      "physicalInput": false,
+      "audibleOutput": false,
+      "timedOut": false,
+      "exitCode": 0,
+      "error": "Invalid timing sample.",
+      "elapsedMs": 17655,
+      "stdoutSha256": "79f92e3b8e4261bb32c84e84c3d8cc87cb44f0ddd7d1a9984c3e30831a38250f",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "artifact": "build/webrtc/cross-desktop-host-3/viewer",
+      "endpoint": "laptop"
+    },
+    {
+      "schema": 1,
+      "scenario": "live-service-cross-host",
+      "passed": true,
+      "origin": "https://screenshare-signaling-v2.bit-yeet.workers.dev",
+      "startedUtc": "2026-09-18T13:18:08.5451186Z",
+      "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+      "runnerSha256": "0590c5482562bd21a1b6f5cfbbc408b9d0734c03212788cead355840a871fa9b",
+      "validatorSha256": "74562d38fee0922daec23cdcb1dc9e86746c9993a252470a0e3d276d6fd69f81",
+      "mediaScope": "cross-machine scenario; endpoint placement recorded by launcher",
+      "physicalInput": false,
+      "audibleOutput": false,
+      "timedOut": false,
+      "exitCode": 0,
+      "metrics": {
+        "audibleOutput": false,
+        "fixedAndAutoSettings": true,
+        "freshRejoin": true,
+        "inputEvents": 40,
+        "passed": true,
+        "physicalInput": false,
+        "productionTls": true,
+        "role": "host",
+        "runtimeReleased": true
+      },
+      "elapsedMs": 20247,
+      "stdoutSha256": "49dd51ea64055517f4daee6f7fbc576a7c32d58f1efe9a66c8567aa1974a2817",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "artifact": "build/webrtc/cross-desktop-host-4/host",
+      "endpoint": "desktop"
+    },
+    {
+      "schema": 1,
+      "scenario": "live-service-cross-viewer",
+      "passed": true,
+      "origin": "https://screenshare-signaling-v2.bit-yeet.workers.dev",
+      "startedUtc": "2026-09-18T13:18:10.0303197Z",
+      "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+      "runnerSha256": "0590c5482562bd21a1b6f5cfbbc408b9d0734c03212788cead355840a871fa9b",
+      "validatorSha256": "74562d38fee0922daec23cdcb1dc9e86746c9993a252470a0e3d276d6fd69f81",
+      "mediaScope": "cross-machine scenario; endpoint placement recorded by launcher",
+      "physicalInput": false,
+      "audibleOutput": false,
+      "timedOut": false,
+      "exitCode": 0,
+      "metrics": {
+        "audibleOutput": false,
+        "audioBlocks": 1466,
+        "externalLatencyVerified": false,
+        "frames": 388,
+        "freshRejoin": true,
+        "inputImageSamplesMs": [
+          97.98,
+          99.275,
+          99.371,
+          93.512,
+          93.52,
+          91.963,
+          93.57,
+          92.879,
+          93.231,
+          102.072,
+          94.09,
+          61.964,
+          108.685,
+          99.247,
+          103.863,
+          94.165,
+          92.542,
+          108.425,
+          62.424,
+          107.62
+        ],
+        "passed": true,
+        "physicalInput": false,
+        "productionTls": true,
+        "restart": true,
+        "role": "viewer",
+        "runtimeReleased": true,
+        "timingScope": "viewer-submit-to-decoded-synthetic-response"
+      },
+      "elapsedMs": 17169,
+      "stdoutSha256": "dee7e60f7085773d758d8ced358dc9c2bc6c285fe8052482522ef1ed7797be2b",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "artifact": "build/webrtc/cross-desktop-host-4/viewer",
+      "endpoint": "laptop",
+      "internalTimingNearestRankMs": {
+        "50": 94.09,
+        "95": 108.425,
+        "99": 108.685
+      }
+    },
+    {
+      "schema": 1,
+      "scenario": "live-service-cross-host",
+      "passed": true,
+      "origin": "https://screenshare-signaling-v2.bit-yeet.workers.dev",
+      "startedUtc": "2026-09-18T13:19:20.5568569Z",
+      "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+      "runnerSha256": "0590c5482562bd21a1b6f5cfbbc408b9d0734c03212788cead355840a871fa9b",
+      "validatorSha256": "74562d38fee0922daec23cdcb1dc9e86746c9993a252470a0e3d276d6fd69f81",
+      "mediaScope": "cross-machine scenario; endpoint placement recorded by launcher",
+      "physicalInput": false,
+      "audibleOutput": false,
+      "timedOut": false,
+      "exitCode": 0,
+      "metrics": {
+        "audibleOutput": false,
+        "fixedAndAutoSettings": true,
+        "freshRejoin": true,
+        "inputEvents": 40,
+        "passed": true,
+        "physicalInput": false,
+        "productionTls": true,
+        "role": "host",
+        "runtimeReleased": true
+      },
+      "elapsedMs": 19419,
+      "stdoutSha256": "49dd51ea64055517f4daee6f7fbc576a7c32d58f1efe9a66c8567aa1974a2817",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "artifact": "build/webrtc/cross-laptop-host-1/host",
+      "endpoint": "laptop"
+    },
+    {
+      "schema": 1,
+      "scenario": "live-service-cross-viewer",
+      "passed": true,
+      "origin": "https://screenshare-signaling-v2.bit-yeet.workers.dev",
+      "startedUtc": "2026-09-18T13:19:24.1961817Z",
+      "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+      "runnerSha256": "0590c5482562bd21a1b6f5cfbbc408b9d0734c03212788cead355840a871fa9b",
+      "validatorSha256": "74562d38fee0922daec23cdcb1dc9e86746c9993a252470a0e3d276d6fd69f81",
+      "mediaScope": "cross-machine scenario; endpoint placement recorded by launcher",
+      "physicalInput": false,
+      "audibleOutput": false,
+      "timedOut": false,
+      "exitCode": 0,
+      "metrics": {
+        "audibleOutput": false,
+        "audioBlocks": 1480,
+        "externalLatencyVerified": false,
+        "frames": 391,
+        "freshRejoin": true,
+        "inputImageSamplesMs": [
+          61.746,
+          77.049,
+          86.799,
+          108.416,
+          93.146,
+          97.802,
+          91.874,
+          93.715,
+          97.262,
+          91.352,
+          97.786,
+          97.458,
+          90.702,
+          92.555,
+          102.504,
+          92.793,
+          92.913,
+          93.331,
+          107.431,
+          68.707
+        ],
+        "passed": true,
+        "physicalInput": false,
+        "productionTls": true,
+        "restart": true,
+        "role": "viewer",
+        "runtimeReleased": true,
+        "timingScope": "viewer-submit-to-decoded-synthetic-response"
+      },
+      "elapsedMs": 17126,
+      "stdoutSha256": "0f0bc57c816491ad1f52bf2d9d8c5abdd8fcb0761ac3c1577fc0309a84b363e0",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "artifact": "build/webrtc/cross-laptop-host-1/viewer",
+      "endpoint": "desktop",
+      "internalTimingNearestRankMs": {
+        "50": 92.913,
+        "95": 107.431,
+        "99": 108.416
+      }
+    }
+  ],
+  "desktopMatrices": [
+    {
+      "artifact": "build/webrtc/stage-2-4-connected-desktop/result.json",
+      "sha256": "8dfc1945cb28f437b8642339473c5355cd4bf915dced3cde526aaceff18f7f40",
+      "passed": false,
+      "plannedRuns": 16,
+      "elapsedSeconds": 69.838,
+      "runnerSha256": "7c02b0bf1646a39b6e19e8f1538284f528b43b746e828dbe29dc8a3111ebafa6",
+      "fixtureSha256": "03b4b7947d0b9077e05b3a96c337f32d9d638720e0ef3ab52d876dbe1975235d",
+      "runs": [
+        {
+          "name": "input-service",
+          "executableSha256": "ab06bd779e36308160f28671f6fbc7aca19378a69f3bfd320ee0614b70627916",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "diagnostic-report",
+          "executableSha256": "c63a7bd38b34e2a2041ff6461dc853daf357d13a1cbb8e6f4f45da37ae6f7d37",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "gamepad-control",
+          "executableSha256": "354bd53b6ca13cbeef7625d2ef0b7676ca44b1393ea507e18290606afa921af9",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "desktop-input",
+          "executableSha256": "f2e7db0639ed977b22fa2c664bcdb5e50cb90aa57cb36d75287567c49160a9dc",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "input-media",
+          "executableSha256": "b208ae5651d1e7670e8e398e3fbdfc31710c3629988a70c775a2795ddf1769d5",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-input-media\\service\\native-service-25884104-54f3-4d59-a76f-ce405333e868\\result.json"
+        },
+        {
+          "name": "presentation-worker",
+          "executableSha256": "8c1a3a5a6605652a8ef4489cae1bfd4a8ec020cbcd97259bd92f93d9102a3f7f",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "room-service",
+          "executableSha256": "591a885738d618d9612758520d9fc6d6282a7be857c0d3c8432597e5a3f8c5b5",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-room-service\\service\\native-service-9b569b29-088a-4bce-b8d3-b062c4c6cdf4\\result.json"
+        },
+        {
+          "name": "cli-media",
+          "executableSha256": "77f12766e6920c167004e4778ce60f57e84240a8a639f5ca04e736d1f491467e",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-cli-media\\service\\native-service-65c09ae9-0a10-48a4-bbd1-53c74248c7c0\\result.json"
+        },
+        {
+          "name": "ui-media",
+          "executableSha256": "49790eb496700d7dad64e87f66e3ee22ae6714307fd191e08c8219ded7af7f26",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-ui-media\\service\\native-service-bcfd9dc3-b3cd-4cae-af90-4af89e784b86\\result.json"
+        },
+        {
+          "name": "controller-ui",
+          "executableSha256": "49790eb496700d7dad64e87f66e3ee22ae6714307fd191e08c8219ded7af7f26",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-controller-ui\\service\\native-service-987a3aa1-65a9-44a8-b87b-ec6c6102d0f7\\result.json"
+        },
+        {
+          "name": "desktop-input-ui",
+          "executableSha256": "49790eb496700d7dad64e87f66e3ee22ae6714307fd191e08c8219ded7af7f26",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-desktop-input-ui\\service\\native-service-1d3cc8cb-cfed-4ac1-a5e0-4e9ffd4309cf\\result.json"
+        },
+        {
+          "name": "mutation-recovery",
+          "executableSha256": "49790eb496700d7dad64e87f66e3ee22ae6714307fd191e08c8219ded7af7f26",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-mutation-recovery\\service\\native-service-d78eff5e-59e8-484b-adb9-3d1fedad4a2d\\result.json"
+        },
+        {
+          "name": "windows-cli",
+          "executableSha256": "813a902963efe8cd7d3c527979362ed2fc811b742dd46d30c40bebd9f8a18eca",
+          "exitCode": 1,
+          "timedOut": false,
+          "passed": false,
+          "evidence": "001-windows-cli\\service\\native-service-fa0c8cd6-9935-4648-adcb-ec3828bee80c\\result.json"
+        }
+      ]
+    },
+    {
+      "artifact": "build/webrtc/stage-2-4-connected-desktop-final/result.json",
+      "sha256": "85a994bdd080bc70a6ba20d63d03ca34bfc1464162612d96ba6726621070ab1c",
+      "passed": true,
+      "plannedRuns": 17,
+      "elapsedSeconds": 103.73,
+      "runnerSha256": "59c69420836fbca2e8d2a2e3bf19e91d0b4b8e880075d4069179b3b98f19db5f",
+      "fixtureSha256": "03b4b7947d0b9077e05b3a96c337f32d9d638720e0ef3ab52d876dbe1975235d",
+      "runs": [
+        {
+          "name": "input-service",
+          "executableSha256": "ab06bd779e36308160f28671f6fbc7aca19378a69f3bfd320ee0614b70627916",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "diagnostic-report",
+          "executableSha256": "c63a7bd38b34e2a2041ff6461dc853daf357d13a1cbb8e6f4f45da37ae6f7d37",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "gamepad-control",
+          "executableSha256": "354bd53b6ca13cbeef7625d2ef0b7676ca44b1393ea507e18290606afa921af9",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "desktop-input",
+          "executableSha256": "f2e7db0639ed977b22fa2c664bcdb5e50cb90aa57cb36d75287567c49160a9dc",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "input-media",
+          "executableSha256": "b208ae5651d1e7670e8e398e3fbdfc31710c3629988a70c775a2795ddf1769d5",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-input-media\\service\\native-service-6b019878-8dc6-4595-b28c-bf94a3ce3adf\\result.json"
+        },
+        {
+          "name": "presentation-worker",
+          "executableSha256": "8c1a3a5a6605652a8ef4489cae1bfd4a8ec020cbcd97259bd92f93d9102a3f7f",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true
+        },
+        {
+          "name": "room-service",
+          "executableSha256": "591a885738d618d9612758520d9fc6d6282a7be857c0d3c8432597e5a3f8c5b5",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-room-service\\service\\native-service-e23259a8-93d1-4fa5-9adc-51c9e0013848\\result.json"
+        },
+        {
+          "name": "cli-media",
+          "executableSha256": "6cb10b11a73fb367316b35a3b7f7b22b9e448bb0d934da2f12809689ad3d2963",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-cli-media\\service\\native-service-aea812dc-17c1-4d5f-963f-e4fd55cf4469\\result.json"
+        },
+        {
+          "name": "cli-delayed-viewer",
+          "executableSha256": "6cb10b11a73fb367316b35a3b7f7b22b9e448bb0d934da2f12809689ad3d2963",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-cli-delayed-viewer\\service\\native-service-00742612-fceb-4686-bac6-744b2f7de465\\result.json"
+        },
+        {
+          "name": "ui-media",
+          "executableSha256": "49790eb496700d7dad64e87f66e3ee22ae6714307fd191e08c8219ded7af7f26",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-ui-media\\service\\native-service-6ecd538e-6a20-49ce-847f-2801e1b500de\\result.json"
+        },
+        {
+          "name": "controller-ui",
+          "executableSha256": "49790eb496700d7dad64e87f66e3ee22ae6714307fd191e08c8219ded7af7f26",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-controller-ui\\service\\native-service-da88ed94-ce8d-42bc-9ecf-6040ddfac0c5\\result.json"
+        },
+        {
+          "name": "desktop-input-ui",
+          "executableSha256": "49790eb496700d7dad64e87f66e3ee22ae6714307fd191e08c8219ded7af7f26",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-desktop-input-ui\\service\\native-service-e4e5b0fb-83fe-4d9d-ac19-3c7cc4bb3db2\\result.json"
+        },
+        {
+          "name": "mutation-recovery",
+          "executableSha256": "49790eb496700d7dad64e87f66e3ee22ae6714307fd191e08c8219ded7af7f26",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-mutation-recovery\\service\\native-service-a84c7d75-1bc0-4966-9153-38e65b03c0ad\\result.json"
+        },
+        {
+          "name": "windows-cli",
+          "executableSha256": "2ea4229892f787ee003cf61de5b46ddf00e94e04b09007e60769d0901389f2bb",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-windows-cli\\service\\native-service-8114b543-54e2-4b45-8706-8fc6936ec86a\\result.json"
+        },
+        {
+          "name": "windows-ui",
+          "executableSha256": "2781803e695a6c3945568cd108df8ba471f72170e04a69053d7295af2c6b37e2",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-windows-ui\\service\\native-service-96c4dc83-04f7-4c09-8564-c18afb797080\\result.json"
+        },
+        {
+          "name": "windows-controller-ui",
+          "executableSha256": "2781803e695a6c3945568cd108df8ba471f72170e04a69053d7295af2c6b37e2",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-windows-controller-ui\\service\\native-service-48224b23-c863-4dd5-bfbe-f94e062fc47f\\result.json"
+        },
+        {
+          "name": "windows-desktop-input-ui",
+          "executableSha256": "2781803e695a6c3945568cd108df8ba471f72170e04a69053d7295af2c6b37e2",
+          "exitCode": 0,
+          "timedOut": false,
+          "passed": true,
+          "evidence": "001-windows-desktop-input-ui\\service\\native-service-40518d70-7709-4ea9-a4ec-8e038c08560d\\result.json"
+        }
+      ]
+    }
+  ]
+}

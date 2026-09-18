@@ -441,6 +441,10 @@ if(TARGET ScreenShareRoomSession)
                 "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                 "$<TARGET_FILE:RoomCliTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-cli-evidence" media)
             set_tests_properties(room-v2-cli-media PROPERTIES TIMEOUT 90)
+            add_test(NAME room-v2-cli-delayed-viewer COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                "$<TARGET_FILE:RoomCliTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-cli-delayed-evidence" media delayed-viewer)
+            set_tests_properties(room-v2-cli-delayed-viewer PROPERTIES TIMEOUT 90)
         endif()
     endif()
 endif()

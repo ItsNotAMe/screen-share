@@ -3,6 +3,9 @@
 Live HTTPS/WSS lifecycle checks now pass on desktop and laptop with silent
 four-viewer media, recovery and shutdown. See [LIVE-SERVICE.md](LIVE-SERVICE.md)
 for the bounded one-command runner and its exact network/latency scope.
+The same runner now supports CLI and coordinated host/viewer roles on two PCs.
+Both LAN directions pass silent media/recovery/settings/input-marker checks;
+see [TWO-MACHINE.md](TWO-MACHINE.md) for commands, evidence and latency limits.
 
 Latest continuation: [FIELD-TESTING.md](FIELD-TESTING.md) records the final 12/12
 Release/Debug headless checks, earlier 16/16 desktop run, blocked final desktop

@@ -19,7 +19,12 @@ works; fresh laptop telemetry now records 8,977 presented frames and 59 fps hard
 decoding. Physical latency and controller acceptance remain open.
 The event-driven four-viewer native lifecycle now passes against the deployed
 HTTPS/WSS service on both PCs; see [LIVE-SERVICE.md](LIVE-SERVICE.md). Earlier
-timed CLI failures remain unresolved; NAT/interface-change tests are still open.
+timed CLI failures are now reproduced and resolved as fixture ordering errors.
+Bidirectional LAN media, restart/rejoin, settings and synthetic input-response
+checks pass; see [TWO-MACHINE.md](TWO-MACHINE.md). NAT/interface-change, physical
+devices and external-latency tests are still open.
+The expanded Release desktop matrix passes 17/17, including delayed viewer,
+generated-window capture, hardware presentation and native UI/CLI control flows.
 The unattended batch results are in [UNATTENDED-RESULTS.md](UNATTENDED-RESULTS.md):
 two-hour software evidence is collected; Stage 4 still has a Release bandwidth-
 recovery failure and the documented device/resource/field gates. Do not repeat

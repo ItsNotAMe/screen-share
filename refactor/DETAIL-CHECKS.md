@@ -11,8 +11,13 @@ after); the user confirmed the updated laptop viewer works, with 8,977 counted
 presents and 59 fps hardware decoding in its final fresh telemetry sample.
 See PRESENTATION-SIZING.md; this is not external latency/controller acceptance.
 Live-service four-viewer lifecycle/recovery now passes with production TLS policy
-on desktop and laptop (LIVE-SERVICE.md). Earlier timed CLI failures remain open;
-the new proof uses same-machine media peers with remote HTTPS/WSS signaling.
+on desktop and laptop (LIVE-SERVICE.md). The earlier timed CLI failures are now
+reproduced and resolved by readiness-ordered tests, including a delayed-viewer
+regression. Bidirectional LAN media/settings/restart/rejoin and 20 internal
+input-response samples per direction pass (TWO-MACHINE.md). Physical latency,
+controller, NAT/interface and resource/congestion gates remain open.
+The expanded Release desktop integration matrix passes 17/17; original failed
+validator/JSON-output runs remain preserved alongside the corrected results.
 
 Checked implementation rows below apply to the shared v2 backend and opt-in
 frontends, not default-shell cutover or field acceptance. Mixed requirements are

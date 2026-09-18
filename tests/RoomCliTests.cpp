@@ -44,7 +44,7 @@ template<class F> void Reject(F fn) {
     Check(rejected);
 }
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
-void NativePresentationSizing() {
+unsigned NativePresentationSizing() {
     struct Window {
         HWND value = CreateWindowExW(0, L"STATIC", L"ScreenShare native sizing regression",
             WS_OVERLAPPEDWINDOW, 40, 40, 640, 480, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -67,8 +67,8 @@ void NativePresentationSizing() {
             {320, 180, pixels.data(), pixels.size(), nullptr});
         std::this_thread::sleep_for(17ms);
     }
-    std::cout << "Native sizing: " << presented << "/90 new-frame presents\n";
     Check(presented >= 30 && renderer->MaximumFrameLatency() == 1);
+    return presented;
 }
 struct PreviewEvidence {
     bool failPresent = false, failUpdate = false;
@@ -383,10 +383,13 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int exitCode = 0;
     try {
-        Check(argc == 2);
+        Check(argc == 2 || (argc == 3 && std::string(argv[2]) == "delayed-viewer"));
+        const bool delayedViewer = argc == 3;
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         if (std::string(argv[1]) == "--presentation-sizing-test") {
-            NativePresentationSizing(); webrtc::CleanupSSL(); return 0;
+            const auto presented = NativePresentationSizing();
+            std::cout << "{\"passed\":true,\"native_sizing_presented\":" << presented << "}\n";
+            webrtc::CleanupSSL(); return 0;
         }
 #endif
         CommandScenario();
@@ -394,7 +397,7 @@ int main(int argc, char** argv) {
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime;
         Check(SUCCEEDED(mediaRuntime.result()));
-        NativePresentationSizing();
+        const auto sizingPresented = NativePresentationSizing();
         PreviewLifecycle();
         proof::TestWindow capture;
         captureWindow = capture.handle();
@@ -442,9 +445,18 @@ int main(int argc, char** argv) {
         const auto passwordPath = commandFiles.filePath("password.txt");
         { QFile file(passwordPath); Check(file.open(QIODevice::WriteOnly)); Check(file.write("test-only-password") == 18); }
         QStringList hostArguments{"--backend", "v2", "--signal-server", argv[1], "--create-room", "--name", "CLI media", "--nickname", "CliHost",
-            "--password-file", passwordPath, "--seconds", "15", "--resolution", "320x180", "--fps", "30", "--upload-bps", "2000000", "--audio", "none", "--report", commandFiles.filePath("report.json")};
+            "--password-file", passwordPath, "--seconds", "30", "--resolution", "320x180", "--fps", "30", "--upload-bps", "2000000", "--audio", "none", "--report", commandFiles.filePath("report.json")};
         auto host = ParseRoomCommand(hostArguments, nullptr, true);
         host.changes = scripted.changes; host.captureChanges = scripted.captureChanges; host.audioChanges = scripted.audioChanges;
+        // Arm the parsed timeline only after the viewer has actually observed
+        // initial video and silence. HTTPS admission is not a media-ready signal.
+        // These vectors are subsequently changed only by their CLI owner thread.
+        for (auto& change : host.changes) change.at += 30s;
+        for (auto& change : host.captureChanges) change.at += 30s;
+        for (auto& change : host.audioChanges) change.at += 30s;
+        std::atomic<bool> initialMediaReady{false};
+        bool hostTimelineArmed = false;
+        std::chrono::steady_clock::time_point hostEpoch;
         std::mutex mutex; std::string roomId;
         std::atomic<bool> stopHost{false}, applied{false}, stopped{false}, accepted{false}, budgetReported{false}, rateReported{false}, receiverReported{false}, senderReported{false}, sourceChanged{false}, audioChanged{false};
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
@@ -454,7 +466,16 @@ int main(int argc, char** argv) {
         std::atomic<bool> presentationReported{false};
 #endif
         RoomCliHooks hostHooks;
-        hostHooks.pump = [&] { return !stopHost; };
+        hostHooks.pump = [&] {
+            if (initialMediaReady && !hostTimelineArmed) {
+                const auto offset = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - hostEpoch) - 30s;
+                for (auto& change : host.changes) change.at += offset;
+                for (auto& change : host.captureChanges) change.at += offset;
+                for (auto& change : host.audioChanges) change.at += offset;
+                hostTimelineArmed = true;
+            }
+            return !stopHost;
+        };
         hostHooks.report = [&](const QJsonObject& value) {
             if (value["type"] == "admission-error" || value["type"] == "admission-ended")
                 std::cerr << "Host admission error=" << value["error"].toInt() << '\n';
@@ -539,7 +560,10 @@ int main(int argc, char** argv) {
                 writeCommand(host.inputCommandsFile,4,"grant",state.peer,"mouse");mouseGrantWritten=true;
             }
         };
-        auto hosting = std::async(std::launch::async, [&] { return RunRoomCliSession(host, Factory(host, hostAudio), hostHooks, true); });
+        auto hosting = std::async(std::launch::async, [&] {
+            hostEpoch = std::chrono::steady_clock::now();
+            return RunRoomCliSession(host, Factory(host, hostAudio), hostHooks, true);
+        });
         const auto deadline = std::chrono::steady_clock::now() + 10s;
         std::string joinedRoom;
         while (joinedRoom.empty()) {
@@ -547,8 +571,9 @@ int main(int argc, char** argv) {
             { std::lock_guard lock(mutex); joinedRoom = roomId; }
             std::this_thread::sleep_for(5ms);
         }
+        if (delayedViewer) std::this_thread::sleep_for(3s); // Beyond the old host's 2.5s audio transition.
         object["host"] = false; object["roomId"] = "screenshare://room/v2/" + QString::fromStdString(joinedRoom); object["nickname"] = "CliViewer";
-        object["seconds"] = 6; object.remove("changes"); object.remove("captureChanges"); object.remove("audioChanges");
+        object["seconds"] = 30; object.remove("changes"); object.remove("captureChanges"); object.remove("audioChanges");
         object["playbackChanges"] = QJsonArray{QJsonObject{{"atMs", 1000}}, QJsonObject{{"atMs", 2000}, {"muted", true}}, QJsonObject{{"atMs", 4000}, {"deviceId", "replacement"}, {"volume", 50}}};
         auto invalidPlayback = object; invalidPlayback["playbackChanges"] = QJsonArray{QJsonObject{{"atMs", 100}, {"volume", 101}}};
         Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
@@ -558,8 +583,10 @@ int main(int argc, char** argv) {
         Reject([&] { ParseRoomSessionConfig(invalidPlayback, true); });
         auto viewer = ParseRoomCommand({"--backend", "v2", "--signal-server", argv[1], "--join-room",
             "screenshare://room/v2/" + QString::fromStdString(joinedRoom), "--nickname", "CliViewer", "--password-file", passwordPath,
-            "--seconds", "6", "--no-preview"}, nullptr, true);
+            "--seconds", "30", "--no-preview"}, nullptr, true);
         viewer.playbackChanges = ParseRoomSessionConfig(object, true).playbackChanges;
+        for (auto& change : viewer.playbackChanges) change.at += 30s;
+        const auto viewerEpoch = std::chrono::steady_clock::now();
         viewer.media.presentation = std::make_shared<PresentationTelemetry>();
         auto frames = std::make_shared<LatestRoomVideoFrame>();
         auto audio = std::make_shared<proof::AudioEvidence>();
@@ -602,13 +629,17 @@ int main(int argc, char** argv) {
             const auto health = value["playbackHealth"].toObject();
             if (health["state"] == "failed") {
                 Check(health["failures"].toInteger() == 1); playbackFailed = true; audio->outputUnavailable = false;
+                viewer.playbackChanges[0].at = 0ms; // Retry only after failure was observed.
             }
             if (playbackFailed && health["state"] == "running") playbackRecovered = true;
             if (value["type"] == "playback") { Check(value["error"].toInt() == 0); ++playbackChanges; }
         };
         viewerHooks.pump = [&] {
-            if (!audioChanged && original >= 10 && audio->quietStreak >= 10) {
+            if (!silentVideo && !audioChanged && original >= 10 && audio->quietStreak >= 10) {
                 Check(audio->audibleBlocks == 0); silentVideo = true;
+                const auto offset = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - viewerEpoch) - 30s;
+                for (size_t i = 1; i < viewer.playbackChanges.size(); ++i) viewer.playbackChanges[i].at += offset;
+                initialMediaReady = true;
             }
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
             Check(preview.PumpMessages());
@@ -631,7 +662,11 @@ int main(int argc, char** argv) {
                 viewer.media.presentation->Publish({preview.framesPresented(), preview.framesDropped(), 0, uint8_t(stats.outcome)});
 #endif
             }
-            return true;
+            return !(silentVideo && original >= 10 && changed >= 10 && audio->audibleBlocks >= 20 &&
+                playbackChanges == 3 && playbackFailed && playbackRecovered && accepted && applied &&
+                budgetReported && rateReported && receiverReported && senderReported && sourceChanged &&
+                audioChanged && extendedReported && pipelineReported && microphoneReported && bypassRestored &&
+                controllerSink->applied && controllerSink->released && desktopEvidence->applied);
         };
         const int viewing = RunRoomCliSession(viewer, Factory(viewer, audio, frames), viewerHooks, true);
         stopHost = true;
@@ -651,7 +686,10 @@ int main(int argc, char** argv) {
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         Check(presentationReported);
 #endif
-        Check(silentVideo && original >= 10 && changed >= 10 && audio->audibleBlocks >= 20);
+        if (!(silentVideo && original >= 10 && changed >= 10 && audio->audibleBlocks >= 20))
+            throw std::runtime_error("CLI media progress: silentVideo=" + std::to_string(silentVideo) +
+                " original=" + std::to_string(original) + " changed=" + std::to_string(changed) +
+                " audibleBlocks=" + std::to_string(audio->audibleBlocks.load()));
         Check(frames->statistics().retained >= original + changed && frames->statistics().converted == 0 && frames->statistics().repacked == 0);
 #ifdef SCREENSHARE_WINDOWS_CLI_PROOF
         Check(preview.framesPresented() >= 20);
@@ -680,7 +718,11 @@ int main(int argc, char** argv) {
         RoomCliHooks missingHooks;
         missingHooks.report = [&](const QJsonObject& value) { if (value["type"] == "admission-error") admissionError = true; };
         Check(RunRoomCliSession(missing, Factory(missing, audio), missingHooks, true) == 1 && admissionError);
-        std::cout << "{\"passed\":true,\"cli_session\":true,\"command_options\":true,\"live_settings\":true,\"bounded_presentation\":true,\"silent_audio\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";
+        std::cout << "{\"passed\":true,\"cli_session\":true,\"command_options\":true,\"live_settings\":true,\"bounded_presentation\":true,\"silent_audio\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed
+#ifdef SCREENSHARE_WINDOWS_CLI_PROOF
+            << ",\"native_sizing_presented\":" << sizingPresented
+#endif
+            << "}\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; exitCode = 1; }
     webrtc::CleanupSSL(); return exitCode;
 }

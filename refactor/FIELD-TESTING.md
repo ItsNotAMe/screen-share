@@ -105,7 +105,9 @@ claimed by these local checks.
 
 Continuation: two-PC video/resize and the corrected laptop presentation counters
 are verified (PRESENTATION-SIZING.md). Event-driven live HTTPS/WSS lifecycle now
-passes on each PC (LIVE-SERVICE.md); earlier timed CLI failures remain unresolved.
+passes on each PC (LIVE-SERVICE.md). Earlier timed CLI failures are now resolved
+as fixture ordering errors, and automated LAN media/recovery passes both directions
+(TWO-MACHINE.md). No physical-input or external-latency gate is inferred from this.
 The GameSir is Bluetooth-connected to the desktop, so laptop controller discovery
 is not yet tested. Privacy, physical controls, Internet/NAT and external latency
 still need their own evidence.
