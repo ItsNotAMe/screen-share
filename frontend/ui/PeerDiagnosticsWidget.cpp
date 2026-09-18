@@ -159,6 +159,9 @@ void PeerDiagnosticsWidget::Update(const screenshare::v2::RoomStatus& value) {
                     .arg(presentation["queued"].toInt()).arg(presentation["outcome"].toString()));
             detail += QString("\nRecent jitter-buffer residence: %1 ms (last fresh interval; not end-to-end latency).")
                 .arg(receiverMetric("jitterBufferRecentMs"));
+            detail += QString("\nEncoder target: %1; completed-packet send delay: %2 (lifetime average). Encoded frames: %3; keyframes: %4.")
+                .arg(metric("targetVideoBps", 1000000, " Mbps")).arg(metric("meanPacketSendDelayMs", 1, " ms"))
+                .arg(metric("framesEncoded", 1, "")).arg(metric("keyFramesEncoded", 1, ""));
             const auto source = rows[index].toObject()["source"].toObject();
             const auto activeImage = source["activeImage"].toObject();
             detail += QString("\nSource scaling: %1.\nActive image in source canvas: %2.")

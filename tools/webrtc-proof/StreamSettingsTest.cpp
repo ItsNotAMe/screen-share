@@ -120,6 +120,9 @@ int main(int argc, char** argv) try {
         video->quality_limitation_reason = invalid ? "unrecognized" : "bandwidth"; video->remote_id = "remote-video";
         video->encoder_implementation = invalid ? "untrusted implementation / path" : "Media Foundation H264 hardware (D3D11/NV12)";
         video->total_encode_time = invalid ? -1 : 0.2; video->frames_encoded = 100;
+        video->target_bitrate = invalid ? std::numeric_limits<double>::infinity() : 3000000;
+        video->total_packet_send_delay = invalid ? -1 : 0.6; video->packets_sent = 200;
+        video->key_frames_encoded = 4;
         video->retransmitted_packets_sent = invalid ? UINT64_MAX : 3;
         video->nack_count = 2; video->pli_count = 1;
         report->AddStats(std::move(video));
@@ -130,6 +133,8 @@ int main(int argc, char** argv) try {
     networkSample(7000000, 1000); Require(!rate->Read().sender.payloadBps, "First RTP counter fabricated a rate");
     networkSample(8000000, 101000);
     auto sender = rate->Read().sender;
+    Require(sender.targetVideoBps == 3000000 && sender.meanPacketSendDelayMs == 3 &&
+        sender.framesEncoded == 100 && sender.keyFramesEncoded == 4, "Sender target/delay/counters incorrect");
     Require(sender.payloadBps == 800000 && sender.encodedFps == 30 && sender.rttMs == 25 && sender.jitterMs == 3 &&
         sender.lossFraction == 0.02 && sender.availableOutgoingBps == 5000000 && sender.limitingReason == VideoLimitReason::Bandwidth &&
         sender.encoder == CodecImplementation::MfH264Hardware && sender.meanEncodeMs == 2 &&
@@ -137,14 +142,15 @@ int main(int argc, char** argv) try {
         "Sender units/selected-pair/RTCP mapping incorrect");
     const auto staleSender = rate->Read(rate->sampled + std::chrono::seconds(3)).sender;
     Require(!staleSender.payloadBps && !staleSender.rttMs && staleSender.limitingReason == VideoLimitReason::Unknown &&
-        staleSender.encoder == CodecImplementation::Unknown && !staleSender.meanEncodeMs && !staleSender.retransmittedPackets,
+        staleSender.encoder == CodecImplementation::Unknown && !staleSender.meanEncodeMs && !staleSender.retransmittedPackets &&
+        !staleSender.targetVideoBps && !staleSender.meanPacketSendDelayMs && !staleSender.framesEncoded && !staleSender.keyFramesEncoded,
         "Stale sender values escaped expiry");
     networkSample(9000000, 101000); Require(rate->Read().sender.payloadBps == 0, "Zero payload rate became unknown");
     networkSample(10000000, 1); Require(!rate->Read().sender.payloadBps, "Reset RTP counter fabricated a rate");
     networkSample(11000000, 1000, "replacement-video", true); sender = rate->Read().sender;
     Require(!sender.payloadBps && !sender.encodedFps && !sender.availableOutgoingBps && !sender.jitterMs && !sender.lossFraction &&
         sender.limitingReason == VideoLimitReason::Unknown && sender.encoder == CodecImplementation::Unknown &&
-        !sender.meanEncodeMs && !sender.retransmittedPackets,
+        !sender.meanEncodeMs && !sender.retransmittedPackets && !sender.targetVideoBps && !sender.meanPacketSendDelayMs,
         "Invalid or replacement stats were trusted");
     sample(12000000, "transport", 0); Require(!rate->Read().sender.rttMs, "Missing path retained prior measurements");
     auto receiverMailbox = std::make_shared<ReceiverStatsMailbox>();

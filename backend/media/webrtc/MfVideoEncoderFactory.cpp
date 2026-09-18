@@ -41,6 +41,7 @@ public:
             config_.width = codec->width;
             config_.height = codec->height;
             config_.fps = codec->maxFramerate;
+            maximumFps_ = codec->maxFramerate;
             config_.bitrate = codec->startBitrate * 1000;
             config_.levelIdc = 42;
             try {
@@ -90,7 +91,6 @@ public:
     }
     void SetRates(const RateControlParameters& rates) override {
         const auto bitrate = rates.bitrate.get_sum_bps();
-        if (bitrate && (!std::isfinite(rates.framerate_fps) || rates.framerate_fps <= 0)) return;
         // Barrier orders the new assignment after the active frame. Zero is a
         // suspension, never a substitute positive bitrate floor.
         worker_->BlockingCall([&] {
@@ -104,7 +104,12 @@ public:
             if (dropped && callback_) callback_->OnFrameDropped(*dropped, 0, true);
             if (!bitrate) return;
             try {
-                const int fps = std::clamp(static_cast<int>(std::round(rates.framerate_fps)), 1, 60);
+                // WebRTC permits an unavailable FPS target. Still apply the
+                // bitrate (including resume), using InitEncode's FPS as required
+                // by RateControlParameters. Clamp before integer conversion.
+                const double targetFps = std::isfinite(rates.framerate_fps) && rates.framerate_fps > 0
+                    ? rates.framerate_fps : double(maximumFps_);
+                const int fps = static_cast<int>(std::round(std::clamp(targetFps, 1.0, 60.0)));
                 const bool restart = !encoder_->isRunning() || fps != config_.fps;
                 config_.fps = fps;
                 config_.bitrate = bitrate;
@@ -302,6 +307,7 @@ private:
     std::shared_ptr<MfHardwareSession> hardware_;
     std::atomic<bool> hardwareActive_{false};
     int64_t hardwareSampleId_ = 0;
+    int maximumFps_ = 60;
     std::unique_ptr<H264StreamEncoder> encoder_;
     H264StreamEncoderConfig config_;
     webrtc::EncodedImageCallback* callback_ = nullptr;

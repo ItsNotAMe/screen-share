@@ -92,3 +92,20 @@ timing and external capture-to-display measurement remain unavailable measuremen
 not invented zeroes. Hardware decode/zero-copy work, physical device acceptance,
 normal legacy entry-point parity, Stage 3 input and Stage 4 performance acceptance
 are separate requirements and remain open.
+
+## Sender recovery investigation
+
+The shared UI/CLI/report includes `targetVideoBps`, `framesEncoded`,
+`keyFramesEncoded` and `meanPacketSendDelayMs`. These use the same bounded,
+once-per-second WebRTC stats request. The delay is a lifetime mean for packets
+already sent, not the current oldest queued packet, a maximum or physical latency.
+First/missing/stale values remain null; zero remains a measured zero.
+The native stats test covers units, invalid data and expiry; report tests cover
+stale suppression and fresh zeroes. Packet impairment artifacts include these
+fields to distinguish sender assignment, encoded output and transport behavior.
+
+The MF adapter now honors WebRTC's unavailable-FPS contract: a positive bitrate
+still resumes video using InitEncode's maximum FPS. Finite targets are clamped
+before integer conversion. Software tests cover zero, negative, NaN, infinity,
+extreme and fractional FPS targets after suspension. This is independent of the
+recorded congestion-recovery failure and must not be described as its proven fix.

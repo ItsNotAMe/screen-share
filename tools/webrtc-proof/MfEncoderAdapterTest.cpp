@@ -9,6 +9,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
@@ -125,6 +126,31 @@ void Run(bool useHardware, bool gpuInput) {
     Require(!gpuInput || hardware->device->readbackCount() == 0, "Owned GPU encoding performed CPU readback");
     std::cout << "MF encoder: zero-rate/resume, keyframe, 100-frame burst coalescing and three reset/release cycles passed.\n";
 }
+void UnavailableFrameRate() {
+    screenshare::media::MfVideoEncoderFactory factory;
+    auto encoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    Sink sink;
+    struct Cleanup { webrtc::VideoEncoder& encoder; ~Cleanup() { encoder.Release(); } } cleanup{*encoder};
+    webrtc::VideoCodec codec;
+    codec.codecType = webrtc::kVideoCodecH264;
+    codec.width = 640; codec.height = 360; codec.maxFramerate = 30; codec.startBitrate = 1000;
+    Require(encoder->InitEncode(&codec, {webrtc::VideoEncoder::Capabilities(false), 2, 1200}) == 0,
+        "FPS fallback initialization failed");
+    encoder->RegisterEncodeCompleteCallback(&sink);
+    uint32_t timestamp = 1;
+    for (double fps : {0.0, -1.0, std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity(), std::numeric_limits<double>::max(), 0.1}) {
+        Rate(*encoder, 0);
+        webrtc::VideoBitrateAllocation allocation; allocation.SetBitrate(0, 0, 400000);
+        encoder->SetRates({allocation, fps});
+        Require(encoder->Encode(Frame(timestamp), nullptr) == 0, "FPS fallback resume rejected");
+        sink.Wait(timestamp);
+        Rate(*encoder, 0); // Barrier before observing callback data.
+        Require(sink.images.back().RtpTimestamp() == timestamp, "FPS fallback failed to resume current frame");
+        ++timestamp;
+    }
+    std::cout << "MF encoder: missing/nonfinite/extreme FPS targets preserve bitrate resume.\n";
+}
 }
 int main(int argc, char** argv) {
     try {
@@ -141,6 +167,7 @@ int main(int argc, char** argv) {
             } else throw std::runtime_error("Usage: MfEncoderAdapterTest [--hardware [--gpu-input]] [--cycles 1..100]");
         }
         Require(!gpuInput || hardware, "--gpu-input requires --hardware");
+        if (!hardware) UnavailableFrameRate();
         proof::LifecycleSample(0, 0);
         for (int cycle = 1; cycle <= cycles; ++cycle) {
             const auto started = std::chrono::steady_clock::now();

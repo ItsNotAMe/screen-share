@@ -145,6 +145,11 @@ int main(int argc, char** argv) {
                     for (const auto& peer : status.stream.peers) if (peer.peerId == viewers[i]->Status().peerId) {
                         auto number = [](const auto& value) -> QJsonValue { return value ? QJsonValue(double(*value)) : QJsonValue(QJsonValue::Null); };
                         observation.insert("payloadBps", number(peer.sender.payloadBps));
+                        observation.insert("targetVideoBps", number(peer.sender.targetVideoBps));
+                        observation.insert("meanPacketSendDelayMs", number(peer.sender.meanPacketSendDelayMs));
+                        observation.insert("framesEncoded", number(peer.sender.framesEncoded));
+                        observation.insert("keyFramesEncoded", number(peer.sender.keyFramesEncoded));
+                        observation.insert("meanEncodeMs", number(peer.sender.meanEncodeMs));
                         observation.insert("availableOutgoingBps", number(peer.sender.availableOutgoingBps));
                         observation.insert("rttMs", number(peer.sender.rttMs));
                         observation.insert("lossFraction", number(peer.sender.lossFraction));

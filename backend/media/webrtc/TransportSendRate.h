@@ -85,6 +85,11 @@ public:
             else if (video->encoder_implementation == "Media Foundation H264 software (CPU I420/NV12)")
                 state_->sender.encoder = CodecImplementation::MfH264Software;
             state_->sender.encodedFps = finite(video->frames_per_second, 240);
+            state_->sender.targetVideoBps = finite(video->target_bitrate, 1e12);
+            state_->sender.framesEncoded = video->frames_encoded;
+            state_->sender.keyFramesEncoded = video->key_frames_encoded;
+            if (video->total_packet_send_delay && video->packets_sent && *video->packets_sent)
+                state_->sender.meanPacketSendDelayMs = finite(*video->total_packet_send_delay / *video->packets_sent, 60, 1000);
             if (video->total_encode_time && video->frames_encoded && *video->frames_encoded)
                 state_->sender.meanEncodeMs = finite(*video->total_encode_time / *video->frames_encoded, 60, 1000);
             if (video->retransmitted_packets_sent && *video->retransmitted_packets_sent <= INT64_MAX)

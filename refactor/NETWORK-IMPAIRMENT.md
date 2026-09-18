@@ -135,3 +135,23 @@ Final result: Release 5/6, Debug 6/6. Release collapse still fails the unchanged
 recovery gate (19.10→2.38→3.95 Mbps phase-tail means). This is not a passing Stage 4
 performance result. Input-marker, revoke, ownership and separate-process evidence
 are retained independently. Nineteen fail-closed Python evidence tests pass.
+
+## Return-to-desktop investigation — 2026-09-18
+
+`return-target-baseline` repeats collapse with sender target, encode/keyframe
+counters and mean completed-packet send delay recorded. It passes the unchanged
+functional gates, but recent recovery buffering averages 192 ms and the single
+internal input response is 340 ms. A passing repetition does not erase the
+earlier Release failure or establish the gaming latency target.
+
+An explicit trial mapped Gaming to WebRTC's `kFluid` track hint (motion policy)
+instead of inheriting the source's screen-content policy. Its independent artifact
+`return-motion-collapse` fails recovery: 15.95 → 1.95 → 1.99 Mbps phase tails,
+with a 446 ms internal input response and elevated receiver buffering. The change
+and its preset-specific tests were reverted; **it is not in the shipped code**.
+No pacing/jitter field trial or alternate controller was adopted. Original and
+experimental executable identities remain in their respective native reports.
+
+The production change in this batch is the independently tested MF unavailable-FPS
+resume fix and optional sender diagnostics. It is not a demonstrated solution to
+bandwidth convergence. The native source remains screen content in both presets.

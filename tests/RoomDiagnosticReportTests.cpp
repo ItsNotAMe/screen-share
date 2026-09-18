@@ -18,6 +18,8 @@ int main(int argc, char** argv) {
         status.playback.selected.deviceId = L"private-playback-secret";
         screenshare::v2::PeerStreamStatus peer; peer.peerId = "private-peer-secret";
         peer.transportSampleStale = true; peer.transportSendBps = 123456;
+        peer.sender.targetVideoBps = 123456; peer.sender.meanPacketSendDelayMs = 123456;
+        peer.sender.framesEncoded = 123456; peer.sender.keyFramesEncoded = 123456;
         status.stream.peers.push_back(peer);
         screenshare::input::Status input; input.peer = peer.peerId; input.reason = screenshare::input::Reason::Backpressure;
         input.transportBlocked = true; input.reliableQueued = 2;
@@ -28,6 +30,16 @@ int main(int argc, char** argv) {
         const auto media = report["peers"].toArray()[0].toObject();
         const auto control = report["input"].toArray()[0].toObject();
         Check(media["peerId"] == control["peer"] && media["transportSendBps"].isNull());
+        const auto staleSender = media["sender"].toObject();
+        for (const auto* key : {"targetVideoBps", "meanPacketSendDelayMs", "framesEncoded", "keyFramesEncoded"})
+            Check(staleSender[key].isNull());
+        auto fresh = status;
+        fresh.stream.peers[0].transportSampleStale = false;
+        fresh.stream.peers[0].sender.targetVideoBps = 0;
+        fresh.stream.peers[0].sender.meanPacketSendDelayMs = 0;
+        const auto freshSender = RoomDiagnosticReport(fresh)["peers"].toArray()[0].toObject()["sender"].toObject();
+        Check(freshSender["targetVideoBps"].isDouble() && freshSender["targetVideoBps"].toDouble() == 0 &&
+            freshSender["meanPacketSendDelayMs"].isDouble() && freshSender["meanPacketSendDelayMs"].toDouble() == 0);
         Check(control["localQueueWaitUs"].isNull() && control["reasonName"] == "backpressure");
         Check(!report["externalLatencyVerified"].toBool());
         QTemporaryDir directory; Check(directory.isValid());
