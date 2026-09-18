@@ -1,5 +1,7 @@
 {
   "schema": 1,
+  "superseded": true,
+  "supersededReason": "The custom silent audio sink was unpaced and could spin one audio worker per viewer, contaminating CPU and synchronized-video measurements. Preserve for audit only; use the corrected paced-playout comparison.",
   "passed": true,
   "legacyComparisonComplete": false,
   "executableSha256": "477c53fec0dbcee3857e41cc386d3633db52240acfc868e5cf9044075b3199a8",

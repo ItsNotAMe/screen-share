@@ -15,11 +15,14 @@ Backend feature scope is frozen for closeout. Finish these groups in order:
 
 Do not add unrelated backend features or repeat completed v2-only harness work.
 
-The 24-run paired 1080p comparison is collected (COMPARISON.md). Next priority is
-the reproduced high-motion image-age regression (~365–380 ms v2 versus ~82–93 ms
-legacy in the CPU-consumer workload), then four-viewer CPU/memory cost after
-separating readback from the normal GPU display path. Re-run affected pairs after
-fixes; do not repeat the benchmark implementation or call v2 better overall yet.
+The first paired comparison is superseded: its custom unpaced silent sink distorted
+CPU and synchronized-video measurements (COMPARISON.md). Use the corrected shared
+paced sink and repeat the comparisons. Default-pacing high-motion sender delay
+still reproduces after that correction. Reference-load pacing and background-timer
+fixes pass final local validation. The corrected 24-run configuration comparison
+favors v2 on image age and CPU, but does not isolate architecture from hardware
+codec/timer/pacing choices. Finish tuned-legacy controls, then normal GPU/two-PC
+resource and physical acceptance; do not rebuild the comparison harness.
 
 Current priority: finish Stage 2–4, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).

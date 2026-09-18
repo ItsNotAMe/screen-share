@@ -1,8 +1,8 @@
 #pragma once
 #include "codec/H264StreamEncoder.h"
+#include "core/ShortWait.h"
 #include <chrono>
 #include <stdexcept>
-#include <thread>
 
 namespace screenshare::media {
 class HardwareFrameCancelled : public std::runtime_error {
@@ -17,6 +17,7 @@ public: HardwareFrameTimeout() : std::runtime_error("Hardware frame exceeded 500
 // without depending on a broken GPU driver. MF calls themselves cannot be preempted.
 template<class Poll, class Submit, class Cancelled>
 EncodedPacket WaitForHardwareFrame(int64_t timestamp, Poll poll, Submit submit, Cancelled cancelled) {
+    thread_local ShortWait timer;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     bool submitted = false;
     for (;;) {
@@ -31,7 +32,7 @@ EncodedPacket WaitForHardwareFrame(int64_t timestamp, Poll poll, Submit submit, 
             return std::move(packets.front());
         }
         if (!submitted) submitted = submit();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        timer.Wait();
     }
 }
 }

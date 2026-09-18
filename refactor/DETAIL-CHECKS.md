@@ -4,12 +4,12 @@ Last reconciled: 2026-09-18 (including preset playout/resize regressions, transp
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
-Paired comparison: 24 Release 1080p workloads now measure the retained legacy
-session API against the v2 production room runtime, with alternating order,
-three generated scenes and one/four viewers. COMPARISON.md records mixed results:
-lower one-viewer private memory, but high-motion v2 image-age and four-viewer
-CPU-consumer resource regressions. Fix these before claiming overall improvement;
-physical display/input, GPU presentation, audio and matched network gates remain.
+Paired comparison: COMPARISON.md records the corrected Release 1080p workload
+and its measurement boundaries. The first 24-run matrix is superseded because
+its unpaced silent sink distorted CPU and synchronized-video results. The shared
+paced sink is now mandatory. Sender pacing and capture/codec/silent-audio waits
+are corrected; physical display/input, GPU presentation, audio and matched network
+gates remain separate from local image-consumer evidence.
 
 Laptop continuation: real two-PC video/resize was confirmed by the user, exposing
 a logical/native pixel sizing mismatch behind misleading busy/presentation counts.

@@ -3,6 +3,7 @@
 #include "core/WindowsMediaRuntime.h"
 #include "runtime/ScreenShareSessionRunner.h"
 #include "media/audio/SilentPcmCapture.h"
+#include "media/audio/DiscardPcmPlayout.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
 #include "rtc_base/logging.h"
@@ -14,6 +15,7 @@
 #include <psapi.h>
 #include <iphlpapi.h>
 #include <timeapi.h>
+#include <tlhelp32.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -21,6 +23,7 @@
 #include <future>
 #include <iostream>
 #include <mutex>
+#include <map>
 #include <set>
 #include <thread>
 
@@ -116,18 +119,21 @@ private:
 
 class Sink final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
-    explicit Sink(Scene& scene) : scene_(scene) {}
+    explicit Sink(Scene& scene, bool retainedOnly) : scene_(scene), retainedOnly_(retainedOnly) {}
     void OnFrame(const webrtc::VideoFrame& frame) override {
+        if (retainedOnly_) { CountRetained(frame.width(), frame.height()); return; }
         const auto pixels = frame.video_frame_buffer()->ToI420();
         if (pixels) Frame(frame.width(), frame.height(), pixels->DataY(), pixels->StrideY());
     }
     void Legacy(SessionEvent::VideoFrame frame) {
+        if (retainedOnly_) { CountRetained(frame.width, frame.height); return; }
         const auto pixels = frame.pixels();
         if (pixels.size() >= size_t(frame.width) * frame.height) Frame(frame.width, frame.height, pixels.data(), frame.width);
     }
     void Begin() { std::lock_guard lock(mutex_); measuring_ = true; frames_ = invalid_ = 0; ages_.clear(); ids_.clear(); squared_ = 0; qualitySamples_ = 0; }
     QJsonObject End(double seconds) {
         std::lock_guard lock(mutex_); measuring_ = false;
+        if (retainedOnly_) return {{"frames", int(frames_)}, {"fps", frames_ / seconds}, {"invalidDimensions", int(invalid_)}};
         std::sort(ages_.begin(), ages_.end());
         auto quantile = [&](double q) -> QJsonValue { return ages_.empty() ? QJsonValue(QJsonValue::Null) : QJsonValue(ages_[size_t(std::ceil(q * ages_.size())) - 1]); };
         const double mse = qualitySamples_ ? squared_ / qualitySamples_ : 0;
@@ -139,6 +145,14 @@ public:
     }
     std::atomic<unsigned> received{0};
 private:
+    // Isolation diagnostic only: no pixel readback, image validation or display.
+    void CountRetained(int width, int height) {
+        ++received;
+        std::lock_guard lock(mutex_);
+        if (!measuring_) return;
+        ++frames_;
+        if (width != Width || height != Height) ++invalid_;
+    }
     void Frame(int width, int height, const uint8_t* y, int stride) {
         ++received;
         const double now = NowMs();
@@ -163,17 +177,49 @@ private:
             squared_ += difference * difference; ++qualitySamples_;
         }
     }
-    Scene& scene_; std::mutex mutex_; bool measuring_ = false; unsigned frames_ = 0, invalid_ = 0;
+    Scene& scene_; const bool retainedOnly_; std::mutex mutex_; bool measuring_ = false; unsigned frames_ = 0, invalid_ = 0;
     std::vector<double> ages_; std::set<unsigned> ids_; double squared_ = 0; uint64_t qualitySamples_ = 0;
-};
-class DiscardAudio final : public PcmPlayoutEndpoint {
-public: void Start() override {} void Write(const PcmBlock&, std::stop_token) override {}
-    uint32_t DelayMs() const override { return 0; } uint32_t BufferFrames() const override { return 0; }
 };
 double CpuSeconds() {
     FILETIME created{}, ended{}, kernel{}, user{}; Require(GetProcessTimes(GetCurrentProcess(), &created, &ended, &kernel, &user), "Process timing failed");
     auto value = [](FILETIME t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
     return double(value(kernel) + value(user)) / 1e7;
+}
+struct ThreadCpu { QString name; uint64_t created = 0; double seconds = 0; };
+std::map<DWORD, ThreadCpu> ThreadTimes() {
+    std::map<DWORD, ThreadCpu> result;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return result;
+    THREADENTRY32 entry{}; entry.dwSize = sizeof(entry);
+    if (Thread32First(snapshot, &entry)) do {
+        if (entry.th32OwnerProcessID != GetCurrentProcessId()) continue;
+        HANDLE thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ThreadID);
+        if (!thread) continue;
+        FILETIME created{}, ended{}, kernel{}, user{};
+        if (GetThreadTimes(thread, &created, &ended, &kernel, &user)) {
+            auto value = [](FILETIME t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+            PWSTR description = nullptr;
+            GetThreadDescription(thread, &description);
+            result.emplace(entry.th32ThreadID, ThreadCpu{description && *description ? QString::fromWCharArray(description) : "unnamed",
+                value(created), double(value(kernel) + value(user)) / 10000000});
+            if (description) LocalFree(description);
+        }
+        CloseHandle(thread);
+    } while (Thread32Next(snapshot, &entry));
+    CloseHandle(snapshot);
+    return result;
+}
+QJsonObject ThreadCpuDelta(const std::map<DWORD, ThreadCpu>& before, double elapsed) {
+    std::map<QString, double> groups;
+    for (const auto& [id, current] : ThreadTimes()) {
+        const auto previous = before.find(id);
+        // Exclude newly created/exited threads and reused IDs; this is partial
+        // attribution, never a replacement for total process CPU accounting.
+        if (previous != before.end() && previous->second.created == current.created)
+            groups[current.name] += 100 * std::max(0.0, current.seconds - previous->second.seconds) / elapsed;
+    }
+    QJsonObject result; for (const auto& [name, cpu] : groups) result[name] = cpu;
+    return result;
 }
 QJsonObject Resources() {
     PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb = sizeof(memory); DWORD handles{};
@@ -195,17 +241,21 @@ bool Listening(unsigned port) {
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     QJsonObject result{{"schema", 1}, {"passed", false}, {"externalLatencyVerified", false}, {"physicalInput", false}, {"audibleOutput", false}};
-    if (argc != 8) { std::cerr << "backend origin scene viewers seconds port output.json\n"; return 2; }
+    if (argc != 8 && argc != 9) { std::cerr << "backend origin scene viewers seconds port output.json [retained-only]\n"; return 2; }
     const QString output = argv[7];
     try {
+        const bool retainedOnly = argc == 9;
+        Require(!retainedOnly || std::string(argv[8]) == "retained-only", "Invalid consumer mode");
+        result["consumer"] = retainedOnly ? "retained-only" : "cpu-pixels";
         const std::string backend = argv[1], mode = argv[3]; const int viewers = std::stoi(argv[4]), seconds = std::stoi(argv[5]), port = std::stoi(argv[6]);
+        result["audioPlayoutMode"] = backend == "v2" ? "paced-discard" : "disabled";
         Require((backend == "legacy" || backend == "v2") && (mode == "static" || mode == "scroll" || mode == "motion") &&
             (viewers == 1 || viewers == 4) && seconds >= 5 && seconds <= 120 && port >= 1024 && port <= 65000, "Invalid comparison configuration");
         WindowsMediaRuntime runtime; Require(SUCCEEDED(runtime.result()), "Windows media startup failed");
         webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false); webrtc::InitializeLogging(std::move(logging));
         webrtc::WinsockInitializer winsock; Require(!winsock.error() && webrtc::InitializeSSL(), "WebRTC network startup failed");
         Scene scene(mode);
-        std::vector<std::shared_ptr<Sink>> sinks; for (int i = 0; i < viewers; ++i) sinks.push_back(std::make_shared<Sink>(scene));
+        std::vector<std::shared_ptr<Sink>> sinks; for (int i = 0; i < viewers; ++i) sinks.push_back(std::make_shared<Sink>(scene, retainedOnly));
         MemorySessionRuntimeControl stop;
         std::vector<std::unique_ptr<RoomSession>> rooms;
         std::vector<std::future<int>> legacy;
@@ -234,7 +284,7 @@ int main(int argc, char** argv) {
                 WindowsRoomRuntimeOptions options;
                 options.capture.sourceType = CaptureSourceType::Window; options.capture.windowHandle = uint64_t(scene.window());
                 options.capture.targetWidth = Width; options.capture.targetHeight = Height; options.capture.targetFps = 60;
-                options.audioEndpoints = PcmEndpointFactories{[] { return std::make_unique<SilentPcmCapture>(); }, [] { return std::make_unique<DiscardAudio>(); }};
+                options.audioEndpoints = PcmEndpointFactories{[] { return std::make_unique<SilentPcmCapture>(); }, [] { return std::make_unique<DiscardPcmPlayout>(); }};
                 options.preferences.resolution = ResolutionMode::Fixed; options.preferences.width = Width; options.preferences.height = Height;
                 options.preferences.fps = 60; options.preferences.fpsMode = SettingMode::Manual;
                 options.preferences.bitrateMode = SettingMode::Manual; options.preferences.bitrateLimitBps = 12000000;
@@ -249,6 +299,7 @@ int main(int argc, char** argv) {
         Wait([&] { return std::all_of(sinks.begin(), sinks.end(), [](auto& sink) { return sink->received >= 30; }); });
         result["startupSeconds"] = std::chrono::duration<double>(Clock::now() - startup).count();
         std::this_thread::sleep_for(5s);
+        const auto threadCpu = ThreadTimes();
         const double cpu = CpuSeconds(), sourceCpu = scene.CpuSeconds(); const auto began = Clock::now(); const unsigned sourceBefore = scene.count();
         for (auto& sink : sinks) sink->Begin();
         QJsonArray resourceSamples;
@@ -257,10 +308,12 @@ int main(int argc, char** argv) {
         result["cpuCorePercent"] = 100 * (CpuSeconds() - cpu) / elapsed;
         result["sourceCpuCorePercent"] = 100 * (scene.CpuSeconds() - sourceCpu) / elapsed;
         result["mediaCpuCorePercent"] = result["cpuCorePercent"].toDouble() - result["sourceCpuCorePercent"].toDouble();
+        result["survivingThreadCpuCorePercent"] = ThreadCpuDelta(threadCpu, elapsed);
         QJsonArray received;
         for (auto& sink : sinks) {
             auto metrics = sink->End(elapsed); received.append(metrics);
-            Require(metrics["uniqueMarkers"].toInt() >= seconds * 5 && metrics["invalidMarkers"].toInt() <= metrics["frames"].toInt() / 20, "Insufficient valid generated-scene delivery");
+            if (retainedOnly) Require(metrics["frames"].toInt() >= seconds * 5 && metrics["invalidDimensions"].toInt() == 0, "Insufficient retained-frame delivery");
+            else Require(metrics["uniqueMarkers"].toInt() >= seconds * 5 && metrics["invalidMarkers"].toInt() <= metrics["frames"].toInt() / 20, "Insufficient valid generated-scene delivery");
         }
         result["receivers"] = received; result["resourceSamples"] = resourceSamples;
         result["sourceUpdates"] = int(scene.count() - sourceBefore); result["measuredSeconds"] = elapsed;
@@ -272,6 +325,10 @@ int main(int argc, char** argv) {
                 {"encoder", CodecImplementationName(peer.sender.encoder)},
                 {"decoder", peer.receiver.observation ? CodecImplementationName(peer.receiver.observation->decoder) : "unknown"},
                 {"videoPayloadBps", peer.sender.payloadBps ? QJsonValue(qint64(*peer.sender.payloadBps)) : QJsonValue(QJsonValue::Null)},
+                {"meanEncodeMs", peer.sender.meanEncodeMs ? QJsonValue(*peer.sender.meanEncodeMs) : QJsonValue(QJsonValue::Null)},
+                {"meanPacketSendDelayMs", peer.sender.meanPacketSendDelayMs ? QJsonValue(*peer.sender.meanPacketSendDelayMs) : QJsonValue(QJsonValue::Null)},
+                {"targetVideoBps", peer.sender.targetVideoBps ? QJsonValue(*peer.sender.targetVideoBps) : QJsonValue(QJsonValue::Null)},
+                {"receiverJitterRecentMs", peer.receiver.observation && peer.receiver.observation->jitterBufferRecentMs ? QJsonValue(int(*peer.receiver.observation->jitterBufferRecentMs)) : QJsonValue(QJsonValue::Null)},
                 {"transportSendBps", peer.transportSendBps ? QJsonValue(qint64(*peer.transportSendBps)) : QJsonValue(QJsonValue::Null)}});
             result["senders"] = peers;
         }
@@ -282,7 +339,9 @@ int main(int argc, char** argv) {
         result["teardownSeconds"] = std::chrono::duration<double>(Clock::now() - stopping).count(); result["afterStopResources"] = Resources();
         result["backend"] = QString::fromStdString(backend); result["scene"] = QString::fromStdString(mode); result["viewers"] = viewers;
         result["settings"] = QJsonObject{{"width", Width}, {"height", Height}, {"fps", 60}, {"bitrateLimitBps", 12000000}, {"audio", "disabled/silent"}, {"encryption", true}, {"warmupSeconds", 5}};
-        result["scope"] = "same-process loopback; generated WGC window to CPU image consumer; source workload included in CPU; no physical presentation/input or network impairment";
+        result["scope"] = retainedOnly
+            ? "same-process loopback; retained-frame delivery only; no pixel readback, image validation or presentation; resource isolation diagnostic only"
+            : "same-process loopback; generated WGC window to CPU image consumer; source workload included in CPU; no physical presentation/input or network impairment";
         result["gpuUtilization"] = QJsonValue(QJsonValue::Null); result["passed"] = true;
     } catch (const std::exception& error) { result["error"] = error.what(); }
     QSaveFile file(output); if (!file.open(QIODevice::WriteOnly)) return 2;

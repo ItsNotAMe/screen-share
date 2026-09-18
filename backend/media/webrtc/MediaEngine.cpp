@@ -6,10 +6,24 @@
 #include "api/create_modular_peer_connection_factory.h"
 #include "api/enable_media.h"
 #include "api/environment/environment_factory.h"
+#include "api/field_trials_view.h"
 #include "api/rtc_event_log/rtc_event_log_factory.h"
 #include <stdexcept>
 
 namespace screenshare::media {
+namespace {
+class MediaFieldTrials final : public webrtc::FieldTrialsView {
+public:
+    std::string Lookup(absl::string_view key) const override {
+        // The pinned SDK's screen-content default paces at 1x with a 2875 ms
+        // drain horizon. Hardware H264 bursts then retain old images even on
+        // loopback. Allow short bursts at 2.5x the congestion-controlled rate;
+        // keep allocation/encoder ceilings and congestion feedback unchanged.
+        // 200 ms accelerates queue draining; it is NOT a packet-age guarantee.
+        return key == "WebRTC-ProbingScreenshareBwe" ? "2.5,200,80,40,-60,3" : "";
+    }
+};
+}
 MediaEngine::MediaEngine(webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio,
     std::unique_ptr<webrtc::VideoEncoderFactory> encoder,
     std::unique_ptr<webrtc::VideoDecoderFactory> decoder, PacketFactory packetFactory, EventLogFactory eventLogFactory)
@@ -21,7 +35,7 @@ MediaEngine::MediaEngine(webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio,
     if (!network_->Start() || !worker_->Start())
         throw std::runtime_error("Media engine threads failed");
     webrtc::PeerConnectionFactoryDependencies dependencies;
-    dependencies.env = webrtc::CreateEnvironment();
+    dependencies.env = webrtc::CreateEnvironment(std::make_unique<MediaFieldTrials>());
     if (eventLogFactory_) dependencies.event_log_factory = std::make_unique<webrtc::RtcEventLogFactory>();
     dependencies.network_thread = network_.get();
     dependencies.worker_thread = worker_.get();

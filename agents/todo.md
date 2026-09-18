@@ -6,11 +6,14 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ### Backend v2 refactor — grouped delivery work
 
-Feature scope is frozen for backend closeout. The matched 24-run 1080p legacy/v2
-matrix now exists and is collected; see refactor/COMPARISON.md. Prioritize the
-repeated v2 high-motion image-age regression and four-viewer resource cost.
-Separate CPU readback from normal GPU presentation before attributing the latter.
-Do not rebuild the comparison harness or claim overall improvement from v2-only tests.
+Feature scope is frozen for backend closeout. See refactor/COMPARISON.md: the first
+matrix is superseded because its unpaced silent sink spun viewer audio workers.
+The corrected shared paced sink is mandatory. Default-pacing sender delay still
+reproduces with it; pacing/background-timer fixes pass final local validation.
+Corrected configuration comparisons favor v2 on CPU/age; tuned-legacy controls
+are next because hardware codec/timer/pacing choices are not architecture-specific.
+Retained-only resource diagnostics cannot establish GPU presentation or image
+latency/quality. Do not rebuild the harness or reuse superseded performance claims.
 
 Priority correction: the user requests Stage 2–4 completion before
 cutover. Read refactor/STAGE-2-4-ACCEPTANCE.md for the remaining acceptance boundary.

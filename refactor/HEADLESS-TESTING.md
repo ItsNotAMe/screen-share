@@ -1130,6 +1130,12 @@ uses fresh processes, bounded deadlines, preserved failed logs, alternating
 backend order and strict workload/measurement validation. The default is 24
 short runs across three scenes and one/four viewers. `backend-comparison-evidence`
 tests reject mismatched settings, incomplete samples and unsupported conclusions.
+The fixture must use paced silent playout (`DiscardPcmPlayout`); a no-op write
+spins the ADM and invalidates CPU/video timing. Reports without that explicit mode
+are rejected. Native `retained-only` runs isolate pixel-consumer overhead but
+cannot pass the image-latency/quality validator. Private high-resolution media
+waits are tested with Windows timer throttling explicitly enabled in the isolated
+test process; no machine-wide timer or power setting is changed.
 
 Do not call its scene-to-CPU-consumer age physical display latency. CPU readback,
 codec defaults, configured ceilings versus measured bitrate and source update

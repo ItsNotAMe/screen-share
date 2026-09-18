@@ -1,5 +1,13 @@
 # Congestion recovery — 2026-09-18
 
+Follow-up: the reference-load comparison in [COMPARISON.md](COMPARISON.md)
+reproduced large hardware-H264 sender delays with default screen pacing. The
+2.5/200 ms pacing trial below was revisited alongside private high-resolution
+capture/codec/silent-audio waits. The final Release packet matrix passes all five
+unchanged gates; first-collapse internal response is 364 ms in that run. This is
+not a physical-latency pass, and 200 ms remains a drain parameter, not expiry.
+The earlier rejected trials remain historical evidence, not the current policy.
+
 The connection's congestion-control budget was never set. RTP sender settings
 correctly capped video, but the pinned WebRTC probe controller uses a **5 Mbps
 maximum probing rate** when its connection maximum is unspecified. That is not a

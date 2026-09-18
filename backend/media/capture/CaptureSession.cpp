@@ -1,13 +1,12 @@
 #include "CaptureSession.h"
 #include "CaptureRecovery.h"
-#include <condition_variable>
+#include "core/ShortWait.h"
 #include <mutex>
 #include <thread>
 
 namespace screenshare::media {
 struct CaptureSession::Impl {
     mutable std::mutex mutex;
-    std::condition_variable_any wake;
     CaptureStatus status;
     bool enabled = false;
     std::jthread worker;
@@ -18,6 +17,7 @@ struct CaptureSession::Impl {
         CaptureState finalState = CaptureState::Stopped;
         CaptureFailure failure = CaptureFailure::Source;
         try {
+            ShortWait idle;
             source = factory();
             if (!source) throw std::runtime_error("Missing capture source");
             source->Start();
@@ -77,10 +77,10 @@ struct CaptureSession::Impl {
                         throw std::runtime_error("Capture startup frame timed out");
                     }
                 }
-                // Cancellable idle/backoff; no catch-up frame queue. Sources pace
-                // their own acquisition and must not block indefinitely in Poll.
-                std::unique_lock lock(mutex);
-                wake.wait_for(lock, stop, std::chrono::milliseconds(1), [] { return false; });
+                // Bounded idle/backoff; cancellation is checked on the next
+                // iteration. Do not let occlusion expand this to a frame-long
+                // sleep. Sources must not block indefinitely in Poll.
+                if (!stop.stop_requested()) idle.Wait();
             }
         } catch (...) { finalState = source && source->Closed() ? CaptureState::Closed : CaptureState::Failed; }
         // Normal stop preserves already-published owned frames until consumers

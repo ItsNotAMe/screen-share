@@ -11,6 +11,7 @@ spec.loader.exec_module(comparison)
 
 def evidence(backend='legacy'):
     return {'schema': 1, 'passed': True, 'backend': backend, 'scene': 'scroll', 'viewers': 1,
+            'audioPlayoutMode': 'paced-discard' if backend == 'v2' else 'disabled',
             'externalLatencyVerified': False, 'physicalInput': False, 'audibleOutput': False,
             'settings': dict(width=1920, height=1080, fps=60, bitrateLimitBps=12000000,
                              audio='disabled/silent', encryption=True, warmupSeconds=5),
@@ -28,6 +29,16 @@ class ComparisonTests(unittest.TestCase):
 
     def test_complete(self):
         self.validate(evidence())
+
+    def test_retained_only_cannot_pass_image_comparison(self):
+        r = evidence(); r['consumer'] = 'retained-only'
+        with self.assertRaises(ValueError): self.validate(r)
+
+    def test_unpaced_fixture_cannot_pass(self):
+        r = evidence(); del r['audioPlayoutMode']
+        with self.assertRaises(ValueError): self.validate(r)
+        r = evidence('v2'); r['audioPlayoutMode'] = 'unpaced-discard'
+        with self.assertRaises(ValueError): comparison.validate(r, 'v2', 'scroll', 1, 20)
 
     def test_lossless_quality_is_not_missing_evidence(self):
         r = evidence(); r['receivers'][0].update(lumaMse=0, sampledLumaPsnrDb=None)

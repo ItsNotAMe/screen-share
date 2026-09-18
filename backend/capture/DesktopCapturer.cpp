@@ -1,4 +1,5 @@
 #include "capture/DesktopCapturer.h"
+#include "core/ShortWait.h"
 #include <dwmapi.h>
 #include "capture/WindowsCaptureDispatcher.h"
 #include "capture/CaptureBackendPolicy.h"
@@ -1611,7 +1612,8 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
             const HRESULT reason = device_->GetDeviceRemovedReason();
             if (FAILED(reason)) throw CaptureDeviceLostError(reason);
             if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("Capture GPU completion deadline exceeded");
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            thread_local ShortWait completionWait;
+            completionWait.Wait();
         }
         frame.nv12Texture = std::move(snapshot);
         frame.nv12OwnedAndComplete = true;

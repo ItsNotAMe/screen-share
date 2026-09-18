@@ -22,6 +22,10 @@ def finite(value):
 
 
 def validate(report, backend, scene, viewers, seconds):
+    if report.get('consumer', 'cpu-pixels') != 'cpu-pixels':
+        raise ValueError('Retained-only diagnostics cannot establish image latency/quality')
+    if report.get('audioPlayoutMode') != ('paced-discard' if backend == 'v2' else 'disabled'):
+        raise ValueError('Missing paced silent playout; old unpaced fixture results are superseded')
     if type(report.get('schema')) is not int or report['schema'] != 1 or report.get('passed') is not True or \
        report.get('backend') != backend or report.get('scene') != scene or report.get('viewers') != viewers:
         raise ValueError('Missing or mismatched completed workload')
