@@ -214,6 +214,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     };
     preset_ = combo("Preset", {"Gaming", "Quality"}, int(p.preset));
     preset_->setObjectName("streamPreset");
+    preset_->setToolTip("Gaming favors low-delay video playback and may be less smooth on unstable networks. "
+        "Quality allows adaptive buffering for smoother playback. Your resolution, FPS and bitrate selections are kept.");
     resolution_ = combo("Resolution", {"Auto", "Fixed", "Native"}, int(p.resolution));
     width_ = number("Width", 2, 3840, p.width); width_->setSingleStep(2); width_->setObjectName("streamWidth");
     height_ = number("Height", 2, 2160, p.height); height_->setSingleStep(2); height_->setObjectName("streamHeight");

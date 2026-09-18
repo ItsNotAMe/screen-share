@@ -22,6 +22,10 @@ gates, not another reporting/cost-harness implementation or an unqualified soak 
 The connection-budget fix now removes WebRTC's unintended 5 Mbps probing fallback;
 see refactor/CONGESTION-RECOVERY.md. Continue receiver buffering/full queue-age and
 external-latency acceptance rather than repeating the rejected pacing/smoothing trials.
+Gaming now uses an explicit per-frame 10 ms RTP playout request, with Quality restoring
+adaptive timing (refactor/PLAYOUT-RECOVERY.md). Repeated phase responses expose
+remaining initial-collapse backlog; prioritize that and reference-load/physical
+latency/A/V acceptance, rather than reimplementing the preset policy.
 Decoded-frame handoff accounting/timing is implemented (refactor/FRAME-HANDOFF.md).
 Continue from its measured queue scope; do not mistake it for full pipeline latency.
 Laptop SSH now works through the dedicated local test account and a pinned host

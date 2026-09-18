@@ -1,6 +1,6 @@
 # Backend v2 — detailed checks and historical evidence
 
-Last reconciled: 2026-09-18 (including transport-budget recovery, bounded RTC traces, two-machine checks, UI/CLI reports and decoded-frame handoff timing). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D field acceptance remains open**.
+Last reconciled: 2026-09-18 (including preset playout/resize regressions, transport-budget recovery, bounded RTC traces, two-machine checks, UI/CLI reports and decoded-frame handoff timing). Implementation status: **Gate A passed for native integration/build proof; Checkpoints B/D field acceptance remains open**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
@@ -24,6 +24,14 @@ maximum despite higher RTP video allowances. The runtime now applies each
 viewer's video allocation plus its audio reservation to WebRTC's transport budget.
 The traced collapse and loss checks pass without changing acceptance thresholds.
 See CONGESTION-RECOVERY.md for rejected trials and remaining receiver-latency gates.
+The subsequent Gaming playout policy reduces software recovery buffering, preserves
+Quality's adaptive mode and follows each frame through asynchronous encoding.
+The impairment harness now requires five new input/image responses per phase.
+The final 10 ms request avoids a pinned-SDK zero-timestamp preset-switch freeze;
+two-machine preset/resize/rejoin checks pass. Existing decoder resize now has
+CPU/GPU regression coverage; provisional decoder changes were unnecessary and removed.
+See PLAYOUT-RECOVERY.md; initial-collapse backlog, reference-load/physical latency
+and A/V synchronization remain open.
 
 Checked implementation rows below apply to the shared v2 backend and opt-in
 frontends, not default-shell cutover or field acceptance. Mixed requirements are
@@ -474,6 +482,11 @@ Plan references: Sections 2.1–2.6 and 5 / Checkpoint B.
 
 ### Automated validation
 
+- [x] Carry Gaming/Quality playout policy with each encoded frame; verify preset
+  transitions through resize, restart and fresh rejoin locally and on the laptop.
+  Gaming uses a 10 ms request to avoid the pinned SDK's zero-timestamp render
+  freeze. Software recovery improves; initial-collapse and physical latency gates
+  remain open (PLAYOUT-RECOVERY.md).
 - [ ] Verify manual resolution under congestion and manual bitrate under WebRTC rate reduction.
 - [x] Verify one viewer's adaptation cannot alter another viewer's restrictions.
 - [ ] Verify encoder failure and hardware-to-software fallback isolation.

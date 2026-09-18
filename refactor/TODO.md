@@ -34,6 +34,14 @@ the 5 Mbps probe ceiling; see [CONGESTION-RECOVERY.md](CONGESTION-RECOVERY.md).
 Corrected Release packet scenarios pass 5/5 and Debug collapse passes, with traced
 before/after evidence. Receiver latency, full queue age and
 the original hardware/resource/field gates remain separate acceptance items.
+Gaming now requests short (10 ms) video playout using per-frame preset metadata;
+Quality restores adaptive buffering. See [PLAYOUT-RECOVERY.md](PLAYOUT-RECOVERY.md)
+for matched repeated input-response evidence and the severe-collapse FPS tradeoff.
+The final nonzero request avoids a pinned-SDK preset-switch freeze; laptop
+preset/resize/rejoin and direct CPU/GPU decoder resize checks pass without changing
+the decoder's existing resize behavior.
+Continue transient sender/network backlog, reference-load latency and physical
+A/V acceptance; do not equate reduced receiver buffering with completed Gaming latency.
 Decoded-frame handoff ownership/timing now covers failed conversion, stop discard
 and in-flight work, with shared UI/CLI diagnostics and strict stress/network
 evidence checks. See [FRAME-HANDOFF.md](FRAME-HANDOFF.md). This measures one local

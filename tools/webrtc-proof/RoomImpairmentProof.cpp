@@ -129,9 +129,17 @@ int main(int argc, char** argv) {
         bool inputApplied = false, inputRevoked = false;
         std::optional<int64_t> inputResponseInternalMs;
         QJsonArray samples;
+        QJsonObject phaseResponses;
         std::array<unsigned, 4> previous{};
         auto previousBytes = link->deliveredBytes.load();
         for (auto phase : {"baseline", "impaired", "recovery"}) {
+            if (!granted()) {
+                Check(viewers[0]->Input()->Request(hostId, screenshare::input::Keyboard));
+                Wait([&] { consume(); for (const auto& peer : host.Input()->Read()) if (peer.peer == viewerId && peer.requested == screenshare::input::Keyboard) return true; return false; });
+                Check(host.Input()->Grant(viewerId, screenshare::input::Keyboard));
+                Wait([&] { consume(); return granted(); });
+            }
+            QJsonArray responses;
             auto config = webrtc::BuiltInNetworkBehaviorConfig{};
             config.queue_length_packets = 256; config.link_capacity = webrtc::DataRate::KilobitsPerSec(healthyCapacityKbps);
             const bool impaired = std::string(phase) == "impaired";
@@ -187,7 +195,7 @@ int main(int argc, char** argv) {
                 previousBytes = bytes; samples.append(sample);
                 std::cerr << QJsonDocument(sample).toJson(QJsonDocument::Compact).toStdString() << std::endl;
                 Check(!link->invalid && host.Status().activePeers == 4);
-                if (impaired && second == 6) {
+                if (second % 2 == 0 && second <= 10) {
                     Check(!responseVisible[0]);
                     const auto inputStarted = std::chrono::steady_clock::now();
                     screenshare::input::Event key; key.kind = screenshare::input::Kind::Key; key.key = 65; key.down = true;
@@ -195,13 +203,22 @@ int main(int argc, char** argv) {
                     Wait([&] { consume(); return hostEvidence->input->applied > 0 && hostEvidence->input->pressed; });
                     inputApplied = true;
                     Wait([&] { consume(); return responseVisible[0]; });
-                    inputResponseInternalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - inputStarted).count();
-                    host.Input()->Revoke();
-                    Wait([&] { consume(); return !granted() && !hostEvidence->input->pressed && hostEvidence->input->releases > 0; });
+                    const auto responseMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - inputStarted).count();
+                    responses.append(qint64(responseMs));
+                    if (impaired && second == 6) inputResponseInternalMs = responseMs;
+                    if (second == 10) {
+                        host.Input()->Revoke();
+                        Wait([&] { consume(); return !granted() && !hostEvidence->input->pressed && hostEvidence->input->releases > 0; });
+                        Check(!viewers[0]->Input()->Submit(hostId, key)); inputRevoked = true;
+                    } else {
+                        key.down = false;
+                        Check(viewers[0]->Input()->Submit(hostId, key));
+                        Wait([&] { consume(); return !hostEvidence->input->pressed; });
+                    }
                     Wait([&] { consume(); return !responseVisible[0]; });
-                    Check(!viewers[0]->Input()->Submit(hostId, key)); inputRevoked = true;
                 }
             }
+            phaseResponses.insert(phase, responses);
         }
         for (auto& viewer : viewers) { auto stop = viewer->Stop(); Get(stop); viewer.reset(); }
         auto stop = host.Stop(); Get(stop);
@@ -209,7 +226,8 @@ int main(int argc, char** argv) {
         for (auto& frames : presentation) frames->Stop();
         Check(!link->queued && !link->bytes && !link->liveSockets && !link->invalid && link->received > 0);
         for (const auto& e : evidence) Check(e->destroyed == 1 && e->invalid == 0);
-        std::cout << QJsonDocument(QJsonObject{{"schema", 2}, {"scenario", QString::fromStdString(scenario)}, {"seed", 12345},
+        std::cout << QJsonDocument(QJsonObject{{"schema", 3}, {"scenario", QString::fromStdString(scenario)}, {"seed", 12345},
+            {"inputResponseByPhaseMs", phaseResponses},
             {"samples", samples}, {"warmupIngressBps", warmupIngress}, {"fastAudioExperiment", fastAudioExperiment},
             {"peakQueued", qint64(link->peakQueued.load())}, {"peakBytes", qint64(link->peakBytes.load())},
             {"maximumSchedulingDelayUs", qint64(link->maximumSchedulingDelayUs.load())},

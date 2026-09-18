@@ -37,6 +37,19 @@ def evidence(scenario='collapse'):
 
 
 class ImpairmentEvidenceTests(unittest.TestCase):
+    def test_repeated_phase_responses(self):
+        report = evidence()
+        with self.assertRaises(ValueError): module.validate(report, 'collapse', 'hash', require_phase_response=True)
+        metrics = report['metrics']; metrics['schema'] = 3
+        metrics['inputResponseByPhaseMs'] = {p: [100] * 5 for p in ('baseline', 'impaired', 'recovery')}
+        self.assertEqual(module.validate(report, 'collapse', 'hash', require_phase_response=True)['inputResponseByPhaseMs']['recovery'], [100] * 5)
+        for bad in ([], [100] * 4, [True] * 5, [-1] * 5, [float('nan')] * 5, [10001] * 5):
+            metrics['inputResponseByPhaseMs']['recovery'] = bad
+            with self.assertRaises(ValueError): module.validate(report, 'collapse', 'hash')
+        metrics['inputResponseByPhaseMs']['recovery'] = [100] * 5
+        metrics['inputResponseInternalMs'] = 99
+        with self.assertRaises(ValueError): module.validate(report, 'collapse', 'hash')
+
     def test_handoff_measurement_and_missing_data(self):
         report = evidence('loss2')
         with self.assertRaises(ValueError):

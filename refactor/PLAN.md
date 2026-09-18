@@ -220,6 +220,10 @@ Defaults for a fresh profile:
 - Start bandwidth estimation conservatively at no more than 3 Mbps or the configured maximum, whichever is lower.
 - Do not enforce the calculated maximum as a minimum bitrate.
 - Keep explicit user settings when switching presets. Presets change adaptation preferences, not manual selections.
+- Gaming requests best-effort 10 ms video playout; Quality explicitly restores
+  WebRTC's adaptive playout range. Carry this request with the exact encoded frame,
+  preserving manual selections and per-viewer isolation. This trades smoothing for
+  freshness and is not an end-to-end latency guarantee; see PLAYOUT-RECOVERY.md.
 
 These are initial tuning defaults, not claims about optimal quality.
 

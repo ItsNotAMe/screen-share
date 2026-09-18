@@ -1,5 +1,13 @@
 # Headless media checks
 
+The impairment runner now records five synthetic input/image responses in each
+of baseline, impairment and recovery, with explicit release and revoke checks.
+See [PLAYOUT-RECOVERY.md](PLAYOUT-RECOVERY.md) for the Gaming/Quality policy and
+matched comparisons. It remains silent and does not inject physical input.
+The four-viewer public-room regression switches Gaming→Quality→Gaming while
+resizing, restarting and rejoining; restored sender settings alone are insufficient:
+fresh 640-wide receiver observations and continued frame delivery are required.
+
 Silent congestion diagnosis now supports bounded per-peer RTC logs and restricted
 probe/ALR summaries. See [CONGESTION-RECOVERY.md](CONGESTION-RECOVERY.md) for the
 one-command workflow, corrected transport budget and remaining latency boundary.

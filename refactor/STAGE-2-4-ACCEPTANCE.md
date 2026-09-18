@@ -61,5 +61,8 @@ a Release recovery failure (NETWORK-IMPAIRMENT.md and UNATTENDED-RESULTS.md).
 The subsequent connection-budget correction is documented in CONGESTION-RECOVERY.md;
 its traced collapse/loss checks pass, while receiver buffering and external latency
 remain unresolved. Earlier failed evidence remains preserved.
+PLAYOUT-RECOVERY.md records the next Gaming receiver-policy improvement and its
+lower collapse FPS. Transient congestion backlog, reference-load receiver latency,
+external targets and physical A/V sync remain open despite better software recovery.
 The desktop later became available: the expanded Release generated-window/UI/CLI
 matrix now passes 17/17 (TWO-MACHINE.md). No unlock or physical input was sent.

@@ -175,6 +175,7 @@ int main(int argc, char** argv) {
             });
         });
         live.resolution = ResolutionMode::Fixed; live.width = 320; live.height = 180;
+        live.preset = StreamPreset::Quality;
         live.fps = 20; live.bitrateMode = SettingMode::Manual; live.bitrateLimitBps = 1000000;
         live.aggregateUploadLimitBps = 4000000;
         auto invalidPreferences = live; invalidPreferences.width = 319;
@@ -228,14 +229,20 @@ int main(int argc, char** argv) {
             });
         });
         live.width = 640; live.height = 360; live.fps = 30;
+        live.preset = StreamPreset::Gaming;
         live.bitrateMode = SettingMode::Auto; live.bitrateLimitBps.reset();
+        std::vector<unsigned> framesBeforeRestore;
+        for (const auto& value : evidence) framesBeforeRestore.push_back(value->frames.load());
         auto restore = host.UpdateStreamPreferences(live); const auto restored = Get(restore);
         Check(restored.error == StreamUpdateError::None && restored.revision > accepted.revision);
         Wait([&] {
             const auto status = host.Status().stream;
             if (status.peers.size() != 4) return false;
             for (const auto& peer : status.peers)
-                if (peer.rejected || peer.appliedRevision != restored.revision || peer.observedRevision != restored.revision || peer.width != 640) return false;
+                if (peer.rejected || peer.appliedRevision != restored.revision || peer.observedRevision != restored.revision || peer.width != 640 ||
+                    !peer.receiver.observation || peer.receiver.stale || peer.receiver.observation->width != 640) return false;
+            for (size_t i = 0; i < evidence.size(); ++i)
+                if (evidence[i]->frames < framesBeforeRestore[i] + 30) return false;
             return true;
         });
         auto leaveAgain = viewers[3]->Stop(); Get(leaveAgain);

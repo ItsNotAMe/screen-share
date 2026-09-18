@@ -1,0 +1,1241 @@
+{
+  "schema": 1,
+  "date": "2026-09-18",
+  "baselineProductionCommit": "74d6239",
+  "externalLatencyVerified": false,
+  "runs": [
+    {
+      "artifact": "build/webrtc/playout-minimal-trial/result.json",
+      "reportSha256": "3e05d69da9876cab88b162e33a77ac97011e0e6c69fc4a1e6a347ca05c262162",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "b85d1057619dba7f0726897e8b1e2fd50fe4970a1c3825fae53deb9280a857a0",
+          "executableSha256": "4094e25a46de44b714e1d73fd375f6ae3c5051d2d82338e5a8349dc089c2edb5",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": null,
+          "legacyImpairedResponseMs": 150,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.015,
+              "tailIngressMbps": 18.004,
+              "tailBufferMs": 31
+            },
+            "impaired": {
+              "affectedFpsMean": 18.693,
+              "tailIngressMbps": 1.516,
+              "tailBufferMs": 16.6
+            },
+            "recovery": {
+              "affectedFpsMean": 26.849,
+              "tailIngressMbps": 17.745,
+              "tailBufferMs": 29.4
+            }
+          }
+        },
+        "loss5": {
+          "nativeReportSha256": "727ee59e0eba085f7fdf782a30b4374131aa6d4fa135ea3ef1b3ecb61c7fd862",
+          "executableSha256": "4094e25a46de44b714e1d73fd375f6ae3c5051d2d82338e5a8349dc089c2edb5",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": null,
+          "legacyImpairedResponseMs": 151,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.995,
+              "tailIngressMbps": 18.438,
+              "tailBufferMs": 27.2
+            },
+            "impaired": {
+              "affectedFpsMean": 23.452,
+              "tailIngressMbps": 12.104,
+              "tailBufferMs": 73
+            },
+            "recovery": {
+              "affectedFpsMean": 28.832,
+              "tailIngressMbps": 13.747,
+              "tailBufferMs": 13
+            }
+          }
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-phase-baseline/result.json",
+      "reportSha256": "7ad3c94d96c7447252bec0def2c2b6331544ed4535d32ab0bfd51c6bfe58df89",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "72147c6339d7fbf3c84e3ea8809ad0832a7a63ae11834d4e0ea67e9c357a0056",
+          "executableSha256": "03e9b1c6db45591950422bb9456dc769c602d15295ce498a61576a67ed79c79c",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              86,
+              96,
+              91,
+              97,
+              96
+            ],
+            "impaired": [
+              1863,
+              337,
+              344,
+              376,
+              378
+            ],
+            "recovery": [
+              434,
+              427,
+              344,
+              346,
+              157
+            ]
+          },
+          "legacyImpairedResponseMs": 344,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.979,
+              "tailIngressMbps": 19.274,
+              "tailBufferMs": 33.8
+            },
+            "impaired": {
+              "affectedFpsMean": 23.846,
+              "tailIngressMbps": 3.076,
+              "tailBufferMs": 264
+            },
+            "recovery": {
+              "affectedFpsMean": 29.88,
+              "tailIngressMbps": 17.932,
+              "tailBufferMs": 190.4
+            }
+          }
+        },
+        "loss5": {
+          "nativeReportSha256": "bdb95931421efb903799d4f524b728f7b1a45ebe1dfc4e601aeefb764a2bfe28",
+          "executableSha256": "03e9b1c6db45591950422bb9456dc769c602d15295ce498a61576a67ed79c79c",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              112,
+              95,
+              96,
+              92,
+              95
+            ],
+            "impaired": [
+              161,
+              150,
+              133,
+              113,
+              159
+            ],
+            "recovery": [
+              164,
+              111,
+              109,
+              99,
+              85
+            ]
+          },
+          "legacyImpairedResponseMs": 133,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.959,
+              "tailIngressMbps": 17.933,
+              "tailBufferMs": 34.6
+            },
+            "impaired": {
+              "affectedFpsMean": 25.609,
+              "tailIngressMbps": 7.183,
+              "tailBufferMs": 57
+            },
+            "recovery": {
+              "affectedFpsMean": 29.143,
+              "tailIngressMbps": 8.219,
+              "tailBufferMs": 28.8
+            }
+          }
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-gaming-release/result.json",
+      "reportSha256": "3e886a92d50029e8d0c7b9a58b6d4efc299f9d9411873efd54e2750a38a36bf4",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "cffaf04d678ae279abf0e9ec89b5c992c149b4242c2d2332053f0966a1457861",
+          "executableSha256": "bf2da5636282333885e9c23db4a71853d72e5d54b8b440bc204c20245d5c7251",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              80,
+              90,
+              91,
+              91,
+              97
+            ],
+            "impaired": [
+              1401,
+              373,
+              127,
+              171,
+              59
+            ],
+            "recovery": [
+              171,
+              90,
+              102,
+              93,
+              96
+            ]
+          },
+          "legacyImpairedResponseMs": 127,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.949,
+              "tailIngressMbps": 17.988,
+              "tailBufferMs": 31
+            },
+            "impaired": {
+              "affectedFpsMean": 19.29,
+              "tailIngressMbps": 2.49,
+              "tailBufferMs": 20.6
+            },
+            "recovery": {
+              "affectedFpsMean": 28.554,
+              "tailIngressMbps": 18,
+              "tailBufferMs": 31
+            }
+          }
+        },
+        "loss2": {
+          "nativeReportSha256": "3dc2f4b15d190cb21bf5ef287b055d799d852d68bca6fceb624ec9758b21f304",
+          "executableSha256": "bf2da5636282333885e9c23db4a71853d72e5d54b8b440bc204c20245d5c7251",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              95,
+              91,
+              95,
+              90,
+              92
+            ],
+            "impaired": [
+              128,
+              121,
+              161,
+              139,
+              159
+            ],
+            "recovery": [
+              64,
+              59,
+              65,
+              59,
+              59
+            ]
+          },
+          "legacyImpairedResponseMs": 161,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.037,
+              "tailIngressMbps": 18.013,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 24.269,
+              "tailIngressMbps": 11.862,
+              "tailBufferMs": 41.6
+            },
+            "recovery": {
+              "affectedFpsMean": 30.059,
+              "tailIngressMbps": 13.055,
+              "tailBufferMs": 4
+            }
+          }
+        },
+        "loss5": {
+          "nativeReportSha256": "b79986a9809ad0c1f4fdb3f69a9049f290062b6d79db362377afe53a6e8c4ad9",
+          "executableSha256": "bf2da5636282333885e9c23db4a71853d72e5d54b8b440bc204c20245d5c7251",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              103,
+              91,
+              95,
+              91,
+              95
+            ],
+            "impaired": [
+              127,
+              154,
+              144,
+              194,
+              150
+            ],
+            "recovery": [
+              77,
+              62,
+              81,
+              59,
+              63
+            ]
+          },
+          "legacyImpairedResponseMs": 144,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.032,
+              "tailIngressMbps": 18.006,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 23.871,
+              "tailIngressMbps": 8.568,
+              "tailBufferMs": 57.6
+            },
+            "recovery": {
+              "affectedFpsMean": 29.015,
+              "tailIngressMbps": 8.58,
+              "tailBufferMs": 2
+            }
+          }
+        },
+        "reorder": {
+          "nativeReportSha256": "58be6d3f27f6958abf1688ce0147fb1c0112f1b7dd815892da5e3eedb378fd12",
+          "executableSha256": "bf2da5636282333885e9c23db4a71853d72e5d54b8b440bc204c20245d5c7251",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              98,
+              96,
+              96,
+              92,
+              90
+            ],
+            "impaired": [
+              109,
+              95,
+              90,
+              86,
+              93
+            ],
+            "recovery": [
+              118,
+              80,
+              64,
+              60,
+              60
+            ]
+          },
+          "legacyImpairedResponseMs": 90,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.067,
+              "tailIngressMbps": 17.999,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 29.013,
+              "tailIngressMbps": 13.524,
+              "tailBufferMs": 35.4
+            },
+            "recovery": {
+              "affectedFpsMean": 29.821,
+              "tailIngressMbps": 14.67,
+              "tailBufferMs": 4.4
+            }
+          }
+        },
+        "duplicate": {
+          "nativeReportSha256": "d230931bb9a04982657fd1fe1744416f265f1d86506be7f4054f40e518665e4a",
+          "executableSha256": "bf2da5636282333885e9c23db4a71853d72e5d54b8b440bc204c20245d5c7251",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              91,
+              94,
+              95,
+              92,
+              93
+            ],
+            "impaired": [
+              109,
+              97,
+              98,
+              87,
+              92
+            ],
+            "recovery": [
+              77,
+              91,
+              96,
+              93,
+              93
+            ]
+          },
+          "legacyImpairedResponseMs": 98,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.073,
+              "tailIngressMbps": 18.036,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 30.021,
+              "tailIngressMbps": 18.369,
+              "tailBufferMs": 27
+            },
+            "recovery": {
+              "affectedFpsMean": 30.044,
+              "tailIngressMbps": 17.987,
+              "tailBufferMs": 27
+            }
+          }
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-gaming-debug/result.json",
+      "reportSha256": "69d78151ac3f73cb553d5bf456609643cf67de5c7811cbbab47ad6efffbe17e7",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "1f3513247dc61a5fafe17fe04b49363efbce4f1fdea2f51641a1bc8c5db740e5",
+          "executableSha256": "8bd6a4fe1a36636abb29db9bf4ba1560818050be8dbcdea038bb495b744612c9",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              112,
+              119,
+              122,
+              120,
+              122
+            ],
+            "impaired": [
+              431,
+              88,
+              142,
+              57,
+              192
+            ],
+            "recovery": [
+              54,
+              159,
+              91,
+              94,
+              112
+            ]
+          },
+          "legacyImpairedResponseMs": 142,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.774,
+              "tailIngressMbps": 17.992,
+              "tailBufferMs": 32
+            },
+            "impaired": {
+              "affectedFpsMean": 19.644,
+              "tailIngressMbps": 1.803,
+              "tailBufferMs": 17
+            },
+            "recovery": {
+              "affectedFpsMean": 27.516,
+              "tailIngressMbps": 15.345,
+              "tailBufferMs": 26.2
+            }
+          }
+        },
+        "loss5": {
+          "nativeReportSha256": "62f12f6fc57e2d344beeb39bacd6691961322cc7f36581756c7209fe83c24305",
+          "executableSha256": "8bd6a4fe1a36636abb29db9bf4ba1560818050be8dbcdea038bb495b744612c9",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              125,
+              130,
+              127,
+              130,
+              121
+            ],
+            "impaired": [
+              122,
+              165,
+              167,
+              158,
+              271
+            ],
+            "recovery": [
+              81,
+              54,
+              60,
+              54,
+              55
+            ]
+          },
+          "legacyImpairedResponseMs": 167,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.559,
+              "tailIngressMbps": 17.98,
+              "tailBufferMs": 28.8
+            },
+            "impaired": {
+              "affectedFpsMean": 23.213,
+              "tailIngressMbps": 7.789,
+              "tailBufferMs": 62.8
+            },
+            "recovery": {
+              "affectedFpsMean": 30.067,
+              "tailIngressMbps": 8.607,
+              "tailBufferMs": 4.4
+            }
+          }
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-short-release/result.json",
+      "reportSha256": "15809c3c16ae390a1f8739fe3c09391249228b28e24106bd0d383428e5809926",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "3f7ca709d62b96bcc3ce6574843f8d3c9dbef26ec1b2e2712c6959c6a2b53b3a",
+          "executableSha256": "9a17e799964939ef3e632203d4f47715a0b0eb32b3782535806f064821f5f6ba",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              87,
+              93,
+              86,
+              97,
+              95
+            ],
+            "impaired": [
+              1612,
+              133,
+              180,
+              54,
+              204
+            ],
+            "recovery": [
+              99,
+              99,
+              98,
+              93,
+              92
+            ]
+          },
+          "legacyImpairedResponseMs": 180,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.955,
+              "tailIngressMbps": 19.343,
+              "tailBufferMs": 33
+            },
+            "impaired": {
+              "affectedFpsMean": 19.945,
+              "tailIngressMbps": 2.864,
+              "tailBufferMs": 23.4
+            },
+            "recovery": {
+              "affectedFpsMean": 29.959,
+              "tailIngressMbps": 18.003,
+              "tailBufferMs": 31
+            }
+          }
+        },
+        "loss2": {
+          "nativeReportSha256": "e9de7bb1ce62989ce82d2768dfd79dfef198b53bafff644b5b229932c6194bea",
+          "executableSha256": "9a17e799964939ef3e632203d4f47715a0b0eb32b3782535806f064821f5f6ba",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              97,
+              89,
+              93,
+              95,
+              90
+            ],
+            "impaired": [
+              111,
+              125,
+              206,
+              167,
+              92
+            ],
+            "recovery": [
+              52,
+              59,
+              65,
+              69,
+              65
+            ]
+          },
+          "legacyImpairedResponseMs": 206,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.103,
+              "tailIngressMbps": 18.05,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 25.075,
+              "tailIngressMbps": 11.847,
+              "tailBufferMs": 42.4
+            },
+            "recovery": {
+              "affectedFpsMean": 30.083,
+              "tailIngressMbps": 13.036,
+              "tailBufferMs": 4
+            }
+          }
+        },
+        "loss5": {
+          "nativeReportSha256": "9e5691d09440577846b7c89a9abb91721c4738eeff0ae72819b8ccf1584bbb98",
+          "executableSha256": "9a17e799964939ef3e632203d4f47715a0b0eb32b3782535806f064821f5f6ba",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              92,
+              91,
+              96,
+              90,
+              96
+            ],
+            "impaired": [
+              131,
+              163,
+              136,
+              148,
+              157
+            ],
+            "recovery": [
+              87,
+              122,
+              128,
+              78,
+              55
+            ]
+          },
+          "legacyImpairedResponseMs": 136,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.017,
+              "tailIngressMbps": 17.991,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 24.656,
+              "tailIngressMbps": 11.902,
+              "tailBufferMs": 62.4
+            },
+            "recovery": {
+              "affectedFpsMean": 28.62,
+              "tailIngressMbps": 11.82,
+              "tailBufferMs": 8.6
+            }
+          }
+        },
+        "reorder": {
+          "nativeReportSha256": "7578d16d7261c09d9d15812792fbc8acc78a5bbed2d993c7869e26bfc67a96eb",
+          "executableSha256": "9a17e799964939ef3e632203d4f47715a0b0eb32b3782535806f064821f5f6ba",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              93,
+              93,
+              89,
+              96,
+              95
+            ],
+            "impaired": [
+              137,
+              101,
+              115,
+              129,
+              93
+            ],
+            "recovery": [
+              103,
+              86,
+              93,
+              91,
+              90
+            ]
+          },
+          "legacyImpairedResponseMs": 115,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.016,
+              "tailIngressMbps": 19.285,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 28.614,
+              "tailIngressMbps": 11.88,
+              "tailBufferMs": 35.2
+            },
+            "recovery": {
+              "affectedFpsMean": 30.015,
+              "tailIngressMbps": 19.244,
+              "tailBufferMs": 26.6
+            }
+          }
+        },
+        "duplicate": {
+          "nativeReportSha256": "75afbe64dc05a15879da28e011178facb879c3950cd6b83df5d9d7ee15993f91",
+          "executableSha256": "9a17e799964939ef3e632203d4f47715a0b0eb32b3782535806f064821f5f6ba",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              88,
+              94,
+              95,
+              90,
+              94
+            ],
+            "impaired": [
+              75,
+              96,
+              95,
+              97,
+              91
+            ],
+            "recovery": [
+              76,
+              97,
+              94,
+              98,
+              97
+            ]
+          },
+          "legacyImpairedResponseMs": 95,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.931,
+              "tailIngressMbps": 17.95,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 30.077,
+              "tailIngressMbps": 18.353,
+              "tailBufferMs": 27
+            },
+            "recovery": {
+              "affectedFpsMean": 29.977,
+              "tailIngressMbps": 18.012,
+              "tailBufferMs": 27
+            }
+          }
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-final-release/result.json",
+      "reportSha256": "e9d7fc85421260d6e7b89126144e732d4d0656f5a8b72a54cb640f3ba853f1c4",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "227683968d35b0de1af77a0e5ff0bc4e3be8dd4041cab55ad6ba41824f965bab",
+          "executableSha256": "57b3dd651770fdec1b11c83dacb80ee3c93898b838c28f65d5eff66296ffbe6c",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              87,
+              92,
+              89,
+              92,
+              96
+            ],
+            "impaired": [
+              1906,
+              148,
+              110,
+              64,
+              128
+            ],
+            "recovery": [
+              107,
+              73,
+              81,
+              104,
+              94
+            ]
+          },
+          "legacyImpairedResponseMs": 110,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.965,
+              "tailIngressMbps": 17.99,
+              "tailBufferMs": 31
+            },
+            "impaired": {
+              "affectedFpsMean": 19.373,
+              "tailIngressMbps": 2.006,
+              "tailBufferMs": 20.4
+            },
+            "recovery": {
+              "affectedFpsMean": 27.444,
+              "tailIngressMbps": 17.756,
+              "tailBufferMs": 30.4
+            }
+          }
+        },
+        "loss5": {
+          "nativeReportSha256": "4e6d05d333e1f9837980d41e5d489fffa8899a1b9e5faaa42ac5876ef5009533",
+          "executableSha256": "57b3dd651770fdec1b11c83dacb80ee3c93898b838c28f65d5eff66296ffbe6c",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              71,
+              93,
+              99,
+              92,
+              97
+            ],
+            "impaired": [
+              147,
+              161,
+              135,
+              164,
+              238
+            ],
+            "recovery": [
+              78,
+              60,
+              62,
+              55,
+              65
+            ]
+          },
+          "legacyImpairedResponseMs": 135,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 30.011,
+              "tailIngressMbps": 18.038,
+              "tailBufferMs": 27
+            },
+            "impaired": {
+              "affectedFpsMean": 23.294,
+              "tailIngressMbps": 11.811,
+              "tailBufferMs": 57.4
+            },
+            "recovery": {
+              "affectedFpsMean": 30.208,
+              "tailIngressMbps": 13.055,
+              "tailBufferMs": 4
+            }
+          }
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-final-debug/result.json",
+      "reportSha256": "33b619e2d0df7ede0a211e25ca4857764718e288a9041755c9c586d64acd0af0",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "bfbc601670e14e32b5c60ed8fabe22839f1af15db2c8821323fdba205729b525",
+          "executableSha256": "52a83b1092920f39e4e47c3b47fd2de2a1879f9800ba8f2ef071cc32f9f13c3d",
+          "validated": true,
+          "error": null,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              112,
+              117,
+              126,
+              129,
+              123
+            ],
+            "impaired": [
+              1394,
+              66,
+              178,
+              105,
+              84
+            ],
+            "recovery": [
+              88,
+              118,
+              143,
+              138,
+              117
+            ]
+          },
+          "legacyImpairedResponseMs": 178,
+          "phases": {
+            "baseline": {
+              "affectedFpsMean": 29.968,
+              "tailIngressMbps": 17.992,
+              "tailBufferMs": 32
+            },
+            "impaired": {
+              "affectedFpsMean": 20.062,
+              "tailIngressMbps": 1.98,
+              "tailBufferMs": 20.6
+            },
+            "recovery": {
+              "affectedFpsMean": 29.274,
+              "tailIngressMbps": 17.888,
+              "tailBufferMs": 32.8
+            }
+          }
+        }
+      }
+    }
+  ],
+  "checks": {
+    "releasePolicyHardwareAndTransitions": {
+      "passed": 8,
+      "total": 8,
+      "artifact": "build\\webrtc\\playout-final-release-tests.log",
+      "sha256": "4121ba67ba52ab90a89fdf1c72f8b975c46b00f928c153672d3529cedc529188"
+    },
+    "debugPolicyAndTransitions": {
+      "passed": 5,
+      "total": 5,
+      "artifact": "build\\webrtc\\playout-final-debug-tests.log",
+      "sha256": "75fe3ecdfb1edff171f06d90a3282e517fa21ae995fb2c0030b7227a38167c6b"
+    },
+    "applicationRelease": {
+      "passed": 3,
+      "total": 3,
+      "artifact": "build\\webrtc\\playout-final-app-tests.log",
+      "sha256": "a943223c66041851beaadf9ca4e60cf41e77876bf7c6f719ec85523d9b666e82"
+    }
+  },
+  "applicationReleaseBuild": true,
+  "policy": {
+    "gamingMinMs": 10,
+    "gamingMaxMs": 10,
+    "quality": "default adaptive range",
+    "manualSettingsPreserved": true,
+    "decoderProductionChanges": false,
+    "vendorSourceChanges": false
+  },
+  "runInterpretation": {
+    "playout-minimal-trial": "exploratory global 0/0 policy",
+    "playout-phase-baseline": "previous production policy with repeated response harness",
+    "playout-gaming-release": "rejected 0/0 per-preset policy: transitions freeze",
+    "playout-gaming-debug": "rejected 0/0 per-preset policy: transitions freeze",
+    "playout-short-release": "10/10 policy; provisional decoder changes present, fixed-size stream",
+    "playout-final-release": "retained policy and unchanged production decoder",
+    "playout-final-debug": "retained policy and unchanged production decoder"
+  },
+  "twoMachine": [
+    {
+      "artifact": "build/webrtc/playout-gaming-cross-host",
+      "endpoints": {
+        "host": {
+          "passed": false,
+          "executableSha256": "f5a6be2251ec910f926090e039c4653b7c79a955e18e6b151193c3add8bc1940",
+          "elapsedMs": 35787,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "55321de558496dd1c091d5594cf6899c8100432132ba7a929a407a4cdacfa521",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "d22aeaa44d6fb6acb1fd49dd02342fb9c7d6d0a582bc988e8c23b62d5bd4c424"
+        },
+        "viewer": {
+          "passed": false,
+          "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+          "elapsedMs": 32451,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "1ad35e8ad23327adf105ec95566512b6fd1f99eaf9456aae5c304d5f14dcfd46",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "9fdf5ed9964946459765e92c27e6f67e8cbd01fc0a916c5d8e99334a386e36dc"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-transition-diagnostic",
+      "endpoints": {
+        "host": {
+          "passed": false,
+          "executableSha256": "e7ba9538176e37ac11976a5246da84a1ab96f8ef185ae91273c8e186b25b7f9a",
+          "elapsedMs": 35760,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "6953678e50974b97925a282e604dc7c9030d1adfa946fd86e14054a8a746ebba",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "9fc9829470a55dafeb3fafb24dfec9f5ae7b7fe1371bb0668d6f88fa02137b01"
+        },
+        "viewer": {
+          "passed": false,
+          "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+          "elapsedMs": 32592,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "1ad35e8ad23327adf105ec95566512b6fd1f99eaf9456aae5c304d5f14dcfd46",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "3b88cfd8e2822581bfc6ffa92514e64835a18be99bed932223fc78cf57a875ee"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-size-diagnostic",
+      "endpoints": {
+        "host": {
+          "passed": false,
+          "executableSha256": "796db419576540065a195c4dc695e0a4f12f8debffc4986949854dee0e3463c5",
+          "elapsedMs": 37500,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "4f258feb2958c57ed6dd64a786a951d4ff9806967b845d18223f9a46d234ddff",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "0f4123375408aa0c5744c7ef16fca8c63a184b9b676a31efc01b22990f64c8e7"
+        },
+        "viewer": {
+          "passed": false,
+          "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+          "elapsedMs": 32466,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "1ad35e8ad23327adf105ec95566512b6fd1f99eaf9456aae5c304d5f14dcfd46",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "b1d71c0a2f5fb7c7d8d46c10e9ab4a7e96e93c38922eb931b4380d602bbcb269"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-sps-diagnostic",
+      "endpoints": {
+        "host": {
+          "passed": false,
+          "executableSha256": "75ff7b164eec7e2ac318e0ec51089f59bb7a57fcd4619abbf1cc26f719fa284e",
+          "elapsedMs": 36944,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "c174e0873a4a392c34d6c202b5f2198551735712b1c1d772559c8cf381da3e5f",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "de07357d713920ab3bbff55e2a02f01bb1410ad932357ab1ce2bb87f6b1122aa"
+        },
+        "viewer": {
+          "passed": false,
+          "executableSha256": "9a811f10f836864eef18b27ac67cdff23d09b0a3e8126d02194e383e15657e14",
+          "elapsedMs": 33889,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "1ad35e8ad23327adf105ec95566512b6fd1f99eaf9456aae5c304d5f14dcfd46",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "12785c415ccb7278820d6c2d09f9af60eb6fe3a7ea00333fb61fca0890e6aba7"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-resize-fixed-cross-host",
+      "endpoints": {
+        "host": {
+          "passed": false,
+          "executableSha256": "4324812acd8a96bc0784b163a06025fc74d11f7ffe35981f271668c84f2b2282",
+          "elapsedMs": 36023,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "aa243b85a73eea4b7b123ae3010977f9c147832f2e45edf67044f77b22b1d6b9",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "022394f15d59fa4708dd830582b219ae4388320f25f6c8b98c0499a142e57327"
+        },
+        "viewer": {
+          "passed": false,
+          "executableSha256": "4324812acd8a96bc0784b163a06025fc74d11f7ffe35981f271668c84f2b2282",
+          "elapsedMs": 32786,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "fbb37b4c3a951d00f8f0cecf0bfcd80c6dec9c10e783d13293901d65189bb56f",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "492ee9b9bc0866128868fbd06ed0a44698e922b1753c76a8d3df1de592cebc9a"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-sps-fixed-cross-host",
+      "endpoints": {
+        "host": {
+          "passed": false,
+          "executableSha256": "c6ffe4a6847285f06c445a71a04c50472e991d8decf319ab9bb290880ae27633",
+          "elapsedMs": 37719,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "6a02e6c435d86f695cb6a3506b9411989b697e3f70111fbf47d31a379985dce2",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "c7c771b2f4f85b4ffdc6304f205f0dd9b355898d1c1442a81cbffd50113a83c5"
+        },
+        "viewer": {
+          "passed": false,
+          "executableSha256": "c6ffe4a6847285f06c445a71a04c50472e991d8decf319ab9bb290880ae27633",
+          "elapsedMs": 34141,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "fbb37b4c3a951d00f8f0cecf0bfcd80c6dec9c10e783d13293901d65189bb56f",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "1b20ac618ee1063562a5b6a8f6ef5250f671ef36121eb8dcab2a6ea7a3cde7d0"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-decoder-diagnostic",
+      "endpoints": {
+        "host": {
+          "passed": false,
+          "executableSha256": "e72b5905e247803e12ec65a056c1251cb30b5aeff156d2d11e2c0a73e6bcaf5e",
+          "elapsedMs": 35851,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "16c06009b0be36bfc36c11ca2a029ff0c8c95a6a1e60738dd158185d9c629662",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "460b3bbe0af84986fefb059dab0bf3bf1670c489f1b47d71eb8cba74effc54d1"
+        },
+        "viewer": {
+          "passed": false,
+          "executableSha256": "e72b5905e247803e12ec65a056c1251cb30b5aeff156d2d11e2c0a73e6bcaf5e",
+          "elapsedMs": 32176,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "fb87c901a18ade6275b7b15c489e90bf86501436cabb880d47ca12a0ad65e178",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "4eac08d4db9164f88e366e9eca0992c216e99abd84f265c2b3e14663adcf4879"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-output-diagnostic",
+      "endpoints": {
+        "host": {
+          "passed": false,
+          "executableSha256": "688a143d78022ba6f48db7e509f13e999ba79d34800cf8a8ead80f7d9408f9b8",
+          "elapsedMs": 35847,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "1040ee842c26b018d0669ddece7d31db8fe523da8b2eee8973396535670a77a8",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "a5e9feab5489be8d6cff6218d46261b089f8a19fb730d4aefa5a8ff487fbd2b6"
+        },
+        "viewer": {
+          "passed": false,
+          "executableSha256": "688a143d78022ba6f48db7e509f13e999ba79d34800cf8a8ead80f7d9408f9b8",
+          "elapsedMs": 32378,
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "94c95fc9257588195fe9db575b78d55d78c80b0f67bbb7612a127b6a33776c64",
+          "error": "Native proof failed or exceeded its deadline.",
+          "reportSha256": "9ee9712ad62e382b0d85e68b4089be783cf76076af63b08bbbefbb7d059f6b15"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-short-cross-host",
+      "endpoints": {
+        "host": {
+          "passed": true,
+          "executableSha256": "931b0d55a9231366922e22213b5a03e43af52573e2d8ee8ea9884fb7e216d769",
+          "elapsedMs": 19087,
+          "stdoutSha256": "49b09331090169523e22b6f620eca0e1ed68ce26b8c963167e08fc101d7fc06f",
+          "stderrSha256": "1f4f3c6e5c559163adc2baede21ec866d97814a543c21502376632312645e803",
+          "reportSha256": "57adeb82e7b4207eb082d6446339f24b67e31665f0bef9499d3b03e240799a08"
+        },
+        "viewer": {
+          "passed": true,
+          "executableSha256": "931b0d55a9231366922e22213b5a03e43af52573e2d8ee8ea9884fb7e216d769",
+          "elapsedMs": 16273,
+          "stdoutSha256": "5149ed312cdbb6d1a3fb74b29a616fd5aa2e89ca82c2571e0560d6e00be46535",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "reportSha256": "522f8894dc52687020a88d46a49747a5e99665d135c990a6efac3e8e2ef7a9b5"
+        }
+      }
+    },
+    {
+      "artifact": "build/webrtc/playout-final-cross-host",
+      "endpoints": {
+        "host": {
+          "passed": true,
+          "executableSha256": "e1e4c191818978f279758f412c6d5a7a25c093a0929624e6cd9e3c0300955183",
+          "elapsedMs": 20068,
+          "stdoutSha256": "49b09331090169523e22b6f620eca0e1ed68ce26b8c963167e08fc101d7fc06f",
+          "stderrSha256": "bd267e00347afef549bb1f09965c4174364c6a26f432b945fc84e4c6ed3aa470",
+          "reportSha256": "e0426e92f8476c24294c965abccbeed0bd2bf3aca2341568c52b0acfb5f794d3",
+          "metrics": {
+            "audibleOutput": false,
+            "fixedAndAutoSettings": true,
+            "freshRejoin": true,
+            "gamingQualityTransitions": true,
+            "inputEvents": 40,
+            "passed": true,
+            "physicalInput": false,
+            "productionTls": true,
+            "role": "host",
+            "runtimeReleased": true
+          }
+        },
+        "viewer": {
+          "passed": true,
+          "executableSha256": "e1e4c191818978f279758f412c6d5a7a25c093a0929624e6cd9e3c0300955183",
+          "elapsedMs": 17438,
+          "stdoutSha256": "938ad45ab3aed6849d7970df35c1618a7127f5cb64088dba2335e1035c593d59",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "reportSha256": "ffa815e24171cda350125651b1d288b3834f859ffb95763beaa5be09c5058a74",
+          "metrics": {
+            "audibleOutput": false,
+            "audioBlocks": 1458,
+            "externalLatencyVerified": false,
+            "frames": 354,
+            "freshRejoin": true,
+            "inputImageSamplesMs": [
+              67.102,
+              63.035,
+              63.325,
+              78.728,
+              63.328,
+              63.755,
+              63.361,
+              63.07,
+              79.15,
+              63.235,
+              63.34,
+              62.923,
+              63.634,
+              79.814,
+              63.761,
+              63.311,
+              63.783,
+              63.458,
+              78.557,
+              64.013
+            ],
+            "passed": true,
+            "physicalInput": false,
+            "productionTls": true,
+            "restart": true,
+            "role": "viewer",
+            "runtimeReleased": true,
+            "timingScope": "viewer-submit-to-decoded-synthetic-response"
+          }
+        }
+      }
+    }
+  ],
+  "discardedDecoderExperiment": "An early resize assertion compared delayed output against the newest input dimensions. Per-RTP dimension checks pass CPU/GPU with the original decoder; provisional restart/SPS changes were removed.",
+  "zeroDelayFailure": "Pinned VCMTiming returns zero render timestamps for zero-minimum low-delay requests; the prerender queue rejects them after Quality clock-based frames. Final 10/10 ms policy keeps clock-based rendering.",
+  "limitations": [
+    "Synthetic 640x360 software media; local hardware codec checks are not reference-load field acceptance",
+    "Five internal response samples per phase do not establish stable p95 or physical input/display latency",
+    "Severe-collapse FPS tradeoff and initial-collapse backlog remain visible"
+  ],
+  "finalExecutables": {
+    "build/sdk-proof-release/RoomImpairmentProof.exe": "57b3dd651770fdec1b11c83dacb80ee3c93898b838c28f65d5eff66296ffbe6c",
+    "build/sdk-proof-release/PublicRoomSessionProof.exe": "4cbb7b3c5d51909ddc8fdf702ee8a73f0299dacf4b993b9dd9617cb87030fe6b",
+    "build/sdk-proof-release/MfEncoderAdapterTest.exe": "743a21911cd487c48e6baa6800427a836c76546689d2147a7a57a8737153827b",
+    "build/sdk-proof-release/MfDecoderAdapterTest.exe": "56145f7e9b8f317acaa6fd99ad5f6a59437eaf8d7a257d1dee3e60cde01fe1cb",
+    "build/sdk-proof-release/CrossMachineRoomProof.exe": "e1e4c191818978f279758f412c6d5a7a25c093a0929624e6cd9e3c0300955183",
+    "build/sdk-proof-debug/RoomImpairmentProof.exe": "52a83b1092920f39e4e47c3b47fd2de2a1879f9800ba8f2ef071cc32f9f13c3d",
+    "build/sdk-proof-debug/PublicRoomSessionProof.exe": "a01efb2903f19b5fe850301b7a02f95b690d8f58c541cdf4b779ef0926fd17c6",
+    "build/sdk-proof-debug/MfEncoderAdapterTest.exe": "cf826dadf964098d0bbc01086e03cacb1084976f6b72f0257266cdf3f0d5e410",
+    "build/sdk-proof-debug/MfDecoderAdapterTest.exe": "ae652263dfc4121526e73f6c68b7ec8d33bfc65579220d4570c037122473676c",
+    "build/sdk-app-release/ScreenShareUi.exe": "1084841fa283fa71847f2d38eeaea396ab5693d085235a5af936742866f8868b",
+    "build/sdk-app-release/RoomCliTests.exe": "3c9b6625c46e0e91af476ec8760acd0c43319a68f0542f9254f3be82cd9c2577",
+    "build/sdk-app-release/RoomUiTests.exe": "47ec5868381c272259c09b2bf587c5670f11ae5a0bd55d6d4ddc8a349effb691"
+  }
+}

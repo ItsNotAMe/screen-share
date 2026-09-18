@@ -14,6 +14,8 @@ The laptop/GameSir first-pass workflow is ready in [FIELD-TESTING.md](FIELD-TEST
 LAN viewing/resize and corrected presentation counters are confirmed; live
 HTTPS/WSS lifecycle runs pass on both PCs. See [LIVE-SERVICE.md](LIVE-SERVICE.md)
 for the remaining NAT, device and latency boundaries.
+Gaming/Quality playout is now frame-scoped; PLAYOUT-RECOVERY.md records software
+buffering improvements and remaining transient-backlog/reference-load/physical gates.
 
 | Group | What remains | Completion evidence |
 | --- | --- | --- |

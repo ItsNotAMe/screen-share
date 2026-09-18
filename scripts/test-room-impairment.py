@@ -22,7 +22,7 @@ def numeric(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def validate(report, scenario, executable_hash, fast_audio=False, require_handoff=False):
+def validate(report, scenario, executable_hash, fast_audio=False, require_handoff=False, require_phase_response=False):
     if report.get('passed') is not True or report.get('timedOut') is not False or report.get('exitCode') != 0 or \
        report.get('logLimitExceeded', False) or report.get('executableSha256') != executable_hash:
         raise ValueError('Native process failed, timed out, or executable identity differs')
@@ -42,7 +42,7 @@ def validate(report, scenario, executable_hash, fast_audio=False, require_handof
                 raise ValueError('Invalid separate-process receiver result')
             ids.add(viewer['pid'])
         return {'separateProcesses': 5, 'runtimeReleased': True, 'externalLatencyVerified': False}
-    if type(metrics.get('schema')) is not int or metrics['schema'] not in (1, 2) or metrics.get('scenario') != scenario or metrics.get('seed') != 12345 or \
+    if type(metrics.get('schema')) is not int or metrics['schema'] not in (1, 2, 3) or metrics.get('scenario') != scenario or metrics.get('seed') != 12345 or \
        metrics.get('released') is not True or metrics.get('externalLatencyVerified') is not False or \
        metrics.get('inputApplied') is not True or metrics.get('inputRevoked') is not True:
         raise ValueError('Missing scenario, seed, ownership, or scope evidence')
@@ -51,7 +51,18 @@ def validate(report, scenario, executable_hash, fast_audio=False, require_handof
             raise ValueError('Missing or excessive packet ownership')
     if metrics.get('fastAudioExperiment') is not fast_audio:
         raise ValueError('Audio experiment configuration differs from request')
-    response_measured = metrics['schema'] == 2
+    response_measured = metrics['schema'] >= 2
+    phase_response = metrics.get('inputResponseByPhaseMs')
+    if require_phase_response and metrics['schema'] < 3:
+        raise ValueError('Missing repeated phase response evidence')
+    if metrics['schema'] >= 3:
+        if not isinstance(phase_response, dict) or set(phase_response) != {'baseline', 'impaired', 'recovery'}:
+            raise ValueError('Missing response phases')
+        for values in phase_response.values():
+            if not isinstance(values, list) or len(values) != 5 or any(type(v) is not int or not 0 <= v <= 10000 for v in values):
+                raise ValueError('Invalid repeated phase response samples')
+        if metrics.get('inputResponseInternalMs') != phase_response['impaired'][2]:
+            raise ValueError('Inconsistent legacy response sample')
     if response_measured and (type(metrics.get('inputResponseInternalMs')) is not int or not 0 <= metrics['inputResponseInternalMs'] <= 10000 or \
        metrics.get('inputResponseSamples') != 1 or metrics.get('inputResponseEndpoint') != 'decoded-frame-consumption'):
         raise ValueError('Missing internal input-to-image response evidence')
@@ -140,6 +151,7 @@ def validate(report, scenario, executable_hash, fast_audio=False, require_handof
     recent_tails = {phase: [[s['peers'][i]['jitterBufferRecentMs'] for s in samples[-5:]
         if s['peers'][i]['jitterBufferRecentMs'] is not None] for i in range(4)] for phase, samples in phases.items()}
     return {'healthyViewerIsolation': True, 'recovered': True,
+            'inputResponseByPhaseMs': phase_response if metrics['schema'] >= 3 else None,
             'decodedFrameHandoff': handoff.summarize(handoffs),
             'internalInputResponseMeasured': response_measured,
             'inputResponseInternalMs': metrics.get('inputResponseInternalMs') if response_measured else None,
@@ -207,7 +219,7 @@ def main():
                 files = list(output.glob('native-service-*/result.json'))
                 if len(files) != 1:
                     raise ValueError('Missing or ambiguous native result')
-                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment, require_handoff=True)
+                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment, require_handoff=True, require_phase_response=True)
             except Exception as error:
                 report['scenarios'][scenario]['error'] = str(error)
                 failures.append(scenario)

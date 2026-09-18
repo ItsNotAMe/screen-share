@@ -271,6 +271,18 @@ private:
                 if (Cancelled(generation)) throw HardwareFrameCancelled();
                 if (IsRetiredFrame(*frame)) throw RetiredVideoFrame{};
                 webrtc::EncodedImage image;
+                if (const auto* metadata = dynamic_cast<MappedVideoBuffer*>(frame->video_frame_buffer().get()); metadata && metadata->preset) {
+                    // Best-effort RTP playout request, not a deadline guarantee.
+                    // Quality explicitly restores the upstream adaptive range;
+                    // omitting the extension would retain the previous request.
+                    // A zero minimum enables zero render timestamps in the
+                    // pinned SDK; switching from Quality then starves its
+                    // monotonic prerender queue. Keep the smallest nonzero
+                    // RTP delay so both presets use the same clock domain.
+                    image.SetPlayoutDelay(*metadata->preset == StreamPreset::Gaming
+                        ? webrtc::VideoPlayoutDelay(webrtc::TimeDelta::Millis(10), webrtc::TimeDelta::Millis(10))
+                        : webrtc::VideoPlayoutDelay{});
+                }
                 input::InsertMappingSei(packet.bytes,Mapping(frame->video_frame_buffer()));
                 image.SetEncodedData(webrtc::EncodedImageBuffer::Create(
                     reinterpret_cast<const uint8_t*>(packet.bytes.data()), packet.bytes.size()));

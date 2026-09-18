@@ -35,9 +35,10 @@ public:
         if (!buffer) throw std::invalid_argument("Missing video frame buffer");
         const auto timestamp = Timestamp(capturedAt);
         input::FrameMapping mapping{sourceGeneration,uint16_t(buffer->width()),uint16_t(buffer->height()),0,0,uint16_t(buffer->width()),uint16_t(buffer->height())};
-        buffer = Adapt(std::move(buffer), timestamp, mapping);
+        std::optional<StreamPreset> preset;
+        buffer = Adapt(std::move(buffer), timestamp, mapping, preset);
         if (!buffer) return;
-        buffer = WithMapping(std::move(buffer),mapping);
+        buffer = WithMapping(std::move(buffer),mapping,preset);
         broadcaster_.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(std::move(buffer))
             .set_timestamp_us(timestamp).build());
     }
@@ -73,11 +74,13 @@ private:
         return {std::max(2, int(width * scale) & ~1), std::max(2, int(height * scale) & ~1)};
     }
     webrtc::scoped_refptr<webrtc::VideoFrameBuffer> Adapt(
-        webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer, int64_t timestamp, input::FrameMapping& mapping) {
+        webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer, int64_t timestamp, input::FrameMapping& mapping,
+        std::optional<StreamPreset>& preset) {
         std::optional<StreamPreferences> preferences;
         uint64_t revision;
         { std::lock_guard lock(settingsMutex_); preferences = preferences_; revision = revision_; }
         if (!preferences) return buffer;
+        preset = preferences->preset;
         const auto& value = *preferences;
         auto wants = broadcaster_.wants();
         wants.requested_resolution.reset(); // This wrapper owns canvas selection.

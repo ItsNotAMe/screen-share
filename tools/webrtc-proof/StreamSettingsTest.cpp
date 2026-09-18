@@ -17,8 +17,11 @@ void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(m
 struct Sink : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     int frames = 0, width = 0, height = 0;
     webrtc::scoped_refptr<webrtc::I420BufferInterface> last;
+    std::optional<StreamPreset> preset;
     void OnFrame(const webrtc::VideoFrame& frame) override {
         ++frames; width = frame.width(); height = frame.height(); last = frame.video_frame_buffer()->ToI420();
+        const auto* metadata = dynamic_cast<MappedVideoBuffer*>(frame.video_frame_buffer().get());
+        preset = metadata ? metadata->preset : std::nullopt;
     }
 };
 int main(int argc, char** argv) try {
@@ -200,6 +203,7 @@ int main(int argc, char** argv) try {
     fixed->Configure(preferences, 1);
     preferences.resolution = ResolutionMode::Auto; preferences.width = 640; preferences.height = 360;
     preferences.fpsMode = SettingMode::Auto;
+    preferences.preset = StreamPreset::Quality;
     adaptive->Configure(preferences, 1);
     webrtc::VideoSinkWants wants;
     wants.max_pixel_count = 160 * 90; wants.max_framerate_fps = 10; wants.is_active = true;
@@ -216,6 +220,8 @@ int main(int argc, char** argv) try {
     Require(adaptiveSink.width * adaptiveSink.height <= 160 * 90 && adaptiveSink.frames <= 22 && adaptiveSink.frames >= 18,
             "Auto did not obey WebRTC pixel/FPS restrictions");
     auto fixedStats = fixed->settingsStats();
+    Require(fixedSink.preset == StreamPreset::Gaming && adaptiveSink.preset == StreamPreset::Quality,
+            "Frame preset missing or shared across viewers");
     Require(fixedStats.observedRevision == 1 && fixedStats.imageWidth == 160 && fixedStats.imageHeight == 90,
             "Fixed aspect-ratio mapping is incorrect");
     Require(fixedSink.last->DataY()[0] == 16 && fixedSink.last->DataY()[60 * fixedSink.last->StrideY() + 80] == 80,
@@ -228,10 +234,12 @@ int main(int argc, char** argv) try {
             "Auto did not recover upward or upscaled beyond source");
     Require(fixed->settingsStats().width == 160, "One source's restrictions changed another source");
     preferences.resolution = ResolutionMode::Native;
+    preferences.preset = StreamPreset::Gaming;
     adaptive->Configure(preferences, 2);
     adaptive->Push(pixels, beginning + std::chrono::seconds(4));
     Require(adaptiveSink.width == 640 && adaptiveSink.height == 360 && adaptive->settingsStats().observedRevision == 2,
             "Native resolution did not follow source");
+    Require(adaptiveSink.preset == StreamPreset::Gaming, "Frame retained old preset after settings update");
     invalid = false;
     try { adaptive->Configure(preferences, 2); } catch (const std::invalid_argument&) { invalid = true; }
     Require(invalid && adaptive->requestedRevision() == 2, "Stale settings revision accepted");

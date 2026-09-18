@@ -56,6 +56,7 @@ void Host(const std::string& origin, const QString& readyFile) {
     });
     Wait([&] { return evidence->input->applied >= 40 && !evidence->input->pressed; });
     StreamPreferences fixed; fixed.resolution = ResolutionMode::Fixed;
+    fixed.preset = StreamPreset::Quality;
     fixed.width = 320; fixed.height = 180; fixed.fps = 20;
     fixed.bitrateMode = SettingMode::Manual; fixed.bitrateLimitBps = 1'000'000;
     auto change = host.UpdateStreamPreferences(fixed); Check(Get(change).error == StreamUpdateError::None);
@@ -68,10 +69,28 @@ void Host(const std::string& origin, const QString& readyFile) {
     });
     Check(evidence->input->releases > 0 && !evidence->input->pressed);
     auto restored = fixed; restored.width = 640; restored.height = 360; restored.fps = 30;
+    restored.preset = StreamPreset::Gaming;
     restored.bitrateMode = SettingMode::Auto; restored.bitrateLimitBps.reset();
     auto restore = host.UpdateStreamPreferences(restored); Check(Get(restore).error == StreamUpdateError::None);
+    auto nextDiagnostic = std::chrono::steady_clock::now();
     Wait([&] {
-        for (const auto& peer : host.Status().stream.peers)
+        const auto status = host.Status();
+        if (std::chrono::steady_clock::now() >= nextDiagnostic) {
+            nextDiagnostic = std::chrono::steady_clock::now() + 1s;
+            QJsonArray peers;
+            for (const auto& peer : status.stream.peers) {
+                auto number = [](const auto& value) -> QJsonValue { return value ? QJsonValue(double(*value)) : QJsonValue(QJsonValue::Null); };
+                peers.append(QJsonObject{{"sourceWidth", peer.source.width}, {"appliedRevision", qint64(peer.appliedRevision)},
+                    {"observedRevision", qint64(peer.observedRevision)}, {"rejected", peer.rejected},
+                    {"encoded", number(peer.sender.framesEncoded)}, {"keyframes", number(peer.sender.keyFramesEncoded)},
+                    {"targetBps", number(peer.sender.targetVideoBps)}, {"receiverStale", peer.receiver.stale},
+                    {"receiverWidth", peer.receiver.observation ? int(peer.receiver.observation->width) : 0},
+                    {"decoded", peer.receiver.observation ? qint64(peer.receiver.observation->framesDecoded) : 0}});
+            }
+            std::cerr << QJsonDocument(QJsonObject{{"stage", "restore"}, {"activePeers", int(status.activePeers)},
+                {"failedPeers", int(status.failedPeers)}, {"peers", peers}}).toJson(QJsonDocument::Compact).toStdString() << std::endl;
+        }
+        for (const auto& peer : status.stream.peers)
             if (peer.receiver.observation && !peer.receiver.stale && peer.receiver.observation->width == 640)
                 return true;
         return false;
@@ -79,7 +98,7 @@ void Host(const std::string& origin, const QString& readyFile) {
     Wait([&] { return host.Status().activePeers == 0; });
     auto stop = host.Stop(); Get(stop); Check(evidence->destroyed == 1 && !evidence->input->pressed);
     Print({{"passed", true}, {"role", "host"}, {"inputEvents", int(evidence->input->applied.load())},
-        {"freshRejoin", true}, {"fixedAndAutoSettings", true}, {"runtimeReleased", true},
+        {"freshRejoin", true}, {"fixedAndAutoSettings", true}, {"gamingQualityTransitions", true}, {"runtimeReleased", true},
         {"physicalInput", false}, {"audibleOutput", false}, {"productionTls", true}});
 }
 void Viewer(const std::string& origin, const std::string& room) {

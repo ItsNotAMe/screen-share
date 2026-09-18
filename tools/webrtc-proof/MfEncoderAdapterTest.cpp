@@ -1,6 +1,7 @@
 #include "LifecycleDiagnostics.h"
 #include "media/webrtc/MfVideoEncoderFactory.h"
 #include "media/webrtc/MfHardwareSession.h"
+#include "media/webrtc/MappedVideoBuffer.h"
 #include "api/environment/environment_factory.h"
 #include "api/video/i420_buffer.h"
 #include "modules/video_coding/include/video_error_codes.h"
@@ -52,12 +53,14 @@ void Run(bool useHardware, bool gpuInput) {
     auto hardware = useHardware ? std::make_shared<screenshare::media::MfHardwareSession>(
         std::make_shared<screenshare::media::D3dVideoDevice>()) : nullptr;
     auto makeFrame = [&](uint32_t timestamp) {
-        if (!gpuInput) return Frame(timestamp);
-        std::vector<uint8_t> pixels(640 * 360 * 3 / 2, 128);
-        return webrtc::VideoFrame::Builder()
-            .set_video_frame_buffer(hardware->device->UploadNv12(640, 360, pixels))
-            .set_rtp_timestamp(timestamp).set_timestamp_us(int64_t(timestamp) * 1000)
-            .set_ntp_time_ms(123456).build();
+        auto frame = Frame(timestamp);
+        if (gpuInput) {
+            std::vector<uint8_t> pixels(640 * 360 * 3 / 2, 128);
+            frame.set_video_frame_buffer(hardware->device->UploadNv12(640, 360, pixels));
+        }
+        if (timestamp >= 100) frame.set_video_frame_buffer(screenshare::media::WithMapping(frame.video_frame_buffer(), {},
+            timestamp == 200 ? screenshare::media::StreamPreset::Quality : screenshare::media::StreamPreset::Gaming));
+        return frame;
     };
     screenshare::media::MfVideoEncoderFactory factory(hardware);
     auto lowerLevel = factory.GetSupportedFormats().front();
@@ -81,6 +84,7 @@ void Run(bool useHardware, bool gpuInput) {
         Require(encoder->Encode(makeFrame(1), nullptr) == 0, "First encode failed");
         sink.Wait(before + 1);
         Rate(*encoder, 0); // Also a worker barrier.
+        Require(!sink.images.back().PlayoutDelay(), "Unconfigured input changed playout policy");
         for (unsigned i = 0; i < 30; ++i) Require(encoder->Encode(makeFrame(2 + i), nullptr) == 0, "Suspended input rejected");
         Rate(*encoder, 400'000);
         Require(sink.images.size() == before + 1, "Zero-rate suspension emitted video");
@@ -89,6 +93,7 @@ void Run(bool useHardware, bool gpuInput) {
         sink.Wait(before + 2);
         Rate(*encoder, 400'000);
         Require(sink.images.back()._frameType == webrtc::VideoFrameType::kVideoFrameKey, "Keyframe request lost");
+        Require(sink.images.back().PlayoutDelay() == webrtc::VideoPlayoutDelay(webrtc::TimeDelta::Millis(10), webrtc::TimeDelta::Millis(10)), "Gaming playout policy lost");
         bool foundSps = false;
         const auto& key = sink.images.back();
         for (const auto& nalu : webrtc::H264::FindNaluIndices(std::span(key.data(), key.size()))) {
@@ -107,6 +112,8 @@ void Run(bool useHardware, bool gpuInput) {
         }
         Require(encoder->Encode(makeFrame(200), nullptr) == 0, "Burst initial encode failed");
         sink.Wait(before + 3); // Worker blocked in callback; all following input must coalesce.
+        { std::lock_guard lock(sink.mutex);
+          Require(sink.images.back().PlayoutDelay() == webrtc::VideoPlayoutDelay{}, "Quality did not restore adaptive playout"); }
         for (unsigned i = 201; i <= 300; ++i) Require(encoder->Encode(makeFrame(i), nullptr) == 0, "Burst input rejected");
         {
             std::lock_guard lock(sink.mutex);
@@ -117,6 +124,7 @@ void Run(bool useHardware, bool gpuInput) {
         Rate(*encoder, 400'000);
         Require(sink.images.size() == before + 4 && sink.images.back().RtpTimestamp() == 300,
             "Pending raw frame backlog was replayed");
+        Require(sink.images.back().PlayoutDelay() == webrtc::VideoPlayoutDelay(webrtc::TimeDelta::Millis(10), webrtc::TimeDelta::Millis(10)), "Coalesced frame retained stale preset");
         encoder->Release();
         encoder->Release();
         Require(encoder->Encode(makeFrame(400), nullptr) == WEBRTC_VIDEO_CODEC_UNINITIALIZED, "Encoder active after release");

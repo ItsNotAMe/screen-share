@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <thread>
 #include <deque>
+#include <map>
 
 namespace {
 void Require(bool value, const char* message) {
@@ -18,7 +19,13 @@ class Sink final : public webrtc::DecodedImageCallback {
 public:
     int32_t Decoded(webrtc::VideoFrame& frame) override {
         Require(std::this_thread::get_id() == caller, "Callback escaped decode caller thread");
-        Require(frame.width() == width && frame.height() == height, "Visible aperture mismatch");
+        const auto dimensions = expectedSizes.find(frame.rtp_timestamp());
+        const auto expectedWidth = dimensions == expectedSizes.end() ? width : dimensions->second.first;
+        const auto expectedHeight = dimensions == expectedSizes.end() ? height : dimensions->second.second;
+        if (frame.width() != expectedWidth || frame.height() != expectedHeight)
+            throw std::runtime_error("Visible aperture mismatch: expected " + std::to_string(expectedWidth) + "x" + std::to_string(expectedHeight) +
+                ", received " + std::to_string(frame.width()) + "x" + std::to_string(frame.height()));
+        if (dimensions != expectedSizes.end()) expectedSizes.erase(dimensions);
         Require(!expected.empty() && frame.rtp_timestamp() == expected.front(), "RTP wrap/timestamp association lost");
         expected.pop_front();
         Require(frame.ntp_time_ms() == 123456, "NTP metadata lost");
@@ -39,6 +46,7 @@ public:
     }
     int width = 0, height = 0;
     std::deque<uint32_t> expected;
+    std::map<uint32_t, std::pair<int, int>> expectedSizes;
     unsigned count = 0;
     std::shared_ptr<screenshare::media::D3dVideoDevice> gpu;
     std::optional<screenshare::Nv12VideoFrame> retained;
@@ -195,7 +203,48 @@ void Recovery() {
     std::cout << "GPU pressure, device retirement, fixed-size software recovery, keyframe/backoff and exhausted recovery passed.\n";
 }
 }
+void ResizeWithoutReconfigure(bool gpu = false) {
+    std::shared_ptr<screenshare::media::D3dVideoDevice> device;
+    screenshare::media::MfVideoDecoderFactory factory(gpu, [&] { return device = std::make_shared<screenshare::media::D3dVideoDevice>(); });
+    auto decoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    webrtc::VideoDecoder::Settings settings; settings.set_codec_type(webrtc::kVideoCodecH264);
+    settings.set_max_render_resolution({320, 180});
+    Require(decoder->Configure(settings), "Resize decoder configure failed");
+    Sink sink; sink.gpu = device; decoder->RegisterDecodeCompleteCallback(&sink);
+    Require(!gpu || decoder->GetDecoderInfo().is_hardware_accelerated, "Resize hardware decoder fell back");
+    struct Cleanup { webrtc::VideoDecoder& decoder; ~Cleanup() { decoder.Release(); } } cleanup{*decoder};
+    unsigned timestamp = 0;
+    for (int width : {320, 640, 320, 1280}) {
+        // A decoder may emit its pending old-size frame after the next input.
+        // Validate dimensions against each output's RTP timestamp, not the
+        // most recently submitted frame.
+        Require(sink.expected.size() <= 1, "Resize accumulated old decoder output");
+        sink.width = width; sink.height = width * 9 / 16;
+        screenshare::H264StreamEncoder encoder;
+        screenshare::H264StreamEncoderConfig config; config.width = sink.width; config.height = sink.height;
+        encoder.Start(config);
+        screenshare::CapturedFrame frame; frame.width = frame.sourceWidth = sink.width; frame.height = frame.sourceHeight = sink.height;
+        frame.nv12Pixels.assign(size_t(sink.width) * sink.height * 3 / 2, std::byte{128});
+        const auto before = sink.count;
+        for (unsigned i = 0; i < 6; ++i) for (const auto& packet : encoder.EncodeFrame(frame)) {
+            webrtc::EncodedImage image;
+            image.SetEncodedData(webrtc::EncodedImageBuffer::Create(reinterpret_cast<const uint8_t*>(packet.bytes.data()), packet.bytes.size()));
+            image.SetRtpTimestamp(++timestamp * 3000); image.ntp_time_ms_ = 123456;
+            image._frameType = packet.isKeyframe ? webrtc::VideoFrameType::kVideoFrameKey : webrtc::VideoFrameType::kVideoFrameDelta;
+            image._encodedWidth = sink.width; image._encodedHeight = sink.height;
+            sink.expected.push_back(image.RtpTimestamp());
+            sink.expectedSizes.emplace(image.RtpTimestamp(), std::pair{sink.width, sink.height});
+            Require(decoder->Decode(image, 0) == WEBRTC_VIDEO_CODEC_OK, "Dynamic resize decode failed");
+        }
+        Require(sink.count >= before + 5, "Dynamic resize stopped output");
+    }
+    if (gpu) {
+        Require(device->readbackCount() == 0 && sink.firstRetained && sink.firstRetained->width == 320 &&
+            sink.retained && sink.retained->width == 1280, "Resize lost retained GPU frame ownership");
+        Require(sink.firstRetained->pixels().size() == 320 * 180 * 3 / 2, "Old GPU frame did not survive resize");
+    }
+}
 int main(int argc, char** argv) {
-    try { Run(false); Run(true, true); if (argc > 1 && std::string(argv[1]) == "--gpu") { Run(true); Recovery(); } return 0; }
+    try { ResizeWithoutReconfigure(); Run(false); Run(true, true); if (argc > 1 && std::string(argv[1]) == "--gpu") { ResizeWithoutReconfigure(true); Run(true); Recovery(); } return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
