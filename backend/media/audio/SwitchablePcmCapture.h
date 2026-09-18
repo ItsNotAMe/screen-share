@@ -111,10 +111,9 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
             if (stop.stop_requested()) worker.request_stop();
             if (!started || failed || stop.stop_requested()) throw std::runtime_error("Audio capture startup failed");
         }
-        bool Pop(PcmBlock& block, uint32_t& latency, uint64_t& lost, std::stop_token stop = {}, bool wait = false) {
+        bool Pop(PcmBlock& block, uint32_t& latency, uint64_t& lost) {
             std::unique_lock lock(mutex);
-            if (wait) ready.wait_for(lock, stop, std::chrono::milliseconds(10), [&] { return latest.has_value() || failed; });
-            if (!latest || stop.stop_requested()) return false;
+            if (!latest) return false;
             const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - capturedAt).count();
             if (age > 30) { latest.reset(); return false; }
             block = *latest; latest.reset(); latency = delay + uint32_t(age); lost = dropped; return true;
@@ -125,10 +124,10 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
     std::unique_ptr<Producer> current_, candidate_;
     std::unique_ptr<AudioSwitchControl::Request> request_;
     std::chrono::steady_clock::time_point deadline_;
+    std::chrono::steady_clock::time_point nextOutput_;
     uint32_t delay_ = 0;
     uint64_t dropped_ = 0, retiredDropped_ = 0;
-    SilentPcmCapture silence_;
-    void Fail() { current_.reset(); delay_ = 0; silence_.Start(); control_->Failed(); }
+    void Fail() { current_.reset(); delay_ = 0; control_->Failed(); }
     void Finish(AudioUpdateError error) { candidate_.reset(); control_->Complete(std::move(request_), error); }
 public:
     explicit SwitchablePcmCapture(std::shared_ptr<AudioSwitchControl> control) : control_(std::move(control)) {}
@@ -142,10 +141,17 @@ public:
             if (stop.stop_requested()) throw;
             Fail();
         }
+        nextOutput_ = std::chrono::steady_clock::now();
     }
     bool Read(PcmBlock& block, std::stop_token stop) override {
-        // Follow the endpoint's 10ms cadence, without a second independent clock.
-        // A stalled device waits at most 10ms; each producer retains one block.
+        // One 10ms output slot covers either captured PCM or replacement silence.
+        // A timeout followed by a late block must not create two slots: that
+        // overfeeds NetEq and makes A/V synchronization delay healthy video.
+        if (stop.stop_requested()) return false;
+        const auto now = std::chrono::steady_clock::now();
+        nextOutput_ += std::chrono::milliseconds(10);
+        if (nextOutput_ < now) nextOutput_ = now; // Never replay missed slots.
+        std::this_thread::sleep_until(nextOutput_);
         if (stop.stop_requested()) return false;
         if (!request_) {
             request_ = control_->Take();
@@ -164,9 +170,9 @@ public:
             } else if (std::chrono::steady_clock::now() >= deadline_) Finish(AudioUpdateError::Timeout);
         }
         if (current_ && current_->Failed()) Fail();
-        if (!current_) return silence_.Read(block, stop);
+        if (!current_) { block.fill(0); return true; }
         uint64_t lost = 0;
-        if (current_->Pop(block, delay_, lost, stop, true)) dropped_ = retiredDropped_ + lost;
+        if (current_->Pop(block, delay_, lost)) dropped_ = retiredDropped_ + lost;
         else { block.fill(0); delay_ = 0; }
         return !stop.stop_requested();
     }

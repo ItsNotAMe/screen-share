@@ -265,8 +265,10 @@ latency. See [COMPARISON.md](COMPARISON.md).
   through the actual UI/CLI presentation buffer. Validate per-viewer progress,
   one pending frame, replacement and recovery without catch-up bursts. See
   [ROOM-STRESS.md](ROOM-STRESS.md) for measured results and remaining limitations.
-  The 180-second scenario exposes later receive-rate degradation even in isolation;
-  diagnose that failure before claiming sustained recovery or two-hour acceptance.
+  The 180-second scenario exposed audio overproduction and consequent receive
+  buffering; the capture cadence fix and buffering regression are now implemented.
+  See [RECEIVER-PACING.md](RECEIVER-PACING.md). Proceed with full soak/network
+  impairment acceptance, preserving A/V synchronization and both buffering/rate checks.
 - [ ] Pass implementation-side stress and service/resource acceptance, including
   capture handle retention, full-room memory accounting, the complete two-hour
   four-viewer soak and impairment. Do not rebuild the completed stress harnesses.

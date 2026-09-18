@@ -103,6 +103,39 @@ void Switches() {
     Require(starting.get().error == AudioUpdateError::Cancelled && std::chrono::steady_clock::now() - cancelStart < 300ms && ownership->live == 0,
         "In-flight activation did not cancel promptly");
 }
+// A device that produces just after the old 10ms timeout used to cause one
+// silence block plus one immediate captured block per read interval.
+void LateCaptureCadence() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    class LateCapture final : public PcmCaptureEndpoint {
+    public:
+        void Start() override {}
+        bool Read(PcmBlock& block, std::stop_token stop) override {
+            std::this_thread::sleep_for(13ms);
+            block.fill(500); return !stop.stop_requested();
+        }
+        uint32_t DelayMs() const override { return 0; }
+    };
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, [] { return std::make_unique<LateCapture>(); });
+    SwitchablePcmCapture capture(control); capture.Start();
+    PcmBlock block; unsigned audible = 0, silent = 0;
+    const auto started = std::chrono::steady_clock::now();
+    for (unsigned n = 0; n < 200; ++n) {
+        Require(capture.Read(block, {}), "Late capture ended");
+        if (block[0]) ++audible; else ++silent;
+    }
+    Require(std::chrono::steady_clock::now() - started >= 1950ms,
+        "Late capture and replacement silence overfed the audio timeline");
+    Require(audible > 80 && silent > 5, "Late-capture regression did not exercise both PCM and timeout silence");
+    std::this_thread::sleep_for(50ms);
+    capture.Read(block, {});
+    const auto resumed = std::chrono::steady_clock::now();
+    capture.Read(block, {});
+    Require(std::chrono::steady_clock::now() - resumed >= 8ms, "Capture replayed missed output slots");
+    std::stop_source stop; stop.request_stop();
+    Require(!capture.Read(block, stop.get_token()), "Paced capture ignored cancellation");
+}
 void NoSharedAudio() {
     using namespace screenshare::media;
     using namespace std::chrono_literals;
@@ -364,6 +397,6 @@ void Run(bool wasapi) {
 }
 }
 int main(int argc, char** argv) {
-    try { audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
+    try { LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

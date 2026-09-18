@@ -1,5 +1,11 @@
 # Full-room lifecycle and continuous media testing
 
+**Latest follow-up:** [RECEIVER-PACING.md](RECEIVER-PACING.md) identifies and fixes
+audio capture overproduction that made A/V synchronization delay video. The
+historical failed receive-rate runs below remain evidence of the original defect.
+Current loopback validation also requires measured mean receiver buffering at or
+below 100 ms; passing frame-rate recovery alone is insufficient.
+
 The silent stress harness now keeps one native process alive across complete
 room create/join/media/stop cycles. Each cycle has a host and four real H.264/Opus
 viewers using the production RoomSession, networking/signaling executors, media

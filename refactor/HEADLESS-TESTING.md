@@ -1,5 +1,15 @@
 # Headless media checks
 
+## Receiver buffering regression — 2026-09-18
+
+`SwitchablePcmCapture` now emits exactly one PCM-or-silence block per output slot;
+late input cannot overfeed audio and cause A/V synchronization to delay video.
+The late-device cadence regression and the existing PCM/public-room suites pass
+in both configurations. Lifecycle validation also rejects missing or over-100-ms
+mean receiver-buffer reports on loopback; fifteen evidence tests pass. See
+[RECEIVER-PACING.md](RECEIVER-PACING.md) for before/after artifacts, the final
+180-second scenarios and the remaining two-hour/physical/network acceptance scope.
+
 ## Room ownership, memory and slow presentation — 2026-09-18
 
 The full-room runner now observes 24 weak dependencies, live synthetic audio

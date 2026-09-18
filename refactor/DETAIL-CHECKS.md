@@ -810,10 +810,11 @@ Historical continuation evidence is in HEADLESS-TESTING.md and CHECKPOINT-A.md; 
 - [ ] Complete allocation/queue-age acceptance and the full two-hour four-viewer
   soak; local presentation impairment does not establish network/decoder impairment
   or external image/input latency. See ROOM-STRESS.md for exact evidence.
-- [ ] Resolve sustained receive-rate degradation exposed by the 180-second room
-  scenario. Capture/source delivery remains healthy; sender and receiver statistics
-  are now recorded to investigate the growing buffering/drop counts. Retain failed
-  runs and unchanged recovery/latency criteria.
+- [x] Resolve the reproduced sustained receive-rate degradation: capture timeout
+  silence plus an immediate late block overfed the audio timeline, causing A/V sync
+  to delay video. Add one output cadence and a late-source regression; require
+  measured loopback receiver buffering as well as frame-rate recovery. See
+  RECEIVER-PACING.md. External latency and full soak acceptance remain open.
 
 # Integration update — 2026-09-16
 

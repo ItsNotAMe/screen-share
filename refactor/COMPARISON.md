@@ -77,6 +77,13 @@ actual UI/CLI bounded presentation buffer. These are v2-only diagnostics; see
 ROOM-STRESS.md for passes, retained failures and limitations. They establish neither
 a legacy comparison nor the two-hour/network/latency acceptance gates.
 
+The v2 receive-buffering regression now has a measured before/after correction:
+audio timeout silence followed by immediate late PCM overfed the audio timeline;
+one output cadence preserves normal A/V synchronization without accumulating delay.
+See RECEIVER-PACING.md for the matched 180-second software scenario and exact
+buffering/FPS results. This is a v2 defect fix, not a legacy comparison or external
+capture-to-display/input-response latency measurement.
+
 Next: connect both integrated session paths to a matched-workload harness. The current headless suite is useful
 regression evidence and must remain easy to run, but is not a substitute for
 the paired runs or external measurements above.

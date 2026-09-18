@@ -34,6 +34,9 @@ count follows from counting the historical checklist entries.
   Full-room ownership/heap accounting and bounded slow-presentation scenarios now
   exist too (ROOM-STRESS.md). They do not complete the two-hour soak, network
   impairment or physical latency gates.
+  The reproduced growing receiver buffer is corrected at the capture audio output
+  cadence, with normal A/V sync preserved; see RECEIVER-PACING.md. Continue sustained
+  soak/network testing rather than adding another decoder or presentation queue.
 - Default enablement and obsolete-code removal remain gated **Stage 5** work.
   Stage 2 integration readiness and the final production cutover are distinct.
 - The visual/usability redesign requested by the user remains **Stage 6**, after

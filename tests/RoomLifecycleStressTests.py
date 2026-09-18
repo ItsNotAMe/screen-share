@@ -35,7 +35,7 @@ class EvidenceTests(unittest.TestCase):
                 replaced[i] += 150 - delta
                 viewers.append({'viewer': i, 'frames': frames[i], 'frameDelta': delta,
                                 'audioBlocks': audio[i], 'audioDelta': 500, 'received': frames[i] + replaced[i],
-                                'replaced': replaced[i], 'pending': 0})
+                                'replaced': replaced[i], 'pending': 0, 'receiver': {'jitterBufferMeanMs': 12}})
             value['progress'].append({'cycle': 1, 'frames': sum(frames), 'elapsedSeconds': elapsed,
                 'intervalSeconds': 5, 'phase': phase, 'viewers': viewers, 'peakCaptureResources': 2, 'maxCaptureHandoffUs': 100})
             value['samples'].append(self.sample(-1, 5))
@@ -169,5 +169,13 @@ class EvidenceTests(unittest.TestCase):
             if fault == 'partial': bad['memorySamples'][2]['complete'] = False
             if fault == 'unknown': bad['memorySamples'][2]['heapBusyBytes'] = None
             with self.assertRaises(ValueError): lifecycle.evaluate(bad, 100, 0, 'binary', memory_accounting=True)
+
+    def test_good_frame_rate_cannot_hide_receive_buffering(self):
+        for bad in (None, {}, {'jitterBufferMeanMs': 101}, {'jitterBufferMeanMs': True}):
+            value = self.continuous(); value['progress'][-1]['viewers'][2]['receiver'] = bad
+            with self.assertRaises(ValueError): lifecycle.evaluate(value, 1, 30, 'binary')
+        result = lifecycle.evaluate(self.continuous(), 1, 30, 'binary')
+        self.assertEqual(result['receiverBuffering']['maximumReportedMeanMs'], 12)
+        self.assertFalse(result['receiverBuffering']['externalLatencyVerified'])
 
 if __name__ == '__main__': unittest.main()

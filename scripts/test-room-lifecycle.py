@@ -85,6 +85,10 @@ def progress_samples(progress, active, seconds, slow_viewer):
             if previous and (viewer['received'] < previous['viewers'][index]['received'] or
                              viewer['replaced'] < previous['viewers'][index]['replaced']):
                 raise ValueError('Presentation counters moved backwards')
+            receiver = viewer.get('receiver')
+            if not isinstance(receiver, dict) or type(receiver.get('jitterBufferMeanMs')) is not int or \
+               not 0 <= receiver['jitterBufferMeanMs'] <= 100:
+                raise ValueError('Loopback receiver buffering exceeds 100ms or is unmeasured')
             if viewer['frameDelta'] / entry['intervalSeconds'] > 36:
                 raise ValueError('Presentation catch-up burst exceeds the fixed 30fps source allowance')
             if slow_viewer and entry['phase'] == 'slow' and index == 0 and previous and \
@@ -170,6 +174,9 @@ def evaluate(detail, cycles, seconds, identity, idle_seconds=0, slow_viewer=Fals
             'restartByShutdownOrder': {'hostFirst': trends(finished[2::2]), 'viewerFirst': trends(finished[1::2])},
             'idleObservation': {'seconds': idle_seconds, 'resources': trends(idle)},
             'ownershipVerified': True, 'slowViewerIsolation': isolation,
+            'receiverBuffering': {'maximumReportedMeanMs': max((v['receiver']['jitterBufferMeanMs']
+                for p in detail.get('progress', []) for v in p['viewers']), default=None),
+                'loopbackLimitMs': 100, 'externalLatencyVerified': False},
             'memoryAccountingVerified': memory_accounting,
             'continuousDurationVerified': seconds, 'handleBoundApplied': cycles >= 20, 'soakAcceptanceComplete': False}
 
