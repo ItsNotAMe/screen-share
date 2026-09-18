@@ -34,6 +34,13 @@ class ComparisonTests(unittest.TestCase):
         r = evidence(); r['consumer'] = 'retained-only'
         with self.assertRaises(ValueError): self.validate(r)
 
+    def test_diagnostics_cannot_pass_normal_comparison(self):
+        r = evidence(); r['stageDiagnostics'] = True
+        with self.assertRaises(ValueError): self.validate(r)
+        comparison.validate(r, 'legacy', 'scroll', 1, 20, stage_diagnostics=True)
+        r = evidence(); r['consumer'] = 'capture-only-cpu-pixels'
+        with self.assertRaises(ValueError): self.validate(r)
+
     def test_unpaced_fixture_cannot_pass(self):
         r = evidence(); del r['audioPlayoutMode']
         with self.assertRaises(ValueError): self.validate(r)

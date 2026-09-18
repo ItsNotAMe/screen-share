@@ -1,6 +1,9 @@
 #include "api/RoomSession.h"
 #include "media/webrtc/WindowsRoomRuntime.h"
 #include "core/WindowsMediaRuntime.h"
+#include "core/ShortWait.h"
+#include "PipelineTrace.h"
+#include "api/make_ref_counted.h"
 #include "runtime/ScreenShareSessionRunner.h"
 #include "runtime/ScreenShareRuntimeInternal.h"
 #include "media/audio/SilentPcmCapture.h"
@@ -120,11 +123,13 @@ private:
 
 class Sink final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
+    std::shared_ptr<PipelineTrace> trace;
     explicit Sink(Scene& scene, bool retainedOnly) : scene_(scene), retainedOnly_(retainedOnly) {}
     void OnFrame(const webrtc::VideoFrame& frame) override {
         if (retainedOnly_) { CountRetained(frame.width(), frame.height()); return; }
         const auto pixels = frame.video_frame_buffer()->ToI420();
         if (pixels) Frame(frame.width(), frame.height(), pixels->DataY(), pixels->StrideY());
+        if (trace) trace->Record(PipelineTrace::Consumed, frame.rtp_timestamp());
     }
     void Legacy(SessionEvent::VideoFrame frame) {
         if (retainedOnly_) { CountRetained(frame.width, frame.height); return; }
@@ -239,16 +244,42 @@ bool Listening(unsigned port) {
     return false;
 }
 
+// Hold the v2 ownership/codec/transport path constant while substituting the
+// legacy host loop's fixed-rate capture schedule. No borrowed textures escape.
+class LegacyCadenceCapture final : public ICaptureSource {
+    std::unique_ptr<ICaptureSource> inner_; ShortWait timer_; Clock::time_point next_;
+public:
+    explicit LegacyCadenceCapture(std::unique_ptr<ICaptureSource> inner) : inner_(std::move(inner)) {}
+    void Start() override { inner_->Start(); next_ = Clock::now(); }
+    std::optional<CaptureSample> Poll() override {
+        for (;;) {
+            const auto remaining = next_ - Clock::now();
+            if (remaining <= Clock::duration::zero()) break;
+            timer_.Wait(std::min(std::chrono::duration_cast<std::chrono::nanoseconds>(remaining), 1ms + 0ns));
+        }
+        next_ += std::chrono::nanoseconds(1'000'000'000 / 60);
+        return inner_->Poll();
+    }
+    bool Closed() const override { return inner_->Closed(); }
+    bool Minimized() const override { return inner_->Minimized(); }
+    CaptureSourceInfo Info() const override { return inner_->Info(); }
+    void Retire() noexcept override { inner_->Retire(); }
+    void Rebuild() override { inner_->Rebuild(); }
+};
+
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     QJsonObject result{{"schema", 1}, {"passed", false}, {"externalLatencyVerified", false}, {"physicalInput", false}, {"audibleOutput", false}};
-    if (argc < 8 || argc > 10) { std::cerr << "backend origin scene viewers seconds port output.json [retained-only] [honor-timers]\n"; return 2; }
+    if (argc < 8 || argc > 13) { std::cerr << "backend origin scene viewers seconds port output.json [retained-only] [honor-timers] [trace] [no-smoothing] [legacy-cadence]\n"; return 2; }
     const QString output = argv[7];
     try {
-        bool retainedOnly = false, honorTimers = false;
+        bool retainedOnly = false, honorTimers = false, traceStages = false, noSmoothing = false, legacyCadence = false;
         for (int i = 8; i < argc; ++i) {
             if (std::string(argv[i]) == "retained-only" && !retainedOnly) retainedOnly = true;
             else if (std::string(argv[i]) == "honor-timers" && !honorTimers) honorTimers = true;
+            else if (std::string(argv[i]) == "trace" && !traceStages) traceStages = true;
+            else if (std::string(argv[i]) == "no-smoothing" && !noSmoothing) noSmoothing = true;
+            else if (std::string(argv[i]) == "legacy-cadence" && !legacyCadence) legacyCadence = true;
             else throw std::invalid_argument("Invalid or duplicate diagnostic option");
         }
         if (honorTimers) {
@@ -261,11 +292,16 @@ int main(int argc, char** argv) {
         }
         result["timerPolicy"] = honorTimers ? "honor-resolution" : "system";
         result["consumer"] = retainedOnly ? "retained-only" : "cpu-pixels";
-        const std::string variant = argv[1], backend = variant.starts_with("legacy") ? "legacy" : "v2", mode = argv[3];
+        const std::string variant = argv[1], backend = variant.starts_with("capture-") ? "capture-only" : variant.starts_with("legacy") ? "legacy" : "v2", mode = argv[3];
         const int viewers = std::stoi(argv[4]), seconds = std::stoi(argv[5]), port = std::stoi(argv[6]);
+        Require(!(traceStages || noSmoothing || legacyCadence) || (backend == "v2" && viewers == 1 && seconds <= 60 && !retainedOnly), "Stage diagnostics require one v2 pixel viewer and at most 60 seconds");
+        result["stageDiagnostics"] = traceStages || noSmoothing || legacyCadence;
+        result["prerenderSmoothing"] = !noSmoothing;
+        result["captureCadence"] = legacyCadence ? "legacy-fixed-60" : "native";
         result["variant"] = QString::fromStdString(variant);
         result["audioPlayoutMode"] = backend == "v2" ? "paced-discard" : "disabled";
-        Require((variant == "legacy" || variant == "legacy-lowlatency" || variant == "legacy-hardware" || variant == "v2" || variant == "v2-software") &&
+        if (backend == "capture-only") result["consumer"] = "capture-only-cpu-pixels";
+        Require((variant == "capture-legacy" || variant == "capture-owned" || variant == "legacy" || variant == "legacy-lowlatency" || variant == "legacy-hardware" || variant == "v2" || variant == "v2-software") &&
             (mode == "static" || mode == "scroll" || mode == "motion") &&
             (viewers == 1 || viewers == 4) && seconds >= 5 && seconds <= 900 && port >= 1024 && port <= 65000, "Invalid comparison configuration");
         WindowsMediaRuntime runtime; Require(SUCCEEDED(runtime.result()), "Windows media startup failed");
@@ -273,13 +309,48 @@ int main(int argc, char** argv) {
         webrtc::WinsockInitializer winsock; Require(!winsock.error() && webrtc::InitializeSSL(), "WebRTC network startup failed");
         Scene scene(mode);
         std::vector<std::shared_ptr<Sink>> sinks; for (int i = 0; i < viewers; ++i) sinks.push_back(std::make_shared<Sink>(scene, retainedOnly));
+        auto trace = traceStages ? std::make_shared<PipelineTrace>() : nullptr;
+        if (trace) sinks.front()->trace = trace;
         MemorySessionRuntimeControl stop;
         std::vector<std::unique_ptr<RoomSession>> rooms;
         std::vector<std::future<int>> legacy;
         // Stop before futures/sessions are destroyed, including on a failed assertion.
         struct StopGuard { MemorySessionRuntimeControl& stop; ~StopGuard() { stop.RequestStop(); } } guard{stop};
         const auto startup = Clock::now();
-        if (backend == "legacy") {
+        if (backend == "capture-only") {
+            Require(viewers == 1 && !retainedOnly, "Capture isolation requires one pixel consumer");
+            legacy.push_back(std::async(std::launch::async, [&] {
+                CaptureConfig config; config.sourceType = CaptureSourceType::Window;
+                config.windowHandle = uint64_t(scene.window()); config.targetWidth = Width; config.targetHeight = Height;
+                config.targetFps = 60; config.includeNv12 = true; config.ownedNv12 = variant == "capture-owned";
+                config.includeBgraReadback = config.includeNv12Readback = false;
+                DesktopCapturer capture; capture.Start(config);
+                std::shared_ptr<D3dVideoDevice> device;
+                ShortWait timer; auto next = Clock::now();
+                while (!stop.StopRequested()) {
+                    if (!config.ownedNv12) {
+                        for (;;) {
+                            const auto remaining = next - Clock::now();
+                            if (remaining <= Clock::duration::zero()) break;
+                            timer.Wait(std::min(std::chrono::duration_cast<std::chrono::nanoseconds>(remaining), 1ms + 0ns));
+                        }
+                        next += std::chrono::nanoseconds(1'000'000'000 / 60);
+                    }
+                    auto frame = capture.TryCaptureFrame(10ms);
+                    if (frame) {
+                        if (!device) device = std::make_shared<D3dVideoDevice>(frame->d3dDevice);
+                        // Synchronous readback before the next capture: the legacy
+                        // borrowed pool cannot be passed to asynchronous consumers.
+                        auto borrowed = webrtc::make_ref_counted<D3dVideoFrameBuffer>(device, frame->nv12Texture, frame->width, frame->height);
+                        auto pixels = borrowed->ToI420();
+                        Require(bool(pixels), "Capture isolation readback failed");
+                        sinks.front()->OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(pixels).build());
+                    }
+                    if (config.ownedNv12) timer.Wait();
+                }
+                return 0;
+            }));
+        } else if (backend == "legacy") {
             for (int i = 0; i < viewers; ++i) legacy.push_back(std::async(std::launch::async, [&, i] {
                 WatchSessionConfig config; config.connectionMode = WatchConnectionMode::DirectListen; config.listenPort = uint16_t(port + i);
                 config.udpAccessCode = "comparison-generated-scene-only"; config.playAudio = false; config.emitVideoFrames = true;
@@ -311,6 +382,14 @@ int main(int argc, char** argv) {
         } else {
             for (int i = -1; i < viewers; ++i) {
                 WindowsRoomRuntimeOptions options;
+                options.connection.set_prerenderer_smoothing(!noSmoothing);
+                if (legacyCadence) options.captureDecorator = [](CaptureSession::Factory original) {
+                    return [original = std::move(original)] { return std::make_unique<LegacyCadenceCapture>(original()); };
+                };
+                if (trace) {
+                    options.encoderDecorator = [trace](std::unique_ptr<webrtc::VideoEncoderFactory> factory) { return std::make_unique<TraceEncoderFactory>(std::move(factory), trace); };
+                    options.decoderDecorator = [trace](std::unique_ptr<webrtc::VideoDecoderFactory> factory) { return std::make_unique<TraceDecoderFactory>(std::move(factory), trace); };
+                }
                 options.preferHardwareEncoding = variant != "v2-software";
                 options.capture.sourceType = CaptureSourceType::Window; options.capture.windowHandle = uint64_t(scene.window());
                 options.capture.targetWidth = Width; options.capture.targetHeight = Height; options.capture.targetFps = 60;
@@ -332,6 +411,7 @@ int main(int argc, char** argv) {
         const auto threadCpu = ThreadTimes();
         const double cpu = CpuSeconds(), sourceCpu = scene.CpuSeconds(); const auto began = Clock::now(); const unsigned sourceBefore = scene.count();
         for (auto& sink : sinks) sink->Begin();
+        if (trace) trace->Begin();
         QJsonArray resourceSamples;
         for (int i = 0; i < seconds; ++i) { std::this_thread::sleep_until(began + std::chrono::seconds(i + 1)); resourceSamples.append(Resources()); }
         const double elapsed = std::chrono::duration<double>(Clock::now() - began).count();
@@ -346,6 +426,7 @@ int main(int argc, char** argv) {
             else Require(metrics["uniqueMarkers"].toInt() >= seconds * 5 && metrics["invalidMarkers"].toInt() <= metrics["frames"].toInt() / 20, "Insufficient valid generated-scene delivery");
         }
         result["receivers"] = received; result["resourceSamples"] = resourceSamples;
+        if (trace) result["pipelineStages"] = trace->End();
         result["sourceUpdates"] = int(scene.count() - sourceBefore); result["measuredSeconds"] = elapsed;
         if (!rooms.empty()) {
             const auto state = rooms.front()->Status();
@@ -369,9 +450,13 @@ int main(int argc, char** argv) {
         result["teardownSeconds"] = std::chrono::duration<double>(Clock::now() - stopping).count(); result["afterStopResources"] = Resources();
         result["backend"] = QString::fromStdString(backend); result["scene"] = QString::fromStdString(mode); result["viewers"] = viewers;
         result["settings"] = QJsonObject{{"width", Width}, {"height", Height}, {"fps", 60}, {"bitrateLimitBps", 12000000}, {"audio", "disabled/silent"}, {"encryption", true}, {"warmupSeconds", 5}};
+        if (backend == "capture-only") {
+            auto settings = result["settings"].toObject(); settings["encryption"] = false; result["settings"] = settings;
+        }
         result["scope"] = retainedOnly
             ? "same-process loopback; retained-frame delivery only; no pixel readback, image validation or presentation; resource isolation diagnostic only"
             : "same-process loopback; generated WGC window to CPU image consumer; source workload included in CPU; no physical presentation/input or network impairment";
+        if (backend == "capture-only") result["scope"] = "generated WGC window to synchronous CPU pixel consumer; no encoder, decoder or transport; readback included on both paths";
         result["gpuUtilization"] = QJsonValue(QJsonValue::Null); result["passed"] = true;
     } catch (const std::exception& error) { result["error"] = error.what(); }
     QSaveFile file(output); if (!file.open(QIODevice::WriteOnly)) return 2;

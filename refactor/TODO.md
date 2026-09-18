@@ -29,6 +29,14 @@ throughput and four-viewer memory, then normal GPU/two-PC resource and physical
 acceptance. Do not rebuild the comparison harness or claim an architectural win
 from fixes that also improve legacy.
 
+Capture decision completed: retain the already-shared `DesktopCapturer` behind
+v2's modular owned-frame interface. Capture-only measurements did not reproduce
+the whole-pipeline gap. Codec-stage traces instead found a retained decoder
+frame; the complete-picture input and verified low-latency fix are shared with
+legacy. See CAPTURE-LATENCY.md and the newest COMPARISON.md scorecard. Continue
+software delivery, four-viewer memory and the existing acceptance gates without
+reopening the capture rewrite merely from whole-pipeline latency numbers.
+
 Current priority: finish Stage 2–4, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).
 The user is back with a Windows laptop and GameSir Nova Lite. Use the concise

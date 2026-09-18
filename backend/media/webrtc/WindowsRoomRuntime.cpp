@@ -73,18 +73,26 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
                 return WasapiPcmEndpoints({}, selection.deviceId).playout;
             };
         }
-        native.engine = [endpoints = std::move(endpoints), state, preferHardware = options.preferHardwareEncoding] {
+        native.engine = [endpoints = std::move(endpoints), state, preferHardware = options.preferHardwareEncoding,
+                         encoderDecorator = options.encoderDecorator, decoderDecorator = options.decoderDecorator] {
+            std::unique_ptr<webrtc::VideoEncoderFactory> encoder = std::make_unique<MfVideoEncoderFactory>(preferHardware ? state->Get() : nullptr);
+            std::unique_ptr<webrtc::VideoDecoderFactory> decoder = std::make_unique<MfVideoDecoderFactory>(true);
+            if (encoderDecorator) encoder = encoderDecorator(std::move(encoder));
+            if (decoderDecorator) decoder = decoderDecorator(std::move(decoder));
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, std::make_shared<PcmAudioDiagnostics>()),
-                std::make_unique<MfVideoEncoderFactory>(preferHardware ? state->Get() : nullptr), std::make_unique<MfVideoDecoderFactory>(true));
+                std::move(encoder), std::move(decoder));
         };
         native.engineReady = [state] { return bool(state->Get()); };
         native.capture = [capture = options.capture, state, target] { return std::make_unique<DeviceCapture>(capture, state, target); };
+        if (options.captureDecorator) native.capture = options.captureDecorator(std::move(native.capture));
+        native.connection = options.connection;
         native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,
             options.capture.displayIndex, options.capture.windowHandle, options.capture.targetFps};
-        native.captureForSelection = [base = options.capture, state, target](CaptureSelection selection) -> CaptureSession::Factory {
+        native.captureForSelection = [base = options.capture, state, target, decorate = options.captureDecorator](CaptureSelection selection) -> CaptureSession::Factory {
             auto config = base; config.sourceType = selection.kind == CaptureKind::Window ? CaptureSourceType::Window : CaptureSourceType::Display;
             config.displayIndex = selection.display; config.windowHandle = selection.window; config.targetFps = selection.fps;
-            return [config, state, target] { return std::make_unique<DeviceCapture>(config, state, target); };
+            CaptureSession::Factory factory = [config, state, target] { return std::make_unique<DeviceCapture>(config, state, target); };
+            return decorate ? decorate(std::move(factory)) : std::move(factory);
         };
         native.deliver = [](CaptureVideoSource& source, const CaptureSample& sample) {
             source.PushBuffer(std::static_pointer_cast<WindowsCaptureResource>(sample.resource)->buffer, sample.capturedAt, sample.resource->inputGeneration);

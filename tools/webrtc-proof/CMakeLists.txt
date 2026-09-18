@@ -280,7 +280,7 @@ target_compile_features(MfCodecProbe PRIVATE cxx_std_20)
 target_include_directories(MfCodecProbe PRIVATE "${nativeRoot}")
 target_compile_definitions(MfCodecProbe PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(MfCodecProbe PRIVATE /EHsc /GR)
-target_link_libraries(MfCodecProbe PRIVATE d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging)
+target_link_libraries(MfCodecProbe PRIVATE d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging dwmapi)
 add_test(NAME mf-software-codec COMMAND MfCodecProbe)
 set_tests_properties(mf-software-codec PROPERTIES TIMEOUT 30)
 

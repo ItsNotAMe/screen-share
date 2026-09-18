@@ -109,9 +109,11 @@ void Run(bool gpu, bool unavailable = false) {
                 }
                 sink.expected.push_back(image.RtpTimestamp());
                 Require(decoder->Decode(image, 0) == WEBRTC_VIDEO_CODEC_OK, "MF adapter decode failed");
+                Require(sink.count == before + i + 1 && sink.expected.empty(),
+                    "Low-latency decoder retained a frame until later input");
             }
         }
-        Require(sink.count - before >= 10, "MF adapter retained excessive output");
+        Require(sink.count - before == 12 && sink.expected.empty(), "MF adapter lost or retained output");
         decoder->Release();
         if (sink.retained) {
             Require(device->readbackCount() == 0, "Normal GPU path read back decoded frames");
@@ -215,10 +217,9 @@ void ResizeWithoutReconfigure(bool gpu = false) {
     struct Cleanup { webrtc::VideoDecoder& decoder; ~Cleanup() { decoder.Release(); } } cleanup{*decoder};
     unsigned timestamp = 0;
     for (int width : {320, 640, 320, 1280}) {
-        // A decoder may emit its pending old-size frame after the next input.
-        // Validate dimensions against each output's RTP timestamp, not the
-        // most recently submitted frame.
-        Require(sink.expected.size() <= 1, "Resize accumulated old decoder output");
+        // Complete-picture input must not leave an old-size frame waiting
+        // for the next source size. Still verify each output's RTP identity.
+        Require(sink.expected.empty(), "Resize retained old decoder output");
         sink.width = width; sink.height = width * 9 / 16;
         screenshare::H264StreamEncoder encoder;
         screenshare::H264StreamEncoderConfig config; config.width = sink.width; config.height = sink.height;
@@ -235,8 +236,9 @@ void ResizeWithoutReconfigure(bool gpu = false) {
             sink.expected.push_back(image.RtpTimestamp());
             sink.expectedSizes.emplace(image.RtpTimestamp(), std::pair{sink.width, sink.height});
             Require(decoder->Decode(image, 0) == WEBRTC_VIDEO_CODEC_OK, "Dynamic resize decode failed");
+            Require(sink.count == before + i + 1 && sink.expected.empty(), "Resize decoder retained a frame");
         }
-        Require(sink.count >= before + 5, "Dynamic resize stopped output");
+        Require(sink.count == before + 6, "Dynamic resize lost output");
     }
     if (gpu) {
         Require(device->readbackCount() == 0 && sink.firstRetained && sink.firstRetained->width == 320 &&

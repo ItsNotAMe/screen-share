@@ -23,6 +23,11 @@ struct WindowsRoomRuntimeOptions {
     // Embedding/diagnostic codec control. Hardware remains preferred by default;
     // software mode keeps the same room/transport/capture pipeline for comparison.
     bool preferHardwareEncoding = true;
+    // Native embedding/diagnostic decorators; absent in normal application use.
+    std::function<std::unique_ptr<webrtc::VideoEncoderFactory>(std::unique_ptr<webrtc::VideoEncoderFactory>)> encoderDecorator;
+    std::function<std::unique_ptr<webrtc::VideoDecoderFactory>(std::unique_ptr<webrtc::VideoDecoderFactory>)> decoderDecorator;
+    std::function<CaptureSession::Factory(CaptureSession::Factory)> captureDecorator;
+    webrtc::PeerConnectionInterface::RTCConfiguration connection;
     std::shared_ptr<PresentationTelemetry> presentation;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
     std::shared_ptr<input::Sink> inputSink;

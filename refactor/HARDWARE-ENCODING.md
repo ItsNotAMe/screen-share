@@ -5,6 +5,14 @@ The controlled workload reproduces that symptom. Hardware is not automatically
 the better choice: scheduling, buffering, driver behavior and competing GPU work
 matter. [COMPARISON.md](COMPARISON.md) records the complete 16-run control matrix.
 
+The next attribution step found a separate shared decoder delay, not a slow
+capture implementation. Complete pictures were submitted as fragmented H264
+elementary streams, retaining one frame until the next input. Both legacy and
+v2 now use the complete-picture subtype and a verified low-latency property.
+[CAPTURE-LATENCY.md](CAPTURE-LATENCY.md) records the diagnosis and tests;
+COMPARISON.md contains the newer fair controls. Numbers below describe the
+earlier encoder investigation and are preserved as historical evidence.
+
 ## Reproduced legacy delay before portable fixes
 
 At 1080p with a 60 FPS / 12 Mbps ceiling, tuned legacy hardware measures

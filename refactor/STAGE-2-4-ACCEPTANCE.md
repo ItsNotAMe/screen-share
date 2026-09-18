@@ -15,6 +15,11 @@ architecture verdict. Tuned legacy remains a real latency competitor; v2
 software throughput and four-viewer private memory are outstanding performance
 work. HARDWARE-ENCODING.md records the reproduced legacy queue delay, its shared
 fix, hardware recovery checks and the bounded ten-minute v2 hardware evidence.
+The subsequent capture/decoder investigation is in CAPTURE-LATENCY.md: capture
+already shares the legacy implementation, the owned wrapper is retained, and
+the one-frame decoder hold is fixed for both backends. Use the newest fair
+scorecard in COMPARISON.md rather than the earlier absolute latency values.
+This closes the capture replacement decision, not resource/field acceptance.
 The decoded-frame handoff now has exact ownership and local wait/age measurements
 ([FRAME-HANDOFF.md](FRAME-HANDOFF.md)); this is one measured queue, not full pipeline
 queue-age or physical latency acceptance.

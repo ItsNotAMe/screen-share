@@ -1149,6 +1149,16 @@ the production legacy path also shares the precise waits and single-submission
 hardware deadline. Source/binary/report hashes and source snapshots distinguish
 the pre-fix and improved-legacy baselines. See HARDWARE-ENCODING.md.
 
+For capture/decoder attribution, `scripts/compare-pipeline-stages.py` uses the
+same executable/origin/output arguments. Its twelve short cases isolate capture
+configuration, fixed-rate scheduling, prerender smoothing and codec stages;
+`--case codecs` selects four repeated post-fix traces. Capture-only and traced
+runs cannot pass ordinary image-comparison validation. Sender/receiver RTP
+epochs are not assumed identical. See [CAPTURE-LATENCY.md](CAPTURE-LATENCY.md)
+for the capture decision and the shared complete-picture decoder fix.
+`MfDecoderAdapterTest` now requires immediate output for every complete frame,
+including across CPU/GPU resize and reset; successful drain alone cannot pass.
+
 Run WGC/live-admission comparisons with access to the active Windows capture
 desktop and authorized test service. A restricted process can build and pass
 component tests while failing WGC activation or room admission. Preserve those

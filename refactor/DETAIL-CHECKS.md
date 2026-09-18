@@ -16,6 +16,15 @@ pre-fix hardware symptom baseline separate from the updated codec controls in
 COMPARISON.md and HARDWARE-ENCODING.md. V2 hardware's local CPU advantage does not
 waive its latency gap against tuned legacy or software-fallback throughput.
 
+Capture/decoder attribution: [CAPTURE-LATENCY.md](CAPTURE-LATENCY.md) records
+matched capture-only measurements and codec-stage traces. Both backends already
+share `DesktopCapturer`; the owned v2 configuration showed no capture regression.
+Keep its safe ownership wrapper. The shared decoder now accepts complete-picture
+H264 and verifies the correctly typed low-latency property. The retained-frame
+regression requires immediate output rather than accepting a frame left pending
+until the next input. New fair controls in COMPARISON.md include this fix on
+both backends; shared improvements are not exclusive architectural wins.
+
 Laptop continuation: real two-PC video/resize was confirmed by the user, exposing
 a logical/native pixel sizing mismatch behind misleading busy/presentation counts.
 The native adapter fix passes a generated-window regression (3/90 before, 89/90

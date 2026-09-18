@@ -1,17 +1,63 @@
 # Before/after validation scorecard
 
-Status: **Portable fixes also remove legacy hardware lag. V2 is not yet a
-demonstrated overall performance improvement over improved legacy.**
+Status: **Capture is retained; a shared decoder fix substantially reduces latency.
+V2 is not yet a demonstrated overall performance improvement over improved legacy.**
 The original corrected matrix compared software/default-paced legacy against
 hardware-preferred Gaming v2. The final controls compare both encoder choices
-after giving legacy the portable timer, sender-mode and hardware-queue fixes.
-Legacy now has lower local image age with either encoder. V2 hardware uses less
-CPU, but neither that nor the original matrix proves an intrinsic architectural
-advantage. Full physical/network/resource acceptance remains open.
+after giving legacy the portable timer, sender-mode, hardware-queue and decoder
+fixes. Legacy remains faster with one viewer; hardware results are close with
+four. V2 hardware uses less CPU, but neither that nor the original matrix proves
+an intrinsic architectural advantage. Full physical/network/resource acceptance
+remains open.
 User requested comparative validation as part of B on 2026-09-15. Passing a
 component test or Gate A is not a comparative performance result.
 
-## Improved-legacy scorecard — final portable-fix controls
+## Latest scorecard — complete-picture decoder on both backends
+
+All **16 new uninstrumented runs** pass workload and codec validation. The
+workload and alternating order below are unchanged. Both backends now use
+complete-picture H264 decoder input and a verified low-latency setting, in
+addition to the prior shared improvements. [CAPTURE-LATENCY.md](CAPTURE-LATENCY.md)
+records the isolated capture measurements, stage traces and frame-retention bug.
+
+| Variant | Viewers | Image-age p95 ms | Fresh-marker FPS | CPU, one-core % | Private MiB |
+|---|---:|---:|---:|---:|---:|
+| Improved legacy software | 1 | 43.3 | 53.2 | 155.5 | 438.6 |
+| Improved legacy hardware | 1 | 44.1 | 53.3 | 55.5 | 338.6 |
+| V2 software | 1 | 61.1 | 36.7 | 92.3 | 315.4 |
+| V2 hardware | 1 | 50.8 | 52.6 | 26.6 | 255.1 |
+| Improved legacy software | 4 | 47.8 | 52.8 | 348.7 | 489.5 |
+| Improved legacy hardware | 4 | 47.7 | 53.5 | 269.2 | 399.8 |
+| V2 software | 4 | 65.8 | 35.9 | 366.8 | 916.2 |
+| V2 hardware | 4 | 44.7 | 52.5 | 100.3 | 540.4 |
+
+Values are medians of two runs (worst-viewer p95 per run for image age), not
+pooled percentiles. V2 hardware's individual p95 values were 47.8/53.8 ms for
+one viewer and 39.2/50.2 ms for four, so the approximately 3 ms four-viewer
+advantage is not a robust universal latency win. Legacy hardware's corresponding
+runs were 43.7/44.5 and 47.8/47.6 ms.
+
+**Decision:** retain the shared `DesktopCapturer` behind the modular owned-frame
+wrapper. Capture-only p95 was approximately 25.2 ms for legacy configuration
+and 24.6 ms for owned configuration; replacing safe ownership with the borrowed
+legacy pool would not address the measured delay. Decoder p95 fell from
+34–38 ms to below 0.5 ms in hardware stage traces. Legacy gets the same fix.
+
+V2 hardware image age falls from 72.4/78.8 to 50.8/44.7 ms in the fair controls;
+legacy hardware also falls from 59.6/63.9 to 44.1/47.7 ms. V2's one-viewer gap
+is now about 6.7 ms. Its measured CPU is 52–63% lower, while four-viewer private
+memory remains about 35% higher. Software image age improves substantially but
+fresh delivery still trails legacy (about 36 versus 53 FPS); do not credit its
+lower one-viewer CPU without that qualification.
+
+Raw new controls: `build/comparison-decoder-fair`. The stage/capture diagnostics
+are separate from these uninstrumented measurements. The
+[compact evidence](evidence/capture-decoder-2026-09-18.json) retains the old/new
+fair summaries, individual results, source/binary/report hashes and validation.
+Normal GPU presentation, game load, equal measured bitrate/full-color quality,
+physical latency, sustained resources and network acceptance remain open.
+
+## Earlier scorecard — before the complete-picture decoder fix
 
 All **16 updated runs** pass workload/codec validation, in addition to the sixteen
 pre-fix controls below. Motion scene, 1080p, 60 FPS and 12 Mbps ceilings,
@@ -324,7 +370,7 @@ essentially equal between paths.
 | Gaming input-to-visible-response p95 <120 ms | No external measurement | No external measurement | Unmeasured |
 | Quality capture-to-display p95 <250 ms | No external measurement | No external measurement | Unmeasured |
 | Image quality at equal bitrate | Matched-ceiling grayscale samples above | Same sampled scene; different codec path and actual rate | Full color/equal-wire-rate quality remains unmeasured |
-| Sustained delivery and stale queue age | Improved software age 60–65 ms; hardware 60–64 ms | Hardware 72–79 ms, software 109–121 ms with lower fresh FPS; ten-minute hardware evidence available | V2 trails improved legacy latency; full-queue and physical gates remain |
+| Sustained delivery and stale queue age | Improved software age 43–48 ms; hardware 44–48 ms | Hardware 45–51 ms, software 61–66 ms with lower fresh FPS; earlier ten-minute hardware evidence available | Shared decoder delay fixed; one-viewer gap and software delivery remain; full-queue/physical gates open |
 | CPU/GPU/memory efficiency | Tuned control CPU/private-memory samples above | Hardware uses less CPU; four-viewer private memory is higher; software four-viewer cost is worse | CPU-consumer result only; normal GPU presentation and GPU utilization remain unmeasured |
 | Native resource lifetime | No matched old-backend soak | 100 full-room restarts pass the handle bound in both builds (+5); extended 500-cycle capture fails (+226). Reproduced retained ports trace to WGC/RPC; cleanup experiments still fail the immediate bound. See CAPTURE-HANDLES.md | Allocation origin and delayed cleanup are identified; immediate resource acceptance and room memory remain open. Relative comparison unavailable |
 | Congestion recovery and viewer isolation | No matched impairment run | Packet impairment/recovery and four-peer rejoin pass; initial-collapse backlog remains | Matched network comparison unmeasured |

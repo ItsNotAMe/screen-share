@@ -33,6 +33,7 @@ def main():
     for relative in (
         'backend/core/ShortWait.h', 'backend/codec/HardwareFrameWait.h',
         'backend/codec/H264StreamEncoder.cpp', 'backend/codec/H264StreamEncoder.h',
+        'backend/codec/H264StreamDecoder.cpp', 'backend/codec/H264StreamDecoder.h',
         'backend/capture/DesktopCapturer.cpp', 'backend/runtime/ScreenShareRuntimeExecution.cpp',
         'backend/runtime/ScreenShareSessionOptions.cpp', 'backend/media/webrtc/MediaEngine.cpp',
         'backend/media/webrtc/MfVideoEncoderFactory.cpp', 'backend/media/webrtc/WindowsRoomRuntime.cpp',

@@ -21,7 +21,9 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def validate(report, backend, scene, viewers, seconds, variant=None, timer_policy='system'):
+def validate(report, backend, scene, viewers, seconds, variant=None, timer_policy='system', stage_diagnostics=False):
+    if report.get('stageDiagnostics', False) is not stage_diagnostics:
+        raise ValueError('Stage diagnostics cannot be mixed with normal performance controls')
     if report.get('variant', backend) != (variant or backend) or report.get('timerPolicy', 'system') != timer_policy:
         raise ValueError('Mismatched codec/timer control')
     if report.get('consumer', 'cpu-pixels') != 'cpu-pixels':

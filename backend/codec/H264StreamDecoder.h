@@ -33,6 +33,8 @@ public:
     H264StreamDecoder& operator=(const H264StreamDecoder&) = delete;
 
     void Start(int maxWidth = 16384, int maxHeight = 16384, ID3D11Device* device = nullptr);
+    // One complete Annex-B picture per nonempty packet, after transport
+    // reassembly. Fragmented byte streams must not be submitted here.
     std::vector<DecodedFrameInfo> DecodePacket(const EncodedPacket& packet);
     std::vector<DecodedFrameInfo> Drain();
     void Stop();

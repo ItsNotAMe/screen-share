@@ -1,0 +1,1538 @@
+{
+  "schema": 1,
+  "date": "2026-09-18",
+  "performanceAcceptancePassed": false,
+  "decision": "Keep shared DesktopCapturer and modular owned-frame wrapper; remove retained decoder frame for both backends",
+  "baselineStages": {
+    "rawReport": "build/comparison-capture-stages-final/result.json",
+    "rawReportSha256": "33fe2272b314cf354f81d91ca34a54406d3eb407c120922c55701b8cf1a6ff6d",
+    "executableSha256": "be433ff304acd7d310b365317e92490e12196d36dbe99acec508fd864375c970",
+    "sourceHashes": {
+      "scripts\\compare-pipeline-stages.py": "4e0bb777aa7522f1ede550a0c84042278d95566f195cf6ffe88e108c4882a76d",
+      "scripts\\compare-backends.py": "826042719fd8e22aa71063fcceaf04a5eab3695163db9aee3526921a9d4e6b64",
+      "tools\\backend-comparison\\BackendComparison.cpp": "9120176d1c25de693cddb648fad0d6cf43dcba7ba80ee962d506b18a1ad53c68",
+      "tools\\backend-comparison\\PipelineTrace.h": "5d5084102d4ca7ef5ac141d0c7e86da96f219d23b8a150e82d9befdd1d557a8a",
+      "backend\\media\\webrtc\\WindowsRoomRuntime.cpp": "f450c165f3d3f00beead64f5aee74229d5aa25471e25e44d42808674c0912be8",
+      "backend\\media\\webrtc\\WindowsRoomRuntime.h": "bbf9272cf1319a15d6fef4566e466577a10adfb2b55bf1c9ed9fa314fb236e4e"
+    },
+    "runs": [
+      {
+        "name": "0-v2-trace",
+        "validated": true,
+        "metricsSha256": "51dda4097fed819d97b339d4c1380eb9b80832682e3a92e183548c9dcfb53d2e",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 70.4549999833107,
+        "freshFps": 52.26402559124013,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.011,
+            "p95Ms": 0.018,
+            "p99Ms": 11.011,
+            "samples": 812
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.8914999961853027,
+            "p95Ms": 1.2087000012397766,
+            "p99Ms": 1.8514000177383423,
+            "samples": 812
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 17.001599997282028,
+            "p95Ms": 33.94949999451637,
+            "p99Ms": 77.1617999970913,
+            "samples": 811
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 2.5046999752521515,
+            "p95Ms": 2.6401000022888184,
+            "p99Ms": 3.121199995279312,
+            "samples": 812
+          }
+        }
+      },
+      {
+        "name": "1-v2-trace-legacy-cadence",
+        "validated": true,
+        "metricsSha256": "ddea16179cf889e268c3e65faf9f07bf1417baa5c161128e98a6acc2080a6b30",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 68.86590000987053,
+        "freshFps": 52.59763135333472,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.011,
+            "p95Ms": 0.016,
+            "p99Ms": 10.013,
+            "samples": 808
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.8950000107288361,
+            "p95Ms": 1.182099997997284,
+            "p99Ms": 1.791399985551834,
+            "samples": 809
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 16.968699991703033,
+            "p95Ms": 33.91260001063347,
+            "p99Ms": 77.99990001320839,
+            "samples": 808
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 2.504399985074997,
+            "p95Ms": 2.636900007724762,
+            "p99Ms": 3.127599984407425,
+            "samples": 808
+          }
+        }
+      },
+      {
+        "name": "2-v2-trace-no-smoothing",
+        "validated": true,
+        "metricsSha256": "0197051430bca7b52885747dca2ff6cda4456a6714361416da02dbf4adca1a72",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 64.61590000987053,
+        "freshFps": 52.664075243070876,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.01,
+            "p95Ms": 0.015,
+            "p99Ms": 2.482,
+            "samples": 812
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.8764999806880951,
+            "p95Ms": 1.1026000082492828,
+            "p99Ms": 1.2159000039100647,
+            "samples": 812
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 16.945299983024597,
+            "p95Ms": 34.02030000090599,
+            "p99Ms": 49.92800000309944,
+            "samples": 811
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 2.5056999921798706,
+            "p95Ms": 2.6137999892234802,
+            "p99Ms": 3.1176000237464905,
+            "samples": 812
+          }
+        }
+      },
+      {
+        "name": "3-v2-software-trace",
+        "validated": true,
+        "metricsSha256": "cb7dea84899f35bdf910bc715eea9fc58eec01a367798d431894bda9cf23ee0b",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 118.8589999973774,
+        "freshFps": 35.865592372623134,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.01,
+            "p95Ms": 0.016,
+            "p99Ms": 5.011,
+            "samples": 545
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.9169999957084656,
+            "p95Ms": 1.1574000120162964,
+            "p99Ms": 1.3059000074863434,
+            "samples": 545
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 17.558699995279312,
+            "p95Ms": 66.68190002441406,
+            "p99Ms": 101.39880001544952,
+            "samples": 544
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 3.6514999866485596,
+            "p95Ms": 4.750800013542175,
+            "p99Ms": 8.246300011873245,
+            "samples": 545
+          }
+        }
+      },
+      {
+        "name": "4-v2-software-trace",
+        "validated": true,
+        "metricsSha256": "80c2f99ed644ad3aa883222341a7b178c3a928d3cf0d19a29362513b13c1e21e",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 120.10099998116493,
+        "freshFps": 39.59898652993808,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.01,
+            "p95Ms": 0.017,
+            "p99Ms": 5.012,
+            "samples": 616
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.9174000024795532,
+            "p95Ms": 1.0942000150680542,
+            "p99Ms": 1.2488999962806702,
+            "samples": 615
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 17.282499998807907,
+            "p95Ms": 61.129700005054474,
+            "p99Ms": 100.37029999494553,
+            "samples": 614
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 3.6879999935626984,
+            "p95Ms": 4.8507000207901,
+            "p99Ms": 8.307899981737137,
+            "samples": 616
+          }
+        }
+      },
+      {
+        "name": "5-v2-trace-no-smoothing",
+        "validated": true,
+        "metricsSha256": "bf41684b642a928245556b444cfd370d2447bbf15333ffb2eee7f37d2ff7efc3",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 63.80239999294281,
+        "freshFps": 52.73065848279737,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.01,
+            "p95Ms": 0.015,
+            "p99Ms": 7.018,
+            "samples": 818
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.8727000057697296,
+            "p95Ms": 1.1119000017642975,
+            "p99Ms": 1.2655999958515167,
+            "samples": 818
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 17.011700004339218,
+            "p95Ms": 33.744100004434586,
+            "p99Ms": 43.4229000210762,
+            "samples": 817
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 2.508100003004074,
+            "p95Ms": 2.6229000091552734,
+            "p99Ms": 3.1295999884605408,
+            "samples": 818
+          }
+        }
+      },
+      {
+        "name": "6-v2-trace-legacy-cadence",
+        "validated": true,
+        "metricsSha256": "ef3937bfcafe24a462e79874121cb6918420cec390c5cfffcbea64e96c4e2f4d",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 63.53839999437332,
+        "freshFps": 51.864663653356374,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.01,
+            "p95Ms": 0.017,
+            "p99Ms": 0.025,
+            "samples": 809
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.8686999976634979,
+            "p95Ms": 1.1360999941825867,
+            "p99Ms": 1.7203999757766724,
+            "samples": 809
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 16.979400008916855,
+            "p95Ms": 33.91400000452995,
+            "p99Ms": 50.30510002374649,
+            "samples": 808
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 2.501800000667572,
+            "p95Ms": 2.9684999883174896,
+            "p99Ms": 3.101500004529953,
+            "samples": 809
+          }
+        }
+      },
+      {
+        "name": "7-v2-trace",
+        "validated": true,
+        "metricsSha256": "9f54ce2d66b499193d51331f2a00ef9d228a4e46b2d8eaf4bf5bafcffee3713f",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 77.38800001144409,
+        "freshFps": 47.198244539958075,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.011,
+            "p95Ms": 0.019,
+            "p99Ms": 16.012,
+            "samples": 740
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.8822999894618988,
+            "p95Ms": 1.2329000234603882,
+            "p99Ms": 1.8485999703407288,
+            "samples": 740
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 17.42900002002716,
+            "p95Ms": 38.30649998784065,
+            "p99Ms": 87.58439999818802,
+            "samples": 739
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 2.5060000121593475,
+            "p95Ms": 2.9814999997615814,
+            "p99Ms": 4.062900006771088,
+            "samples": 740
+          }
+        }
+      },
+      {
+        "name": "8-capture-legacy",
+        "validated": true,
+        "metricsSha256": "e0fd67633632b320524295209a97c43598e1289aa9fa5b87f5ff73bb99f38399",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 25.192900002002716,
+        "freshFps": 50.73011535301611,
+        "pipelineStages": null
+      },
+      {
+        "name": "9-capture-owned",
+        "validated": true,
+        "metricsSha256": "8fc36333091e7b64d158d3164a542e7397d61df93dc500cd64c03f34f1f3c378",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 24.60350000858307,
+        "freshFps": 51.462499576534285,
+        "pipelineStages": null
+      },
+      {
+        "name": "10-capture-owned",
+        "validated": true,
+        "metricsSha256": "57fc2321073eacc4861b333990c6f414be7e8dc9025cf2318f5d75163bf6040e",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 24.55849999189377,
+        "freshFps": 52.529126450692985,
+        "pipelineStages": null
+      },
+      {
+        "name": "11-capture-legacy",
+        "validated": true,
+        "metricsSha256": "7e2f0f49cddcfac6ec78fda39fbc6cb2f55dc7dc08a99fcb916d1e4d39d0d73b",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 25.22699999809265,
+        "freshFps": 52.59554410550338,
+        "pipelineStages": null
+      }
+    ]
+  },
+  "fixedStages": {
+    "rawReport": "build/comparison-decoder-stages/result.json",
+    "rawReportSha256": "f054826020f03747c5d24b531e9188a68331bd2efcceb4d16e433eb4d254afbb",
+    "executableSha256": "833dce134aa5058c8c3e78035ec9d5d2e5fe2434633c025c345021cb43896c2d",
+    "sourceHashes": {
+      "scripts\\compare-pipeline-stages.py": "f7849d743b7b5eb2c1ad8d0c695ec35627530de17790d80513686f0c5f8f61d1",
+      "scripts\\compare-backends.py": "826042719fd8e22aa71063fcceaf04a5eab3695163db9aee3526921a9d4e6b64",
+      "tools\\backend-comparison\\BackendComparison.cpp": "9120176d1c25de693cddb648fad0d6cf43dcba7ba80ee962d506b18a1ad53c68",
+      "tools\\backend-comparison\\PipelineTrace.h": "5d5084102d4ca7ef5ac141d0c7e86da96f219d23b8a150e82d9befdd1d557a8a",
+      "backend\\media\\webrtc\\WindowsRoomRuntime.cpp": "f450c165f3d3f00beead64f5aee74229d5aa25471e25e44d42808674c0912be8",
+      "backend\\media\\webrtc\\WindowsRoomRuntime.h": "bbf9272cf1319a15d6fef4566e466577a10adfb2b55bf1c9ed9fa314fb236e4e",
+      "backend\\codec\\H264StreamDecoder.cpp": "aa181b3e0954b10b890df5096f7e0d0a890a1b6a9c49c1d0a5443e23ce13d99e",
+      "backend\\capture\\DesktopCapturer.cpp": "b629119ac4ade5229ed71a5a8b657d760bf4ec98f4abba99ed4cc05df22d7ebe",
+      "backend\\media\\capture\\CaptureSession.cpp": "2d55afd1200ea0b4b6cdc989a72afe848d4dc9719ae81c37bb688df263bfa50d"
+    },
+    "runs": [
+      {
+        "name": "0-v2-trace",
+        "validated": true,
+        "metricsSha256": "122e26ed6f3d589052b7046ad2360e8a762c61a66416730f8c882436172323ad",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 56.83330002427101,
+        "freshFps": 52.26369042370934,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.01,
+            "p95Ms": 0.018,
+            "p99Ms": 43.008,
+            "samples": 813
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 1.2621999979019165,
+            "p95Ms": 1.5629999935626984,
+            "p99Ms": 1.8309000134468079,
+            "samples": 811
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 0.29280000925064087,
+            "p95Ms": 0.44339999556541443,
+            "p99Ms": 0.7529000043869019,
+            "samples": 813
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 2.519899994134903,
+            "p95Ms": 2.996500015258789,
+            "p99Ms": 4.556100010871887,
+            "samples": 813
+          }
+        }
+      },
+      {
+        "name": "1-v2-software-trace",
+        "validated": true,
+        "metricsSha256": "9818471639380d9183cdd8fb5d3661f0b86e67456a0cb34c54340439007d0339",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 64.6782999932766,
+        "freshFps": 36.79759613570311,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.011,
+            "p95Ms": 0.016,
+            "p99Ms": 1.014,
+            "samples": 560
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.9550000131130219,
+            "p95Ms": 1.3282000124454498,
+            "p99Ms": 1.6026999950408936,
+            "samples": 560
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 0.34279999136924744,
+            "p95Ms": 0.5451000034809113,
+            "p99Ms": 0.7274999916553497,
+            "samples": 561
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 3.6377000212669373,
+            "p95Ms": 4.596300005912781,
+            "p99Ms": 8.741999983787537,
+            "samples": 560
+          }
+        }
+      },
+      {
+        "name": "2-v2-software-trace",
+        "validated": true,
+        "metricsSha256": "31c265b024b6018a4de50204892d876ae48c1c122587b862add144e33f5c5971",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 93.75369998812675,
+        "freshFps": 40.39742372163119,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.011,
+            "p95Ms": 0.017,
+            "p99Ms": 5.01,
+            "samples": 624
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.920199990272522,
+            "p95Ms": 1.1091000139713287,
+            "p99Ms": 1.2179000079631805,
+            "samples": 622
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 0.3428000211715698,
+            "p95Ms": 0.5967999994754791,
+            "p99Ms": 0.7650000154972076,
+            "samples": 622
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 3.729400008916855,
+            "p95Ms": 4.893099993467331,
+            "p99Ms": 8.55019998550415,
+            "samples": 624
+          }
+        }
+      },
+      {
+        "name": "3-v2-trace",
+        "validated": true,
+        "metricsSha256": "e37e461d3f552446f961f9dfae3623d02bedf21a8d792472460d57091ceb6c00",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "imageAgeP95Ms": 41.804399996995926,
+        "freshFps": 52.19898385978086,
+        "pipelineStages": {
+          "captureReturnToEncoderInput": {
+            "p50Ms": 0.01,
+            "p95Ms": 0.015,
+            "p99Ms": 9.009,
+            "samples": 809
+          },
+          "decodedToCpuConsumption": {
+            "p50Ms": 0.9111999869346619,
+            "p95Ms": 1.4013999998569489,
+            "p99Ms": 1.652099996805191,
+            "samples": 809
+          },
+          "decoderInputToOutput": {
+            "p50Ms": 0.29989999532699585,
+            "p95Ms": 0.42670002579689026,
+            "p99Ms": 0.5848999917507172,
+            "samples": 809
+          },
+          "encoderInputToOutput": {
+            "p50Ms": 2.5089999735355377,
+            "p95Ms": 2.9794999957084656,
+            "p99Ms": 3.123999983072281,
+            "samples": 809
+          }
+        }
+      }
+    ]
+  },
+  "baselineDecoderSha256": "f10840e9112271efd33f02cda926041ece1c947d397c4b3c2bb12141af81c34a",
+  "priorFair": {
+    "rawReport": "build/comparison-portable-final/result.json",
+    "rawReportSha256": "85d7dfc8a443184ed964e7f3fe9bc3ba9d62aeced67ed5fd989cd958bee1b2cf",
+    "executableSha256": "6a1faadbb80980672dce52239a45f8ffe6e54ebd425dd453483448fde2ab436a",
+    "sourceHashes": {
+      "backend/core/ShortWait.h": "214818e2977168f161c5d72f899467a9b23b479fc06095f6bb39f0b3209bf4ce",
+      "backend/codec/HardwareFrameWait.h": "bf974f44a72babeb587544351a8c5be7cab794ebe0ec698844ed02c26553fcab",
+      "backend/codec/H264StreamEncoder.cpp": "fc8d1f0e06dd9d49a371a13d778b3dcdaa1db1642e0f949b5fec692c1a4f4963",
+      "backend/codec/H264StreamEncoder.h": "1bcd7b7aeec43542853e3c2125694902876a8054e40bb34fed067b1f3c652017",
+      "backend/capture/DesktopCapturer.cpp": "b629119ac4ade5229ed71a5a8b657d760bf4ec98f4abba99ed4cc05df22d7ebe",
+      "backend/runtime/ScreenShareRuntimeExecution.cpp": "e79a517c847eb4bacf9eac84901a5c55c6e290d6c7d4c87a04fc33a1fe80026e",
+      "backend/runtime/ScreenShareSessionOptions.cpp": "dd72183e8ababfb5751e28cd35286356dccf606d23b534d1692cf6b3f90e692c",
+      "backend/media/webrtc/MediaEngine.cpp": "1796c8616b8e62a68b77aab7eb5a0cf6ed3832fb3a55c29c5ec1c6f7b9981dd7",
+      "backend/media/webrtc/MfVideoEncoderFactory.cpp": "b8f38624a674e23c28640914ff3665fbf8ba5a3019174ab569bc8b5ae75e62a0",
+      "backend/media/webrtc/WindowsRoomRuntime.cpp": "12f5748bb8a3f0a26be050985184d2effd4591729fd4c9ebe2d9163509c58251",
+      "backend/media/webrtc/WindowsRoomRuntime.h": "3ab8394f18b1911e2b3d231991c8bba7fecfeb93c778d84528c4fe2fca7e58cf",
+      "backend/media/audio/PcmBlockPacer.h": "6eff0f49901eb0f8aaedb6e33ff330349ef32ba70ce119964c4728595373ecab"
+    },
+    "summary": {
+      "1": {
+        "legacy-lowlatency": {
+          "runs": 2,
+          "imageAgeP95Ms": 59.69609999656677,
+          "freshFps": 52.87333496388851,
+          "lumaPsnrDb": 23.15705997637088,
+          "cpuCorePercent": 155.6591573785876,
+          "privateMiB": 431.955078125
+        },
+        "legacy-hardware": {
+          "runs": 2,
+          "imageAgeP95Ms": 59.618000000715256,
+          "freshFps": 53.19703476700725,
+          "lumaPsnrDb": 28.159631180685462,
+          "cpuCorePercent": 53.66890310337152,
+          "privateMiB": 335.333984375
+        },
+        "v2-software": {
+          "runs": 2,
+          "imageAgeP95Ms": 109.11315001547337,
+          "freshFps": 36.67350881309366,
+          "lumaPsnrDb": 22.499286839755783,
+          "cpuCorePercent": 84.72316038871722,
+          "privateMiB": 314.509765625
+        },
+        "v2": {
+          "runs": 2,
+          "imageAgeP95Ms": 72.433100014925,
+          "freshFps": 52.12286412360797,
+          "lumaPsnrDb": 26.990089439105667,
+          "cpuCorePercent": 26.834851203496218,
+          "privateMiB": 254.119140625
+        }
+      },
+      "4": {
+        "legacy-lowlatency": {
+          "runs": 2,
+          "imageAgeP95Ms": 65.23710000514984,
+          "freshFps": 49.59756851323931,
+          "lumaPsnrDb": 23.448589451346574,
+          "cpuCorePercent": 357.05288784627817,
+          "privateMiB": 512.0419921875
+        },
+        "legacy-hardware": {
+          "runs": 2,
+          "imageAgeP95Ms": 63.89425000548363,
+          "freshFps": 51.723577082939705,
+          "lumaPsnrDb": 28.172233866146133,
+          "cpuCorePercent": 254.05550213945963,
+          "privateMiB": 395.703125
+        },
+        "v2-software": {
+          "runs": 2,
+          "imageAgeP95Ms": 120.91744999587536,
+          "freshFps": 36.86717464700409,
+          "lumaPsnrDb": 22.64344258472121,
+          "cpuCorePercent": 379.5539566496368,
+          "privateMiB": 933.2568359375
+        },
+        "v2": {
+          "runs": 2,
+          "imageAgeP95Ms": 78.79070000350475,
+          "freshFps": 51.673877249998284,
+          "lumaPsnrDb": 26.982412070814632,
+          "cpuCorePercent": 106.36487005708094,
+          "privateMiB": 574.3583984375
+        }
+      }
+    },
+    "runs": [
+      {
+        "name": "1-0-legacy-lowlatency",
+        "validated": true,
+        "metricsSha256": "b685e057d755a12ed7a4ba4c35b5ed94be5952d42fd8a619c98a95d1ed85582a",
+        "logSha256": "9b24bcaa88f7017deb4f286973b6c281f5106321917d8eab2bc98d142a9267f5",
+        "viewers": 1,
+        "imageAgeP95Ms": 60.56369999051094,
+        "freshFps": 52.94820055540413,
+        "cpuCorePercent": 157.1821581643548,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "1-1-legacy-hardware",
+        "validated": true,
+        "metricsSha256": "c177f964e736b450251fcf4294ea17d01de563808c79372b806bae1480100151",
+        "logSha256": "d71b6ced1639835a82a0b72081885b8a05413f5c0715a405c48349e33b6dc06f",
+        "viewers": 1,
+        "imageAgeP95Ms": 59.30720001459122,
+        "freshFps": 53.24742122738996,
+        "cpuCorePercent": 56.403518377604975,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "1-2-v2-software",
+        "validated": true,
+        "metricsSha256": "22f4b1ba02e974cbfb154d6250e85c65a9102e197c695b9ede8f0fd1f1284e4f",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 1,
+        "imageAgeP95Ms": 104.96380001306534,
+        "freshFps": 34.648850177906844,
+        "cpuCorePercent": 86.09089307371335,
+        "encoder": [
+          "mf-h264-software"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "1-3-v2",
+        "validated": true,
+        "metricsSha256": "9d7c328b22f8683fe5690c523d645ebcd1ffa6a9874521713c4a366833fce97a",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 1,
+        "imageAgeP95Ms": 74.65330001711845,
+        "freshFps": 51.799454292749026,
+        "cpuCorePercent": 27.109089405743106,
+        "encoder": [
+          "mf-h264-hardware"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "1-4-v2",
+        "validated": true,
+        "metricsSha256": "cbc49c9dab0556d15694a97f96e1002fe3d856e50e214c22991b863058a139f5",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 1,
+        "imageAgeP95Ms": 70.21290001273155,
+        "freshFps": 52.4462739544669,
+        "cpuCorePercent": 26.56061300124933,
+        "encoder": [
+          "mf-h264-hardware"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "1-5-v2-software",
+        "validated": true,
+        "metricsSha256": "8adb8dd5d5b9d61b8c81a8690082615182493ee302456e27dadc3d4b0cb564d2",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 1,
+        "imageAgeP95Ms": 113.2625000178814,
+        "freshFps": 38.698167448280486,
+        "cpuCorePercent": 83.35542770372109,
+        "encoder": [
+          "mf-h264-software"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "1-6-legacy-hardware",
+        "validated": true,
+        "metricsSha256": "24abbad1d965753089977cc1c0dd663f911774ab9ed70b43fc1028ed22c909f2",
+        "logSha256": "dc764ee846bfe644606db18a5270abcc9afc8f1678eb07555ec41c1365bc5143",
+        "viewers": 1,
+        "imageAgeP95Ms": 59.928799986839294,
+        "freshFps": 53.14664830662454,
+        "cpuCorePercent": 50.93428782913806,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "1-7-legacy-lowlatency",
+        "validated": true,
+        "metricsSha256": "c03973eb043aee1c3f6955441ace3a2445096b7a9b72b1c13f6937603c729dc1",
+        "logSha256": "fdf076c6b6407e92f406e117129a512092a39410970bd3b2f18520df0b73e51a",
+        "viewers": 1,
+        "imageAgeP95Ms": 58.828500002622604,
+        "freshFps": 52.79846937237289,
+        "cpuCorePercent": 154.13615659282038,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "4-0-legacy-lowlatency",
+        "validated": true,
+        "metricsSha256": "2ec934d4dd5242213f503292a5c8acbd463f974d20009f96e3c21ef7e1262373",
+        "logSha256": "ad973834ac27238f5303e0a6001100b151a94868f7a1b03a3e192291e630ff86",
+        "viewers": 4,
+        "imageAgeP95Ms": 64.45879998803139,
+        "freshFps": 51.19717238016944,
+        "cpuCorePercent": 356.1522047137336,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "4-1-legacy-hardware",
+        "validated": true,
+        "metricsSha256": "c37a339c42374599c78e93f373deb22fe63c24a52f12bdbc075abc8fc2653c6b",
+        "logSha256": "96e0ccede5ef7af5c264e080b65ffecc25977299b103724e13e8ec00b13212af",
+        "viewers": 4,
+        "imageAgeP95Ms": 63.56530001759529,
+        "freshFps": 51.99861787673684,
+        "cpuCorePercent": 246.00908607849206,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "4-2-v2-software",
+        "validated": true,
+        "metricsSha256": "e2c04ed8c423880f51f03a35fa9737641ef5f6d70a01236efe29ebee976ada07",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 4,
+        "imageAgeP95Ms": 124.76389998197556,
+        "freshFps": 36.68636840896642,
+        "cpuCorePercent": 366.08245818657724,
+        "encoder": [
+          "mf-h264-software",
+          "mf-h264-software",
+          "mf-h264-software",
+          "mf-h264-software"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "4-3-v2",
+        "validated": true,
+        "metricsSha256": "426ab97ec2c0c887cf450251a259956884752a7316a17f7e5f3117cad9f0d168",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 4,
+        "imageAgeP95Ms": 74.9273000061512,
+        "freshFps": 51.78649068129662,
+        "cpuCorePercent": 103.7479779519097,
+        "encoder": [
+          "mf-h264-hardware",
+          "mf-h264-hardware",
+          "mf-h264-hardware",
+          "mf-h264-hardware"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "4-4-v2",
+        "validated": true,
+        "metricsSha256": "8782e7d0acea9aa52a3e1a5189cd78eac5f7741ffa147726e5bb995907cae766",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 4,
+        "imageAgeP95Ms": 82.6541000008583,
+        "freshFps": 51.56126381869994,
+        "cpuCorePercent": 108.98176216225215,
+        "encoder": [
+          "mf-h264-hardware",
+          "mf-h264-hardware",
+          "mf-h264-hardware",
+          "mf-h264-hardware"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "4-5-v2-software",
+        "validated": true,
+        "metricsSha256": "ec269dc3c53d42aa438b3ea872854e3ab62953731ca16966ef3d0d82a73d1a2d",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 4,
+        "imageAgeP95Ms": 117.07100000977516,
+        "freshFps": 37.04798088504176,
+        "cpuCorePercent": 393.02545511269636,
+        "encoder": [
+          "mf-h264-software",
+          "mf-h264-software",
+          "mf-h264-software",
+          "mf-h264-software"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "4-6-legacy-hardware",
+        "validated": true,
+        "metricsSha256": "8666c3445f3316a523ee934984910ac880ee552b733ba38de03c1ce6d0b5c496",
+        "logSha256": "782b84d067ea52613024e693f44c054cc867ec6abf78e079f4ce14897410d42e",
+        "viewers": 4,
+        "imageAgeP95Ms": 64.22319999337196,
+        "freshFps": 51.448536289142574,
+        "cpuCorePercent": 262.1019182004272,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "4-7-legacy-lowlatency",
+        "validated": true,
+        "metricsSha256": "03bf4d1a026fcf46e6b3f0aaa3dca795cde0a50ef34be8d2d417a825a1c817ae",
+        "logSha256": "f070789bbb7aa5deb90a2240bfdc3890e9ea367ece552b5252818d0cd198b68f",
+        "viewers": 4,
+        "imageAgeP95Ms": 66.0154000222683,
+        "freshFps": 47.99796464630918,
+        "cpuCorePercent": 357.95357097882265,
+        "encoder": [],
+        "softwareFallbacks": null
+      }
+    ]
+  },
+  "fixedFair": {
+    "rawReport": "build/comparison-decoder-fair/result.json",
+    "rawReportSha256": "7404b3db06a38d98896d4e466aeb8f10587ef311fa66d0931c549553ad1cd5df",
+    "executableSha256": "833dce134aa5058c8c3e78035ec9d5d2e5fe2434633c025c345021cb43896c2d",
+    "sourceHashes": {
+      "backend/core/ShortWait.h": "214818e2977168f161c5d72f899467a9b23b479fc06095f6bb39f0b3209bf4ce",
+      "backend/codec/HardwareFrameWait.h": "bf974f44a72babeb587544351a8c5be7cab794ebe0ec698844ed02c26553fcab",
+      "backend/codec/H264StreamEncoder.cpp": "fc8d1f0e06dd9d49a371a13d778b3dcdaa1db1642e0f949b5fec692c1a4f4963",
+      "backend/codec/H264StreamEncoder.h": "1bcd7b7aeec43542853e3c2125694902876a8054e40bb34fed067b1f3c652017",
+      "backend/codec/H264StreamDecoder.cpp": "aa181b3e0954b10b890df5096f7e0d0a890a1b6a9c49c1d0a5443e23ce13d99e",
+      "backend/codec/H264StreamDecoder.h": "945cf54a8ce6ae9a4246736bbb3d3fed82188bf9c9db76f2bd556622c2ab1fbe",
+      "backend/capture/DesktopCapturer.cpp": "b629119ac4ade5229ed71a5a8b657d760bf4ec98f4abba99ed4cc05df22d7ebe",
+      "backend/runtime/ScreenShareRuntimeExecution.cpp": "e79a517c847eb4bacf9eac84901a5c55c6e290d6c7d4c87a04fc33a1fe80026e",
+      "backend/runtime/ScreenShareSessionOptions.cpp": "dd72183e8ababfb5751e28cd35286356dccf606d23b534d1692cf6b3f90e692c",
+      "backend/media/webrtc/MediaEngine.cpp": "1796c8616b8e62a68b77aab7eb5a0cf6ed3832fb3a55c29c5ec1c6f7b9981dd7",
+      "backend/media/webrtc/MfVideoEncoderFactory.cpp": "b8f38624a674e23c28640914ff3665fbf8ba5a3019174ab569bc8b5ae75e62a0",
+      "backend/media/webrtc/WindowsRoomRuntime.cpp": "f450c165f3d3f00beead64f5aee74229d5aa25471e25e44d42808674c0912be8",
+      "backend/media/webrtc/WindowsRoomRuntime.h": "bbf9272cf1319a15d6fef4566e466577a10adfb2b55bf1c9ed9fa314fb236e4e",
+      "backend/media/audio/PcmBlockPacer.h": "6eff0f49901eb0f8aaedb6e33ff330349ef32ba70ce119964c4728595373ecab"
+    },
+    "summary": {
+      "1": {
+        "legacy-lowlatency": {
+          "runs": 2,
+          "imageAgeP95Ms": 43.32705000042915,
+          "freshFps": 53.198789033141765,
+          "lumaPsnrDb": 23.11918921852874,
+          "cpuCorePercent": 155.50423694729204,
+          "privateMiB": 438.642578125
+        },
+        "legacy-hardware": {
+          "runs": 2,
+          "imageAgeP95Ms": 44.11895000934601,
+          "freshFps": 53.29772674089479,
+          "lumaPsnrDb": 28.15436441545353,
+          "cpuCorePercent": 55.54452341368715,
+          "privateMiB": 338.61328125
+        },
+        "v2-software": {
+          "runs": 2,
+          "imageAgeP95Ms": 61.07649999856949,
+          "freshFps": 36.723093398738925,
+          "lumaPsnrDb": 22.58477090879419,
+          "cpuCorePercent": 92.2608348217562,
+          "privateMiB": 315.3681640625
+        },
+        "v2": {
+          "runs": 2,
+          "imageAgeP95Ms": 50.802349999547005,
+          "freshFps": 52.5975724256532,
+          "lumaPsnrDb": 26.755530011203856,
+          "cpuCorePercent": 26.639396139676926,
+          "privateMiB": 255.107421875
+        }
+      },
+      "4": {
+        "legacy-lowlatency": {
+          "runs": 2,
+          "imageAgeP95Ms": 47.78959999978542,
+          "freshFps": 52.79782634471272,
+          "lumaPsnrDb": 23.174184779851387,
+          "cpuCorePercent": 348.73573669480936,
+          "privateMiB": 489.4677734375
+        },
+        "legacy-hardware": {
+          "runs": 2,
+          "imageAgeP95Ms": 47.664700016379356,
+          "freshFps": 53.54733708832667,
+          "lumaPsnrDb": 28.152242448314574,
+          "cpuCorePercent": 269.24441967608027,
+          "privateMiB": 399.8017578125
+        },
+        "v2-software": {
+          "runs": 2,
+          "imageAgeP95Ms": 65.84964999556541,
+          "freshFps": 35.90942381827982,
+          "lumaPsnrDb": 22.38417220145648,
+          "cpuCorePercent": 366.8044374403163,
+          "privateMiB": 916.232421875
+        },
+        "v2": {
+          "runs": 2,
+          "imageAgeP95Ms": 44.66914999485016,
+          "freshFps": 52.534359634171416,
+          "lumaPsnrDb": 27.267036209922903,
+          "cpuCorePercent": 100.2674193382545,
+          "privateMiB": 540.42578125
+        }
+      }
+    },
+    "runs": [
+      {
+        "name": "1-0-legacy-lowlatency",
+        "validated": true,
+        "metricsSha256": "f392055432dafce68fe5da1b1a77a79cc1114d3aad56313ccff66ca8ab87f7c1",
+        "logSha256": "73c608a8051c1861928cf632efecb6caaa4ecb431618ac0d82054fbdbbd91983",
+        "viewers": 1,
+        "imageAgeP95Ms": 42.97510001063347,
+        "freshFps": 53.048285744646165,
+        "cpuCorePercent": 158.822992634993,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "1-1-legacy-hardware",
+        "validated": true,
+        "metricsSha256": "914ce6d670539714cfaa08d5726c3c3ca8aea7fffbac9ed6854f866028f78b5e",
+        "logSha256": "313d5ccb75d9db6958ac78764b78d2db6e77a6d6eceb763c07b54de8cbbdcb78",
+        "viewers": 1,
+        "imageAgeP95Ms": 43.73480001091957,
+        "freshFps": 53.09854934763182,
+        "cpuCorePercent": 56.48283188903278,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "1-2-v2-software",
+        "validated": true,
+        "metricsSha256": "4d9b87cf5017d5a94bdfbc149362e070b3c63e0eb0096d78ca523c11730b0479",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 1,
+        "imageAgeP95Ms": 51.03429999947548,
+        "freshFps": 37.34805379291685,
+        "cpuCorePercent": 94.60444516236258,
+        "encoder": [
+          "mf-h264-software"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "1-3-v2",
+        "validated": true,
+        "metricsSha256": "f6130712122372b95ec92abe4093a97be9edf72b9b821bc39b0ad98472f4499a",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 1,
+        "imageAgeP95Ms": 47.82260000705719,
+        "freshFps": 51.947799231485554,
+        "cpuCorePercent": 26.48325303698509,
+        "encoder": [
+          "mf-h264-hardware"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "1-4-v2",
+        "validated": true,
+        "metricsSha256": "892ef929df684ba3ca49de5efa8f18c95467ad55d229916ebdf7f31bcc1f4ba5",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 1,
+        "imageAgeP95Ms": 53.78209999203682,
+        "freshFps": 53.24734561982085,
+        "cpuCorePercent": 26.795539242368765,
+        "encoder": [
+          "mf-h264-hardware"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "1-5-v2-software",
+        "validated": true,
+        "metricsSha256": "93eb8bb19e5d1edcd66624c3fb76bdb080c2d8529badc0c78cfc3e9a76a69e92",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 1,
+        "imageAgeP95Ms": 71.1186999976635,
+        "freshFps": 36.098133004561,
+        "cpuCorePercent": 89.91722448114983,
+        "encoder": [
+          "mf-h264-software"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "1-6-legacy-hardware",
+        "validated": true,
+        "metricsSha256": "1cff5ee7045f33fec78c64b51daf085b92c1ebb40958153006cba16075b6807a",
+        "logSha256": "594c514d8111d466199768ed8241a9425c8054587352d1f2b692219d98a92da5",
+        "viewers": 1,
+        "imageAgeP95Ms": 44.503100007772446,
+        "freshFps": 53.49690413415775,
+        "cpuCorePercent": 54.60621493834152,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "1-7-legacy-lowlatency",
+        "validated": true,
+        "metricsSha256": "dc4e0d73a13d66bc72ae77b83c83499b3846efa491923135e23c239330f28096",
+        "logSha256": "f194158304ffdd2b1e0cc2172769c43c85ff2da0112f3dfe22abd2eb03de9c4b",
+        "viewers": 1,
+        "imageAgeP95Ms": 43.67899999022484,
+        "freshFps": 53.34929232163736,
+        "cpuCorePercent": 152.1854812595911,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "4-0-legacy-lowlatency",
+        "validated": true,
+        "metricsSha256": "b75424d44c9e2c877f7f3c1270c5bdf0603f9e88eb7e75de80f815a323874fca",
+        "logSha256": "10dd4c67a9dff58c2a1bea8e5b450ea044bc39d5646ec132d442522d8db642e8",
+        "viewers": 4,
+        "imageAgeP95Ms": 47.76079997420311,
+        "freshFps": 53.148829131294235,
+        "cpuCorePercent": 355.9296588696151,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "4-1-legacy-hardware",
+        "validated": true,
+        "metricsSha256": "96047f6e0d3be68d22eefc68a8107ea66765e5f3183d5f77dd7cb3e21084d125",
+        "logSha256": "4c1ed3f2d750cb665161db447094c5a0fe7a070e9a5f11851e8210e1c4d8e2be",
+        "viewers": 4,
+        "imageAgeP95Ms": 47.759900003671646,
+        "freshFps": 53.7472905990809,
+        "cpuCorePercent": 275.06425901070327,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "4-2-v2-software",
+        "validated": true,
+        "metricsSha256": "b518e9e959f1c62b0b58a005ecb6afded9b6190ac67c066d4bae126b4a60f722",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 4,
+        "imageAgeP95Ms": 76.15329998731613,
+        "freshFps": 38.570526011835256,
+        "cpuCorePercent": 396.3602741899954,
+        "encoder": [
+          "mf-h264-software",
+          "mf-h264-software",
+          "mf-h264-software",
+          "mf-h264-software"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "4-3-v2",
+        "validated": true,
+        "metricsSha256": "a65444ff4574e5ff1fe8bba00303909714b23e26dc95a52d7c21c9cafd44c6ac",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 4,
+        "imageAgeP95Ms": 39.188899993896484,
+        "freshFps": 52.63463246522329,
+        "cpuCorePercent": 95.85415286575187,
+        "encoder": [
+          "mf-h264-hardware",
+          "mf-h264-hardware",
+          "mf-h264-hardware",
+          "mf-h264-hardware"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "4-4-v2",
+        "validated": true,
+        "metricsSha256": "16b1412ab2e99196213d434e01d27492593ee65a6e2ea10f13bd0253ec8b50ac",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 4,
+        "imageAgeP95Ms": 50.14939999580383,
+        "freshFps": 52.43408680311954,
+        "cpuCorePercent": 104.68068581075713,
+        "encoder": [
+          "mf-h264-hardware",
+          "mf-h264-hardware",
+          "mf-h264-hardware",
+          "mf-h264-hardware"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "4-5-v2-software",
+        "validated": true,
+        "metricsSha256": "cc75fc9b26d3d81010bc51cd9c6176f1c485132c2d76fe1959554147276c66b7",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "viewers": 4,
+        "imageAgeP95Ms": 55.5460000038147,
+        "freshFps": 33.24832162472438,
+        "cpuCorePercent": 337.24860069063715,
+        "encoder": [
+          "mf-h264-software",
+          "mf-h264-software",
+          "mf-h264-software",
+          "mf-h264-software"
+        ],
+        "softwareFallbacks": 0
+      },
+      {
+        "name": "4-6-legacy-hardware",
+        "validated": true,
+        "metricsSha256": "a2ecc0a100a2f3c552ef3927361b327da5f4d3f2327baaf2c1b762197ffd6d38",
+        "logSha256": "9f54f71b37e4a59b34289df66103b35ce6ac0beb08b7d5850e4773a6b5f71fbd",
+        "viewers": 4,
+        "imageAgeP95Ms": 47.56950002908707,
+        "freshFps": 53.347383577572444,
+        "cpuCorePercent": 263.4245803414572,
+        "encoder": [],
+        "softwareFallbacks": null
+      },
+      {
+        "name": "4-7-legacy-lowlatency",
+        "validated": true,
+        "metricsSha256": "a09a0b7b311212dbce07022a5db34c9d6a0aad6706f1e96b50a46b1cda64adbe",
+        "logSha256": "08cf8a570b92343ffd092b3b4c2a3cdb476361b013ee1b8fa138326fd1d7e440",
+        "viewers": 4,
+        "imageAgeP95Ms": 47.81840002536774,
+        "freshFps": 52.4468235581312,
+        "cpuCorePercent": 341.5418145200036,
+        "encoder": [],
+        "softwareFallbacks": null
+      }
+    ]
+  },
+  "verification": [
+    {
+      "report": "build/sdk-proof-release/capture-decoder-release.xml",
+      "sha256": "ed9f558b565ccf0ad65e42f4984fee825c6bca5a683ea6275edecac72823d189",
+      "tests": [
+        {
+          "name": "webrtc-direct-h264-and-data",
+          "status": "run"
+        },
+        {
+          "name": "public-room-session-media",
+          "status": "run"
+        },
+        {
+          "name": "mf-webrtc-decoder-lifecycle",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-output-deadline",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-decoder-recovery",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-fallback-and-gpu-lifetime",
+          "status": "run"
+        },
+        {
+          "name": "webrtc-direct-hardware-h264",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-encoder-lifecycle",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-owned-gpu-lifecycle",
+          "status": "run"
+        },
+        {
+          "name": "mf-software-codec",
+          "status": "run"
+        }
+      ]
+    },
+    {
+      "report": "build/sdk-proof-debug/capture-decoder-debug.xml",
+      "sha256": "0779db7da979c1e7964e5c361df87fc685069e374e9e4a5df7c7a9086dd14e08",
+      "tests": [
+        {
+          "name": "webrtc-direct-h264-and-data",
+          "status": "run"
+        },
+        {
+          "name": "public-room-session-media",
+          "status": "run"
+        },
+        {
+          "name": "mf-webrtc-decoder-lifecycle",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-output-deadline",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-decoder-recovery",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-fallback-and-gpu-lifetime",
+          "status": "run"
+        },
+        {
+          "name": "webrtc-direct-hardware-h264",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-encoder-lifecycle",
+          "status": "run"
+        },
+        {
+          "name": "mf-hardware-owned-gpu-lifecycle",
+          "status": "run"
+        },
+        {
+          "name": "mf-software-codec",
+          "status": "run"
+        }
+      ]
+    },
+    {
+      "report": "build/sdk-app-release/capture-decoder-app-release.xml",
+      "sha256": "e4916167be3f26709e3a7570e8cb3e9cd2e1272b14bfd16b0fc90336c6c2d1b5",
+      "tests": [
+        {
+          "name": "backend-comparison-evidence",
+          "status": "run"
+        },
+        {
+          "name": "native-room-runtime-link",
+          "status": "run"
+        },
+        {
+          "name": "room-v2-cli-media",
+          "status": "run"
+        },
+        {
+          "name": "room-v2-qt-ui",
+          "status": "run"
+        }
+      ]
+    },
+    {
+      "report": "build/sdk-app-debug/capture-decoder-app-debug.xml",
+      "sha256": "ee463fec4e0bd18dd3737eb8ab22ff08ab1ce138914a7727fe5fb41d82a6f98e",
+      "tests": [
+        {
+          "name": "backend-comparison-evidence",
+          "status": "run"
+        },
+        {
+          "name": "native-room-runtime-link",
+          "status": "run"
+        },
+        {
+          "name": "room-v2-cli-media",
+          "status": "run"
+        },
+        {
+          "name": "room-v2-qt-ui",
+          "status": "run"
+        }
+      ]
+    }
+  ],
+  "network": [
+    {
+      "report": "build/decoder-network-release/result.json",
+      "sha256": "34d5b29954c410ce907fa53388303884a1d48571984d99b9b3ee5b08c1b70308",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "healthyViewerIsolation": true,
+          "recovered": true,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              68,
+              57,
+              62,
+              59,
+              62
+            ],
+            "impaired": [
+              797,
+              52,
+              57,
+              26,
+              57
+            ],
+            "recovery": [
+              26,
+              36,
+              37,
+              67,
+              56
+            ]
+          },
+          "decodedFrameHandoff": {
+            "measured": true,
+            "scope": "decoded-frame-handoff",
+            "samples": 144,
+            "maximumWaitMs": 5.644,
+            "maximumSampledPendingAgeMs": 5.285,
+            "externalLatencyVerified": false
+          },
+          "internalInputResponseMeasured": true,
+          "inputResponseInternalMs": 57,
+          "inputResponseScene": "localized-marker",
+          "unknownBandwidthEstimateSamples": 0,
+          "baselineIngressBps": 17991689.188084435,
+          "impairedIngressBps": 2319913.2531701922,
+          "recoveryFps": [
+            30.078164613941475,
+            29.90329908553282,
+            29.90329908553282,
+            29.90329908553282
+          ],
+          "recentBufferingMs": {
+            "baseline": [
+              29,
+              10.8,
+              11,
+              11
+            ],
+            "impaired": [
+              21.6,
+              11,
+              11,
+              11
+            ],
+            "recovery": [
+              32,
+              11,
+              11,
+              11
+            ]
+          },
+          "recentBufferingSamples": {
+            "baseline": [
+              5,
+              5,
+              5,
+              5
+            ],
+            "impaired": [
+              5,
+              5,
+              5,
+              5
+            ],
+            "recovery": [
+              5,
+              5,
+              5,
+              5
+            ]
+          },
+          "unknownRecentBufferSamples": 0,
+          "externalLatencyVerified": false
+        },
+        "loss5": {
+          "healthyViewerIsolation": true,
+          "recovered": true,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              31,
+              26,
+              25,
+              36,
+              25
+            ],
+            "impaired": [
+              114,
+              140,
+              151,
+              159,
+              119
+            ],
+            "recovery": [
+              51,
+              51,
+              25,
+              26,
+              26
+            ]
+          },
+          "decodedFrameHandoff": {
+            "measured": true,
+            "scope": "decoded-frame-handoff",
+            "samples": 144,
+            "maximumWaitMs": 6.506,
+            "maximumSampledPendingAgeMs": 5.091,
+            "externalLatencyVerified": false
+          },
+          "internalInputResponseMeasured": true,
+          "inputResponseInternalMs": 151,
+          "inputResponseScene": "localized-marker",
+          "unknownBandwidthEstimateSamples": 0,
+          "baselineIngressBps": 17976583.927336793,
+          "impairedIngressBps": 11827972.618399912,
+          "recoveryFps": [
+            30.212603477091978,
+            30.02413386738335,
+            30.02413386738335,
+            30.02413386738335
+          ],
+          "recentBufferingMs": {
+            "baseline": [
+              12,
+              11,
+              11,
+              11
+            ],
+            "impaired": [
+              70,
+              11,
+              11,
+              11
+            ],
+            "recovery": [
+              7.4,
+              11,
+              11,
+              11
+            ]
+          },
+          "recentBufferingSamples": {
+            "baseline": [
+              5,
+              5,
+              5,
+              5
+            ],
+            "impaired": [
+              5,
+              5,
+              5,
+              5
+            ],
+            "recovery": [
+              5,
+              5,
+              5,
+              5
+            ]
+          },
+          "unknownRecentBufferSamples": 0,
+          "externalLatencyVerified": false
+        }
+      }
+    },
+    {
+      "report": "build/decoder-network-debug/result.json",
+      "sha256": "6963732319e25592909fe0c35784d5cd9011d80b3caf44e27a40129a2cff7812",
+      "passed": true,
+      "scenarios": {
+        "collapse": {
+          "healthyViewerIsolation": true,
+          "recovered": true,
+          "inputResponseByPhaseMs": {
+            "baseline": [
+              67,
+              88,
+              94,
+              93,
+              92
+            ],
+            "impaired": [
+              1196,
+              88,
+              88,
+              51,
+              51
+            ],
+            "recovery": [
+              41,
+              51,
+              79,
+              62,
+              62
+            ]
+          },
+          "decodedFrameHandoff": {
+            "measured": true,
+            "scope": "decoded-frame-handoff",
+            "samples": 144,
+            "maximumWaitMs": 6.442,
+            "maximumSampledPendingAgeMs": 5.069,
+            "externalLatencyVerified": false
+          },
+          "internalInputResponseMeasured": true,
+          "inputResponseInternalMs": 88,
+          "inputResponseScene": "localized-marker",
+          "unknownBandwidthEstimateSamples": 0,
+          "baselineIngressBps": 17981624.253368396,
+          "impairedIngressBps": 1791782.9898961687,
+          "recoveryFps": [
+            29.90320238672618,
+            29.902835836035152,
+            29.902835836035152,
+            29.902835836035152
+          ],
+          "recentBufferingMs": {
+            "baseline": [
+              30.8,
+              13.4,
+              14.6,
+              13.6
+            ],
+            "impaired": [
+              27.6,
+              13.2,
+              13.2,
+              13
+            ],
+            "recovery": [
+              30,
+              12.6,
+              13,
+              12.2
+            ]
+          },
+          "recentBufferingSamples": {
+            "baseline": [
+              5,
+              5,
+              5,
+              5
+            ],
+            "impaired": [
+              5,
+              5,
+              5,
+              5
+            ],
+            "recovery": [
+              5,
+              5,
+              5,
+              5
+            ]
+          },
+          "unknownRecentBufferSamples": 0,
+          "externalLatencyVerified": false
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Same-process generated WGC scene to CPU pixels, not physical display/input latency",
+    "Both backends receive timer, encoder scheduling and decoder fixes",
+    "Legacy software decoder/shared encoder versus v2 hardware-preferred decoder/per-viewer encoder",
+    "Configured bitrate ceilings are equal; measured wire rate and full-color quality are not matched",
+    "Two runs per variant; summaries are medians of run percentiles, not pooled percentiles",
+    "Capture-only excludes codecs/network; stage RTP associations stay within sender or receiver",
+    "Software delivery, four-viewer memory, native handles and field acceptance remain open"
+  ]
+}

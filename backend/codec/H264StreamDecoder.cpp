@@ -41,18 +41,6 @@ void SetInputSubtype(IMFTransform* transform, DWORD streamId, REFGUID subtype)
     ThrowIfFailed(transform->SetInputType(streamId, inputType.Get(), 0), "IMFTransform::SetInputType(decoder)");
 }
 
-bool TrySetCodecApiBool(ICodecAPI* codecApi, const GUID& key, bool setting)
-{
-    if (codecApi == nullptr) {
-        return false;
-    }
-
-    VARIANT value{};
-    value.vt = VT_BOOL;
-    value.boolVal = setting ? VARIANT_TRUE : VARIANT_FALSE;
-    return SUCCEEDED(codecApi->SetValue(&key, &value));
-}
-
 void ConfigureLowLatencyDecoderOptions(IMFTransform* transform)
 {
     if (transform == nullptr) {
@@ -71,10 +59,19 @@ void ConfigureLowLatencyDecoderOptions(IMFTransform* transform)
         {0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda},
     };
     Microsoft::WRL::ComPtr<ICodecAPI> codecApi;
-    if (SUCCEEDED(transform->QueryInterface(codecApiInterfaceId, reinterpret_cast<void**>(codecApi.GetAddressOf()))) &&
-        codecApi) {
-        TrySetCodecApiBool(codecApi.Get(), CODECAPI_AVLowLatencyMode, true);
-    }
+    ThrowIfFailed(transform->QueryInterface(codecApiInterfaceId, reinterpret_cast<void**>(codecApi.GetAddressOf())),
+        "H264 decoder codec API");
+    // The Microsoft H264 decoder is the documented exception: this property
+    // requires VT_UI4, unlike the encoder's VT_BOOL. Never silently ignore a
+    // rejected request and then advertise a low-latency decoder.
+    VARIANT value{}; value.vt = VT_UI4; value.ulVal = 1;
+    ThrowIfFailed(codecApi->SetValue(&CODECAPI_AVLowLatencyMode, &value), "H264 decoder low latency");
+    VARIANT actual{};
+    const HRESULT read = codecApi->GetValue(&CODECAPI_AVLowLatencyMode, &actual);
+    const bool enabled = SUCCEEDED(read) && actual.vt == VT_UI4 && actual.ulVal != 0;
+    VariantClear(&actual);
+    ThrowIfFailed(read, "H264 decoder low-latency readback");
+    if (!enabled) throw std::runtime_error("H264 decoder did not retain low-latency mode");
 }
 
 DWORD Nv12BufferBytes(UINT32 width, UINT32 height)
@@ -258,30 +255,9 @@ void H264StreamDecoder::Start(int maxWidth, int maxHeight, ID3D11Device* device)
         throw std::runtime_error("H264 decoder MFT did not expose one input and one output stream");
     }
 
-    const HRESULT h264EsResult = [&]() -> HRESULT {
-        Microsoft::WRL::ComPtr<IMFMediaType> inputType;
-        HRESULT hr = MFCreateMediaType(&inputType);
-        if (FAILED(hr)) {
-            return hr;
-        }
-        hr = inputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-        if (FAILED(hr)) {
-            return hr;
-        }
-        hr = inputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264_ES);
-        if (FAILED(hr)) {
-            return hr;
-        }
-        hr = inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-        if (FAILED(hr)) {
-            return hr;
-        }
-        return transform_->SetInputType(inputStreamId_, inputType.Get(), 0);
-    }();
-
-    if (FAILED(h264EsResult)) {
-        SetInputSubtype(transform_.Get(), inputStreamId_, MFVideoFormat_H264);
-    }
+    // Each packet is one complete Annex-B access unit. H264_ES allows partial
+    // pictures and makes the parser wait for a subsequent frame boundary.
+    SetInputSubtype(transform_.Get(), inputStreamId_, MFVideoFormat_H264);
 
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0), "IMFTransform::ProcessMessage(decoder BEGIN_STREAMING)");
     ThrowIfFailed(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0), "IMFTransform::ProcessMessage(decoder START_OF_STREAM)");
