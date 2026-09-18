@@ -40,6 +40,7 @@ struct ReceiverVideoObservation {
     std::optional<ReceiverPresentationObservation> presentation;
     std::optional<uint32_t> decoderDrops, jitterBufferMeanMs;
     CodecImplementation decoder = CodecImplementation::Unknown;
+    std::optional<uint32_t> jitterBufferRecentMs; // Mean over the last fresh stats interval; not end-to-end latency.
 };
 struct ReceiverVideoStatus {
     std::optional<ReceiverVideoObservation> observation;

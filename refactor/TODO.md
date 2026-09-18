@@ -8,6 +8,10 @@ checks are implementation details, **not separate user turns**.
 
 Current priority: finish all available Stage 2–4 work unattended, preserving the
 physical/remote gates listed in [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).
+The unattended batch results are in [UNATTENDED-RESULTS.md](UNATTENDED-RESULTS.md):
+two-hour software evidence is collected; Stage 4 still has a Release bandwidth-
+recovery failure and the documented device/resource/field gates. Do not repeat
+completed reporting, input diagnostics or cost-model implementation.
 UI/CLI reports and local input timing/pressure diagnostics are now implemented
 and pass both 12-case headless matrices; see [SESSION-REPORTS.md](SESSION-REPORTS.md).
 

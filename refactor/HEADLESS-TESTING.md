@@ -1103,3 +1103,11 @@ commands, preserved failures and the unresolved latency boundary. SERVICE-COST.m
 records real ten-room heartbeat/listing invariants and the eight-hour operation model.
 The interactive input desktop is currently `Screen-saver`; generated-desktop tests
 are not rerun by unlocking or synthesizing user input. Physical acceptance stays open.
+
+Final batch details are in UNATTENDED-RESULTS.md. Both final `closeout-final-*`
+headless matrices pass 12/12; final rebuilt `lifecycle-latest-*` runs pass 60 seconds
+plus ten-second idle in both builds. The 7200-second software run's original data
+passes reevaluation after fixing an ideal sample-count assumption; raw and derived
+reports are preserved with hashes. Final network results are Release 5/6 and Debug
+6/6, with Release bandwidth recovery still failing. Do not replace that result
+with the historical initial 6/6 runs.

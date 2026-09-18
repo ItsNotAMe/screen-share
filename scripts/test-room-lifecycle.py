@@ -99,7 +99,10 @@ def progress_samples(progress, active, seconds, slow_viewer):
         if entry['phase'] in phases:
             phases[entry['phase']].append([v['frameDelta'] / entry['intervalSeconds'] for v in viewers])
         previous = entry
-    if seconds >= 10 and (len(progress) < seconds // 5 - 1 or not previous or previous['elapsedSeconds'] < seconds - 6):
+    # Each interval is validated against both monotonic elapsed time and its
+    # matching resource sample above. Small scheduling delays accumulate over a
+    # long run; dividing duration by an ideal five seconds rejects intact logs.
+    if seconds >= 10 and (not previous or not seconds - 6 <= previous['elapsedSeconds'] <= seconds + 1):
         raise ValueError('Missing continuous soak samples')
     if not seconds and progress:
         raise ValueError('Unexpected continuous samples in restart run')

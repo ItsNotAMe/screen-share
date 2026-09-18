@@ -68,8 +68,10 @@ python scripts/test-room-lifecycle.py build/sdk-app-release build/webrtc/receive
 ```
 
 The short reproduction and regression are closed only for this measured software
-path. Full two-hour soak, network impairment, physical audio quality/device-clock
+path. The two-hour software run is now collected (UNATTENDED-RESULTS.md), with
+maximum reported mean buffering of 25 ms and normal synchronization preserved.
+Full resource/queue-age acceptance, network recovery, physical audio quality/device-clock
 behavior, external capture-to-display/input-response latency and the existing WGC
 resource failure remain separate acceptance gates. `soakAcceptanceComplete` stays
-false. The next group is the sustained soak and network impairment work; retain
+false. Continue the remaining performance and physical acceptance work; retain
 normal A/V synchronization and both the rate and buffering checks.

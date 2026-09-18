@@ -70,8 +70,11 @@ QJsonObject StreamPreferencesJson(const StreamPreferences& value) {
     return result;
 }
 RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopback) {
-    Keys(object, {"origin", "host", "roomId", "nickname", "name", "password", "public", "viewerLimit", "seconds", "preview", "capture", "audio", "stream", "changes", "captureChanges", "audioChanges", "playbackChanges"});
+    Keys(object, {"origin", "host", "roomId", "nickname", "name", "password", "public", "viewerLimit", "seconds", "preview", "capture", "audio", "stream", "changes", "captureChanges", "audioChanges", "playbackChanges", "reportFile"});
     RoomSessionConfig result;
+    result.reportFile = String(object, "reportFile");
+    if (object.contains("reportFile") && (result.reportFile.trimmed().isEmpty() || result.reportFile.contains(QChar(0))))
+        throw std::invalid_argument("Invalid report path");
     const auto origin = String(object, "origin"); const QUrl url(origin);
     if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment() ||
         (!url.path().isEmpty() && url.path() != "/") || (url.scheme() != "https" && !(loopback && url.scheme() == "http" && url.host() == "127.0.0.1")))

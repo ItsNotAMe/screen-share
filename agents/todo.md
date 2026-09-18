@@ -10,6 +10,11 @@ Priority correction: the user requests Stage 2–4 completion unattended before
 cutover. Read refactor/STAGE-2-4-ACCEPTANCE.md for the remaining acceptance boundary.
 UI/CLI redacted JSON reports and input pressure/local timing diagnostics are
 implemented and verified (SESSION-REPORTS.md); do not reimplement them.
+Unattended results: refactor/UNATTENDED-RESULTS.md. The two-hour software run is now
+collected and validated after a timing-check correction; final short runtime
+checks pass both builds. Final network evidence retains a Release recovery failure.
+Continue that performance investigation and the listed physical/resource/field
+gates, not another reporting/cost-harness implementation or an unqualified soak rerun.
 
 Current continuation: the shared input service, controller and mouse/keyboard
 UI/CLI/device groups are implemented. See [DESKTOP-INPUT.md](../refactor/DESKTOP-INPUT.md).
@@ -24,8 +29,9 @@ the real UI/CLI one-frame presentation impairment scenario are now implemented.
 See ROOM-STRESS.md for results and limitations. The sustained receive-rate decline
 was traced to capture timeout silence followed by immediate late PCM, overfeeding
 audio and delaying synchronized video. The fixed output cadence and regression
-are implemented; see RECEIVER-PACING.md. Next complete two-hour soak and network
-impairment acceptance with synchronization enabled. Do not add another frame queue or compact memory to
+are implemented; see RECEIVER-PACING.md. Two-hour software evidence is collected;
+finish remaining resource and network acceptance with synchronization enabled.
+Do not add another frame queue or compact memory to
 improve the measurements. Keep the immediate +8 bound; delayed OS cleanup
 does not waive it. Preserve Stage 2
 physical/parity and Stage 3 physical input gates. Recording-device integration

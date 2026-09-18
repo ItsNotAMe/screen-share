@@ -54,7 +54,8 @@ try {
   mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, host: '127.0.0.1', port: 0, compatibilityDate: '2026-05-21', durableObjects: {
     V2_ROOMS: { className: 'V2Room', useSQLite: true }, V2_CONTROL: { className: 'V2Control', useSQLite: true }, V2_DIRECTORY: { className: 'V2Directory', useSQLite: true } } });
   const origin = (await mf.ready).origin;
-  child = spawn(executable, [origin, ...(fault ? [fault] : [])], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const experiment = impairment && process.argv[6] === '--fast-audio-experiment';
+  child = spawn(executable, [origin, ...(fault ? [fault] : []), ...(experiment ? ['--fast-audio-experiment'] : [])], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', chunk => { stdout += chunk.toString(); });
   for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => {
     log += chunk.toString();

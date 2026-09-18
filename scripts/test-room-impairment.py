@@ -19,7 +19,7 @@ def numeric(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def validate(report, scenario, executable_hash):
+def validate(report, scenario, executable_hash, fast_audio=False):
     if report.get('passed') is not True or report.get('timedOut') is not False or report.get('exitCode') != 0 or \
        report.get('logLimitExceeded', False) or report.get('executableSha256') != executable_hash:
         raise ValueError('Native process failed, timed out, or executable identity differs')
@@ -39,16 +39,27 @@ def validate(report, scenario, executable_hash):
                 raise ValueError('Invalid separate-process receiver result')
             ids.add(viewer['pid'])
         return {'separateProcesses': 5, 'runtimeReleased': True, 'externalLatencyVerified': False}
-    if metrics.get('schema') != 1 or metrics.get('scenario') != scenario or metrics.get('seed') != 12345 or \
+    if type(metrics.get('schema')) is not int or metrics['schema'] not in (1, 2) or metrics.get('scenario') != scenario or metrics.get('seed') != 12345 or \
        metrics.get('released') is not True or metrics.get('externalLatencyVerified') is not False or \
        metrics.get('inputApplied') is not True or metrics.get('inputRevoked') is not True:
         raise ValueError('Missing scenario, seed, ownership, or scope evidence')
     for key, maximum in (('peakQueued', 2048), ('peakBytes', 16 * 1024 * 1024)):
         if type(metrics.get(key)) is not int or not 0 < metrics[key] <= maximum:
             raise ValueError('Missing or excessive packet ownership')
+    if metrics.get('fastAudioExperiment') is not fast_audio:
+        raise ValueError('Audio experiment configuration differs from request')
+    response_measured = metrics['schema'] == 2
+    if response_measured and (type(metrics.get('inputResponseInternalMs')) is not int or not 0 <= metrics['inputResponseInternalMs'] <= 10000 or \
+       metrics.get('inputResponseSamples') != 1 or metrics.get('inputResponseEndpoint') != 'decoded-frame-consumption'):
+        raise ValueError('Missing internal input-to-image response evidence')
+    if response_measured and metrics.get('inputResponseScene', 'full-frame') not in ('full-frame', 'localized-marker'):
+        raise ValueError('Unknown input response scene')
     if type(metrics.get('maximumSchedulingDelayUs')) is not int or metrics['maximumSchedulingDelayUs'] < 0:
         raise ValueError('Missing simulator scheduling observation')
     samples = metrics.get('samples')
+    warmup = metrics.get('warmupIngressBps')
+    if not isinstance(warmup, list) or len(warmup) != 20 or not all(numeric(n) for n in warmup):
+        raise ValueError('Missing fixed convergence interval')
     if not isinstance(samples, list) or len(samples) != 36:
         raise ValueError('Missing phase samples')
     previous = None
@@ -57,9 +68,11 @@ def validate(report, scenario, executable_hash):
         phase = ('baseline', 'impaired', 'recovery')[index // 12]
         if sample.get('phase') != phase or sample.get('second') != index % 12 + 1:
             raise ValueError('Unexpected phase ordering')
+        if response_measured and (not numeric(sample.get('intervalSeconds')) or not 0 < sample['intervalSeconds'] <= 10):
+            raise ValueError('Missing observation interval')
         impaired = phase == 'impaired'
         jittered = impaired and scenario in ('loss2', 'loss5', 'reorder')
-        configuration = {'capacityBps': 4000000 if impaired and scenario == 'collapse' else 20000000,
+        configuration = {'capacityBps': (4000000 if impaired else 20000000) if scenario == 'collapse' else 100000000,
             'delayMeanMs': 25 if jittered else 0, 'delayStddevMs': 10 if jittered else 0,
             'configuredLossPercent': (2 if scenario == 'loss2' else 5) if impaired and scenario in ('loss2', 'loss5') else 0,
             'allowReordering': impaired and scenario == 'reorder', 'duplicateEvery': 50 if impaired and scenario == 'duplicate' else 0}
@@ -72,10 +85,18 @@ def validate(report, scenario, executable_hash):
             raise ValueError('Missing peer telemetry')
         for i, peer in enumerate(peers):
             if peer.get('viewer') != i or not all(numeric(peer.get(key)) for key in
-                ('audioBlocks', 'payloadBps', 'availableOutgoingBps', 'rttMs', 'lossFraction', 'jitterBufferMeanMs')):
+                ('audioBlocks', 'payloadBps', 'rttMs', 'lossFraction', 'jitterBufferMeanMs')):
                 raise ValueError('Missing peer observations')
+            # WebRTC can temporarily omit the bandwidth estimate under congestion.
+            # Keep explicit unknowns; packet-byte counters independently prove shaping.
+            if 'availableOutgoingBps' not in peer or (peer['availableOutgoingBps'] is not None and not numeric(peer['availableOutgoingBps'])):
+                raise ValueError('Missing or invalid bandwidth estimate field')
             if type(peer.get('pending')) is not int or not 0 <= peer['pending'] <= 1:
                 raise ValueError('Presentation queue is missing or unbounded')
+            recent = peer.get('jitterBufferRecentMs')
+            if 'jitterBufferRecentMs' not in peer or (recent is not None and (not numeric(recent) or recent > 60000)) or \
+               (phase != 'impaired' and index >= 2 and recent is None):
+                raise ValueError('Missing or invalid recent receiver buffering')
             if previous and peer['audioBlocks'] <= previous['peers'][i]['audioBlocks']:
                 raise ValueError('Audio stopped progressing')
         for key in ('lost', 'overflow', 'queued', 'duplicated', 'reordered'):
@@ -107,10 +128,20 @@ def validate(report, scenario, executable_hash):
             raise ValueError('Requested impairment was not observed')
         if scenario in ('reorder', 'duplicate') and (after['lost'] != before['lost'] or after['overflow'] != before['overflow']):
             raise ValueError('Reordering/duplication scenario introduced packet loss')
+    recent_tails = {phase: [[s['peers'][i]['jitterBufferRecentMs'] for s in samples[-5:]
+        if s['peers'][i]['jitterBufferRecentMs'] is not None] for i in range(4)] for phase, samples in phases.items()}
     return {'healthyViewerIsolation': True, 'recovered': True,
+            'internalInputResponseMeasured': response_measured,
+            'inputResponseInternalMs': metrics.get('inputResponseInternalMs') if response_measured else None,
+            'inputResponseScene': metrics.get('inputResponseScene', 'full-frame') if response_measured else None,
+            'unknownBandwidthEstimateSamples': sum(p['availableOutgoingBps'] is None for s in samples for p in s['peers']),
             'baselineIngressBps': statistics.mean(s['ingressBps'] for s in baseline),
             'impairedIngressBps': statistics.mean(s['ingressBps'] for s in phases['impaired'][-5:]),
             'recoveryFps': [statistics.mean(s['fps'][i] for s in recovery) for i in range(4)],
+            'recentBufferingMs': {phase: [statistics.mean(values) if values else None for values in peers]
+                for phase, peers in recent_tails.items()},
+            'recentBufferingSamples': {phase: [len(values) for values in peers] for phase, peers in recent_tails.items()},
+            'unknownRecentBufferSamples': sum(p['jitterBufferRecentMs'] is None for s in samples for p in s['peers']),
             'externalLatencyVerified': False}
 
 
@@ -118,8 +149,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build', type=Path)
     parser.add_argument('output', type=Path)
-    parser.add_argument('--scenario', choices=SCENARIOS)
+    parser.add_argument('--scenario', choices=SCENARIOS, action='append', help='May be repeated; default runs every case')
+    parser.add_argument('--fast-audio-experiment', action='store_true', help='Proof-only NetEq acceleration experiment; not production policy')
     args = parser.parse_args()
+    if args.fast_audio_experiment and (not args.scenario or 'processes' in args.scenario):
+        parser.error('Audio experiment requires explicit packet scenarios (not processes)')
     args.output.mkdir(parents=True, exist_ok=False)
     executable = args.build.resolve() / 'RoomImpairmentProof.exe'
     digest = runner.sha256(executable)
@@ -127,6 +161,7 @@ def main():
     if not node:
         raise RuntimeError('Node is required')
     report = {'schema': 1, 'passed': False, 'scenarios': {}, 'externalLatencyVerified': False,
+              'fastAudioExperiment': args.fast_audio_experiment,
               'runnerSha256': runner.sha256(Path(__file__)),
               'fixtureSha256': runner.sha256(ROOT / 'signaling-worker/tests/run-native-service.mjs'),
               'pinnedWebRtc': json.loads((ROOT / 'refactor/webrtc-source.json').read_text())['commit'],
@@ -135,19 +170,27 @@ def main():
                               'Jitter is Gaussian (25 ms mean, 10 ms standard deviation), not capped at 50 ms',
                               'Mean jitter-buffer telemetry is not capture-to-display latency']}
     try:
-        for scenario in [args.scenario] if args.scenario else SCENARIOS:
+        failures = []
+        for scenario in dict.fromkeys(args.scenario or SCENARIOS):
             output = args.output / scenario
             output.mkdir()
             process = runner.run_process([node, ROOT / 'signaling-worker/tests/run-native-service.mjs', executable,
-                output, 'network-impairment', scenario], output / 'runner.log', os.environ.copy(), timeout=110)
+                output, 'network-impairment', scenario, *(['--fast-audio-experiment'] if args.fast_audio_experiment else [])],
+                output / 'runner.log', os.environ.copy(), timeout=110)
             report['scenarios'][scenario] = {'process': process}
-            if not process['passed']:
-                raise ValueError(f'{scenario}: native process failed; inspect retained logs')
-            files = list(output.glob('native-service-*/result.json'))
-            if len(files) != 1:
-                raise ValueError('Missing or ambiguous native result')
-            report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest)
-        report['passed'] = True
+            try:
+                if not process['passed']:
+                    raise ValueError('Native process failed; inspect retained logs')
+                files = list(output.glob('native-service-*/result.json'))
+                if len(files) != 1:
+                    raise ValueError('Missing or ambiguous native result')
+                report['scenarios'][scenario]['validation'] = validate(json.loads(files[0].read_text()), scenario, digest, args.fast_audio_experiment)
+            except Exception as error:
+                report['scenarios'][scenario]['error'] = str(error)
+                failures.append(scenario)
+        report['passed'] = not failures
+        if failures:
+            report['error'] = 'Failed scenarios: ' + ', '.join(failures)
     except Exception as error:
         report['error'] = str(error)
     finally:

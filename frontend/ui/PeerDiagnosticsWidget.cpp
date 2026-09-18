@@ -157,6 +157,8 @@ void PeerDiagnosticsWidget::Update(const screenshare::v2::RoomStatus& value) {
                 .arg(presentation.isEmpty() ? "unknown" : QString("%1 submitted, %2 dropped, %3 queued; %4")
                     .arg(presentation["presented"].toInteger()).arg(presentation["dropped"].toInteger())
                     .arg(presentation["queued"].toInt()).arg(presentation["outcome"].toString()));
+            detail += QString("\nRecent jitter-buffer residence: %1 ms (last fresh interval; not end-to-end latency).")
+                .arg(receiverMetric("jitterBufferRecentMs"));
             const auto source = rows[index].toObject()["source"].toObject();
             const auto activeImage = source["activeImage"].toObject();
             detail += QString("\nSource scaling: %1.\nActive image in source canvas: %2.")

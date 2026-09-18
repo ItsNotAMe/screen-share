@@ -1,0 +1,602 @@
+{
+  "schema": 1,
+  "evaluatorSha256": "a33729d8c7d77fb279f20752cd1c4069fa12c72339a68049c9f798e2a8d30085",
+  "reason": "Reevaluate explicit unknown bandwidth/no-emission intervals; original reports retained",
+  "runs": {
+    "release": {
+      "sourceReportSha256": "a5af5f20e8c1b4250814b0c726ab68b2ccd7770f7f205f9d77835783ca673915",
+      "executableSha256": "75b577116fad061cf6d4204bf846eeef8161e7455ef7dad73537a6f1b091f5bb",
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "9afb829c1fac45b9c8ef62071c1ccf4977b5563602203849d8158df8472fe340",
+          "passed": false,
+          "error": "Sender failed to regain bandwidth after recovery"
+        },
+        "loss2": {
+          "nativeReportSha256": "1d6482dc5383732e11133076489bd79ba13991f8cbade8f3ca002954bb10b9d7",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 174,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 19329992.315636627,
+            "impairedIngressBps": 13009717.848891562,
+            "recoveryFps": [
+              30.109872688053557,
+              29.711785813953107,
+              29.711785813953107,
+              29.512313856119885
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                42,
+                86.2,
+                32.6,
+                109.4
+              ],
+              "impaired": [
+                70.8,
+                103,
+                37,
+                116.4
+              ],
+              "recovery": [
+                58.6,
+                104.8,
+                37.6,
+                118
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "loss5": {
+          "nativeReportSha256": "592f34dbee038d25eec2d52c65797134b589b6e1f2e06ed60fe0d3362548d91d",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 342,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 3153627.9151499714,
+            "impairedIngressBps": 1399629.8400227579,
+            "recoveryFps": [
+              29.953640454256625,
+              29.754774702194233,
+              29.754774702194233,
+              29.95414177155912
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                124.6,
+                107.4,
+                105.4,
+                22.4
+              ],
+              "impaired": [
+                165.2,
+                109,
+                105.6,
+                55.4
+              ],
+              "recovery": [
+                197.4,
+                110.4,
+                108.4,
+                47
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "reorder": {
+          "nativeReportSha256": "7e2b0e5b1a33d6e57b210cd91a3cd5e57cd74de02a384ea14f63e779d88a1efa",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 120,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 19104965.272048924,
+            "impairedIngressBps": 13917239.430683311,
+            "recoveryFps": [
+              30.089852201723886,
+              30.089820386657166,
+              29.692003090814268,
+              29.293343821800867
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                18.2,
+                27.2,
+                104.4,
+                104
+              ],
+              "impaired": [
+                38.6,
+                49.8,
+                101,
+                103.2
+              ],
+              "recovery": [
+                81.2,
+                45,
+                97.4,
+                97.6
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "duplicate": {
+          "nativeReportSha256": "b8ed91ea8960a6965743186f951f001fe906a4a8427353f5365d619f424e2931",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 114,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 19256875.0012473,
+            "impairedIngressBps": 19318018.42934834,
+            "recoveryFps": [
+              29.9154885022806,
+              29.9154885022806,
+              30.114561320629143,
+              29.915397684631632
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                18.4,
+                44.8,
+                124.8,
+                107.8
+              ],
+              "impaired": [
+                47.4,
+                59.4,
+                62.4,
+                108
+              ],
+              "recovery": [
+                46.6,
+                53.2,
+                38.2,
+                105.8
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "processes": {
+          "nativeReportSha256": "eef396f676286d0e0b845f60f883ba268f0f10c0f5e67782c79166b57def30d9",
+          "passed": true,
+          "validation": {
+            "separateProcesses": 5,
+            "runtimeReleased": true,
+            "externalLatencyVerified": false
+          }
+        }
+      },
+      "passed": false
+    },
+    "debug": {
+      "sourceReportSha256": "de4c789af17872a20c9603715f99eaa267a543744c6930580dc755dbe17d1074",
+      "executableSha256": "78cb3767e4ac6e14274a5e8aa67a9441dac3bdf526fff2aba8d638491aed1e3d",
+      "scenarios": {
+        "collapse": {
+          "nativeReportSha256": "7ca37605b2cd485707b1d4ad3a1ead148d112995250985f1ae9d215cbf7d60ee",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 425,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 18689613.858141202,
+            "impairedIngressBps": 2353911.4997784644,
+            "recoveryFps": [
+              30.272195373288262,
+              30.073133294086837,
+              30.072645438211833,
+              29.874191663561234
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                66.8,
+                26.8,
+                130.4,
+                42.4
+              ],
+              "impaired": [
+                333.2,
+                39,
+                119.4,
+                56
+              ],
+              "recovery": [
+                386.6,
+                38,
+                56.2,
+                49
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "loss2": {
+          "nativeReportSha256": "eca7318f86bb25443dd958d3f1e3855e68df18da684436e14b473020df0a5cca",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 276,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 2984496.8745923913,
+            "impairedIngressBps": 1917977.5804916502,
+            "recoveryFps": [
+              29.940998358729416,
+              29.940998358729416,
+              29.940998358729416,
+              30.140829002259025
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                119.2,
+                43,
+                117.8,
+                103.8
+              ],
+              "impaired": [
+                174.8,
+                57.2,
+                120.8,
+                42.6
+              ],
+              "recovery": [
+                167.2,
+                52,
+                118.6,
+                51.2
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "loss5": {
+          "nativeReportSha256": "a03fe813c5a9349d53ad9ad4f95ea224c2a901a3e4adc687a4b3cc3af55c655c",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 159,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 19303351.37672271,
+            "impairedIngressBps": 9323007.682057736,
+            "recoveryFps": [
+              30.071851511231234,
+              29.872808490172183,
+              29.872495014068427,
+              29.872275466043142
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                39.6,
+                107.4,
+                31.6,
+                109.2
+              ],
+              "impaired": [
+                70.8,
+                111.2,
+                48.4,
+                108.6
+              ],
+              "recovery": [
+                91.8,
+                104.8,
+                45,
+                111.2
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "reorder": {
+          "nativeReportSha256": "1d54419d0cba2288d117315035631ad46f71b5cd3c23cf59f00914874f8622c7",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 161,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 19233566.651896797,
+            "impairedIngressBps": 20337172.24466326,
+            "recoveryFps": [
+              30.081582461360224,
+              29.88260880719464,
+              30.0818348538486,
+              29.88260880719464
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                25.8,
+                36.4,
+                119,
+                25.4
+              ],
+              "impaired": [
+                47.6,
+                47.8,
+                124.4,
+                44.8
+              ],
+              "recovery": [
+                57.6,
+                51.2,
+                124.2,
+                54.8
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "duplicate": {
+          "nativeReportSha256": "9901668cc4c74d708ce263944fc6d8b6e538f759fffe294d2e972c98448892a9",
+          "passed": true,
+          "validation": {
+            "healthyViewerIsolation": true,
+            "recovered": true,
+            "internalInputResponseMeasured": true,
+            "inputResponseInternalMs": 205,
+            "inputResponseScene": "localized-marker",
+            "unknownBandwidthEstimateSamples": 0,
+            "baselineIngressBps": 3215310.052402128,
+            "impairedIngressBps": 3395624.4114227323,
+            "recoveryFps": [
+              29.90138433655969,
+              30.10020538737467,
+              29.90138433655969,
+              30.10020538737467
+            ],
+            "recentBufferingMs": {
+              "baseline": [
+                111.4,
+                22.8,
+                100.6,
+                115
+              ],
+              "impaired": [
+                112.4,
+                52.8,
+                105.8,
+                119.6
+              ],
+              "recovery": [
+                109.6,
+                49,
+                105.4,
+                107.8
+              ]
+            },
+            "recentBufferingSamples": {
+              "baseline": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "impaired": [
+                5,
+                5,
+                5,
+                5
+              ],
+              "recovery": [
+                5,
+                5,
+                5,
+                5
+              ]
+            },
+            "unknownRecentBufferSamples": 0,
+            "externalLatencyVerified": false
+          }
+        },
+        "processes": {
+          "nativeReportSha256": "e00af24bb0d12386f976e14fcfaa905e9db5228f800936810331b362070f5e36",
+          "passed": true,
+          "validation": {
+            "separateProcesses": 5,
+            "runtimeReleased": true,
+            "externalLatencyVerified": false
+          }
+        }
+      },
+      "passed": true
+    }
+  }
+}

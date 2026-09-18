@@ -269,6 +269,8 @@ void ProfileSettingsScenario() {
     diagnostic.receiver.observation->presentation = ReceiverPresentationObservation{12, 3, 1, 3};
     diagnostic.receiver.observation->decoderDrops = 4;
     diagnostic.receiver.observation->jitterBufferMeanMs = 5;
+    diagnostic.receiver.observation->jitterBufferRecentMs = 0;
+    Check(StreamPeerJson(diagnostic, 3)["receiver"].toObject()["jitterBufferRecentMs"].toInt(-1) == 0);
     diagnostic.receiver.observation->decoder = CodecImplementation::MfH264Software;
     Check(StreamPeerJson(diagnostic, 3)["receiver"].toObject()["decodeFps"].toDouble(-1) == 0);
     Check(StreamPeerJson(diagnostic, 3)["receiver"].toObject()["presentation"].toObject()["dropped"].toInteger() == 3);
@@ -276,7 +278,7 @@ void ProfileSettingsScenario() {
     const auto expiredReceiver = StreamPeerJson(diagnostic, 3)["receiver"].toObject();
     Check(expiredReceiver["sampleState"] == "stale" && expiredReceiver["width"].isNull() && expiredReceiver["framesDecoded"].isNull());
     Check(expiredReceiver["presentation"].isNull() && expiredReceiver["decoderDrops"].isNull() &&
-        expiredReceiver["jitterBufferMeanMs"].isNull() && expiredReceiver["decoder"] == "unknown");
+        expiredReceiver["jitterBufferMeanMs"].isNull() && expiredReceiver["jitterBufferRecentMs"].isNull() && expiredReceiver["decoder"] == "unknown");
     StreamStatus partial; partial.requestedRevision = 2;
     diagnostic.settingsError = SettingsApplyError::SenderRejected;
     diagnostic.appliedPreferences = StreamPreferences{};

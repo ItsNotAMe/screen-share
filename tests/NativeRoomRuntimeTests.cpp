@@ -1,8 +1,10 @@
 #include "api/RoomSession.h"
 #include "media/webrtc/WindowsRoomRuntime.h"
 #include "media/ReceiverTelemetry.h"
+#include "media/ReceiverBufferInterval.h"
 #include <QCoreApplication>
 #include <iostream>
+#include <limits>
 // Links the complete shipped Windows runtime through the application core.
 // No capture/audio devices are opened before authenticated admission.
 int main(int argc, char** argv) {
@@ -12,6 +14,17 @@ int main(int argc, char** argv) {
         using namespace std::chrono_literals;
         auto require = [](bool value) { if (!value) throw std::runtime_error("Receiver telemetry protocol check failed"); };
         const auto now = ReceiverTelemetryInbox::Clock::now();
+        ReceiverBufferInterval buffering;
+        require(!buffering.Sample("stream", 1, 100, now));
+        require(buffering.Sample("stream", 4, 130, now + 1s) == 100);
+        require(buffering.Sample("stream", 4.3, 160, now + 2s) == 10); // Recovery is not hidden by lifetime history.
+        require(!buffering.Sample("stream", 4.3, 160, now + 2500ms)); // No emitted frames is unknown, not zero.
+        require(!buffering.Sample("stream", 4.6, 190, now + 6s)); // Stale interval.
+        require(!buffering.Sample("new-stream", 4.9, 220, now + 7s));
+        require(!buffering.Sample("new-stream", 0.1, 10, now + 8s)); // Counter reset.
+        require(buffering.Sample("new-stream", 0.1, 20, now + 9s) == 0);
+        require(!buffering.Sample("new-stream", std::numeric_limits<double>::infinity(), 30, now + 10s));
+        require(!buffering.Sample("new-stream", 0.2, 30, now + 11s));
         PresentationTelemetry local;
         require(!local.Read(now));
         local.Publish({5, 2, 1, 3}, now);
@@ -32,6 +45,15 @@ int main(int argc, char** argv) {
         const auto full = EncodeReceiverTelemetry(extended);
         require(full.size() == 60 && full[3] == 2);
         auto fullDecoded = DecodeReceiverTelemetry(full);
+        auto recent = extended; recent.video.jitterBufferRecentMs = 0;
+        const auto recentWire = EncodeReceiverTelemetry(recent);
+        require(recentWire.size() == 64 && recentWire[3] == 3);
+        require(DecodeReceiverTelemetry(recentWire)->video.jitterBufferRecentMs == 0);
+        recent.video.jitterBufferRecentMs = 123;
+        require(DecodeReceiverTelemetry(EncodeReceiverTelemetry(recent))->video.jitterBufferRecentMs == 123);
+        recent.video.jitterBufferRecentMs = 60001; require(EncodeReceiverTelemetry(recent).empty());
+        for (size_t length = 0; length < recentWire.size(); ++length) require(!DecodeReceiverTelemetry(std::span(recentWire).first(length)));
+        auto invalidRecent = recentWire; invalidRecent[5] &= ~16; require(!DecodeReceiverTelemetry(invalidRecent));
         require(fullDecoded && fullDecoded->video.presentation->presented == 20 && fullDecoded->video.presentation->dropped == 7 &&
             fullDecoded->video.presentation->queued == 1 && fullDecoded->video.presentation->outcome == 3 &&
             fullDecoded->video.decoderDrops == 4 && fullDecoded->video.jitterBufferMeanMs == 12 &&

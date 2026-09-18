@@ -8,7 +8,7 @@ No unchecked physical requirement is waived by the unattended test run.
 | --- | --- | --- |
 | 2: user experience | Normal-shell opt-in share/join, pushed directory, profiles, settings, capture/audio recovery, GPU receive, and redacted UI/CLI reports. Release/Debug headless matrices pass 12/12 each. | Physical audio formats/quality/unplug, source privacy/identity/HDR/adapters, supported-desktop DXGI and occlusion. Final legacy command/default cutover remains Stage 5. |
 | 3: gaming input | Consent, source-bound mapping, per-peer ownership, controllers, queues/watchdogs, neutralization, UI/CLI input diagnostics, recording-sink real-channel tests. | Physical mouse/keyboard confinement and foreground/UIPI behavior, XInput/PlayStation and virtual-driver/local-slot behavior; measured external input response. |
-| 4: stability/performance/service | 100-room restart evidence, resource accounting, silent soak runner, real encrypted packet impairment suite, and ten-room service cost invariants. | Two-hour result, original immediate capture-handle failure, full sustained-memory/queue-age acceptance, hardware 1080p60 load, separate machines/NAT/TLS/interface changes, external image/input latency and A/V skew, matched legacy comparison, measured eight-hour service/account headroom and production hibernation. |
+| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, final short Release/Debug runs, real encrypted packet/input-marker/process tests, and ten-room/eight-hour service cost evidence. | Release bandwidth-recovery failure, original immediate capture-handle failure, full sustained-memory/queue-age acceptance, hardware 1080p60 load, separate machines/NAT/TLS/interface changes, external image/input latency and A/V skew, matched legacy comparison, actual billed usage/account headroom and production hibernation. |
 
 ## Physical checks that cannot be replaced by this fixture
 
@@ -38,5 +38,6 @@ an eight-hour usage, billing, quota-headroom or production-hibernation measureme
 
 The production-code eight-hour steady-operation model now passes both alarm
 orderings (SERVICE-COST.md). Real packet/network and separate-process tests pass
-6/6 in both configurations (NETWORK-IMPAIRMENT.md). Capture/input physical tests
+6/6 in both configurations in the initial batch; later stricter/final runs retain
+a Release recovery failure (NETWORK-IMPAIRMENT.md and UNATTENDED-RESULTS.md). Capture/input physical tests
 remain blocked while the input desktop is `Screen-saver`; no unlock or input was sent.

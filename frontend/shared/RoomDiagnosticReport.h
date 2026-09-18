@@ -11,6 +11,8 @@
 #include <QSaveFile>
 #include <QUuid>
 
+QString RoomReportBuildVersion();
+
 // Typed allowlist: no options, raw logs, SDP, credentials, device IDs, source
 // handles, room names, nicknames, network addresses or real peer IDs are exported.
 inline QJsonObject RoomDiagnosticReport(const screenshare::v2::RoomStatus& status,
@@ -32,7 +34,7 @@ inline QJsonObject RoomDiagnosticReport(const screenshare::v2::RoomStatus& statu
     }
     return {{"schema", 1}, {"backend", "v2"}, {"reportId", QUuid::createUuid().toString(QUuid::WithoutBraces)},
         {"createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
-        {"appVersion", QCoreApplication::applicationVersion()}, {"phase", int(status.phase)}, {"error", int(status.error)},
+        {"appVersion", RoomReportBuildVersion()}, {"phase", int(status.phase)}, {"error", int(status.error)},
         {"activePeers", qint64(status.activePeers)}, {"failedPeers", qint64(status.failedPeers)},
         {"requestedPreferences", StreamPreferencesJson(status.stream.preferences)},
         {"pipeline", PipelineDiagnosticsJson(status.stream)}, {"settingsApplication", StreamApplicationJson(status.stream)},

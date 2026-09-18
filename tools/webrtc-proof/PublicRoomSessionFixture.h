@@ -59,6 +59,8 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     MediaEngine::PacketFactory packetFactory;
     CaptureSession::Factory captureFactory;
     std::optional<StreamPreferences> preferences;
+    bool fastAudioExperiment = false; // Proof-only; production defaults are untouched.
+    bool localizedInputResponse = false;
     void OnFrame(const webrtc::VideoFrame& frame) override {
         auto pixels = frame.video_frame_buffer()->ToI420();
         if (pixels && pixels->DataY()[pixels->StrideY() * (pixels->height() / 2) + pixels->width() / 2] > 185) ++responseFrames;
@@ -115,7 +117,13 @@ public:
             if (evidence->failDelivery.exchange(false)) throw std::runtime_error("Injected viewer delivery failure");
             if (evidence->input->pressed) {
                 auto response = *std::static_pointer_cast<SyntheticCaptureResource>(sample.resource);
-                std::fill(response.luma.begin(), response.luma.end(), uint8_t(210));
+                if (evidence->localizedInputResponse) {
+                    const int left = std::max(0, response.width / 2 - 16), right = std::min(response.width, response.width / 2 + 16);
+                    const int top = std::max(0, response.height / 2 - 16), bottom = std::min(response.height, response.height / 2 + 16);
+                    for (int y = top; y < bottom; ++y)
+                        std::fill(response.luma.begin() + y * response.width + left,
+                            response.luma.begin() + y * response.width + right, uint8_t(210));
+                } else std::fill(response.luma.begin(), response.luma.end(), uint8_t(210));
                 source.Push(response, sample.capturedAt); return;
             }
             source.Push(*std::static_pointer_cast<SyntheticCaptureResource>(sample.resource), sample.capturedAt);
@@ -124,6 +132,7 @@ public:
         options.preferences.resolution = ResolutionMode::Fixed;
         options.preferences.width = 640; options.preferences.height = 360; options.preferences.fps = 30;
         if (evidence_->preferences) options.preferences = *evidence_->preferences;
+        options.connection.audio_jitter_buffer_fast_accelerate = evidence_->fastAudioExperiment;
         native_ = CreateNativeRoomRuntime(std::move(identity), std::move(send), std::move(options));
 #endif
     }

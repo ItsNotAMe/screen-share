@@ -98,11 +98,15 @@ struct Service::Impl {
         const auto permission = p.status.permission;
         const auto peer = p.status.peer;
         try {
-            const auto began = Clock::now();
-            const bool applied = sink && External(lock, [&] { return sink->Apply(peer,e); });
+            Clock::time_point began{}, completed{};
+            const bool applied = sink && External(lock, [&] {
+                began = Clock::now();
+                const bool result = sink->Apply(peer,e);
+                completed = Clock::now();
+                return result;
+            });
             if (p.status.permission != permission || closed) return;
             if(applied) {
-                const auto completed = Clock::now();
                 p.status.queueWaitUs = std::chrono::duration_cast<std::chrono::microseconds>(began - pending.received).count();
                 p.status.backendApplyUs = std::chrono::duration_cast<std::chrono::microseconds>(completed - began).count();
                 p.measured = completed; ++p.status.applied; return;

@@ -608,7 +608,7 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 
 ### UI/input validation
 
-- [ ] Verify accurate pending/applied/error states and per-viewer metrics.
+- [x] Verify accurate pending/applied/error states and per-viewer metrics through actual headless UI/CLI scenarios (DIAGNOSTICS.md, SESSION-REPORTS.md).
 - [ ] Verify no input backlog under video saturation, retransmissions or keyframe bursts.
 - [ ] Verify lost/late/reordered states and reliable events after watchdog expiry.
 - [ ] Verify revoke, disconnect, controller unplug and backend failure neutralization.
@@ -632,7 +632,7 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 
 ### Harness and impairment scenarios
 
-- [ ] Extend the multi-viewer harness for the new CLI and four-viewer runs.
+- [x] Extend the multi-viewer harness for the new CLI and four-viewer runs; public RoomSession, UI/CLI, lifecycle and separate-process runners are implemented.
 - [x] Add seeded real-packet WebRTC network scenarios with recorded configurations,
   actual impairment/isolation/recovery checks and independent receiver processes.
   See NETWORK-IMPAIRMENT.md; the 640x360 software proof is not full field acceptance.
@@ -640,7 +640,8 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [ ] Run one-viewer-path bandwidth collapse/recovery: 20 → 4 → 20 Mbps.
 - [ ] Run 2% and 5% loss with up to 50 ms jitter.
 - [ ] Run reordering/duplication without injected loss.
-- [ ] Run slow decode/presentation on one viewer.
+- [x] Run slow presentation on one viewer through the actual one-frame frontend handoff; verify replacement and healthy-viewer progress.
+- [ ] Run delayed decoder output on one viewer under sustained reference load (slow presentation does not replace this check).
 - [ ] Run host encoder exhaustion/hardware failure.
 - [ ] Run late join, kick, leave/rejoin and host restart.
 - [ ] Run interface change, ICE restart and blocked direct UDP.
@@ -662,8 +663,11 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [ ] Verify upward adaptation resumes without repeated resolution/encoder oscillation.
 - [ ] Verify one impaired viewer does not lower healthy viewers without a documented shared resource/budget constraint.
 - [ ] Complete a two-hour four-viewer soak without deadlock, sustained memory growth or accumulating queues.
-  The continuous native runner supports 7200 seconds; Release 180-second and Debug
-  30-second runs pass functional checks. Neither is the required two-hour run.
+  The Release 7200-second synthetic run now passes progress, buffering and tracked
+  ownership checks after correcting a sample-count assumption. Full private-memory,
+  queue-age and physical-device acceptance remains open; see UNATTENDED-RESULTS.md.
+- [x] Collect a full two-hour four-viewer software-path run, slow-viewer isolation,
+  60-second post-stop observation and complete read-only memory accounting.
 - [ ] Complete 100 start/stop cycles without retained sessions, sockets, devices or callbacks.
   Full RoomSession create/join/media/stop now passes 100 cycles in both builds,
   with four viewers, both shutdown orders, callback barriers, runtime destruction

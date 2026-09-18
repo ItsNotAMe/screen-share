@@ -1,5 +1,6 @@
 import importlib.util
 import copy
+import math
 from pathlib import Path
 import unittest
 
@@ -20,14 +21,16 @@ class EvidenceTests(unittest.TestCase):
                 'completed': list(range(1, 101)),
                 'samples': [self.sample(n) for n in range(101)]}
 
-    def continuous(self, seconds=30, slow=False):
+    def continuous(self, seconds=30, slow=False, interval=5):
         value = self.evidence()
         value.update(cycles=1, soakSeconds=seconds, slowViewer=slow, completed=[1], elapsedSeconds=seconds,
                      samples=[self.sample(0)], progress=[], ownership=[{
                          'cycle': 1, 'ownershipReleased': True, 'peakCaptureResources': 2, 'activeSeconds': seconds}])
         frames, audio, replaced = [15] * 4, [10] * 4, [0] * 4
-        for elapsed in range(5, seconds, 5):
-            phase = 'healthy' if not slow or elapsed < 15 else 'transition' if elapsed in (15, 35) else 'slow' if elapsed < 35 else 'recovered'
+        for tick in range(1, math.ceil(seconds / interval)):
+            elapsed = tick * interval
+            def phase_at(at): return 'healthy' if not slow or at < 15 else 'slow' if at < 35 else 'recovered'
+            phase = phase_at(elapsed) if phase_at(elapsed) == phase_at(elapsed - interval) else 'transition'
             viewers = []
             for i in range(4):
                 delta = 20 if slow and phase == 'slow' and i == 0 else 150
@@ -37,8 +40,8 @@ class EvidenceTests(unittest.TestCase):
                                 'audioBlocks': audio[i], 'audioDelta': 500, 'received': frames[i] + replaced[i],
                                 'replaced': replaced[i], 'pending': 0, 'receiver': {'jitterBufferMeanMs': 12}})
             value['progress'].append({'cycle': 1, 'frames': sum(frames), 'elapsedSeconds': elapsed,
-                'intervalSeconds': 5, 'phase': phase, 'viewers': viewers, 'peakCaptureResources': 2, 'maxCaptureHandoffUs': 100})
-            value['samples'].append(self.sample(-1, 5))
+                'intervalSeconds': interval, 'phase': phase, 'viewers': viewers, 'peakCaptureResources': 2, 'maxCaptureHandoffUs': 100})
+            value['samples'].append(self.sample(-1, interval))
         value['samples'].append(self.sample(1, seconds + 5))
         return value
 
@@ -81,6 +84,19 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaises(ValueError): lifecycle.evaluate(value, 1, 30, 'binary')
         value = self.continuous(); value['samples'].pop(1)
         with self.assertRaises(ValueError): lifecycle.evaluate(value, 1, 30, 'binary')
+
+    def test_two_hour_scheduling_drift_does_not_invent_missing_samples(self):
+        value = self.continuous(7200, interval=5.006)
+        self.assertEqual(len(value['progress']), 1438)
+        result = lifecycle.evaluate(value, 1, 7200, 'binary')
+        self.assertEqual(result['continuousDurationVerified'], 7200)
+        self.assertFalse(result['soakAcceptanceComplete'])
+        missing = copy.deepcopy(value)
+        missing['progress'].pop(100); missing['samples'].pop(101)
+        with self.assertRaises(ValueError): lifecycle.evaluate(missing, 1, 7200, 'binary')
+        truncated = copy.deepcopy(value)
+        truncated['progress'].pop(); truncated['samples'].pop(-2)
+        with self.assertRaises(ValueError): lifecycle.evaluate(truncated, 1, 7200, 'binary')
 
     def test_owned_dependencies_and_capture_budget_are_required(self):
         for key, bad in [('ownershipReleased', False), ('peakCaptureResources', 11), ('peakCaptureResources', True)]:

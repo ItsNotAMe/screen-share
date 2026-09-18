@@ -22,6 +22,7 @@ int main(int argc, char** argv) {
         screenshare::input::Status input; input.peer = peer.peerId; input.reason = screenshare::input::Reason::Backpressure;
         input.transportBlocked = true; input.reliableQueued = 2;
         auto report = RoomDiagnosticReport(status, {input});
+        Check(!report["appVersion"].toString().isEmpty());
         const auto bytes = QJsonDocument(report).toJson();
         Check(!bytes.contains("secret") && !bytes.contains("123456"));
         const auto media = report["peers"].toArray()[0].toObject();
@@ -38,6 +39,14 @@ int main(int argc, char** argv) {
         Check(saved.open(QIODevice::ReadOnly)); Check(saved.readAll() == bytes);
         const auto config = ParseRoomCommand({"--backend", "v2", "--signal-server", "https://example.com", "--create-room", "--report", path});
         Check(config.reportFile == path);
+        QJsonObject jsonConfig{{"origin", "https://example.com"}, {"host", true}, {"reportFile", path}};
+        Check(ParseRoomSessionConfig(jsonConfig).reportFile == path);
+        for (const auto& invalid : {QJsonValue(" "), QJsonValue(QString(4097, 'a')), QJsonValue(QString(QChar(0))), QJsonValue(42)}) {
+            jsonConfig["reportFile"] = invalid;
+            bool invalidPath = false;
+            try { ParseRoomSessionConfig(jsonConfig); } catch (const std::invalid_argument&) { invalidPath = true; }
+            Check(invalidPath);
+        }
         bool rejected = false;
         try { ParseRoomCommand({"--backend", "v2", "--signal-server", "https://example.com", "--create-room", "--report", " "}); }
         catch (const std::invalid_argument&) { rejected = true; }

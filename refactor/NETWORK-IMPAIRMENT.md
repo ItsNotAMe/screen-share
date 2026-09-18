@@ -74,3 +74,64 @@ image/input latency, A/V skew and matched legacy comparison remain open. In part
 the Release collapse receiver's cumulative mean jitter buffering rose from 84 ms
 at baseline end to 151 ms at recovery end. Recovery FPS is not proof of low latency;
 stale-frame-age settling and physical latency acceptance must remain open.
+
+## Recent-buffer measurement follow-up
+
+The receiver now reports both lifetime and recent-interval buffering. The recent
+value differences the actual emitted-frame delay/count; missing/reset/stale
+intervals stay unknown. The harness records a fixed 20-second warmup before its
+three 12-second phases because WebRTC starts at 3 Mbps, below the collapse gate.
+Warmup is retained in the artifact; no trial is retried or selected automatically.
+The runner now completes all requested scenarios even when one fails, and supports
+repeated `--scenario` arguments. Overall failure is retained.
+
+`network-recent-release` failed the collapse offered-load precondition. Adding the
+fixed warmup did not resolve it: `network-warmup-release` also failed. Those runs
+cannot establish a 20→4 Mbps collapse, regardless of their native process success.
+The unchanged offered-load/recovery bounds are preserved. The earlier 6/6 results
+above remain historical evidence, not proof that every later run passes.
+
+`network-recent-remaining-release` passes loss2, loss5, reorder, duplicate and
+separate-process checks (5/5). The affected receiver's recent recovery-tail means
+are respectively 97.8, 88.6, 113.0 and 113.4 ms. These observations do not meet or
+prove the external Gaming latency target. No production jitter/codec knob was
+changed merely to obtain a passing benchmark.
+
+The follow-up Debug reordering run (`network-recent-all-debug`) overflowed 57
+packets when delay was added at a nearly saturated 20 Mbps link. It correctly
+failed the no-added-loss gate. Pure loss/reorder/duplicate cases now use 100 Mbps
+headroom, with the sender still capped at 20 Mbps; collapse alone retains
+20→4→20 Mbps. This separates delay/reordering from unintended capacity loss.
+`network-isolated-final-debug` passes 6/6; Release passes 5/6, with collapse still
+below the offered-load requirement. These are bounded functional checks, not
+proof of repeatable bandwidth convergence or the external latency target.
+
+The explicit proof-only `--fast-audio-experiment` passes through WebRTC's existing
+`audio_jitter_buffer_fast_accelerate` configuration. Run it with an explicit packet
+case, e.g. `--scenario loss5 --fast-audio-experiment`. Production defaults remain
+unchanged. In the Release/Debug comparisons, affected-viewer recent recovery means
+were 48.0/55.0 ms by default and 140.4/62.6 ms with acceleration; initial conditions
+also differed. Artifacts: `network-fast-audio-{release,debug}`. These few runs do
+not establish a causal benefit, so the setting was not adopted.
+
+Schema 2 adds an internal input-to-image measurement during impairment. The existing
+recording sink changes a synthetic response scene on an authorized press; the
+viewer must consume the decoded response, then consume its removal after revoke.
+It uses one machine's monotonic clock, never OS input or physical display output.
+One observation per scenario is not a p95/p99 latency claim. Sample intervals now
+include time spent waiting for this response, keeping FPS/ingress rates honest.
+Older schema 1 evidence cannot claim this input-image measurement.
+
+Final localized-marker runs: `network-marker-final-{release,debug}`. The input
+response uses a 32×32 patch instead of replacing the whole noisy scene, so it does
+not simultaneously change the whole encoder workload for all viewers. Explicit
+unknown bandwidth and no-emission recent-buffer intervals during impairment are
+retained as unknown; missing fields/nonfinite values and missing recovery
+observations still fail. The corrected evaluator records observation counts and
+preserves the original reports. See `network-marker-reevaluated.json` and the
+committed evidence/UNATTENDED-RESULTS.md.
+
+Final result: Release 5/6, Debug 6/6. Release collapse still fails the unchanged
+recovery gate (19.10→2.38→3.95 Mbps phase-tail means). This is not a passing Stage 4
+performance result. Input-marker, revoke, ownership and separate-process evidence
+are retained independently. Nineteen fail-closed Python evidence tests pass.

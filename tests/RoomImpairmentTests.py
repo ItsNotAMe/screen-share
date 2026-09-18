@@ -16,8 +16,8 @@ def evidence(scenario='collapse'):
             affected = phase != 'baseline'
             impaired = phase == 'impaired'
             jittered = impaired and scenario in ('loss2', 'loss5', 'reorder')
-            samples.append({'phase': phase, 'second': second, 'fps': [30] * 4,
-                'capacityBps': 4000000 if impaired and scenario == 'collapse' else 20000000,
+            samples.append({'phase': phase, 'second': second, 'intervalSeconds': 1.0, 'fps': [30] * 4,
+                'capacityBps': (4000000 if impaired else 20000000) if scenario == 'collapse' else 100000000,
                 'delayMeanMs': 25 if jittered else 0, 'delayStddevMs': 10 if jittered else 0,
                 'configuredLossPercent': (2 if scenario == 'loss2' else 5) if impaired and scenario in ('loss2', 'loss5') else 0,
                 'allowReordering': impaired and scenario == 'reorder', 'duplicateEvery': 50 if impaired and scenario == 'duplicate' else 0,
@@ -27,11 +27,13 @@ def evidence(scenario='collapse'):
                 'reordered': int(affected and scenario == 'reorder'),
                 'peers': [{'viewer': i, 'audioBlocks': count * 100, 'pending': 0,
                     'payloadBps': 7000000, 'availableOutgoingBps': 8000000, 'rttMs': 1,
-                    'lossFraction': 0, 'jitterBufferMeanMs': 12} for i in range(4)]})
+                    'lossFraction': 0, 'jitterBufferMeanMs': 12, 'jitterBufferRecentMs': 10} for i in range(4)]})
     return {'passed': True, 'timedOut': False, 'exitCode': 0, 'executableSha256': 'hash',
-        'metrics': {'schema': 1, 'scenario': scenario, 'seed': 12345, 'released': True,
+        'metrics': {'schema': 2, 'scenario': scenario, 'seed': 12345, 'released': True, 'fastAudioExperiment': False,
                     'inputApplied': True, 'inputRevoked': True, 'externalLatencyVerified': False,
-                    'peakQueued': 200, 'peakBytes': 200000, 'maximumSchedulingDelayUs': 1000, 'samples': samples}}
+                    'inputResponseInternalMs': 100, 'inputResponseSamples': 1, 'inputResponseEndpoint': 'decoded-frame-consumption',
+                    'peakQueued': 200, 'peakBytes': 200000, 'maximumSchedulingDelayUs': 1000,
+                    'warmupIngressBps': [8000000] * 20, 'samples': samples}}
 
 
 class ImpairmentEvidenceTests(unittest.TestCase):
@@ -94,10 +96,47 @@ class ImpairmentEvidenceTests(unittest.TestCase):
     def test_missing_nonfinite_telemetry(self):
         self.reject(lambda r: r['metrics']['samples'][3]['peers'][0].pop('jitterBufferMeanMs'))
         self.reject(lambda r: r['metrics']['samples'][3].update(ingressBps=float('nan')))
+        self.reject(lambda r: r['metrics']['samples'][3]['peers'][0].pop('jitterBufferRecentMs'))
+        self.reject(lambda r: r['metrics']['samples'][3]['peers'][0].update(jitterBufferRecentMs=float('inf')))
+
+    def test_explicit_unknown_bandwidth_during_congestion(self):
+        report = evidence()
+        report['metrics']['samples'][13]['peers'][0]['availableOutgoingBps'] = None
+        self.assertEqual(module.validate(report, 'collapse', 'hash')['unknownBandwidthEstimateSamples'], 1)
+        self.reject(lambda r: r['metrics']['samples'][13]['peers'][0].pop('availableOutgoingBps'))
+        self.reject(lambda r: r['metrics']['samples'][13]['peers'][0].update(availableOutgoingBps=float('nan')))
+
+    def test_no_emission_interval_is_unknown_under_impairment(self):
+        report = evidence()
+        for sample in report['metrics']['samples'][12:24]: sample['peers'][0]['jitterBufferRecentMs'] = None
+        result = module.validate(report, 'collapse', 'hash')
+        self.assertEqual(result['unknownRecentBufferSamples'], 12)
+        self.assertIsNone(result['recentBufferingMs']['impaired'][0])
+        self.assertEqual(result['recentBufferingSamples']['impaired'][0], 0)
+        self.reject(lambda r: r['metrics']['samples'][30]['peers'][0].update(jitterBufferRecentMs=None))
+
+    def test_recent_buffering_does_not_infer_latency_acceptance(self):
+        report = evidence()
+        for sample in report['metrics']['samples'][24:]:
+            sample['peers'][0]['jitterBufferRecentMs'] = 150
+        result = module.validate(report, 'collapse', 'hash')
+        self.assertEqual(result['recentBufferingMs']['recovery'][0], 150)
+        self.assertFalse(result['externalLatencyVerified'])
+
+    def test_older_schema_cannot_claim_input_image_measurement(self):
+        report = evidence(); report['metrics']['schema'] = 1
+        result = module.validate(report, 'collapse', 'hash')
+        self.assertFalse(result['internalInputResponseMeasured'])
+        self.assertIsNone(result['inputResponseInternalMs'])
 
     def test_wrong_configuration(self):
         self.reject(lambda r: r['metrics']['samples'][13].update(capacityBps=20000000))
         self.reject(lambda r: r['metrics'].pop('maximumSchedulingDelayUs'))
+        self.reject(lambda r: r['metrics'].update(fastAudioExperiment=True))
+        self.reject(lambda r: r['metrics'].pop('warmupIngressBps'))
+        self.reject(lambda r: r['metrics'].pop('inputResponseInternalMs'))
+        self.reject(lambda r: r['metrics'].update(inputResponseEndpoint='physical-display'))
+        self.reject(lambda r: r['metrics']['samples'][13].pop('intervalSeconds'))
 
     def test_stalled_audio(self):
         self.reject(lambda r: r['metrics']['samples'][10]['peers'][0].update(audioBlocks=0))

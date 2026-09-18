@@ -13,6 +13,9 @@ Relative CLI paths resolve from the working directory. Save failure is reported
 as `diagnostic-report` with `saved:false` and a failing process result. Reports are
 optional and never uploaded. Atomic writes preserve the previous destination on
 failure; output is capped at 1 MiB.
+JSON session configurations accept the same optional path as `reportFile`.
+Reports record the compiled application version even when the Qt application
+version property was not initialized.
 
 The shared typed exporter includes requested/applied media settings, optional
 sender/receiver measurements, pipeline/audio health and input observations. It
@@ -39,3 +42,6 @@ Validation: `stage23-final-{release,debug}/result.json` under `build/webrtc` pas
 identifier redaction, unknown/stale metrics, write failures, permission expiry,
 bounded state pressure, controller/desktop consent, real media and shutdown.
 Tests use silent audio and recording sinks; physical acceptance remains open.
+The final `closeout-final-{release,debug}` matrices also pass 12/12 each after
+recent-buffer telemetry, precise backend-apply timing, compiled-version reporting
+and JSON report-path support. Native telemetry checks pass in both builds.

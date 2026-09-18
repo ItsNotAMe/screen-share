@@ -26,6 +26,14 @@ RoomApplication shell, RoomSessionWindow and production CLI session runner.
 - Receiver stats: allowlisted decoder implementation, dropped decoder frames and
   optional mean jitter-buffer residence (cumulative delay / emitted count). This
   is a lifetime average, not instantaneous buffering or end-to-end latency.
+  `jitterBufferRecentMs` separately differences delay/emitted counters over the
+  most recent fresh sampling interval. Initial, stale (three seconds), reset,
+  different-stream, invalid and zero-emission intervals remain unknown. A measured
+  zero is retained. This value can reveal recovery hidden by lifetime averaging;
+  it still measures emitted-frame buffering, not the oldest queued frame or
+  capture-to-display latency. Wire V3 adds four bounded bytes, with V1/V2 decoding
+  retained. Pre-V3 receivers cannot decode V3 telemetry; use matching builds for
+  diagnostics (media negotiation is unchanged).
   Windows GPU decode maps to `mf-h264-hardware`; startup/runtime software fallback
   maps to `mf-h264-software`. The current implementation determines this label.
 - Local receive handoff: `gpuRetained` counts native decoded frames consumed by
@@ -71,7 +79,7 @@ degradation without creating a minimum bitrate floor.
 `StreamSettingsTest` injects sender rejection and unsupported topology at the real
 WebRTC interface, exercises two independent source/settings instances, retries,
 pauses/resumes and validates real stats objects. `NativeRoomRuntimeTests` covers
-V1/V2 framing, all truncations, invalid flags/ranges, canonical absence, expiry,
+V1/V2/V3 framing, all truncations, invalid flags/ranges, canonical absence, expiry,
 replay, generation changes and local presentation expiry. UI tests cover stale
 serialization, actual renderer-to-host telemetry, presets and the real partial-
 application label. CLI tests cover extended JSON and actual Windows presentation;

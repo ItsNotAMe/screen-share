@@ -1,5 +1,6 @@
 #pragma once
 #include "media/ReceiverTelemetry.h"
+#include "media/ReceiverBufferInterval.h"
 #include "api/data_channel_interface.h"
 #include "api/make_ref_counted.h"
 #include "api/peer_connection_interface.h"
@@ -16,6 +17,7 @@ struct ReceiverStatsMailbox {
     uint64_t serial = 0;
     std::optional<ReceiverVideoObservation> video;
     std::chrono::steady_clock::time_point sampled{}, next{};
+    ReceiverBufferInterval buffering;
 };
 class ReceiverStatsCallback : public webrtc::RTCStatsCollectorCallback {
     std::shared_ptr<ReceiverStatsMailbox> mailbox_;
@@ -23,6 +25,9 @@ public:
     explicit ReceiverStatsCallback(std::shared_ptr<ReceiverStatsMailbox> mailbox) : mailbox_(std::move(mailbox)) {}
     void OnStatsDelivered(const webrtc::scoped_refptr<const webrtc::RTCStatsReport>& report) override {
         std::optional<ReceiverVideoObservation> video;
+        std::string stream;
+        std::optional<double> delay;
+        std::optional<uint64_t> emitted;
         unsigned videoReceivers = 0;
         for (const auto* inbound : report->GetStatsOfType<webrtc::RTCInboundRtpStreamStats>()) {
             if (!inbound->kind || *inbound->kind != "video") continue;
@@ -34,6 +39,7 @@ public:
             ReceiverVideoObservation value{*inbound->frame_width, *inbound->frame_height, *inbound->frames_decoded};
             value.decoderDrops = inbound->frames_dropped;
             if (inbound->jitter_buffer_delay && inbound->jitter_buffer_emitted_count && *inbound->jitter_buffer_emitted_count) {
+                stream = inbound->id(); delay = *inbound->jitter_buffer_delay; emitted = *inbound->jitter_buffer_emitted_count;
                 const double mean = *inbound->jitter_buffer_delay * 1000 / *inbound->jitter_buffer_emitted_count;
                 if (std::isfinite(mean) && mean >= 0 && mean <= 60000) value.jitterBufferMeanMs = uint32_t(std::lround(mean));
             }
@@ -45,8 +51,11 @@ public:
             if (ValidReceiverVideo(value)) video = value;
         }
         std::lock_guard lock(mailbox_->mutex);
+        const auto now = std::chrono::steady_clock::now();
+        if (video && delay && emitted) video->jitterBufferRecentMs = mailbox_->buffering.Sample(stream, *delay, *emitted, now);
+        else mailbox_->buffering.Reset();
         mailbox_->pending = false; mailbox_->video = video; ++mailbox_->serial;
-        mailbox_->sampled = std::chrono::steady_clock::now();
+        mailbox_->sampled = now;
     }
 };
 // Owned by one native Entry. All methods and observer callbacks run on signaling;
