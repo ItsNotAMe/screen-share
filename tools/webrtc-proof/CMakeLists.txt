@@ -12,6 +12,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME room-lifecycle-evidence COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_LIST_DIR}/../../tests/RoomLifecycleStressTests.py")
     set_tests_properties(room-lifecycle-evidence PROPERTIES TIMEOUT 20)
+    add_test(NAME room-impairment-evidence COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_LIST_DIR}/../../tests/RoomImpairmentTests.py")
+    set_tests_properties(room-impairment-evidence PROPERTIES TIMEOUT 20)
 endif()
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/WebRTC.cmake")
 screenshare_import_webrtc()
@@ -80,6 +83,29 @@ target_link_libraries(RoomMediaProof PRIVATE MfWebRTCCodecs ScreenShareNegotiati
 add_custom_command(TARGET RoomMediaProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>" "$<TARGET_FILE_DIR:RoomMediaProof>" VERBATIM)
 find_program(SCREENSHARE_NODE_EXECUTABLE node)
+set(SCREENSHARE_WEBRTC_TEST_SOURCE_DIR "" CACHE PATH "Optional pinned WebRTC checkout for network impairment proof")
+if(SCREENSHARE_WEBRTC_TEST_SOURCE_DIR)
+    set(webrtcSource "${SCREENSHARE_WEBRTC_TEST_SOURCE_DIR}")
+    find_package(Git REQUIRED)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${webrtcSource}" rev-parse HEAD OUTPUT_VARIABLE testRevision OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    file(READ "${CMAKE_CURRENT_LIST_DIR}/../../refactor/webrtc-source.json" testLock)
+    string(JSON expectedTestRevision GET "${testLock}" commit)
+    if(NOT testRevision STREQUAL expectedTestRevision)
+        message(FATAL_ERROR "Network impairment source must match the pinned WebRTC revision")
+    endif()
+    execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${webrtcSource}" diff --exit-code HEAD --
+        test/network/simulated_network.cc test/network/simulated_network.h api/test/simulated_network.h
+        api/test/network_emulation/leaky_bucket_network_queue.cc api/test/network_emulation/leaky_bucket_network_queue.h
+        api/test/network_emulation/network_queue.h COMMAND_ERROR_IS_FATAL ANY)
+    add_executable(RoomImpairmentProof RoomImpairmentProof.cpp
+        "${webrtcSource}/test/network/simulated_network.cc"
+        "${webrtcSource}/api/test/network_emulation/leaky_bucket_network_queue.cc")
+    target_link_libraries(RoomImpairmentProof PRIVATE MfWebRTCCodecs ScreenShareRoomSession)
+    target_include_directories(RoomImpairmentProof SYSTEM PRIVATE "${webrtcSource}")
+    add_custom_command(TARGET RoomImpairmentProof POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>"
+        "$<TARGET_FILE_DIR:RoomImpairmentProof>" VERBATIM)
+endif()
   if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../signaling-worker/node_modules/miniflare/package.json")
       add_executable(PublicRoomSessionProof PublicRoomSessionProof.cpp)
       target_link_libraries(PublicRoomSessionProof PRIVATE MfWebRTCCodecs ScreenShareRoomSession)

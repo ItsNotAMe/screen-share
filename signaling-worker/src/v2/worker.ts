@@ -1,13 +1,14 @@
 import { AdmissionError, failure, json, randomId, readAdmission, tokenHash } from './admission';
 import type { RoomEnv } from './room';
+import { roomCapacity } from './capacity';
 export { V2Room } from './room';
 export { V2Directory } from './directory';
-interface Env extends RoomEnv { ALLOWED_ORIGINS?: string; }
+interface Env extends RoomEnv { ALLOWED_ORIGINS?: string; V2_MAX_ROOMS?: string; }
 
 // One object per hashed IP for admission budgets; one named object for the
 // authoritative global room cap. Missing bindings fail closed at the router.
 export class V2Control {
-  constructor(private ctx: DurableObjectState) {}
+  constructor(private ctx: DurableObjectState, private env: Pick<Env, 'V2_MAX_ROOMS'> = {}) {}
   async fetch(request: Request): Promise<Response> {
     return this.ctx.blockConcurrencyWhile(async () => {
       const path = new URL(request.url).pathname;
@@ -29,7 +30,10 @@ export class V2Control {
       const rooms = await this.ctx.storage.get<Record<string, number>>('rooms') ?? {};
       for (const [id, expires] of Object.entries(rooms)) if (expires <= now) delete rooms[id];
       if (path === '/reserve') {
-        if (Object.keys(rooms).length >= 500) return new Response(null, { status: 409 });
+        let limit: number;
+        try { limit = roomCapacity(this.env.V2_MAX_ROOMS); }
+        catch { return new Response(null, { status: 503 }); }
+        if (Object.keys(rooms).length >= limit) return new Response(null, { status: 409 });
         rooms[roomId] = now + 180000;
       } else if (path === '/renew') {
         if (!Object.hasOwn(rooms, roomId)) return new Response(null, { status: 409 });

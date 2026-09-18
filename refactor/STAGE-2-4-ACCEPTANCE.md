@@ -35,3 +35,8 @@ The service-cost invariant test demonstrates zero application/storage work for
 automatic heartbeats across 50 participants plus 10 directory subscribers, and
 zero room-object fanout for ten listing requests. It is deliberately not labelled
 an eight-hour usage, billing, quota-headroom or production-hibernation measurement.
+
+The production-code eight-hour steady-operation model now passes both alarm
+orderings (SERVICE-COST.md). Real packet/network and separate-process tests pass
+6/6 in both configurations (NETWORK-IMPAIRMENT.md). Capture/input physical tests
+remain blocked while the input desktop is `Screen-saver`; no unlock or input was sent.

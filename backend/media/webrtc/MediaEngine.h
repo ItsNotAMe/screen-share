@@ -6,6 +6,7 @@
 #include "rtc_base/thread.h"
 #include <array>
 #include <memory>
+#include <functional>
 
 namespace screenshare::media {
 // Private native boundary. Construct/use/destroy on the signaling executor.
@@ -13,9 +14,13 @@ namespace screenshare::media {
 // remain caller-owned and must outlive their peers. SSL is application-owned.
 class MediaEngine final {
 public:
+    // Optional native transport injection. Construct the packet factory on the
+    // owned network thread; its sockets must obey WebRTC's thread/lifetime rules.
+    using PacketFactory = std::function<std::unique_ptr<webrtc::PacketSocketFactory>(webrtc::SocketFactory*)>;
     MediaEngine(webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio,
                 std::unique_ptr<webrtc::VideoEncoderFactory> encoder,
-                std::unique_ptr<webrtc::VideoDecoderFactory> decoder);
+                std::unique_ptr<webrtc::VideoDecoderFactory> decoder,
+                PacketFactory packetFactory = {});
     ~MediaEngine();
     MediaEngine(const MediaEngine&) = delete;
     MediaEngine& operator=(const MediaEngine&) = delete;

@@ -4,6 +4,7 @@ import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,16 +12,19 @@ import { fileURLToPath } from 'node:url';
 const workerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const executable = resolve(process.argv[2] ?? '');
 const fault = process.argv[5] ?? '';
-if (fault && fault !== 'mutation-ack-delay' && fault !== 'controllers' && fault !== 'desktop-input') throw new Error('Unknown native service scenario');
+const impairment = process.argv[4] === 'network-impairment';
+if (impairment ? !['collapse', 'loss2', 'loss5', 'reorder', 'duplicate', 'processes'].includes(fault) :
+    fault && fault !== 'mutation-ack-delay' && fault !== 'controllers' && fault !== 'desktop-input') throw new Error('Unknown native service scenario');
 if (!process.argv[2] || !process.argv[3]) throw new Error('Usage: node run-native-service.mjs <RoomServiceTests.exe> <artifact-root>');
 const artifact = join(resolve(process.argv[3]), 'native-service-' + randomUUID());
 await mkdir(artifact, { recursive: true });
 let mf, child, timer;
 const report = { schema: 1, passed: false, timedOut: false, executableSha256: createHash('sha256').update(await readFile(executable)).digest('hex'),
-  limitations: ['Loopback plaintext test adapter; remote TLS is not exercised', process.argv[4] === 'windows-media' ? 'Generated-window WGC capture and synthetic audio; no physical input' : process.argv[4] === 'media' ? 'Synthetic capture/audio; no physical devices or input' : 'Signaling payloads are synthetic; no media or physical input', 'No hibernation, load or NAT acceptance'], elapsedMs: 0 };
+  limitations: ['Loopback plaintext test adapter; remote TLS is not exercised', process.argv[4] === 'windows-media' ? 'Generated-window WGC capture and synthetic audio; no physical input' : process.argv[4] === 'media' || impairment ? 'Synthetic capture/audio; no physical devices or input' : 'Signaling payloads are synthetic; no media or physical input', 'No hibernation or NAT acceptance'], elapsedMs: 0 };
 const started = Date.now();
 report.fault = fault || null;
 let log = '';
+let stdout = '';
 try {
   const bundle = await build({ stdin: { resolveDir: workerRoot, contents: `
     import worker from './src/v2/worker.ts';
@@ -51,12 +55,17 @@ try {
     V2_ROOMS: { className: 'V2Room', useSQLite: true }, V2_CONTROL: { className: 'V2Control', useSQLite: true }, V2_DIRECTORY: { className: 'V2Directory', useSQLite: true } } });
   const origin = (await mf.ready).origin;
   child = spawn(executable, [origin, ...(fault ? [fault] : [])], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { log += chunk.toString(); if (log.length > 1024 * 1024) child.kill(); });
-  timer = setTimeout(() => { report.timedOut = true; child.kill(); }, 60000);
+  child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+  for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => {
+    log += chunk.toString();
+    if (impairment) appendFileSync(join(artifact, 'progress.log'), chunk);
+    if (log.length > 1024 * 1024) { report.logLimitExceeded = true; child.kill(); }
+  });
+  timer = setTimeout(() => { report.timedOut = true; child.kill(); }, impairment ? 90000 : 60000);
   report.exitCode = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
   clearTimeout(timer);
-  report.passed = report.exitCode === 0 && !report.timedOut;
-  if (report.passed) report.metrics = JSON.parse(log.trim());
+  report.passed = report.exitCode === 0 && !report.timedOut && !report.logLimitExceeded;
+  if (report.passed) report.metrics = JSON.parse(impairment ? stdout.trim() : log.trim());
 } catch (error) { report.passed = false; report.error = error.message; }
 finally {
   clearTimeout(timer);

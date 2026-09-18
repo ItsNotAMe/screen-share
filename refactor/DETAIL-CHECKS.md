@@ -484,8 +484,8 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [x] Implement authoritative sender identity, targeted signaling and generation checks.
 - [x] Implement separate room/directory revisions; exclude directed signaling from state revisions.
 - [x] Implement bounded duplicate suppression, one-shot gap resync, expected-revision conflicts and reconnect snapshots; native/service components tested separately.
-- [ ] Enforce message-byte limits, candidate limits and bounded queues.
-- [ ] Add shared client/server protocol fixture tests.
+- [x] Enforce message-byte limits, candidate limits and bounded queues; protocol/signaling and native transport tests cover these bounds.
+- [x] Add shared client/server protocol fixture tests (`refactor/protocol-fixtures`, RoomProtocolTests and Worker protocol tests).
 
 ### Persistence, hibernation and directory
 
@@ -516,7 +516,7 @@ Plan references: Section 3 and 5 / Checkpoint C.
 - [x] Issue 256-bit membership tokens, store hashes and enforce role/target/socket authorization.
 - [x] Preserve versioned salted PBKDF2 work factor and HTTPS-only secret handling.
 - [x] Add admission and per-socket rate limits without cross-object checks for every message; load tuning remains pending.
-- [ ] Preserve configurable room/participant caps, CORS restrictions and certificate validation.
+- [x] Preserve configurable room/participant caps, CORS restrictions and certificate validation. `V2_MAX_ROOMS` accepts 1–500 (default 500); invalid configuration fails new reservations closed while preserving renewals/releases. Room policy controls 1–63 viewers. Local capacity concurrency and configuration tests pass; production deployment remains separate.
 - [x] Implement kick invalidation and avoid claims of permanent accountless bans.
 
 ### Worker/native integration tests
@@ -525,13 +525,14 @@ Plan references: Section 3 and 5 / Checkpoint C.
 
 - [x] Add Worker typecheck/test scripts and execute tests in the local Cloudflare runtime.
 - [x] Test simultaneous joins, provisional expiry and capacity races; expiry uses injected persisted deadlines with the actual alarm handler.
-- [ ] Test passwords, invalid/expired tokens, replay and unauthorized commands.
-- [ ] Test old-socket close after replacement and hibernation heartbeat freshness.
-- [ ] Test duplicate/gapped revisions and stale connection candidates.
+- [x] Test passwords, invalid/expired tokens, replay and unauthorized commands in the local Worker/native suites.
+- [x] Test old-socket close after replacement in local workerd.
+- [ ] Validate heartbeat freshness after actual production hibernation (automatic local ping/pong coverage is separate).
+- [x] Test duplicate/gapped revisions and stale connection candidates in shared protocol/state-cache and signaling tests.
 - [x] Test directory write/removal failures, retries and leases in actual workerd with injected failures/deadlines.
 - [ ] Test host crash/leave, public/unlisted visibility and viewer-limit changes.
-- [ ] Test malformed/oversized messages, Unicode handling and signaling floods.
-- [ ] Verify listing has zero per-room fanout and heartbeat has zero per-peer storage writes.
+- [x] Test malformed/oversized messages, Unicode handling and signaling floods in protocol/admission/signaling and workerd tests.
+- [x] Verify listing has zero per-room fanout and heartbeat has zero per-peer storage writes; actual workerd instrumentation covers ten rooms, fifty participants and ten directory subscribers (SERVICE-COST.md).
 
 **Gate C**
 
@@ -632,7 +633,9 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 ### Harness and impairment scenarios
 
 - [ ] Extend the multi-viewer harness for the new CLI and four-viewer runs.
-- [ ] Add seeded WebRTC network-simulation scenarios and record configurations/seeds.
+- [x] Add seeded real-packet WebRTC network scenarios with recorded configurations,
+  actual impairment/isolation/recovery checks and independent receiver processes.
+  See NETWORK-IMPAIRMENT.md; the 640x360 software proof is not full field acceptance.
 - [ ] Run healthy 1080p60 with one viewer and four viewers.
 - [ ] Run one-viewer-path bandwidth collapse/recovery: 20 → 4 → 20 Mbps.
 - [ ] Run 2% and 5% loss with up to 50 ms jitter.
@@ -672,7 +675,9 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 
 ### Free-tier workload
 
-- [ ] Model/test ten rooms × one host/four viewers × eight hours, plus ten directory subscribers.
+- [x] Model eight hours of production alarm/outbox operations for ten rooms and ten
+  directory subscribers; test actual heartbeat/listing invariants in workerd.
+  See SERVICE-COST.md. Model operations are not measured provider billing/duration.
 - [ ] Count Worker HTTP requests/upgrades.
 - [ ] Count Durable Object messages, cross-object calls and alarms.
 - [ ] Count storage reads/writes, active duration and directory broadcasts.

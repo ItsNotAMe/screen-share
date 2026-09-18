@@ -1093,3 +1093,13 @@ occlusion result remains open.
 All runs used silent synthetic audio and test-owned windows/messages. Physical
 driver failures, end-to-end latency and the earlier intermittent timeout cause
 remain open; local renderer counters do not close those gates.
+## Stage 2–4 unattended closeout additions — 2026-09-18
+
+Release/Debug `stage23-final-*/result.json` pass **12/12 each**, including input
+pressure/timing and redacted report export. See SESSION-REPORTS.md.
+`network-timestamps-{release,debug}/result.json` pass **6/6 each** with encrypted
+packet impairment and separate receiver processes. See NETWORK-IMPAIRMENT.md for
+commands, preserved failures and the unresolved latency boundary. SERVICE-COST.md
+records real ten-room heartbeat/listing invariants and the eight-hour operation model.
+The interactive input desktop is currently `Screen-saver`; generated-desktop tests
+are not rerun by unlocking or synthesizing user input. Physical acceptance stays open.

@@ -11,7 +11,7 @@
 namespace screenshare::media {
 MediaEngine::MediaEngine(webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio,
     std::unique_ptr<webrtc::VideoEncoderFactory> encoder,
-    std::unique_ptr<webrtc::VideoDecoderFactory> decoder)
+    std::unique_ptr<webrtc::VideoDecoderFactory> decoder, PacketFactory packetFactory)
     : signaling_(webrtc::Thread::Current()),
       network_(webrtc::Thread::CreateWithSocketServer()), worker_(webrtc::Thread::Create()) {
     if (!signaling_ || !audio || !encoder || !decoder)
@@ -28,6 +28,10 @@ MediaEngine::MediaEngine(webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio,
     dependencies.audio_decoder_factory = webrtc::CreateAudioDecoderFactory<webrtc::AudioDecoderOpus>();
     dependencies.video_encoder_factory = std::move(encoder);
     dependencies.video_decoder_factory = std::move(decoder);
+    if (packetFactory) {
+        dependencies.packet_socket_factory = network_->BlockingCall([&] { return packetFactory(network_->socketserver()); });
+        if (!dependencies.packet_socket_factory) throw std::invalid_argument("Missing packet socket factory");
+    }
     webrtc::EnableMedia(dependencies);
     factory_ = webrtc::CreateModularPeerConnectionFactory(std::move(dependencies));
     if (!factory_) throw std::runtime_error("Media factory failed");

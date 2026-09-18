@@ -53,8 +53,10 @@ existing CLI commands remain legacy until adoption and the required acceptance g
 `scripts/test-room-regression.py` now runs the production room/UI/CLI and mutation
 recovery scenarios as one silent matrix, with repeated rounds, process-tree cleanup,
 bounded logs and hashed JSON evidence. Generated Windows capture/GPU tests are an
-explicit `--desktop` extension. Separate native host/viewer processes, scripted
-authorized input, network impairment and continuous soak acceptance remain open.
+explicit `--desktop` extension. Separate native host/viewer processes and seeded
+encrypted-packet impairments now pass in both builds; see NETWORK-IMPAIRMENT.md.
+Scripted authorized input uses recording sinks. Physical input, external latency
+and continuous soak acceptance remain separate gates.
 
 ## 2. Complete user experience (B + D)
 

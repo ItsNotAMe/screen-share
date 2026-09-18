@@ -56,6 +56,9 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<unsigned> smallFrames{0};
     std::shared_ptr<proof::CaptureLifetime> capture = std::make_shared<proof::CaptureLifetime>();
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
+    MediaEngine::PacketFactory packetFactory;
+    CaptureSession::Factory captureFactory;
+    std::optional<StreamPreferences> preferences;
     void OnFrame(const webrtc::VideoFrame& frame) override {
         auto pixels = frame.video_frame_buffer()->ToI420();
         if (pixels && pixels->DataY()[pixels->StrideY() * (pixels->height() / 2) + pixels->width() / 2] > 185) ++responseFrames;
@@ -102,11 +105,12 @@ public:
             endpoints.playout = [control = options.playback] { return std::make_unique<ControlledPcmPlayout>(control); };
             options.playbackForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         }
-        options.engine = [endpoints] {
+        options.engine = [endpoints, packetFactory = evidence_->packetFactory] {
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
-                std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>());
+                std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>(), packetFactory);
         };
         options.capture = [lifetime = evidence_->capture] { return std::make_unique<proof::ObservedCaptureSource>(lifetime); };
+        if (evidence_->captureFactory) options.capture = evidence_->captureFactory;
         options.deliver = [evidence = evidence_](auto& source, const auto& sample) {
             if (evidence->failDelivery.exchange(false)) throw std::runtime_error("Injected viewer delivery failure");
             if (evidence->input->pressed) {
@@ -119,6 +123,7 @@ public:
         options.frames = frames ? std::move(frames) : evidence_;
         options.preferences.resolution = ResolutionMode::Fixed;
         options.preferences.width = 640; options.preferences.height = 360; options.preferences.fps = 30;
+        if (evidence_->preferences) options.preferences = *evidence_->preferences;
         native_ = CreateNativeRoomRuntime(std::move(identity), std::move(send), std::move(options));
 #endif
     }

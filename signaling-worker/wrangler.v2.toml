@@ -3,6 +3,11 @@ name = "screenshare-signaling-v2"
 main = "src/v2/worker.ts"
 compatibility_date = "2026-05-21"
 
+# Optional deployment budget: decimal string from 1 through 500 (default 500).
+# Invalid values block new rooms; existing room renewals and releases still work.
+# [vars]
+# V2_MAX_ROOMS = "100"
+
 [[durable_objects.bindings]]
 name = "V2_ROOMS"
 class_name = "V2Room"
