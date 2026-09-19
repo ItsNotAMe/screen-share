@@ -31,6 +31,9 @@
 #include <QTemporaryDir>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QButtonGroup>
+#include <QListWidget>
+#include <QToolButton>
 #include <QAbstractItemView>
 #include <QScrollBar>
 #include <QDialog>
@@ -393,7 +396,7 @@ void NormalHomeScenario(const QUrl& origin) {
     preferences->findChild<QPushButton*>("preferencesBack")->click();
     Check(host.home()->isVisible() && host.browser()->profileName() == "Auto saved");
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    for (const auto size : {QSize(800,600), QSize(1200,850)}) {
+    for (const auto size : {QSize(740,600), QSize(800,600), QSize(1200,850)}) {
         host.window().resize(size); QCoreApplication::processEvents();
         snapshot(QString("home-%1").arg(size.width()));
         host.home()->findChild<QPushButton*>("HomePrimary")->click();
@@ -401,6 +404,15 @@ void NormalHomeScenario(const QUrl& origin) {
         Check(host.browser()->findChild<QPushButton*>("createV2Room")->isVisible());
         Check(!host.browser()->findChild<QPushButton*>("joinV2Room")->isVisible());
         host.browser()->findChild<QLineEdit*>("roomName")->setText("Friday games");
+        auto* visibility = host.browser()->findChild<QWidget*>("RoomVisibility")->findChild<QButtonGroup*>();
+        visibility->button(1)->click(); Check(!host.browser()->findChild<QCheckBox*>("publicRoom")->isChecked());
+        visibility->button(0)->click();
+        auto* kinds = host.browser()->findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>();
+        kinds->button(1)->click();
+        Check(host.browser()->findChild<QComboBox*>("captureSource")->currentIndex() == -1);
+        host.browser()->findChild<QPushButton*>("createV2Room")->click(); Check(!host.session());
+        kinds->button(0)->click(); Check(host.browser()->findChild<QComboBox*>("captureSource")->currentIndex() == 0);
+        Check(host.browser()->findChild<QListWidget*>("SourceCards")->currentItem());
         host.window().resize(size + QSize(20,20)); QCoreApplication::processEvents(); host.window().resize(size);
         Check(host.browser()->findChild<QLineEdit*>("roomName")->text() == "Friday games");
         host.window().findChild<QPushButton*>("TitleSettings")->click();
@@ -470,7 +482,7 @@ void NormalHomeScenario(const QUrl& origin) {
     viewer.browser()->findChild<QPushButton*>("roomBack")->click();
     host.home()->findChild<QPushButton*>("HomePrimary")->click();
     host.browser()->findChild<QLineEdit*>("roomName")->setText("<b>Normal home</b>");
-    host.browser()->findChild<QComboBox*>("createPreset")->setCurrentIndex(1);
+    host.browser()->findChild<QWidget*>("StreamPresets")->findChild<QButtonGroup*>()->button(1)->click();
     host.browser()->findChild<QComboBox*>("createBitrate")->setCurrentIndex(1);
     host.browser()->findChild<QLineEdit*>("roomPassword")->setText("normal-home-secret");
     host.browser()->findChild<QPushButton*>("createV2Room")->click();
@@ -532,6 +544,7 @@ void BrowserScenario(const QUrl& origin) {
     }, true, viewerFile, false);
     auto& host = *hostApp.browser(); auto& viewer = *viewerApp.browser();
     Directory audit(true); Check(audit.Start(origin)); hostApp.show(); viewerApp.show();
+    viewer.OpenJoin();
     auto* hostStack = hostApp.window().findChild<QStackedWidget*>("AppPageStack");
     auto* viewerStack = viewerApp.window().findChild<QStackedWidget*>("AppPageStack");
     Check(hostStack && viewerStack && hostStack->count() == 1 && !host.isWindow());
@@ -560,6 +573,7 @@ void BrowserScenario(const QUrl& origin) {
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
     // Offscreen Qt clipboard only. Never replace the user's real Windows clipboard.
     host.activeSession()->findChild<QPushButton*>("copyRoomLink")->click(); Check(QApplication::clipboard()->text() == roomLink);
+    viewer.findChild<QPushButton*>("pasteRoomLink")->click(); Check(viewer.findChild<QLineEdit*>("joinRoomId")->text() == roomLink);
 #endif
     for (const auto& invalid : {roomLink + "?password=secret", roomLink + "#token", QString("https://other.example/room"), QString("screenshare://user:secret@room/v2/id"), QString("screenshare://room/v3/id"), QString("screenshare://room/v2/%2e%2e")}) {
         Check(!ParseRoomReference(invalid));
@@ -569,8 +583,19 @@ void BrowserScenario(const QUrl& origin) {
     Check(!ParseRoomReference(QString(129, 'x')) && !MakeRoomLink(roomLink).size());
     const auto parsed = ParseRoomSessionConfig(QJsonObject{{"origin", origin.toString()}, {"roomId", roomLink}}, true);
     Check(parsed.room.origin == origin.toString().toStdString() && parsed.room.roomId == host.activeSession()->session().status().roomId);
-    viewer.findChild<QLineEdit*>("roomPassword")->setText("wrong-password"); list->selectRow(0);
-    viewer.findChild<QPushButton*>("joinSelectedRoom")->click();
+    list->cellWidget(0,4)->findChild<QPushButton*>()->click();
+    Check(!viewer.activeSession() && viewer.findChild<QLineEdit*>("roomPassword")->isVisible());
+    if (const auto previews = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !previews.isEmpty()) {
+        QCoreApplication::processEvents(); QDir().mkpath(previews);
+        const auto ratio = viewerApp.window().devicePixelRatioF(); QPixmap image(viewerApp.window().size()*ratio);
+        image.setDevicePixelRatio(ratio); image.fill(Qt::transparent); viewerApp.window().render(&image);
+        Check(image.save(QDir(previews).filePath("join-protected.png")));
+    }
+    viewer.findChild<QPushButton*>("cancelRoomPassword")->click();
+    Check(viewer.findChild<QLineEdit*>("roomPassword")->isHidden() || !viewer.findChild<QLineEdit*>("roomPassword")->isVisible());
+    list->cellWidget(0,4)->findChild<QPushButton*>()->click();
+    viewer.findChild<QLineEdit*>("roomPassword")->setText("wrong-password");
+    viewer.findChild<QPushButton*>("joinWithPassword")->click();
     Wait([&] { return viewer.activeSession() && viewer.activeSession()->session().status().phase == RoomPhase::Failed; });
     viewer.activeSession()->close();
     Wait([&] { return !viewer.activeSession() && viewer.isVisible() && viewer.directory().status().phase == Directory::Phase::Ready; });

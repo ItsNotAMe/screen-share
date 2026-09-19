@@ -21,15 +21,23 @@ Settings now uses pill tabs, a rounded content panel and an inline circular Back
 button. Title actions only fill on hover/press, without a persistent focus underline.
 Home Refresh is icon-only with an accessible label. Viewers have their own column;
 host names are not exposed by the current public directory schema.
-Create exposes preset, resolution, FPS, bitrate limit, source, audio and capacity;
-it stacks cards at compact widths and uses two columns in wider windows. Primary
-actions stay outside the scrolling form. This replaces the combined temporary
-browser form, not the remaining temporary live-session controls.
+Create now follows the two-card mockup: stacked field labels, Public/Private and
+Gaming/Quality segments, Display/Window source cards, a two-column quality grid,
+password inside Room details, and collapsed capacity controls. Source snapshots
+refresh on source enumeration or category changes; unavailable previews use a
+named placeholder, never a replacement capture source. Below 780 logical pixels,
+the cards stack. The create action remains outside the scrolling form.
+Join has inline Paste/Join actions, per-room Join buttons, a password prompt under
+the directory, and collapsed playback options. The obsolete separate selected-room
+action is removed. No nickname fields, helper descriptions, room counters, or
+invented host data were added. Backend admission and configuration remain shared.
 
 Release UI/test targets build. The silent room-v2-qt-ui integration test passes at
 100% and 150% display scale, covering normal navigation, profile validation,
 profile persistence, search/row identity, configured stream delivery, media and
-session lifecycle. Rendered Home/Create/Join were inspected at 800x600 and 1200x850,
+session lifecycle. The entry redesign additionally exercises source-category and
+visibility segments, paste, password prompt/cancel, and the per-room join path.
+Rendered Home/Create/Join were inspected at 740x600, 800x600 and 1200x850,
 including 150% scaling. The test now includes production SVG resources and explicitly
 loads Windows fonts for Qt offscreen rendering. No screen-reader verification or
 physical-device campaign was performed.

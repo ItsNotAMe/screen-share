@@ -146,6 +146,11 @@ QString uiStyleSheet()
 QWidget { color: #edf5f2; font-family: "Segoe UI"; font-size: 10pt; }
 QDialog, QWidget#RoomBrowser { background: #0c1110; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
+QScrollBar:vertical { background: #101815; width: 10px; margin: 0; border: 0; }
+QScrollBar::handle:vertical { background: #40534a; border-radius: 5px; min-height: 24px; }
+QScrollBar::handle:vertical:hover { background: #60786f; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; border: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QLineEdit, QComboBox, QSpinBox {
     background: #151d1b; color: #edf5f2; border: 1px solid #293631;
     border-radius: 6px; padding: 8px; min-height: 20px;
@@ -192,10 +197,30 @@ QTabBar::tab:selected { border-bottom: 2px solid #38d8c8; }
 QLabel#PageHeading { font-size: 23pt; font-weight: 650; }
 QLabel#SectionHeading { font-size: 13pt; font-weight: 650; padding-bottom: 6px; }
 QWidget#FormCard { background: #121a17; border: 1px solid #293631; border-radius: 8px; }
+QLabel#OptionLabel { color: #c5d1cb; background: transparent; }
+QPushButton#SegmentButton { background: #101815; border: 1px solid #30413a; border-radius: 7px; padding: 8px 12px; }
+QPushButton#SegmentButton:checked { background: #17473d; border-color: #38d8c8; color: #8ce4d5; }
+QPushButton#SegmentButton:hover { background: #263d33; }
+QPushButton#SegmentButton:checked:hover { background: #25584b; }
+QListWidget#SourceCards { background: transparent; border: 0; outline: 0; }
+QListWidget#SourceCards::item { background: #0e1612; border: 1px solid #30413a; border-radius: 7px; padding: 6px; }
+QListWidget#SourceCards::item:selected { background: #15352d; border: 1px solid #38d8c8; color: #edf5f2; }
+QListWidget#SourceCards::item:hover { background: #203b30; }
+QWidget#DisclosureCard { background: #131c17; border: 1px solid #293631; border-radius: 8px; }
+QToolButton#OptionsDisclosure { background: transparent; color: #c5d1cb; border: 0; border-radius: 6px; padding: 6px; text-align: left; }
+QToolButton#OptionsDisclosure:hover { background: #263d33; }
+QPushButton#roomBack, QPushButton#JoinPasswordToggle { background: transparent; border: 0; padding: 5px; color: #b7c8c0; }
+QPushButton#roomBack:hover, QPushButton#JoinPasswordToggle:hover { background: #20312c; }
+QPushButton#JoinListedRoom { background: #38d8c8; color: #08251f; border: 0; border-radius: 6px; padding: 5px 12px; font-weight: 600; }
+QPushButton#JoinListedRoom:hover { background: #65e3d6; }
+QPushButton#JoinListedRoom:disabled { background: #20312c; color: #73877f; }
+QTableWidget#publicRooms { background: #121a17; border: 1px solid #293631; border-radius: 8px; selection-background-color: #1d3b31; }
+QTableWidget#publicRooms QHeaderView::section { background: #202b26; padding: 10px; }
+QTableWidget#publicRooms::item { border-bottom: 1px solid #293631; padding: 0 10px; }
 QLabel#FormHint { color: #a3b5af; }
 QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
 QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }
-QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#saveProfile {
+QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#joinWithPassword {
     background: #38d8c8; color: #08251f; font-weight: 650; min-height: 24px;
 }
 QWidget#AppShellWindow,

@@ -10,6 +10,8 @@ class QLabel;
 class AppShellWindow;
 class QSpinBox;
 class QBoxLayout;
+class QVBoxLayout;
+class QListWidget;
 
 class RoomBrowserWindow final : public QWidget {
 public:
@@ -41,6 +43,8 @@ private:
     void Launch(bool host);
     void Refresh(const screenshare::room::qt::RoomDirectory::Status&);
     void RefreshSources();
+    void RefreshSourceCards(bool selectFirst = false);
+    void JoinListedRoom(const QString& id, bool passwordRequired);
     QUrl origin_;
     QtRoomSession::Factory factory_;
     bool loopback_, closing_ = false, closedNotified_ = false;
@@ -58,8 +62,12 @@ private:
     QComboBox *source_, *audio_, *decoder_;
     QTableWidget* rooms_;
     QLabel *status_, *error_;
-    QPushButton* joinSelected_;
     QPushButton* retry_;
+    QWidget *passwordPanel_, *directoryPanel_;
+    QWidget* passwordActions_;
+    QVBoxLayout *detailsBody_, *joinBody_;
+    QListWidget* sourceCards_;
+    bool windowSources_ = false;
 };
 int RunRoomBrowserWindow(const QUrl& origin, bool normalHome = false,
                         std::function<void(AppShellWindow&)> initializeShell = {});
