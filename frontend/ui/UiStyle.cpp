@@ -22,7 +22,8 @@ public:
 };
 class ComboItemDelegate final : public QStyledItemDelegate {
 public:
-    explicit ComboItemDelegate(QAbstractItemView* view) : QStyledItemDelegate(view), view_(view) {
+    explicit ComboItemDelegate(QComboBox* combo) : QStyledItemDelegate(combo->view()), view_(combo->view()), combo_(combo) {
+        auto* view = view_;
         view->installEventFilter(this); view->viewport()->installEventFilter(this);
     }
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
@@ -34,8 +35,10 @@ protected:
     void initStyleOption(QStyleOptionViewItem* option, const QModelIndex& index) const override {
         QStyledItemDelegate::initStyleOption(option, index);
         option->state &= ~(QStyle::State_MouseOver | QStyle::State_HasFocus);
-        if (!keyboard_) option->state &= ~QStyle::State_Selected;
-        if (index == hovered_) option->state |= QStyle::State_MouseOver;
+        option->state &= ~QStyle::State_Selected;
+        if (index.row() == combo_->currentIndex() && index.parent() == combo_->rootModelIndex())
+            option->state |= QStyle::State_Selected;
+        if (index == hovered_ || (keyboard_ && index == view_->currentIndex())) option->state |= QStyle::State_MouseOver;
     }
     bool eventFilter(QObject* object, QEvent* event) override {
         if (event->type() == QEvent::MouseMove) {
@@ -51,6 +54,7 @@ protected:
     }
 private:
     QAbstractItemView* view_;
+    QComboBox* combo_;
     QModelIndex hovered_;
     bool keyboard_ = false;
 };
@@ -85,7 +89,7 @@ void styleComboPopup(QComboBox* combo)
     combo->setMaxVisibleItems(8);
     // The native combo delegate paints a menu frame over QSS item styling.
     // A standard view delegate keeps hover/selection in the shared theme.
-    combo->setItemDelegate(new ComboItemDelegate(combo->view()));
+    combo->setItemDelegate(new ComboItemDelegate(combo));
     combo->view()->setMouseTracking(true);
     combo->view()->viewport()->setMouseTracking(true);
     auto* popup = combo->view()->window();
@@ -116,6 +120,7 @@ QComboBox { border-radius: 10px; padding-right: 36px; combobox-popup: 0; }
 QFrame#ThemedComboPopup { background: transparent; border: 0; }
 QComboBox::drop-down { subcontrol-origin: border; subcontrol-position: top right; width: 32px; border: 0; }
 QComboBox::down-arrow { image: url(:/screenshare/ui/icons/chevron-down.svg); width: 16px; height: 16px; }
+QComboBox::down-arrow:on { image: url(:/screenshare/ui/icons/chevron-up.svg); }
 QComboBox QAbstractItemView { background: #191e1c; color: #edf5f2; selection-background-color: #21645b; border: 1px solid #607068; border-radius: 6px; padding: 0; outline: 0; }
 QComboBox QScrollBar:vertical { background: #191e1c; width: 10px; margin: 0; border: 0; }
 QComboBox QScrollBar::handle:vertical { background: #727a76; min-height: 24px; border-radius: 5px; }
