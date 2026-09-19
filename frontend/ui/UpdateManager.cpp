@@ -536,7 +536,10 @@ void UpdateManager::downloadUpdate(
     QObject::connect(reply, &QNetworkReply::readyRead, this, [reply, output] {
         output->write(reply->readAll());
     });
-    QObject::connect(progress, &QObject::destroyed, reply, [reply] { reply->abort(); reply->deleteLater(); });
+    QObject::connect(progress, &QObject::destroyed, reply, [reply] {
+        // Finish widget destruction/disconnection before abort emits finished.
+        QTimer::singleShot(0, reply, [reply] { reply->abort(); reply->deleteLater(); });
+    });
     QObject::connect(reply, &QNetworkReply::downloadProgress, progress, [progress](qint64 received, qint64 total) {
         if (total > 0) {
             progress->setValue(static_cast<int>((received * 100) / total));

@@ -55,8 +55,12 @@ struct UpdateManagerTestAccess {
         Wait([&] { return install.isEnabled() && status.text().contains("verified"); });
         Check(progress.value()==100);
         // Closing the update UI during an outstanding transfer must cancel it.
-        auto* transient=new QProgressBar;
-        manager.downloadUpdate(update,transient,&status,&install,&later);
+        auto* transient=new QWidget;
+        auto* transientStatus=new QLabel(transient);
+        auto* transientProgress=new QProgressBar(transient);
+        auto* transientInstall=new QPushButton(transient);
+        auto* transientLater=new QPushButton(transient);
+        manager.downloadUpdate(update,transientProgress,transientStatus,transientInstall,transientLater);
         delete transient;
         QApplication::processEvents();
     }
