@@ -1259,3 +1259,15 @@ reports are preserved with hashes. That batch's network results were Release 5/6
 and Debug 6/6, including a retained Release bandwidth-recovery failure. Later
 transport/pacing fixes and fresh packet results are recorded in
 CONGESTION-RECOVERY.md and COMPARISON.md; neither erases the original failure.
+
+The physical-controller reader can be checked without input injection using
+`ViewerGamepadReportTests.exe --lifecycle-probe` in the signed-in user's session.
+It reads ten short polling-thread lifetimes and fails on missing states; it does
+not grant room access or prove permission lifecycle correctness. The connected
+GameSir/native-DS4 run passes (263 valid reads, zero missing).
+
+Reverse load evidence is recorded in HARDWARE-LAN.md. The shared generated scene
+uses per-monitor DPI awareness for stable physical marker coordinates on scaled
+displays. `load-viewer` now preserves startup image counters and the
+`initial-fresh-images` failure stage when initialization times out. Hardware-host
+requirements and the 45-FPS viewer threshold remain unchanged.

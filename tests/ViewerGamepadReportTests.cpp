@@ -160,6 +160,33 @@ bool TestDualSenseUsbAndBluetooth()
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "--lifecycle-probe") {
+        const auto devices = screenshare::ViewerGamepad::ConnectedDevices();
+        bool passed = !devices.empty();
+        for (const auto& device : devices) {
+            unsigned firstMissing = 0, valid = 0, missing = 0;
+            // Match permission lifetimes: each grant has a new polling thread,
+            // while the selected HID device survives between grants.
+            for (unsigned cycle = 0; cycle < 10; ++cycle) {
+                std::jthread reader([&] {
+                    if (!screenshare::ViewerGamepad::ReadState(device.id)) ++firstMissing;
+                    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+                    while (std::chrono::steady_clock::now() < end) {
+                        if (screenshare::ViewerGamepad::ReadState(device.id)) ++valid;
+                        else ++missing;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+                    }
+                });
+                reader.join();
+                std::this_thread::sleep_for(std::chrono::milliseconds(750));
+            }
+            std::cout << device.name << ": cycles=10 firstMissing=" << firstMissing
+                      << " valid=" << valid << " missing=" << missing << '\n';
+            passed &= firstMissing == 0 && missing == 0 && valid > 0;
+        }
+        std::cout << "devices=" << devices.size() << " passed=" << passed << '\n';
+        return passed ? 0 : 1;
+    }
     // Explicit field diagnostic: read controllers only; never inject input or
     // connect to a room.
     if (argc == 2 && std::string_view(argv[1]) == "--device-probe") {

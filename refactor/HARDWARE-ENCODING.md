@@ -150,6 +150,14 @@ production leak bound. Existing native resource acceptance remains open.
 
 ## Remaining boundaries
 
+Reverse laptop-host qualification (2026-09-19) **fails hardware encoding**: the
+standalone adapter probe exceeds its 500-ms output deadline, and the real LAN
+session falls back once to software. That fallback sustains 49.49 fresh FPS for
+five minutes with zero invalid images. Keep hardware preferred with bounded
+fallback; do not force hardware on this laptop or lengthen its stall deadline.
+This is a per-machine result, not a reason to discard the measured desktop
+hardware benefit. See [HARDWARE-LAN.md](HARDWARE-LAN.md) for both endpoints and limits.
+
 The tested desktop has an RTX 5070 Ti and AMD integrated graphics; inventory
 alone does not prove which adapter every codec selected. The controls confirm
 hardware/software implementation selection, not vendor attribution. Repeat the

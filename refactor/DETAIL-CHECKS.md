@@ -744,7 +744,10 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 - [ ] Verify no input backlog under video saturation, retransmissions or keyframe bursts.
 - [ ] Verify lost/late/reordered states and reliable events after watchdog expiry.
 - [ ] Verify revoke, disconnect, controller unplug and backend failure neutralization.
-  Controller and service cases pass with recording sinks. Physical devices remain open.
+  Controller and service cases pass with recording sinks. Physical GameSir
+  Bluetooth/native-DS4 delivery, explicit held-button release and power-off
+  cleanup now pass on laptop → desktop (CONTROLLERS.md, 2026-09-19). Other
+  devices, intermittent regrant and physical backend-failure cases remain open.
 - [ ] Verify window focus/confinement, letterboxing and source-change mapping.
   Recording-sink UI/CLI, metadata and source-generation cases pass. Physical
   injection/foreground/occlusion behavior still requires separate acceptance.

@@ -97,3 +97,43 @@ host/viewer reports are accepted, 18 malformed/fallback/stalled load reports and
 nine malformed timing reports are rejected. Release/Debug evidence CTests and
 the comparison evidence CTest pass. No production backend behavior changed in
 this measurement group.
+
+## Reverse direction: 2026-09-19
+
+The laptop-host → desktop-viewer five-minute run delivers **49.49 fresh FPS**,
+14,848 distinct images and zero invalid images at 1920×1080. Both sessions remain
+healthy. This passes the viewer's unchanged 45-FPS delivery gate, but **fails the
+hardware-host gate**: laptop encoding falls back once to `mf-h264-software`.
+Host-side receiver telemetry confirms the desktop uses `mf-h264-hardware` decoding.
+The viewer's own codec-observed fields are not populated; do not infer codec choice
+from its requested mode alone.
+
+| Endpoint | CPU (one core = 100%) | Peak private MiB | First / last 30-s median private MiB | First / last 30-s median handles |
+| --- | --- | --- | --- | --- |
+| Laptop software host | 189.4% | 437.2 | 279.8 / 272.1 | 803 / 794 |
+| Desktop hardware viewer | 17.0% | 110.2 | 104.4 / 107.2 | 710 / 698.5 |
+
+Desktop Section handles stay at 13 during streaming and fall to six after stop.
+This is useful bounded five-minute fallback evidence, not physical presentation,
+gaming latency, four-viewer throughput or a long-term leak certification.
+
+A separate interactive-session `MfHardwareAdapterTest` also fails with
+`Hardware frame exceeded 500 ms output deadline`, without capture or networking.
+The laptop hardware encoder is therefore not qualified. The deadline has not
+been increased to hide the stall. This does not overturn the desktop hardware
+result, and both legacy and v2 share the affected codec implementation.
+
+The first reverse attempt failed its fresh-image startup check. The generated
+scene now opts its window thread into per-monitor DPI awareness so markers remain
+at physical pixel coordinates on scaled displays. This fixture change is shared
+with the legacy comparison. The corrected run passes image validation; no
+production capture path or acceptance threshold changed. Startup failures now
+preserve image counters instead of losing the diagnostic evidence.
+
+Raw runs are in `build/reverse-load-20260919` and
+`build/reverse-load-dpi-20260919`; the first host used an older validator and is
+retained only as a failed diagnostic. The corrected endpoints use matching runner,
+validator and executable hashes. [Compact evidence](evidence/reverse-load-2026-09-19.json)
+retains both outcomes, hashes, resource summaries and standalone diagnostic logs.
+Release/Debug proof builds, controller parser tests and live-evidence tests pass.
+Both temporary remote load tasks were removed after completion.

@@ -24,6 +24,9 @@ public:
         timeBeginPeriod(1);
         std::promise<HWND> ready; auto future = ready.get_future();
         thread_ = std::thread([this, ready = std::move(ready)]() mutable {
+            // Marker coordinates describe physical pixels. A DPI-virtualized
+            // window changes their captured positions on scaled laptop displays.
+            SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             WNDCLASSW type{}; type.lpfnWndProc = Procedure; type.hInstance = GetModuleHandleW(nullptr); type.lpszClassName = L"BackendComparisonScene";
             RegisterClassW(&type);
             HWND window = CreateWindowW(type.lpszClassName, L"ScreenShare comparison — generated content only", WS_POPUP,

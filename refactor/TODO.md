@@ -28,6 +28,21 @@ substitute for the remaining field gates.
 
 Do not add unrelated backend features or repeat completed v2-only harness work.
 
+Field update (2026-09-19): GameSir Bluetooth delivery, explicit held-button
+release and held-button power-off cleanup pass on laptop → desktop. The native
+DS4 HID reader now accepts padded reports while retaining CRC validation. The
+Qt page's scrolling/video clipping is user-confirmed. Repeat-grant investigation
+remains open: a read-only ten-polling-thread lifecycle probe passes, so it has not
+reproduced the intermittent permission failure. See CONTROLLERS.md.
+
+Reverse-load update: laptop → desktop sustains 49.49 fresh FPS for five minutes,
+with zero invalid images and stable handle counts. Laptop hardware encoding fails
+the standalone output deadline and falls back to software; the strict hardware
+gate remains failed. This completes the reverse-direction measurement, not
+multi-viewer/hardware qualification. See HARDWARE-LAN.md and its compact evidence.
+SERVICE-COST.md now records actual account dashboard readings: observed request
+headroom is below the 50% target; interval/error reconciliation remains open.
+
 Latest completed work (2026-09-19): native presentation/recovery acceptance in
 software-decoder compatibility mode. The actual laptop delivers 47.7 rendered /
 48.3 fresh decoded FPS for five minutes with zero invalid images/render errors.

@@ -61,6 +61,35 @@ be measured in production. The half-allowance duration budget is 6,500 GB-s, or
 
 ## Deployment budget
 
+### Account observation (2026-09-19 local time)
+
+Read-only inspection of the signed-in Cloudflare dashboard confirms that this
+account is on Workers Free. The Durable Objects Usage panel labels its interval
+**September 18–September 18** and reports account-wide totals, including legacy:
+
+| Dashboard usage | Observed | Free daily allowance | Approximate allowance remaining |
+| --- | ---: | ---: | ---: |
+| Requests | 56.32k | 100,000 | 43.68% |
+| Duration | 221 GB-s | 13,000 GB-s | 98.30% |
+| SQL rows read | 16.5k | 5,000,000 | 99.67% |
+| SQL rows written | 28.32k | 100,000 | 71.68% |
+
+SQL storage is 5.84 MB. These rounded dashboard readings are neither a finalized
+invoice nor a controlled ten-room/eight-hour workload. In particular, the observed
+request total leaves **less than the target 50% account headroom**. Do not mark the
+cost gate passed or infer production hibernation from the low aggregate duration.
+The separate Workers panel shows `Requests today: 0 / 100,000`, while account-home
+rolling-24-hour analytics show 20.83k Worker invocations. The different intervals
+and possible reporting delay must be reconciled before comparing those counters.
+
+The room namespace overview reports 185 errors in the past 24 hours. Its detailed
+invocation-status chart instead shows 82 client disconnects and two Worker
+exceptions, with zero CPU-limit, memory-limit or internal errors. These views do
+not reconcile yet; neither treating all overview errors as crashes nor dismissing
+the exceptions is justified. Retrieve attributable exception details and a matched
+measurement interval before closing service reliability acceptance. No account
+plan, permission, deployment or service setting was changed during this inspection.
+
 `V2_MAX_ROOMS` is an optional string binding containing a decimal integer from
 1 through 500; omission keeps 500. The setting can reduce the safety cap, not
 raise the protocol/directory bound. Empty, malformed and out-of-range values

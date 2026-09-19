@@ -231,7 +231,17 @@ inline QJsonObject Run(bool host, const std::string& origin, const QString& invi
         Check(ready.write(bytes) == bytes.size() && ready.commit());
         const auto deadline = Clock::now() + 60s;
         while (room.Status().activePeers != 1) { Check(Clock::now() < deadline && room.Status().phase == RoomPhase::Active); std::this_thread::sleep_for(10ms); }
-    } else Wait([&] { if (presentation) presentation->Pump(); return sink->Read()["freshFrames"].toInt() >= 60; });
+    } else {
+        try { Wait([&] { if (presentation) presentation->Pump(); return sink->Read()["freshFrames"].toInt() >= 60; }); }
+        catch (...) {
+            auto evidence = sink->Read();
+            evidence["passed"] = false; evidence["role"] = "viewer";
+            evidence["failedStage"] = "initial-fresh-images";
+            auto stop = room.Stop(); Get(stop);
+            evidence["runtimeReleased"] = true;
+            return evidence;
+        }
+    }
     // Let rate/telemetry settle before collecting load samples.
     waitUntil(Clock::now() + 5s);
     const auto presentationBefore = presentation ? presentation->Read()["presented"].toInteger() : 0;

@@ -9,6 +9,15 @@ the **Working agreement** table at the top of [TODO.md](TODO.md). This document
 keeps the detailed acceptance requirements; its historical updates are not
 additional milestones.
 
+2026-09-19 field follow-up: GameSir Bluetooth delivery and held-input release/
+disconnect pass; intermittent repeat-grant behavior remains open. Reverse LAN
+delivery sustains 49.49 fresh FPS for five minutes with no invalid images, using
+laptop software encoding after a hardware deadline failure. Hardware-host
+qualification therefore fails rather than being silently waived. See CONTROLLERS.md
+and HARDWARE-LAN.md. Actual account usage in SERVICE-COST.md also leaves the cost
+gate open: the observed request headroom is below target and chart intervals/
+exceptions still need reconciliation.
+
 Latest completed portion: five-minute native presentation in software-decoder
 compatibility mode passes at 47.7 rendered / 48.3 fresh decoded FPS. Real GPU
 rendering, one-frame latency configuration, resize/minimize/restore and valid

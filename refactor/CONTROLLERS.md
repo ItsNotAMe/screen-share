@@ -36,6 +36,13 @@ to succeed. That intermittent regrant behavior is not explained by the successfu
 disconnect check and remains a follow-up. External input-to-display latency and
 physical compatibility with other Xbox or Sony models remain unverified.
 
+Follow-up: `ViewerGamepadReportTests --lifecycle-probe` keeps one selected device
+across ten fresh polling threads, separated by 750 ms, without refreshing or
+injecting input. The laptop returned `firstMissing=0 valid=263 missing=0` across
+ten cycles. This rules out a deterministic failure in that exercised reader
+lifetime pattern, but does not exercise permission messaging or close the
+intermittent regrant observation.
+
 The opt-in v2 room UI and CLI now support explicitly authorized controllers.
 Mouse/keyboard control is now integrated; see [DESKTOP-INPUT.md](DESKTOP-INPUT.md).
 Stage 3/Gate D and physical acceptance
