@@ -106,6 +106,9 @@ void styleComboPopup(QComboBox* combo)
     combo->view()->setMouseTracking(true);
     combo->view()->viewport()->setMouseTracking(true);
     auto* popup = combo->view()->window();
+    // Windows only composites a translucent QWidget window when it is
+    // frameless; otherwise transparent rounded corners can appear black.
+    popup->setWindowFlag(Qt::FramelessWindowHint, true);
     popup->setAttribute(Qt::WA_TranslucentBackground);
     popup->setObjectName("ThemedComboPopup");
     auto palette = popup->palette();
