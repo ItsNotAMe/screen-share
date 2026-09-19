@@ -490,11 +490,16 @@ void NormalHomeScenario(const QUrl& origin) {
         }
         auto* section = host.browser()->findChild<QScrollArea*>("StreamSectionScroll");
         const auto beforeOptions = section->geometry();
+        const auto beforeViewport = section->viewport()->size();
+        const auto beforeSourceWidth = sources->width();
+        const auto beforeResolutionSize = host.browser()->findChild<QComboBox*>("createResolution")->size();
         const int beforeScroll = section->verticalScrollBar()->value();
         advanced->click(); QCoreApplication::processEvents();
         auto* options = host.browser()->findChild<QWidget*>("AdvancedOptionsContent");
         Check(options && options->isVisible() && !options->isWindow());
         Check(section->geometry()==beforeOptions);
+        Check(section->viewport()->size()==beforeViewport && sources->width()==beforeSourceWidth);
+        Check(host.browser()->findChild<QComboBox*>("createResolution")->size()==beforeResolutionSize);
         Check(section->verticalScrollBar()->value()==beforeScroll);
         auto* resolution = host.browser()->findChild<QComboBox*>("createResolution");
         resolution->setFocus(); const int chosen = resolution->currentIndex();

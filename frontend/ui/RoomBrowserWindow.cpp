@@ -176,6 +176,8 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* stream = new QWidget; stream->setObjectName("FormCard"); createColumns_->addWidget(stream, 1);
     auto* streamFrame = new QVBoxLayout(stream); streamFrame->setContentsMargins(1,1,1,1);
     auto* streamScroll = new QScrollArea; streamScroll->setObjectName("StreamSectionScroll"); streamScroll->setWidgetResizable(true);
+    // Keep the content width stable as advanced options add/remove overflow.
+    streamScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     streamScroll->setFrameShape(QFrame::NoFrame); streamScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* streamContent = new QWidget; auto* streamBody = new QVBoxLayout(streamContent);
     streamScroll->setWidget(streamContent); streamFrame->addWidget(streamScroll);
