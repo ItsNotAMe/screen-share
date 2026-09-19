@@ -13,10 +13,23 @@ bad CRC still fail; no fallback disables integrity validation.
 Release and Debug parser tests cover padded packets, unchanged decoded controls,
 corruption and truncation. `ViewerGamepadReportTests --device-probe` performs a
 five-second read-only check per detected controller, printing valid/missing counts
-without HID paths or button contents. The fixed viewer was staged for the laptop;
-the subsequent probe found zero devices, so post-fix physical delivery/release
-acceptance remains pending reconnection. This finding explains rejected HID reads;
-it does not by itself prove every grant/revoke issue resolved.
+without HID paths or button contents. After reconnecting the controller, the
+fixed laptop viewer successfully requested controller-only access from the desktop
+host. The user confirmed that buttons/sticks work in the streamed test scene.
+A host sample records 797 applied reports, zero rejected reports, an active
+gamepad grant and no input error. An earlier session ended at its configured
+30-minute deadline after 254 applied reports; that shutdown was distinct from
+the fixed HID rejection. Raw logs are in `build/physical-controller-check/`
+(the earlier session is preserved in `first-session/`).
+
+This validates physical GameSir Bluetooth delivery through the native DS4 HID
+reader and host virtual controller. The user also confirmed that releasing control
+while holding a button clears the input cleanly. The host subsequently reports
+1,373 applied reports, zero rejected, zero granted capabilities and no pending
+release acknowledgement. Explicit held-button release passes for this setup.
+Controller disconnection and external input-to-display latency still need
+acceptance; this does not establish physical
+compatibility with every Xbox or Sony model.
 
 The opt-in v2 room UI and CLI now support explicitly authorized controllers.
 Mouse/keyboard control is now integrated; see [DESKTOP-INPUT.md](DESKTOP-INPUT.md).

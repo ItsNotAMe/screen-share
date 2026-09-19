@@ -85,7 +85,16 @@ The decoded-frame handoff now has exact ownership and local wait/age measurement
 ([FRAME-HANDOFF.md](FRAME-HANDOFF.md)); this is one measured queue, not full pipeline
 queue-age or physical latency acceptance.
 
-Continuation: the user has a Windows laptop and GameSir Nova Lite. FIELD-TESTING.md
+Continuation: the user has a Windows laptop and GameSir Nova Lite.
+
+Physical controller update (2026-09-19): laptop Bluetooth GameSir input, using the
+native DS4 HID reader, reaches the desktop virtual controller. The user confirmed
+button/stick response and clean explicit release while holding a button; the host
+records 1,373 applied reports, zero rejected and a cleared grant afterward.
+See CONTROLLERS.md for the padded-HID fix and evidence. Disconnect, other physical
+controller models and external latency remain unverified.
+
+FIELD-TESTING.md
 contains the prepared five-minute first pass and test-scene/package instructions.
 The desktop became available and a 16-case Release matrix plus WGC window/display
 checks passed, but it later returned to Screen-saver and blocked the final desktop
