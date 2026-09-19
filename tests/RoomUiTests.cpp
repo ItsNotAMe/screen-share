@@ -32,6 +32,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QAbstractItemView>
+#include <QScrollBar>
 #include <QDialog>
 #include <QDir>
 #include <QFontDatabase>
@@ -415,6 +416,8 @@ void NormalHomeScenario(const QUrl& origin) {
             snapshot(QString("volume-focused-%1").arg(size.width()));
             auto* decoder = settingsPage->findChild<QComboBox*>("profileDecoder");
             decoder->showPopup(); QCoreApplication::processEvents();
+            Check(!decoder->view()->verticalScrollBar()->isVisible());
+            Check(decoder->view()->viewport()->rect().contains(decoder->view()->visualRect(decoder->model()->index(1,0))));
             Check(QApplication::activePopupWidget());
             Check(QApplication::activePopupWidget()->grab().save(QDir(previews).filePath(QString("dropdown-%1.png").arg(size.width()))));
             auto* viewport = decoder->view()->viewport();
@@ -425,6 +428,11 @@ void NormalHomeScenario(const QUrl& origin) {
             QEvent leave(QEvent::Leave); QApplication::sendEvent(viewport, &leave); QCoreApplication::processEvents();
             Check(hoveredImage != viewport->grab().toImage());
             Check(QApplication::activePopupWidget()->grab().save(QDir(previews).filePath(QString("dropdown-left-%1.png").arg(size.width()))));
+            decoder->hidePopup();
+            for (int option = 0; option < 20; ++option) decoder->addItem(QString("Option %1").arg(option));
+            decoder->showPopup(); QCoreApplication::processEvents();
+            Check(decoder->view()->verticalScrollBar()->isVisible());
+            Check(QApplication::activePopupWidget()->grab().save(QDir(previews).filePath(QString("dropdown-scroll-%1.png").arg(size.width()))));
             decoder->hidePopup();
         }
         settingsPage->findChild<QPushButton*>("preferencesBack")->click();
