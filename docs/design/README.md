@@ -15,6 +15,10 @@ title bar retains the original logo, aligned text and a circular profile icon.
 Home uses a larger search field, a Refresh action and persistent list headings;
 automatic-update labels and the room/peer counters have been removed. Shared
 dropdowns, checkboxes and spin controls use the dark/teal theme with explicit arrows.
+Settings now uses pill tabs, a rounded content panel and an inline circular Back
+button. Title actions only fill on hover/press (keyboard focus uses an underline).
+Home Refresh is icon-only with an accessible label. Viewers have their own column;
+host names are not exposed by the current public directory schema.
 Create exposes preset, resolution, FPS, bitrate limit, source, audio and capacity;
 it stacks cards at compact widths and uses two columns in wider windows. Primary
 actions stay outside the scrolling form. This replaces the combined temporary

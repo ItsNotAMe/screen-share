@@ -22,7 +22,8 @@ QSpinBox::down-button { subcontrol-position: bottom right; border-bottom-right-r
 QSpinBox::up-arrow { image: url(:/screenshare/ui/icons/chevron-up.svg); width: 14px; height: 14px; }
 QSpinBox::down-arrow { image: url(:/screenshare/ui/icons/chevron-down.svg); width: 14px; height: 14px; }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #365047; }
-QCheckBox { spacing: 9px; }
+QCheckBox { spacing: 9px; min-height: 28px; padding: 0; }
+QCheckBox::indicator { subcontrol-position: center left; }
 QCheckBox::indicator { width: 18px; height: 18px; border: 1px solid #60786f; border-radius: 5px; background: #151d1b; }
 QCheckBox::indicator:checked { background: #38d8c8; border-color: #38d8c8; image: url(:/screenshare/ui/icons/check.svg); }
 QCheckBox::indicator:hover, QCheckBox::indicator:focus { border-color: #38d8c8; }
@@ -74,8 +75,8 @@ QWidget#AppTitleBar {
 QLabel#TitleBrand { font-size: 11pt; font-weight: 700; margin-left: 8px; margin-right: 8px; }
 QLabel#TitleVersion { color: #a3b5af; font-size: 11pt; }
 QPushButton#TitleProfile, QPushButton#TitleSettings { font-size: 11pt; background: transparent; border: 0; }
-QPushButton#TitleProfile:hover, QPushButton#TitleSettings:hover,
-QPushButton#TitleProfile:focus, QPushButton#TitleSettings:focus { background: #24362f; border: 0; }
+QPushButton#TitleProfile:focus, QPushButton#TitleSettings:focus { background: transparent; border: 0; text-decoration: underline; }
+QPushButton#TitleProfile:hover, QPushButton#TitleSettings:hover { background: #24362f; border: 0; }
 QPushButton#TitleProfile:pressed, QPushButton#TitleSettings:pressed { background: #304a40; }
 QWidget#Toast {
     background: rgba(24, 27, 26, 240);
@@ -280,7 +281,10 @@ QPushButton#HomeSecondary:hover {
     border: 1px solid #4a5b58;
     background: #2c3331;
 }
-QLabel#HomeActionArrow { color: #a3b5af; font-size: 22pt; background: transparent; }
+QTabWidget#PreferencesTabs::pane { border: 1px solid #293631; border-radius: 14px; background: #121a17; top: 8px; }
+QTabWidget#PreferencesTabs QTabBar::tab { border: 1px solid #293631; border-radius: 16px; margin-right: 8px; margin-bottom: 12px; padding: 8px 22px; }
+QTabWidget#PreferencesTabs QTabBar::tab:selected { background: #38d8c8; color: #08251f; border-color: #38d8c8; }
+QPushButton#preferencesBack { border-radius: 20px; padding: 0; }
 QPushButton#HomeGhost {
     background: transparent;
     color: #9faaa6;

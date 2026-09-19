@@ -184,7 +184,7 @@ QWidget* HomeWindow::buildActionPanel(
     text->addWidget(detailLabel, 0, Qt::AlignLeft);
     layout->addWidget(textBlock, 0, Qt::AlignVCenter);
     layout->addStretch(1);
-    auto* arrow = label("›", "HomeActionArrow"); layout->addWidget(arrow);
+    layout->addWidget(iconLabel("chevron-right", 30), 0, Qt::AlignVCenter);
 
     QObject::connect(button, &QPushButton::clicked, button, [action = std::move(action)] {
         if (action) {
@@ -212,7 +212,10 @@ QWidget* HomeWindow::buildRoomPanel()
     search_->addAction(QIcon(":/screenshare/ui/icons/search.svg"), QLineEdit::LeadingPosition);
     heading->addWidget(search_);
     connect(search_, &QLineEdit::textChanged, this, [this] { filterRooms(); });
-    refreshRoomsButton_ = actionButton("Refresh", "HomeGhost", "refresh");
+    refreshRoomsButton_ = actionButton("", "HomeGhost", "refresh");
+    refreshRoomsButton_->setFixedWidth(44);
+    refreshRoomsButton_->setToolTip("Refresh rooms");
+    refreshRoomsButton_->setAccessibleName("Refresh rooms");
     QObject::connect(refreshRoomsButton_, &QPushButton::clicked, this, [this] {
         refreshRooms();
     });
@@ -226,6 +229,9 @@ QWidget* HomeWindow::buildRoomPanel()
     auto* columnLayout = new QHBoxLayout(columns);
     columnLayout->setContentsMargins(54, 6, 10, 6);
     columnLayout->addWidget(label("Room", "HomeInfoTitle"), 1);
+    columnLayout->setSpacing(12);
+    auto* viewers = label("Viewers", "HomeInfoTitle"); viewers->setFixedWidth(70);
+    viewers->setAlignment(Qt::AlignCenter); columnLayout->addWidget(viewers);
     auto* access = label("Access", "HomeInfoTitle"); access->setFixedWidth(130);
     columnLayout->addWidget(access);
     auto* action = label("Join", "HomeInfoTitle"); action->setFixedWidth(84);
@@ -266,9 +272,9 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
     text->setContentsMargins(0, 0, 0, 0);
     text->setSpacing(1);
     text->addWidget(label(room.name, "HomeInfoPrimary"));
-    const QString peerText = room.peerCount == 1 ? QStringLiteral("1 peer") : QStringLiteral("%1 peers").arg(room.peerCount);
-    text->addWidget(label(peerText, "HomeInfoSecondary"));
     layout->addLayout(text, 1);
+    auto* viewers = label(QString::number(room.peerCount), "HomeViewerCount");
+    viewers->setFixedWidth(70); viewers->setAlignment(Qt::AlignCenter); layout->addWidget(viewers);
 
     auto* status = label(
         room.passwordProtected ? QStringLiteral("Locked") : QStringLiteral("Public"),
@@ -299,7 +305,6 @@ void HomeWindow::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QStr
     if (unavailable.isEmpty() || !rooms.empty()) updateRooms(rooms);
     directoryStatus_->setText(unavailable);
     directoryStatus_->setVisible(!unavailable.isEmpty());
-    refreshRoomsButton_->setText("Refresh");
     refreshRoomsButton_->setEnabled(true);
 }
 
@@ -328,7 +333,7 @@ void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)
         if (!row) { row = buildRoomRow(room); roomListLayout_->addWidget(row); }
         row->setProperty("searchName", room.name);
         row->findChild<QLabel*>("HomeInfoPrimary")->setText(room.name);
-        row->findChild<QLabel*>("HomeInfoSecondary")->setText(QString("%1 viewer%2").arg(room.peerCount).arg(room.peerCount == 1 ? "" : "s"));
+        row->findChild<QLabel*>("HomeViewerCount")->setText(QString::number(room.peerCount));
         row->findChild<QPushButton*>("HomeTinyButton")->setEnabled(room.joinable);
         auto* badge = row->findChild<QLabel*>("HomeLockedStatus");
         if (!badge) badge = row->findChild<QLabel*>("HomePublicStatus");
