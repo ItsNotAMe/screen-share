@@ -39,6 +39,7 @@
 #include <QDialog>
 #include <QAction>
 #include <QScrollArea>
+#include <QFrame>
 #include <QDir>
 #include <QFontDatabase>
 #include <QPlainTextEdit>
@@ -414,6 +415,7 @@ void NormalHomeScenario(const QUrl& origin) {
         visibility->button(1)->click(); Check(!host.browser()->findChild<QCheckBox*>("publicRoom")->isChecked());
         visibility->button(0)->click();
         auto* kinds = host.browser()->findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>();
+        host.browser()->findChild<QComboBox*>("captureSource")->addItem("Second display",QVariantMap{{"display",1}});
         kinds->button(1)->click();
         Check(host.browser()->findChild<QComboBox*>("captureSource")->currentIndex() == -1);
         host.browser()->findChild<QPushButton*>("createV2Room")->click(); Check(!host.session());
@@ -467,11 +469,33 @@ void NormalHomeScenario(const QUrl& origin) {
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         Check(host.browser()->isVisible() && host.browser()->findChild<QLineEdit*>("roomName")->text() == "Friday games");
         snapshot(QString("create-%1").arg(size.width()));
+        auto* sources = host.browser()->findChild<QListWidget*>("SourceCards");
+        Check(sources->count()==2);
+        const auto sourceGrid = sources->gridSize();
+        for (int frame=0; frame<10; ++frame) {
+            QCoreApplication::processEvents();
+            Check(sources->gridSize()==sourceGrid && sources->visualItemRect(sources->item(0)).top()==sources->visualItemRect(sources->item(1)).top());
+        }
+        sources->addItem(new QListWidgetItem(*sources->item(1)));
+        for (int frame=0; frame<10; ++frame) {
+            QCoreApplication::processEvents();
+            Check(sources->gridSize()==sourceGrid && sources->visualItemRect(sources->item(0)).top()==sources->visualItemRect(sources->item(1)).top());
+        }
+        delete sources->takeItem(2); QCoreApplication::processEvents(); Check(sources->gridSize()==sourceGrid);
         auto* advanced = host.browser()->findChild<QPushButton*>("OptionsDisclosure");
         Check(advanced && advanced->height() >= 30);
         for (auto* label : advanced->findChildren<QLabel*>()) {
             if (!label->text().isEmpty()) Check(label->width() >= label->sizeHint().width());
         }
+        const auto beforeOptions = host.browser()->findChild<QWidget*>("SourceKinds")->geometry();
+        advanced->click(); QCoreApplication::processEvents();
+        auto* optionsPopup = host.browser()->findChild<QFrame*>("AdvancedOptionsPopup");
+        Check(optionsPopup && optionsPopup->isVisible());
+        Check(host.browser()->findChild<QWidget*>("SourceKinds")->geometry()==beforeOptions);
+        if (const auto output = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !output.isEmpty())
+            Check(optionsPopup->grab().save(QDir(output).filePath(QString("advanced-%1.png").arg(size.width()))));
+        QKeyEvent dismiss(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier); QApplication::sendEvent(optionsPopup,&dismiss);
+        Check(!advanced->isChecked() && !optionsPopup->isVisible());
         if (size.height() >= 820) Check(host.browser()->findChild<QScrollArea*>("RoomBrowserScroll")->verticalScrollBar()->maximum() == 0);
         host.browser()->findChild<QPushButton*>("roomBack")->click();
         host.home()->findChild<QPushButton*>("HomeSecondary")->click();
@@ -569,8 +593,12 @@ void BrowserScenario(const QUrl& origin) {
     host.findChild<QPushButton*>("createV2Room")->click();
     Wait([&] { return host.activeSession() && host.activeSession()->session().status().phase == RoomPhase::Active &&
         !host.directory().running() && viewer.directory().status().rooms.size() == 1 && audit.status().rooms.size() == 1; });
-    auto* list = viewer.findChild<QTableWidget*>("publicRooms");
-    Check(list->rowCount() == 1 && list->item(0, 0)->text() == "<b>Plain room</b>" && list->item(0, 3)->text() == "Required");
+    auto* list = viewer.findChild<QWidget*>("publicRooms");
+    Check(list && list->findChildren<QFrame*>("HomeRoomRow").size()==1);
+    Check(list->findChild<QLabel*>("HomeInfoPrimary")->text()=="<b>Plain room</b>" && list->findChild<QLabel*>("HomeLockedStatus"));
+    list->findChild<QLineEdit*>("roomSearch")->setText("not present");
+    Check(list->findChild<QFrame*>("HomeRoomRow")->isHidden());
+    list->findChild<QLineEdit*>("roomSearch")->clear();
     const auto hostAttempts = host.directory().connectionAttempts();
     Check(hostStack->currentWidget() == host.activeSession() && hostStack->count() == 2);
     Check(host.activeSession()->window() == &hostApp.window() && hostApp.window().isVisible());
@@ -595,7 +623,7 @@ void BrowserScenario(const QUrl& origin) {
     Check(!ParseRoomReference(QString(129, 'x')) && !MakeRoomLink(roomLink).size());
     const auto parsed = ParseRoomSessionConfig(QJsonObject{{"origin", origin.toString()}, {"roomId", roomLink}}, true);
     Check(parsed.room.origin == origin.toString().toStdString() && parsed.room.roomId == host.activeSession()->session().status().roomId);
-    list->cellWidget(0,4)->findChild<QPushButton*>()->click();
+    list->findChild<QPushButton*>("HomeTinyButton")->click();
     Wait([&] { return !viewer.activeSession() && viewer.findChild<QDialog*>("RoomPasswordDialog"); });
     auto* passwordPrompt = viewer.findChild<QDialog*>("RoomPasswordDialog");
     Check(passwordPrompt->isVisible());
@@ -607,8 +635,8 @@ void BrowserScenario(const QUrl& origin) {
     }
     viewer.findChild<QPushButton*>("cancelRoomPassword")->click();
     Wait([&] { return !viewer.findChild<QDialog*>("RoomPasswordDialog"); });
-    Wait([&] { return viewer.directory().status().phase == Directory::Phase::Ready && list->rowCount() == 1 && list->cellWidget(0,4); });
-    list->cellWidget(0,4)->findChild<QPushButton*>()->click();
+    Wait([&] { return viewer.directory().status().phase == Directory::Phase::Ready && list->findChildren<QFrame*>("HomeRoomRow").size()==1; });
+    list->findChild<QPushButton*>("HomeTinyButton")->click();
     Wait([&] { return !viewer.activeSession() && viewer.findChild<QDialog*>("RoomPasswordDialog"); });
     viewer.findChild<QLineEdit*>("joinPassword")->setText("wrong-password");
     viewer.findChild<QPushButton*>("joinWithPassword")->click();

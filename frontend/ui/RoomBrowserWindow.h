@@ -3,7 +3,7 @@
 #include "shared/RoomProfile.h"
 #include "room/qt/RoomDirectory.h"
 class QLineEdit;
-class QTableWidget;
+class RoomDirectoryWidget;
 class QCheckBox;
 class QComboBox;
 class QLabel;
@@ -63,9 +63,8 @@ private:
     QBoxLayout* createColumns_;
     QCheckBox* public_;
     QComboBox *source_, *audio_;
-    QTableWidget* rooms_;
-    QLabel *status_, *error_;
-    QPushButton* retry_;
+    RoomDirectoryWidget* rooms_;
+    QLabel* error_;
     QWidget *passwordPanel_, *directoryPanel_;
     bool passwordRetry_ = false;
     bool passwordRejected_ = false;

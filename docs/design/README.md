@@ -43,7 +43,10 @@ keep identical dimensions regardless of title, selection or image aspect ratio.
 A background capture owner fetches real source thumbnails with no display fallback;
 closed, protected or minimized sources retain placeholders. Thumbnails are not saved.
 Gaming/Quality use controller/HD outline icons with their short descriptions.
-Advanced settings is an inline gear disclosure below stream controls. Preview
+Advanced settings opens a compact anchored popover below stream controls, so the
+cards keep their size. Escape or clicking outside dismisses it. Home and Join use
+one RoomDirectoryWidget for search, headings, stable room rows, refresh and status.
+Preview
 cards have equal responsive widths and spaced rows. Set SCREENSHARE_SOURCE_PREVIEW_PROOF=1
 to additionally verify real display and window capture in the UI test (interactive
 desktop access required; no images are saved). Ordinary offscreen tests retain
@@ -51,6 +54,9 @@ their synthetic source model.
 The native check enters Create from Home and repeats that navigation. Capture is
 started when the page becomes visible; hidden-page cancellation invalidates the
 old pass so it cannot suppress previews on a later visit.
+The source grid reserves scrollbar space when calculating its two columns and
+uses a single delegate for card padding. Tests add/remove an overflow row to
+guard against scrollbar-driven one/two-column oscillation.
 
 Release UI/test targets build. The silent room-v2-qt-ui integration test passes at
 100% and 150% display scale, covering normal navigation, profile validation,

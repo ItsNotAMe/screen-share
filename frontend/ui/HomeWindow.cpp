@@ -109,8 +109,21 @@ HomeWindow::HomeWindow(Actions actions, QWidget* parent)
     root->setSpacing(0);
     root->addWidget(buildMainMenu(), 1);
 
+}
+
+RoomDirectoryWidget::RoomDirectoryWidget(std::function<void()> refresh, std::function<void(const QString&)> join, QWidget* parent)
+    : QWidget(parent), request_(std::move(refresh)), join_(std::move(join)) {
+    auto* layout = new QVBoxLayout(this); layout->setContentsMargins(0,0,0,0);
+    layout->addWidget(buildRoomPanel());
     showRoomStatus("Connecting to room list…");
 }
+
+QWidget* HomeWindow::buildRoomPanel() {
+    rooms_ = new RoomDirectoryWidget(actions_.requestRooms, actions_.openRoom, this);
+    return rooms_;
+}
+void HomeWindow::refreshRooms() { rooms_->refreshRooms(); }
+void HomeWindow::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QString& unavailable) { rooms_->setPushedRooms(rooms, unavailable); }
 
 QWidget* HomeWindow::buildMainMenu()
 {
@@ -194,7 +207,7 @@ QWidget* HomeWindow::buildActionPanel(
     return button;
 }
 
-QWidget* HomeWindow::buildRoomPanel()
+QWidget* RoomDirectoryWidget::buildRoomPanel()
 {
     auto* panel = new QFrame;
     panel->setObjectName("HomePanel");
@@ -252,7 +265,7 @@ QWidget* HomeWindow::buildRoomPanel()
     return panel;
 }
 
-QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
+QWidget* RoomDirectoryWidget::buildRoomRow(const HomeActiveRoom& room)
 {
     auto* row = new QFrame;
     row->setObjectName("HomeRoomRow");
@@ -288,27 +301,27 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
     join->setFixedWidth(84);
     join->setEnabled(room.joinable);
     QObject::connect(join, &QPushButton::clicked, this, [this, id = room.roomId] {
-        if (actions_.openRoom) actions_.openRoom(id);
+        if (join_) join_(id);
     });
     layout->addWidget(join, 0, Qt::AlignVCenter);
     return row;
 }
 
-void HomeWindow::refreshRooms()
+void RoomDirectoryWidget::refreshRooms()
 {
-    if (actions_.requestRooms) actions_.requestRooms();
+    if (request_) request_();
 }
 
-void HomeWindow::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QString& unavailable)
+void RoomDirectoryWidget::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QString& unavailable)
 {
-    if (!actions_.requestRooms) return;
     if (unavailable.isEmpty() || !rooms.empty()) updateRooms(rooms);
     directoryStatus_->setText(unavailable);
     directoryStatus_->setVisible(!unavailable.isEmpty());
+    if (!unavailable.isEmpty()) for (auto* button : findChildren<QPushButton*>("HomeTinyButton")) button->setEnabled(false);
     refreshRoomsButton_->setEnabled(true);
 }
 
-void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)
+void RoomDirectoryWidget::updateRooms(const QVector<HomeActiveRoom>& rooms)
 {
     if (roomListLayout_ == nullptr) {
         return;
@@ -352,13 +365,13 @@ void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)
     filterRooms();
 }
 
-void HomeWindow::filterRooms()
+void RoomDirectoryWidget::filterRooms()
 {
     for (auto* row : findChildren<QFrame*>("HomeRoomRow"))
         row->setVisible(row->property("searchName").toString().contains(search_->text().trimmed(), Qt::CaseInsensitive));
 }
 
-void HomeWindow::showRoomStatus(const QString& message)
+void RoomDirectoryWidget::showRoomStatus(const QString& message)
 {
     if (roomListLayout_ == nullptr) {
         return;

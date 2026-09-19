@@ -203,9 +203,6 @@ QPushButton#SegmentButton:checked { background: #17473d; border-color: #38d8c8; 
 QPushButton#SegmentButton:hover { background: #263d33; }
 QPushButton#SegmentButton:checked:hover { background: #25584b; }
 QListWidget#SourceCards { background: transparent; border: 0; outline: 0; }
-QListWidget#SourceCards::item { background: #0e1612; border: 1px solid #30413a; border-radius: 7px; padding: 6px; }
-QListWidget#SourceCards::item:selected { background: #15352d; border: 1px solid #38d8c8; color: #edf5f2; }
-QListWidget#SourceCards::item:hover { background: #203b30; }
 QPushButton#PresetCard { background: #101815; border: 1px solid #30413a; border-radius: 7px; padding: 0; }
 QPushButton#PresetCard:checked { background: #153b34; border-color: #38d8c8; }
 QPushButton#PresetCard:hover { background: #263d33; }
@@ -217,12 +214,6 @@ QPushButton#OptionsDisclosure { background: transparent; color: #c5d1cb; border:
 QPushButton#OptionsDisclosure:hover { background: #263d33; }
 QPushButton#roomBack { background: transparent; border: 0; padding: 6px 10px; color: #b7c8c0; font-size: 14px; }
 QPushButton#roomBack:hover { background: #20312c; }
-QPushButton#JoinListedRoom { background: #38d8c8; color: #08251f; border: 0; border-radius: 6px; padding: 5px 12px; font-weight: 600; }
-QPushButton#JoinListedRoom:hover { background: #65e3d6; }
-QPushButton#JoinListedRoom:disabled { background: #20312c; color: #73877f; }
-QTableWidget#publicRooms { background: #121a17; border: 1px solid #293631; border-radius: 8px; selection-background-color: #1d3b31; }
-QTableWidget#publicRooms QHeaderView::section { background: #202b26; padding: 10px; }
-QTableWidget#publicRooms::item { border-bottom: 1px solid #293631; padding: 0 10px; }
 QLabel#FormHint { color: #a3b5af; }
 QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
 QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }

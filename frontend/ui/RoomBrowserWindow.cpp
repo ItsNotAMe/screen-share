@@ -23,7 +23,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSignalBlocker>
-#include <QTableWidget>
+#include "ui/HomeWindow.h"
 #include <QVBoxLayout>
 #include <QButtonGroup>
 #include <QClipboard>
@@ -38,10 +38,30 @@
 #include <QAction>
 #include <QThread>
 #include <QStyledItemDelegate>
+#include <QFrame>
+#include <QHideEvent>
+#include <QKeyEvent>
 using namespace screenshare;
 using namespace screenshare::room::qt;
 
 namespace {
+class OptionsPopup final : public QFrame {
+public:
+    explicit OptionsPopup(QWidget* parent) : QFrame(parent,Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint) {
+        setObjectName("AdvancedOptionsPopup"); setAttribute(Qt::WA_TranslucentBackground);
+        setAttribute(Qt::WA_NoMouseReplay);
+    }
+    std::function<void()> dismissed;
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this); painter.setCompositionMode(QPainter::CompositionMode_Source);
+        painter.fillRect(rect(),Qt::transparent); painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        painter.setRenderHint(QPainter::Antialiasing); painter.setPen(QPen(QColor("#3c4b45"),1));
+        painter.setBrush(QColor("#151d1b")); painter.drawRoundedRect(QRectF(rect()).adjusted(.5,.5,-.5,-.5),8,8);
+    }
+    void hideEvent(QHideEvent* event) override { QFrame::hideEvent(event); if (dismissed) dismissed(); }
+    void keyPressEvent(QKeyEvent* event) override { if(event->key()==Qt::Key_Escape) hide(); else QFrame::keyPressEvent(event); }
+};
 class ContentButton final : public QPushButton {
 public:
     using QPushButton::QPushButton;
@@ -77,7 +97,10 @@ public:
 protected:
     void resizeEvent(QResizeEvent* event) override {
         QListWidget::resizeEvent(event);
-        const QSize cell(qMax(140, viewport()->width()/2),128);
+        // Reserve scrollbar width even while it is hidden. Using viewport width
+        // here made wrapping add/remove the scrollbar and oscillate indefinitely.
+        const QSize cell(qMax(120, (width()-24)/2),128);
+        if (gridSize() == cell) return;
         setGridSize(cell);
         for (int row=0; row<count(); ++row) item(row)->setSizeHint(cell);
     }
@@ -130,9 +153,21 @@ QWidget* disclosure(const QString& title, QWidget* content, QWidget* owner) {
     for (auto* part : {gear,label,arrow}) { part->setAttribute(Qt::WA_TransparentForMouseEvents); row->addWidget(part); }
     label->setSizePolicy(QSizePolicy::Minimum,QSizePolicy::Preferred);
     toggle->setSizePolicy(QSizePolicy::Minimum,QSizePolicy::Fixed);
-    layout->addWidget(toggle,0,Qt::AlignLeft); layout->addWidget(content); content->hide();
-    QObject::connect(toggle, &QPushButton::toggled, block, [arrow, content](bool open) {
-        content->setVisible(open); arrow->setPixmap(entryIcon(open ? "chevron-up" : "chevron-down").pixmap(14,14));
+    layout->addWidget(toggle,0,Qt::AlignLeft);
+    auto* popup = new OptionsPopup(block); popup->setMinimumWidth(260);
+    auto* popupLayout = new QVBoxLayout(popup); popupLayout->setContentsMargins(16,16,16,16); popupLayout->addWidget(content);
+    popup->dismissed = [toggle,arrow] {
+        const QSignalBlocker blocked(toggle); toggle->setChecked(false); arrow->setPixmap(entryIcon("chevron-down").pixmap(14,14));
+    };
+    QObject::connect(toggle, &QPushButton::toggled, block, [arrow, popup,toggle,content](bool open) {
+        arrow->setPixmap(entryIcon(open ? "chevron-up" : "chevron-down").pixmap(14,14));
+        if (!open) { popup->hide(); return; }
+        popup->adjustSize(); auto position = toggle->mapToGlobal(QPoint(0,toggle->height()+6));
+        const auto available = toggle->screen()->availableGeometry();
+        if (position.y()+popup->height()>available.bottom()) position.setY(toggle->mapToGlobal(QPoint(0,0)).y()-popup->height()-6);
+        position.setX(qBound(available.left(),position.x(),qMax(available.left(),available.right()-popup->width())));
+        popup->move(position); popup->show();
+        if (auto* input = content->findChild<QSpinBox*>()) input->setFocus();
     });
     return block;
 }
@@ -253,18 +288,10 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* join = new QPushButton("Join room"); join->setObjectName("joinV2Room"); linkRow->addWidget(join); joinBody_->addLayout(linkRow);
     for (auto* control : {static_cast<QWidget*>(roomId_), static_cast<QWidget*>(paste), static_cast<QWidget*>(join)}) control->setFixedHeight(42);
     body->addWidget(joinPanel_);
-    directoryPanel_ = new QWidget; auto* directoryBody = new QVBoxLayout(directoryPanel_); directoryBody->setContentsMargins(0,0,0,0); directoryBody->setSpacing(12);
-    auto* available = new QLabel("Available rooms"); available->setObjectName("SectionHeading"); directoryBody->addWidget(available);
-    status_ = new QLabel; status_->setWordWrap(true); status_->setObjectName("FormHint"); directoryBody->addWidget(status_);
-    rooms_ = new QTableWidget(0, 5); rooms_->setObjectName("publicRooms"); rooms_->setHorizontalHeaderLabels({"Room", "Viewers", "Status", "Password", ""});
-    rooms_->setEditTriggers(QAbstractItemView::NoEditTriggers); rooms_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    rooms_->setSelectionMode(QAbstractItemView::SingleSelection); rooms_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    rooms_->setShowGrid(false); rooms_->setColumnHidden(3, true); rooms_->setColumnWidth(1,80); rooms_->setColumnWidth(2,150); rooms_->setColumnWidth(4,100);
-    rooms_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    rooms_->verticalHeader()->setDefaultSectionSize(58);
-    rooms_->verticalHeader()->hide(); rooms_->setMinimumHeight(120); directoryBody->addWidget(rooms_, 1);
-    retry_ = new QPushButton("Reconnect to room list"); retry_->setEnabled(false); directoryBody->addWidget(retry_);
-    body->addWidget(directoryPanel_);
+    rooms_ = new RoomDirectoryWidget([this] { directory_.Stop(); directory_.Start(origin_); },
+        [this](const QString& id) { JoinListedRoom(id); }, this);
+    rooms_->setObjectName("publicRooms"); rooms_->setMinimumHeight(260);
+    directoryPanel_ = rooms_; body->addWidget(directoryPanel_,1);
     body->addStretch();
     error_ = new QLabel; error_->setObjectName("browserError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
     auto* actions = new QHBoxLayout; actions->addStretch();
@@ -272,7 +299,6 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     layout->addLayout(actions);
     connect(create, &QPushButton::clicked, this, [this] { Launch(true); });
     connect(join, &QPushButton::clicked, this, [this] { Launch(false); });
-    connect(retry_, &QPushButton::clicked, this, [this] { directory_.Start(origin_); });
     directory_.changed = [this](const auto& value) {
         Refresh(value);
         if (directoryChanged) directoryChanged(value);
@@ -519,7 +545,7 @@ void RoomBrowserWindow::ShowBackButton() {
 }
 void RoomBrowserWindow::OpenCreate() {
     setWindowTitle("ScreenShare — Create room"); heading_->setText("Create a room");
-    createPanel_->show(); joinPanel_->hide(); directoryPanel_->hide(); rooms_->hide(); retry_->hide(); status_->hide();
+    createPanel_->show(); joinPanel_->hide(); directoryPanel_->hide();
     detailsBody_->insertWidget(3, passwordPanel_); passwordPanel_->show();
     password_->findChild<QAction*>("togglePasswordVisibility")->setChecked(false);
     findChild<QPushButton*>("createV2Room")->show(); findChild<QPushButton*>("joinV2Room")->hide();
@@ -528,45 +554,25 @@ void RoomBrowserWindow::OpenCreate() {
 }
 void RoomBrowserWindow::OpenJoin(const QString& roomId) {
     setWindowTitle("ScreenShare — Join room"); heading_->setText("Join a room");
-    createPanel_->hide(); joinPanel_->show(); directoryPanel_->show(); rooms_->show(); retry_->setVisible(directory_.status().phase == RoomDirectory::Phase::Failed);
-    status_->setVisible(directory_.status().phase != RoomDirectory::Phase::Ready);
+    createPanel_->hide(); joinPanel_->show(); directoryPanel_->show();
     findChild<QPushButton*>("createV2Room")->hide(); findChild<QPushButton*>("joinV2Room")->show();
     password_->clear(); error_->clear(); roomId_->setText(roomId); roomId_->setFocus();
     QTimer::singleShot(0, this, [this] { findChild<QScrollArea*>("RoomBrowserScroll")->verticalScrollBar()->setValue(0); });
 }
 void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
-    retry_->setEnabled(state.phase == RoomDirectory::Phase::Failed);
-    retry_->setVisible(!joinPanel_->isHidden() && state.phase == RoomDirectory::Phase::Failed);
-    QString selected;
-    if (rooms_->currentRow() >= 0 && rooms_->item(rooms_->currentRow(), 0)) selected = rooms_->item(rooms_->currentRow(), 0)->data(Qt::UserRole).toString();
-    const QSignalBlocker blocked(rooms_); rooms_->clearSelection(); rooms_->setCurrentCell(-1, -1);
-    rooms_->setRowCount(int(state.rooms.size()));
-    for (size_t i = 0; i < state.rooms.size(); ++i) {
-        const auto& room = state.rooms[i]; auto* title = new QTableWidgetItem(room.name); title->setData(Qt::UserRole, room.id);
-        rooms_->setItem(int(i), 0, title); rooms_->setItem(int(i), 1, new QTableWidgetItem(QString("%1/%2").arg(room.viewers).arg(room.limit)));
-        auto* stateItem = new QTableWidgetItem(room.status != "open" ? room.status : room.password ? "Password required" : "Live");
-        stateItem->setData(Qt::UserRole, room.status);
-        rooms_->setItem(int(i), 2, stateItem); rooms_->setItem(int(i), 3, new QTableWidgetItem(room.password ? "Required" : "No"));
-        auto* cell = rooms_->cellWidget(int(i), 4);
-        if (!cell || cell->property("roomId").toString() != room.id) {
-            cell = new QWidget; cell->setProperty("roomId", room.id);
-            auto* rowActions = new QHBoxLayout(cell); rowActions->setContentsMargins(8,7,8,7);
-            auto* join = new QPushButton("Join"); join->setObjectName("JoinListedRoom"); join->setFixedHeight(42); rowActions->addWidget(join);
-            connect(join, &QPushButton::clicked, this, [this, id = room.id] { JoinListedRoom(id); });
-            rooms_->setCellWidget(int(i), 4, cell);
-        }
-        cell->findChild<QPushButton*>()->setEnabled(state.phase == RoomDirectory::Phase::Ready && room.status == "open");
-        if (room.id == selected) rooms_->selectRow(int(i));
-    }
-    rooms_->setFixedHeight(rooms_->horizontalHeader()->sizeHint().height() + qBound(80, int(state.rooms.size()) * 58, 290) + 2);
+    QVector<HomeActiveRoom> rooms;
+    for (const auto& room : state.rooms)
+        rooms.push_back({room.id,room.name,room.viewers,room.password,0,
+            state.phase == RoomDirectory::Phase::Ready && room.status == "open"});
+    QString message;
     switch (state.phase) {
-    case RoomDirectory::Phase::Stopped: status_->setText("Room list paused."); break;
-    case RoomDirectory::Phase::Connecting: status_->setText("Connecting to room list…"); break;
-    case RoomDirectory::Phase::Ready: status_->clear(); break;
-    case RoomDirectory::Phase::Reconnecting: status_->setText("Reconnecting. The room list may be outdated."); break;
-    case RoomDirectory::Phase::Failed: status_->setText("Room list unavailable. Reconnect to try again."); break;
+    case RoomDirectory::Phase::Stopped: message = "Room list paused."; break;
+    case RoomDirectory::Phase::Connecting: message = "Connecting to room list…"; break;
+    case RoomDirectory::Phase::Ready: break;
+    case RoomDirectory::Phase::Reconnecting: message = "Reconnecting. The room list may be outdated."; break;
+    case RoomDirectory::Phase::Failed: message = "Room list unavailable. Refresh to try again."; break;
     }
-    status_->setVisible(!joinPanel_->isHidden() && state.phase != RoomDirectory::Phase::Ready);
+    rooms_->setPushedRooms(rooms,message);
 }
 void RoomBrowserWindow::Launch(bool host) {
     if (active_ || closing_) return;

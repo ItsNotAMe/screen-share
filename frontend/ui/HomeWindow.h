@@ -11,6 +11,7 @@ class QLabel;
 class QPushButton;
 class QVBoxLayout;
 class QLineEdit;
+class RoomDirectoryWidget;
 
 struct HomeActiveRoom {
     QString roomId;
@@ -43,13 +44,24 @@ private:
         const QString& buttonObjectName,
         std::function<void()> action);
     QWidget* buildRoomPanel();
-    QWidget* buildRoomRow(
-        const HomeActiveRoom& room);
-    void updateRooms(const QVector<HomeActiveRoom>& rooms);
-    void filterRooms();
-    void showRoomStatus(const QString& message);
-
     Actions actions_;
+    RoomDirectoryWidget* rooms_ = nullptr;
+};
+
+// Shared list, search, status and row actions used by Home and Join.
+class RoomDirectoryWidget final : public QWidget {
+public:
+    RoomDirectoryWidget(std::function<void()> refresh, std::function<void(const QString&)> join, QWidget* parent = nullptr);
+    void setPushedRooms(const QVector<HomeActiveRoom>&, const QString& unavailable = {});
+    void refreshRooms();
+private:
+    QWidget* buildRoomPanel();
+    QWidget* buildRoomRow(const HomeActiveRoom&);
+    void updateRooms(const QVector<HomeActiveRoom>&);
+    void filterRooms();
+    void showRoomStatus(const QString&);
+    std::function<void()> request_;
+    std::function<void(const QString&)> join_;
     QVBoxLayout* roomListLayout_ = nullptr;
     QLabel* roomStatusLabel_ = nullptr;
     QPushButton* refreshRoomsButton_ = nullptr;
