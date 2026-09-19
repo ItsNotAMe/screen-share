@@ -372,6 +372,12 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     if (!playback) nickname->setFocus();
 }
 void RoomBrowserWindow::RefreshSources() {
+    ++previewRevision_;
+    if (previewThread_) previewThread_->requestInterruption();
+    sourcePreviews_.clear();
+    previewsLoaded_ = false;
+    sourceCards_->setProperty("previewCaptureCount", 0);
+    sourceCards_->setProperty("previewCaptureFinished", false);
     const auto previous = source_->currentData();
     source_->clear();
     if (!enumerateSources_) source_->addItem("Default display", QVariantMap{{"display", 0}});
@@ -388,8 +394,6 @@ void RoomBrowserWindow::RefreshSources() {
     RefreshSourceCards();
 }
 void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
-    ++previewRevision_;
-    if (previewThread_) previewThread_->requestInterruption();
     const QSignalBlocker blocked(sourceCards_);
     sourceCards_->clear();
     QListWidgetItem* selected = nullptr;
@@ -397,14 +401,6 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
         const auto data = source_->itemData(index).toMap();
         if (data.contains("window") != windowSources_) continue;
         QPixmap preview;
-        if (enumerateSources_) {
-            if (!windowSources_) {
-                const auto name = source_->itemData(index, Qt::UserRole+1).toString();
-                for (auto* screen : QGuiApplication::screens()) {
-                    if (screen->name() == name) { preview = screen->grabWindow(0); break; }
-                }
-            }
-        }
         if (preview.isNull()) {
             preview = QPixmap(144,80); preview.fill(QColor("#0c1110"));
             QPainter painter(&preview); painter.setPen(QColor("#a3b5af"));
@@ -417,6 +413,7 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
         { QPainter painter(&scaled); const auto fitted = preview.scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation);
           painter.drawPixmap((144-fitted.width())/2, (80-fitted.height())/2, fitted); }
         QIcon icon; icon.addPixmap(scaled, QIcon::Normal); icon.addPixmap(scaled, QIcon::Selected);
+        if (sourcePreviews_.contains(index)) icon = sourcePreviews_.value(index);
         auto* item = new QListWidgetItem(icon, shortName, sourceCards_);
         item->setSizeHint(sourceCards_->gridSize()); item->setTextAlignment(Qt::AlignHCenter);
         item->setToolTip(fullName); item->setData(Qt::AccessibleTextRole, fullName); item->setData(Qt::UserRole, index);
@@ -434,22 +431,21 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
 }
 void RoomBrowserWindow::LoadSourcePreviews() {
     if (!enumerateSources_ || closing_ || !isVisible() || createPanel_->isHidden()) return;
-    if (previewThread_) return; // A repeated show event must not cancel the current capture pass.
+    if (previewThread_ || previewsLoaded_) return;
     QVector<QVariantMap> sources;
-    for (int row = 0; row < sourceCards_->count(); ++row) {
-        const auto index = sourceCards_->item(row)->data(Qt::UserRole);
-        if (index.isValid()) sources.push_back(source_->itemData(index.toInt()).toMap());
-    }
+    // Capture both categories once; tab switches only render the in-memory cache.
+    for (int index = 0; index < source_->count(); ++index)
+        sources.push_back(source_->itemData(index).toMap());
     if (sources.isEmpty()) return;
     sourceCards_->setProperty("previewCaptureCount", 0);
     sourceCards_->setProperty("previewCaptureFinished", false);
     const auto revision = previewRevision_;
-    auto previews = std::make_shared<QVector<QImage>>();
     auto failure = std::make_shared<QString>();
     // A single capture owner keeps GPU work off the UI thread. Never fall back
     // to another window/display when the requested source cannot be captured.
-    previewThread_ = QThread::create([sources, previews, failure] {
-        for (const auto& source : sources) {
+    previewThread_ = QThread::create([this, revision, sources, failure] {
+        for (int index = 0; index < sources.size(); ++index) {
+            const auto& source = sources[index];
             if (QThread::currentThread()->isInterruptionRequested()) break;
             QImage image;
             try {
@@ -466,28 +462,32 @@ void RoomBrowserWindow::LoadSourcePreviews() {
                     auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(30));
                     if (frame && frame->width > 0 && frame->height > 0 && !frame->pixels.empty()) {
                         image = QImage(reinterpret_cast<const uchar*>(frame->pixels.data()), frame->width, frame->height,
-                                       frame->rowPitch, QImage::Format_RGB32).copy(); break;
+                                       frame->rowPitch, QImage::Format_RGB32).scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation); break;
                     }
                 }
             } catch (const std::exception& error) { *failure = QString::fromUtf8(error.what()); }
             catch (...) { *failure = "Source unavailable"; }
-            previews->push_back(std::move(image));
+            if (image.isNull()) continue;
+            QMetaObject::invokeMethod(this, [this, revision, index, image] {
+                if (revision != previewRevision_) return;
+                QPixmap thumbnail(144,80); thumbnail.fill(QColor("#0c1110"));
+                QPainter painter(&thumbnail);
+                painter.drawImage((144-image.width())/2,(80-image.height())/2,image); painter.end();
+                QIcon icon; icon.addPixmap(thumbnail,QIcon::Normal); icon.addPixmap(thumbnail,QIcon::Selected);
+                sourcePreviews_.insert(index, icon);
+                for (int row = 0; row < sourceCards_->count(); ++row) {
+                    auto* item = sourceCards_->item(row);
+                    if (item->data(Qt::UserRole).isValid() && item->data(Qt::UserRole).toInt() == index)
+                        item->setIcon(icon);
+                }
+                sourceCards_->setProperty("previewCaptureCount", sourcePreviews_.size());
+            }, Qt::QueuedConnection);
         }
     });
-    connect(previewThread_, &QThread::finished, this, [this, revision, previews, failure] {
+    connect(previewThread_, &QThread::finished, this, [this, revision, failure] {
         auto* completed = previewThread_; previewThread_ = nullptr; completed->deleteLater();
         if (revision != previewRevision_) { LoadSourcePreviews(); return; }
-        int captured = 0;
-        for (int row = 0; row < previews->size() && row < sourceCards_->count(); ++row) {
-            if ((*previews)[row].isNull()) continue;
-            QPixmap thumbnail(144,80); thumbnail.fill(QColor("#0c1110"));
-            QPainter painter(&thumbnail); const auto scaled = (*previews)[row].scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation);
-            painter.drawImage((144-scaled.width())/2,(80-scaled.height())/2,scaled); painter.end();
-            QIcon icon; icon.addPixmap(thumbnail,QIcon::Normal); icon.addPixmap(thumbnail,QIcon::Selected);
-            sourceCards_->item(row)->setIcon(icon);
-            ++captured;
-        }
-        sourceCards_->setProperty("previewCaptureCount", captured);
+        previewsLoaded_ = true;
         sourceCards_->setProperty("previewCaptureFinished", true);
         sourceCards_->setProperty("previewCaptureError", *failure);
     });

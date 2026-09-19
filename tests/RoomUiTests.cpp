@@ -1411,8 +1411,20 @@ int main(int argc, char** argv) {
             Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
             Check(cards->property("previewCaptureCount").toInt() > 0);
             browser.findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>()->button(1)->click();
-            Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
+            // Both categories were preloaded: switching must not start another pass.
+            Check(cards->property("previewCaptureFinished").toBool());
             Check(cards->property("previewCaptureCount").toInt() > 0);
+            const auto cachedWindow = cards->item(0)->icon().cacheKey();
+            auto* kinds = browser.findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>();
+            kinds->button(0)->click();
+            const auto cachedDisplay = cards->item(0)->icon().cacheKey();
+            for (int repeat = 0; repeat < 3; ++repeat) {
+                kinds->button(1)->click();
+                Check(cards->item(0)->icon().cacheKey() == cachedWindow);
+                kinds->button(0)->click();
+                Check(cards->item(0)->icon().cacheKey() == cachedDisplay);
+                Check(cards->property("previewCaptureFinished").toBool());
+            }
             browser.close();
         }
         MutationLifecycle(argv[1]);

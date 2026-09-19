@@ -240,7 +240,7 @@ QLabel#FormHint { color: #a3b5af; }
 QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
 QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }
 QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#joinWithPassword {
-    background: #38d8c8; color: #08251f; font-weight: 650; min-height: 24px;
+    background: #38d8c8; color: #ffffff; font-weight: 650; min-height: 24px;
 }
 QWidget#AppShellWindow,
 QStackedWidget#AppPageStack,
@@ -497,7 +497,7 @@ QPushButton#HomeGhost:hover {
 }
 QPushButton#HomeTinyButton {
     background: transparent;
-    color: #6ee8dc;
+    color: #ffffff;
     border: 1px solid #3c615d;
     border-radius: 7px;
     padding: 7px 10px;

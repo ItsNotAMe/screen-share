@@ -24,7 +24,10 @@ host names are not exposed by the current public directory schema.
 Create now follows the two-card mockup: stacked field labels, Public/Private and
 Gaming/Quality segments, Display/Window source cards, a two-column quality grid,
 password inside Room details, and collapsed capacity controls. Source snapshots
-refresh on source enumeration or category changes; unavailable previews use a
+preload both categories on source enumeration and stay cached across tab switches;
+each thumbnail appears as soon as its background capture finishes. Only small
+thumbnail images are retained in memory, and refreshing sources resets the cache.
+Unavailable previews use a
 named placeholder, never a replacement capture source. Below 780 logical pixels,
 the cards stack. The create action remains outside the scrolling form.
 Home and the page title now share a header row, with a larger SVG Back icon.

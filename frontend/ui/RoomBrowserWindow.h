@@ -2,6 +2,8 @@
 #include "ui/RoomSessionWindow.h"
 #include "shared/RoomProfile.h"
 #include "room/qt/RoomDirectory.h"
+#include <QHash>
+#include <QIcon>
 class QLineEdit;
 class RoomDirectoryWidget;
 class QCheckBox;
@@ -73,6 +75,8 @@ private:
     bool windowSources_ = false;
     QThread* previewThread_ = nullptr;
     uint64_t previewRevision_ = 0;
+    QHash<int, QIcon> sourcePreviews_;
+    bool previewsLoaded_ = false;
 };
 int RunRoomBrowserWindow(const QUrl& origin, bool normalHome = false,
                         std::function<void(AppShellWindow&)> initializeShell = {});
