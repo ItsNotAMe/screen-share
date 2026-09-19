@@ -91,8 +91,10 @@ Physical controller update (2026-09-19): laptop Bluetooth GameSir input, using t
 native DS4 HID reader, reaches the desktop virtual controller. The user confirmed
 button/stick response and clean explicit release while holding a button; the host
 records 1,373 applied reports, zero rejected and a cleared grant afterward.
-See CONTROLLERS.md for the padded-HID fix and evidence. Disconnect, other physical
-controller models and external latency remain unverified.
+The subsequent held-button power-off check also passes by user observation;
+host evidence ends at 1,592 applied reports, zero rejected and a cleared grant.
+See CONTROLLERS.md for the padded-HID fix and evidence. Intermittent regrant after
+release, other physical controller models and external latency remain unverified.
 
 FIELD-TESTING.md
 contains the prepared five-minute first pass and test-scene/package instructions.

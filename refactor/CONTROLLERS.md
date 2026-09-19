@@ -27,9 +27,14 @@ reader and host virtual controller. The user also confirmed that releasing contr
 while holding a button clears the input cleanly. The host subsequently reports
 1,373 applied reports, zero rejected, zero granted capabilities and no pending
 release acknowledgement. Explicit held-button release passes for this setup.
-Controller disconnection and external input-to-display latency still need
-acceptance; this does not establish physical
-compatibility with every Xbox or Sony model.
+The user then confirmed that turning off the controller while holding a button
+clears the pressed input and disables control. The host records 1,592 applied
+reports, zero rejected, zero granted capabilities and no pending release.
+Disconnect cleanup passes for this setup. One intervening regrant was revoked
+without new reports; refreshing/reselecting the controller allowed the next grant
+to succeed. That intermittent regrant behavior is not explained by the successful
+disconnect check and remains a follow-up. External input-to-display latency and
+physical compatibility with other Xbox or Sony models remain unverified.
 
 The opt-in v2 room UI and CLI now support explicitly authorized controllers.
 Mouse/keyboard control is now integrated; see [DESKTOP-INPUT.md](DESKTOP-INPUT.md).
