@@ -312,6 +312,12 @@ void AppShellWindow::changeEvent(QEvent* event)
 void AppShellWindow::showEvent(QShowEvent* event)
 {
     QWidget::showEvent(event);
+    if (!initialFocusSet_) {
+        initialFocusSet_ = true;
+        // Start without selecting a chrome action. Tab still enters the normal
+        // focus chain; later shows preserve the user's existing focus.
+        setFocus(Qt::OtherFocusReason);
+    }
 #ifdef _WIN32
     applyNativeWindowStyle();
     registerPanicHotkey();

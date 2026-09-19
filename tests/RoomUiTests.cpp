@@ -359,6 +359,8 @@ void NormalHomeScenario(const QUrl& origin) {
     }, true, hostFile, false, true);
     RoomApplication viewer(origin, Factory(audio), true, profiles.filePath("normal-viewer.ini"), false, true);
     host.show(); viewer.show();
+    Check(host.window().focusWidget() == &host.window());
+    Check(viewer.window().focusWidget() == &viewer.window());
     auto* stack = host.window().findChild<QStackedWidget*>("AppPageStack");
     Check(host.home() && viewer.home() && stack->currentWidget() == host.home());
     Check(!host.home()->findChild<QNetworkAccessManager*>()); // No legacy /rooms client.

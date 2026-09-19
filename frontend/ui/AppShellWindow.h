@@ -55,6 +55,7 @@ private:
     QWidget* titleBar_ = nullptr;
     QPushButton* maximizeButton_ = nullptr;
     QPushButton* profileButton_ = nullptr;
+    bool initialFocusSet_ = false;
     std::function<void()> panicHotkeyHandler_;
     std::function<bool()> closeHandler_;
 #ifdef _WIN32
