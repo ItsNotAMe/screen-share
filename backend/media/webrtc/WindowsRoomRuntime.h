@@ -29,6 +29,7 @@ struct WindowsRoomRuntimeOptions {
     std::function<std::unique_ptr<webrtc::VideoEncoderFactory>(std::unique_ptr<webrtc::VideoEncoderFactory>)> encoderDecorator;
     std::function<std::unique_ptr<webrtc::VideoDecoderFactory>(std::unique_ptr<webrtc::VideoDecoderFactory>)> decoderDecorator;
     std::function<CaptureSession::Factory(CaptureSession::Factory)> captureDecorator;
+    MediaEngine::PacketFactory packetFactory; // Optional embedding/test transport; absent in the application.
     webrtc::PeerConnectionInterface::RTCConfiguration connection;
     std::shared_ptr<PresentationTelemetry> presentation;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;

@@ -4,21 +4,29 @@ Last reconciled: 2026-09-19 (including congestion-window settling, continuous di
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+Latest reconciliation: matched impairment comparison complete, 32 selected valid
+runs (MATCHED-NETWORK.md); physical HID regrant passes 42 grants after the cancelled
+read fix. Real virtual-driver multi-pad allocation is a separate retained failure,
+and administrator cleanup is needed before retesting (CONTROLLERS.md). The
+eight-minute GPU probe still grows Section handles (RECEIVER-RESOURCES.md).
+Older pending-comparison/regrant narrative below is historical, not additional work.
+
 Unattended closeout update (2026-09-19): final Release/Debug room matrices pass
 17/17 each; ten repeated controller fixtures pass 140 grants and ten deliberate
 backend denials. Permission-owned pollers prevent late old-owner cleanup from
 cancelling a new grant. Native silent audio lifecycle, none/system/microphone/
 process capture, generated-window privacy and injected capture recovery pass on
-both PCs. Physical controller regrant remains unaccepted after one grant-4
-failure followed by zero enumerated devices. Four software viewers on the laptop
+both PCs. Physical controller regrant subsequently passes 42 grants and ten
+polling-thread lifetimes after the cancelled-HID-read fix; earlier failures remain
+preserved (CONTROLLERS.md). Four software viewers on the laptop
 pass five-minute LAN delivery at 53.6 fresh FPS each with stable resources.
 The final network matrix retains a 151.2051 ms settling failure; the isolated
 unchanged-policy rerun passes at 141.6709 ms. SERVICE-COST.md records deployed
 hibernatable-message activity, without claiming controlled billing/headroom.
 See CONTROLLERS.md, HARDWARE-LAN.md and
 [compact evidence](evidence/unattended-closeout-2026-09-19.json). These results
-do not close physical timing, hardware-resource, Internet/NAT or matched-impaired
-legacy comparison requirements.
+do not close physical timing, hardware-resource or Internet/NAT requirements.
+Matched-impaired legacy comparison is now complete (MATCHED-NETWORK.md).
 
 Native presentation acceptance (RECEIVER-RESOURCES.md): the five-minute laptop
 software-decoder/GPU-renderer run passes at 47.7 rendered / 48.3 fresh decoded
@@ -758,12 +766,15 @@ Plan references: Sections 2.7, 4.1–4.2 and 5 / Checkpoint D.
 
 - [x] Verify accurate pending/applied/error states and per-viewer metrics through actual headless UI/CLI scenarios (DIAGNOSTICS.md, SESSION-REPORTS.md).
 - [ ] Verify no input backlog under video saturation, retransmissions or keyframe bursts.
-- [ ] Verify lost/late/reordered states and reliable events after watchdog expiry.
+- [x] Verify lost/late/reordered states and reliable events after watchdog expiry.
+  InputServiceTests rejects old reliable events after the independent watchdog
+  expires; real-channel packet tests retain loss/reordering and revoke evidence.
 - [ ] Verify revoke, disconnect, controller unplug and backend failure neutralization.
   Controller and service cases pass with recording sinks. Physical GameSir
   Bluetooth/native-DS4 delivery, explicit held-button release and power-off
   cleanup now pass on laptop → desktop (CONTROLLERS.md, 2026-09-19). Other
-  devices, intermittent regrant and physical backend-failure cases remain open.
+  devices and physical backend-failure cases remain open. The observed repeat-grant
+  fault is fixed and passes 42 physical-reader grants without refreshing.
 - [ ] Verify window focus/confinement, letterboxing and source-change mapping.
   Recording-sink UI/CLI, metadata and source-generation cases pass. Physical
   injection/foreground/occlusion behavior still requires separate acceptance.
@@ -787,7 +798,10 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [x] Add seeded real-packet WebRTC network scenarios with recorded configurations,
   actual impairment/isolation/recovery checks and independent receiver processes.
   See NETWORK-IMPAIRMENT.md; the 640x360 software proof is not full field acceptance.
-- [ ] Run healthy 1080p60 with one viewer and four viewers.
+- [x] Run healthy 1080p60 with one viewer and four viewers.
+  HARDWARE-LAN.md records the one-viewer hardware path and four independent
+  laptop software viewers at 53.6 fresh FPS each for five minutes. This is a
+  60-FPS configured target, not a claim of 60 distinct delivered images per second.
 - [x] Run one-viewer-path bandwidth collapse/recovery: 20 → 4 → 20 Mbps with
   640×360@30 software media, actual offered load and healthy-viewer isolation;
   corrected Release and Debug pass. See CONGESTION-RECOVERY.md.
@@ -801,7 +815,10 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [ ] Run host encoder exhaustion/hardware failure.
 - [ ] Run late join, kick, leave/rejoin and host restart.
 - [ ] Run interface change, ICE restart and blocked direct UDP.
-- [ ] Run input state loss, delayed reliable events and revoke during congestion.
+- [x] Run input state loss, delayed reliable events and revoke during congestion.
+  RoomImpairmentProof exercises the encrypted channels and recording sink,
+  observes input-visible response, revokes during impairment and rejects input
+  afterward; InputServiceTests covers late reliable events after watchdog expiry.
 
 ### Real-machine acceptance
 
@@ -820,7 +837,10 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [ ] Verify steady A/V skew within ±50 ms.
 - [ ] Verify stale frame age stops growing after capacity reduction; target settling within three seconds at sustainable settings.
 - [ ] Verify upward adaptation resumes without repeated resolution/encoder oscillation.
-- [ ] Verify one impaired viewer does not lower healthy viewers without a documented shared resource/budget constraint.
+- [x] Verify one impaired viewer does not lower healthy viewers without a documented shared resource/budget constraint.
+  MATCHED-NETWORK.md records four-viewer collapse/loss controls and healthy-viewer
+  phase FPS/age. Software CPU pressure is disclosed; this is local packet-model
+  evidence, not Internet/NAT or physical-display coverage.
 - [ ] Complete a two-hour four-viewer soak without deadlock, sustained memory growth or accumulating queues.
   The Release 7200-second synthetic run now passes progress, buffering and tracked
   ownership checks after correcting a sample-count assumption. Full private-memory,
@@ -833,8 +853,13 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
   and stale-port rejection. Handle growth is +5 each; memory accounting remains
   unresolved, so this complete resource-acceptance row stays open. See ROOM-STRESS.md.
 - [ ] Verify healthy room/list changes appear within two seconds.
-- [ ] Verify zero periodic HTTP membership/list polling.
-- [ ] Verify zero per-room listing verification and zero per-peer heartbeat writes.
+- [x] Verify zero periodic HTTP membership/list polling.
+  Production room/directory clients subscribe over WebSockets; final UI/CLI
+  matrices exercise pushed changes. Reconnect/resynchronization is distinct
+  from a periodic HTTP polling loop.
+- [x] Verify zero per-room listing verification and zero per-peer heartbeat writes.
+  The workerd cost-invariants test records zero room-object calls for directory
+  reads and zero application/storage work for automatic heartbeat exchanges.
 
 ### Free-tier workload
 
@@ -845,7 +870,9 @@ Plan references: Section 5 / Checkpoint E and Free-tier validation.
 - [ ] Count Durable Object messages, cross-object calls and alarms.
 - [ ] Count storage reads/writes, active duration and directory broadcasts.
 - [ ] Verify at least 50% headroom against each applicable measured daily allowance.
-- [ ] Record account-wide usage caveats and current Cloudflare limits/source date.
+- [x] Record account-wide usage caveats and current Cloudflare limits/source date.
+  SERVICE-COST.md includes dated official limits and account/namespace readings,
+  explicitly separates intervals, and retains the failed request-headroom target.
 
 **Gate E**
 

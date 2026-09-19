@@ -4,6 +4,9 @@
 #include "core/ShortWait.h"
 #include "PipelineTrace.h"
 #include "ComparisonScene.h"
+#ifdef SCREENSHARE_COMPARISON_NETWORK
+#include "LegacyImpairedLink.h"
+#endif
 #include "api/make_ref_counted.h"
 #include "runtime/ScreenShareSessionRunner.h"
 #include "runtime/ScreenShareRuntimeInternal.h"
@@ -64,6 +67,23 @@ public:
         if (pixels.size() >= size_t(frame.width) * frame.height) Frame(frame.width, frame.height, pixels.data(), frame.width);
     }
     void Begin() { std::lock_guard lock(mutex_); measuring_ = true; frames_ = invalid_ = 0; ages_.clear(); ids_.clear(); squared_ = 0; qualitySamples_ = 0; }
+    void BeginPhase() { std::lock_guard lock(mutex_); phaseFrames_ = phaseInvalid_ = 0; phaseAges_.clear(); heldAges_.clear(); }
+    void ObserveDisplayed() {
+        std::lock_guard lock(mutex_);
+        if (latestPainted_ > 0) heldAges_.push_back(NowMs() - latestPainted_);
+    }
+    QJsonObject EndPhase(double seconds) {
+        std::lock_guard lock(mutex_);
+        std::sort(phaseAges_.begin(), phaseAges_.end()); std::sort(heldAges_.begin(), heldAges_.end());
+        auto quantile = [](const auto& values, double q) -> QJsonValue {
+            return values.empty() ? QJsonValue(QJsonValue::Null) : QJsonValue(values[size_t(std::ceil(q * values.size())) - 1]);
+        };
+        return {{"frames", int(phaseFrames_)}, {"invalidMarkers", int(phaseInvalid_)},
+            {"freshFrames", int(phaseAges_.size())}, {"freshFps", phaseAges_.size() / seconds},
+            {"deliveredAgeP95Ms", quantile(phaseAges_, .95)}, {"displayedAgeP95Ms", quantile(heldAges_, .95)},
+            {"displayedAgeP99Ms", quantile(heldAges_, .99)}, {"displayedAgeMaximumMs", quantile(heldAges_, 1)},
+            {"displayedAgeSamples", int(heldAges_.size())}};
+    }
     QJsonObject End(double seconds) {
         std::lock_guard lock(mutex_); measuring_ = false;
         if (retainedOnly_) return {{"frames", int(frames_)}, {"fps", frames_ / seconds}, {"invalidDimensions", int(invalid_)}};
@@ -90,19 +110,21 @@ private:
         ++received;
         const double now = NowMs();
         std::lock_guard lock(mutex_); if (!measuring_) return;
-        ++frames_;
-        if (width != Width || height != Height) { ++invalid_; return; }
+        ++frames_; ++phaseFrames_;
+        if (width != Width || height != Height) { ++invalid_; ++phaseInvalid_; return; }
         unsigned id = 0;
         for (int bit = 0; bit < 16; ++bit) {
             int a = 0, b = 0;
             for (int dx = -2; dx <= 2; ++dx) { a += y[(Height * 172 / 360) * stride + Width * (50 + bit * 36) / 640 + dx]; b += y[(Height * 196 / 360) * stride + Width * (50 + bit * 36) / 640 + dx]; }
-            if ((a > 640) == (b > 640)) { ++invalid_; return; }
+            if ((a > 640) == (b > 640)) { ++invalid_; ++phaseInvalid_; return; }
             if (a > 640) id |= 1u << bit;
         }
         const double painted = scene_.Time(id);
-        if (!painted || painted > now || now - painted > 10000) { ++invalid_; return; }
+        if (!painted || painted > now || now - painted > 10000) { ++invalid_; ++phaseInvalid_; return; }
+        latestPainted_ = painted;
         if (!ids_.insert(id).second) return;
         ages_.push_back(now - painted);
+        phaseAges_.push_back(now - painted);
         for (int row = 10; row < Height; row += 20) for (int col = 10; col < Width; col += 20) {
             if (row * 360 / Height >= 150 && row * 360 / Height < 220) continue;
             const double reference = 16 + 219.0 * scene_.Shade(id, col, row) / 255;
@@ -112,6 +134,9 @@ private:
     }
     Scene& scene_; const bool retainedOnly_; std::mutex mutex_; bool measuring_ = false; unsigned frames_ = 0, invalid_ = 0;
     std::vector<double> ages_; std::set<unsigned> ids_; double squared_ = 0; uint64_t qualitySamples_ = 0;
+    unsigned phaseFrames_ = 0, phaseInvalid_ = 0;
+    double latestPainted_ = 0;
+    std::vector<double> phaseAges_, heldAges_;
 };
 double CpuSeconds() {
     FILETIME created{}, ended{}, kernel{}, user{}; Require(GetProcessTimes(GetCurrentProcess(), &created, &ended, &kernel, &user), "Process timing failed");
@@ -197,16 +222,18 @@ public:
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     QJsonObject result{{"schema", 1}, {"passed", false}, {"externalLatencyVerified", false}, {"physicalInput", false}, {"audibleOutput", false}};
-    if (argc < 8 || argc > 13) { std::cerr << "backend origin scene viewers seconds port output.json [retained-only] [honor-timers] [trace] [no-smoothing] [legacy-cadence]\n"; return 2; }
+    if (argc < 8 || argc > 14) { std::cerr << "backend origin scene viewers seconds port output.json [retained-only] [honor-timers] [trace] [no-smoothing] [legacy-cadence] [network=collapse|loss5]\n"; return 2; }
     const QString output = argv[7];
     try {
         bool retainedOnly = false, honorTimers = false, traceStages = false, noSmoothing = false, legacyCadence = false;
+        std::string networkScenario;
         for (int i = 8; i < argc; ++i) {
             if (std::string(argv[i]) == "retained-only" && !retainedOnly) retainedOnly = true;
             else if (std::string(argv[i]) == "honor-timers" && !honorTimers) honorTimers = true;
             else if (std::string(argv[i]) == "trace" && !traceStages) traceStages = true;
             else if (std::string(argv[i]) == "no-smoothing" && !noSmoothing) noSmoothing = true;
             else if (std::string(argv[i]) == "legacy-cadence" && !legacyCadence) legacyCadence = true;
+            else if (std::string(argv[i]).starts_with("network=") && networkScenario.empty()) networkScenario = std::string(argv[i]).substr(8);
             else throw std::invalid_argument("Invalid or duplicate diagnostic option");
         }
         if (honorTimers) {
@@ -221,6 +248,12 @@ int main(int argc, char** argv) {
         result["consumer"] = retainedOnly ? "retained-only" : "cpu-pixels";
         const std::string variant = argv[1], backend = variant.starts_with("capture-") ? "capture-only" : variant.starts_with("legacy") ? "legacy" : "v2", mode = argv[3];
         const int viewers = std::stoi(argv[4]), seconds = std::stoi(argv[5]), port = std::stoi(argv[6]);
+        Require(networkScenario.empty() || ((networkScenario == "collapse" || networkScenario == "loss5") &&
+            backend != "capture-only" && !retainedOnly && !traceStages && !noSmoothing && !legacyCadence &&
+            seconds >= 36 && seconds <= 90 && seconds % 3 == 0), "Invalid paired network configuration");
+#ifndef SCREENSHARE_COMPARISON_NETWORK
+        Require(networkScenario.empty(), "Build the comparison with the pinned network test source");
+#endif
         Require(!(traceStages || noSmoothing || legacyCadence) || (backend == "v2" && viewers == 1 && seconds <= 60 && !retainedOnly), "Stage diagnostics require one v2 pixel viewer and at most 60 seconds");
         result["stageDiagnostics"] = traceStages || noSmoothing || legacyCadence;
         result["prerenderSmoothing"] = !noSmoothing;
@@ -241,6 +274,14 @@ int main(int argc, char** argv) {
         MemorySessionRuntimeControl stop;
         std::vector<std::unique_ptr<RoomSession>> rooms;
         std::vector<std::future<int>> legacy;
+#ifdef SCREENSHARE_COMPARISON_NETWORK
+        std::shared_ptr<proof::LinkControl> link;
+        std::unique_ptr<proof::LegacyImpairedLink> legacyLink;
+        if (!networkScenario.empty()) {
+            link = std::make_shared<proof::LinkControl>(12345);
+            if (backend == "legacy") legacyLink = std::make_unique<proof::LegacyImpairedLink>(uint16_t(port + 4), uint16_t(port), link);
+        }
+#endif
         // Stop before futures/sessions are destroyed, including on a failed assertion.
         struct StopGuard { MemorySessionRuntimeControl& stop; ~StopGuard() { stop.RequestStop(); } } guard{stop};
         const auto startup = Clock::now();
@@ -290,9 +331,12 @@ int main(int argc, char** argv) {
                 config.captureSourceType = SessionCaptureSourceType::Window; config.windowHandle = uint64_t(scene.window()); config.windowProcessId = GetCurrentProcessId();
                 config.udpAccessCode = "comparison-generated-scene-only"; config.captureSystemAudio = false;
                 config.stream.outputResolution = SessionResolution{Width, Height}; config.stream.fps = 60; config.stream.bitrateBps = 12000000;
-                config.stream.adaptBitrate = config.stream.adaptResolution = false;
+                // Both network controls may reduce rate below the same ceiling.
+                // Preserve the existing fixed-rate normal-load controls.
+                config.stream.adaptBitrate = !networkScenario.empty();
+                config.stream.adaptResolution = false;
                 config.stream.lowLatency = variant != "legacy";
-                for (int i = 0; i < viewers; ++i) config.targets.push_back("127.0.0.1:" + std::to_string(port + i));
+                for (int i = 0; i < viewers; ++i) config.targets.push_back("127.0.0.1:" + std::to_string(port + (i == 0 && !networkScenario.empty() ? 4 : i)));
                 if (variant == "legacy-hardware") {
                     // Existing legacy runtime/encoder, not the v2 adapter. The
                     // typed application preset forces software, so override only
@@ -309,6 +353,9 @@ int main(int argc, char** argv) {
         } else {
             for (int i = -1; i < viewers; ++i) {
                 WindowsRoomRuntimeOptions options;
+#ifdef SCREENSHARE_COMPARISON_NETWORK
+                if (link && i == 0) options.packetFactory = [link](auto* sockets) { return std::make_unique<proof::ImpairedPacketFactory>(sockets, link); };
+#endif
                 options.connection.set_prerenderer_smoothing(!noSmoothing);
                 if (legacyCadence) options.captureDecorator = [](CaptureSession::Factory original) {
                     return [original = std::move(original)] { return std::make_unique<LegacyCadenceCapture>(original()); };
@@ -340,6 +387,40 @@ int main(int argc, char** argv) {
         for (auto& sink : sinks) sink->Begin();
         if (trace) trace->Begin();
         QJsonArray resourceSamples;
+#ifdef SCREENSHARE_COMPARISON_NETWORK
+        if (link) {
+            QJsonArray phases;
+            auto counters = [&] { return QJsonObject{{"received", qint64(link->received.load())}, {"delivered", qint64(link->delivered.load())},
+                {"deliveredBytes", qint64(link->deliveredBytes.load())}, {"lost", qint64(link->lost.load())}, {"overflow", qint64(link->overflow.load())}}; };
+            const int phaseSeconds = seconds / 3;
+            for (int phase = 0; phase < 3; ++phase) {
+                auto network = link->Read().network;
+                network.link_capacity = webrtc::DataRate::KilobitsPerSec(phase == 1 && networkScenario == "collapse" ? 4000 : 20000);
+                network.loss_percent = phase == 1 && networkScenario == "loss5" ? 5 : 0;
+                network.queue_delay_ms = phase == 1 && networkScenario == "loss5" ? 25 : 0;
+                network.delay_standard_deviation_ms = phase == 1 && networkScenario == "loss5" ? 10 : 0;
+                link->Set(network);
+                const auto before = counters();
+                for (auto& sink : sinks) sink->BeginPhase();
+                const auto phaseStart = Clock::now();
+                for (int tick = 1; tick <= phaseSeconds * 100; ++tick) {
+                    std::this_thread::sleep_until(phaseStart + std::chrono::milliseconds(tick * 10));
+                    for (auto& sink : sinks) sink->ObserveDisplayed();
+                    if (tick % 100 == 0) resourceSamples.append(Resources());
+                }
+                const double measured = std::chrono::duration<double>(Clock::now() - phaseStart).count();
+                QJsonArray viewersInPhase; for (auto& sink : sinks) viewersInPhase.append(sink->EndPhase(measured));
+                phases.append(QJsonObject{{"phase", phase == 0 ? "baseline" : phase == 1 ? "impaired" : "recovery"},
+                    {"seconds", measured}, {"capacityBps", phase == 1 && networkScenario == "collapse" ? 4000000 : 20000000},
+                    {"lossPercent", network.loss_percent}, {"delayMs", network.queue_delay_ms}, {"jitterMs", network.delay_standard_deviation_ms},
+                    {"before", before}, {"after", counters()}, {"receivers", viewersInPhase}});
+            }
+            result["network"] = QJsonObject{{"scenario", QString::fromStdString(networkScenario)}, {"seed", 12345},
+                {"impairedViewer", 0}, {"queuePackets", 256}, {"phases", phases}, {"invalid", link->invalid.load()},
+                {"maximumSchedulingDelayUs", qint64(link->maximumSchedulingDelayUs.load())}, {"maximumResidenceUs", qint64(link->maximumResidenceUs.load())}};
+            Require(!link->invalid && link->received > 100, "Impairment link was bypassed or failed");
+        } else
+#endif
         for (int i = 0; i < seconds; ++i) { std::this_thread::sleep_until(began + std::chrono::seconds(i + 1)); resourceSamples.append(Resources()); }
         const double elapsed = std::chrono::duration<double>(Clock::now() - began).count();
         result["cpuCorePercent"] = 100 * (CpuSeconds() - cpu) / elapsed;
@@ -374,6 +455,10 @@ int main(int argc, char** argv) {
         for (auto& process : legacy) Require(Await(process) == 0, "Legacy runtime failed");
         for (auto it = rooms.rbegin(); it != rooms.rend(); ++it) { auto stopped = (*it)->Stop(); Await(stopped); }
         rooms.clear();
+#ifdef SCREENSHARE_COMPARISON_NETWORK
+        legacyLink.reset();
+        if (link) Require(!link->queued && !link->bytes && !link->liveSockets, "Impaired link resources survived stop");
+#endif
         result["teardownSeconds"] = std::chrono::duration<double>(Clock::now() - stopping).count(); result["afterStopResources"] = Resources();
         result["backend"] = QString::fromStdString(backend); result["scene"] = QString::fromStdString(mode); result["viewers"] = viewers;
         result["settings"] = QJsonObject{{"width", Width}, {"height", Height}, {"fps", 60}, {"bitrateLimitBps", 12000000}, {"audio", "disabled/silent"}, {"encryption", true}, {"warmupSeconds", 5}};
@@ -384,6 +469,8 @@ int main(int argc, char** argv) {
             ? "same-process loopback; retained-frame delivery only; no pixel readback, image validation or presentation; resource isolation diagnostic only"
             : "same-process loopback; generated WGC window to CPU image consumer; source workload included in CPU; no physical presentation/input or network impairment";
         if (backend == "capture-only") result["scope"] = "generated WGC window to synchronous CPU pixel consumer; no encoder, decoder or transport; readback included on both paths";
+        if (!networkScenario.empty()) result["scope"] = "same-process generated WGC scene to CPU image consumer; matched UDP ingress model on viewer 0; legacy relay adds a loopback hop; no physical display/input or Internet/NAT verdict";
+        if (!networkScenario.empty()) result["networkAdaptation"] = backend == "legacy" ? "legacy-feedback-enabled" : "webrtc-congestion-control";
         result["gpuUtilization"] = QJsonValue(QJsonValue::Null); result["passed"] = true;
     } catch (const std::exception& error) { result["error"] = error.what(); }
     QSaveFile file(output); if (!file.open(QIODevice::WriteOnly)) return 2;

@@ -2,7 +2,9 @@
 
 Status: **Retain modular capture. V2 now has lower local image age in all four
 matched configuration groups, and hardware uses substantially less CPU.
-Four-viewer resources and physical/network acceptance remain open.** Legacy
+Matched packet impairment also strongly favors v2 for continuity; see
+[MATCHED-NETWORK.md](MATCHED-NETWORK.md). Laptop hardware resources and physical/
+Internet acceptance remain open.** Legacy
 receives the portable timer, sender-mode, hardware-queue, decoder and software
 CABAC fixes too. These are measured workload results, not a universal
 architectural win or permission to waive the remaining acceptance gates.

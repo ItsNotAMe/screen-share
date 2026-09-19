@@ -12,8 +12,8 @@ index before frontend work.** The detailed gates and evidence live in
 
 | Remaining group | Done when | Status |
 | --- | --- | --- |
-| 1. Presentation, devices and gaming acceptance | Sustained GPU presentation and recovery are verified; source privacy/HDR/adapters, audio switching/unplug, controller/input release and external image/input/A-V timing have recorded results. | Native presentation and both-PC silent audio/capture privacy/recovery pass. Final Release/Debug matrices pass 17/17 each. Synthetic regrant passes; physical regrant, hardware changes and external timing remain. |
-| 2. Resource, network and service closeout | Resolve or explicitly scope the hardware receiver growth and original capture-handle failure; finish multi-viewer/reverse hardware load, matched impaired legacy comparison, Internet/NAT/interface recovery, billed usage/headroom and hibernation evidence. | Four-viewer LAN compatibility load and reverse-direction measurement complete. Hardware-resource qualification, matched impaired legacy comparison, Internet/NAT and service headroom remain open. |
+| 1. Presentation, devices and gaming acceptance | Sustained GPU presentation and recovery are verified; source privacy/HDR/adapters, audio switching/unplug, controller/input release and external image/input/A-V timing have recorded results. | Native presentation, both-PC silent audio/capture and 42 physical-reader regrants pass. Real multi-pad driver allocation fails separately; administrator cleanup, hardware changes and external timing remain. |
+| 2. Resource, network and service closeout | Resolve or explicitly scope the hardware receiver growth and original capture-handle failure; finish multi-viewer/reverse hardware load, matched impaired legacy comparison, Internet/NAT/interface recovery, billed usage/headroom and hibernation evidence. | Four-viewer LAN compatibility, reverse direction and all 32 selected matched impairment runs complete. Hardware-resource qualification, Internet/NAT and service headroom remain open. |
 | 3. Stage 5 cutover and cleanup | After the acceptance gates pass, make v2 the normal path, remove superseded legacy code/commands, verify packaging and the final regression matrix. | Waiting for groups 1–2. |
 
 **Then Stage 6: frontend look-and-feel redesign.** No new backend features are
@@ -31,17 +31,26 @@ Do not add unrelated backend features or repeat completed v2-only harness work.
 Unattended update: see `evidence/unattended-closeout-2026-09-19.json` for exact
 passes and retained failures, and `evidence/four-viewer-lan-2026-09-19.json` for
 load measurements. No user interaction or audible signal was needed. Physical
-controller regrant is not passed: one run failed at grant 4, then enumeration
-found no device. Do not substitute synthetic success for that result. The
-remaining matched impaired comparison can be developed unattended; actual
+controller regrant now passes 42 real-reader grants after fixing cancelled HID
+reads across polling-thread lifetimes; the earlier failure remains recorded. The
+matched impaired comparison is complete (MATCHED-NETWORK.md); actual
 hotspot/HDR/device changes and external timing require unavailable conditions.
+
+**Current blockers, not another routine test group:** real driver multi-pad
+allocation and leftover virtual-device cleanup (CONTROLLERS.md); laptop hardware
+graphics/encoder qualification and immediate capture-handle bound; unavailable
+physical/HDR/unplug/Internet-path and external timing conditions; service
+headroom/billing reconciliation. All available unattended device/media and
+matched-comparison work is recorded in `evidence/devices-final-2026-09-19.json`
+and `evidence/matched-network-2026-09-19.json`. Do not rerun completed matrices
+without a relevant fix or changed condition.
 
 Field update (2026-09-19): GameSir Bluetooth delivery, explicit held-button
 release and held-button power-off cleanup pass on laptop → desktop. The native
 DS4 HID reader now accepts padded reports while retaining CRC validation. The
 Qt page's scrolling/video clipping is user-confirmed. Repeat-grant investigation
-remains open: a read-only ten-polling-thread lifecycle probe passes, so it has not
-reproduced the intermittent permission failure. See CONTROLLERS.md.
+is closed for this device: Windows cancelled an old thread's pending HID read.
+The fixed reader passes 42 grants and ten polling-thread lifetimes. See CONTROLLERS.md.
 
 Reverse-load update: laptop → desktop sustains 49.49 fresh FPS for five minutes,
 with zero invalid images and stable handle counts. Laptop hardware encoding fails

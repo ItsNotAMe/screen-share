@@ -9,12 +9,21 @@ the **Working agreement** table at the top of [TODO.md](TODO.md). This document
 keeps the detailed acceptance requirements; its historical updates are not
 additional milestones.
 
+Latest unattended closeout: the 32-run matched packet comparison is complete
+and supports retaining v2 (MATCHED-NETWORK.md). The physical HID regrant fault is
+fixed (42 grants, ten reader lifetimes). A separate real virtual-driver allocation
+test fails and requires administrator cleanup before retesting (CONTROLLERS.md).
+The longer eight-minute standalone GPU probe still shows Section-handle growth;
+software receiver compatibility remains the qualified path. These are the current
+results; older “comparison/regrant pending” updates below are historical.
+
 Unattended closeout (2026-09-19): Release/Debug room matrices pass 17/17 each.
 Both PCs pass silent native audio lifecycle, all four audio capture selections,
 generated-window minimize/restore/close privacy and injected capture recovery.
 Ten controller fixtures pass 140 grants plus ten expected backend denials after
-the permission-owner fix. Physical-reader regrant remains unaccepted: grant 4
-failed, then no controller was enumerated. Four independent laptop software
+the permission-owner fix. The subsequent physical-reader fix passes 42 grants
+and ten polling-thread lifetimes; cancelled HID reads were the reproduced fault.
+Earlier failures remain preserved (CONTROLLERS.md). Four independent laptop software
 viewers pass five-minute LAN load at 53.6 fresh FPS each with stable resources.
 The isolated collapse rerun passes the unchanged limit (141.6709 ms), while an
 earlier 151.2051 ms failure is preserved. These are partial gate results, not a
@@ -22,7 +31,7 @@ backend cutover decision. See CONTROLLERS.md, HARDWARE-LAN.md, CONGESTION-WINDOW
 and `evidence/unattended-closeout-2026-09-19.json`.
 
 2026-09-19 field follow-up: GameSir Bluetooth delivery and held-input release/
-disconnect pass; intermittent repeat-grant behavior remains open. Reverse LAN
+disconnect pass; repeat-grant now passes the unattended physical-reader check. Reverse LAN
 delivery sustains 49.49 fresh FPS for five minutes with no invalid images, using
 laptop software encoding after a hardware deadline failure. Hardware-host
 qualification therefore fails rather than being silently waived. See CONTROLLERS.md
@@ -114,8 +123,9 @@ button/stick response and clean explicit release while holding a button; the hos
 records 1,373 applied reports, zero rejected and a cleared grant afterward.
 The subsequent held-button power-off check also passes by user observation;
 host evidence ends at 1,592 applied reports, zero rejected and a cleared grant.
-See CONTROLLERS.md for the padded-HID fix and evidence. Intermittent regrant after
-release, other physical controller models and external latency remain unverified.
+See CONTROLLERS.md for the padded-HID and cancelled-read fixes and evidence.
+Repeat-grant now passes automatically; other physical controller models and
+external latency remain unverified.
 
 FIELD-TESTING.md
 contains the prepared five-minute first pass and test-scene/package instructions.
@@ -136,7 +146,7 @@ input-response checks now pass; see TWO-MACHINE.md for the exact scope.
 | --- | --- | --- |
 | 2: user experience | Normal-shell opt-in share/join, pushed directory, profiles, settings, capture/audio recovery, GPU receive, and redacted UI/CLI reports. Release/Debug headless matrices pass 12/12 each. | Physical audio formats/quality/unplug, source privacy/identity/HDR/adapters, supported-desktop DXGI and occlusion. Final legacy command/default cutover remains Stage 5. |
 | 3: gaming input | Consent, source-bound mapping, per-peer ownership, controllers, queues/watchdogs, neutralization, UI/CLI input diagnostics, recording-sink real-channel tests. | Physical mouse/keyboard confinement and foreground/UIPI behavior, XInput/PlayStation and virtual-driver/local-slot behavior; measured external input response. |
-| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, five strict collapse-settling runs plus four other packet cases, normal-load tuned legacy comparisons, bidirectional LAN software media/recovery through live TLS, five-minute one-viewer desktop-to-laptop 1080p hardware delivery, five-minute software-decoder compatibility with stable laptop resources and native GPU presentation/recovery, encrypted input-marker/process tests, and ten-room/eight-hour service cost evidence. | Laptop hardware-decoder/kernel resource retention (software workaround now verified with native GPU presentation), original immediate capture-handle failure, full Qt/physical presentation and full pipeline queue-age acceptance, four-viewer/other-direction hardware load, Internet/NAT/interface changes, external image/input latency and A/V skew, matched impaired-network comparison, actual billed usage/account headroom and production hibernation. Relative memory optimization is backlogged. |
+| 4: stability/performance/service | 100-room restart evidence, completed two-hour software run with ownership/accounting, Release/Debug local tests, strict collapse settling, normal-load and 32 selected matched-impaired legacy comparisons, bidirectional LAN media/recovery through live TLS, five-minute desktop hardware delivery and four-viewer software-decoder compatibility with stable laptop resources, native GPU presentation/recovery, encrypted input-marker/process tests, and ten-room/eight-hour service cost model. | Laptop hardware-decoder/kernel retention (software workaround verified), original immediate capture-handle failure, remaining physical presentation/full-pipeline queue-age acceptance, strict four-viewer/reverse hardware qualification, Internet/NAT/interface changes, external image/input latency and A/V skew, actual billed usage/account headroom and production hibernation reconciliation. Relative memory optimization is backlogged. |
 
 ## Physical checks that cannot be replaced by this fixture
 
