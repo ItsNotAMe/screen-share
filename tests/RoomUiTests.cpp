@@ -31,6 +31,7 @@
 #include <QTemporaryDir>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QAbstractItemView>
 #include <QDialog>
 #include <QDir>
 #include <QFontDatabase>
@@ -402,6 +403,11 @@ void NormalHomeScenario(const QUrl& origin) {
         Check(host.browser()->findChild<QLineEdit*>("roomName")->text() == "Friday games");
         host.window().findChild<QPushButton*>("TitleSettings")->click();
         auto* settingsPage = host.window().findChild<QWidget*>("ProfilePreferences"); Check(settingsPage && !settingsPage->isWindow());
+        auto* focusedVolume = settingsPage->findChild<QSpinBox*>("profileVolume");
+        focusedVolume->setFocus();
+        QMouseEvent emptyClick(QEvent::MouseButtonPress, QPointF(4,4), QPointF(settingsPage->mapToGlobal(QPoint(4,4))), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(settingsPage, &emptyClick);
+        Check(host.window().focusWidget() == nullptr);
         snapshot(QString("settings-%1").arg(size.width()));
         if (!previews.isEmpty()) {
             auto* volume = settingsPage->findChild<QSpinBox*>("profileVolume");
@@ -411,6 +417,14 @@ void NormalHomeScenario(const QUrl& origin) {
             decoder->showPopup(); QCoreApplication::processEvents();
             Check(QApplication::activePopupWidget());
             Check(QApplication::activePopupWidget()->grab().save(QDir(previews).filePath(QString("dropdown-%1.png").arg(size.width()))));
+            auto* viewport = decoder->view()->viewport();
+            const auto point = decoder->view()->visualRect(decoder->model()->index(1,0)).center();
+            QMouseEvent hover(QEvent::MouseMove, QPointF(point), QPointF(viewport->mapToGlobal(point)), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(viewport, &hover); QCoreApplication::processEvents();
+            const auto hoveredImage = viewport->grab().toImage();
+            QEvent leave(QEvent::Leave); QApplication::sendEvent(viewport, &leave); QCoreApplication::processEvents();
+            Check(hoveredImage != viewport->grab().toImage());
+            Check(QApplication::activePopupWidget()->grab().save(QDir(previews).filePath(QString("dropdown-left-%1.png").arg(size.width()))));
             decoder->hidePopup();
         }
         settingsPage->findChild<QPushButton*>("preferencesBack")->click();

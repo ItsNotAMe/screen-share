@@ -6,8 +6,38 @@
 #include <QEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QMouseEvent>
 
 namespace {
+class ComboItemDelegate final : public QStyledItemDelegate {
+public:
+    explicit ComboItemDelegate(QAbstractItemView* view) : QStyledItemDelegate(view), view_(view) {
+        view->installEventFilter(this); view->viewport()->installEventFilter(this);
+    }
+protected:
+    void initStyleOption(QStyleOptionViewItem* option, const QModelIndex& index) const override {
+        QStyledItemDelegate::initStyleOption(option, index);
+        option->state &= ~(QStyle::State_MouseOver | QStyle::State_HasFocus);
+        if (!keyboard_) option->state &= ~QStyle::State_Selected;
+        if (index == hovered_) option->state |= QStyle::State_MouseOver;
+    }
+    bool eventFilter(QObject* object, QEvent* event) override {
+        if (event->type() == QEvent::MouseMove) {
+            keyboard_ = false;
+            hovered_ = view_->indexAt(static_cast<QMouseEvent*>(event)->position().toPoint());
+            view_->viewport()->update();
+        } else if (event->type() == QEvent::Leave || event->type() == QEvent::Hide) {
+            hovered_ = {}; keyboard_ = false; view_->viewport()->update();
+        } else if (event->type() == QEvent::KeyPress) {
+            hovered_ = {}; keyboard_ = true; view_->viewport()->update();
+        }
+        return QStyledItemDelegate::eventFilter(object, event);
+    }
+private:
+    QAbstractItemView* view_;
+    QModelIndex hovered_;
+    bool keyboard_ = false;
+};
 class ComboPopupSurface final : public QObject {
 public:
     explicit ComboPopupSurface(QWidget* popup) : QObject(popup), popup_(popup) { popup->installEventFilter(this); }
@@ -18,7 +48,7 @@ public:
         }
         if (event->type() == QEvent::Paint) {
             QPainter painter(popup_); painter.setRenderHint(QPainter::Antialiasing);
-            painter.setPen(QColor("#385047")); painter.setBrush(QColor("#151d1b"));
+            painter.setPen(QColor("#60786f")); painter.setBrush(QColor("#151d1b"));
             painter.drawRoundedRect(QRectF(popup_->rect()).adjusted(.5,.5,-.5,-.5), 8, 8);
             return true; // Suppress the native rectangular popup panel.
         }
@@ -33,7 +63,7 @@ void styleComboPopup(QComboBox* combo)
 {
     // The native combo delegate paints a menu frame over QSS item styling.
     // A standard view delegate keeps hover/selection in the shared theme.
-    combo->setItemDelegate(new QStyledItemDelegate(combo));
+    combo->setItemDelegate(new ComboItemDelegate(combo->view()));
     combo->view()->setMouseTracking(true);
     combo->view()->viewport()->setMouseTracking(true);
     auto* popup = combo->view()->window();

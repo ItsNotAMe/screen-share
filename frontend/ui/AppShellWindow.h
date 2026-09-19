@@ -29,6 +29,7 @@ public:
     void setCloseHandler(std::function<bool()> handler);
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
     void changeEvent(QEvent* event) override;
     void showEvent(QShowEvent* event) override;

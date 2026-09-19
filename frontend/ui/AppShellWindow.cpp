@@ -14,6 +14,7 @@
 #include <QtGui/QPixmap>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QFrame>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QHBoxLayout>
@@ -87,6 +88,7 @@ void preferRoundedWindows(HWND hwnd)
 AppShellWindow::AppShellWindow(QWidget* parent) : QWidget(parent)
 {
     setObjectName("AppShellWindow");
+    qApp->installEventFilter(this);
     setWindowTitle("ScreenShare");
     setWindowIcon(QIcon(QStringLiteral(":/screenshare/brand/screenshare-mark.svg")));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint);
@@ -323,6 +325,24 @@ void AppShellWindow::showEvent(QShowEvent* event)
     registerPanicHotkey();
 #endif
     updateChromeState();
+}
+
+bool AppShellWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::MouseButtonPress) {
+        auto* target = qobject_cast<QWidget*>(watched);
+        if (target && target->window() == this) {
+            bool control = false;
+            for (auto* ancestor = target; ancestor && ancestor != this; ancestor = ancestor->parentWidget()) {
+                if (ancestor->focusPolicy() != Qt::NoFocus) { control = true; break; }
+            }
+            if (!control) {
+                auto* focused = focusWidget();
+                if (focused) focused->clearFocus();
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 #ifdef _WIN32
