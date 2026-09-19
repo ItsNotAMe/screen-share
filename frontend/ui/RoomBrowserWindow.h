@@ -8,6 +8,8 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class AppShellWindow;
+class QSpinBox;
+class QBoxLayout;
 
 class RoomBrowserWindow final : public QWidget {
 public:
@@ -26,8 +28,12 @@ public:
     void OpenCreate();
     void OpenJoin(const QString& roomId = {});
     void ShowBackButton();
+    QString profileName() const { return profile_.nickname(); }
+    void OpenPreferences(bool playback, QWidget* owner = nullptr);
+    std::function<void()> profileChanged;
     bool keepDirectoryOnHide = false; // Shared home/form navigation keeps one subscription.
 protected:
+    void resizeEvent(QResizeEvent*) override;
     void showEvent(QShowEvent*) override;
     void hideEvent(QHideEvent*) override;
     void closeEvent(QCloseEvent*) override;
@@ -42,7 +48,12 @@ private:
     RoomProfile profile_;
     screenshare::room::qt::RoomDirectory directory_;
     std::unique_ptr<RoomSessionWindow> active_;
-    QLineEdit *nickname_, *name_, *roomId_, *password_;
+    QLineEdit *name_, *roomId_, *password_;
+    QWidget *createPanel_, *joinPanel_;
+    QLabel* heading_;
+    QComboBox *preset_, *resolution_, *fps_, *bitrate_;
+    QSpinBox* viewerLimit_;
+    QBoxLayout* createColumns_;
     QCheckBox* public_;
     QComboBox *source_, *audio_, *decoder_;
     QTableWidget* rooms_;

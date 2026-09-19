@@ -32,6 +32,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDir>
+#include <QFontDatabase>
 #include <QPlainTextEdit>
 #include <iostream>
 #include <deque>
@@ -351,7 +353,10 @@ void NormalHomeScenario(const QUrl& origin) {
     RoomProfile profile(hostFile);
     StreamPreferences prefs; prefs.resolution = ResolutionMode::Fixed; prefs.width = 320; prefs.height = 180; prefs.fps = 30;
     Check(profile.saveStreamPreferences(prefs));
-    RoomApplication host(origin, Factory(audio), true, hostFile, false, true);
+    StreamPreferences createdPreferences;
+    RoomApplication host(origin, [factory = Factory(audio), &createdPreferences](WindowsRoomRuntimeOptions options) {
+        createdPreferences = options.preferences; return factory(std::move(options));
+    }, true, hostFile, false, true);
     RoomApplication viewer(origin, Factory(audio), true, profiles.filePath("normal-viewer.ini"), false, true);
     host.show(); viewer.show();
     auto* stack = host.window().findChild<QStackedWidget*>("AppPageStack");
@@ -360,6 +365,44 @@ void NormalHomeScenario(const QUrl& origin) {
     Wait([&] { return host.browser()->directory().status().phase == Directory::Phase::Ready &&
         viewer.browser()->directory().status().phase == Directory::Phase::Ready; });
     const auto attempts = host.browser()->directory().connectionAttempts();
+    const auto previews = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");
+    auto snapshot = [&](const QString& name) {
+        if (previews.isEmpty()) return;
+        QCoreApplication::processEvents();
+        Check(QDir().mkpath(previews));
+        const auto ratio = host.window().devicePixelRatioF();
+        QPixmap rendered(host.window().size() * ratio); rendered.setDevicePixelRatio(ratio); rendered.fill(Qt::transparent);
+        host.window().render(&rendered);
+        Check(rendered.save(QDir(previews).filePath(name + ".png")));
+    };
+    host.window().findChild<QPushButton*>("TitleProfile")->click();
+    auto* preferences = host.window().findChild<QDialog*>("ProfilePreferences"); Check(preferences);
+    const auto originalName = host.browser()->profileName();
+    preferences->findChild<QLineEdit*>("profileNickname")->setText(" ");
+    preferences->findChild<QPushButton*>("saveProfile")->click();
+    Check(preferences->isVisible() && !preferences->findChild<QLabel*>("profileError")->text().isEmpty());
+    Check(host.browser()->profileName() == originalName);
+    preferences->findChild<QLineEdit*>("profileNickname")->setText("Not saved");
+    if (!previews.isEmpty()) { Check(QDir().mkpath(previews)); Check(preferences->grab().save(QDir(previews).filePath("profile.png"))); }
+    preferences->reject(); Check(host.browser()->profileName() == originalName);
+    for (const auto size : {QSize(800,600), QSize(1200,850)}) {
+        host.window().resize(size); QCoreApplication::processEvents();
+        snapshot(QString("home-%1").arg(size.width()));
+        host.home()->findChild<QPushButton*>("HomePrimary")->click();
+        Check(!host.browser()->findChild<QLineEdit*>("roomNickname"));
+        Check(host.browser()->findChild<QPushButton*>("createV2Room")->isVisible());
+        Check(!host.browser()->findChild<QPushButton*>("joinV2Room")->isVisible());
+        host.browser()->findChild<QLineEdit*>("roomName")->setText("Friday games");
+        host.window().resize(size + QSize(20,20)); QCoreApplication::processEvents(); host.window().resize(size);
+        Check(host.browser()->findChild<QLineEdit*>("roomName")->text() == "Friday games");
+        snapshot(QString("create-%1").arg(size.width()));
+        host.browser()->findChild<QPushButton*>("roomBack")->click();
+        host.home()->findChild<QPushButton*>("HomeSecondary")->click();
+        Check(host.browser()->findChild<QPushButton*>("joinV2Room")->isVisible());
+        Check(!host.browser()->findChild<QPushButton*>("createV2Room")->isVisible());
+        snapshot(QString("join-%1").arg(size.width()));
+        host.browser()->findChild<QPushButton*>("roomBack")->click();
+    }
     for (int i = 0; i < 3; ++i) {
         host.home()->findChild<QPushButton*>("HomePrimary")->click();
         Check(stack->currentWidget() == host.browser() && !host.keepingScreenAwake());
@@ -374,6 +417,8 @@ void NormalHomeScenario(const QUrl& origin) {
     viewer.browser()->findChild<QPushButton*>("roomBack")->click();
     host.home()->findChild<QPushButton*>("HomePrimary")->click();
     host.browser()->findChild<QLineEdit*>("roomName")->setText("<b>Normal home</b>");
+    host.browser()->findChild<QComboBox*>("createPreset")->setCurrentIndex(1);
+    host.browser()->findChild<QComboBox*>("createBitrate")->setCurrentIndex(1);
     host.browser()->findChild<QLineEdit*>("roomPassword")->setText("normal-home-secret");
     host.browser()->findChild<QPushButton*>("createV2Room")->click();
     auto selectedRow = [&]() -> QWidget* {
@@ -386,8 +431,17 @@ void NormalHomeScenario(const QUrl& origin) {
     Wait([&] { return host.session() && host.session()->session().status().phase == RoomPhase::Active &&
         !host.browser()->directory().running() && selectedRow(); });
     Check(host.keepingScreenAwake() && stack->count() == 3);
+    Check(createdPreferences.preset == StreamPreset::Quality && createdPreferences.width == 320 &&
+        createdPreferences.height == 180 && createdPreferences.fps == 30 &&
+        createdPreferences.bitrateMode == SettingMode::Manual && createdPreferences.bitrateLimitBps == 2000000);
     auto* title = selectedRow()->findChild<QLabel*>("HomeInfoPrimary");
     Check(title && title->text() == "<b>Normal home</b>" && title->textFormat() == Qt::PlainText);
+    auto* search = viewer.home()->findChild<QLineEdit*>("roomSearch");
+    search->setText("no matching title"); Check(selectedRow()->isHidden());
+    search->clear(); Check(!selectedRow()->isHidden());
+    const auto* stableRow = selectedRow();
+    viewer.home()->setPushedRooms({{QString::fromStdString(host.session()->session().status().roomId), "<b>Normal home</b>", 0, true, 0, true}});
+    Check(selectedRow() == stableRow);
     selectedRow()->findChild<QPushButton*>("HomeTinyButton")->click();
     Check(!viewer.session() && viewer.browser()->findChild<QLineEdit*>("joinRoomId")->text() ==
         QString::fromStdString(host.session()->session().status().roomId));
@@ -431,7 +485,7 @@ void BrowserScenario(const QUrl& origin) {
     Check(!hostApp.keepingScreenAwake() && !viewerApp.keepingScreenAwake());
     Wait([&] { return audit.status().phase == Directory::Phase::Ready && host.directory().status().phase == Directory::Phase::Ready && viewer.directory().status().phase == Directory::Phase::Ready; });
     Check(audit.status().rooms.empty() && host.directory().connectionAttempts() == 1);
-    Check(host.findChild<QLineEdit*>("roomNickname")->text() == QStringLiteral("Caf\u00e9"));
+    Check(!host.findChild<QLineEdit*>("roomNickname") && host.profileName() == QStringLiteral("Caf\u00e9"));
     host.findChild<QLineEdit*>("roomName")->setText("<b>Plain room</b>");
     host.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret");
     host.findChild<QPushButton*>("createV2Room")->click();
@@ -468,7 +522,15 @@ void BrowserScenario(const QUrl& origin) {
     viewer.activeSession()->close();
     Wait([&] { return !viewer.activeSession() && viewer.isVisible() && viewer.directory().status().phase == Directory::Phase::Ready; });
     Check(viewerStack->count() == 1 && viewerStack->currentWidget() == &viewer && !viewerApp.keepingScreenAwake());
-    viewer.findChild<QLineEdit*>("roomNickname")->setText(" Browser viewer ");
+    viewerApp.window().findChild<QPushButton*>("TitleProfile")->click();
+    auto* profileDialog = viewerApp.window().findChild<QDialog*>("ProfilePreferences");
+    Check(profileDialog);
+    profileDialog->findChild<QLineEdit*>("profileNickname")->setText(QString(33, 'x'));
+    // The edit enforces the persisted profile's 32-character limit.
+    Check(profileDialog->findChild<QLineEdit*>("profileNickname")->text().size() == 32);
+    profileDialog->findChild<QLineEdit*>("profileNickname")->setText(" Browser viewer ");
+    profileDialog->findChild<QPushButton*>("saveProfile")->click();
+    Check(viewer.profileName() == "Browser viewer");
     viewer.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret"); list->selectRow(0);
     viewer.findChild<QLineEdit*>("joinRoomId")->setText(roomLink);
     viewer.findChild<QComboBox*>("roomDecoder")->setCurrentIndex(1);
@@ -481,7 +543,7 @@ void BrowserScenario(const QUrl& origin) {
     Check(viewer.findChild<QLineEdit*>("roomPassword")->text().isEmpty());
     Check(RoomProfile(viewerFile).nickname() == "Browser viewer");
     { QSettings saved(hostFile, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"nickname"}); }
-    { QSettings saved(viewerFile, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"decoder/v1", "nickname"}); }
+    { QSettings saved(viewerFile, QSettings::IniFormat); Check(saved.allKeys() == QStringList{"decoder/v1", "nickname", "playback/v1"}); }
     auto* hostWindow = host.activeSession(); auto* viewerWindow = viewer.activeSession();
     const auto streamRevision = hostWindow->session().status().stream.requestedRevision;
     hostWindow->findChild<QSpinBox*>("streamWidth")->setValue(1280);
@@ -976,6 +1038,13 @@ void DesktopInputScenario(const std::string& origin) {
 int main(int argc, char** argv) {
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString&) {});
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
+    QApplication::setStyle("Fusion");
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    // Qt's offscreen backend does not enumerate the Windows font directory.
+    const auto fonts = QDir(qEnvironmentVariable("WINDIR", "C:/Windows")).filePath("Fonts");
+    Check(QFontDatabase::addApplicationFont(QDir(fonts).filePath("segoeui.ttf")) >= 0);
+    Check(QFontDatabase::addApplicationFont(QDir(fonts).filePath("segoeuib.ttf")) >= 0);
+#endif
     webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false);
     webrtc::InitializeLogging(std::move(logging)); webrtc::WinsockInitializer winsock;
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;

@@ -24,7 +24,7 @@ index before frontend work.** The detailed gates and evidence live in
 | --- | --- | --- |
 | 1–2. Backend acceptance | Accept measured current scope and record outstanding limitations. | Accepted by user; remaining items deferred to BACKLOG.md. |
 | Stage 5 cutover and cleanup | Make v2 the normal path, preserve useful working input/platform code, remove superseded paths and verify affected packaging/regressions. | Complete for the accepted personal-use scope: default UI/CLI, obsolete frontend removal, legacy transport isolated to diagnostics, Release/Debug 9/9 and relocated package checks. See CUTOVER.md. External publishing remains separate. |
-| Stage 6 frontend redesign | Improve appearance, layout, resizing and interaction using the modular backend. | Design boards ready in ../docs/design/README.md; grouped implementation and final cleanup tracked in ../agents/todo.md. No additional backend acceptance campaign required. |
+| Stage 6 frontend redesign | Improve appearance, layout, resizing and interaction using the modular backend. | Shared title bar, Home/Create/Join and profile/playback defaults implemented; Release UI tests pass at 100%/150% scale. Host/Viewer/settings/updates next. See ../docs/design/README.md and ../agents/todo.md. No additional backend acceptance campaign required. |
 
 **Then Stage 6: frontend look-and-feel redesign.** No new backend features are
 planned between these groups. A failed check belongs to its existing group,

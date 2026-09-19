@@ -10,6 +10,7 @@
 class QLabel;
 class QPushButton;
 class QVBoxLayout;
+class QLineEdit;
 
 struct HomeActiveRoom {
     QString roomId;
@@ -34,7 +35,6 @@ public:
     void setPushedRooms(const QVector<HomeActiveRoom>&, const QString& unavailable = {});
 
 private:
-    QWidget* buildTopBar();
     QWidget* buildMainMenu();
     QWidget* buildActionPanel(
         const char* iconName,
@@ -46,6 +46,7 @@ private:
     QWidget* buildRoomRow(
         const HomeActiveRoom& room);
     void updateRooms(const QVector<HomeActiveRoom>& rooms);
+    void filterRooms();
     void showRoomStatus(const QString& message);
     QWidget* buildMetric(const QString& value, const QString& label);
 
@@ -55,4 +56,6 @@ private:
     QLabel* roomCountValue_ = nullptr;
     QLabel* peerCountValue_ = nullptr;
     QPushButton* refreshRoomsButton_ = nullptr;
+    QLabel* directoryStatus_ = nullptr;
+    QLineEdit* search_ = nullptr;
 };

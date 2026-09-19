@@ -3,6 +3,33 @@
 QString uiStyleSheet()
 {
     return QStringLiteral(R"(
+QWidget { color: #edf5f2; font-family: "Segoe UI"; font-size: 10pt; }
+QDialog, QWidget#RoomBrowser { background: #0c1110; }
+QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
+QLineEdit, QComboBox, QSpinBox {
+    background: #151d1b; color: #edf5f2; border: 1px solid #293631;
+    border-radius: 6px; padding: 8px; min-height: 20px;
+}
+QComboBox QAbstractItemView { background: #151d1b; color: #edf5f2; selection-background-color: #21645b; }
+QPushButton { background: #151d1b; color: #edf5f2; border: 1px solid #293631; border-radius: 6px; padding: 9px 14px; }
+QPushButton:hover { background: #20312c; border-color: #52746a; }
+QPushButton:disabled { color: #73877f; background: #111815; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPushButton:focus { border: 2px solid #38d8c8; }
+QTableWidget { background: #151d1b; alternate-background-color: #18221e; gridline-color: #293631; border: 1px solid #293631; }
+QHeaderView::section { background: #151d1b; color: #a3b5af; border: 0; padding: 8px; }
+QTableWidget::item { padding: 6px; }
+QTableWidget::item:selected { background: #21645b; }
+QTabWidget::pane { border: 1px solid #293631; }
+QTabBar::tab { background: #151d1b; padding: 10px 18px; }
+QTabBar::tab:selected { border-bottom: 2px solid #38d8c8; }
+QLabel#PageHeading { font-size: 23pt; font-weight: 650; }
+QLabel#SectionHeading { font-size: 13pt; font-weight: 650; padding-bottom: 6px; }
+QWidget#FormCard { background: #121a17; border: 1px solid #293631; border-radius: 8px; }
+QLabel#FormHint { color: #a3b5af; }
+QLabel#browserError, QLabel#profileError { color: #ffafa6; }
+QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#saveProfile {
+    background: #38d8c8; color: #08251f; font-weight: 650; min-height: 24px;
+}
 QWidget#AppShellWindow,
 QStackedWidget#AppPageStack,
 QWidget#HomeWindow,
@@ -13,7 +40,7 @@ QWidget#HomeContent {
     font-size: 10pt;
 }
 QFrame#AppShellFrame {
-    background: #171a19;
+    background: #0c1110;
     border: 1px solid #2d3533;
     border-radius: 12px;
 }
@@ -26,9 +53,13 @@ QFrame#AppShellFrame[chromeHidden="true"] {
     border-radius: 0;
 }
 QWidget#AppTitleBar {
-    background: transparent;
+    background: #101815;
     border: 0;
 }
+QLabel#TitleBrand { font-size: 15pt; font-weight: 700; margin-left: 8px; margin-right: 8px; }
+QLabel#TitleVersion { color: #a3b5af; font-size: 9pt; }
+QPushButton#TitleProfile, QPushButton#TitleSettings { background: transparent; border: 0; }
+QPushButton#TitleProfile:focus, QPushButton#TitleSettings:focus { border: 2px solid #38d8c8; }
 QWidget#Toast {
     background: rgba(24, 27, 26, 240);
     border: 1px solid #3a4543;
@@ -85,11 +116,11 @@ QPushButton#WindowCloseButton:pressed {
     background: #a83b3b;
 }
 QFrame#HomeTopBar {
-    background: #171a19;
+    background: #0c1110;
     border: 0;
 }
 QWidget#HomeContent {
-    background: #171a19;
+    background: #0c1110;
 }
 QWidget#RoomWindow,
 QWidget#RoomContent,
@@ -138,7 +169,7 @@ QLabel#HomeEmptyState {
     font-weight: 600;
 }
 QFrame#HomeRoomList {
-    background: #191c1b;
+    background: #121a17;
     border: 1px solid #2a302f;
     border-radius: 8px;
 }
@@ -150,7 +181,7 @@ QFrame#HomeRoomRow:hover {
     background: #202725;
 }
 QFrame#HomeMetric {
-    background: #191c1b;
+    background: #121a17;
     border: 1px solid #2a302f;
     border-radius: 8px;
 }
@@ -194,9 +225,9 @@ QLabel#HomeMetricLabel {
     font-weight: 650;
 }
 QPushButton#HomePrimary {
-    background: #168f82;
+    background: #123c35;
     color: #ffffff;
-    border: 0;
+    border: 1px solid #38d8c8;
     border-radius: 8px;
     padding: 14px 24px;
     font-weight: 750;
@@ -208,7 +239,7 @@ QPushButton#HomePrimary:pressed {
     background: #107468;
 }
 QPushButton#HomeSecondary {
-    background: #262b2a;
+    background: #151d1b;
     color: #edf5f2;
     border: 1px solid #353e3c;
     border-radius: 8px;

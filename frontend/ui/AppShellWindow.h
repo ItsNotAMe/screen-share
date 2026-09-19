@@ -18,6 +18,9 @@ public:
     int addPage(QWidget* page);
     void setCurrentWidget(QWidget* page);
     void setChromeVisible(bool visible);
+    void setProfileName(const QString& name);
+    std::function<void()> openProfile;
+    std::function<void()> openSettings;
     void showToast(const QString& message);
     // Handler invoked when the host presses the global panic-revoke hotkey
     // (Ctrl+Alt+Shift+F12). Wired to instantly revoke any active remote control.
@@ -51,6 +54,7 @@ private:
     QStackedWidget* stack_ = nullptr;
     QWidget* titleBar_ = nullptr;
     QPushButton* maximizeButton_ = nullptr;
+    QPushButton* profileButton_ = nullptr;
     std::function<void()> panicHotkeyHandler_;
     std::function<bool()> closeHandler_;
 #ifdef _WIN32

@@ -14,6 +14,7 @@
 #include <QtGui/QPixmap>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QFrame>
+#include <QtWidgets/QLabel>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QPushButton>
@@ -103,10 +104,11 @@ AppShellWindow::AppShellWindow(QWidget* parent) : QWidget(parent)
 
     stack_ = new QStackedWidget;
     stack_->setObjectName("AppPageStack");
-    frameLayout->addWidget(stack_, 0, 0);
+    frameLayout->addWidget(stack_, 1, 0);
+    frameLayout->setRowStretch(1, 1);
 
     QWidget* titleBar = buildTitleBar();
-    frameLayout->addWidget(titleBar, 0, 0, Qt::AlignTop | Qt::AlignRight);
+    frameLayout->addWidget(titleBar, 0, 0);
     titleBar->raise();
 
     root->addWidget(frame_, 1);
@@ -170,12 +172,30 @@ QWidget* AppShellWindow::buildTitleBar()
 {
     auto* frame = new QWidget;
     frame->setObjectName("AppTitleBar");
-    frame->setFixedSize(140, 38);
+    frame->setMinimumHeight(58);
     titleBar_ = frame;
 
     auto* layout = new QHBoxLayout(frame);
-    layout->setContentsMargins(0, 0, 8, 0);
+    layout->setContentsMargins(20, 8, 8, 8);
     layout->setSpacing(4);
+
+    auto* mark = new QLabel;
+    mark->setPixmap(renderSvgResource(":/screenshare/brand/screenshare-mark.svg", QSize(36, 36)));
+    layout->addWidget(mark);
+    auto* brand = new QLabel("ScreenShare"); brand->setObjectName("TitleBrand");
+    layout->addWidget(brand);
+    auto* version = new QLabel(QStringLiteral("v") + QStringLiteral(SCREENSHARE_APP_VERSION));
+    version->setObjectName("TitleVersion"); layout->addWidget(version);
+    layout->addStretch();
+    profileButton_ = new QPushButton("Profile"); profileButton_->setObjectName("TitleProfile");
+    profileButton_->setIcon(QIcon(renderSvgResource(":/screenshare/ui/icons/viewers.svg", QSize(18,18), "#a3b5af")));
+    profileButton_->setAccessibleName("Open profile");
+    connect(profileButton_, &QPushButton::clicked, this, [this] { if (openProfile) openProfile(); });
+    layout->addWidget(profileButton_);
+    auto* settings = new QPushButton("Settings"); settings->setObjectName("TitleSettings");
+    settings->setIcon(QIcon(renderSvgResource(":/screenshare/ui/icons/settings.svg", QSize(18,18), "#a3b5af")));
+    connect(settings, &QPushButton::clicked, this, [this] { if (openSettings) openSettings(); });
+    layout->addWidget(settings);
 
     auto* minimizeButton = windowButton("window-minimize", "WindowControlButton");
     connect(minimizeButton, &QPushButton::clicked, this, [this] {
@@ -200,6 +220,12 @@ QWidget* AppShellWindow::buildTitleBar()
     layout->addWidget(closeButton);
 
     return frame;
+}
+
+void AppShellWindow::setProfileName(const QString& name)
+{
+    profileButton_->setText(fontMetrics().elidedText(name, Qt::ElideRight, 140));
+    profileButton_->setToolTip(name + " — edit profile");
 }
 
 QPushButton* AppShellWindow::windowButton(const char* iconName, const QString& objectName)

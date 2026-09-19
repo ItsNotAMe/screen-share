@@ -11,6 +11,10 @@ RoomApplication::RoomApplication(QUrl origin, QtRoomSession::Factory factory,
         loopback, std::move(profileFile), enumerateSources);
     browser_->presentPage = [this](QWidget* page) { Present(page); };
     browser_->closed = [this] { Finish(); };
+    shell_.setProfileName(browser_->profileName());
+    browser_->profileChanged = [this] { shell_.setProfileName(browser_->profileName()); };
+    shell_.openProfile = [this] { browser_->OpenPreferences(false, &shell_); };
+    shell_.openSettings = [this] { browser_->OpenPreferences(true, &shell_); };
     if (normalHome) {
         HomeWindow::Actions actions;
         actions.createRoom = [this] { OpenRoom(true); };
@@ -79,12 +83,6 @@ void RoomApplication::Present(QWidget* page) {
     if (browser_) browser_->keepDirectoryOnHide = page == home_.get();
     auto* stack = shell_.findChild<QStackedWidget*>("AppPageStack");
     if (stack->indexOf(page) < 0) {
-        // Reserve the normal title-bar hit area without changing page controls.
-        if (auto* layout = page->layout()) {
-            auto margins = layout->contentsMargins();
-            margins.setTop(std::max(margins.top(), 44));
-            layout->setContentsMargins(margins);
-        }
         shell_.addPage(page);
     }
     shell_.setCurrentWidget(page);

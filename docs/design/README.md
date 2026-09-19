@@ -1,7 +1,33 @@
 # ScreenShare 1.0 frontend direction
 
-Status: design concepts, not implemented UI. Version 1.0.0 is the next unreleased
+Status: shared shell, Home/Create/Join and profile/playback defaults implemented;
+Host/Viewer, room settings and update redesign remain. Version 1.0.0 is the next unreleased
 application version; no release, update manifest or deployment was published.
+
+## Implemented foundation (2026-09-19)
+
+The original brand mark is now in a shared title bar with profile and Settings.
+Home has local search, stable live room rows and non-displacing reconnect status.
+Create and Join are separate views; neither edits the nickname. A top-bar dialog
+validates and saves the local nickname and playback defaults for future sessions.
+Create exposes preset, resolution, FPS, bitrate limit, source, audio and capacity;
+it stacks cards at compact widths and uses two columns in wider windows. Primary
+actions stay outside the scrolling form. This replaces the combined temporary
+browser form, not the remaining temporary live-session controls.
+
+Release UI/test targets build. The silent room-v2-qt-ui integration test passes at
+100% and 150% display scale, covering normal navigation, profile validation/cancel,
+profile persistence, search/row identity, configured stream delivery, media and
+session lifecycle. Rendered Home/Create/Join were inspected at 800x600 and 1200x850,
+including 150% scaling. The test now includes production SVG resources and explicitly
+loads Windows fonts for Qt offscreen rendering. No screen-reader verification or
+physical-device campaign was performed.
+
+To regenerate screenshots, set SCREENSHARE_UI_PREVIEWS to an output directory before
+running ctest --test-dir build/sdk-app-release -R "^room-v2-qt-ui$" --output-on-failure.
+Set QT_SCALE_FACTOR=1.5 for the scaled variant. Current local outputs are under
+build/frontend-previews and build/frontend-previews-150; build/frontend-tests.log
+and build/frontend-tests-150.log hold results. These are generated build artifacts.
 
 ## Boards
 

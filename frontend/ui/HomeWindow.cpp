@@ -15,6 +15,9 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSizePolicy>
+#include <QtWidgets/QScrollArea>
+#include <QtWidgets/QLineEdit>
+#include <QtCore/QSet>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
@@ -25,19 +28,6 @@
 
 namespace {
 
-
-#ifndef SCREENSHARE_APP_VERSION
-#define SCREENSHARE_APP_VERSION "0.0.0"
-#endif
-
-QString appVersionText()
-{
-    const QString version = QString::fromUtf8(SCREENSHARE_APP_VERSION).trimmed();
-    if (version.isEmpty()) {
-        return {};
-    }
-    return QStringLiteral("v%1").arg(version);
-}
 
 QPixmap renderSvgResource(const QString& path, const QSize& size, const QString& color = QString())
 {
@@ -102,15 +92,6 @@ QPushButton* actionButton(const QString& text, const QString& objectName, const 
     return button;
 }
 
-QFrame* separator()
-{
-    auto* line = new QFrame;
-    line->setObjectName("HomeDivider");
-    line->setFrameShape(QFrame::NoFrame);
-    line->setFixedHeight(1);
-    return line;
-}
-
 } // namespace
 
 HomeWindow::HomeWindow(Actions actions, QWidget* parent)
@@ -126,40 +107,9 @@ HomeWindow::HomeWindow(Actions actions, QWidget* parent)
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
-    root->addWidget(buildTopBar());
-    root->addWidget(separator());
-    if (actions_.requestRooms) root->addWidget(label("Screen sharing, audio and remote input with explicit host permission. Keyboard control requires display sharing.", "HomeInfoSecondary"));
     root->addWidget(buildMainMenu(), 1);
 
     showRoomStatus("Connecting to room list…");
-}
-
-QWidget* HomeWindow::buildTopBar()
-{
-    auto* frame = new QFrame;
-    frame->setObjectName("HomeTopBar");
-
-    auto* layout = new QHBoxLayout(frame);
-    layout->setContentsMargins(30, 20, 160, 18);
-    layout->setSpacing(14);
-
-    auto* mark = new QLabel;
-    mark->setFixedSize(46, 46);
-    mark->setPixmap(renderSvgResource(
-        QStringLiteral(":/screenshare/brand/screenshare-mark.svg"),
-        QSize(46, 46)));
-    layout->addWidget(mark, 0, Qt::AlignVCenter);
-
-    auto* brandBlock = new QWidget;
-    brandBlock->setObjectName("HomeBrandBlock");
-    auto* brandLayout = new QHBoxLayout(brandBlock);
-    brandLayout->setContentsMargins(0, 0, 0, 0);
-    brandLayout->setSpacing(10);
-    brandLayout->addWidget(label("ScreenShare", "HomeBrand"), 0, Qt::AlignVCenter);
-    brandLayout->addWidget(label(appVersionText(), "HomeVersion"), 0, Qt::AlignVCenter);
-    brandLayout->addStretch(1);
-    layout->addWidget(brandBlock, 1, Qt::AlignVCenter);
-    return frame;
 }
 
 QWidget* HomeWindow::buildMainMenu()
@@ -201,6 +151,7 @@ QWidget* HomeWindow::buildActionPanel(
     std::function<void()> action)
 {
     auto* button = new QPushButton;
+    button->setAccessibleName(title);
     button->setObjectName(buttonObjectName);
     button->setCursor(Qt::PointingHandCursor);
     button->setMinimumWidth(300);
@@ -257,13 +208,19 @@ QWidget* HomeWindow::buildRoomPanel()
 
     auto* heading = new QHBoxLayout;
     heading->setContentsMargins(0, 0, 0, 0);
-    heading->addWidget(label("Quick Join", "HomeSectionTitle"), 1);
+    heading->addWidget(label("Available rooms", "HomeSectionTitle"), 1);
+    search_ = new QLineEdit; search_->setObjectName("roomSearch"); search_->setPlaceholderText("Search rooms");
+    search_->setAccessibleName("Search available rooms"); search_->setClearButtonEnabled(true);
+    heading->addWidget(search_);
+    connect(search_, &QLineEdit::textChanged, this, [this] { filterRooms(); });
     refreshRoomsButton_ = actionButton("Refresh", "HomeGhost", "refresh");
     QObject::connect(refreshRoomsButton_, &QPushButton::clicked, this, [this] {
         refreshRooms();
     });
     heading->addWidget(refreshRoomsButton_);
     layout->addLayout(heading);
+    directoryStatus_ = label("Connecting…", "HomeInfoSecondary");
+    layout->addWidget(directoryStatus_);
 
     auto* roomList = new QFrame;
     roomList->setObjectName("HomeRoomList");
@@ -273,7 +230,8 @@ QWidget* HomeWindow::buildRoomPanel()
     roomStatusLabel_ = label("Loading rooms...", "HomeEmptyState");
     roomStatusLabel_->setAlignment(Qt::AlignCenter);
     roomListLayout_->addWidget(roomStatusLabel_, 1);
-    layout->addWidget(roomList, 1);
+    auto* scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidget(roomList); layout->addWidget(scroll, 1);
 
     auto* footer = new QHBoxLayout;
     footer->setSpacing(10);
@@ -322,9 +280,8 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
     auto* join = actionButton("Join", "HomeTinyButton", "watch");
     join->setMinimumWidth(64);
     join->setEnabled(room.joinable);
-    QObject::connect(join, &QPushButton::clicked, this, [this, room] {
-        if (!room.joinable) return;
-        if (actions_.openRoom) actions_.openRoom(room.roomId);
+    QObject::connect(join, &QPushButton::clicked, this, [this, id = room.roomId] {
+        if (actions_.openRoom) actions_.openRoom(id);
     });
     layout->addWidget(join, 0, Qt::AlignVCenter);
     return row;
@@ -338,8 +295,8 @@ void HomeWindow::refreshRooms()
 void HomeWindow::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QString& unavailable)
 {
     if (!actions_.requestRooms) return;
-    if (unavailable.isEmpty()) updateRooms(rooms);
-    else showRoomStatus(unavailable);
+    if (unavailable.isEmpty() || !rooms.empty()) updateRooms(rooms);
+    directoryStatus_->setText(unavailable.isEmpty() ? "Rooms update automatically" : unavailable);
     refreshRoomsButton_->setText(unavailable.isEmpty() ? "Live updates" : "Reconnect");
     refreshRoomsButton_->setEnabled(!unavailable.isEmpty());
 }
@@ -350,15 +307,32 @@ void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)
         return;
     }
 
-    while (QLayoutItem* item = roomListLayout_->takeAt(0)) {
-        delete item->widget();
-        delete item;
+    QSet<QString> ids;
+    for (const auto& room : rooms) ids.insert(room.roomId);
+    // Keep existing row widgets and their order so pushes preserve focus/scroll.
+    for (int i = roomListLayout_->count()-1; i >= 0; --i) {
+        auto* item = roomListLayout_->itemAt(i); auto* widget = item->widget();
+        if (!widget || !ids.contains(widget->property("roomId").toString())) {
+            delete roomListLayout_->takeAt(i); delete widget;
+        }
     }
-
+    roomStatusLabel_ = nullptr;
     int peerCount = 0;
     for (const HomeActiveRoom& room : rooms) {
         peerCount += room.peerCount;
-        roomListLayout_->addWidget(buildRoomRow(room));
+        QWidget* row = nullptr;
+        for (int i = 0; i < roomListLayout_->count(); ++i) {
+            auto* candidate = roomListLayout_->itemAt(i)->widget();
+            if (candidate && candidate->property("roomId").toString() == room.roomId) { row = candidate; break; }
+        }
+        if (!row) { row = buildRoomRow(room); roomListLayout_->addWidget(row); }
+        row->setProperty("searchName", room.name);
+        row->findChild<QLabel*>("HomeInfoPrimary")->setText(room.name);
+        row->findChild<QLabel*>("HomeInfoSecondary")->setText(QString("%1 viewer%2").arg(room.peerCount).arg(room.peerCount == 1 ? "" : "s"));
+        row->findChild<QPushButton*>("HomeTinyButton")->setEnabled(room.joinable);
+        auto* badge = row->findChild<QLabel*>("HomeLockedStatus");
+        if (!badge) badge = row->findChild<QLabel*>("HomePublicStatus");
+        badge->setText(room.passwordProtected ? "Password required" : "Public");
     }
 
     if (rooms.isEmpty()) {
@@ -376,6 +350,13 @@ void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)
     if (peerCountValue_ != nullptr) {
         peerCountValue_->setText(QString::number(peerCount));
     }
+    filterRooms();
+}
+
+void HomeWindow::filterRooms()
+{
+    for (auto* row : findChildren<QFrame*>("HomeRoomRow"))
+        row->setVisible(row->property("searchName").toString().contains(search_->text().trimmed(), Qt::CaseInsensitive));
 }
 
 void HomeWindow::showRoomStatus(const QString& message)
