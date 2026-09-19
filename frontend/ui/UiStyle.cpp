@@ -109,6 +109,7 @@ void styleComboPopup(QComboBox* combo)
     // Windows only composites a translucent QWidget window when it is
     // frameless; otherwise transparent rounded corners can appear black.
     popup->setWindowFlag(Qt::FramelessWindowHint, true);
+    popup->setWindowFlag(Qt::NoDropShadowWindowHint, true);
     popup->setAttribute(Qt::WA_TranslucentBackground);
     popup->setObjectName("ThemedComboPopup");
     auto palette = popup->palette();
@@ -251,7 +252,7 @@ QPushButton#WindowControlButton,
 QPushButton#WindowCloseButton {
     background: transparent;
     border: 0;
-    border-radius: 0;
+    border-radius: 6px;
     padding: 0;
 }
 QPushButton#WindowControlButton:hover {
