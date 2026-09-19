@@ -2,6 +2,20 @@
 
 ## Silent native device closeout
 
+Controller regressions can also run without UI interaction:
+`RoomUiTests.exe HTTPS_ORIGIN controllers-physical` uses the connected physical
+reader and a recording host sink; `ViewerGamepadReportTests --lifecycle-probe`
+checks ten polling-thread lifetimes. These pass on the Bluetooth GameSir after
+the cancelled-read fix (CONTROLLERS.md). No button presses are required.
+
+`GamepadControlTests.exe --native-neutral` explicitly exercises the installed
+virtual-controller driver with neutral states only. It preserves existing XInput
+devices (or reserves one owned sentinel when none exist), and attempts five
+cycles using up to three free slots. The ordinary CTest remains fully injected.
+The native run currently fails; do not rerun it before the leftover device state
+is resolved (CONTROLLERS.md). This checks allocation/release and slot preservation,
+not gameplay or latency.
+
 These commands operate their own fixtures; no clicks, controller buttons or
 keyboard/mouse injection are needed:
 

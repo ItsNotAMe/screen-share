@@ -1,5 +1,42 @@
 # Controller integration
 
+## Real virtual-driver allocation finding (2026-09-19)
+
+The explicit `GamepadControlTests --native-neutral` fixture exercises the real
+driver without buttons, axes, keyboard or mouse input. It preserves occupied
+XInput slots and uses up to three free slots for five allocation/release cycles.
+It **fails** on this desktop: a newly created target reports an occupied user
+index. The production sink rejects it rather than routing into another pad.
+This is separate from the fixed physical HID regrant failure below.
+
+The old client and an isolated official v1.21.222.0 client control both fail;
+the latter's device-ready handshake did not establish a fix. The production
+dependency remains unchanged. Virtual devices remained visible after the failed
+tests. The user approved cleanup of serials 1–3; client and checked driver calls
+reported success without removing them, and PnP removal returned `Access is denied`.
+Administrator cleanup of those virtual devices remains necessary. Do not rerun
+native allocation until that device state is resolved. No driver was installed,
+uninstalled or restarted, and no physical controller was removed.
+
+Evidence: [devices-final-2026-09-19.json](evidence/devices-final-2026-09-19.json).
+The ordinary CTest remains injected and passes in both builds; it cannot override
+this real-driver failure. Earlier single-controller field delivery remains valid
+for its observed scope, not proof of three independent virtual pads.
+
+The approved cleanup requires an **administrator PowerShell**; the current
+agent process cannot elevate itself without an interactive Windows prompt:
+
+```powershell
+pnputil /remove-device 'USB\VID_045E&PID_028E\01'
+pnputil /remove-device 'USB\VID_045E&PID_028E\02'
+pnputil /remove-device 'USB\VID_045E&PID_028E\03'
+```
+
+These are the three remaining virtual instances recorded after the test, not a
+wildcard or bus-driver removal. Recheck device state afterward; command success
+alone is insufficient. The unattended cleanup already attempted these exact
+commands and received access denied.
+
 ## Unattended regrant follow-up (2026-09-19)
 
 Polling owners now bind to the permission epoch that created them. A delayed
@@ -18,9 +55,22 @@ controller delivery failure; it contains no device paths or button values.
 
 Physical-reader mode is explicit: `RoomUiTests.exe HTTPS_ORIGIN controllers-physical`.
 It requires exactly one enumerated controller and uses the real reader with a
-recording host sink. The laptop run **failed at grant 4**; its follow-up found
-zero connected devices. The live-service synthetic control passes. These results
-do not prove the physical failure's cause or close physical repeat-grant acceptance.
+recording host sink. The original laptop run failed at grant 4; its follow-up
+found zero devices. With the controller connected, diagnostics reproduced
+`ERROR_OPERATION_ABORTED` (995): exiting a polling thread cancels its pending
+HID read even while the shared reader survives. The reader now consumes that
+cancelled completion and starts a new read. It also waits up to 32 ms for the
+first report, without extending cached-state freshness. Both legacy and v2 use
+this reader.
+
+The final laptop run passes three batches of 14 grants/releases without Refresh
+(42 grants and three deliberate backend denials), followed by ten polling-thread
+lifetimes with 201 valid reads and zero missing reads. Raw evidence is in
+`build/unattended-closeout-20260919/controller-ready-final-20260919`.
+This closes the observed GameSir repeat-grant fault with a physical reader and
+recording host sink; it does not claim 42 physical virtual-driver delivery cycles.
+Earlier failures remain retained. The user-confirmed real-driver delivery,
+held-button release and power-off checks below supply the separate field evidence.
 No stale-state timeout, consent, CRC or focus-safety check was relaxed.
 See [compact evidence](evidence/unattended-closeout-2026-09-19.json).
 
@@ -54,10 +104,10 @@ release acknowledgement. Explicit held-button release passes for this setup.
 The user then confirmed that turning off the controller while holding a button
 clears the pressed input and disables control. The host records 1,592 applied
 reports, zero rejected, zero granted capabilities and no pending release.
-Disconnect cleanup passes for this setup. One intervening regrant was revoked
+Disconnect cleanup passes for this setup. Historically, one intervening regrant was revoked
 without new reports; refreshing/reselecting the controller allowed the next grant
-to succeed. That intermittent regrant behavior is not explained by the successful
-disconnect check and remains a follow-up. External input-to-display latency and
+to succeed. That intermittent regrant behavior was not explained by the successful
+disconnect check; it is resolved by the cancelled-read fix above. External input-to-display latency and
 physical compatibility with other Xbox or Sony models remain unverified.
 
 Follow-up: `ViewerGamepadReportTests --lifecycle-probe` keeps one selected device
@@ -65,7 +115,8 @@ across ten fresh polling threads, separated by 750 ms, without refreshing or
 injecting input. The laptop returned `firstMissing=0 valid=263 missing=0` across
 ten cycles. This rules out a deterministic failure in that exercised reader
 lifetime pattern, but does not exercise permission messaging or close the
-intermittent regrant observation.
+intermittent regrant observation by itself. The newer 42-grant result above closes
+that reproduced fault.
 
 The opt-in v2 room UI and CLI now support explicitly authorized controllers.
 Mouse/keyboard control is now integrated; see [DESKTOP-INPUT.md](DESKTOP-INPUT.md).
@@ -82,7 +133,8 @@ peer without stopping media. Release neutralizes only the owned device. Runtime
 code never installs or repairs drivers. The client DLL is loaded only from beside
 the executable, with system dependencies; current-directory/PATH lookup is excluded.
 The queried API is [ViGEm's x360 user-index API](https://github.com/nefarius/ViGEmClient/blob/master/include/ViGEm/Client.h),
-not its target serial number. Real-driver allocation still needs physical validation.
+not its target serial number. The new real-driver allocation check fails as
+described above; injected success does not qualify this configuration.
 
 `GamepadPoller` reads only the explicitly selected viewer device on a dedicated
 4 ms loop and submits changed full states. The existing service supplies 100 ms

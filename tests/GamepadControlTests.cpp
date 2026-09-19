@@ -1,5 +1,7 @@
 #include "input/v2/GamepadSink.h"
 #include "input/v2/GamepadPoller.h"
+#include "input/XInputGamepad.h"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -56,8 +58,71 @@ public:
     void RevokeIfCurrent(const std::string& peer, uint64_t epoch) override { if(permission == epoch) Revoke(peer); }
     std::vector<Status> Read() const override { Status s; s.peer = "host"; s.permission = permission; s.granted = granted ? Gamepad : 0; return {s}; }
 };
-int main() {
+class NativeDiagnosticBackend final : public VirtualGamepadBackend {
+    std::unique_ptr<VirtualGamepadBackend> inner_ = CreateVirtualGamepadBackend();
+public:
+    VirtualGamepadBackendStatus Status() const override { return inner_->Status(); }
+    std::unique_ptr<VirtualGamepadDevice> CreateXbox360(std::string* error = nullptr) override {
+        std::string reason;
+        auto device = inner_->CreateXbox360(&reason);
+        if (!device) std::cerr << "Native create failed: " << reason << '\n';
+        else if (!device->UserIndex()) std::cerr << "Native device has no XInput user index\n";
+        else { std::cerr << "Native assigned slot=" << *device->UserIndex() << " visible=";
+            for (const int slot : XInputGamepad::ConnectedSlots()) std::cerr << slot << ',';
+            std::cerr << '\n'; }
+        if (error) *error = reason;
+        return device;
+    }
+};
+void NativeNeutralLifecycle() {
+    // Explicit opt-in only. Reserve a neutral owned device as the local-slot
+    // sentinel; never submit buttons/axes or modify pre-existing controllers.
+    const auto original = XInputGamepad::ConnectedSlots();
+    if (original.size() >= 4) throw std::runtime_error("Native test needs a free XInput slot");
+    auto backend = CreateVirtualGamepadBackend();
+    if (!backend->Status().available) throw std::runtime_error(backend->Status().message);
+    std::unique_ptr<VirtualGamepadDevice> sentinel;
+    if (original.empty()) {
+        sentinel = backend->CreateXbox360();
+        Check(bool(sentinel));
+        Check(sentinel->SubmitState(RemoteGamepadState{}));
+    }
+    Wait([&] { return XInputGamepad::ConnectedSlots().size() == (original.empty() ? 1 : original.size()); });
+    const auto reserved = XInputGamepad::ConnectedSlots();
+    const int remoteCount = int(4 - reserved.size());
+    if (sentinel) Check(sentinel->UserIndex() == unsigned(reserved.front()));
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        auto sink = std::make_shared<GamepadSink>([] { return std::make_unique<NativeDiagnosticBackend>(); },
+            [] { return XInputGamepad::ConnectedSlots(); });
+        for (int i = 0; i < remoteCount; ++i) {
+            const auto peer = "native-" + std::to_string(i);
+            if (!sink->Grant(peer, Gamepad, i)) throw std::runtime_error("Native grant failed: cycle=" + std::to_string(cycle) + " pad=" + std::to_string(i));
+            Event neutral; neutral.kind = Kind::Pad;
+            Check(sink->Apply(peer, neutral) && sink->Healthy(peer));
+        }
+        Wait([&] { return XInputGamepad::ConnectedSlots().size() == 4; });
+        Check(!sink->Grant("exhausted", Gamepad, 0));
+        if (sentinel) Check(sentinel->UserIndex() == unsigned(reserved.front()));
+        for (const int slot : XInputGamepad::ConnectedSlots()) {
+            if (std::find(reserved.begin(), reserved.end(), slot) != reserved.end()) continue;
+            const auto state = XInputGamepad::ReadState(slot);
+            Check(state && !state->buttons && !state->leftTrigger && !state->rightTrigger &&
+                !state->thumbLX && !state->thumbLY && !state->thumbRX && !state->thumbRY);
+        }
+        for (int i = 0; i < remoteCount; ++i) sink->Release("native-" + std::to_string(i));
+        Wait([&] { return XInputGamepad::ConnectedSlots() == reserved; });
+    }
+    sentinel.reset(); backend.reset();
+    Wait([&] { return XInputGamepad::ConnectedSlots() == original; });
+    std::cout << "{\"passed\":true,\"nativeVirtualDevices\":true,\"neutralStateOnly\":true,"
+                 "\"keyboardMouseInput\":false,\"cycles\":5,\"remotePadsPerCycle\":" << remoteCount << ',' <<
+                 "\"reservedSlotPreserved\":true,\"allOwnedDevicesRemoved\":true,\"preexistingSlots\":"
+              << original.size() << "}\n";
+}
+int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string(argv[1]) == "--native-neutral") { NativeNeutralLifecycle(); return 0; }
+        Check(argc == 1);
         auto state = std::make_shared<Evidence>(); state->slots = {0};
         GamepadSink sink([state] { return std::make_unique<Backend>(state); }, [state] { return std::vector<int>(state->slots.begin(), state->slots.end()); });
         Check(!sink.Grant("key", Keyboard, 0));

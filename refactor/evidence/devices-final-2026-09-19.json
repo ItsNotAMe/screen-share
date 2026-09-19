@@ -1,0 +1,415 @@
+{
+  "schema": 1,
+  "date": "2026-09-19",
+  "backendAccepted": false,
+  "controller": {
+    "result": {
+      "sha256": "E8E8BC36C650184741A799D67D62E4E75B7908C1B4D5F1867E4C23B7E217B5B4",
+      "osInputInjection": false,
+      "physicalControllerRead": true,
+      "lifecycleExitCode": 0,
+      "rounds": [
+        {
+          "round": 1,
+          "exitCode": 0
+        },
+        {
+          "round": 2,
+          "exitCode": 0
+        },
+        {
+          "round": 3,
+          "exitCode": 0
+        }
+      ],
+      "parserSha256": "93C11A551215F190079A46D78DB4BD176BF4FEC60350381073ED2997EA0C346B"
+    },
+    "successfulGrants": 42,
+    "expectedBackendDenials": 3,
+    "pollingThreadLifetimes": 10,
+    "validReads": 201,
+    "missingReads": 0,
+    "scope": "Physical GameSir Bluetooth DS4 reader, recording host sink; no OS input injection",
+    "artifacts": [
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/lifecycle.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/lifecycle.stdout.log",
+        "sha256": "6de4f729ad4f2f09baa9d22cba429085a99231f8b3c977abecad739b38aeccfe"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/result.json",
+        "sha256": "b38e6e6f14613ea79f51177851764263756dd3e249945ac5f55f18cb30619a2c"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/round-1.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/round-1.stdout.log",
+        "sha256": "e2a506dd4021efe4dbabc4608862d3193262ebf6dd7e4f4114fac86f77b58623"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/round-2.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/round-2.stdout.log",
+        "sha256": "e2a506dd4021efe4dbabc4608862d3193262ebf6dd7e4f4114fac86f77b58623"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/round-3.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/controller-ready-final-20260919/round-3.stdout.log",
+        "sha256": "e2a506dd4021efe4dbabc4608862d3193262ebf6dd7e4f4114fac86f77b58623"
+      }
+    ]
+  },
+  "graphics": {
+    "result": {
+      "adapter": "Intel(R) Arc(TM) Pro Graphics",
+      "afterStop": {
+        "handles": 527,
+        "privateBytes": 108064768,
+        "workingSetBytes": 120520704
+      },
+      "diagnosticOnly": true,
+      "handleTypesStopped": {
+        "ALPC Port": 2,
+        "Desktop": 1,
+        "Directory": 4,
+        "Event": 21,
+        "File": 15,
+        "IRTimer": 6,
+        "IoCompletion": 4,
+        "Key": 16,
+        "Mutant": 3,
+        "Process": 1,
+        "SchedulerSharedData": 1,
+        "Section": 282,
+        "Semaphore": 17,
+        "Thread": 1,
+        "TpWorkerFactory": 3,
+        "Unknown": 140,
+        "WaitCompletionPacket": 8,
+        "WindowStation": 2
+      },
+      "phases": [
+        {
+          "after": {
+            "handles": 280,
+            "privateBytes": 34709504,
+            "workingSetBytes": 47120384
+          },
+          "before": {
+            "handles": 279,
+            "privateBytes": 34787328,
+            "workingSetBytes": 47038464
+          },
+          "handleTypesAfter": {
+            "ALPC Port": 2,
+            "Desktop": 1,
+            "Directory": 4,
+            "Event": 34,
+            "File": 17,
+            "IRTimer": 6,
+            "IoCompletion": 5,
+            "Key": 16,
+            "Mutant": 5,
+            "Process": 1,
+            "SchedulerSharedData": 1,
+            "Section": 4,
+            "Semaphore": 17,
+            "Thread": 8,
+            "TpWorkerFactory": 3,
+            "Unknown": 146,
+            "WaitCompletionPacket": 8,
+            "WindowStation": 2
+          },
+          "handleTypesBefore": {
+            "ALPC Port": 5,
+            "Desktop": 1,
+            "Directory": 4,
+            "Event": 32,
+            "File": 17,
+            "IRTimer": 6,
+            "IoCompletion": 5,
+            "Key": 16,
+            "Mutant": 5,
+            "Process": 1,
+            "SchedulerSharedData": 1,
+            "Section": 4,
+            "Semaphore": 17,
+            "Thread": 6,
+            "TpWorkerFactory": 3,
+            "Unknown": 146,
+            "WaitCompletionPacket": 8,
+            "WindowStation": 2
+          },
+          "iterations": 7200,
+          "mode": "idle"
+        },
+        {
+          "after": {
+            "handles": 369,
+            "privateBytes": 182374400,
+            "workingSetBytes": 186826752
+          },
+          "before": {
+            "handles": 280,
+            "privateBytes": 34746368,
+            "workingSetBytes": 47165440
+          },
+          "handleTypesAfter": {
+            "ALPC Port": 2,
+            "Desktop": 1,
+            "Directory": 4,
+            "Event": 34,
+            "File": 17,
+            "IRTimer": 6,
+            "IoCompletion": 7,
+            "Key": 16,
+            "Mutant": 5,
+            "Process": 1,
+            "SchedulerSharedData": 1,
+            "Section": 93,
+            "Semaphore": 17,
+            "Thread": 6,
+            "TpWorkerFactory": 3,
+            "Unknown": 146,
+            "WaitCompletionPacket": 8,
+            "WindowStation": 2
+          },
+          "handleTypesBefore": {
+            "ALPC Port": 2,
+            "Desktop": 1,
+            "Directory": 4,
+            "Event": 34,
+            "File": 17,
+            "IRTimer": 6,
+            "IoCompletion": 5,
+            "Key": 16,
+            "Mutant": 5,
+            "Process": 1,
+            "SchedulerSharedData": 1,
+            "Section": 4,
+            "Semaphore": 17,
+            "Thread": 8,
+            "TpWorkerFactory": 3,
+            "Unknown": 146,
+            "WaitCompletionPacket": 8,
+            "WindowStation": 2
+          },
+          "iterations": 7200,
+          "mode": "raw-upload"
+        },
+        {
+          "after": {
+            "handles": 459,
+            "privateBytes": 169570304,
+            "workingSetBytes": 172343296
+          },
+          "before": {
+            "handles": 369,
+            "privateBytes": 182374400,
+            "workingSetBytes": 186826752
+          },
+          "handleTypesAfter": {
+            "ALPC Port": 2,
+            "Desktop": 1,
+            "Directory": 4,
+            "Event": 34,
+            "File": 17,
+            "IRTimer": 6,
+            "IoCompletion": 7,
+            "Key": 16,
+            "Mutant": 5,
+            "Process": 1,
+            "SchedulerSharedData": 1,
+            "Section": 183,
+            "Semaphore": 17,
+            "Thread": 6,
+            "TpWorkerFactory": 3,
+            "Unknown": 146,
+            "WaitCompletionPacket": 8,
+            "WindowStation": 2
+          },
+          "handleTypesBefore": {
+            "ALPC Port": 2,
+            "Desktop": 1,
+            "Directory": 4,
+            "Event": 34,
+            "File": 17,
+            "IRTimer": 6,
+            "IoCompletion": 7,
+            "Key": 16,
+            "Mutant": 5,
+            "Process": 1,
+            "SchedulerSharedData": 1,
+            "Section": 93,
+            "Semaphore": 17,
+            "Thread": 6,
+            "TpWorkerFactory": 3,
+            "Unknown": 146,
+            "WaitCompletionPacket": 8,
+            "WindowStation": 2
+          },
+          "iterations": 7199,
+          "mode": "upload"
+        },
+        {
+          "after": {
+            "handles": 560,
+            "privateBytes": 123166720,
+            "workingSetBytes": 126599168
+          },
+          "before": {
+            "handles": 459,
+            "privateBytes": 169570304,
+            "workingSetBytes": 172343296
+          },
+          "handleTypesAfter": {
+            "ALPC Port": 2,
+            "Desktop": 1,
+            "Directory": 4,
+            "Event": 35,
+            "File": 17,
+            "IRTimer": 6,
+            "IoCompletion": 8,
+            "Key": 16,
+            "Mutant": 5,
+            "Process": 1,
+            "SchedulerSharedData": 1,
+            "Section": 282,
+            "Semaphore": 17,
+            "Thread": 6,
+            "TpWorkerFactory": 3,
+            "Unknown": 146,
+            "WaitCompletionPacket": 8,
+            "WindowStation": 2
+          },
+          "handleTypesBefore": {
+            "ALPC Port": 2,
+            "Desktop": 1,
+            "Directory": 4,
+            "Event": 34,
+            "File": 17,
+            "IRTimer": 6,
+            "IoCompletion": 7,
+            "Key": 16,
+            "Mutant": 5,
+            "Process": 1,
+            "SchedulerSharedData": 1,
+            "Section": 183,
+            "Semaphore": 17,
+            "Thread": 6,
+            "TpWorkerFactory": 3,
+            "Unknown": 146,
+            "WaitCompletionPacket": 8,
+            "WindowStation": 2
+          },
+          "iterations": 7200,
+          "mode": "upload-readback"
+        }
+      ],
+      "stagingAllocations": 1
+    },
+    "executable": {
+      "exitCode": 0,
+      "sha256": "8E459108978F3B1C482E710AD3821B77F6E767F5668625AD76E10252F84FD8D0",
+      "physicalControllerRead": false,
+      "platform": "offscreen",
+      "osInputInjection": false
+    },
+    "secondsPerPhase": 120,
+    "resourceBoundQualified": false,
+    "artifacts": [
+      {
+        "path": "build/unattended-closeout-20260919/gpu-bound-final-20260919/result.json",
+        "sha256": "5d127f26d08ff1363ec6e74239917393da429eef39de2b83f77fb5dbea6288aa"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/gpu-bound-final-20260919/stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "build/unattended-closeout-20260919/gpu-bound-final-20260919/stdout.log",
+        "sha256": "49ea1c742e41cd4f0164c7f7db4924e2c97f57b58a0071fbd41ad40d595f1ddb"
+      }
+    ]
+  },
+  "sourceHashes": {
+    "backend/input/ViewerGamepad.cpp": "55a4773c655775a47d6c4006ef52de79754906c02ffabb2f6f7d80bee36f58d2",
+    "tests/GamepadControlTests.cpp": "d51c0ddea9fefd6e0ba5d10e89bfbaa2e00d3656f643ec0be3e30f06de9726de"
+  },
+  "nativeVirtualDriver": {
+    "passed": false,
+    "finding": "Real multi-pad allocation fails; requested user index is reported as occupied. Isolated newer-client control does not fix it; production pin restored.",
+    "cleanup": "User authorized removal of virtual serials 1-3. Client and checked driver calls reported success but XInput still listed devices. PnP removal returned Access is denied; administrator cleanup remains required.",
+    "artifacts": [
+      {
+        "path": "build/native-gamepad-neutral-diagnostic-20260919.log",
+        "sha256": "64e54aa8ee4ff5371e9523715a3d3c2be652a2cb38c9ca1eb2d7639ff279a04f"
+      },
+      {
+        "path": "build/native-gamepad-neutral-final-20260919.log",
+        "sha256": "ddf6c6f868e1fa295cff96ce39197f10114809e65906c904ebea5cb1b3928432"
+      },
+      {
+        "path": "build/native-gamepad-neutral-fourth-20260919.log",
+        "sha256": "d31e2fdfd5b49f2ee3968cb32328f632af7eebe921f1dc66b3c54bcbb273a087"
+      },
+      {
+        "path": "build/native-gamepad-neutral-second-20260919.log",
+        "sha256": "64e54aa8ee4ff5371e9523715a3d3c2be652a2cb38c9ca1eb2d7639ff279a04f"
+      },
+      {
+        "path": "build/native-gamepad-neutral-third-20260919.log",
+        "sha256": "25ca43189c655c99b6ac2f71c93e78dd8d3a2adb017b152d66b698a858769499"
+      },
+      {
+        "path": "build/native-gamepad-current-client-20260919.stderr.log",
+        "sha256": "b85fa654e5fa12963f64aa9c65c2a7e02a58dfcf9a1142e8b53e746ab72af538"
+      },
+      {
+        "path": "build/native-gamepad-current-client-20260919.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "build/vigem-authorized-cleanup-20260919.log",
+        "sha256": "da62ec8c57507d36a3f6caea33f97708d3c569261b166f3efddf457604b5a817"
+      },
+      {
+        "path": "build/vigem-checked-cleanup-20260919.log",
+        "sha256": "02e86f5fae1c1213adacc16f5348c896fb10c739004b44e41ee292f1de5aca9b"
+      }
+    ]
+  },
+  "targetedRegressions": {
+    "release": {
+      "passed": true,
+      "ctests": 6,
+      "artifact": {
+        "path": "build/final-input-network-release-tests.log",
+        "sha256": "39228cfeaa9565a8f70d4305a16ede0ad0ff6be197184f291b08952f040e4515"
+      }
+    },
+    "debug": {
+      "passed": true,
+      "ctests": 6,
+      "artifact": {
+        "path": "build/final-input-network-debug-tests.log",
+        "sha256": "54d850dca3f45be96254d103b9fb8c4c97c0cec8f2c5e00aff8a94d5cf51101d"
+      }
+    }
+  },
+  "laptopApplication": {
+    "path": "C:/Users/ScreenShareTest/ScreenShareTests/decoder-compat-4f0f5fc/ScreenShare-release-windows-x64/ScreenShareUi.exe",
+    "sha256": "8b2c3da63a1cb619c3e7b9ccaf4a1184a39a9c11f938d67702fd3d6d199bd35b",
+    "remoteHashMatched": true
+  }
+}

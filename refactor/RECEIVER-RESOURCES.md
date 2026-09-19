@@ -163,6 +163,19 @@ capture-restart acceptance items in STAGE-2-4-ACCEPTANCE.md.
 
 ## Reproduction
 
+### Longer unattended laptop probe (2026-09-19)
+
+Four 120-second phases confirm continued Section-handle growth: idle 4, direct
+upload 93, owned upload 183, upload/readback 282. After device release, 282
+Sections remain. Total handles rise from 279 to 560, then fall to 527; private
+memory ends near 103 MiB and is not monotonically increasing. This is an
+eight-minute standalone D3D probe, not a streaming acceptance pass. The hardware
+path's long-term resource bound remains unqualified; the measured software
+decoder compatibility path remains the available workaround.
+
+Raw evidence: `build/unattended-closeout-20260919/gpu-bound-final-20260919`.
+No driver, registry, power or machine-policy change was made.
+
 `CrossMachineRoomProof.exe gpu-resources 30` runs four phases of 30 seconds:
 idle, direct D3D texture creation/release, the owned-frame upload path, then
 upload with checked CPU pixel readback. It emits JSON with resource and handle

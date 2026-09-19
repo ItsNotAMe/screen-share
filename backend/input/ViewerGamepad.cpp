@@ -335,14 +335,24 @@ struct PlayStationDevice {
             if (readPending) {
                 DWORD bytesRead = 0;
                 if (!GetOverlappedResult(handle.get(), &overlapped, &bytesRead, FALSE)) {
-                    if (GetLastError() == ERROR_IO_INCOMPLETE) {
+                    const auto error = GetLastError();
+                    if (error == ERROR_IO_INCOMPLETE) {
                         return;
                     }
-                    failed = true;
-                    return;
+                    // A permission's polling thread can exit with an outstanding
+                    // read. Windows then completes it as cancelled, even though
+                    // this shared device handle is still connected. Reissue on
+                    // the new owner after observing completion. Other failures
+                    // still revoke; cached reports retain their freshness limit.
+                    if (error != ERROR_OPERATION_ABORTED) {
+                        failed = true;
+                        return;
+                    }
+                    state.reset(); // A new polling owner needs a fresh report.
+                } else {
+                    AcceptReport(bytesRead);
                 }
                 readPending = false;
-                AcceptReport(bytesRead);
             }
             if (!BeginRead()) {
                 failed = true;
@@ -388,6 +398,13 @@ public:
             return std::nullopt;
         }
         (*found)->Pump();
+        if (!(*found)->failed && !(*found)->state && (*found)->readPending) {
+            // Enumeration starts an asynchronous read; an immediate first poll
+            // must not mistake its normal startup latency for an unplug. Wait
+            // only for that initial report, never extend cached-state freshness.
+            WaitForSingleObject((*found)->event.get(), 32);
+            (*found)->Pump();
+        }
         if ((*found)->failed || !(*found)->state ||
             GetTickCount64() - (*found)->lastStateAt > InputFreshnessTimeoutMs) {
             return std::nullopt;
