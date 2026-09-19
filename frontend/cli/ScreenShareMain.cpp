@@ -1,4 +1,3 @@
-#include "cli/ScreenShareCLI.h"
 #include "core/WindowsMediaRuntime.h"
 #include <iostream>
 #ifdef SCREENSHARE_HAS_ROOM_V2_CLI
@@ -15,10 +14,9 @@ int main(int argc, char** argv)
         return 1;
     }
 #ifdef SCREENSHARE_HAS_ROOM_V2_CLI
-    for (int i = 1; i < argc; ++i)
-        if (std::string_view(argv[i]) == "--backend" || std::string_view(argv[i]) == "--create-room" ||
-            std::string_view(argv[i]) == "--join-room") return RunRoomCli(argc, argv);
-    if (argc > 1 && std::string_view(argv[1]) == "--room-v2") return RunRoomCli(argc, argv);
+    return RunRoomCli(argc, argv);
+#else
+    std::cerr << "This application requires the modular room runtime. Build with the pinned WebRTC SDK.\n";
+    return 1;
 #endif
-    return RunScreenShareCli(argc, argv);
 }

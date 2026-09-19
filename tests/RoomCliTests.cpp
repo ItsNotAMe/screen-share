@@ -346,8 +346,11 @@ void CommandScenario() {
         {"--resolution", "1921x1080"}, {"--fps", "300"}, {"--bitrate", "-1"}, {"--seconds", "1.5"}, {"--no-preview"},
         {"--watch", "5000"}, {"--signal-room", "chosen-id"}, {"--remote-control"}, {"--nickname", QString(33, 'a')}, {"--nickname"}})
         Reject([&] { ParseRoomCommand(base + extra); });
-    Reject([&] { ParseRoomCommand({"--create-room", "--signal-server", "https://example.test"}); });
-    Reject([&] { ParseRoomCommand({"--backend", "v2", "--create-room"}); });
+    Check(ParseRoomCommand({"--create-room", "--signal-server", "https://example.test"}).room.host);
+    Check(ParseRoomCommand({"--create-room"}).room.host);
+    Check(ParseRoomHomeLaunch({}) == QUrl(DefaultRoomServiceOrigin()));
+    Reject([&] { ParseRoomCommand({"--backend", "legacy", "--create-room"}); });
+    Reject([&] { ParseRoomHomeLaunch({"--backend", "legacy"}); });
     Reject([&] { ParseRoomHomeLaunch({"--backend", "v2", "--signal-server", "http://127.0.0.1"}); });
     Check(ParseRoomHomeLaunch({"--signal-server", "https://example.test", "--backend", "v2"}).host() == "example.test");
     for (const auto& origin : {"https://name:secret@example.test", "https://example.test/path", "https://example.test/?token=value"})

@@ -23,8 +23,8 @@ index before frontend work.** The detailed gates and evidence live in
 | Remaining group | Done when | Status |
 | --- | --- | --- |
 | 1–2. Backend acceptance | Accept measured current scope and record outstanding limitations. | Accepted by user; remaining items deferred to BACKLOG.md. |
-| Stage 5 cutover and cleanup | Make v2 the normal path, preserve useful working input/platform code, remove superseded paths and verify affected packaging/regressions. | Next; no longer blocked by deferred acceptance checks. External publishing remains a separate action. |
-| Stage 6 frontend redesign | Improve appearance, layout, resizing and interaction using the modular backend. | Follows cutover; no additional backend acceptance campaign required. |
+| Stage 5 cutover and cleanup | Make v2 the normal path, preserve useful working input/platform code, remove superseded paths and verify affected packaging/regressions. | Complete for the accepted personal-use scope: default UI/CLI, obsolete frontend removal, legacy transport isolated to diagnostics, Release/Debug 9/9 and relocated package checks. See CUTOVER.md. External publishing remains separate. |
+| Stage 6 frontend redesign | Improve appearance, layout, resizing and interaction using the modular backend. | Next. No additional backend acceptance campaign required. |
 
 **Then Stage 6: frontend look-and-feel redesign.** No new backend features are
 planned between these groups. A failed check belongs to its existing group,
@@ -477,14 +477,19 @@ latency. See [COMPARISON.md](COMPARISON.md).
 
 ## 5. Cutover, removal and release readiness (E)
 
-**Deliverable:** validated default v2 behavior and removal of obsolete UDP, polling,
-adaptation, NAT invite and old runner code; preserve useful platform/security tests.
+**Delivered:** default modular UI/CLI and removal of obsolete frontend flows and
+HTTP room checks. Custom UDP/NAT/adaptation/runner code is isolated to explicit
+comparison/regression libraries; shipping executables do not link them. Shared
+platform/input code and reproducible fair-comparison tools are preserved.
 
 Include upgrade behavior, separate namespaces, dependency/runtime packaging,
 installer/fresh-machine checks and documentation. Deployment/publishing remain
 separate authorized actions.
 
-- [ ] Complete safe cutover and legacy cleanup after acceptance.
+- [x] Complete client cutover and legacy application-path cleanup for accepted scope.
+  CUTOVER.md records defaults, upgrade behavior, test evidence and the portable
+  package. Public release, installer/fresh-machine qualification and outstanding
+  distribution obligations are separate deferred work, not frontend prerequisites.
 
 ## 6. UI design and usability refactor — after the current refactor
 

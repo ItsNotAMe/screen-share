@@ -8,7 +8,9 @@ directory: `-NoUi` persists that directory's UI-off CMake option. RoomSocketTest
 stages its three Qt DLLs so it also runs in this configuration. See
 [CHECKPOINT-C.md](CHECKPOINT-C.md) and [HEADLESS-TESTING.md](HEADLESS-TESTING.md).
 
-The working branch is `refactor/backend-v2`. Gate A passed its native integration/build criterion; see CLOSEOUT-A.md for current evidence and failed resource bounds. Normal application media remains on the existing backend pending validated integration.
+The working branch is `refactor/backend-v2`. The modular backend is now the normal
+application path; see CUTOVER.md. The pinned native SDK is required. Remaining
+hardware qualification is deferred to BACKLOG.md under the user's acceptance decision.
 
 ## Current verified SDK and portable workflow
 

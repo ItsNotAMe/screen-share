@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ui/WatchSessionUiState.h"
 
 #include <QtCore/QString>
 #include <QtCore/QVector>
@@ -9,7 +8,6 @@
 #include <functional>
 
 class QLabel;
-class QNetworkAccessManager;
 class QPushButton;
 class QVBoxLayout;
 
@@ -27,7 +25,6 @@ public:
     struct Actions {
         std::function<void()> createRoom;
         std::function<void()> joinRoom;
-        std::function<void(const WatchSessionUiState&)> quickJoinRoom;
         std::function<void()> requestRooms;
         std::function<void(const QString&)> openRoom;
     };
@@ -53,7 +50,6 @@ private:
     QWidget* buildMetric(const QString& value, const QString& label);
 
     Actions actions_;
-    QNetworkAccessManager* roomNetwork_ = nullptr;
     QVBoxLayout* roomListLayout_ = nullptr;
     QLabel* roomStatusLabel_ = nullptr;
     QLabel* roomCountValue_ = nullptr;

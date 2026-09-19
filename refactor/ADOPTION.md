@@ -1,9 +1,9 @@
-# Normal room workflows — guarded adoption
+# Normal room workflows
 
 The existing home screen can now route Start Sharing, Join Room and Quick Join
 through the shared v2 backend. CLI create/join no longer requires a JSON file.
-This is an explicit backend choice; ordinary launch and existing UDP/control
-commands remain available until feature parity and cutover acceptance pass.
+This is now the default backend. `--backend v2` is optional, and old UDP commands
+are retired. `--signal-server` overrides the configured v2 service; see CUTOVER.md.
 
 ## Launch
 
@@ -32,7 +32,8 @@ uses the existing asynchronous shutdown; `--seconds N` bounds a CLI session.
 
 | Scope | Options |
 | --- | --- |
-| Required | `--backend v2 --signal-server HTTPS_ORIGIN`, plus exactly one `--create-room` or `--join-room ID_OR_LINK` |
+| Required | Exactly one `--create-room` or `--join-room ID_OR_LINK` |
+| Service override | `--signal-server HTTPS_ORIGIN`; optional compatibility switch `--backend v2` |
 | Both roles | `--nickname NAME`, `--password-file PATH`, `--seconds 0..86400` |
 | Host room | `--name NAME`, `--private`, `--viewer-limit 1..63` |
 | Host capture | `--display INDEX` or `--window HWND` (not both) |
@@ -97,10 +98,8 @@ Release and Debug desktop-inclusive matrices pass **7/7 each** at
 checks pass **4/4 each**. See HEADLESS-TESTING.md for evidence and the corrected
 test that originally selected the first room row instead of the intended room ID.
 
-Default cutover remains blocked by physical keyboard/mouse/controller acceptance
-(Stage 3), physical media/latency/resource/network acceptance (Stages 2/4), and
-the final compatibility/reporting/updater audit and obsolete-path removal
-(Stage 5). Legacy diagnostic ZIP reports and direct/invite CLI workflows must be
-explicitly replaced or retired at that audit, not silently dropped by this flag.
-The guarded share/watch workflow is implemented; full default adoption and
-Stage 2 acceptance are not being marked complete.
+The user subsequently accepted the current backend and deferred remaining
+qualification. Default client cutover is now complete (CUTOVER.md). Old direct/
+invite commands and legacy ZIP-report workflows are retired; use room diagnostics.
+The retained results above describe the earlier adoption stage. The final cutover
+checks pass 9/9 in both builds plus relocated portable-package startup checks.

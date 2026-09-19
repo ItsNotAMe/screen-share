@@ -8,12 +8,11 @@ Backend targets expose this directory as their include root, never the frontend
 directory. Includes such as `media/HostMediaSession.h` remain stable for consumers.
 Qt Core/Network/WebSockets are backend dependencies for rooms; Qt Widgets is not.
 
-`api/` is the current application-facing facade. `media/` and `room/` implement
-the v2 replacement. `runtime/`, `transport/` and parts of `core/` still support the
-legacy default until the refactor acceptance gates permit cutover and removal.
-The CLI still uses runtime diagnostic entrypoints. The legacy Win32 receiver
-window remains beside its D3D presenter in `render/` pending presentation adoption;
-this directory split does not claim those architectural migrations are complete.
+`api/RoomSession.h`, `media/` and `room/` implement the default application path.
+The old `runtime/`, custom `transport/` and `api/ScreenShareAPI` facade remain only
+in explicitly linked comparison/regression targets. Neither shipping entry point
+links `ScreenShareAPI` or `ScreenShareLegacyTransport`. The shared Win32 preview,
+D3D presenter, capture/codec and input code remains in use by the modular backend.
 
 WebRTC native headers stay in `media/webrtc/`. Public commands must enqueue work
 and publish results without blocking the UI. Capture, signaling and room sockets
@@ -22,7 +21,7 @@ retain their explicit thread/lifetime ownership. See `../refactor/PLAN.md`.
 `room/qt/RoomNetwork` owns the dedicated room-network event loop, admission and
 bounded socket command/event queues. `media/RoomPeerRoster` maps authenticated
 snapshot generations/revisions to peer lifecycle hooks. These are used by the
-real-room headless scenario; normal UI/CLI facade adoption remains in progress.
+real-room headless scenario and the normal UI/CLI application.
 
 `room/qt/RoomSessionCoordinator` automatically dispatches network events and
 asynchronous send completions on signaling; `RoomSignalCodec` provides structural

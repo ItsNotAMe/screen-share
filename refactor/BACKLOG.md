@@ -25,6 +25,14 @@ The fair normal-load and matched impairment comparison is completed, not deferre
 Cleanup of the three test-created virtual devices requires administrator commands
 in CONTROLLERS.md; that housekeeping is distinct from future driver qualification.
 
+## External release preparation
+
+Client cutover is complete for current use. Public service migration/publication,
+fresh-machine installer qualification, remaining distribution notices/source
+obligations and release-channel coordination remain separate future work.
+The isolated v2 service and existing updater selection are unchanged. These
+release tasks do not block the frontend redesign.
+
 ## Multi-viewer memory
 
 Deferred at the user's request on 2026-09-18. Matching legacy's private-memory

@@ -1,187 +1,83 @@
 # Screen Share
 
-Native Windows screen sharing in C++.
+Native Windows screen sharing with H.264 video, WASAPI audio, WebRTC transport,
+and a Qt desktop interface. The modular room backend is now the default in both
+the UI and CLI. The old UDP sharing commands and v1 room links are retired.
 
-Screen Share captures a display or application window, encodes video with H.264, captures audio with
-WASAPI/Opus, and sends media directly over UDP. The desktop UI uses the native backend in-process,
-while `ScreenShare.exe` remains available for CLI diagnostics and automation.
-
-Native sources are split into [backend/](backend/README.md) (shared API, media,
-rooms and platform services) and [frontend/](frontend/README.md) (desktop UI,
-CLI and updater). The room server remains in `signaling-worker/`. The v2 refactor
-and its remaining cutover gates are tracked in [refactor/TODO.md](refactor/TODO.md).
-
-The new backend can be selected explicitly for the existing home screen with
-`ScreenShareUi --backend v2 --signal-server HTTPS_ORIGIN`. CLI room creation/join
-also works without JSON using `--backend v2 --create-room` or `--join-room ID_OR_LINK`
-and the same service option. See [guarded adoption](refactor/ADOPTION.md) for
-options and limitations. Default launch retains existing remote-control features;
-v2 now supports [controllers with explicit consent](refactor/CONTROLLERS.md).
-V2 mouse/keyboard mapping and consent are integrated; physical input acceptance
-and production cutover remain pending. See [desktop input](refactor/DESKTOP-INPUT.md).
-
-## Current Capabilities
-
-- Share a full display or selected application window.
-- Capture system, microphone, or selected-process audio.
-- Join rooms through the built-in Internet signaling Worker flow.
-- Keep media direct over UDP; the Worker coordinates rooms and UDP candidates but does not relay media.
-- Decode and preview video in the Qt UI with a Direct3D/NV12 render path.
-- Support multiple viewers with isolated send lanes, per-viewer health/recovery, host disconnect controls,
-  room passwords, automatic UDP encryption keys, reports, and live stream settings.
-- Let up to three viewers use independent virtual Xbox controllers while the host keeps a local controller;
-  viewers may use Xbox/XInput, DualShock 4, or DualSense controllers, and ScreenShare Setup provisions
-  host controller support before the application is launched.
-- Build a portable Windows zip with the UI, CLI, runtime DLLs, README, and license.
-- Check GitHub Releases for verified updates; installed copies use ScreenShare Setup while portable
-  copies continue using the ZIP updater.
-
-## Requirements
-
-- Windows 10/11
-- CMake 3.24+
-- MSYS2/MinGW-w64 UCRT64 or Visual Studio with Desktop development with C++
-- Windows SDK with C++/WinRT headers
-- Opus development package
-- Qt 6 Network, Svg, and Widgets for `ScreenShareUi.exe`
-- Optional: FFmpeg for inspecting generated media files
-- Inno Setup 6 or 7 when producing the installed prerelease package.
-
-For the common MSYS2 setup, run:
-
-```powershell
-.\scripts\install-dev-deps.ps1
-```
-
-Useful variants:
-
-```powershell
-.\scripts\install-dev-deps.ps1 -DryRun
-.\scripts\install-dev-deps.ps1 -SkipQt -SkipFfmpeg
-.\scripts\install-dev-deps.ps1 -WorkerOnly
-.\scripts\install-dev-deps.ps1 -InstallWindowsSdk
-```
-
-## Build
-
-Debug build:
-
-```powershell
-cmake --preset debug
-cmake --build --preset debug
-```
-
-Release build and portable package:
-
-```powershell
-cmake --preset release
-cmake --build --preset release
-```
-
-The release build writes a portable zip such as:
-
-```text
-build\release\ScreenShare-release-windows-x64.zip
-```
-
-Release builds enable compiler-supported LTO/IPO by default. Disable it only when comparing builds
-or working around a toolchain issue:
-
-```powershell
-cmake --preset release -DSCREENSHARE_ENABLE_RELEASE_LTO=OFF
-```
-
-The normal build compiles a hash-pinned ViGEm user-mode client from source. To use an already fetched
-source tree while developing offline:
-
-```powershell
-cmake --preset release `
-  -DSCREENSHARE_VIGEMCLIENT_SOURCE_DIR=C:\path\to\ViGEmClient-1.16.18.0
-```
-
-To create the test installer, fetch the pinned signed controller runtime and enable installer
-packaging. The runtime is embedded in ScreenShare Setup; it is never downloaded or installed when
-ScreenShare starts:
-
-```powershell
-$driverSetup = .\scripts\fetch-controller-runtime.ps1
-cmake --preset release `
-  -DSCREENSHARE_BUILD_INSTALLER=ON `
-  -DSCREENSHARE_CONTROLLER_DRIVER_SETUP="$driverSetup" `
-  -DSCREENSHARE_INNO_SETUP_COMPILER="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-cmake --build --preset release
-```
-
-This writes `ScreenShare-Setup-0.3.4-windows-x64.exe`. The portable ZIP remains useful for diagnostics,
-but it does not provision a controller driver and therefore does not promise ready-to-use controller
-hosting.
-
-Installed copies contain `ScreenShare-installed.marker`. The auto-updater uses that marker to select
-the independently signed `windowsInstaller` manifest asset, re-verifies its SHA-256 after ScreenShare
-closes, requests UAC, runs Setup silently, and restarts ScreenShare. Normal application startup never
-installs or repairs the controller driver.
+The current personal-use build connects to the existing isolated v2 service:
+`https://screenshare-signaling-v2.bit-yeet.workers.dev` (ten-room cap).
+This client cutover does not deploy, migrate or replace the v1 service.
+Override the origin with `--signal-server HTTPS_ORIGIN`, or set
+`SCREENSHARE_DEFAULT_ROOM_ORIGIN` when configuring a build.
 
 ## Run
 
-Start the desktop app:
+Open `ScreenShareUi.exe`, choose Create Room or Join Room, and share the new
+room ID or link. Room lists update through a persistent subscription.
+Nicknames, capture/audio selections, stream settings, diagnostics and explicit
+host-approved remote input use the shared backend.
+
+CLI examples:
 
 ```powershell
-.\build\release\ScreenShareUi.exe
+.\ScreenShare.exe --create-room --name "Game night" --nickname Host --display 0 --preset gaming
+.\ScreenShare.exe --join-room ROOM_ID --nickname Viewer
+.\ScreenShare.exe --join-room ROOM_ID --decoder software
+.\ScreenShare.exe --help
 ```
 
-Typical flow:
+Use the software decoder option on the tested laptop where hardware graphics
+resource behavior remains unqualified. The GameSir Bluetooth field checks and
+physical-reader regrant pass; multi-controller virtual-driver allocation remains
+a known limitation. See [backlog](refactor/BACKLOG.md) and
+[controller results](refactor/CONTROLLERS.md).
 
-1. On the host computer, choose **Create Room** and start sharing.
-2. On the watcher computer, choose **Join Room** and select the room.
-3. If the room is locked, enter the room password when prompted.
-4. If direct UDP cannot connect, use the generated reports from both computers for diagnostics.
+## Build and package
 
-Reports are enabled by default in the UI and are the easiest way to debug connection, audio, video,
-or performance issues. Relative UI report names are saved under
-`%LOCALAPPDATA%\ScreenShare\reports`, so installed copies never try to write into Program Files.
-An absolute report path entered in the UI is still used as-is.
+The application requires Windows x64, the pinned clang-cl/WebRTC SDK, a matching
+MSVC/Windows SDK environment, and Qt 6 Core/Network/WebSockets/Widgets/Svg.
+Follow [native setup and SDK instructions](refactor/BUILD.md). The earlier
+MinGW-only application path is retired; debug/release presets now use the native
+toolchain. Use a fresh build directory if an existing cache used MinGW.
 
-## CLI Smoke Test
-
-Generate an access code:
+After preparing the native dependencies and environment:
 
 ```powershell
-.\build\release\ScreenShare.exe --generate-access-code
+cmake --preset native-release
+cmake --build --preset native-release
+cmake --build build/native-release --target package-portable
 ```
 
-Start a watcher:
-
-```powershell
-.\build\release\ScreenShare.exe --watch 5000 --access-code CODE --log receiver.log
-```
-
-Start a sharer:
-
-```powershell
-.\build\release\ScreenShare.exe --share 192.168.1.127:5000 --access-code CODE --log sender.log
-```
-
-Use `--allow-plaintext` only for intentional unencrypted local tests.
-
-## More Documentation
-
-- [Detailed usage and CLI reference](docs/usage.md)
-- [Release and update publishing](docs/release.md)
-- [Controller backend and safety model](docs/controller-support.md)
-- [Signaling Worker](signaling-worker/README.md)
-- [Assets and branding](assets/README.md)
-- [Performance tracking](agents/performance.md) and [CSV results](agents/performance.csv)
-- [Current TODO](agents/todo.md)
+The equivalent Debug preset is `native-debug`. The portable archive is produced
+in the selected build directory. SDK-only/relocated build instructions and
+verification are in [BUILD.md](refactor/BUILD.md).
+The hash-pinned ViGEm client is built from source; the application never installs
+or repairs drivers during normal startup. Installer publishing and signed update
+manifests remain separate release actions: [release instructions](docs/release.md).
 
 ## Architecture
 
-```text
-Capture: Windows Graphics Capture / DXGI fallback
-Video:   GPU scale + NV12 conversion -> H.264 encode -> UDP fanout
-Audio:   WASAPI capture -> Opus encode -> UDP
-Network: STUN + Worker signaling + direct UDP media
-Watch:   UDP receive -> H.264 decode -> Direct3D NV12 preview + WASAPI playback
-UI:      Qt desktop shell calling the native ScreenShare API in-process
-```
+- [backend/](backend/README.md): room/session API, capture, codecs, audio, input,
+  presentation and platform services.
+- [frontend/](frontend/README.md): Qt UI, CLI and updater.
+- `signaling-worker/`: admission, room/directory updates and signaling; media
+  travels between peers through WebRTC, not through the Worker.
+- Historical custom UDP transport and runner are isolated in diagnostic build
+  targets for the reproducible legacy comparison. Shipping entry points do not
+  link or expose them.
 
-The project is still a Windows-native prototype, but the main user path is the desktop UI.
+The modular path uses owned frames, bounded queues, independent per-viewer
+adaptation, explicit input consent and asynchronous teardown.
+[Normal-load comparison](refactor/COMPARISON.md) and
+[matched impairment comparison](refactor/MATCHED-NETWORK.md) record benefits and
+tradeoffs. Remaining qualification is deferred at the user's request;
+[TODO.md](refactor/TODO.md) defines cutover and the next frontend redesign.
+
+## Documentation
+
+- [Current usage](docs/usage.md)
+- [CLI configuration and controls](refactor/ROOM-CLI.md)
+- [Headless testing](refactor/HEADLESS-TESTING.md)
+- [Cutover and upgrade behavior](refactor/CUTOVER.md)
+- [Controller support](refactor/CONTROLLERS.md)
+- [Deferred work](refactor/BACKLOG.md)

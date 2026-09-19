@@ -17,10 +17,11 @@ QMap<QString, QString> Options(const QStringList& args, const QSet<QString>& fla
         else if (values.contains(key)) {
             if (++i >= args.size() || args[i].startsWith("--")) throw std::invalid_argument("Missing room option value");
             result[key] = args[i];
-        } else throw std::invalid_argument("Unsupported room option; legacy ports, invites and remote control cannot be translated to v2");
+        } else throw std::invalid_argument("Unsupported room option. Legacy UDP commands and invites are retired; use --create-room or --join-room.");
     }
-    if (result.value("--backend") != "v2") throw std::invalid_argument("Room adoption requires --backend v2; omit it for the existing application");
-    if (!result.contains("--signal-server")) throw std::invalid_argument("Specify --signal-server with the v2 HTTPS service origin");
+    if (result.contains("--backend") && result.value("--backend") != "v2")
+        throw std::invalid_argument("Only the modular room backend is supported. Remove --backend or use --backend v2.");
+    if (!result.contains("--signal-server")) result["--signal-server"] = DefaultRoomServiceOrigin();
     return result;
 }
 int Number(const QString& value) {
@@ -43,6 +44,9 @@ QString Password(const QString& path) {
         throw std::invalid_argument("Room password contains a control character");
     return password;
 }
+}
+QString DefaultRoomServiceOrigin() {
+    return QStringLiteral(SCREENSHARE_DEFAULT_ROOM_ORIGIN);
 }
 QUrl ParseRoomHomeLaunch(const QStringList& arguments) {
     const auto options = Options(arguments, {}, {"--backend", "--signal-server"});

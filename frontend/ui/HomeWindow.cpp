@@ -1,29 +1,18 @@
 #include "ui/HomeWindow.h"
 
-#include "ui/RoomAccessCheck.h"
 #include "ui/UiStyle.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>
-#include <QtCore/QJsonArray>
-#include <QtCore/QJsonDocument>
-#include <QtCore/QJsonObject>
 #include <QtCore/QRectF>
 #include <QtCore/QSize>
-#include <QtCore/QUrl>
 #include <QtGui/QIcon>
 #include <QtGui/QPainter>
 #include <QtGui/QPixmap>
-#include <QtNetwork/QNetworkAccessManager>
-#include <QtNetwork/QNetworkReply>
-#include <QtNetwork/QNetworkRequest>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QHBoxLayout>
-#include <QtWidgets/QInputDialog>
 #include <QtWidgets/QLabel>
-#include <QtWidgets/QLineEdit>
-#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QVBoxLayout>
@@ -36,8 +25,6 @@
 
 namespace {
 
-constexpr const char* kDefaultSignalServer = "https://screenshare-signaling.bit-yeet.workers.dev";
-constexpr const char* kDefaultStunServer = "stun.l.google.com:19302";
 
 #ifndef SCREENSHARE_APP_VERSION
 #define SCREENSHARE_APP_VERSION "0.0.0"
@@ -50,12 +37,6 @@ QString appVersionText()
         return {};
     }
     return QStringLiteral("v%1").arg(version);
-}
-
-std::string toStdUtf8(const QString& value)
-{
-    const QByteArray bytes = value.toUtf8();
-    return std::string(bytes.constData(), static_cast<size_t>(bytes.size()));
 }
 
 QPixmap renderSvgResource(const QString& path, const QSize& size, const QString& color = QString())
@@ -130,43 +111,6 @@ QFrame* separator()
     return line;
 }
 
-QVector<HomeActiveRoom> parseRooms(const QByteArray& payload)
-{
-    const QJsonDocument document = QJsonDocument::fromJson(payload);
-    if (!document.isObject()) {
-        return {};
-    }
-
-    const QJsonArray rooms = document.object().value(QStringLiteral("rooms")).toArray();
-    QVector<HomeActiveRoom> result;
-    result.reserve(rooms.size());
-    for (const QJsonValue& value : rooms) {
-        const QJsonObject object = value.toObject();
-        HomeActiveRoom room;
-        room.roomId = object.value(QStringLiteral("roomId")).toString().trimmed();
-        if (room.roomId.isEmpty()) {
-            continue;
-        }
-        room.name = object.value(QStringLiteral("name")).toString().trimmed();
-        if (room.name.isEmpty()) {
-            room.name = room.roomId;
-        }
-        room.peerCount = std::max(0, object.value(QStringLiteral("peerCount")).toInt(0));
-        room.passwordProtected =
-            object.value(QStringLiteral("passwordProtected")).toBool(
-                object.value(QStringLiteral("requiresRoomKey")).toBool(false));
-        room.updatedAt = static_cast<qint64>(object.value(QStringLiteral("updatedAt")).toDouble(0));
-        result.push_back(std::move(room));
-    }
-    std::sort(result.begin(), result.end(), [](const HomeActiveRoom& lhs, const HomeActiveRoom& rhs) {
-        if (lhs.updatedAt != rhs.updatedAt) {
-            return lhs.updatedAt > rhs.updatedAt;
-        }
-        return lhs.name.localeAwareCompare(rhs.name) < 0;
-    });
-    return result;
-}
-
 } // namespace
 
 HomeWindow::HomeWindow(Actions actions, QWidget* parent)
@@ -187,10 +131,7 @@ HomeWindow::HomeWindow(Actions actions, QWidget* parent)
     if (actions_.requestRooms) root->addWidget(label("Screen sharing, audio and remote input with explicit host permission. Keyboard control requires display sharing.", "HomeInfoSecondary"));
     root->addWidget(buildMainMenu(), 1);
 
-    if (!actions_.requestRooms) {
-        roomNetwork_ = new QNetworkAccessManager(this);
-        refreshRooms();
-    } else showRoomStatus("Connecting to room list…");
+    showRoomStatus("Connecting to room list…");
 }
 
 QWidget* HomeWindow::buildTopBar()
@@ -383,63 +324,7 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
     join->setEnabled(room.joinable);
     QObject::connect(join, &QPushButton::clicked, this, [this, room] {
         if (!room.joinable) return;
-        if (actions_.openRoom) { actions_.openRoom(room.roomId); return; }
-        if (!actions_.quickJoinRoom) {
-            return;
-        }
-
-        QString password;
-        if (room.passwordProtected) {
-            bool ok = false;
-            password = QInputDialog::getText(
-                this,
-                "Room password",
-                QStringLiteral("Enter password for %1").arg(room.name),
-                QLineEdit::Password,
-                QString(),
-                &ok);
-            if (!ok) {
-                return;
-            }
-            if (password.isEmpty()) {
-                QMessageBox::warning(this, "Room password", "Enter the room password.");
-                return;
-            }
-        }
-
-        WatchSessionUiState state;
-        state.config.connectionMode = screenshare::WatchConnectionMode::Room;
-        state.config.listenPort = 5000;
-        state.config.roomId = toStdUtf8(room.roomId);
-        state.config.roomPassword = toStdUtf8(password);
-        state.config.signalingStunServer = kDefaultStunServer;
-        state.config.reportPath = "receiver-report.zip";
-        state.config.playAudio = true;
-        state.config.previewLatencyMs = 40;
-        state.config.audioPlaybackVolumePercent = 100;
-        state.roomId = room.roomId;
-        state.roomName = room.name;
-        state.passwordProtected = room.passwordProtected;
-        startRoomAccessCheck(
-            QString::fromUtf8(kDefaultSignalServer),
-            room.roomId,
-            password,
-            this,
-            [this, state](const RoomAccessCheckResult& result) {
-                if (result.status == RoomAccessCheckResult::Status::Accepted) {
-                    actions_.quickJoinRoom(state);
-                    return;
-                }
-                const QString message =
-                    result.status == RoomAccessCheckResult::Status::WrongPassword
-                        ? QStringLiteral("Room password is wrong.")
-                    : result.status == RoomAccessCheckResult::Status::PasswordRequired
-                        ? QStringLiteral("Room password required.")
-                    : result.message.isEmpty()
-                        ? QStringLiteral("Could not verify room access.")
-                        : result.message;
-                QMessageBox::warning(this, "Join room", message);
-            });
+        if (actions_.openRoom) actions_.openRoom(room.roomId);
     });
     layout->addWidget(join, 0, Qt::AlignVCenter);
     return row;
@@ -447,32 +332,7 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
 
 void HomeWindow::refreshRooms()
 {
-    if (actions_.requestRooms) { actions_.requestRooms(); return; }
-    if (roomNetwork_ == nullptr) {
-        return;
-    }
-
-    showRoomStatus("Loading rooms...");
-    if (refreshRoomsButton_ != nullptr) {
-        refreshRoomsButton_->setEnabled(false);
-    }
-
-    QNetworkRequest request(QUrl(QString::fromUtf8(kDefaultSignalServer) + QStringLiteral("/rooms")));
-    request.setHeader(QNetworkRequest::UserAgentHeader, "ScreenShareUi");
-    QNetworkReply* reply = roomNetwork_->get(request);
-    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        reply->deleteLater();
-        if (refreshRoomsButton_ != nullptr) {
-            refreshRoomsButton_->setEnabled(true);
-        }
-
-        if (reply->error() != QNetworkReply::NoError) {
-            showRoomStatus("Could not load rooms");
-            return;
-        }
-
-        updateRooms(parseRooms(reply->readAll()));
-    });
+    if (actions_.requestRooms) actions_.requestRooms();
 }
 
 void HomeWindow::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QString& unavailable)

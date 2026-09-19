@@ -217,6 +217,20 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
 
 int RunRoomCli(int argc, char** argv) {
     try {
+        if (argc == 1 || (argc == 2 && (std::string_view(argv[1]) == "--help" || std::string_view(argv[1]) == "-h"))) {
+            std::cout << "ScreenShare — modular room backend\n"
+                "  ScreenShare --create-room [--name NAME] [--nickname NAME] [--display INDEX | --window HANDLE]\n"
+                "  ScreenShare --join-room ID_OR_LINK [--nickname NAME] [--decoder auto|software]\n"
+                "  ScreenShare --room-v2 CONFIG.json\n"
+                "Options: --signal-server HTTPS_ORIGIN, --password-file PATH, --private, --viewer-limit N,\n"
+                "  --preset gaming|quality, --resolution auto|native|WIDTHxHEIGHT, --fps auto|N, --bitrate auto|BPS,\n"
+                "  --audio none|system|microphone|process, --audio-device ID, --process-id PID,\n"
+                "  --playback-device ID, --volume 0..100, --mute, --unmute, --seconds N, --no-preview,\n"
+                "  --control-file PATH, --gamepad DEVICE_ID. See refactor/ROOM-CLI.md for input consent.\n"
+                "Default service: " << DefaultRoomServiceOrigin().toStdString() << "\n"
+                "Old --share/--watch commands and v1 room links are retired; create a new room.\n";
+            return 0;
+        }
         RoomSessionConfig config;
         if (argc > 1 && std::string_view(argv[1]) == "--room-v2") {
             if (argc != 3) throw std::invalid_argument("Usage: ScreenShare --room-v2 CONFIG.json");

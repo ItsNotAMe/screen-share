@@ -55,6 +55,9 @@ function(screenshare_configure_release_lto_warnings target_name)
 endfunction()
 
 include(cmake/WebRTC.cmake)
+if(NOT SCREENSHARE_WEBRTC_ARTIFACT_DIR)
+    message(FATAL_ERROR "The application now requires the pinned WebRTC artifact/SDK. Use a native preset or scripts/run-webrtc-proof.ps1 -Application; see refactor/BUILD.md.")
+endif()
 if(SCREENSHARE_WEBRTC_ARTIFACT_DIR)
     screenshare_import_webrtc()
     include(cmake/MediaNegotiation.cmake)
@@ -178,14 +181,6 @@ add_library(ScreenShareCore STATIC
     backend/render/Nv12D3D11Presenter.cpp
     backend/render/FramePresentationBackend.cpp
     backend/render/ReceiverPreviewWindow.cpp
-    backend/transport/NatTraversal.cpp
-    backend/transport/SignalingClient.cpp
-    backend/transport/StunClient.cpp
-    backend/transport/UdpCrypto.cpp
-    backend/transport/LanDiscovery.cpp
-    backend/transport/UdpProtocol.cpp
-    backend/transport/UdpReceiver.cpp
-    backend/transport/UdpSender.cpp
     backend/updater/UpdateSignature.cpp
     backend/video/Nv12Convert.cpp
 )
@@ -248,6 +243,15 @@ endif()
 if(TARGET ScreenShareNegotiation)
     target_link_libraries(ScreenShareCore PRIVATE ScreenShareNegotiation)
 endif()
+
+# Historical transport is retained only for reproducible comparison/regression
+# tools. Neither shipping entry point links this or the legacy session runner.
+add_library(ScreenShareLegacyTransport STATIC EXCLUDE_FROM_ALL
+    backend/transport/NatTraversal.cpp backend/transport/SignalingClient.cpp
+    backend/transport/StunClient.cpp backend/transport/UdpCrypto.cpp
+    backend/transport/LanDiscovery.cpp backend/transport/UdpProtocol.cpp
+    backend/transport/UdpReceiver.cpp backend/transport/UdpSender.cpp)
+target_link_libraries(ScreenShareLegacyTransport PUBLIC ScreenShareCore)
 if(MSVC)
     # Room transport is a backend dependency, including CLI-only builds.
     include(cmake/RoomTransport.cmake)
@@ -318,7 +322,7 @@ if(MSVC)
     endif()
 endif()
 
-add_library(ScreenShareAPI STATIC
+add_library(ScreenShareAPI STATIC EXCLUDE_FROM_ALL
     backend/api/ScreenShareAPI.cpp
     backend/runtime/ScreenShareRuntimeExecution.cpp
     backend/runtime/ScreenShareRuntimeSupport.cpp
@@ -333,7 +337,7 @@ target_include_directories(ScreenShareAPI PUBLIC
 )
 
 target_link_libraries(ScreenShareAPI PUBLIC
-    ScreenShareCore
+    ScreenShareLegacyTransport
 )
 
 if(BUILD_TESTING)
@@ -354,7 +358,7 @@ if(BUILD_TESTING)
         tests/ControllerProtocolTests.cpp
     )
     target_compile_features(ControllerProtocolTests PRIVATE cxx_std_20)
-    target_link_libraries(ControllerProtocolTests PRIVATE ScreenShareCore)
+    target_link_libraries(ControllerProtocolTests PRIVATE ScreenShareLegacyTransport)
     add_test(NAME controller-protocol COMMAND ControllerProtocolTests)
 
     add_executable(ViewerGamepadReportTests
@@ -368,7 +372,7 @@ if(BUILD_TESTING)
         tests/UdpSenderPacingTests.cpp
     )
     target_compile_features(UdpSenderPacingTests PRIVATE cxx_std_20)
-    target_link_libraries(UdpSenderPacingTests PRIVATE ScreenShareCore)
+    target_link_libraries(UdpSenderPacingTests PRIVATE ScreenShareLegacyTransport)
     add_test(NAME udp-sender-pacing COMMAND UdpSenderPacingTests)
 
     add_executable(AvSyncDiagnosticsTests
@@ -394,14 +398,15 @@ endif()
 
 add_executable(ScreenShare
     frontend/cli/ScreenShareMain.cpp
-    frontend/cli/ScreenShareCLI.cpp
 )
 
 target_compile_features(ScreenShare PRIVATE cxx_std_20)
 target_include_directories(ScreenShare PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
 if(TARGET ScreenShareRoomSession)
+    set(SCREENSHARE_DEFAULT_ROOM_ORIGIN "https://screenshare-signaling-v2.bit-yeet.workers.dev" CACHE STRING "Default modular room service HTTPS origin")
     add_library(ScreenShareRoomFrontend STATIC frontend/shared/RoomSessionConfig.cpp frontend/shared/RoomProfile.cpp frontend/shared/RoomLaunch.cpp frontend/shared/RoomInputCommands.cpp frontend/shared/RoomDiagnosticReport.cpp)
     target_compile_definitions(ScreenShareRoomFrontend PRIVATE SCREENSHARE_REPORT_VERSION="${PROJECT_VERSION}")
+    target_compile_definitions(ScreenShareRoomFrontend PRIVATE SCREENSHARE_DEFAULT_ROOM_ORIGIN="${SCREENSHARE_DEFAULT_ROOM_ORIGIN}")
     target_include_directories(ScreenShareRoomFrontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
     target_link_libraries(ScreenShareRoomFrontend PUBLIC ScreenShareCore ScreenShareRoomSession)
     if(BUILD_TESTING)
@@ -415,6 +420,12 @@ if(TARGET ScreenShareRoomSession)
     target_link_libraries(ScreenShareRoomCli PUBLIC ScreenShareRoomFrontend)
     target_link_libraries(ScreenShare PRIVATE ScreenShareRoomCli)
     target_compile_definitions(ScreenShare PRIVATE SCREENSHARE_HAS_ROOM_V2_CLI)
+    if(BUILD_TESTING)
+        add_test(NAME room-cli-default-help COMMAND ScreenShare --help)
+        set_tests_properties(room-cli-default-help PROPERTIES PASS_REGULAR_EXPRESSION "modular room backend" TIMEOUT 15)
+        add_test(NAME room-cli-retired-command COMMAND ScreenShare --watch 5000)
+        set_tests_properties(room-cli-retired-command PROPERTIES WILL_FAIL TRUE TIMEOUT 15)
+    endif()
     get_filename_component(_screenshare_cli_qt_bin "${Qt6_DIR}/../../../bin" ABSOLUTE)
     find_program(SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE NAMES windeployqt6 windeployqt
         PATHS "${_screenshare_cli_qt_bin}" NO_DEFAULT_PATH REQUIRED)
@@ -476,7 +487,7 @@ endif()
 screenshare_configure_release_lto_warnings(ScreenShare)
 
 target_link_libraries(ScreenShare PRIVATE
-    ScreenShareAPI
+    ScreenShareCore
 )
 
 if(TARGET ScreenShareViGEmClient)
@@ -599,7 +610,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         endif()
 
         add_library(ScreenShareUiShell STATIC frontend/ui/AppShellWindow.cpp frontend/ui/ScreenAwakeGuard.cpp frontend/ui/Toast.cpp
-            frontend/ui/HomeWindow.cpp frontend/ui/RoomAccessCheck.cpp frontend/ui/UiReportPath.cpp)
+            frontend/ui/HomeWindow.cpp frontend/ui/UiReportPath.cpp)
         if(SCREENSHARE_BUILD_FIELD_TEST)
             add_executable(ScreenShareFieldScene WIN32 tools/field-test/FieldScene.cpp)
             target_link_libraries(ScreenShareFieldScene PRIVATE ScreenShareCore Qt6::Widgets)
@@ -612,11 +623,6 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_compile_definitions(ScreenShareUiShell PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX SCREENSHARE_APP_VERSION="${PROJECT_VERSION}")
         add_executable(ScreenShareUi WIN32
             frontend/ui/main.cpp
-            frontend/ui/QtSessionBackend.cpp
-            frontend/ui/ActiveShareWindow.cpp
-            frontend/ui/ActiveWatchWindow.cpp
-            frontend/ui/CreateRoomWindow.cpp
-            frontend/ui/JoinRoomWindow.cpp
             frontend/ui/UiStyle.cpp
             frontend/ui/UpdateManager.cpp
             frontend/ui/UpdatePackageSelection.cpp
@@ -629,7 +635,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_include_directories(ScreenShareUi PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/frontend
         )
-        target_link_libraries(ScreenShareUi PRIVATE ScreenShareAPI ScreenShareUiShell Qt6::Network Qt6::Svg Qt6::Widgets shell32)
+        target_link_libraries(ScreenShareUi PRIVATE ScreenShareUiShell Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         if(TARGET ScreenShareRoomFrontend)
             # The normal app and room entry points share one shell implementation.
             add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomGamepadControl.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/RoomApplication.cpp)

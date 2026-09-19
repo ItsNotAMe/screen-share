@@ -1,4 +1,7 @@
-# Opt-in v2 room CLI
+# Modular room CLI
+
+This is now the default CLI. `--backend v2` is optional; omitting
+`--signal-server` uses the configured v2 service. See CUTOVER.md for upgrade behavior.
 
 Viewers can use `--decoder software` (or `"decoder": "software"` in room JSON)
 to avoid hardware-decoder compatibility problems. `auto` is the default and

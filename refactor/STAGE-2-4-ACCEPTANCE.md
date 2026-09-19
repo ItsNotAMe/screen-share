@@ -6,6 +6,11 @@ cutover and frontend work. This supersedes the blocking gates below, which remai
 as historical evidence rather than prerequisites. Failed/unverified results have
 not become passing results.
 
+Client cutover subsequently completed: default UI/CLI use v2, obsolete frontend
+paths are removed, and custom transport is isolated to diagnostics. Release/Debug
+cutover checks pass 9/9 and the relocated portable package passes. See CUTOVER.md;
+frontend redesign is now the next active milestone.
+
 The requested scope is to finish Stages 2–4 before cutover or the later UI redesign.
 Implementation and locally reproducible evidence are separate from field acceptance.
 No unchecked physical requirement is waived by the unattended test run.
