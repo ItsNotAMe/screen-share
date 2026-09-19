@@ -5,21 +5,18 @@ remain in Git. The backend was accepted for personal use on 2026-09-19; deferred
 qualification is not a prerequisite for routine frontend work. Do not restart a
 broad acceptance campaign without a reported regression or an explicit request.
 
-## Before external release
+## Release process
 
-- [ ] Redesign update UI and defer installation/restart until an active room ends;
-  preserve signed-manifest and package verification.
-- [ ] Rebuild the actual UI/CLI, portable package and installer from the final commit.
-  Verify fresh-machine installation and upgrade from 0.3.4, including controller runtime.
-- [ ] Confirm production service/channel policy and the isolated v2 ten-room limit.
-  Explain that both endpoints must update and old rooms/invites are incompatible.
-- [ ] Complete distribution notices/source obligations and release documentation;
-  sign the update manifest and finish the appropriate executable signing workflow.
-- [ ] Review final session UI and package behavior before merge/publication.
+The maintained build/publish scripts enforce a clean source commit, application
+checks, package verification and signed updates. See [release instructions](../docs/release.md).
 
 ## Deferred qualification and known failures
 
 Details and prior measured limits: [known limitations](../docs/known-limitations.md).
+
+- [ ] Qualify fresh-machine installation; the owner confirmed an upgrade from 0.3.4
+  on the second computer and the two-computer input/audio fixes for 1.0.0.
+- [ ] Obtain Authenticode signing for future application/Setup binaries.
 
 - [ ] Clean up the three test-created virtual devices, then qualify native
   multi-controller allocation/local-slot preservation and broader Xbox/PlayStation hardware.

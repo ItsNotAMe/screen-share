@@ -1,4 +1,5 @@
 #include "ui/UpdateManager.h"
+#include "ui/AppShellWindow.h"
 
 #include "ui/UpdatePackageSelection.h"
 
@@ -279,17 +280,6 @@ QLabel* updateIconLabel(const QString& iconName, const char* color, int size, co
 
 } // namespace
 
-struct UpdateManager::UpdateInfo {
-    QString version;
-    QString channel;
-    QString packageUrl;
-    QString sha256;
-    QString signatureBase64;
-    screenshare::ui::UpdatePackageKind packageKind = screenshare::ui::UpdatePackageKind::PortableZip;
-    qint64 sizeBytes = 0;
-    QStringList notes;
-};
-
 UpdateManager::UpdateManager(QWidget* dialogParent, QObject* parent)
     : QObject(parent)
     , dialogParent_(dialogParent)
@@ -546,12 +536,13 @@ void UpdateManager::downloadUpdate(
     QObject::connect(reply, &QNetworkReply::readyRead, this, [reply, output] {
         output->write(reply->readAll());
     });
-    QObject::connect(reply, &QNetworkReply::downloadProgress, this, [progress](qint64 received, qint64 total) {
+    QObject::connect(progress, &QObject::destroyed, reply, [reply] { reply->abort(); reply->deleteLater(); });
+    QObject::connect(reply, &QNetworkReply::downloadProgress, progress, [progress](qint64 received, qint64 total) {
         if (total > 0) {
             progress->setValue(static_cast<int>((received * 100) / total));
         }
     });
-    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply, output, outputPath, update, progress, statusLabel, installButton, laterButton] {
+    QObject::connect(reply, &QNetworkReply::finished, progress, [this, reply, output, outputPath, update, progress, statusLabel, installButton, laterButton] {
         output->write(reply->readAll());
         output->close();
         reply->deleteLater();
@@ -577,25 +568,43 @@ void UpdateManager::downloadUpdate(
             return;
         }
 
-        QString errorMessage;
-        if (!launchUpdater(update, outputPath, &errorMessage)) {
-            statusLabel->setText(errorMessage);
-            installButton->setText(QStringLiteral("Download Update"));
-            installButton->setEnabled(true);
-            laterButton->setEnabled(true);
-            return;
-        }
-
-        installButton->setText(QStringLiteral("Installing..."));
-        statusLabel->setText(update.packageKind == screenshare::ui::UpdatePackageKind::WindowsInstaller ?
-            QStringLiteral("ScreenShare will close, then Windows will request approval for Setup...") :
-            QStringLiteral("Installing after ScreenShare closes..."));
-        QTimer::singleShot(100, qApp, &QCoreApplication::quit);
+        // A download may finish after the user joins a room. Keep the verified
+        // package ready, but require an explicit install after the room drains.
+        QObject::disconnect(installButton, &QPushButton::clicked, this, nullptr);
+        laterButton->setEnabled(true);
+        auto* readyTimer = new QTimer(installButton);
+        const auto refreshReady = [this, statusLabel, installButton] {
+            auto* shell = dynamic_cast<AppShellWindow*>(dialogParent_);
+            const bool busy = shell && shell->hasActiveSession && shell->hasActiveSession();
+            installButton->setEnabled(!busy);
+            installButton->setText(QStringLiteral("Install and restart"));
+            statusLabel->setText(busy ? QStringLiteral("Update ready. Leave your room to install.") :
+                QStringLiteral("Update verified and ready to install."));
+        };
+        QObject::connect(readyTimer, &QTimer::timeout, installButton, refreshReady);
+        readyTimer->start(500); refreshReady();
+        QObject::connect(installButton, &QPushButton::clicked, installButton,
+            [this, update, outputPath, statusLabel, installButton, readyTimer] {
+                QString errorMessage;
+                if (!launchUpdater(update, outputPath, &errorMessage)) {
+                    statusLabel->setText(errorMessage); return;
+                }
+                readyTimer->stop(); installButton->setEnabled(false);
+                installButton->setText(QStringLiteral("Installing..."));
+                // Quit immediately after the guarded launch: no event-loop gap
+                // in which a new room can start before shutdown.
+                QCoreApplication::quit();
+            });
     });
 }
 
 bool UpdateManager::launchUpdater(const UpdateInfo& update, const QString& packagePath, QString* errorMessage)
 {
+    auto* shell = dynamic_cast<AppShellWindow*>(dialogParent_);
+    if (shell && shell->hasActiveSession && shell->hasActiveSession()) {
+        *errorMessage = QStringLiteral("Leave your room before installing this update.");
+        return false;
+    }
     const QString appDir = QCoreApplication::applicationDirPath();
     const QDir appDirectory(appDir);
     if (QFileInfo::exists(appDirectory.filePath(QStringLiteral("CMakeCache.txt"))) ||

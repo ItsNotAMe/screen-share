@@ -65,6 +65,7 @@ RoomApplication::RoomApplication(RoomSessionConfig config, QtRoomSession::Factor
 }
 
 void RoomApplication::Initialize() {
+    shell_.hasActiveSession = [this] { return session() != nullptr || closing_; };
     shell_.setPanicHotkeyHandler([this] {
         if (session_) session_->revokeControl();
         if (browser_ && browser_->activeSession()) browser_->activeSession()->revokeControl();
@@ -116,6 +117,7 @@ void RoomApplication::Finish() {
 void RoomApplication::show() { if (!finished_) shell_.show(); }
 
 RoomApplication::~RoomApplication() {
+    shell_.hasActiveSession = {};
     shell_.setPanicHotkeyHandler({});
     shell_.setCloseHandler({});
     // unique_ptr-owned pages remove themselves from the shell's QObject tree.

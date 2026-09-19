@@ -21,6 +21,8 @@ public:
     void setProfileName(const QString& name);
     std::function<void()> openProfile;
     std::function<void()> openSettings;
+    // Includes joining and worker shutdown, even when settings cover the room.
+    std::function<bool()> hasActiveSession;
     void showToast(const QString& message);
     // Handler invoked when the host presses the global panic-revoke hotkey
     // (Ctrl+Alt+Shift+F12). Wired to instantly revoke any active remote control.

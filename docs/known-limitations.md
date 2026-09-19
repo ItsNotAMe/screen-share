@@ -35,11 +35,12 @@ The default client uses the isolated v2 service with a ten-room cap. Installing
 it does not migrate or deploy the v1 service. Both endpoints need the v2 client;
 v1 rooms and UDP invites are incompatible. See [usage](usage.md).
 
-Before external release: confirm service/channel policy; rebuild and qualify the
-portable package and installer on a fresh machine; check upgrades from 0.3.4;
-finish distribution notices/source obligations; publish only signed update
-manifests. The current updater does not defer installation until a room ends.
-Its redesign and active-session deferral remain outstanding.
+For 1.0.0 the owner confirmed the service policy, two-computer input/audio fixes
+and installation over 0.3.4 on the second computer. Fresh-machine installation
+and broader hardware qualification remain unverified. Updates now wait until
+the room ends and require an explicit install/restart action. Publish only
+signed update manifests; the application and Setup binaries are not
+Authenticode-signed. See [release notes](release-1.0.0.md).
 
 Historical detailed evidence is retained at Git commit `376d59a`. For example:
 `git show 376d59a:refactor/CONTROLLERS.md` recovers the driver investigation.

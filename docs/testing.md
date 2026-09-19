@@ -1,5 +1,10 @@
 # Testing
 
+`update-session-deferral` exercises a verified local download while a room is
+active, readiness after leaving, the new-room-before-click race, and closing
+the update UI during a transfer. `room-v2-qt-ui` checks the shell's session
+guard with the real room application lifecycle.
+
 Build tests with the same native toolchain as the application; see [build](build.md).
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.

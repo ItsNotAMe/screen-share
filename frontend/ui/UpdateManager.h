@@ -2,6 +2,8 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
+#include "ui/UpdatePackageSelection.h"
 
 class QNetworkAccessManager;
 class QWidget;
@@ -13,7 +15,13 @@ public:
     void checkForUpdates();
 
 private:
-    struct UpdateInfo;
+    friend struct UpdateManagerTestAccess;
+    struct UpdateInfo {
+        QString version, channel, packageUrl, sha256, signatureBase64;
+        screenshare::ui::UpdatePackageKind packageKind = screenshare::ui::UpdatePackageKind::PortableZip;
+        qint64 sizeBytes = 0;
+        QStringList notes;
+    };
 
     void handleManifestReply(class QNetworkReply* reply);
     void showUpdateDialog(const UpdateInfo& update);

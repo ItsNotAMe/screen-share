@@ -76,3 +76,8 @@ dist/
 
 # Downloaded/build-once native dependencies survive build output cleanup
 .deps/
+
+# Local release signing material must never enter source control.
+*.dpapi
+*.pfx
+*.key

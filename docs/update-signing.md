@@ -46,6 +46,13 @@ Paste the emitted bytes into `kUpdatePublicKeyXy` and rebuild.
 
 ## 2. Sign each release manifest
 
+For unattended local releases, run `scripts/set-update-signing-secret.ps1`
+once to verify and save the existing key passphrase using Windows DPAPI. The
+signing script automatically uses that account-bound encrypted file when it
+exists; it passes the decrypted value only through the OpenSSL process's stdin.
+No signing key is regenerated or shared with the assistant. See `docs/release.md`
+for the single-command build and publishing workflow.
+
 Each update asset is signed independently. The signed message is exactly these
 three fields joined by newlines (using the selected asset's `url` and `sha256`):
 

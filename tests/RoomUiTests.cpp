@@ -604,6 +604,7 @@ void BrowserScenario(const QUrl& origin) {
     auto* viewerStack = viewerApp.window().findChild<QStackedWidget*>("AppPageStack");
     Check(hostStack && viewerStack && hostStack->count() == 1 && !host.isWindow());
     Check(!hostApp.keepingScreenAwake() && !viewerApp.keepingScreenAwake());
+    Check(!hostApp.window().hasActiveSession() && !viewerApp.window().hasActiveSession());
     Wait([&] { return audit.status().phase == Directory::Phase::Ready && host.directory().status().phase == Directory::Phase::Ready && viewer.directory().status().phase == Directory::Phase::Ready; });
     Check(audit.status().rooms.empty() && host.directory().connectionAttempts() == 1);
     Check(!host.findChild<QLineEdit*>("roomNickname") && host.profileName() == QStringLiteral("Caf\u00e9"));
@@ -622,6 +623,7 @@ void BrowserScenario(const QUrl& origin) {
     Check(hostStack->currentWidget() == host.activeSession() && hostStack->count() == 2);
     Check(host.activeSession()->window() == &hostApp.window() && hostApp.window().isVisible());
     Check(hostApp.keepingScreenAwake() && !host.isVisible());
+    Check(hostApp.window().hasActiveSession());
     // Admission status can become Active before the Qt snapshot enables the
     // copy button. Wait for the actual control, not just the earlier room ID.
     Wait([&] { return !host.activeSession()->findChild<QLineEdit*>("roomLink")->text().isEmpty() &&
