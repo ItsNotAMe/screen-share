@@ -265,6 +265,12 @@ if(MSVC)
         if(BUILD_TESTING)
             add_executable(NativeRoomRuntimeTests tests/NativeRoomRuntimeTests.cpp)
             target_link_libraries(NativeRoomRuntimeTests PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_executable(NativePcmAudioTests tools/webrtc-proof/PcmAudioDeviceTest.cpp)
+            target_link_libraries(NativePcmAudioTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
+            add_test(NAME native-pcm-audio COMMAND NativePcmAudioTests)
+            set_tests_properties(native-pcm-audio PROPERTIES TIMEOUT 90)
+            add_executable(NativeCaptureTests tools/webrtc-proof/CaptureBackendTest.cpp)
+            target_link_libraries(NativeCaptureTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
             add_executable(RoomInputTests tools/webrtc-proof/PublicRoomSessionProof.cpp)
             target_link_libraries(RoomInputTests PRIVATE ScreenShareCore ScreenShareRoomSession)
             add_executable(RoomLifecycleStress tools/webrtc-proof/RoomLifecycleStress.cpp)
@@ -734,6 +740,11 @@ if(SCREENSHARE_BUILD_QT_UI)
         if(MSVC)
             target_compile_options(ScreenShareUi PRIVATE /W4 /permissive- /EHsc)
         endif()
+        if(WIN32 AND BUILD_TESTING)
+            add_executable(WindowChromeTests tests/WindowChromeTests.cpp frontend/ui/UiStyle.cpp frontend/ui/resources.qrc)
+            set_property(TARGET WindowChromeTests PROPERTY AUTORCC ON)
+            target_link_libraries(WindowChromeTests PRIVATE ScreenShareUiShell)
+        endif()
 
         find_program(SCREENSHARE_WINDEPLOYQT_EXECUTABLE
             NAMES windeployqt6 windeployqt-qt6 windeployqt
@@ -749,7 +760,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         if(WIN32 AND SCREENSHARE_WINDEPLOYQT_EXECUTABLE)
             # Test binaries deploy their own runtime. They must remain buildable
             # while the user is running the application under field test.
-            foreach(ui_proof IN ITEMS RoomUiTests RoomUiWindowsTests)
+            foreach(ui_proof IN ITEMS RoomUiTests RoomUiWindowsTests WindowChromeTests)
                 if(TARGET ${ui_proof})
                     add_custom_command(TARGET ${ui_proof} POST_BUILD
                         COMMAND "${CMAKE_COMMAND}"

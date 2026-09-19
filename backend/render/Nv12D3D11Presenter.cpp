@@ -678,7 +678,7 @@ void Nv12D3D11Presenter::Attach(HWND hwnd)
     impl_->EnsurePipeline();
 }
 
-void Nv12D3D11Presenter::Resize(std::uint32_t width, std::uint32_t height)
+void Nv12D3D11Presenter::Resize(std::uint32_t width, std::uint32_t height, bool redraw)
 {
     const std::uint32_t clampedWidth = ClampDimension(width);
     const std::uint32_t clampedHeight = ClampDimension(height);
@@ -691,30 +691,30 @@ void Nv12D3D11Presenter::Resize(std::uint32_t width, std::uint32_t height)
     impl_->clientWidth = clampedWidth;
     impl_->clientHeight = clampedHeight;
     impl_->swapChainResizePending = true;
-    if (impl_->swapChain) {
+    if (redraw && impl_->swapChain) {
         impl_->Render();
     }
 }
 
-void Nv12D3D11Presenter::SetScaleMode(ScaleMode mode)
+void Nv12D3D11Presenter::SetScaleMode(ScaleMode mode, bool redraw)
 {
     if (impl_->scaleMode == mode) {
         return;
     }
     impl_->scaleMode = mode;
-    if (impl_->swapChain) {
+    if (redraw && impl_->swapChain) {
         impl_->Render();
     }
 }
 
-void Nv12D3D11Presenter::SetLinearSampling(bool enabled)
+void Nv12D3D11Presenter::SetLinearSampling(bool enabled, bool redraw)
 {
     if (impl_->linearSampling == enabled) {
         return;
     }
     impl_->linearSampling = enabled;
     impl_->sampler.Reset();
-    if (impl_->swapChain) {
+    if (redraw && impl_->swapChain) {
         impl_->Render();
     }
 }

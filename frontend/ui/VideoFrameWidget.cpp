@@ -167,6 +167,7 @@ private:
     {
         FramePresentationSession presenter(factory);
         bool active = false;
+        screenshare::input::FrameMapping bufferedMapping;
         for (;;) {
             Work work;
             {
@@ -186,9 +187,10 @@ private:
                 queuedFrames_.store(0, std::memory_order_release);
                 resizePending_ = smoothPending_ = clearPending_ = false;
             }
-            if (work.clearPending) { presenter.Clear(); active = false; }
+            if (work.clearPending) { presenter.Clear(); active = false; bufferedMapping={}; }
             const auto started = std::chrono::steady_clock::now();
             bool presented = false;
+            bool redrawn = false;
             if (work.frame) {
                 active = true;
                 const auto pixels = work.frame->native ? std::span<const uint8_t>{} : work.frame->pixels();
@@ -196,11 +198,20 @@ private:
                     work.lowLatency, {work.frame->width, work.frame->height, pixels.data(), pixels.size(),
                         work.frame->native ? work.frame->native->texture() : nullptr});
             } else if (active) {
-                presenter.Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
+                redrawn = presenter.Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
             }
             const auto status = presenter.statistics();
+            const bool busy = status.outcome==screenshare::PresentationOutcome::Busy;
+            if(work.frame)bufferedMapping=(presented || busy)?work.frame->inputMapping:screenshare::input::FrameMapping{};
             { std::lock_guard lock(diagnosticsMutex_); rendererStatistics_ = status;
-              if(work.clearPending || (work.frame && !presented))inputMapping_={};
+              // A busy swap chain leaves the last presented image visible.
+              // Dropping its mapping here also silently drops keyboard events
+              // between that skipped frame and the next successful present.
+              if(work.clearPending || (work.frame && !presented && !busy))inputMapping_={};
+              if(!work.frame && redrawn && status.outcome==screenshare::PresentationOutcome::Presented && bufferedMapping.Valid()) {
+                  inputMapping_=bufferedMapping;
+                  inputViewportWidth_=work.width;inputViewportHeight_=work.height;
+              }
               if(presented) {inputMapping_=work.frame->inputMapping;inputViewportWidth_=work.width;inputViewportHeight_=work.height;} }
             presentErrors_ = status.errors;
             recoveries_ = status.recoveries;
@@ -519,9 +530,9 @@ bool VideoFrameWidget::eventFilter(QObject* watched, QEvent* event)
         // Qt delivers a double-click as Press, Release, DblClick, Release — the
         // DblClick stands in for the second press, so forward it as a button-down
         // or the host only ever sees a single click.
-        if (controlMouse_) {
+        if (controlActive_) {
             d3dSurface_->setFocus(Qt::MouseFocusReason);
-            emitMouseButton(static_cast<QMouseEvent*>(event), true);
+            if (controlMouse_) emitMouseButton(static_cast<QMouseEvent*>(event), true);
             return true;
         }
         break;
@@ -610,17 +621,18 @@ void VideoFrameWidget::emitMouseButton(QMouseEvent* event, bool pressed)
     }
     float normX = 0.0f;
     float normY = 0.0f;
-    if (!mapToNormalized(event->position().toPoint(), normX, normY)) {
-        if(!pressed) {screenshare::RemoteInputEvent release;release.kind=screenshare::RemoteInputKind::ReleaseControl;inputHandler_(release);}
-        return;
-    }
+    const bool mapped = mapToNormalized(event->position().toPoint(), normX, normY);
+    if (!mapped && pressed) return;
     screenshare::RemoteInputEvent input;
     input.kind = screenshare::RemoteInputKind::MouseButton;
     input.button = button;
     input.pressed = pressed;
     input.normX = normX;
     input.normY = normY;
-    input.sourceMapping = mappedForInput_; inputHandler_(input);
+    // An outside release still releases the held button. The receiver uses its
+    // original mapping rather than withdrawing the host's permission.
+    if (mapped) input.sourceMapping = mappedForInput_;
+    inputHandler_(input);
 }
 
 void VideoFrameWidget::emitKey(QKeyEvent* event, bool pressed)
@@ -640,7 +652,11 @@ void VideoFrameWidget::emitKey(QKeyEvent* event, bool pressed)
     input.key = static_cast<int>(event->nativeVirtualKey());
     input.scancode = static_cast<int>(event->nativeScanCode());
     input.pressed = pressed;
-    input.sourceMapping = presentedInputMapping(); inputHandler_(input);
+    // Keys need the displayed source identity, not a pixel-to-viewport mapping.
+    // Resizing the viewport must not suppress typing while its redraw completes.
+    input.sourceMapping = d3dSurface_ && d3dSurface_->isVisible()
+        ? framePresenter_->stats().inputMapping : presentedInputMapping();
+    inputHandler_(input);
 }
 
 void VideoFrameWidget::emitWheel(QWheelEvent* event)
@@ -669,9 +685,9 @@ void VideoFrameWidget::emitWheel(QWheelEvent* event)
 
 void VideoFrameWidget::mousePressEvent(QMouseEvent* event)
 {
-    if (controlMouse_) {
+    if (controlActive_) {
         setFocus(Qt::MouseFocusReason);
-        emitMouseButton(event, true);
+        if (controlMouse_) emitMouseButton(event, true);
         event->accept();
         return;
     }

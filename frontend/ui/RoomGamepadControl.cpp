@@ -152,7 +152,18 @@ void RoomGamepadControl::SetVideo(VideoFrameWidget* video) {
     video_->setRemoteInputHandler([this](const auto& value) {
         if(value.kind==RemoteInputKind::ReleaseControl) {Revoke();return;}
         const auto event=MappedInput(value);const auto port=port_();
-        if(!event) {if(value.kind==RemoteInputKind::MouseButton && !value.pressed)Revoke();return;}
+        if(!event) {
+            if(value.kind==RemoteInputKind::MouseButton && !value.pressed) {
+                const auto held=heldInput_.find(256+value.button);
+                if(held!=heldInput_.end()) {
+                    auto release=held->second.first;release.down=false;
+                    if(port && !port->SubmitIfCurrent(requestedPeer_,held->second.second,release))
+                        port->RevokeIfCurrent(requestedPeer_,held->second.second);
+                    heldInput_.erase(held);
+                }
+            }
+            return;
+        }
         if(!port || !armed_ || inputPaused_->load() || requestedPeer_.empty())return;
         uint64_t permission=0;
         for(const auto& state:port->Read())if(state.peer==requestedPeer_)permission=state.permission;

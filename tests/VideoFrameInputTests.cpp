@@ -8,6 +8,7 @@
 #include <vector>
 #include "render/Nv12D3D11Presenter.h"
 #include "shared/PresentationDiagnostics.h"
+#include "shared/MappedInput.h"
 #include <dxgi.h>
 #include <chrono>
 #include <thread>
@@ -69,14 +70,40 @@ void PresentationRecoveryScenario() {
         };
         send(); Require(widget.presentationStats().presentedFrames == 1);
         Require(widget.presentationStats().inputMapping.generation==1);
+        // A static stream supplies no new frame when the viewport changes.
+        // Redrawing the retained image must update its input viewport too.
+        widget.show();QApplication::processEvents();
+        widget.resize(640,480);QApplication::processEvents();
+        Await([&]{return widget.presentationStats().inputViewportWidth==640 &&
+            widget.presentationStats().inputViewportHeight==480;});
+        Require(widget.presentationStats().inputMapping.generation==1);
         using enum screenshare::PresentationOutcome;
+        widget.showVideoSurface();QApplication::processEvents();
+        unsigned downs=0,ups=0;
+        widget.setControlCapture(true,true,true);
+        widget.setRemoteInputHandler([&](const auto& value){
+            if(auto event=MappedInput(value);event && event->kind==screenshare::input::Kind::Key) {
+                if(event->down)++downs;else ++ups;
+            }
+        });
+        // Six complete presses, two during skipped GPU presents. Previously
+        // only four survived mapping validation, despite permission staying on.
+        for(int press=0;press<6;++press) {
+            state->outcome=(press==1 || press==4)?Busy:Presented;send();
+            QKeyEvent down(QEvent::KeyPress,Qt::Key_D,Qt::NoModifier,0x20,0x44,0);
+            QKeyEvent up(QEvent::KeyRelease,Qt::Key_D,Qt::NoModifier,0x20,0x44,0);
+            QApplication::sendEvent(&widget,&down);QApplication::sendEvent(&widget,&up);
+        }
+        Require(downs==6 && ups==6);
+        widget.setRemoteInputHandler({});
+        const auto busyBefore=widget.presentationStats().renderer.busyDrops;
         for (const auto outcome : {Busy, Occluded, Minimized, Unavailable, Unknown}) {
             state->outcome = outcome; send();
             Require(widget.presentationStats().renderer.outcome == outcome);
-            Require(!widget.presentationStats().inputMapping.Valid());
+            Require(widget.presentationStats().inputMapping.Valid()==(outcome==Busy));
         }
         const auto drops = widget.presentationStats().renderer;
-        Require(drops.busyDrops == 1 && drops.occludedDrops == 1 && drops.minimizedDrops == 1 && drops.unavailableDrops == 1);
+        Require(drops.busyDrops == busyBefore+1 && drops.occludedDrops == 1 && drops.minimizedDrops == 1 && drops.unavailableDrops == 1);
         Require(drops.errors == 0 && drops.recoveries == 0 && PresentationDiagnosticsJson(drops)["lastErrorCode"].isNull());
         state->outcome = Presented;
         const auto previousDrops = widget.presentationStats().droppedFrames;

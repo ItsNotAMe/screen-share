@@ -55,9 +55,9 @@ public:
     Nv12D3D11Presenter& operator=(const Nv12D3D11Presenter&) = delete;
 
     void Attach(HWND hwnd);
-    void Resize(std::uint32_t width, std::uint32_t height);
-    void SetScaleMode(ScaleMode mode);
-    void SetLinearSampling(bool enabled);
+    void Resize(std::uint32_t width, std::uint32_t height, bool redraw = true);
+    void SetScaleMode(ScaleMode mode, bool redraw = true);
+    void SetLinearSampling(bool enabled, bool redraw = true);
     void Present(const FrameView& frame);
     // Configure before Attach. Busy/occluded frames are dropped, never retried.
     void SetLowLatency(bool enabled);

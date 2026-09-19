@@ -7,6 +7,7 @@
 #include <optional>
 #include <mutex>
 #include <thread>
+#include <deque>
 
 namespace screenshare::media {
 // One command across all recording incarnations. Endpoint factories and native
@@ -78,11 +79,11 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
     struct Producer {
         std::mutex mutex;
         std::condition_variable_any ready;
-        std::optional<PcmBlock> latest;
-        std::chrono::steady_clock::time_point capturedAt;
+        struct Captured { PcmBlock block; std::chrono::steady_clock::time_point at; };
+        std::deque<Captured> blocks;
         bool started = false, failed = false;
         uint32_t delay = 0;
-        uint64_t dropped = 0;
+        uint64_t dropped = 0, expired = 0;
         // Last member: joins before any state the worker uses is destroyed.
         std::jthread worker;
         explicit Producer(AudioSwitchControl::Factory factory) : worker([this, factory = std::move(factory)](std::stop_token stop) {
@@ -97,8 +98,10 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
                     if (stop.stop_requested()) break;
                     {
                         std::lock_guard lock(mutex);
-                        if (latest) overflow += 480;
-                        latest = block; capturedAt = std::chrono::steady_clock::now();
+                        // PCM is continuous, unlike replaceable video frames.
+                        // Preserve short device bursts and scheduling jitter.
+                        if (blocks.size() == 6) { blocks.pop_front(); overflow += 480; }
+                        blocks.push_back({block, std::chrono::steady_clock::now()});
                         delay = device->DelayMs(); dropped = device->DroppedFrames() + overflow;
                     }
                     ready.notify_all();
@@ -113,10 +116,13 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
         }
         bool Pop(PcmBlock& block, uint32_t& latency, uint64_t& lost) {
             std::unique_lock lock(mutex);
-            if (!latest) return false;
-            const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - capturedAt).count();
-            if (age > 30) { latest.reset(); return false; }
-            block = *latest; latest.reset(); latency = delay + uint32_t(age); lost = dropped; return true;
+            const auto now = std::chrono::steady_clock::now();
+            while (!blocks.empty() && now - blocks.front().at > std::chrono::milliseconds(80)) {
+                blocks.pop_front(); expired += 480;
+            }
+            if (blocks.empty()) return false;
+            const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - blocks.front().at).count();
+            block = blocks.front().block; blocks.pop_front(); latency = delay + uint32_t(age); lost = dropped + expired; return true;
         }
         bool Failed() { std::lock_guard lock(mutex); return failed; }
     };
@@ -125,6 +131,7 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
     std::unique_ptr<AudioSwitchControl::Request> request_;
     std::chrono::steady_clock::time_point deadline_;
     std::chrono::steady_clock::time_point nextOutput_;
+    ShortWait outputTimer_;
     uint32_t delay_ = 0;
     uint64_t dropped_ = 0, retiredDropped_ = 0;
     void Fail() { current_.reset(); delay_ = 0; control_->Failed(); }
@@ -141,7 +148,9 @@ public:
             if (stop.stop_requested()) throw;
             Fail();
         }
-        nextOutput_ = std::chrono::steady_clock::now();
+        // Prime a bounded 60ms reserve before starting the output timeline.
+        // The device may deliver several 10ms blocks together after a short stall.
+        nextOutput_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
     }
     bool Read(PcmBlock& block, std::stop_token stop) override {
         // One 10ms output slot covers either captured PCM or replacement silence.
@@ -151,7 +160,12 @@ public:
         const auto now = std::chrono::steady_clock::now();
         nextOutput_ += std::chrono::milliseconds(10);
         if (nextOutput_ < now) nextOutput_ = now; // Never replay missed slots.
-        std::this_thread::sleep_until(nextOutput_);
+        while (!stop.stop_requested() && std::chrono::steady_clock::now() < nextOutput_) {
+            const auto remaining = nextOutput_ - std::chrono::steady_clock::now();
+            if (remaining > std::chrono::steady_clock::duration::zero())
+                outputTimer_.Wait(std::min(std::chrono::duration_cast<std::chrono::nanoseconds>(remaining),
+                    std::chrono::nanoseconds(std::chrono::milliseconds(10))));
+        }
         if (stop.stop_requested()) return false;
         if (!request_) {
             request_ = control_->Take();

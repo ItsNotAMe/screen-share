@@ -31,8 +31,24 @@ public:
     }
     std::optional<CaptureSample> Poll() override {
         try {
-            auto frame = capture_.TryCaptureFrame(std::chrono::milliseconds(10));
-            if (!frame) { if(target_) { if(auto target=Target())target_->Touch(*target);else target_->Invalidate(sourceId_); } return std::nullopt; }
+            const auto now = std::chrono::steady_clock::now();
+            if (now < nextFrame_) return std::nullopt;
+            // WGC/DXGI may stop producing frames when the desktop is unchanged.
+            // Sample the last owned texture at the configured cadence instead
+            // of waiting for damage (or WebRTC's slow idle refresh).
+            auto frame = capture_.TryCaptureFrame(std::chrono::milliseconds(0));
+            if (Closed() || Minimized()) { retained_.reset(); return std::nullopt; }
+            const auto period = std::chrono::nanoseconds(1000000000 / std::max(1, config_.targetFps));
+            nextFrame_ += period;
+            if(nextFrame_ <= now)nextFrame_ = now + period; // Skip missed slots, without accumulating poll jitter.
+            if (!frame) {
+                if(target_) {
+                    if(auto target=Target())target_->Touch(*target);else target_->Invalidate(sourceId_);
+                    if(retained_ && target_->Read().generation != retained_->inputGeneration)retained_.reset();
+                }
+                if(retained_)return CaptureSample{retained_,now};
+                return std::nullopt;
+            }
             const auto captured = std::chrono::steady_clock::now();
             if (!device_) device_ = std::make_shared<D3dVideoDevice>(frame->d3dDevice);
             auto resource = std::make_shared<WindowsCaptureResource>();
@@ -44,6 +60,7 @@ public:
                     resource->inputGeneration=target_->Publish(*target);
                 else target_->Invalidate(sourceId_);
             }
+            retained_ = resource;
             return CaptureSample{std::move(resource), captured};
         } catch (const CaptureDeviceLostError&) { throw CaptureLost(); }
         catch (...) { if (Closed()) return std::nullopt; throw; }
@@ -54,8 +71,8 @@ public:
         return {capture_.config().backend == CaptureBackend::WindowsGraphicsCapture ?
             CaptureImplementation::WindowsGraphicsCapture : CaptureImplementation::DesktopDuplication, capture_.displayFallback()};
     }
-    void Retire() noexcept override { if(target_)target_->Invalidate(sourceId_); if (device_) device_->Retire(); }
-    void Rebuild() override { capture_.RebuildDevice(); device_.reset(); }
+    void Retire() noexcept override { retained_.reset(); if(target_)target_->Invalidate(sourceId_); if (device_) device_->Retire(); }
+    void Rebuild() override { retained_.reset(); nextFrame_={}; capture_.RebuildDevice(); device_.reset(); }
 private:
     std::optional<input::DesktopTarget> Target() const {
         const auto bounds=capture_.InputBounds();if(!bounds)return {};
@@ -75,5 +92,7 @@ private:
     CaptureConfig config_;
     DesktopCapturer capture_;
     std::shared_ptr<D3dVideoDevice> device_;
+    std::shared_ptr<WindowsCaptureResource> retained_;
+    std::chrono::steady_clock::time_point nextFrame_;
 };
 }

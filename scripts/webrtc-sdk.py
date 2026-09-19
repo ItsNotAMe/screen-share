@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import uuid
 
 
 def digest(path):
@@ -72,8 +73,11 @@ def export(artifact, cache, resume=None):
         raise ValueError('Compiler differs from the dependency build')
     # No overwrites or recursive deletion. Interrupted exports remain inspectable.
     cache.mkdir(parents=True, exist_ok=True)
-    import tempfile
-    staging = checked_path(cache, resume) if resume else Path(tempfile.mkdtemp(prefix='export-', dir=cache))
+    # This is a persistent SDK shared with the developer's build tools, not a
+    # private temporary directory. Python's mkdtemp uses owner-only Windows ACLs.
+    staging = checked_path(cache, resume) if resume else cache / ('export-' + uuid.uuid4().hex)
+    if not resume:
+        staging.mkdir()  # Inherit the dependency cache's normal permissions.
     if not staging.is_dir() or not staging.name.startswith('export-'):
         raise ValueError('Resume requires an export staging directory inside the cache')
     def copy(path, name):

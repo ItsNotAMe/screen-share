@@ -14,6 +14,7 @@
 #include <QtGui/QPixmap>
 #include <QMouseEvent>
 #include <QWindow>
+#include <QtMath>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QApplication>
@@ -459,8 +460,12 @@ bool AppShellWindow::nativeEvent(const QByteArray& eventType, void* message, qin
         updateChromeState();
         break;
     case WM_NCHITTEST: {
-        const QPoint globalPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
-        const QPoint localPos = mapFromGlobal(globalPos);
+        // Native hit tests use physical desktop pixels; Qt widgets use logical
+        // pixels. Convert relative to this HWND first for mixed-DPI monitors.
+        POINT clientPos{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};
+        if(!ScreenToClient(msg->hwnd,&clientPos))break;
+        const qreal scale = devicePixelRatioF();
+        const QPoint localPos(qFloor(clientPos.x/scale),qFloor(clientPos.y/scale));
         QWidget* child = childAt(localPos);
         if (isTitleControl(child)) {
             *result = HTCLIENT;
@@ -474,10 +479,9 @@ bool AppShellWindow::nativeEvent(const QByteArray& eventType, void* message, qin
         }
 
         if (!IsZoomed(msg->hwnd)) {
-            int border = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-            if (border < 8) {
-                border = 8;
-            }
+            const UINT dpi = GetDpiForWindow(msg->hwnd);
+            const int nativeBorder = GetSystemMetricsForDpi(SM_CXSIZEFRAME,dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
+            const int border = qCeil(qMax(8,nativeBorder)/scale);
 
             const bool left = localPos.x() >= 0 && localPos.x() < border;
             const bool right = localPos.x() <= width() && localPos.x() >= width() - border;

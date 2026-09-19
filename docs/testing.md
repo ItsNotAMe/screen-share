@@ -31,6 +31,28 @@ for deterministic popup positions. Windows may clamp popup positions to a screen
 edge. Qt widget grabs do not include the native D3D video plane: use actual frame
 presentation counters and native rendering checks, not a black grab, as evidence.
 
+Audio cadence and retained-frame resize regressions run without physical input:
+
+The audio test checks ordered PCM blocks delivered in 50ms bursts, with no gaps
+after startup. The video/input test forwards six complete key presses across two
+busy GPU presents, so renderer frame drops cannot silently discard key events.
+
+```powershell
+cmake --build build/release --target NativePcmAudioTests VideoFrameInputTests NativeCaptureTests
+ctest --test-dir build/release -R '^(native-pcm-audio|video-frame-input)$' --output-on-failure
+```
+
+On an interactive Windows desktop, `build/release/NativeCaptureTests.exe --cadence`
+checks 30/60 FPS on its own stationary test window, including minimize/restore;
+it saves no pixels. `build/release/NativePcmAudioTests.exe --wasapi` checks silent
+native playback and process-only capture. Neither proves audible signal fidelity
+or end-to-end behavior on a second computer.
+
+`WindowChromeTests` checks native caption-button hit testing in normal, maximized,
+and restored windows. Build that target, then run it on a Windows desktop with
+`QT_SCALE_FACTOR` set to `1`, `1.5`, and `2` in separate processes. These overrides
+apply only to the test process; they do not change Windows display settings.
+
 The wider runners remain in `scripts/test-headless-media.py`,
 `scripts/test-room-regression.py`, `scripts/test-room-hardware-load.py` and
 `scripts/test-room-impairment.py`; use `--help` for current fixture/options schemas.

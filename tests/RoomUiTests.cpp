@@ -1253,6 +1253,13 @@ void DesktopInputScenario(const std::string& origin) {
     for(const auto& state:viewer.session().input()->Read())Check(state.granted==caps);
 
 #endif
+    // Releasing outside the image must release the button, not the grant.
+    const auto outsideUps=evidence->buttonUps.load();
+    const QPointF inside(video->width()/2.0,video->height()/2.0);
+    QMouseEvent insideDown(QEvent::MouseButtonPress,inside,inside,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(video,&insideDown);
+    QMouseEvent outsideUp(QEvent::MouseButtonRelease,QPointF(-10,-10),QPointF(-10,-10),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(video,&outsideUp);
+    Wait([&]{return evidence->buttonUps>outsideUps;});
+    for(const auto& state:viewer.session().input()->Read())Check(state.granted==caps);
     const auto buttonUps=evidence->buttonUps.load();
     const QPointF center(video->width()/2.0,video->height()/2.0);
     QMouseEvent hold(QEvent::MouseButtonPress,center,center,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(video,&hold);
@@ -1272,6 +1279,17 @@ void DesktopInputScenario(const std::string& origin) {
 
     Check(viewer.findChild<QCheckBox*>("controllerConsent")->isChecked());
     QEvent resume(QEvent::WindowActivate);QApplication::sendEvent(&viewer,&resume);
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    Check(host.session().input()->Grant(viewer.session().status().peerId,screenshare::input::Keyboard));
+    Wait([&]{for(const auto& state:viewer.session().input()->Read())if(state.granted==screenshare::input::Keyboard)return true;return false;});
+    QCoreApplication::processEvents();
+    auto* surface=video->findChild<QWidget*>("D3DVideoSurface");Check(surface);
+    QMouseEvent keyboardFocus(QEvent::MouseButtonPress,center,center,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(surface,&keyboardFocus);
+    Check(QApplication::focusWidget()==surface);
+    const auto keyboardBefore=evidence->keys.load();
+    QKeyEvent keyboardPress(QEvent::KeyPress,Qt::Key_B,Qt::NoModifier,0x30,0x42,0);QApplication::sendEvent(surface,&keyboardPress);
+    Wait([&]{return evidence->keys>keyboardBefore;});
+#endif
     host.revokeControl();Wait([&]{return !viewer.findChild<QCheckBox*>("controllerConsent")->isChecked();});
     authorize();
     CaptureSelection selection;

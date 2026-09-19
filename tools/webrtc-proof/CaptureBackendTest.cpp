@@ -3,6 +3,7 @@
 #include "media/capture/WindowsCaptureSource.h"
 #include "media/capture/SwitchableCaptureSource.h"
 #include "core/WindowsMediaRuntime.h"
+#include "core/ShortWait.h"
 #include "CaptureTestWindow.h"
 #include <array>
 #include <cstring>
@@ -151,9 +152,39 @@ void DisplayRebuild() {
     }
     std::cout << "Display checks finished; no pixel files/readback\n";
 }
+void StaticCadence() {
+    WindowsMediaRuntime runtime;
+    Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
+    proof::TestWindow window(false);
+    for(int fps : {30,60}) {
+        CaptureConfig config;config.sourceType=CaptureSourceType::Window;
+        config.windowHandle=reinterpret_cast<uint64_t>(window.handle());
+        config.targetWidth=640;config.targetHeight=360;config.targetFps=fps;
+        WindowsCaptureSource source(config);source.Start();
+        std::optional<CaptureSample> frame;
+        Wait([&]{frame=source.Poll();return frame.has_value();});
+        auto previous=frame->resource;
+        unsigned frames=0,repeated=0;
+        const auto start=std::chrono::steady_clock::now();
+        ShortWait wait;
+        while(std::chrono::steady_clock::now()-start<std::chrono::seconds(2)) {
+            if(auto sample=source.Poll()) {++frames;if(sample->resource==previous)++repeated;previous=sample->resource;}
+            wait.Wait();
+        }
+        Require(frames>=unsigned(fps*1.8) && frames<=unsigned(fps*2.2),"Static source did not sustain the selected cadence");
+        Require(repeated>unsigned(fps),"Static-source test did not exercise retained frames");
+        std::cout<<"Static capture "<<fps<<" FPS: "<<frames<<" frames in 2s, "<<repeated<<" retained\n";
+        window.Invoke([&]{ShowWindow(window.handle(),SW_MINIMIZE);});
+        Wait([&]{source.Poll();return source.Minimized();});
+        Require(!source.Poll(),"Minimized source replayed retained pixels");
+        window.Invoke([&]{ShowWindow(window.handle(),SW_RESTORE);RedrawWindow(window.handle(),nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);});
+        Wait([&]{frame=source.Poll();return frame.has_value();});
+    }
+}
 int main(int argc, char** argv) try {
     Policy(); CursorPixels();
     if (argc > 1 && std::string_view(argv[1]) == "--live") WindowLifecycle();
     if (argc > 1 && std::string_view(argv[1]) == "--display") DisplayRebuild();
+    if (argc > 1 && std::string_view(argv[1]) == "--cadence") StaticCadence();
     std::cout << "Capture backend checks passed\n"; return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

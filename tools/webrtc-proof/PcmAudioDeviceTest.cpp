@@ -52,7 +52,7 @@ void Switches() {
     auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     PcmBlock block; std::stop_source stop;
     std::this_thread::sleep_for(100ms); capture->Read(block, stop.get_token());
-    Require(capture->DroppedFrames() >= 480 && capture->DelayMs() <= 30, "Capture backlog was not bounded");
+    Require(capture->DroppedFrames() >= 480 && capture->DelayMs() <= 80, "Capture backlog was not bounded");
     auto pump = [&](std::future<AudioUpdateResult>& future) {
         const auto deadline = std::chrono::steady_clock::now() + 6s;
         unsigned nonzero = 0;
@@ -105,6 +105,37 @@ void Switches() {
 }
 // A device that produces just after the old 10ms timeout used to cause one
 // silence block plus one immediate captured block per read interval.
+void BurstyCaptureCadence() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    class Bursty final : public PcmCaptureEndpoint {
+        screenshare::ShortWait wait_;
+        std::chrono::steady_clock::time_point next_;
+        int16_t sequence_ = 0;
+    public:
+        void Start() override { next_ = std::chrono::steady_clock::now(); }
+        uint32_t DelayMs() const override { return 0; }
+        bool Read(PcmBlock& block, std::stop_token stop) override {
+            if (sequence_ % 5 == 0) {
+                next_ += 50ms;
+                while (!stop.stop_requested() && std::chrono::steady_clock::now() < next_) wait_.Wait(1ms);
+            }
+            if(stop.stop_requested())return false;
+            block.fill(++sequence_);return true;
+        }
+    };
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, [] { return std::make_unique<Bursty>(); });
+    SwitchablePcmCapture capture(control);capture.Start();
+    int last=0, skipped=0, silent=0, gaps=0;
+    for(int index=0;index<150;++index) {
+        PcmBlock block;Require(capture.Read(block,{}),"Bursty capture stopped");
+        if(!block[0]) {++silent;if(last)++gaps;continue;}
+        if(last)skipped+=block[0]-last-1;
+        last=block[0];
+    }
+    std::cout<<"Burst continuity: skipped="<<skipped<<" gaps="<<gaps<<" initial silence="<<silent-gaps<<" dropped="<<capture.DroppedFrames()<<'\n';
+    Require(skipped==0 && gaps==0 && silent<=2,"Device packet bursts lost PCM or introduced holes");
+}
 void LateCaptureCadence() {
     using namespace screenshare::media;
     using namespace std::chrono_literals;
@@ -443,7 +474,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
-        LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
+        BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

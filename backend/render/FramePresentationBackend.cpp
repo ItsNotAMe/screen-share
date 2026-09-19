@@ -25,6 +25,7 @@ public:
         if (outcome_ != screenshare::PresentationOutcome::Unknown) return;
         Prepare(window, width, height, smooth, lowLatency, scale);
         presenter_.Redraw();
+        outcome_ = presenter_.lastOutcome();
     }
     void Prepare(HWND window, uint32_t width, uint32_t height, bool smooth, bool lowLatency,
         screenshare::Nv12D3D11Presenter::ScaleMode scale) {
@@ -40,9 +41,11 @@ public:
             width = static_cast<uint32_t>(std::max<LONG>(1, client.right - client.left));
             height = static_cast<uint32_t>(std::max<LONG>(1, client.bottom - client.top));
         }
-        presenter_.Resize(width, height);
-        presenter_.SetLinearSampling(smooth);
-        presenter_.SetScaleMode(scale);
+        // Batch changes into the caller's single Present/Redraw. Rendering in
+        // each setter fills the one-frame queue before that final draw.
+        presenter_.Resize(width, height, false);
+        presenter_.SetLinearSampling(smooth, false);
+        presenter_.SetScaleMode(scale, false);
     }
     void Reset() noexcept override { presenter_.Reset(); }
     uint32_t MaximumFrameLatency() const noexcept override { return presenter_.maximumFrameLatency(); }

@@ -16,18 +16,24 @@ public:
     void Start(std::stop_token stop) override {
         config_.pcm48kStereo = false;
         config_.pcm48kNativeChannels = true;
-        config_.bufferDuration = std::chrono::milliseconds(10);
+        // Capacity, not a forced capture delay. Match the legacy reserve so a
+        // brief scheduling stall does not overwrite the hardware's PCM ring.
+        config_.bufferDuration = std::chrono::milliseconds(100);
         capture_.Start(config_, stop);
         if (capture_.format().sampleRate != 48000 || capture_.format().bitsPerSample != 16)
             throw std::runtime_error("WASAPI did not accept PCM48");
         downmix_.emplace(capture_.format().channels, capture_.format().channelMask);
     }
     bool Read(PcmBlock& output, std::stop_token stop) override {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
         while (pending_.size() < output.size() && !stop.stop_requested()) {
             auto packet = capture_.CapturePacket(std::chrono::milliseconds(10));
             if (!packet) {
-                // Silent loopback devices may report no packets. Keep a bounded
-                // 10ms read and expose silence, so handover can establish readiness.
+                // Packet/event timing is not the audio sample clock. A single
+                // 10ms wait timing out must not insert zeros into a partial block.
+                if(std::chrono::steady_clock::now()<deadline)continue;
+                // A genuinely silent loopback device may report no packets.
+                // The output clock supplies silence while this bounded read waits.
                 if (stop.stop_requested()) return false;
                 for (auto& value : output) {
                     value = pending_.empty() ? 0 : pending_.front();
@@ -38,12 +44,12 @@ public:
             if (packet->dataDiscontinuity) { dropped_ += pending_.size() / 2; pending_.clear(); }
             const auto inputFrameBytes = size_t(capture_.format().channels) * 2;
             if (packet->data.size() != size_t(packet->frames) * inputFrameBytes) throw std::runtime_error("Invalid capture PCM packet");
-            // 20ms here plus the switchable endpoint's one 10ms handoff block.
+            // Preserve up to the native ring capacity, including delayed bursts.
             const size_t samples = size_t(packet->frames) * 2;
-            const size_t keep = std::min<size_t>(samples, 1920);
+            const size_t keep = std::min<size_t>(samples, 9600);
             dropped_ += (samples - keep) / 2;
-            while (pending_.size() + keep > 1920) { pending_.pop_front(); pending_.pop_front(); ++dropped_; }
-            std::array<int16_t, 1920> stereo{};
+            while (pending_.size() + keep > 9600) { pending_.pop_front(); pending_.pop_front(); ++dropped_; }
+            std::array<int16_t, 9600> stereo{};
             if (!packet->silent) downmix_->Convert(std::span(packet->data).subspan((samples - keep) / 2 * inputFrameBytes),
                 std::span(stereo).first(keep));
             for (size_t i = 0; i < keep; ++i) pending_.push_back(stereo[i]);
@@ -52,7 +58,8 @@ public:
         for (auto& value : output) { value = pending_.front(); pending_.pop_front(); }
         return true;
     }
-    uint32_t DelayMs() const override { return (capture_.bufferFrames() + uint32_t(pending_.size() / 2)) / 48; }
+    // Ring capacity is spare space, not queued audio latency.
+    uint32_t DelayMs() const override { return uint32_t(pending_.size() / 2) / 48; }
     uint64_t DroppedFrames() const override { return dropped_; }
 private:
     AudioCaptureConfig config_;
@@ -84,18 +91,10 @@ public:
         format.wBitsPerSample = 16; format.nBlockAlign = 4; format.nAvgBytesPerSec = 192000;
         const DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
         Microsoft::WRL::ComPtr<IAudioClient3> lowPeriod;
-        HRESULT initialized = E_FAIL;
-        if (SUCCEEDED(client_.As(&lowPeriod))) {
-            UINT32 normal, fundamental, minimum, maximum;
-            if (SUCCEEDED(lowPeriod->GetSharedModeEnginePeriod(&format, &normal, &fundamental, &minimum, &maximum)))
-                initialized = lowPeriod->InitializeSharedAudioStream(AUDCLNT_STREAMFLAGS_EVENTCALLBACK, minimum, &format, nullptr);
-        }
-        if (FAILED(initialized)) {
-            // Re-activate after a rejected low-period initialization.
-            lowPeriod.Reset(); client_.Reset();
-            Check(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client_.GetAddressOf())));
-            Check(client_->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 0, 0, &format, nullptr));
-        }
+        // Keep 50ms of output headroom, rather than the engine's minimum-size
+        // ring. Legacy used 100ms; this tolerates short video/CPU scheduling stalls
+        // while retaining a smaller, bounded audio delay.
+        Check(client_->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 50 * 10000, 0, &format, nullptr));
         event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (!event_) throw std::runtime_error("WASAPI render event creation failed");
         Check(client_->SetEventHandle(event_));
@@ -108,6 +107,9 @@ public:
             CoTaskMemFree(currentFormat);
         }
         Check(client_->GetService(IID_PPV_ARGS(&render_)));
+        BYTE* initial;
+        Check(render_->GetBuffer(bufferFrames_, &initial));
+        Check(render_->ReleaseBuffer(bufferFrames_, AUDCLNT_BUFFERFLAGS_SILENT));
         Check(client_->Start());
     }
     void Write(const PcmBlock& block, std::stop_token stop) override {
