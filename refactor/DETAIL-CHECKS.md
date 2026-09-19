@@ -1,5 +1,10 @@
 # Backend v2 — detailed checks and historical evidence
 
+**2026-09-19 scope override:** backend Stages 2–4 accepted by the user for current
+use. Remaining unchecked acceptance items are deferred to BACKLOG.md and do not
+block cutover/frontend work. Preserve their factual status; do not restart this
+checklist as a mandatory test campaign. TODO.md defines the active next stages.
+
 Last reconciled: 2026-09-19 (including congestion-window settling, continuous displayed-image age, fair legacy controls, preset playout/resize regressions, transport-budget recovery, two-machine checks and UI/CLI reports). Implementation status: **Gate A passed for native integration/build proof; local congestion settling passed; Checkpoints B/D field acceptance remains open**.
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.

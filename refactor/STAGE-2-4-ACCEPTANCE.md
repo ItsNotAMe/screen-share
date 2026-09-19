@@ -1,5 +1,11 @@
 # Stages 2–4 acceptance status
 
+**Scope decision, 2026-09-19:** the user accepts current measured backend behavior
+and explicitly defers remaining checks/limitations to BACKLOG.md. Proceed to
+cutover and frontend work. This supersedes the blocking gates below, which remain
+as historical evidence rather than prerequisites. Failed/unverified results have
+not become passing results.
+
 The requested scope is to finish Stages 2–4 before cutover or the later UI redesign.
 Implementation and locally reproducible evidence are separate from field acceptance.
 No unchecked physical requirement is waived by the unattended test run.

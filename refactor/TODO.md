@@ -6,20 +6,30 @@ checks are implementation details, **not separate user turns**.
 
 ## Working agreement
 
+**2026-09-19 user decision: backend Stages 2–4 are accepted for the current
+personal-use scope. Proceed with Stage 5 cutover, then Stage 6 frontend redesign.**
+The measured comparison supports retaining v2; universal superiority is not
+claimed. Remaining checks and known limitations are deferred to
+[BACKLOG.md](BACKLOG.md), not prerequisites for frontend work. This decision
+supersedes the stricter gates in the plan and historical checklists. Keep failed
+evidence as failed; do not mark unperformed checks passed or repeat acceptance
+batches to delay the next stage. Preserve working legacy input/platform code
+where useful during cutover. Virtual-device cleanup is a separate test cleanup.
+
 Backend feature scope is frozen for closeout. **This section is the remaining-group
 index before frontend work.** The detailed gates and evidence live in
 [STAGE-2-4-ACCEPTANCE.md](STAGE-2-4-ACCEPTANCE.md).
 
 | Remaining group | Done when | Status |
 | --- | --- | --- |
-| 1. Presentation, devices and gaming acceptance | Sustained GPU presentation and recovery are verified; source privacy/HDR/adapters, audio switching/unplug, controller/input release and external image/input/A-V timing have recorded results. | Native presentation, both-PC silent audio/capture and 42 physical-reader regrants pass. Real multi-pad driver allocation fails separately; administrator cleanup, hardware changes and external timing remain. |
-| 2. Resource, network and service closeout | Resolve or explicitly scope the hardware receiver growth and original capture-handle failure; finish multi-viewer/reverse hardware load, matched impaired legacy comparison, Internet/NAT/interface recovery, billed usage/headroom and hibernation evidence. | Four-viewer LAN compatibility, reverse direction and all 32 selected matched impairment runs complete. Hardware-resource qualification, Internet/NAT and service headroom remain open. |
-| 3. Stage 5 cutover and cleanup | After the acceptance gates pass, make v2 the normal path, remove superseded legacy code/commands, verify packaging and the final regression matrix. | Waiting for groups 1–2. |
+| 1–2. Backend acceptance | Accept measured current scope and record outstanding limitations. | Accepted by user; remaining items deferred to BACKLOG.md. |
+| Stage 5 cutover and cleanup | Make v2 the normal path, preserve useful working input/platform code, remove superseded paths and verify affected packaging/regressions. | Next; no longer blocked by deferred acceptance checks. External publishing remains a separate action. |
+| Stage 6 frontend redesign | Improve appearance, layout, resizing and interaction using the modular backend. | Follows cutover; no additional backend acceptance campaign required. |
 
 **Then Stage 6: frontend look-and-feel redesign.** No new backend features are
 planned between these groups. A failed check belongs to its existing group,
 not a new milestone or a separate user turn. Relative memory optimization is
-backlogged; leak/unbounded-growth checks remain required.
+backlogged; remaining resource qualification is also deferred under the decision above.
 
 Completed foundations: the corrected fair normal-load legacy/v2 scorecard
 ([COMPARISON.md](COMPARISON.md)), shared capture/codec fixes, and local congestion
@@ -36,7 +46,7 @@ reads across polling-thread lifetimes; the earlier failure remains recorded. The
 matched impaired comparison is complete (MATCHED-NETWORK.md); actual
 hotspot/HDR/device changes and external timing require unavailable conditions.
 
-**Current blockers, not another routine test group:** real driver multi-pad
+**Deferred limitations, no longer frontend blockers:** real driver multi-pad
 allocation and leftover virtual-device cleanup (CONTROLLERS.md); laptop hardware
 graphics/encoder qualification and immediate capture-handle bound; unavailable
 physical/HDR/unplug/Internet-path and external timing conditions; service
