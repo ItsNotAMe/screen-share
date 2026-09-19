@@ -11,6 +11,23 @@
 #include <QProxyStyle>
 #include <QScreen>
 #include <QTimer>
+#include <QFormLayout>
+#include <QLabel>
+
+void alignOptionRows(QFormLayout* form)
+{
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    for (int row = 0; row < form->rowCount(); ++row) {
+        auto* labelItem = form->itemAt(row, QFormLayout::LabelRole);
+        auto* fieldItem = form->itemAt(row, QFormLayout::FieldRole);
+        if (!labelItem || !fieldItem) continue;
+        if (fieldItem->widget()) fieldItem->widget()->ensurePolished();
+        if (auto* label = qobject_cast<QLabel*>(labelItem->widget())) {
+            label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            label->setMinimumHeight(fieldItem->sizeHint().height());
+        }
+    }
+}
 
 namespace {
 class ComboListStyle final : public QProxyStyle {
@@ -176,7 +193,8 @@ QLabel#PageHeading { font-size: 23pt; font-weight: 650; }
 QLabel#SectionHeading { font-size: 13pt; font-weight: 650; padding-bottom: 6px; }
 QWidget#FormCard { background: #121a17; border: 1px solid #293631; border-radius: 8px; }
 QLabel#FormHint { color: #a3b5af; }
-QLabel#browserError, QLabel#profileError { color: #ffafa6; }
+QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
+QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }
 QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#saveProfile {
     background: #38d8c8; color: #08251f; font-weight: 650; min-height: 24px;
 }

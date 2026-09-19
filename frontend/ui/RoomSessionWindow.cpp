@@ -83,6 +83,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         reportResult->setText(WriteRoomDiagnosticReport(path, report) ? "Saved diagnostic report: " + path : "Could not save diagnostic report. Check the destination is writable.");
     });
     auto* roomForm = new QFormLayout;
+    roomForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     nickname_ = new QLineEdit; nickname_->setObjectName("liveNickname"); nickname_->setMaxLength(128);
     name_ = new QLineEdit; name_->setObjectName("liveRoomName"); name_->setMaxLength(256);
     publicRoom_ = new QCheckBox("Public room"); publicRoom_->setObjectName("livePublicRoom");
@@ -133,6 +134,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     video_->setLowLatency(true);
     layout->addWidget(video_, 1);
     auto* playbackWidget = new QWidget; auto* playbackForm = new QFormLayout(playbackWidget);
+    playbackForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     playbackWidget->setVisible(!config.room.host); layout->addWidget(playbackWidget);
     playbackDevice_ = new QComboBox; playbackDevice_->setObjectName("playbackDevice");
     playbackDevice_->addItem(config.media.playbackDeviceId.empty() ? "Default output" : "Current output", QString::fromStdWString(config.media.playbackDeviceId));
@@ -163,6 +165,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         else playbackState_->setText("Could not change playback. Previous settings retained while available.");
     };
     auto* formWidget = new QWidget; auto* form = new QFormLayout(formWidget); formWidget->setVisible(config.room.host);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     auto combo = [&](const char* label, QStringList values, int selected) { auto* field = new QComboBox; field->addItems(values); field->setCurrentIndex(selected); form->addRow(label, field); return field; };
     auto number = [&](const char* label, int minimum, int maximum, int value) { auto* field = new QSpinBox; field->setRange(minimum, maximum); field->setValue(value); form->addRow(label, field); return field; };
     const auto& p = config.media.preferences;
@@ -266,8 +269,6 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     layout->addWidget(gamepad_);
     gamepad_->SetVideo(video_);
     gamepad_->prepareGrant=[this](uint8_t caps){return session_.prepareInputGrant(caps);};
-    auto* controls = new QLabel("Input requires explicit consent. Window sharing permits mouse control only; source changes revoke control.");
-    controls->setWordWrap(true); layout->addWidget(controls);
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { session_.stop(); stop_->setEnabled(false); apply_->setEnabled(false); });
     connect(apply_, &QPushButton::clicked, this, [this] {
@@ -392,6 +393,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         });
         presentationStatus->start();
     }
+    for (auto* optionForm : findChildren<QFormLayout*>()) alignOptionRows(optionForm);
     session_.error = [this](const auto& message) { error_->setText(message); };
     session_.finished = [this](const auto&) { stop_->setEnabled(false); apply_->setEnabled(false); if (closing_) QTimer::singleShot(0, this, [this] { close(); }); };
     if (!session_.start(std::move(config))) { stop_->setEnabled(false); apply_->setEnabled(false); }

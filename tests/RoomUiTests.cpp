@@ -384,13 +384,14 @@ void NormalHomeScenario(const QUrl& origin) {
     Check(!preferences->isWindow() && !host.home()->isVisible());
     const auto originalName = host.browser()->profileName();
     preferences->findChild<QLineEdit*>("profileNickname")->setText(" ");
-    preferences->findChild<QPushButton*>("saveProfile")->click();
+    Check(!preferences->findChild<QPushButton*>("saveProfile"));
     Check(preferences->isVisible() && !preferences->findChild<QLabel*>("profileError")->text().isEmpty());
     Check(host.browser()->profileName() == originalName);
-    preferences->findChild<QLineEdit*>("profileNickname")->setText("Not saved");
-    if (!previews.isEmpty()) { Check(QDir().mkpath(previews)); Check(preferences->grab().save(QDir(previews).filePath("profile.png"))); }
+    preferences->findChild<QLineEdit*>("profileNickname")->setText("Auto saved");
+    Check(RoomProfile(hostFile).nickname() == "Auto saved");
+    snapshot("profile");
     preferences->findChild<QPushButton*>("preferencesBack")->click();
-    Check(host.home()->isVisible() && host.browser()->profileName() == originalName);
+    Check(host.home()->isVisible() && host.browser()->profileName() == "Auto saved");
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     for (const auto size : {QSize(800,600), QSize(1200,850)}) {
         host.window().resize(size); QCoreApplication::processEvents();
@@ -581,7 +582,17 @@ void BrowserScenario(const QUrl& origin) {
     // The edit enforces the persisted profile's 32-character limit.
     Check(profileDialog->findChild<QLineEdit*>("profileNickname")->text().size() == 32);
     profileDialog->findChild<QLineEdit*>("profileNickname")->setText(" Browser viewer ");
-    profileDialog->findChild<QPushButton*>("saveProfile")->click();
+    auto* initialVolume = profileDialog->findChild<QSpinBox*>("profileVolume");
+    initialVolume->setValue(76);
+    Check(RoomProfile(viewerFile).playback().volume == 76);
+    initialVolume->setValue(100);
+    auto* initialMute = profileDialog->findChild<QCheckBox*>();
+    initialMute->setChecked(true); Check(RoomProfile(viewerFile).playback().muted);
+    initialMute->setChecked(false);
+    auto* initialDecoder = profileDialog->findChild<QComboBox*>("profileDecoder");
+    initialDecoder->setCurrentIndex(1); Check(RoomProfile(viewerFile).decoder() == "software");
+    initialDecoder->setCurrentIndex(0);
+    profileDialog->findChild<QPushButton*>("preferencesBack")->click();
     Check(viewer.profileName() == "Browser viewer");
     viewer.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret"); list->selectRow(0);
     viewer.findChild<QLineEdit*>("joinRoomId")->setText(roomLink);

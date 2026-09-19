@@ -10,7 +10,9 @@ The original brand mark is now in a shared title bar with profile and Settings.
 Home has local search, stable live room rows and non-displacing reconnect status.
 Create and Join are separate views; neither edits the nickname. An in-window settings page
 validates and saves the local nickname and playback defaults for future sessions.
-Back/Cancel returns to the previous page without discarding its room draft. The
+Settings save each valid change automatically; invalid nicknames retain the last
+saved value. Save/Cancel buttons and explanatory option descriptions are removed.
+Back returns to the previous page without discarding its room draft. The
 title bar retains the original logo, aligned text and a circular profile icon.
 Home uses a larger search field, a Refresh action and persistent list headings;
 automatic-update labels and the room/peer counters have been removed. Shared
@@ -25,7 +27,7 @@ actions stay outside the scrolling form. This replaces the combined temporary
 browser form, not the remaining temporary live-session controls.
 
 Release UI/test targets build. The silent room-v2-qt-ui integration test passes at
-100% and 150% display scale, covering normal navigation, profile validation/cancel,
+100% and 150% display scale, covering normal navigation, profile validation,
 profile persistence, search/row identity, configured stream delivery, media and
 session lifecycle. Rendered Home/Create/Join were inspected at 800x600 and 1200x850,
 including 150% scaling. The test now includes production SVG resources and explicitly

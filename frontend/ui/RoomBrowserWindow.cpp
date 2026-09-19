@@ -9,7 +9,6 @@
 #include <QDialog>
 #include <QPointer>
 #include <QStackedWidget>
-#include <QDialogButtonBox>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -48,8 +47,6 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     public_ = new QCheckBox("List this room publicly"); public_->setObjectName("publicRoom"); public_->setChecked(true); form->addRow("Visibility", public_);
     viewerLimit_ = new QSpinBox; viewerLimit_->setObjectName("createViewerLimit"); viewerLimit_->setRange(1,63); viewerLimit_->setValue(4);
     form->addRow("Viewer limit", viewerLimit_);
-    auto* limitHint = new QLabel("More than four viewers increases upload and encoding work."); limitHint->setWordWrap(true);
-    limitHint->setObjectName("FormHint"); form->addRow(limitHint);
     auto* stream = new QWidget; stream->setObjectName("FormCard"); form = new QFormLayout(stream); createColumns_->addWidget(stream, 1);
     form->setContentsMargins(16,16,16,16); form->setSpacing(12); form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
@@ -84,8 +81,6 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     int rateIndex = bitrate_->findData(rate);
     if(rateIndex < 0) { bitrate_->addItem(QString("%1 Mbps limit").arg(rate/1000000.0), rate); rateIndex = bitrate_->count()-1; }
     bitrate_->setCurrentIndex(rateIndex); form->addRow("Bitrate", bitrate_);
-    auto* policy = new QLabel("Auto adapts to the connection. Manual resolution and FPS set the requested output; bitrate is a limit, not a guaranteed rate.");
-    policy->setWordWrap(true); policy->setObjectName("FormHint"); form->addRow(policy);
     audio_ = new QComboBox; audio_->addItems({"System audio", "Microphone", "No shared audio"}); form->addRow("Shared audio", audio_);
     body->addWidget(createPanel_);
     joinPanel_ = new QWidget; auto* joinForm = new QFormLayout(joinPanel_); joinForm->setContentsMargins(0,0,0,0); joinForm->setSpacing(12);
@@ -131,6 +126,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
         if (directoryChanged) directoryChanged(value);
         if (closing_ && !closedNotified_ && !active_ && !directory_.running()) QTimer::singleShot(0, this, [this] { close(); });
     };
+    for (auto* optionForm : findChildren<QFormLayout*>()) alignOptionRows(optionForm);
     for (auto* combo : findChildren<QComboBox*>()) styleComboPopup(combo);
     OpenCreate();
 }
@@ -170,12 +166,15 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     auto* heading = new QLabel("Settings"); heading->setObjectName("PageHeading"); headingRow->addWidget(heading); headingRow->addStretch(); layout->addLayout(headingRow);
     auto* tabs = new QTabWidget; tabs->setObjectName("PreferencesTabs"); layout->addWidget(tabs);
     auto* profilePage = new QWidget; auto* profileForm = new QFormLayout(profilePage);
+    profileForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     profileForm->setContentsMargins(24,24,24,24); profileForm->setVerticalSpacing(16);
     auto* nickname = new QLineEdit(profile_.nickname()); nickname->setObjectName("profileNickname"); nickname->setMaxLength(32);
     profileForm->addRow("Nickname", nickname);
-    auto* hint = new QLabel("Your display name for new rooms. This is not an account or verified identity. Existing sessions keep their current name.");
-    hint->setWordWrap(true); profileForm->addRow(hint); tabs->addTab(profilePage, "Profile");
+    auto* nicknameError = new QLabel; nicknameError->setObjectName("profileError"); nicknameError->setWordWrap(true);
+    profileForm->addRow(nicknameError);
+    tabs->addTab(profilePage, "Profile");
     auto* playbackPage = new QWidget; auto* playbackForm = new QFormLayout(playbackPage);
+    playbackForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     playbackForm->setContentsMargins(24,24,24,24); playbackForm->setVerticalSpacing(16);
     auto* playbackHeading = new QLabel("Playback defaults"); playbackHeading->setObjectName("SectionHeading"); playbackForm->addRow(playbackHeading);
     auto* decoder = new QComboBox; decoder->addItem("Automatic", "auto"); decoder->addItem("Software compatibility", "software");
@@ -185,22 +184,28 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     auto* volume = new QSpinBox; volume->setRange(0,100); volume->setSuffix(" %"); volume->setValue(profile_.playback().volume); volume->setObjectName("profileVolume");
     playbackForm->addRow("Initial volume", volume);
     auto* muted = new QCheckBox("Start muted"); muted->setChecked(profile_.playback().muted); playbackForm->addRow(muted);
-    auto* playbackHint = new QLabel("Defaults apply when joining your next room. Current playback is controlled from the viewer.");
-    playbackHint->setWordWrap(true); playbackForm->addRow(playbackHint); tabs->addTab(playbackPage, "Playback");
+    tabs->addTab(playbackPage, "Playback");
+    alignOptionRows(profileForm); alignOptionRows(playbackForm);
     tabs->setCurrentIndex(playback ? 1 : 0);
     layout->addStretch();
-    auto* error = new QLabel; error->setTextFormat(Qt::PlainText); error->setWordWrap(true); error->setObjectName("profileError"); layout->addWidget(error);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); layout->addWidget(buttons);
-    buttons->button(QDialogButtonBox::Save)->setObjectName("saveProfile");
-    for (auto* button : buttons->buttons()) button->setFixedSize(104, 44);
-    connect(buttons, &QDialogButtonBox::rejected, dialog, finish);
-    connect(buttons, &QDialogButtonBox::accepted, dialog, [this, finish, nickname, decoder, volume, muted, error] {
-        if (!RoomProfile::normalizeNickname(nickname->text())) { error->setText("Use 1–32 characters without control characters."); nickname->setFocus(); return; }
-        if (!profile_.saveNickname(nickname->text()) || !profile_.saveDecoder(decoder->currentData().toString()) ||
-            !profile_.savePlayback({volume->value(), muted->isChecked()})) { error->setText("Could not save all preferences. Check your settings folder is writable."); return; }
-        decoder_->setCurrentIndex(decoder_->findData(profile_.decoder()));
-        if (profileChanged) profileChanged(); finish();
+    auto* error = new QLabel; error->setTextFormat(Qt::PlainText); error->setWordWrap(true); error->setObjectName("playbackError"); layout->addWidget(error);
+    connect(nickname, &QLineEdit::textChanged, dialog, [this, nickname, nicknameError] {
+        if (!RoomProfile::normalizeNickname(nickname->text())) { nicknameError->setText("Use 1–32 characters without control characters."); return; }
+        if (!profile_.saveNickname(nickname->text())) { nicknameError->setText("Could not save nickname. Check your settings folder is writable."); return; }
+        nicknameError->clear();
+        if (profileChanged) profileChanged();
     });
+    connect(decoder, &QComboBox::currentIndexChanged, dialog, [this, decoder, error] {
+        if (!profile_.saveDecoder(decoder->currentData().toString())) { error->setText("Could not save video decoding preference."); return; }
+        error->clear();
+        decoder_->setCurrentIndex(decoder_->findData(profile_.decoder()));
+    });
+    auto savePlayback = [this, volume, muted, error] {
+        if (!profile_.savePlayback({volume->value(), muted->isChecked()})) error->setText("Could not save playback preferences.");
+        else error->clear();
+    };
+    connect(volume, &QSpinBox::valueChanged, dialog, savePlayback);
+    connect(muted, &QCheckBox::toggled, dialog, savePlayback);
     if (stack) {
         stack->addWidget(dialog); stack->setCurrentWidget(dialog); dialog->show();
     } else dialog->show();
