@@ -9,7 +9,7 @@ class PlaybackControl {
 public:
     using Factory = std::function<std::unique_ptr<PcmPlayoutEndpoint>()>;
     struct Request { PlaybackSelection selected; Factory factory; std::promise<AudioUpdateResult> reply; };
-    PlaybackControl(PlaybackSelection selection, Factory factory) : status_{std::move(selection), 1}, factory_(std::move(factory)) { ValidatePlaybackSelection(status_.selected); }
+    PlaybackControl(PlaybackSelection selection, Factory factory) : status_{std::move(selection), 1, {}}, factory_(std::move(factory)) { ValidatePlaybackSelection(status_.selected); }
     std::pair<PlaybackSelection, Factory> Attach() { std::lock_guard lock(mutex_); active_ = !closed_; return {status_.selected, factory_}; }
     void Detach() { std::lock_guard lock(mutex_); active_ = false; status_.health.state = AudioEndpointState::Inactive; Cancel(); }
     void Close() { std::lock_guard lock(mutex_); closed_ = true; status_.health.state = AudioEndpointState::Inactive; Cancel(); }

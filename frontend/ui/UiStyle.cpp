@@ -183,6 +183,8 @@ QScrollBar::handle:vertical { background: #40534a; border-radius: 5px; min-heigh
 QScrollBar::handle:vertical:hover { background: #60786f; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; border: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+QScrollBar#StreamSectionBar:disabled,
+QScrollBar#StreamSectionBar::handle:vertical:disabled { background: transparent; }
 QLineEdit, QComboBox, QSpinBox {
     background: #151d1b; color: #edf5f2; border: 1px solid #293631;
     border-radius: 6px; padding: 8px; min-height: 20px;
@@ -229,17 +231,44 @@ QTabBar::tab:selected { border-bottom: 2px solid #38d8c8; }
 QLabel#PageHeading { font-size: 23pt; font-weight: 650; }
 QLabel#SessionTitle { font-size: 18pt; font-weight: 650; }
 QWidget#RoomSession, QWidget#SessionDashboard, QWidget#SessionSettings { background: #0c1110; color: #edf5f2; }
+QWidget#SessionSettingsOverlay { background: rgba(0,0,0,150); }
+QWidget#SessionSettings { border-left: 1px solid #293631; }
+QTabWidget#SessionSettingsTabs::pane { border: 0; border-top: 1px solid #293631; }
+QTabWidget#SessionSettingsTabs QTabBar::tab { background: transparent; color: #a3b5af; padding: 12px 16px; border-top-left-radius: 8px; border-top-right-radius: 8px; border-bottom: 2px solid transparent; }
+QPushButton#sessionMute { background: transparent; border: 0; padding: 0; }
+QPushButton#sessionMute:hover { background: #263d33; }
+QPushButton#sessionSettingsBack { background: transparent; border: 0; padding: 0; }
+QPushButton#sessionSettingsBack:hover { background: #263d33; }
+QTabWidget#SessionSettingsTabs QTabBar::tab:selected { color: #38d8c8; border-bottom-color: #38d8c8; }
+QTabWidget#SessionSettingsTabs QTabBar::tab:hover { background: #192b24; }
+QFrame#SettingsDivider { background: #293631; border: 0; }
+QPushButton#sessionStreamAdvanced { background: transparent; border: 0; text-align: left; padding: 0; color: #c5d1cb; }
+QPushButton#sessionStreamAdvanced:hover { background: #263d33; }
+QWidget#SessionAdvancedContent { background: transparent; }
+QDialog#RoomPasswordDialog, QDialog#SourcePickerDialog, QDialog#SessionDetailsPopup { background: rgba(0,0,0,150); color: #edf5f2; }
+QWidget#SessionPopupPanel { background: #151d1b; border: 1px solid #35473f; border-radius: 10px; }
+QLabel#MetricCaption, QLabel#SessionElapsed { color: #a3b5af; font-size: 9pt; }
+QLabel#MetricValue, QLabel#SessionHealth { color: #edf5f2; font-size: 10pt; font-weight: 600; }
+QLabel#PeerName { font-size: 12pt; font-weight: 600; }
+QLabel#PeerAvatar { background: #16675c; border-radius: 20px; color: #edf5f2; font-size: 15pt; }
+QPushButton#confirmSourceSelection { background: #126c61; color: #ffffff; }
 QScrollArea#SessionControlsScroll { background: #121a17; border: 0; }
 QSlider#sessionVolume::groove:horizontal { height: 4px; background: #40534a; border-radius: 2px; }
 QSlider#sessionVolume::sub-page:horizontal { background: #38d8c8; border-radius: 2px; }
 QSlider#sessionVolume::handle:horizontal { background: #38d8c8; width: 14px; margin: -5px 0; border-radius: 7px; }
 QWidget#SessionCard { background: #121a17; border: 1px solid #293631; border-radius: 8px; }
-QLabel#SessionSourceSummary { font-size: 13pt; color: #edf5f2; }
+QLabel#SessionSourceSummary { font-size: 10pt; color: #c5d1cb; }
 QLabel#roomPhase, QLabel#SessionConnection { color: #7bdbb8; }
-QPushButton#stopRoom { color: #ffafa6; border: 1px solid #af5550; padding: 10px 16px; }
-QPushButton#stopRoom:hover { background: #422521; }
-QPushButton#controllerAction, QPushButton#applyStream { background: #38d8c8; color: #102c28; }
-QPushButton#PeerCapability { padding: 8px; border-radius: 7px; }
+QPushButton#stopRoom { background: #a52b2b; color: #ffffff; border: 1px solid #c44747; padding: 10px 16px; }
+QPushButton#stopRoom:hover { background: #bf3535; }
+QPushButton#stopRoom:pressed { background: #872222; }
+QPushButton#acceptPeerRequest, QPushButton#controllerAction, QPushButton#applyStream { background: #126c61; color: #ffffff; }
+QPushButton#acceptPeerRequest:hover, QPushButton#controllerAction:hover, QPushButton#applyStream:hover, QPushButton#confirmSourceSelection:hover,
+QPushButton#createV2Room:hover, QPushButton#joinV2Room:hover, QPushButton#joinWithPassword:hover { background: #177d70; color: #ffffff; }
+QPushButton#acceptPeerRequest:pressed, QPushButton#controllerAction:pressed, QPushButton#applyStream:pressed, QPushButton#confirmSourceSelection:pressed,
+QPushButton#createV2Room:pressed, QPushButton#joinV2Room:pressed, QPushButton#joinWithPassword:pressed { background: #0d5149; color: #ffffff; }
+QPushButton#controllerAction:disabled { background: #263c35; color: #a3b5af; }
+QPushButton#PeerCapability { padding: 4px; border-radius: 7px; }
 QPushButton#PeerCapability:checked { background: #194b43; border: 1px solid #38d8c8; }
 QPushButton#PeerCapability:hover { background: #263c34; }
 QLabel#SectionHeading, QLabel#HomeSectionTitle { color: #edf5f2; font-size: 13pt; font-weight: 650; }
@@ -265,7 +294,7 @@ QLabel#FormHint { color: #a3b5af; }
 QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
 QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }
 QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#joinWithPassword {
-    background: #38d8c8; color: #102c28; font-weight: 650; min-height: 24px;
+    background: #126c61; color: #ffffff; font-weight: 650; min-height: 24px;
 }
 QWidget#AppShellWindow,
 QStackedWidget#AppPageStack,

@@ -12,6 +12,7 @@
 #include <QClipboard>
 #include "ui/VideoFrameWidget.h"
 #include "ui/UiStyle.h"
+#include "ui/SourcePickerDialog.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
 #include "rtc_base/logging.h"
@@ -37,16 +38,113 @@
 #include <QResizeEvent>
 #include <QThread>
 #include <QPainter>
+#include <QMouseEvent>
+#include <QElapsedTimer>
+#include <QProcess>
+#include <QDir>
+#include <QFileInfo>
+#include <QScrollBar>
+#include <QTabBar>
+#include <QVariantAnimation>
+#include <QKeyEvent>
+#include "ui/AppShellWindow.h"
+#include <thread>
 #include <climits>
 using namespace screenshare::v2;
 using namespace screenshare::media;
 namespace {
+class SettingsBackdrop final : public QWidget {
+public:
+    SettingsBackdrop(QWidget* parent):QWidget(parent) {
+        qApp->installEventFilter(this);
+        animation_.setDuration(180);animation_.setEasingCurve(QEasingCurve::OutCubic);
+        connect(&animation_,&QVariantAnimation::valueChanged,this,[this](const QVariant& value){progress_=value.toReal();positionPanel();});
+        connect(&animation_,&QVariantAnimation::finished,this,[this]{if(!opening_){hide();if(didClose)didClose();}});
+    }
+    ~SettingsBackdrop() override {qApp->removeEventFilter(this);}
+    QWidget* panel=nullptr;
+    std::function<void()> dismiss,didClose;
+    std::function<void(int)> panelMoved;
+    void slide(bool open){
+        animation_.stop();opening_=open;
+        if(open){show();raise();}
+        animation_.setStartValue(progress_);animation_.setEndValue(open?1.0:0.0);animation_.start();
+    }
+protected:
+    bool eventFilter(QObject* watched,QEvent* event) override {
+        auto* target=qobject_cast<QWidget*>(watched);
+        if(isVisible() && target && parentWidget()->isAncestorOf(target) && !isAncestorOf(target) && target!=this) {
+            switch(event->type()) {
+            case QEvent::MouseButtonPress:
+                if(static_cast<QMouseEvent*>(event)->button()==Qt::LeftButton && dismiss)dismiss();
+                return true;
+            case QEvent::MouseButtonRelease:case QEvent::MouseButtonDblClick:
+            case QEvent::MouseMove:case QEvent::Wheel:case QEvent::KeyPress:case QEvent::KeyRelease:
+                return true;
+            default:break;
+            }
+        }
+        return QWidget::eventFilter(watched,event);
+    }
+    void resizeEvent(QResizeEvent* event) override{QWidget::resizeEvent(event);positionPanel();}
+    void mousePressEvent(QMouseEvent* event) override {
+        if(event->button()==Qt::LeftButton && panel && !panel->geometry().contains(event->position().toPoint())) {
+            if(dismiss)dismiss();event->accept();return;
+        }
+        QWidget::mousePressEvent(event);
+    }
+private:
+    void positionPanel(){if(panel){const int w=qMin(520,width());panel->setGeometry(width()-qRound(w*progress_),0,w,height());if(panelMoved)panelMoved(panel->x());}}
+    QVariantAnimation animation_;
+    qreal progress_=0;
+    bool opening_=false;
+};
+class AdvancedDisclosure final : public QPushButton {
+public:
+    AdvancedDisclosure() {
+        setCheckable(true);setAccessibleName("Advanced settings");
+        auto* row=new QHBoxLayout(this);row->setContentsMargins(6,6,6,6);row->setSpacing(8);
+        auto* gear=new QLabel;gear->setPixmap(uiIcon("settings").pixmap(18,18));
+        auto* label=new QLabel("Advanced settings");auto* arrow=new QLabel;arrow->setObjectName("AdvancedArrow");
+        arrow->setPixmap(uiIcon("chevron-down").pixmap(14,14));
+        for(auto* part:{gear,label,arrow}){part->setAttribute(Qt::WA_TransparentForMouseEvents);row->addWidget(part);}
+        connect(this,&QPushButton::toggled,this,[arrow](bool open){arrow->setPixmap(uiIcon(open?"chevron-up":"chevron-down").pixmap(14,14));});
+        setSizePolicy(QSizePolicy::Maximum,QSizePolicy::Fixed);
+    }
+    QSize sizeHint() const override{return (layout()->sizeHint()+QSize(12,8)).expandedTo(QSize(0,36));}
+    QSize minimumSizeHint() const override{return sizeHint();}
+};
+class OutputDeviceCombo final : public QComboBox {
+public:
+    std::function<void()> refresh;
+    void showPopup() override {if(refresh)refresh();QComboBox::showPopup();}
+};
+class SettingsTabs final : public QTabWidget {
+protected:
+    void resizeEvent(QResizeEvent* event) override {QTabWidget::resizeEvent(event);tabBar()->setFixedWidth(width());}
+};
+class SessionVolumeSlider final : public QSlider {
+public:
+    SessionVolumeSlider() : QSlider(Qt::Horizontal) {setFixedHeight(36);setAccessibleName("Playback volume");}
+protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        if(event->button()!=Qt::LeftButton){QSlider::mousePressEvent(event);return;}
+        setFocus(Qt::MouseFocusReason);setSliderDown(true);Move(event);event->accept();
+    }
+    void mouseMoveEvent(QMouseEvent* event) override {if(isSliderDown()){Move(event);event->accept();}else QSlider::mouseMoveEvent(event);}
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if(event->button()==Qt::LeftButton&&isSliderDown()){Move(event);setSliderDown(false);event->accept();}else QSlider::mouseReleaseEvent(event);
+    }
+private:
+    void Move(QMouseEvent* event){setValue(QStyle::sliderValueFromPosition(minimum(),maximum(),qBound(0,int(event->position().x())-7,width()-14),qMax(1,width()-14)));}
+};
 class SourcePreviewLabel final : public QLabel {
 public:
     using QLabel::QLabel;
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);painter.fillRect(rect(),QColor("#080e0b"));
+        if(pixmap().isNull()) {painter.setPen(QColor("#a3b5af"));painter.drawText(rect().adjusted(20,20,-20,-20),Qt::AlignCenter|Qt::TextWordWrap,text());return;}
         const auto original=pixmap();const auto target=original.width()<=80?QSize(80,80):size();
         const auto image=original.scaled(target,Qt::KeepAspectRatio,Qt::SmoothTransformation);
         painter.drawPixmap((width()-image.width())/2,(height()-image.height())/2,image);
@@ -74,12 +172,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     scroll->setObjectName("roomSessionScroll");
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
-    // The D3D surface intentionally does not create native ancestors. Give it
-    // a scrolling native parent and a native viewport so Windows moves and
-    // clips the swap-chain window with the Qt content.
-    scroll->viewport()->setAttribute(Qt::WA_NativeWindow);
+    // Diagnostics do not own the native video surface. Avoid promoting hidden
+    // forms into native windows while constructing the embedded session page.
     auto* content = new QWidget;
-    content->setAttribute(Qt::WA_NativeWindow);
     auto* layout = new QVBoxLayout(content);
     UiSpacing::applyPage(layout);
     scroll->setWidget(content);
@@ -94,13 +189,21 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     auto* exportReport = new QPushButton("Save diagnostic report", this); exportReport->setObjectName("saveRoomReport"); layout->addWidget(exportReport);
     auto* reportResult = new QLabel(this); reportResult->setObjectName("roomReportResult"); reportResult->setTextFormat(Qt::PlainText);
     reportResult->setWordWrap(true); reportResult->setTextInteractionFlags(Qt::TextSelectableByMouse); layout->addWidget(reportResult);
-    connect(exportReport, &QPushButton::clicked, this, [this, reportResult, configured = config.reportFile] {
+    auto* showReport=new QPushButton("Show in Explorer");showReport->setObjectName("showRoomReport");showReport->setEnabled(false);layout->addWidget(showReport);
+    connect(showReport,&QPushButton::clicked,this,[showReport,reportResult]{
+        const auto path=showReport->property("reportPath").toString();
+        if(!QFileInfo::exists(path)){reportResult->setText("The saved report is no longer at: "+path);showReport->setEnabled(false);return;}
+        if(!QProcess::startDetached("explorer.exe",{QStringLiteral("/select,"),QDir::toNativeSeparators(path)}))reportResult->setText("Could not open Explorer. Report saved at: "+path);
+    });
+    connect(exportReport, &QPushButton::clicked, this, [this, reportResult, showReport, configured = config.reportFile] {
         const auto file = configured.isEmpty() ? "room-v2-" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".json" : configured;
         const auto path = ResolveUiReportPath(file);
         const auto input = session_.input();
         auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
         report["decodedFrameHandoff"] = FrameQueueDiagnostics(session_.frameStatistics());
-        reportResult->setText(WriteRoomDiagnosticReport(path, report) ? "Saved diagnostic report: " + path : "Could not save diagnostic report. Check the destination is writable.");
+        const bool saved=WriteRoomDiagnosticReport(path, report);
+        reportResult->setText(saved ? "Saved diagnostic report: " + QDir::toNativeSeparators(path) : "Could not save diagnostic report. Check the destination is writable.");
+        showReport->setProperty("reportPath",saved?path:QString());showReport->setEnabled(saved);
     });
     auto* roomForm = new QFormLayout;
     roomForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -129,7 +232,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     layout->addLayout(roomForm);
     members_ = new QLabel; members_->setTextFormat(Qt::PlainText); members_->setWordWrap(true); members_->setObjectName("roomMembers"); layout->addWidget(members_);
     roomUpdateState_ = new QLabel; roomUpdateState_->setWordWrap(true); roomUpdateState_->setObjectName("roomUpdateState"); layout->addWidget(roomUpdateState_);
-    auto edited = [this] { editingRoom_ = true; };
+    auto edited = [this] { editingRoom_ = true; ++roomEditSequence_; };
     connect(nickname_, &QLineEdit::textChanged, this, [this] { editingNickname_ = true; }); connect(name_, &QLineEdit::textChanged, this, edited);
     connect(publicRoom_, &QCheckBox::toggled, this, edited);
     connect(viewerLimit_, &QSpinBox::valueChanged, this, edited);
@@ -145,18 +248,18 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         roomUpdateState_->setText("Updating nickname…"); session_.updateNickname(nickname_->text().toStdString(), nicknameRevision_);
     });
     connect(updatePolicy_, &QPushButton::clicked, this, [this, lockRoomFields] {
-        updatingNickname_ = false; lockRoomFields();
+        autoRoomUpdate_=false;updatingNickname_ = false; lockRoomFields();
         roomUpdateState_->setText("Updating room…");
         session_.updatePolicy({name_->text().toStdString(), publicRoom_->isChecked(), viewerLimit_->value()}, editRevision_);
     });
-    video_ = new VideoFrameWidget(nullptr,std::move(presentation)); video_->setMinimumSize(320, 180); video_->setVisible(!config.room.host && config.preview);
+    video_ = new VideoFrameWidget(this,std::move(presentation)); video_->setMinimumSize(320, 180); video_->setVisible(!config.room.host && config.preview);
     video_->setObjectName("roomVideo");
     video_->setLowLatency(true);
     layout->addWidget(video_, 1);
-    auto* playbackWidget = new QWidget; auto* playbackForm = new QFormLayout(playbackWidget);
+    auto* playbackWidget = new QWidget(this); auto* playbackForm = new QFormLayout(playbackWidget);
     playbackForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     playbackWidget->setVisible(!config.room.host); layout->addWidget(playbackWidget);
-    playbackDevice_ = new QComboBox; playbackDevice_->setObjectName("playbackDevice");
+    playbackDevice_ = new OutputDeviceCombo; playbackDevice_->setObjectName("playbackDevice");
     playbackDevice_->addItem(config.media.playbackDeviceId.empty() ? "Default output" : "Current output", QString::fromStdWString(config.media.playbackDeviceId));
     playbackForm->addRow("Playback device", playbackDevice_);
     playbackVolume_ = new QSpinBox; playbackVolume_->setRange(0, 100); playbackVolume_->setSuffix("%");
@@ -168,23 +271,28 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     playbackHealth_ = new QLabel; playbackHealth_->setWordWrap(true); playbackHealth_->setObjectName("playbackHealth"); playbackForm->addRow(playbackHealth_);
     connect(refreshPlayback_, &QPushButton::clicked, this, [this] {
         try {
-            const auto selected = playbackDevice_->currentData(); playbackDevice_->clear(); playbackDevice_->addItem("Default output", QString());
-            for (const auto& device : screenshare::WasapiCapture::EnumerateDevices(screenshare::AudioCaptureSource::SystemOutput))
+            const auto devices = screenshare::WasapiCapture::EnumerateDevices(screenshare::AudioCaptureSource::SystemOutput);
+            const QSignalBlocker blocker(playbackDevice_);
+            const auto selected = playbackDevice_->currentData(); const auto label=playbackDevice_->currentText(); playbackDevice_->clear(); playbackDevice_->addItem("Default output", QString());
+            for (const auto& device : devices)
                 playbackDevice_->addItem(QString::fromStdWString(device.name), QString::fromStdWString(device.id));
-            const auto index = playbackDevice_->findData(selected); if (index >= 0) playbackDevice_->setCurrentIndex(index);
+            auto index = playbackDevice_->findData(selected); if(index<0){playbackDevice_->addItem(label,selected);index=playbackDevice_->count()-1;} playbackDevice_->setCurrentIndex(index);
         } catch (...) { playbackState_->setText("Could not enumerate output devices."); }
     });
+    static_cast<OutputDeviceCombo*>(playbackDevice_)->refresh=[this]{refreshPlayback_->click();};
+    playbackForm->setRowVisible(refreshPlayback_,false);
+    playbackForm->setRowVisible(applyPlayback_,false);
     connect(applyPlayback_, &QPushButton::clicked, this, [this] {
         applyPlayback_->setEnabled(false); playbackState_->setText("Applying playback settings…");
         session_.updatePlayback({playbackDevice_->currentData().toString().toStdWString(), unsigned(playbackVolume_->value()), playbackMuted_->isChecked()});
     });
-    session_.playbackUpdated = [this](const auto& result) {
-        if (result.error == AudioUpdateError::None) playbackState_->setText("Playback settings applied.");
+    session_.playbackUpdated = [this,profile](const auto& result) {
+        if (result.error == AudioUpdateError::None) {playbackState_->clear();if(profile)profile->savePlayback({playbackVolume_->value(),playbackMuted_->isChecked()});}
         else if (result.error == AudioUpdateError::Cancelled) playbackState_->setText("Playback change cancelled.");
         else if (result.error == AudioUpdateError::Unavailable) playbackState_->setText("Playback is not active yet.");
         else playbackState_->setText("Could not change playback. Previous settings retained while available.");
     };
-    auto* formWidget = new QWidget; auto* form = new QFormLayout(formWidget); formWidget->setVisible(config.room.host);
+    auto* formWidget = new QWidget(this); auto* form = new QFormLayout(formWidget); formWidget->setVisible(config.room.host);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     auto combo = [&](const char* label, QStringList values, int selected) { auto* field = new QComboBox; field->addItems(values); field->setCurrentIndex(selected); form->addRow(label, field); return field; };
     auto number = [&](const char* label, int minimum, int maximum, int value) { auto* field = new QSpinBox; field->setRange(minimum, maximum); field->setValue(value); form->addRow(label, field); return field; };
@@ -267,23 +375,12 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     uploadBudgetEnabled_->setChecked(p.aggregateUploadLimitBps.has_value()); form->addRow(uploadBudgetEnabled_);
     uploadBudget_ = number("Upload allowance (bits/s)", 160000, 1000000000, p.aggregateUploadLimitBps.value_or(20000000)); uploadBudget_->setObjectName("uploadBudget");
     apply_ = new QPushButton("Apply settings"); apply_->setObjectName("applyStream"); form->addRow(apply_);
-    auto* sourceSettings = new QScrollArea; sourceSettings->setWidgetResizable(true); sourceSettings->setWidget(formWidget);
+    auto* sourceSettings = new QScrollArea(this); sourceSettings->setWidgetResizable(true); sourceSettings->setWidget(formWidget);
     sourceSettings->setVisible(config.room.host); sourceSettings->setMinimumHeight(160); layout->addWidget(sourceSettings, 1);
     settingsState_ = new QLabel; settingsState_->setObjectName("streamSettingsState"); settingsState_->setWordWrap(true); layout->addWidget(settingsState_);
     uploadState_ = new QLabel; uploadState_->setWordWrap(true); uploadState_->setObjectName("uploadState"); uploadState_->setVisible(config.room.host); layout->addWidget(uploadState_);
     auto* peerDiagnostics = new PeerDiagnosticsWidget(this);
     peerDiagnostics->setVisible(config.room.host); layout->addWidget(peerDiagnostics);
-    if (profile) {
-        auto* saveDefaults = new QPushButton(config.room.host ? "Save stream settings for new rooms" : "Save playback settings for new sessions");
-        saveDefaults->setObjectName("saveSessionDefaults"); layout->addWidget(saveDefaults);
-        auto* savedState = new QLabel; savedState->setObjectName("profileSaveState"); savedState->setWordWrap(true); layout->addWidget(savedState);
-        connect(saveDefaults, &QPushButton::clicked, this, [this, profile, savedState, host = config.room.host] {
-            const bool saved = host ? profile->saveStreamPreferences(ReadPreferences()) :
-                profile->savePlayback({playbackVolume_->value(), playbackMuted_->isChecked()});
-            savedState->setText(saved ? "Saved for new sessions. Use Apply to change this session." :
-                "Settings are invalid or could not be saved. Previous defaults were not replaced by invalid values.");
-        });
-    }
     gamepad_ = new RoomGamepadControl(config.room.host, [this] { return session_.input(); },
         [this] { return session_.status(); }, this, std::move(devices), std::move(read));
     layout->addWidget(gamepad_);
@@ -292,7 +389,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { close(); stop_->setEnabled(false); apply_->setEnabled(false); });
     connect(apply_, &QPushButton::clicked, this, [this] {
-        error_->clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
+        error_->clear();streamSaveError_.clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
     });
     session_.statusChanged = [this, peerDiagnostics, capacityWarning, host = config.room.host](const auto& value) {
         phase_->setText(Phase(value.phase));
@@ -302,8 +399,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         copyLink_->setEnabled(value.phase == RoomPhase::Active && !roomLink_->text().isEmpty());
         const bool editable = value.phase == RoomPhase::Active && !session_.roomUpdatePending();
         updateNickname_->setEnabled(editable); updatePolicy_->setEnabled(host && editable);
-        nickname_->setEnabled(editable); name_->setEnabled(host && editable);
-        publicRoom_->setEnabled(host && editable); viewerLimit_->setEnabled(host && editable);
+        nickname_->setEnabled(editable); name_->setEnabled(host && (editable||autoRoomUpdate_));
+        publicRoom_->setEnabled(host && (editable||autoRoomUpdate_)); viewerLimit_->setEnabled(host && (editable||autoRoomUpdate_));
         if (!editingRoom_ && !session_.roomUpdatePending()) {
             const QSignalBlocker nameBlock(name_), publicBlock(publicRoom_), limitBlock(viewerLimit_);
             editRevision_ = value.revision;
@@ -328,6 +425,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         playbackHealth_->setText(playbackFailed ? "Audio output failed. Video continues. Retry playback or select another output." :
             value.playback.health.state == AudioEndpointState::Running ? "Audio output active." : "Audio output inactive.");
         applyPlayback_->setText(playbackFailed ? "Retry playback" : "Apply playback settings");
+        applyPlayback_->setVisible(playbackFailed);
         applyPlayback_->setEnabled(playbackEditable); refreshPlayback_->setEnabled(playbackEditable);
         playbackDevice_->setEnabled(playbackEditable); playbackVolume_->setEnabled(playbackEditable); playbackMuted_->setEnabled(playbackEditable);
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
@@ -337,7 +435,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             value.audio.health.state == AudioEndpointState::Running ? (value.audio.microphoneProcessing ?
                 "Microphone active: noise suppression and digital gain. Echo cancellation is unavailable." : "Audio capture active; speech processing bypassed.") :
             value.audio.health.state == AudioEndpointState::Silent ? "Audio capture disabled." : "Audio capture inactive.");
-        switchAudio_->setText(audioFailed ? "Retry selected audio" : "Share selected audio");
+        switchAudio_->setText(audioFailed ? "Retry" : "Share");
         switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioKind_->setEnabled(audioEditable); audioDevice_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioProcess_->setEnabled(audioEditable && audioKind_->currentIndex() == 2);
@@ -353,21 +451,19 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             const auto measuredText = measuredPeers && measuredPeers == value.stream.peers.size() ?
                 QString("Measured WebRTC transport upload: %1 Mbps (excludes IP/interface overhead).").arg(measured / 1000000.0, 0, 'f', 2) :
                 QString("Measured transport upload: waiting for fresh samples from every viewer.");
-            uploadState_->setText(QString("Video caps: %1 Mbps allocated, %2 Mbps applied; %3 viewer(s) paused by the upload allowance. ")
+            uploadState_->setText(QString("Video caps: %1 Mbps allocated, %2 Mbps applied; %3 viewer(s) paused. ")
                 .arg(allocated / 1000000.0, 0, 'f', 2).arg(applied / 1000000.0, 0, 'f', 2).arg(paused) + measuredText);
         }
-        if (host && session_.settingsPending()) settingsState_->setText("Settings pending…");
+        if(host&&!streamSaveError_.isEmpty())settingsState_->setText(streamSaveError_);
+        else if (host && session_.settingsPending()) settingsState_->setText("Settings pending…");
         else if (host && value.stream.requestedRevision) {
             const auto application = StreamApplicationJson(value.stream);
-            settingsState_->setText(value.stream.peers.empty() ? QString("Settings saved. Waiting for viewers.") :
-                QString("Stream settings: %1 applied, %2 pending, %3 rejected. %4")
-                .arg(application["applied"].toInt()).arg(application["pending"].toInt()).arg(application["rejected"].toInt())
-                .arg(application["rejected"].toInt() ? "Some viewers retain earlier settings. Review viewer details, then Apply to retry." : ""));
+            settingsState_->setText(application["rejected"].toInt()?"Some viewers could not apply these settings. Review Details, then change the setting to retry.":application["pending"].toInt()?"Applying settings…":QString());
         }
         if (value.phase == RoomPhase::Failed) error_->setText("The room session failed. Stop and start a new session to retry.");
         error_->setVisible(!error_->text().isEmpty());
     };
-    session_.settingsAccepted = [this](const auto& result) { if (result.error != StreamUpdateError::None) error_->setText("The settings update was rejected."); };
+    session_.settingsAccepted = [this](const auto& result) { if (result.error != StreamUpdateError::None) {streamSaveError_="These settings could not be applied. Change an option to retry.";settingsState_->setText(streamSaveError_);} };
     session_.captureUpdated = [this](const auto& result) {
         if (result.error == CaptureUpdateError::None) captureState_->setText("Sharing the new source. Receiver reports appear in viewer details.");
         else if (result.error == CaptureUpdateError::Cancelled) captureState_->setText("Source change cancelled.");
@@ -376,13 +472,18 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     session_.roomUpdated = [this](const auto& result) {
         switch (result.error) {
         case RoomUpdateError::None:
-            if (updatingNickname_) editingNickname_ = false; else editingRoom_ = false;
-            roomUpdateState_->setText("Server confirmed the update."); break;
-        case RoomUpdateError::Conflict: roomUpdateState_->setText("The room changed while you were editing. Reload current values and review your change."); break;
+            if (updatingNickname_) {editingNickname_ = false;nicknameRevision_=result.currentRevision;} else editingRoom_ = autoRoomUpdate_&&roomSubmittedSequence_!=roomEditSequence_;
+            roomUpdateState_->clear(); break;
+        case RoomUpdateError::Conflict: roomUpdateState_->setText("The room changed while you were editing. Your changes were not applied; edit again to retry."); break;
         case RoomUpdateError::Unconfirmed: roomUpdateState_->setText("The server outcome is unknown. Check current room values before trying again."); break;
         case RoomUpdateError::Invalid: roomUpdateState_->setText("Invalid name or room settings."); break;
         case RoomUpdateError::Forbidden: roomUpdateState_->setText("Only the host can change room settings."); break;
         default: roomUpdateState_->setText("The room update was not accepted."); break;
+        }
+        autoRoomUpdate_=false;
+        if(applyingProfileNickname_) {
+            applyingProfileNickname_=false;
+            if(profileNicknameResult)profileNicknameResult(result.error==RoomUpdateError::None?QString():"Saved for future rooms, but this room's nickname was not confirmed. "+roomUpdateState_->text());
         }
     };
     if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::Nv12VideoFrame frame) {
@@ -424,17 +525,39 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     auto* dashboard = new QWidget; dashboard->setObjectName("SessionDashboard"); dashboard->setAttribute(Qt::WA_StyledBackground);
     auto* dashboardLayout = new QVBoxLayout(dashboard); UiSpacing::applyPage(dashboardLayout);
     pages->addWidget(dashboard);
-    auto* settingsPage = new QWidget; settingsPage->setObjectName("SessionSettings");settingsPage->setAttribute(Qt::WA_StyledBackground);
-    auto* settingsLayout = new QVBoxLayout(settingsPage); UiSpacing::applyPage(settingsLayout);
-    auto* backToSession = new QPushButton("Back to session"); backToSession->setObjectName("sessionSettingsBack");
-    backToSession->setIcon(uiIcon("back")); settingsLayout->addWidget(backToSession,0,Qt::AlignLeft);
-    auto* settingsTitle = new QLabel(config.room.host ? "Room settings" : "Playback settings"); settingsTitle->setObjectName("PageHeading"); settingsLayout->addWidget(settingsTitle);
-    auto* settingsTabs = new QTabWidget; settingsTabs->setObjectName("SessionSettingsTabs"); settingsLayout->addWidget(settingsTabs,1);
-    pages->addWidget(settingsPage);
-    connect(backToSession,&QPushButton::clicked,this,[pages,dashboard]{pages->setCurrentWidget(dashboard);});
+    auto* settingsPage = new SettingsBackdrop(dashboard); settingsDrawer_=settingsPage;settingsPage->setObjectName("SessionSettingsOverlay");settingsPage->setAttribute(Qt::WA_StyledBackground);
+
+    auto* drawer=new QWidget(settingsPage);drawer->setObjectName("SessionSettings");drawer->setAttribute(Qt::WA_StyledBackground);settingsPage->panel=drawer;
+    auto* settingsLayout = new QVBoxLayout(drawer); settingsLayout->setContentsMargins(20,20,20,20);settingsLayout->setSpacing(16);
+    auto* settingsHeading=new QHBoxLayout;
+    auto* settingsTitle = new QLabel(config.room.host ? "Room settings" : "Playback settings"); settingsTitle->setObjectName("SectionHeading");settingsHeading->addWidget(settingsTitle,1);
+    auto* backToSession = new QPushButton; backToSession->setObjectName("sessionSettingsBack");backToSession->setAccessibleName("Close settings");backToSession->setToolTip("Close settings");backToSession->setFixedSize(36,36);settingsHeading->addWidget(backToSession);settingsLayout->addLayout(settingsHeading);
+    auto* settingsTabs = new SettingsTabs; settingsTabs->setObjectName("SessionSettingsTabs"); settingsLayout->addWidget(settingsTabs,1);
+    settingsPage->hide();backToSession->setIcon(uiIcon("window-close"));
+    if(!config.room.host) {
+        settingsPage->panelMoved=[this,settingsPage,drawer](int){
+            if(settingsPage->isVisible())video_->setOverlayExclusion(QRect(video_->mapFromGlobal(drawer->mapToGlobal(QPoint())),drawer->size()));
+        };
+        settingsPage->didClose=[this]{video_->setOverlayExclusion({});};
+    }
+    auto hideSettings=[settingsPage]{settingsPage->slide(false);};
+    auto showSettings=[this,settingsPage,dashboard,backToSession,drawer]{
+        settingsPage->setGeometry(dashboard->rect());
+        settingsPage->slide(true);backToSession->setFocus();
+    };
+    settingsPage->dismiss=hideSettings;
+    connect(backToSession,&QPushButton::clicked,this,hideSettings);
+    if(config.room.host){auto* escape=new QShortcut(QKeySequence(Qt::Key_Escape),this);connect(escape,&QShortcut::activated,this,hideSettings);}
     auto move = [layout](QWidget* widget,QBoxLayout* destination,int stretch=0) { layout->removeWidget(widget); destination->addWidget(widget,stretch); };
     auto* sessionHeader = new QHBoxLayout;
     room_->setObjectName("SessionTitle"); room_->setWordWrap(true); move(room_,sessionHeader,1); move(phase_,sessionHeader);
+    auto* elapsed=new QLabel("Elapsed  00:00");elapsed->setObjectName("SessionElapsed");elapsed->setToolTip("Session duration");sessionHeader->addWidget(elapsed);
+    auto* viewerIcon=new QLabel;viewerIcon->setPixmap(uiIcon("viewers").pixmap(20,20));sessionHeader->addWidget(viewerIcon);
+    auto* viewerCount=new QLabel("0 viewers");viewerCount->setObjectName("SessionViewerCount");sessionHeader->addWidget(viewerCount);
+    auto previousHeader=session_.statusChanged;
+    session_.statusChanged=[previousHeader,viewerCount](const auto& status){previousHeader(status);const auto count=std::count_if(status.members.begin(),status.members.end(),[](const auto& member){return !member.host;});viewerCount->setText(QString("%1 %2").arg(count).arg(count==1?"viewer":"viewers"));};
+    auto elapsedClock=std::make_shared<QElapsedTimer>();elapsedClock->start();auto* elapsedTimer=new QTimer(this);elapsedTimer->setInterval(1000);
+    connect(elapsedTimer,&QTimer::timeout,this,[elapsed,elapsedClock]{const auto seconds=elapsedClock->elapsed()/1000;elapsed->setText(QString("Elapsed  %1:%2").arg(seconds/60,2,10,QChar('0')).arg(seconds%60,2,10,QChar('0')));});elapsedTimer->start();
     dashboardLayout->addLayout(sessionHeader);
     sessionColumns_ = new QBoxLayout(QBoxLayout::LeftToRight); sessionColumns_->setSpacing(UiSpacing::SectionGap);
     dashboardLayout->addLayout(sessionColumns_,1);
@@ -451,6 +574,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     sessionColumns_->setStretch(0,config.room.host?3:5); sessionColumns_->setStretch(1,2);
     auto* controlsTitle=new QLabel(config.room.host?"Viewers":"Controls"); controlsTitle->setObjectName("SectionHeading"); controlsBody->addWidget(controlsTitle);
     move(gamepad_,controlsBody); controlsBody->addStretch();
+    auto* detailsButton=new QPushButton("Details");detailsButton->setObjectName("sessionDetails");detailsButton->setIcon(uiIcon("chevron-down"));detailsButton->setLayoutDirection(Qt::RightToLeft);
     for(const auto* name:{"showInputDiagnostics","inputDiagnostics"}) if(auto* widget=gamepad_->findChild<QWidget*>(name)) {
         gamepad_->layout()->removeWidget(widget);layout->addWidget(widget);
     }
@@ -459,49 +583,99 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         hostPreview_=new SourcePreviewLabel;hostPreview_->setObjectName("HostSourcePreview");hostPreview_->setAlignment(Qt::AlignCenter);
         hostPreview_->setMinimumHeight(80);hostPreview_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Expanding);
         hostPreview_->setPixmap(uiIcon("display").pixmap(80,80));primary->addWidget(hostPreview_,1);
+        auto* previewActivity=new QTimer(this);previewActivity->setInterval(100);
+        connect(previewActivity,&QTimer::timeout,this,[this,loopback] {
+            const bool active=!loopback&&!closing_&&hostPreview_->isVisible()&&window()->isActiveWindow()&&!window()->isMinimized()&&!session_.status().stream.preferences.videoPaused;
+            if(active!=previewActive_){previewActive_=active;RefreshHostPreview();}
+        });previewActivity->start();
         auto* sourceSummary=new QLabel; sourceSummary->setObjectName("SessionSourceSummary"); sourceSummary->setWordWrap(true); primary->addWidget(sourceSummary);
         auto* sourceActions=new QHBoxLayout;primary->addLayout(sourceActions);
         auto* changeSource=new QPushButton("Change source"); changeSource->setObjectName("sessionChangeSource"); changeSource->setIcon(uiIcon("display")); sourceActions->addWidget(changeSource);
-        connect(changeSource,&QPushButton::clicked,this,[pages,settingsPage,settingsTabs]{settingsTabs->setCurrentIndex(0);pages->setCurrentWidget(settingsPage);});
+        connect(changeSource,&QPushButton::clicked,this,[this,loopback]{
+            if(auto* existing=findChild<QDialog*>("SourcePickerDialog")){existing->raise();return;}
+            auto* picker=new SourcePickerDialog(session_.status().capture.selected,!loopback,this);picker->setAttribute(Qt::WA_DeleteOnClose);
+            picker->body->insertWidget(picker->body->count()-1,sharedAudioSettings_);sharedAudioSettings_->show();
+            connect(picker,&QDialog::finished,this,[this]{sharedAudioSettings_->setParent(this);sharedAudioSettings_->hide();});
+            picker->chosen=[this](CaptureSelection selection){captureState_->setText("Waiting for the new source…");session_.switchCapture(selection);};
+            picker->open();
+        });
+        auto* pauseVideo=new QPushButton("Pause video");pauseVideo->setObjectName("pauseSharedVideo");pauseVideo->setIcon(uiIcon("pause"));sourceActions->addWidget(pauseVideo);
+        connect(pauseVideo,&QPushButton::clicked,this,[this] {
+            auto preferences=session_.status().stream.preferences;
+            preferences.videoPaused=!preferences.videoPaused;
+            session_.apply(preferences);
+        });
         auto* muteAudio=new QPushButton("Mute audio");muteAudio->setObjectName("muteSharedAudio");muteAudio->setIcon(uiIcon("volume"));sourceActions->addWidget(muteAudio);
+        for(auto* button:{changeSource,pauseVideo,muteAudio}){button->setMinimumHeight(42);button->setIconSize(QSize(22,22));}
         auto previousAudio=std::make_shared<AudioSelection>();
         connect(muteAudio,&QPushButton::clicked,this,[this,previousAudio] {
             const auto current=session_.status().audio.selected;
             if(current.kind==AudioKind::None)session_.switchAudio(*previousAudio);
             else {*previousAudio=current;AudioSelection muted;muted.kind=AudioKind::None;session_.switchAudio(muted);}
         });
-        auto* healthTitle=new QLabel("Stream health"); healthTitle->setObjectName("SectionHeading"); primary->addWidget(healthTitle);
-        auto* health=new QLabel; health->setObjectName("SessionHealth"); health->setWordWrap(true); primary->addWidget(health);
+        auto* healthRow=new QHBoxLayout;healthRow->setSpacing(8);primary->addLayout(healthRow);
+        auto metric=[healthRow](const QString& title){auto* column=new QVBoxLayout;auto* caption=new QLabel(title);caption->setObjectName("MetricCaption");column->addWidget(caption);auto* value=new QLabel("—");value->setObjectName("MetricValue");column->addWidget(value);healthRow->addLayout(column,1);return value;};
+        auto* health=metric("Stream health");health->setObjectName("SessionHealth");
+        auto* bitrate=metric("Actual bitrate");auto* rtt=metric("Network RTT");auto* sentFps=metric("Encoded FPS");healthRow->addWidget(detailsButton);
         auto previous=session_.statusChanged;
-        session_.statusChanged=[this,previous,sourceSummary,health,controlsTitle,muteAudio,loopback](const auto& status) {
+        session_.statusChanged=[this,previous,sourceTitle,sourceSummary,health,bitrate,rtt,sentFps,controlsTitle,muteAudio,pauseVideo,loopback](const auto& status) {
             previous(status);
+            const bool pausePending=session_.settingsPending()||std::any_of(status.stream.peers.begin(),status.stream.peers.end(),[&](const auto& peer){return !peer.rejected&&peer.appliedRevision<status.stream.requestedRevision;});
+            pauseVideo->setEnabled(status.phase==RoomPhase::Active&&!pausePending);
+            pauseVideo->setText(pausePending?"Applying…":status.stream.preferences.videoPaused?"Resume video":"Pause video");
+            pauseVideo->setIcon(uiIcon(status.stream.preferences.videoPaused?"play":"pause"));
             muteAudio->setEnabled(status.phase==RoomPhase::Active && status.activePeers>0 && !session_.audioPending());
             muteAudio->setText(status.audio.selected.kind==AudioKind::None?"Share audio":"Mute audio");
             const auto& selected=status.capture.selected;
             if(!loopback && (!previewRevision_ || selected.kind!=previewSource_.kind || selected.display!=previewSource_.display || selected.window!=previewSource_.window)) {
-                previewSource_=selected;RefreshHostPreview();
+                previewSource_=selected;previewSourceSize_={};RefreshHostPreview();
             }
             const auto sourceName=status.capture.selected.kind==CaptureKind::Window ? QString("Sharing a window") : QString("Display %1").arg(status.capture.selected.display+1);
-            sourceSummary->setText(sourceName+QString(" · %1\nTarget frame rate: %2").arg(status.stream.preferences.preset==StreamPreset::Gaming?"Gaming":"Quality",
+            sourceTitle->setText("You’re sharing "+sourceName);
+            sourceSummary->setText(QString("%1  ·  %2").arg(status.stream.preferences.preset==StreamPreset::Gaming?"Gaming":"Quality",
                 status.stream.preferences.fpsMode==SettingMode::Auto?QString("Auto"):QString("%1 FPS").arg(status.stream.preferences.fps)));
+            QSize resolution=previewSourceSize_;bool streamResolution=false;
+            if(!status.stream.peers.empty()&&status.stream.peers.front().width>0){resolution=QSize(status.stream.peers.front().width,status.stream.peers.front().height);streamResolution=true;}
+            sourceSummary->setText((resolution.isValid()?QString("%1 × %2  ·  ").arg(resolution.width()).arg(resolution.height()):QString("Resolution pending  ·  "))+sourceSummary->text());
+            sourceSummary->setToolTip(streamResolution?"Observed stream resolution for the first viewer; per-viewer measurements are in Details.":"Captured source resolution; stream resolution appears when a viewer connects.");
             controlsTitle->setText(QString("Viewers · %1").arg(status.activePeers));
             uint64_t upload=0; bool sampled=false;
             for(const auto& peer:status.stream.peers) if(peer.transportSendBps){upload+=*peer.transportSendBps;sampled=true;}
-            health->setText(status.activePeers ? (sampled ? QString("Transport upload  %1 Mbps").arg(upload/1000000.0,0,'f',2):"Waiting for stream measurements…") : "Waiting for viewers");
+            health->setText(status.stream.preferences.videoPaused?"Paused":!status.activePeers?"Waiting":status.failedPeers?"Degraded":"Connected");
+            bitrate->setText(sampled?QString("%1 Mbps").arg(upload/1000000.0,0,'f',1):"—");bitrate->setToolTip("Total measured transport upload across viewers");rtt->setText("—");sentFps->setText("—");
             if(status.stream.peers.size()==1) {
                 const auto& sender=status.stream.peers.front().sender;
-                if(sender.encodedFps)health->setText(health->text()+QString("\nEncoded video  %1 FPS").arg(*sender.encodedFps,0,'f',0));
-                if(sender.rttMs)health->setText(health->text()+QString("\nNetwork RTT  %1 ms").arg(*sender.rttMs,0,'f',0));
+                if(sender.encodedFps)sentFps->setText(QString("%1 FPS").arg(*sender.encodedFps,0,'f',0));
+                if(sender.rttMs)rtt->setText(QString("%1 ms").arg(*sender.rttMs,0,'f',0));
             }
         };
     } else {
-        move(video_,primary,1);
-        auto* connection=new QLabel; connection->setObjectName("SessionConnection"); connection->setWordWrap(true); controlsBody->insertWidget(1,connection);
+        primary->setContentsMargins(0,0,0,0);
+        move(video_,primary,1);video_->setCornerRadius(8);
+        auto* connectionTitle=new QLabel("Connection");connectionTitle->setObjectName("SectionHeading");controlsBody->addWidget(connectionTitle);
+        auto* metrics=new QFormLayout;metrics->setContentsMargins(0,8,0,8);metrics->setVerticalSpacing(12);
+        auto metric=[metrics](const char* caption,const char* name){
+            auto* line=new QFrame;line->setObjectName("SettingsDivider");line->setFixedHeight(1);metrics->addRow(line);
+            auto* value=new QLabel(QString(QChar(0x2014)));value->setObjectName(name);value->setAlignment(Qt::AlignRight|Qt::AlignVCenter);metrics->addRow(caption,value);return value;
+        };
+        auto* rtt=metric("RTT","SessionRtt");rtt->setToolTip("Network round-trip time");
+        auto* videoInfo=metric("Resolution","SessionVideoInfo");
+        auto* fpsInfo=metric("FPS","SessionFps");
+        auto* bitrate=metric("Bitrate","SessionBitrate");bitrate->setToolTip("Received transport traffic, including audio and video");
+        controlsBody->addLayout(metrics);
+        auto* connection=new QLabel(this);connection->setObjectName("SessionConnection");connection->hide();
         auto previous=session_.statusChanged;
-        session_.statusChanged=[previous,connection](const auto& status){previous(status);connection->setText(Phase(status.phase));};
-        auto* videoInfo=new QLabel("Waiting for video…");videoInfo->setObjectName("SessionVideoInfo");controlsBody->insertWidget(2,videoInfo);
+        session_.statusChanged=[previous,connection,rtt,bitrate](const auto& status){
+            previous(status);connection->setText(Phase(status.phase));
+            rtt->setText(status.stream.receiveRttMs?QString("%1 ms").arg(*status.stream.receiveRttMs,0,'f',0):QString(QChar(0x2014)));
+            bitrate->setText(status.stream.receiveBps?QString("%1 Mbps").arg(*status.stream.receiveBps/1000000.0,0,'f',1):QString(QChar(0x2014)));
+        };
+        controlsBody->addWidget(detailsButton);
+        auto decoded=std::make_shared<unsigned>(0);auto* fpsTimer=new QTimer(this);fpsTimer->setInterval(1000);
+        auto sampleClock=std::make_shared<QElapsedTimer>();sampleClock->start();
+        connect(fpsTimer,&QTimer::timeout,this,[decoded,fpsInfo,sampleClock]{const auto ms=sampleClock->restart();fpsInfo->setText(QString::number(ms?1000.0*(*decoded)/ms:0,'f',0));*decoded=0;});fpsTimer->start();
         auto present=session_.frameReady;
-        session_.frameReady=[present,videoInfo](auto frame){videoInfo->setText(QString("Video  %1 × %2").arg(frame.width).arg(frame.height));if(present)present(std::move(frame));};
+        session_.frameReady=[present,videoInfo,decoded](auto frame){++*decoded;videoInfo->setText(QString("%1 %2 %3").arg(frame.width).arg(QChar(0x00d7)).arg(frame.height));if(present)present(std::move(frame));};
     }
     layout->removeWidget(sourceSettings); layout->removeWidget(playbackWidget);
     // Compact source actions and progressive disclosure keep the common stream
@@ -520,119 +694,281 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         apply->setText("Share");form->insertRow(row,caption,widget);
     };
     inlineActions("Source",captureSource_,refreshCapture_,switchCapture_);
+    form->setRowVisible(captureSource_->parentWidget(),false);
     inlineActions("Audio device",audioDevice_,refreshAudio_,switchAudio_);
+    // Keep video, audio and advanced settings in separate, predictable groups.
+    auto presetRow=form->takeRow(preset_);delete presetRow.labelItem->widget();delete presetRow.labelItem;delete presetRow.fieldItem;form->insertRow(0,"Preset",preset_);
+    for(auto* field:{static_cast<QWidget*>(audioKind_),audioDevice_->parentWidget(),static_cast<QWidget*>(audioState_),static_cast<QWidget*>(captureState_)}) {
+        auto row=form->takeRow(field);if(row.labelItem){form->addRow(row.labelItem->widget(),field);delete row.labelItem;}else form->addRow(field);delete row.fieldItem;
+    }
     detachField(audioHealth_);layout->addWidget(audioHealth_);
-    auto* advancedStream=new QPushButton("Advanced settings");advancedStream->setObjectName("sessionStreamAdvanced");advancedStream->setCheckable(true);form->insertRow(form->rowCount()-1,advancedStream);
-    auto refreshAdvanced=[this,form,advancedStream] {
+    auto* advancedStream=new AdvancedDisclosure;advancedStream->setObjectName("sessionStreamAdvanced");form->addRow(advancedStream);
+    auto* advancedContent=new QWidget;advancedContent->setObjectName("SessionAdvancedContent");auto* advancedForm=new QFormLayout(advancedContent);advancedForm->setContentsMargins(0,8,0,8);advancedForm->setVerticalSpacing(12);advancedForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    for(auto* field:{static_cast<QWidget*>(bitrateLimit_),static_cast<QWidget*>(uploadBudgetEnabled_),static_cast<QWidget*>(uploadBudget_)}) {
+        auto row=form->takeRow(field);if(row.labelItem){advancedForm->addRow(row.labelItem->widget(),field);delete row.labelItem;}else advancedForm->addRow(field);delete row.fieldItem;
+    }
+    auto* automaticCap=new QSpinBox;automaticCap->setRange(bitrate_->minimum(),bitrate_->maximum());automaticCap->setValue(bitrate_->value());automaticCap->setSingleStep(bitrate_->singleStep());advancedForm->insertRow(1,"Video ceiling (bps)",automaticCap);
+    connect(automaticCap,&QSpinBox::valueChanged,bitrate_,&QSpinBox::setValue);connect(bitrate_,&QSpinBox::valueChanged,automaticCap,&QSpinBox::setValue);
+    form->addRow(advancedContent);advancedContent->hide();
+    connect(advancedStream,&QPushButton::toggled,this,[sourceSettings]{const auto top=sourceSettings->verticalScrollBar()->value();QTimer::singleShot(0,sourceSettings,[sourceSettings,top]{sourceSettings->verticalScrollBar()->setValue(top);});});
+    auto refreshAdvanced=[this,form,advancedStream,advancedContent,advancedForm,automaticCap] {
         const bool advanced=advancedStream->isChecked();
-        form->setRowVisible(audioProcess_,audioKind_->currentIndex()==2);
-        form->setRowVisible(width_,resolution_->currentIndex()==int(ResolutionMode::Fixed));
-        form->setRowVisible(height_,resolution_->currentIndex()==int(ResolutionMode::Fixed));
-        form->setRowVisible(fps_,fpsMode_->currentIndex()==int(SettingMode::Manual));
-        form->setRowVisible(bitrateLimit_,advanced);
-        form->setRowVisible(bitrate_,bitrateMode_->currentIndex()==int(SettingMode::Manual)||bitrateLimit_->isChecked());
-        form->setRowVisible(uploadBudgetEnabled_,advanced);
-        form->setRowVisible(uploadBudget_,advanced&&uploadBudgetEnabled_->isChecked());
+        advancedContent->setVisible(advanced);
+        form->setRowVisible(width_,false);
+        form->setRowVisible(height_,false);
+        form->setRowVisible(fps_,false);
+        const bool automatic=bitrateMode_->currentIndex()==int(SettingMode::Auto);
+        form->setRowVisible(bitrate_,false);
+        advancedForm->setRowVisible(bitrateLimit_,automatic);
+        advancedForm->setRowVisible(automaticCap,automatic&&bitrateLimit_->isChecked());
+        advancedForm->setRowVisible(uploadBudget_,uploadBudgetEnabled_->isChecked());
     };
+    captureState_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);audioState_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+    // Use one frame-rate chooser; keep the existing model fields as the source
+    // of truth for configuration and acknowledgements.
+    auto* frameRate=new QComboBox;frameRate->setObjectName("sessionFrameRate");frameRate->addItem("Auto",0);
+    for(int fps:{30,60,120,144,240})frameRate->addItem(QString("%1 FPS").arg(fps),fps);
+    if(frameRate->findData(p.fps)<0)frameRate->addItem(QString("%1 FPS").arg(p.fps),p.fps);
+    frameRate->setCurrentIndex(p.fpsMode==SettingMode::Auto?0:frameRate->findData(p.fps));
+    int fpsRow=0;QFormLayout::ItemRole fpsRole;form->getWidgetPosition(fpsMode_,&fpsRow,&fpsRole);form->insertRow(fpsRow,"Frame rate",frameRate);
+    form->setRowVisible(fpsMode_,false);form->setRowVisible(fps_,false);
+    connect(frameRate,&QComboBox::currentIndexChanged,this,[this,frameRate]{const auto value=frameRate->currentData().toInt();fpsMode_->setCurrentIndex(int(value?SettingMode::Manual:SettingMode::Auto));if(value)fps_->setValue(value);});
+    auto* resolutionChoice=new QComboBox;resolutionChoice->setObjectName("sessionResolutionPreset");resolutionChoice->addItem("Auto");resolutionChoice->addItem("Native");
+    for(const auto size:{QSize(854,480),QSize(1280,720),QSize(1920,1080),QSize(2560,1440),QSize(3840,2160)})resolutionChoice->addItem(QString("%1p · %2 × %1").arg(size.height()).arg(size.width()),size);
+    if(p.resolution==ResolutionMode::Fixed&&resolutionChoice->findData(QSize(p.width,p.height))<0)resolutionChoice->addItem(QString("%1 × %2").arg(p.width).arg(p.height),QSize(p.width,p.height));
+    resolutionChoice->setCurrentIndex(p.resolution==ResolutionMode::Auto?0:p.resolution==ResolutionMode::Native?1:resolutionChoice->findData(QSize(p.width,p.height)));
+    int resolutionRow=0;QFormLayout::ItemRole resolutionRole;form->getWidgetPosition(resolution_,&resolutionRow,&resolutionRole);form->insertRow(resolutionRow,"Resolution",resolutionChoice);form->setRowVisible(resolution_,false);
+    connect(resolutionChoice,&QComboBox::currentIndexChanged,this,[this,resolutionChoice](int index){resolution_->setCurrentIndex(int(index==0?ResolutionMode::Auto:index==1?ResolutionMode::Native:ResolutionMode::Fixed));if(index>1){const auto size=resolutionChoice->currentData().toSize();width_->setValue(size.width());height_->setValue(size.height());}});
+    auto* bitrateChoice=new QComboBox;bitrateChoice->setObjectName("sessionBitratePreset");bitrateChoice->addItem("Auto",0);
+    for(int mbps:{5,10,15,20,30,50,80,100})bitrateChoice->addItem(QString("%1 Mbps").arg(mbps),mbps*1000000);
+    const int currentBitrate=p.bitrateMode==SettingMode::Manual?p.bitrateLimitBps.value_or(0):0;
+    if(bitrateChoice->findData(currentBitrate)<0)bitrateChoice->addItem(QString("%1 Mbps").arg(currentBitrate/1000000.0),currentBitrate);
+    bitrateChoice->setCurrentIndex(bitrateChoice->findData(currentBitrate));
+    int bitrateRow=0;QFormLayout::ItemRole bitrateRole;form->getWidgetPosition(bitrateMode_,&bitrateRow,&bitrateRole);form->insertRow(bitrateRow,"Bitrate",bitrateChoice);form->setRowVisible(bitrateMode_,false);
+    connect(bitrateChoice,&QComboBox::currentIndexChanged,this,[this,bitrateChoice]{const auto value=bitrateChoice->currentData().toInt();bitrateMode_->setCurrentIndex(int(value?SettingMode::Manual:SettingMode::Auto));if(value)bitrate_->setValue(value);});
     connect(advancedStream,&QPushButton::toggled,this,refreshAdvanced);
     for(auto* combo:{audioKind_,resolution_,fpsMode_,bitrateMode_})connect(combo,&QComboBox::currentIndexChanged,this,refreshAdvanced);
     connect(bitrateLimit_,&QCheckBox::toggled,this,refreshAdvanced);connect(uploadBudgetEnabled_,&QCheckBox::toggled,this,refreshAdvanced);refreshAdvanced();
-    form->setContentsMargins(20,20,20,20);form->setVerticalSpacing(12);
-    detachField(apply_);settingsLayout->addWidget(apply_,0,Qt::AlignRight);apply_->setVisible(config.room.host);
+    form->setContentsMargins(12,20,12,20);form->setVerticalSpacing(12);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    for(auto* field:formWidget->findChildren<QComboBox*>()) {
+        field->setMinimumWidth(0);field->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+    }
+    auto decorate=[](QComboBox* box,const QString& icon){for(int index=0;index<box->count();++index)box->setItemIcon(index,uiIcon(icon));box->setIconSize(QSize(22,22));};
+    decorate(preset_,"preset-gaming");preset_->setItemIcon(1,uiIcon("preset-quality"));decorate(captureSource_,"display");decorate(resolutionChoice,"display");decorate(frameRate,"fps");decorate(bitrateChoice,"quality");decorate(audioKind_,"volume");decorate(audioDevice_,"volume");
+    if(auto* label=qobject_cast<QLabel*>(form->labelForField(bitrateMode_)))label->setText("Bitrate");
+    auto separator=[form](QWidget* before){int row=0;QFormLayout::ItemRole role;form->getWidgetPosition(before,&row,&role);auto* line=new QFrame;line->setObjectName("SettingsDivider");line->setFixedHeight(1);form->insertRow(row,line);};separator(advancedStream);
+    alignOptionRows(form);alignOptionRows(advancedForm);alignOptionRows(roomForm);
+    detachField(apply_);apply_->setParent(this);apply_->hide();
+    sharedAudioSettings_=new QWidget(this);auto* shareAudioForm=new QFormLayout(sharedAudioSettings_);shareAudioForm->setContentsMargins(0,8,0,0);shareAudioForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    for(auto* field:{static_cast<QWidget*>(audioKind_),audioDevice_->parentWidget(),static_cast<QWidget*>(audioProcess_),static_cast<QWidget*>(audioState_)}) {
+        auto row=form->takeRow(field);if(row.labelItem){shareAudioForm->addRow(row.labelItem->widget(),field);delete row.labelItem;}else shareAudioForm->addRow(field);delete row.fieldItem;
+    }
+    auto refreshAudioFields=[this,shareAudioForm]{shareAudioForm->setRowVisible(audioProcess_,audioKind_->currentIndex()==2);shareAudioForm->setRowVisible(audioDevice_->parentWidget(),audioKind_->currentIndex()<2);};
+    connect(audioKind_,&QComboBox::currentIndexChanged,this,refreshAudioFields);refreshAudioFields();sharedAudioSettings_->hide();alignOptionRows(shareAudioForm);
+    detachField(captureState_);layout->addWidget(captureState_);
     if(config.room.host) { settingsTabs->addTab(sourceSettings,"Stream"); sourceSettings->show(); playbackWidget->hide(); }
-    else { settingsTabs->addTab(playbackWidget,"Audio"); playbackWidget->show(); sourceSettings->hide(); }
+    else { settingsTabs->addTab(playbackWidget,"Playback"); playbackWidget->show(); sourceSettings->hide();
+        if(auto* controller=gamepad_->findChild<QComboBox*>("controllerDevice"))playbackForm->addRow("Controller",controller);
+    }
     layout->removeItem(roomForm);
     auto* roomSettings=new QWidget; roomSettings->setLayout(roomForm);
     if(config.room.host) settingsTabs->addTab(roomSettings,"Room"); else {roomSettings->setParent(settingsPage);roomSettings->hide();}
     // Profile editing belongs to the application's top-bar menu.
     roomForm->setRowVisible(nickname_,false); roomForm->setRowVisible(updateNickname_,false);
+    if(config.room.host)roomForm->setRowVisible(updatePolicy_,false);roomForm->setRowVisible(reloadRoom,false);
     layout->removeWidget(roomUpdateState_); roomForm->addRow(roomUpdateState_);
     layout->removeWidget(settingsState_); form->addRow(settingsState_);
-    settingsTabs->addTab(scroll,"Details");
-    connect(settingsTabs,&QTabWidget::currentChanged,this,[this,settingsTabs,sourceSettings,host=config.room.host]{apply_->setVisible(host&&settingsTabs->currentWidget()==sourceSettings);});
-    auto* detailsButton=new QPushButton("Details");detailsButton->setObjectName("sessionDetails");
-    (config.room.host?primary:controlsBody)->addWidget(detailsButton);
-    connect(detailsButton,&QPushButton::clicked,this,[pages,settingsPage,settingsTabs,scroll]{settingsTabs->setCurrentWidget(scroll);pages->setCurrentWidget(settingsPage);});
+    layout->removeWidget(roomLink_);roomLink_->setParent(this);roomLink_->hide();
+    settingsTabs->setTabIcon(0,uiIcon(config.room.host?"play":"volume"));if(config.room.host)settingsTabs->setTabIcon(1,uiIcon("room"));settingsTabs->setIconSize(QSize(22,22));settingsTabs->tabBar()->setExpanding(true);
+    if(config.room.host) {
+        auto* streamSave=new QTimer(this);streamSave->setSingleShot(true);streamSave->setInterval(350);
+        auto queueStream=[streamSave]{streamSave->start();};
+        for(auto* choice:{preset_,frameRate,resolutionChoice,bitrateChoice})connect(choice,&QComboBox::activated,this,queueStream);
+        for(auto* toggle:{bitrateLimit_,uploadBudgetEnabled_})connect(toggle,&QCheckBox::clicked,this,queueStream);
+        for(auto* value:{automaticCap,uploadBudget_})connect(value,&QSpinBox::valueChanged,this,[value,queueStream]{if(value->hasFocus())queueStream();});
+        connect(streamSave,&QTimer::timeout,this,[this,streamSave]{if(session_.settingsPending()){streamSave->start();return;}if(session_.status().phase==RoomPhase::Active)apply_->click();});
+        connect(apply_,&QPushButton::clicked,streamSave,&QTimer::stop);
+        auto* roomSave=new QTimer(this);roomSave->setSingleShot(true);roomSave->setInterval(500);
+        connect(name_,&QLineEdit::textEdited,this,[roomSave]{roomSave->start();});
+        connect(publicRoom_,&QCheckBox::clicked,this,[roomSave]{roomSave->start();});
+        connect(viewerLimit_,&QSpinBox::valueChanged,this,[roomSave,this]{if(viewerLimit_->hasFocus())roomSave->start();});
+        connect(updatePolicy_,&QPushButton::clicked,roomSave,&QTimer::stop);
+        connect(roomSave,&QTimer::timeout,this,[this,roomSave]{
+            if(closing_)return;
+            if(session_.roomUpdatePending()){roomSave->start();return;}
+            const auto status=session_.status();if(status.phase!=RoomPhase::Active)return;
+            if(name_->text().trimmed().isEmpty()){roomUpdateState_->setText("Enter a room name.");return;}
+            const RoomPolicy policy{name_->text().toStdString(),publicRoom_->isChecked(),viewerLimit_->value()};
+            if(policy.name==status.policy.name&&policy.publicRoom==status.policy.publicRoom&&policy.viewerLimit==status.policy.viewerLimit){editingRoom_=false;return;}
+            updatingNickname_=false;autoRoomUpdate_=true;roomSubmittedSequence_=roomEditSequence_;
+            roomUpdateState_->setText("Saving…");session_.updatePolicy(policy,status.revision);
+        });
+        auto* audioSave=new QTimer(this);audioSave->setSingleShot(true);audioSave->setInterval(300);
+        for(auto* choice:{audioKind_,audioDevice_})connect(choice,&QComboBox::activated,this,[audioSave]{audioSave->start();});
+        connect(audioProcess_,&QSpinBox::editingFinished,this,[audioSave]{audioSave->start();});
+        connect(audioSave,&QTimer::timeout,this,[this,audioSave]{
+            if(closing_||session_.status().phase!=RoomPhase::Active)return;
+            if(session_.audioPending()){audioSave->start();return;}
+            if(!session_.status().activePeers){audioState_->setText("Audio change pending until a viewer connects.");audioSave->start();return;}
+            switchAudio_->click();
+        });
+        connect(switchAudio_,&QPushButton::clicked,audioSave,&QTimer::stop);switchAudio_->hide();
+    }
+    auto* detailsPopup=new SessionPopup("Stream details",this);detailsPopup->setObjectName("SessionDetailsPopup");detailsPopup->body->addWidget(scroll,1);scroll->show();
+    connect(detailsPopup,&QDialog::finished,this,[this,showVideo=!config.room.host&&config.preview]{video_->setVisible(showVideo);});
+    connect(detailsButton,&QPushButton::clicked,this,[this,detailsPopup]{video_->hide();detailsPopup->open();});
     auto* footer=new QHBoxLayout; footer->setSpacing(12); dashboardLayout->addLayout(footer);
     auto* openSettings=new QPushButton(config.room.host?"Room settings":"Playback settings"); openSettings->setObjectName("openSessionSettings");
-    openSettings->setIcon(uiIcon("settings")); footer->addWidget(openSettings);
-    connect(openSettings,&QPushButton::clicked,this,[pages,settingsPage,settingsTabs]{settingsTabs->setCurrentIndex(0);pages->setCurrentWidget(settingsPage);});
+    openSettings->setIcon(uiIcon("settings"));if(config.room.host)footer->addWidget(openSettings);
+    connect(openSettings,&QPushButton::clicked,this,[showSettings,settingsTabs]{settingsTabs->setCurrentIndex(0);showSettings();});
     if(config.room.host) {copyLink_->setText("Copy invite");copyLink_->setIcon(uiIcon("copy"));move(copyLink_,footer);}
     else {
-        auto* mute=new QPushButton("Mute"); mute->setObjectName("sessionMute"); mute->setCheckable(true); mute->setChecked(playbackMuted_->isChecked());
-        mute->setIcon(uiIcon("volume")); footer->addWidget(mute);
-        auto* volume=new QSlider(Qt::Horizontal); volume->setObjectName("sessionVolume"); volume->setRange(0,100);volume->setValue(playbackVolume_->value());volume->setMaximumWidth(120);footer->addWidget(volume);
+        auto* mute=new QPushButton; mute->setObjectName("sessionMute"); mute->setCheckable(true); mute->setChecked(playbackMuted_->isChecked());mute->setFixedSize(42,42);mute->setIconSize(QSize(20,20));
+        auto syncMute=[mute](bool muted){mute->setIcon(uiIcon(muted?"mute":"volume"));mute->setToolTip(muted?"Unmute":"Mute");mute->setAccessibleName(muted?"Unmute audio":"Mute audio");};syncMute(mute->isChecked());
+        footer->addWidget(mute);
+        auto* volume=new SessionVolumeSlider; volume->setObjectName("sessionVolume"); volume->setRange(0,100);volume->setValue(playbackVolume_->value());volume->setMinimumWidth(90);volume->setMaximumWidth(160);footer->addWidget(volume);
+        auto* volumeText=new QLabel(QString("%1%").arg(volume->value()));volumeText->setMinimumWidth(36);footer->addWidget(volumeText);footer->addStretch();
         auto* volumeDelay=new QTimer(this); volumeDelay->setSingleShot(true); volumeDelay->setInterval(100);
-        connect(volume,&QSlider::valueChanged,this,[this,volumeDelay](int value){playbackVolume_->setValue(value);volumeDelay->start();});
-        connect(volumeDelay,&QTimer::timeout,this,[this,volumeDelay]{
+        connect(volume,&QSlider::valueChanged,this,[this,volumeDelay,volumeText](int value){playbackVolume_->setValue(value);volumeText->setText(QString("%1%").arg(value));volumeDelay->start();});
+        connect(volumeDelay,&QTimer::timeout,this,[this,volumeDelay,volume,mute]{
             if(session_.playbackPending())volumeDelay->start();
-            else if(session_.status().phase==RoomPhase::Active)applyPlayback_->click();
+            else if(session_.status().phase==RoomPhase::Active) {
+                playbackState_->setText("Applying playback settings…");
+                session_.updatePlayback({playbackDevice_->currentData().toString().toStdWString(),unsigned(volume->value()),mute->isChecked()});
+            }
         });
-        connect(mute,&QPushButton::toggled,this,[this,volumeDelay](bool checked){playbackMuted_->setChecked(checked);volumeDelay->start(100);});
-        connect(playbackMuted_,&QCheckBox::toggled,mute,&QPushButton::setChecked);
-        connect(playbackVolume_,&QSpinBox::valueChanged,volume,&QSlider::setValue);
-        auto* fullscreen=new QPushButton("Fullscreen"); fullscreen->setObjectName("sessionFullscreen");fullscreen->setIcon(uiIcon("fullscreen"));footer->addWidget(fullscreen);
-        connect(fullscreen,&QPushButton::clicked,this,[this,fullscreen]{auto* shell=window();if(shell->isFullScreen()){shell->showNormal();fullscreen->setText("Fullscreen");}else{shell->showFullScreen();fullscreen->setText("Exit fullscreen");}});
-        auto* escape=new QShortcut(QKeySequence(Qt::Key_Escape),this);connect(escape,&QShortcut::activated,this,[this,fullscreen]{if(window()->isFullScreen()){window()->showNormal();fullscreen->setText("Fullscreen");}});
-        auto* toggle=new QPushButton("Controls"); toggle->setObjectName("toggleSessionControls");toggle->setCheckable(true);toggle->setChecked(true);footer->addWidget(toggle);
+        connect(mute,&QPushButton::toggled,this,[this,volumeDelay,syncMute](bool checked){syncMute(checked);playbackMuted_->setChecked(checked);volumeDelay->start(0);});
+        connect(playbackMuted_,&QCheckBox::toggled,mute,[mute,syncMute](bool checked){const QSignalBlocker block(mute);mute->setChecked(checked);syncMute(checked);});
+        connect(playbackVolume_,&QSpinBox::valueChanged,volume,[volume,volumeText](int value){const QSignalBlocker block(volume);volume->setValue(value);volumeText->setText(QString("%1%").arg(value));});
+        connect(applyPlayback_,&QPushButton::clicked,volumeDelay,&QTimer::stop);
+        connect(playbackDevice_,&QComboBox::activated,this,[volumeDelay]{volumeDelay->start();});
+        connect(playbackVolume_,&QSpinBox::valueChanged,this,[this,volumeDelay]{if(playbackVolume_->hasFocus())volumeDelay->start();});
+        connect(playbackMuted_,&QCheckBox::clicked,this,[volumeDelay]{volumeDelay->start();});
+        auto* fullscreen=new QPushButton("Fullscreen"); fullscreen->setObjectName("sessionFullscreen");fullscreen->setIcon(uiIcon("fullscreen"));fullscreen->setFixedHeight(42);fullscreen->setIconSize(QSize(20,20));footer->addWidget(fullscreen);
+        auto* cinema=new QWidget;cinema->setObjectName("StreamFullscreen");auto* cinemaLayout=new QVBoxLayout(cinema);cinemaLayout->setContentsMargins(0,0,0,0);cinemaLayout->setSpacing(0);pages->addWidget(cinema);
+        auto previousState=std::make_shared<Qt::WindowStates>();
+        qApp->installEventFilter(this);
+        exitFullscreen_=[this,pages,dashboard,primary,previousState]{
+            if(!streamFullscreen_)return;streamFullscreen_=false;
+            primary->addWidget(video_,1);video_->setCornerRadius(8);pages->setCurrentWidget(dashboard);video_->show();
+            auto* shell=window();if(auto* app=dynamic_cast<AppShellWindow*>(shell))app->setChromeVisible(true);
+            shell->setWindowState(*previousState);video_->setFocus();
+        };
+        connect(fullscreen,&QPushButton::clicked,this,[this,pages,cinema,cinemaLayout,previousState]{
+            if(streamFullscreen_){exitFullscreen_();return;}
+            *previousState=window()->windowState();streamFullscreen_=true;video_->setCornerRadius(0);cinemaLayout->addWidget(video_);pages->setCurrentWidget(cinema);video_->show();
+            if(auto* app=dynamic_cast<AppShellWindow*>(window()))app->setChromeVisible(false);
+            window()->showFullScreen();video_->setFocus();
+        });
+        auto* escape=new QShortcut(QKeySequence(Qt::Key_Escape),this);connect(escape,&QShortcut::activated,this,[this,settingsPage,hideSettings]{if(streamFullscreen_){exitFullscreen_();return;}if(settingsPage->isVisible())hideSettings();});
+        auto* toggle=new QPushButton("Controls"); toggle->setObjectName("toggleSessionControls");toggle->setIcon(uiIcon("controls"));toggle->setIconSize(QSize(20,20));toggle->setFixedHeight(42);toggle->setCheckable(true);toggle->setChecked(true);footer->addWidget(toggle);
         connect(toggle,&QPushButton::toggled,controlsScroll,&QWidget::setVisible);
+        openSettings->setText({});openSettings->setAccessibleName("Playback settings");openSettings->setToolTip("Playback settings");openSettings->setFixedSize(42,42);openSettings->setIconSize(QSize(20,20));footer->addWidget(openSettings);
     }
-    footer->addStretch(); stop_->setText(config.room.host?"Stop sharing":"Leave room");stop_->setIcon(uiIcon("stop"));move(stop_,footer);
+    if(config.room.host)footer->addStretch(); stop_->setText(config.room.host?"Stop sharing":"Leave room");stop_->setIcon(uiIcon("stop","#ffffff"));stop_->setIconSize(QSize(20,20));stop_->setMinimumHeight(42);move(stop_,footer);
+    if(config.room.host)for(auto* button:{openSettings,copyLink_,stop_}) {
+        button->setFixedHeight(42);button->setIconSize(QSize(20,20));footer->setAlignment(button,Qt::AlignVCenter);
+    }
     move(error_,dashboardLayout); error_->hide();
     for(auto* combo:findChildren<QComboBox*>()) styleComboPopup(combo);
     pages->setCurrentWidget(dashboard);
     session_.error = [this](const auto& message) { error_->setText(message);error_->setVisible(!message.isEmpty()); };
-    session_.finished = [this](const auto&) { stop_->setEnabled(false); apply_->setEnabled(false); if (closing_) QTimer::singleShot(0, this, [this] { close(); }); };
-    if (!session_.start(std::move(config))) { stop_->setEnabled(false); apply_->setEnabled(false); }
+    session_.finished = [this,host=config.room.host](const auto& status) {
+        apply_->setEnabled(false);
+        // Leave remains usable after failures; a normal remote room shutdown
+        // follows the same cleanup/navigation path as a local Leave.
+        stop_->setEnabled(!closing_);
+        if(closing_ || (!host && status.phase==RoomPhase::Stopped))
+            QTimer::singleShot(0,this,[this]{close();});
+    };
+    if (!session_.start(std::move(config))) { stop_->setEnabled(true); apply_->setEnabled(false); }
+}
+bool RoomSessionWindow::eventFilter(QObject* watched,QEvent* event) {
+    auto* widget=qobject_cast<QWidget*>(watched);
+    if(widget && (widget==this || isAncestorOf(widget)) && (event->type()==QEvent::ShortcutOverride || event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease)) {
+        auto* key=static_cast<QKeyEvent*>(event);
+        if(key->key()==Qt::Key_Escape) {
+            if(event->type()==QEvent::KeyRelease && swallowEscapeRelease_){swallowEscapeRelease_=false;event->accept();return true;}
+            if(streamFullscreen_){
+                if(event->type()==QEvent::KeyPress){swallowEscapeRelease_=true;exitFullscreen_();}
+                event->accept();return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(watched,event);
 }
 void RoomSessionWindow::resizeEvent(QResizeEvent* event) {
     if(sessionColumns_)sessionColumns_->setDirection(event->size().width()<720?QBoxLayout::TopToBottom:QBoxLayout::LeftToRight);
+    if(settingsDrawer_)QTimer::singleShot(0,this,[this]{settingsDrawer_->setGeometry(settingsDrawer_->parentWidget()->rect());});
     QWidget::resizeEvent(event);
 }
 RoomSessionWindow::~RoomSessionWindow() {
+    qApp->removeEventFilter(this);
     if(previewWorker_) {previewWorker_->requestInterruption();previewWorker_->wait();delete previewWorker_;}
     // QWidget children otherwise outlive the session_ member they reference.
     delete gamepad_; gamepad_ = nullptr;
 }
 void RoomSessionWindow::RefreshHostPreview() {
     ++previewRevision_;
-    hostPreview_->setPixmap(uiIcon("display").pixmap(80,80));
-    hostPreview_->setToolTip("Loading source preview…");
+    hostPreview_->setText(previewActive_?"Starting live preview…":session_.status().stream.preferences.videoPaused?"Video paused":"Preview suspended to save resources.\nSelect this window to resume the preview.");
+    hostPreview_->setToolTip("Live preview runs only while this app is selected. Sharing continues when the preview is suspended.");
     if(previewWorker_) {previewWorker_->requestInterruption();return;}
+    if(!previewActive_)return;
     const auto source=previewSource_;const auto revision=previewRevision_;
-    auto result=std::make_shared<QImage>();
-    previewWorker_=QThread::create([source,result] {
+    auto pending=std::make_shared<std::atomic_bool>(false);
+    previewWorker_=QThread::create([this,source,revision,pending] {
         try {
-            screenshare::CaptureConfig capture;capture.targetFps=15;capture.allowDisplayFallback=false;
+            screenshare::CaptureConfig capture;capture.targetFps=30;capture.allowDisplayFallback=false;
             capture.backend=screenshare::CaptureBackend::WindowsGraphicsCapture;
             capture.sourceType=source.kind==CaptureKind::Window?screenshare::CaptureSourceType::Window:screenshare::CaptureSourceType::Display;
             capture.windowHandle=source.window;capture.displayIndex=source.display;
             screenshare::DesktopCapturer capturer;capturer.Start(capture);
-            const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(1);
-            while(!QThread::currentThread()->isInterruptionRequested()&&std::chrono::steady_clock::now()<until) {
+            while(!QThread::currentThread()->isInterruptionRequested()) {
+                const auto nextFrame=std::chrono::steady_clock::now()+std::chrono::milliseconds(33);
                 auto frame=capturer.TryCaptureFrame(std::chrono::milliseconds(30));
-                if(frame&&!frame->pixels.empty()) {*result=QImage(reinterpret_cast<const uchar*>(frame->pixels.data()),frame->width,frame->height,frame->rowPitch,QImage::Format_RGB32).scaled(480,270,Qt::KeepAspectRatio,Qt::SmoothTransformation);break;}
+                if(frame&&!frame->pixels.empty()&&!pending->exchange(true)) {
+                    auto image=QImage(reinterpret_cast<const uchar*>(frame->pixels.data()),frame->width,frame->height,frame->rowPitch,QImage::Format_RGB32).scaled(640,360,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+                    const QSize sourceSize(frame->sourceWidth,frame->sourceHeight);
+                    QMetaObject::invokeMethod(this,[this,image,sourceSize,revision,pending]{pending->store(false);if(revision==previewRevision_&&previewActive_){previewSourceSize_=sourceSize;hostPreview_->setPixmap(QPixmap::fromImage(image));}},Qt::QueuedConnection);
+                }
+                std::this_thread::sleep_until(nextFrame);
             }
         } catch(...) {}
     });
-    connect(previewWorker_,&QThread::finished,this,[this,result,revision] {
+    connect(previewWorker_,&QThread::finished,this,[this,revision] {
         auto* worker=previewWorker_;previewWorker_=nullptr;worker->deleteLater();
-        if(revision!=previewRevision_) {if(!closing_)RefreshHostPreview();return;}
-        if(!result->isNull())hostPreview_->setPixmap(QPixmap::fromImage(*result));
-        hostPreview_->setToolTip(result->isNull()?"Source preview unavailable":"Source preview captured when this source was selected");
+        if(revision!=previewRevision_) {if(!closing_&&previewActive_)RefreshHostPreview();return;}
+        if(previewActive_)hostPreview_->setText("Live preview unavailable");
     });
     previewWorker_->start();
 }
 void RoomSessionWindow::revokeControl() { if (gamepad_) gamepad_->Revoke(); }
+void RoomSessionWindow::setProfileNickname(const QString& nickname) {
+    const auto edit=++profileNicknameEdit_;
+    QTimer::singleShot(500,this,[this,nickname,edit]{applyProfileNickname(nickname,edit);});
+}
+void RoomSessionWindow::applyProfileNickname(QString nickname,uint64_t edit) {
+    if(edit!=profileNicknameEdit_||closing_)return;
+    if(session_.roomUpdatePending()) {QTimer::singleShot(100,this,[this,nickname,edit]{applyProfileNickname(nickname,edit);});return;}
+    const auto status=session_.status();
+    if(status.phase!=RoomPhase::Active) {if(profileNicknameResult)profileNicknameResult("Saved for future rooms. The current room is not connected.");return;}
+    for(const auto& member:status.members)if(member.peerId==status.peerId&&member.nickname==nickname.toStdString())return;
+    nicknameRevision_=status.revision;nickname_->setText(nickname);applyingProfileNickname_=true;updatingNickname_=true;
+    updateNickname_->setEnabled(false);updatePolicy_->setEnabled(false);
+    roomUpdateState_->setText("Updating nickname…");session_.updateNickname(nickname.toStdString(),status.revision);
+}
 StreamPreferences RoomSessionWindow::ReadPreferences() const {
     StreamPreferences p; p.preset = StreamPreset(preset_->currentIndex()); p.resolution = ResolutionMode(resolution_->currentIndex());
     p.width = width_->value(); p.height = height_->value(); p.fpsMode = SettingMode(fpsMode_->currentIndex()); p.fps = fps_->value();
     p.bitrateMode = SettingMode(bitrateMode_->currentIndex());
     if (p.bitrateMode == SettingMode::Manual || bitrateLimit_->isChecked()) p.bitrateLimitBps = bitrate_->value();
     if (uploadBudgetEnabled_->isChecked()) p.aggregateUploadLimitBps = uploadBudget_->value();
+    p.videoPaused=session_.status().stream.preferences.videoPaused;
     return p;
 }
 void RoomSessionWindow::closeEvent(QCloseEvent* event) {
+    if(exitFullscreen_)exitFullscreen_();
     if (session_.running()) { closing_ = true; session_.stop(); event->ignore(); }
     else { event->accept(); if (closed) closed(); }
 }

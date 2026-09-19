@@ -36,6 +36,7 @@
     <file alias="ui/icons/remove.svg">../../assets/ui/icons/remove.svg</file>
     <file alias="ui/icons/report.svg">../../assets/ui/icons/report.svg</file>
     <file alias="ui/icons/room.svg">../../assets/ui/icons/room.svg</file>
+    <file alias="ui/icons/controls.svg">../../assets/ui/icons/controls.svg</file>
     <file alias="ui/icons/settings.svg">../../assets/ui/icons/settings.svg</file>
     <file alias="ui/icons/shield.svg">../../assets/ui/icons/shield.svg</file>
     <file alias="ui/icons/share.svg">../../assets/ui/icons/share.svg</file>

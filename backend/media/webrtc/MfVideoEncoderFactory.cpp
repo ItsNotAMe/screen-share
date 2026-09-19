@@ -21,15 +21,15 @@ namespace {
 struct RetiredVideoFrame {};
 class MfVideoEncoder final : public webrtc::VideoEncoder {
 public:
-    explicit MfVideoEncoder(std::shared_ptr<MfHardwareSession> hardware)
-        : worker_(webrtc::Thread::Create()), hardware_(std::move(hardware)) {
+    explicit MfVideoEncoder(std::shared_ptr<MfHardwareSession> hardware, int level)
+        : worker_(webrtc::Thread::Create()), hardware_(std::move(hardware)), level_(level) {
         worker_->SetName("MF encoder", nullptr);
         if (!worker_->Start()) throw std::runtime_error("MF encoder worker startup failed");
     }
     ~MfVideoEncoder() override { Release(); worker_->Stop(); }
     int InitEncode(const webrtc::VideoCodec* codec, const Settings&) override {
         if (!codec || codec->codecType != webrtc::kVideoCodecH264 ||
-            codec->width < 16 || codec->height < 16 || codec->width > 1920 || codec->height > 1080 ||
+            codec->width < 16 || codec->height < 16 || codec->width > (level_ >= 52 ? 3840 : 1920) || codec->height > (level_ >= 52 ? 2160 : 1080) ||
             codec->width % 2 || codec->height % 2 || codec->maxFramerate == 0 || codec->maxFramerate > 60 ||
             codec->numberOfSimulcastStreams > 1 || codec->startBitrate > 40'000)
             return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
@@ -43,7 +43,7 @@ public:
             config_.fps = codec->maxFramerate;
             maximumFps_ = codec->maxFramerate;
             config_.bitrate = codec->startBitrate * 1000;
-            config_.levelIdc = 42;
+            config_.levelIdc = config_.width > 1920 || config_.height > 1080 ? level_ : 42;
             try {
                 encoder_ = std::make_unique<H264StreamEncoder>();
                 if (config_.bitrate) StartTransform();
@@ -325,6 +325,7 @@ private:
     std::shared_ptr<MfHardwareSession> hardware_;
     std::atomic<bool> hardwareActive_{false};
     int64_t hardwareSampleId_ = 0;
+    const int level_;
     int maximumFps_ = 60;
     std::unique_ptr<H264StreamEncoder> encoder_;
     H264StreamEncoderConfig config_;
@@ -336,21 +337,22 @@ private:
 };
 }
 std::vector<webrtc::SdpVideoFormat> MfVideoEncoderFactory::GetSupportedFormats() const {
-    return {{"H264", {{"profile-level-id", "64002a"}, {"level-asymmetry-allowed", "1"}, {"packetization-mode", "1"}}}};
+    return {{"H264", {{"profile-level-id", "640034"}, {"level-asymmetry-allowed", "1"}, {"packetization-mode", "1"}}}};
 }
 webrtc::VideoEncoderFactory::CodecSupport MfVideoEncoderFactory::QueryCodecSupport(
     const webrtc::SdpVideoFormat& format, std::optional<std::string> mode, std::optional<webrtc::Resolution> size) const {
     const auto level = format.parameters.find("profile-level-id");
     // IsCodecInList compares profiles, not levels. Until per-level MF limits are
-    // implemented, reject a negotiated lower level instead of exceeding it.
-    const bool levelSupported = level != format.parameters.end() && level->second == "64002a";
-    return {levelSupported && (!mode || *mode == "L1T1") && (!size || (size->width >= 16 && size->width <= 1920 &&
-        size->height >= 16 && size->height <= 1080 && size->width % 2 == 0 && size->height % 2 == 0)) &&
+    // implemented, only accept the explicit 1080p and UHD limits below.
+    const bool highLevel = level != format.parameters.end() && level->second == "640034";
+    const bool levelSupported = highLevel || (level != format.parameters.end() && level->second == "64002a");
+    return {levelSupported && (!mode || *mode == "L1T1") && (!size || (size->width >= 16 && size->width <= (highLevel ? 3840 : 1920) &&
+        size->height >= 16 && size->height <= (highLevel ? 2160 : 1080) && size->width % 2 == 0 && size->height % 2 == 0)) &&
         format.IsCodecInList(GetSupportedFormats()), false};
 }
 std::unique_ptr<webrtc::VideoEncoder> MfVideoEncoderFactory::Create(const webrtc::Environment&,
     const webrtc::SdpVideoFormat& format) {
     if (!QueryCodecSupport(format, std::nullopt, std::nullopt).is_supported) return nullptr;
-    return std::make_unique<MfVideoEncoder>(hardware_);
+    return std::make_unique<MfVideoEncoder>(hardware_,format.parameters.at("profile-level-id")=="640034"?52:42);
 }
 }

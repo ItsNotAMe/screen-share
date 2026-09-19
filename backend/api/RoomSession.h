@@ -50,6 +50,8 @@ struct PeerStreamStatus {
     std::optional<media::StreamPreferences> appliedPreferences;
 };
 struct StreamStatus {
+    std::optional<uint64_t> receiveBps;
+    std::optional<double> receiveRttMs;
     uint64_t requestedRevision = 0;
     media::StreamPreferences preferences;
     std::vector<PeerStreamStatus> peers;

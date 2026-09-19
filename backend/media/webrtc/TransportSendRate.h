@@ -17,6 +17,8 @@ struct TransportSendRate {
     std::mutex mutex;
     bool pending = false;
     std::string transports;
+    uint64_t receivedBytes = 0;
+    std::optional<uint64_t> receiveBps;
     uint64_t bytes = 0;
     int64_t timestampUs = 0;
     std::optional<uint64_t> bitsPerSecond;
@@ -25,11 +27,11 @@ struct TransportSendRate {
     uint64_t videoBytes = 0;
     int64_t videoTimestampUs = 0;
     std::chrono::steady_clock::time_point sampled{}, next{};
-    struct Snapshot { std::optional<uint64_t> bitsPerSecond; bool stale; SenderVideoObservation sender; };
+    struct Snapshot { std::optional<uint64_t> bitsPerSecond; bool stale; SenderVideoObservation sender; std::optional<uint64_t> receiveBps; };
     Snapshot Read(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) {
         std::lock_guard lock(mutex);
         const bool stale = sampled != std::chrono::steady_clock::time_point{} && now - sampled >= std::chrono::seconds(3);
-        return {stale ? std::nullopt : bitsPerSecond, stale, stale ? SenderVideoObservation{} : sender};
+        return {stale ? std::nullopt : bitsPerSecond, stale, stale ? SenderVideoObservation{} : sender, stale ? std::nullopt : receiveBps};
     }
 };
 class TransportSendRateCallback : public webrtc::RTCStatsCollectorCallback {
@@ -44,14 +46,18 @@ public:
             // numeric conversion or fabricating an implausible rate.
             return std::isfinite(value) && value <= 1e12 ? std::optional(uint64_t(value)) : std::nullopt;
         };
-        uint64_t bytes = 0; std::string transports;
+        uint64_t bytes = 0, receivedBytes = 0; std::string transports;
         for (const auto* transport : report->GetStatsOfType<webrtc::RTCTransportStats>()) {
             if (!transport->bytes_sent) continue;
+            receivedBytes += transport->bytes_received.value_or(0);
             bytes += *transport->bytes_sent; transports += transport->id() + ";";
         }
         const auto at = report->timestamp().us();
         std::lock_guard lock(state_->mutex);
-        state_->pending = false; state_->bitsPerSecond.reset();
+        state_->pending = false; state_->bitsPerSecond.reset();state_->receiveBps.reset();
+        if (!transports.empty() && transports == state_->transports)
+            state_->receiveBps=rate(receivedBytes,state_->receivedBytes,at,state_->timestampUs);
+        state_->receivedBytes=receivedBytes;
         if (!transports.empty() && transports == state_->transports && at > state_->timestampUs && bytes >= state_->bytes)
             state_->bitsPerSecond = rate(bytes, state_->bytes, at, state_->timestampUs);
         state_->transports = std::move(transports); state_->bytes = bytes; state_->timestampUs = at;

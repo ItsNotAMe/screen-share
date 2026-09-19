@@ -3,7 +3,6 @@
 #include <QtWidgets/QWidget>
 
 class QLabel;
-class QGraphicsOpacityEffect;
 
 // Lightweight, non-blocking notification that fades in near the bottom of a host
 // widget, stays for a short time, then fades out and deletes itself. Unlike a
@@ -20,9 +19,9 @@ private:
     void start();
     void reposition();
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void paintEvent(QPaintEvent*) override;
 
     QWidget* host_ = nullptr;
     QLabel* label_ = nullptr;
-    QGraphicsOpacityEffect* opacity_ = nullptr;
     int visibleMs_ = 3200;
 };

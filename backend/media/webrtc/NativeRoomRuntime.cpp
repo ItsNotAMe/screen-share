@@ -191,7 +191,14 @@ public:
     }
     v2::StreamStatus StreamSettings() const override {
         v2::StreamStatus result;
-        if (!identity_.host) return result;
+        if (!identity_.host) {
+            for(const auto& [id,entry]:peers_) if(!entry->removing && !entry->retired) {
+                const auto sample=entry->sendRate->Read();
+                result.receiveBps=sample.receiveBps;result.receiveRttMs=sample.sender.rttMs;
+                break;
+            }
+            return result;
+        }
         result.requestedRevision = settingsRevision_; result.preferences = options_.preferences;
         const auto capture = capture_.snapshot();
         result.capture = {capture.state, capture.captureFailure, capture.sourceGeneration, capture.captureSource};
@@ -308,7 +315,7 @@ public:
                 // An initial rejection cannot satisfy the initial stream contract.
                 if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
             }
-            if (!entry.removing && identity_.host && entry.negotiation->ready()) {
+            if (!entry.removing && entry.negotiation->ready()) {
                 bool request = false;
                 { std::lock_guard lock(entry.sendRate->mutex);
                   const auto now = std::chrono::steady_clock::now();

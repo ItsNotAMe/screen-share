@@ -20,7 +20,7 @@ public:
         : microphoneProcessor_(std::move(microphoneProcessor)) {
         ValidateAudioSelection(initial);
         factory_ = SelectFactory(initial, std::move(factory));
-        status_ = {std::move(initial), 1};
+        status_ = {std::move(initial), 1, {}, false};
         status_.microphoneProcessing = bool(microphoneProcessor_) && status_.selected.kind == AudioKind::Microphone;
     }
     Factory Attach() { std::lock_guard lock(mutex_); active_ = !closed_; return factory_; }

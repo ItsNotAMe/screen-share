@@ -19,6 +19,7 @@ struct StreamPreferences {
     SettingMode bitrateMode = SettingMode::Auto;
     std::optional<int> bitrateLimitBps;
     std::optional<int> aggregateUploadLimitBps;
+    bool videoPaused = false; // Session-only; never persisted as a new-room default.
 };
 struct StreamLimits {
     int maxVideoBitrateBps, initialVideoBitrateBps;
@@ -51,6 +52,7 @@ inline StreamLimits ValidateStreamPreferences(const StreamPreferences& value) {
 inline int AllocateViewerVideo(const StreamPreferences& preferences, size_t viewers) {
     if (viewers > 63) throw std::invalid_argument("Invalid viewer count");
     const auto individual = ValidateStreamPreferences(preferences).maxVideoBitrateBps;
+    if (preferences.videoPaused) return 0;
     if (!preferences.aggregateUploadLimitBps || !viewers) return individual;
     const auto available = std::max<int64_t>(0, int64_t(*preferences.aggregateUploadLimitBps) * 4 / 5 - int64_t(viewers) * kViewerAudioAllowanceBps);
     const auto share = available / int64_t(viewers);

@@ -3,6 +3,8 @@
 #include "render/Nv12D3D11Presenter.h"
 
 #include <QtGui/QPainter>
+#include <QtGui/QPainterPath>
+#include <QtGui/QRegion>
 #include <QtGui/QPaintEngine>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
@@ -471,7 +473,7 @@ void VideoFrameWidget::setControlCapture(bool enabled, bool mouse, bool keyboard
     if (controlActive_) {
         setFocusPolicy(Qt::StrongFocus);
         setCursor(controlMouse_ ? Qt::CrossCursor : Qt::ArrowCursor);
-        setFocus(Qt::OtherFocusReason);
+        // Do not steal focus from the button that activated this window.
     } else {
         setFocusPolicy(Qt::NoFocus);
         unsetCursor();
@@ -483,7 +485,7 @@ void VideoFrameWidget::setControlCapture(bool enabled, bool mouse, bool keyboard
         if (controlActive_) {
             d3dSurface_->setFocusPolicy(Qt::StrongFocus);
             d3dSurface_->setCursor(controlMouse_ ? Qt::CrossCursor : Qt::ArrowCursor);
-            d3dSurface_->setFocus(Qt::OtherFocusReason);
+            // Pointer interaction gives the video focus when requested.
         } else {
             d3dSurface_->setFocusPolicy(Qt::NoFocus);
             d3dSurface_->unsetCursor();
@@ -764,6 +766,39 @@ void VideoFrameWidget::paintEvent(QPaintEvent* event)
     }
 }
 
+void VideoFrameWidget::setCornerRadius(int radius)
+{
+    cornerRadius_ = std::max(0, radius);
+    updateCornerMask();
+}
+
+void VideoFrameWidget::setOverlayExclusion(const QRect& rect)
+{
+    overlayExclusion_ = rect;
+    updateCornerMask();
+}
+
+void VideoFrameWidget::updateCornerMask()
+{
+    QRegion region(rect());
+    if (cornerRadius_) {
+        QPainterPath outline;
+        outline.addRoundedRect(QRectF(rect()), cornerRadius_, cornerRadius_);
+        region = QRegion(outline.toFillPolygon().toPolygon());
+        setMask(region);
+    } else clearMask();
+    // Clip the native swap chain under in-app overlays without changing its
+    // viewport, scaling, frame presentation or input coordinates.
+    if (d3dSurface_) {
+        if (!cornerRadius_ && overlayExclusion_.isEmpty())d3dSurface_->clearMask();
+        else {
+            region -= QRegion(overlayExclusion_);
+            // An empty QWidget mask removes clipping instead of hiding it.
+            d3dSurface_->setMask(region.isEmpty()?QRegion(-1,-1,1,1):region);
+        }
+    }
+}
+
 void VideoFrameWidget::resizeEvent(QResizeEvent* event)
 {
     paintedMapping_={};
@@ -771,6 +806,7 @@ void VideoFrameWidget::resizeEvent(QResizeEvent* event)
     if (d3dSurface_ != nullptr) {
         d3dSurface_->setGeometry(rect());
     }
+    updateCornerMask();
     updateD3DTarget();
 }
 

@@ -3,7 +3,7 @@
 #include "media/capture/SyntheticCaptureSource.h"
 #include <atomic>
 struct DesktopInputEvidence {
-    std::atomic<unsigned> applied{0},released{0},keys{0},wheels{0};
+    std::atomic<unsigned> applied{0},released{0},keys{0},wheels{0},keyUps{0},buttonUps{0};
     std::atomic<bool> healthy{true};
     std::atomic<float> x{0},y{0};
 };
@@ -15,6 +15,8 @@ public:
     bool Apply(const screenshare::input::Event& event) override {
         state_->x=event.x;state_->y=event.y;
         if(event.kind==screenshare::input::Kind::Key)++state_->keys;
+        if(event.kind==screenshare::input::Kind::Key && !event.down)++state_->keyUps;
+        if(event.kind==screenshare::input::Kind::Button && !event.down)++state_->buttonUps;
         if(event.kind==screenshare::input::Kind::Wheel)++state_->wheels;
         ++state_->applied;return true;
     }

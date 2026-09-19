@@ -12,6 +12,8 @@
 #include <QtGui/QCloseEvent>
 #include <QtGui/QPainter>
 #include <QtGui/QPixmap>
+#include <QMouseEvent>
+#include <QWindow>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QApplication>
@@ -332,6 +334,10 @@ bool AppShellWindow::eventFilter(QObject* watched, QEvent* event)
     if (event->type() == QEvent::MouseButtonPress) {
         auto* target = qobject_cast<QWidget*>(watched);
         if (target && target->window() == this) {
+            if (titleBar_ && (target == titleBar_ || titleBar_->isAncestorOf(target)) && !isTitleControl(target)) {
+                auto* mouse = static_cast<QMouseEvent*>(event);
+                if (mouse->button() == Qt::LeftButton && windowHandle() && windowHandle()->startSystemMove()) return true;
+            }
             bool control = false;
             for (auto* ancestor = target; ancestor && ancestor != this; ancestor = ancestor->parentWidget()) {
                 if (ancestor->focusPolicy() != Qt::NoFocus) { control = true; break; }

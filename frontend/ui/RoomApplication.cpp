@@ -19,7 +19,12 @@ RoomApplication::RoomApplication(QUrl origin, QtRoomSession::Factory factory,
         HomeWindow::Actions actions;
         actions.createRoom = [this] { OpenRoom(true); };
         actions.joinRoom = [this] { OpenRoom(false); };
-        actions.openRoom = [this](const QString& id) { OpenRoom(false, id); };
+        actions.openRoom = [this](const QString& id) {
+            if(closing_ || browser_->activeSession())return;
+            browser_->OpenJoin(id);
+            browser_->JoinListedRoom(id);
+            if(!browser_->activeSession())Present(browser_.get());
+        };
         actions.requestRooms = [this] {
             // Only an explicit Refresh replaces the live subscription.
             if (browser_->directory().status().phase == screenshare::room::qt::RoomDirectory::Phase::Connecting) return;

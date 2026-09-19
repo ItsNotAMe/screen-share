@@ -21,7 +21,14 @@ PeerDiagnosticsWidget::PeerDiagnosticsWidget(QWidget* parent) : QWidget(parent) 
     diagnostics->setEditTriggers(QAbstractItemView::NoEditTriggers);
     diagnostics->setSelectionBehavior(QAbstractItemView::SelectRows);
     diagnostics->setSelectionMode(QAbstractItemView::SingleSelection);
-    diagnostics->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    diagnostics->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    diagnostics->horizontalHeader()->setMinimumSectionSize(100);
+    diagnostics->horizontalHeader()->setTextElideMode(Qt::ElideNone);
+    for(int column=0;column<diagnostics->columnCount();++column)
+        diagnostics->setColumnWidth(column,qMax(120,diagnostics->horizontalHeader()->fontMetrics().horizontalAdvance(diagnostics->horizontalHeaderItem(column)->text())+32));
+    diagnostics->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    diagnostics->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    diagnostics->verticalHeader()->hide();
     diagnostics->setMaximumHeight(180); diagnostics->setVisible(true); layout->addWidget(diagnostics);
     auto* details = new QLabel(this); details->setObjectName("peerDiagnosticsDetails");
     details->setTextFormat(Qt::PlainText); details->setWordWrap(true);

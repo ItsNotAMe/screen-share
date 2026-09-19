@@ -7,21 +7,32 @@ application version; no release, update manifest or deployment was published.
 ## Implemented foundation (2026-09-19)
 
 Host and Viewer now use a session dashboard with the shared spacing and title bar.
-The host has a source snapshot, source/audio actions, real transport statistics,
+The host has a live source preview, source/audio actions, real transport statistics,
 and stable viewer rows with independent mouse/keyboard/controller grant toggles.
-The snapshot is captured once when a source is selected, off the UI thread; it is
-not a live monitor. Unavailable snapshots show a source icon, never another source.
-Pause is not exposed because the current session API has no video-pause operation.
+The preview targets 30 FPS off the UI thread while the app is active, with a bounded
+single-image handoff. Inactive windows show a black resource-saving placeholder;
+sharing continues. Change source opens the Create screen's thumbnail-card picker.
+Pause/Resume suspends outgoing video for every viewer while audio continues.
 The viewer has a large video canvas, collapsible control panel, local volume/mute,
 fullscreen with Escape, and Leave. Stop/Leave drains the session and returns Home.
+Viewer controller discovery selects the first available device automatically,
+including devices connected after joining. It preserves a manual choice across
+discovery updates; loss of that device releases control before selecting another.
 Controls expose separate capability choices and local consent; a host grant no
 longer requires a viewer request, but cannot bypass that local opt-out. Grants
-use acknowledged state, preserve other capabilities, and retain focus/source-change
-release safety. Keyboard control is unavailable for window capture.
-Room settings stays in the same window with Stream/Room/Details tabs and a Back
-action. Stream Apply remains reachable outside the scroll area. Diagnostics and
-report export live in Details; session nickname fields are hidden in favor of
-the top-bar profile menu. Settings uses a full page rather than the board's drawer.
+use acknowledged state and preserve other capabilities. Losing viewer focus releases
+held input and pauses forwarding without withdrawing host permissions; returning to
+the viewer resumes input. Source changes still revoke control. Keyboard control is
+unavailable for window capture.
+Room settings opens on the right with Stream/Room tabs and a Close
+action. Stream presets and room policy changes apply automatically after a short
+debounce; errors remain visible. Resolution and bitrate use predefined choices.
+Shared-audio controls live in Change source and apply automatically. Diagnostics and
+report export live in a separate in-app Details overlay, reached directly from
+the dashboard health/connection section. The source picker uses the same embedded
+overlay with Refresh in its heading. Neither opens a native window.
+Session nickname fields are hidden in favor of
+the top-bar profile menu. Stop sharing uses the legacy solid-red treatment.
 Validation: silent Qt UI checks at 100%/150%, 740/1000/1200 logical-pixel layouts,
 live volume/mute, fullscreen, settings return, synthetic controller grant/release
 cycles (including unsolicited grant and opt-out), independent mouse/keyboard
@@ -175,8 +186,7 @@ Requests can highlight the corresponding button and still support denial.
 Include release-all and the existing panic
 shortcut. Window-capture keyboard restrictions remain visible. Show per-peer RTT
 and actual stream statistics in Details; RTT is not input-to-image latency.
-Source previews, pause and additional thumbnail UI are design proposals: bind only
-supported capabilities, or implement and test the behavior before exposing them.
+Source previews, video pause/resume and the thumbnail source picker are implemented.
 
 Viewer prioritizes the video canvas and a collapsible controls panel. Controller
 selection, explicit consent, request/pending/granted/released states and release

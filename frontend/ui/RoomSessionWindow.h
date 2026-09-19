@@ -27,8 +27,11 @@ public:
     ~RoomSessionWindow() override;
     QtRoomSession& session() { return session_; }
     void revokeControl();
+    void setProfileNickname(const QString&);
+    std::function<void(const QString&)> profileNicknameResult;
     std::function<void()> closed;
 protected:
+    bool eventFilter(QObject*,QEvent*) override;
     void closeEvent(QCloseEvent*) override;
     void resizeEvent(QResizeEvent*) override;
 private:
@@ -67,12 +70,23 @@ private:
     QPushButton *updateNickname_, *updatePolicy_;
     uint64_t editRevision_ = 0, nicknameRevision_ = 0;
     bool editingRoom_ = false, editingNickname_ = false, updatingNickname_ = false;
-    bool closing_ = false;
+    uint64_t roomEditSequence_ = 0, roomSubmittedSequence_ = 0;
+    bool autoRoomUpdate_ = false;
+    QString streamSaveError_;
+    bool closing_ = false, streamFullscreen_ = false, swallowEscapeRelease_ = false;
+    std::function<void()> exitFullscreen_;
+    uint64_t profileNicknameEdit_ = 0;
+    bool applyingProfileNickname_ = false;
+    void applyProfileNickname(QString, uint64_t);
     QBoxLayout* sessionColumns_ = nullptr;
     QLabel* hostPreview_ = nullptr;
+    QSize previewSourceSize_;
     QThread* previewWorker_ = nullptr;
     screenshare::media::CaptureSelection previewSource_;
     uint64_t previewRevision_ = 0;
+    bool previewActive_ = false;
+    QWidget* settingsDrawer_ = nullptr;
+    QWidget* sharedAudioSettings_ = nullptr;
     void RefreshHostPreview();
 };
 int RunRoomSessionWindow(const QString& configurationPath);

@@ -14,7 +14,7 @@ const executable = resolve(process.argv[2] ?? '');
 const fault = process.argv[5] ?? '';
 const impairment = process.argv[4] === 'network-impairment';
 if (impairment ? !['collapse', 'loss2', 'loss5', 'reorder', 'duplicate', 'processes'].includes(fault) :
-    fault && !['mutation-ack-delay', 'controllers', 'desktop-input', 'delayed-viewer'].includes(fault)) throw new Error('Unknown native service scenario');
+    fault && !['mutation-ack-delay', 'controllers', 'desktop-input', 'native-resolution', 'delayed-viewer'].includes(fault)) throw new Error('Unknown native service scenario');
 if (!process.argv[2] || !process.argv[3]) throw new Error('Usage: node run-native-service.mjs <RoomServiceTests.exe> <artifact-root>');
 const artifact = join(resolve(process.argv[3]), 'native-service-' + randomUUID());
 await mkdir(artifact, { recursive: true });

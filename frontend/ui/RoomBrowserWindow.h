@@ -32,6 +32,7 @@ public:
     std::function<void(const screenshare::room::qt::RoomDirectory::Status&)> directoryChanged;
     void OpenCreate();
     void OpenJoin(const QString& roomId = {});
+    void JoinListedRoom(const QString& id);
     void ShowBackButton();
     QString profileName() const { return profile_.nickname(); }
     void OpenPreferences(bool playback, QWidget* owner = nullptr);
@@ -48,7 +49,6 @@ private:
     void RefreshSources();
     void RefreshSourceCards(bool selectFirst = false);
     void LoadSourcePreviews();
-    void JoinListedRoom(const QString& id);
     void PromptPassword();
     void SetError(const QString& message = {});
     QUrl origin_;
@@ -72,6 +72,7 @@ private:
     QWidget *passwordPanel_, *directoryPanel_;
     bool passwordRetry_ = false;
     bool passwordRejected_ = false;
+    QString joinFailure_;
     QVBoxLayout *detailsBody_, *joinBody_;
     QListWidget* sourceCards_;
     bool windowSources_ = false;

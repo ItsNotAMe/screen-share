@@ -41,6 +41,8 @@ public:
     bool presentVideoFrameAsync(screenshare::SessionEvent::VideoFrame frame);
     void showVideoSurface();
     void setSmoothScaling(bool enabled);
+    void setCornerRadius(int radius);
+    void setOverlayExclusion(const QRect& rect);
     void setLowLatency(bool enabled);
     [[nodiscard]] std::uint64_t presentedFrameCount() const;
     [[nodiscard]] PresentationStats presentationStats() const;
@@ -66,6 +68,9 @@ protected:
 
 private:
     void updateD3DTarget();
+    void updateCornerMask();
+    int cornerRadius_ = 0;
+    QRect overlayExclusion_;
     [[nodiscard]] bool mapToNormalized(const QPoint& pos, float& normX, float& normY) const;
     void emitMouseButton(QMouseEvent* event, bool pressed);
     void emitWheel(QWheelEvent* event);

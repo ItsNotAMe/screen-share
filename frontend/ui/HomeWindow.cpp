@@ -59,6 +59,7 @@ QLabel* label(const QString& text, const char* objectName)
     auto* widget = new QLabel(text);
     widget->setObjectName(QString::fromUtf8(objectName));
     widget->setTextFormat(Qt::PlainText);
+    widget->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     widget->setWordWrap(true);
     widget->setAttribute(Qt::WA_TransparentForMouseEvents);
     return widget;
@@ -243,7 +244,7 @@ QWidget* RoomDirectoryWidget::buildRoomPanel()
     columnLayout->addWidget(label("Room", "HomeInfoTitle"), 1);
     columnLayout->setSpacing(12);
     auto* viewers = label("Viewers", "HomeInfoTitle"); viewers->setFixedWidth(70);
-    viewers->setAlignment(Qt::AlignCenter); columnLayout->addWidget(viewers);
+    viewers->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); columnLayout->addWidget(viewers);
     auto* access = label("Access", "HomeInfoTitle"); access->setFixedWidth(130);
     columnLayout->addWidget(access);
     auto* action = label("Join", "HomeInfoTitle"); action->setFixedWidth(84);
@@ -286,12 +287,12 @@ QWidget* RoomDirectoryWidget::buildRoomRow(const HomeActiveRoom& room)
     text->addWidget(label(room.name, "HomeInfoPrimary"));
     layout->addLayout(text, 1);
     auto* viewers = label(QString::number(room.peerCount), "HomeViewerCount");
-    viewers->setFixedWidth(70); viewers->setAlignment(Qt::AlignCenter); layout->addWidget(viewers);
+    viewers->setFixedWidth(70); viewers->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); layout->addWidget(viewers);
 
     auto* status = label(
         room.passwordProtected ? QStringLiteral("Locked") : QStringLiteral("Public"),
         room.passwordProtected ? "HomeLockedStatus" : "HomePublicStatus");
-    status->setAlignment(Qt::AlignCenter);
+    status->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     status->setFixedHeight(22);
     status->setFixedWidth(130);
     layout->addWidget(status, 0, Qt::AlignVCenter);

@@ -218,7 +218,7 @@ private:
 }
 
 std::vector<webrtc::SdpVideoFormat> MfVideoDecoderFactory::GetSupportedFormats() const {
-    return {{"H264", {{"profile-level-id", "64002a"}, {"level-asymmetry-allowed", "1"}, {"packetization-mode", "1"}}},
+    return {{"H264", {{"profile-level-id", "640034"}, {"level-asymmetry-allowed", "1"}, {"packetization-mode", "1"}}},
         {"H264", {{"profile-level-id", "42e01f"}, {"level-asymmetry-allowed", "1"}, {"packetization-mode", "1"}}}};
 }
 

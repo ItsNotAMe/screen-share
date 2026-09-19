@@ -1,7 +1,9 @@
 #include "ui/RoomBrowserWindow.h"
+#include "ui/SessionPopup.h"
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
 #include "ui/UiStyle.h"
+#include "ui/SourceCards.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
 #include "rtc_base/logging.h"
@@ -50,43 +52,6 @@ public:
     using QPushButton::QPushButton;
     QSize sizeHint() const override { return layout() ? (layout()->sizeHint()+QSize(12,8)).expandedTo(QSize(0,36)) : QPushButton::sizeHint(); }
     QSize minimumSizeHint() const override { return sizeHint(); }
-};
-class SourceCardDelegate final : public QStyledItemDelegate {
-public:
-    using QStyledItemDelegate::QStyledItemDelegate;
-    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        painter->save(); painter->setRenderHint(QPainter::Antialiasing);
-        const auto card = option.rect.adjusted(8,6,-8,-6);
-        const bool selected = option.state & QStyle::State_Selected;
-        painter->setBrush(QColor(option.state & QStyle::State_MouseOver ? "#111d18" : "#080e0b"));
-        painter->setPen(QPen(QColor(selected ? "#38d8c8" : "#30413a"),selected ? 1.5 : 1));
-        painter->drawRoundedRect(card,7,7);
-        const auto icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
-        const QRect preview(card.left()+12,card.top()+10,card.width()-24,72);
-        icon.paint(painter,preview,Qt::AlignCenter,QIcon::Normal);
-        const int y = card.bottom()-17;
-        painter->setBrush(Qt::NoBrush); painter->setPen(QPen(QColor(selected ? "#38d8c8" : "#8b9d95"),1.5));
-        painter->drawEllipse(QPoint(card.left()+18,y),5,5);
-        if (selected) { painter->setBrush(QColor("#38d8c8")); painter->drawEllipse(QPoint(card.left()+18,y),2,2); }
-        painter->setFont(option.font); painter->setPen(QColor("#dce7e1"));
-        painter->drawText(QRect(card.left()+29,y-10,card.width()-37,20),Qt::AlignVCenter,
-            option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString(),Qt::ElideRight,card.width()-37));
-        painter->restore();
-    }
-};
-class SourceList final : public QListWidget {
-public:
-    using QListWidget::QListWidget;
-protected:
-    void resizeEvent(QResizeEvent* event) override {
-        QListWidget::resizeEvent(event);
-        // Reserve scrollbar width even while it is hidden. Using viewport width
-        // here made wrapping add/remove the scrollbar and oscillate indefinitely.
-        const QSize cell(qMax(120, (width()-24)/2),128);
-        if (gridSize() == cell) return;
-        setGridSize(cell);
-        for (int row=0; row<count(); ++row) item(row)->setSizeHint(cell);
-    }
 };
 QIcon entryIcon(const QString& name, const QByteArray& color = "#b7c8c0") {
     return uiIcon(name,color);
@@ -175,6 +140,12 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* streamScroll = new QScrollArea; streamScroll->setObjectName("StreamSectionScroll"); streamScroll->setWidgetResizable(true);
     // Keep the content width stable as advanced options add/remove overflow.
     streamScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+    auto* streamBar = streamScroll->verticalScrollBar();
+    streamBar->setObjectName("StreamSectionBar");
+    streamBar->setEnabled(false);
+    connect(streamBar, &QScrollBar::rangeChanged, streamBar, [streamBar](int minimum, int maximum) {
+        streamBar->setEnabled(maximum > minimum);
+    });
     streamScroll->setFrameShape(QFrame::NoFrame); streamScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* streamContent = new QWidget; auto* streamBody = new QVBoxLayout(streamContent);
     streamScroll->setWidget(streamContent); streamFrame->addWidget(streamScroll);
@@ -351,6 +322,10 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
         if (!RoomProfile::normalizeNickname(nickname->text())) { nicknameError->setText("Use 1–32 characters without control characters."); return; }
         if (!profile_.saveNickname(nickname->text())) { nicknameError->setText("Could not save nickname. Check your settings folder is writable."); return; }
         nicknameError->clear();
+        if(active_) {
+            active_->profileNicknameResult=[label=QPointer<QLabel>(nicknameError)](const QString& message){if(label)label->setText(message);};
+            active_->setProfileNickname(*RoomProfile::normalizeNickname(nickname->text()));
+        }
         if (profileChanged) profileChanged();
     });
     connect(decoder, &QComboBox::currentIndexChanged, dialog, [this, decoder, error] {
@@ -497,11 +472,12 @@ void RoomBrowserWindow::JoinListedRoom(const QString& id) {
     Launch(false);
 }
 void RoomBrowserWindow::PromptPassword() {
-    auto* dialog = new QDialog(this); dialog->setObjectName("RoomPasswordDialog");
-    dialog->setWindowTitle("Room password"); dialog->setWindowModality(Qt::WindowModal); dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setMinimumWidth(360); dialog->setStyleSheet(uiStyleSheet());
-    auto* body = new QVBoxLayout(dialog); body->setContentsMargins(24,24,24,24); body->setSpacing(16);
-    auto* title = new QLabel(passwordRejected_ ? "Incorrect password. Try again." : "Enter room password"); title->setObjectName("SectionHeading"); body->addWidget(title);
+    if(findChild<QDialog*>("RoomPasswordDialog"))return;
+    if(presentPage)presentPage(this);else show();
+    auto* dialog=new SessionPopup("Room password",this);dialog->setObjectName("RoomPasswordDialog");dialog->setAttribute(Qt::WA_DeleteOnClose);dialog->setPanelSize(QSize(440,260));
+    connect(dialog,&QDialog::finished,dialog,&QObject::deleteLater);
+    auto* body=dialog->body;
+    auto* title=new QLabel(passwordRejected_?"Incorrect password. Try again.":"Enter room password");body->addWidget(title);
     auto* field = new QLineEdit; field->setObjectName("joinPassword"); field->setEchoMode(QLineEdit::Password); field->setMaxLength(128);
     field->setPlaceholderText("Password"); passwordEye(field); body->addWidget(field);
     auto* actions = new QHBoxLayout; actions->addStretch();
@@ -565,6 +541,9 @@ void RoomBrowserWindow::Launch(bool host) {
     const auto nickname = RoomProfile::normalizeNickname(profile_.nickname());
     const auto roomId = ParseRoomReference(roomId_->text().trimmed());
     if (!nickname || (!host && !roomId)) { SetError("Enter a valid room ID or room link."); return; }
+    if(!host && password_->text().isEmpty()) {
+        for(const auto& room:directory_.status().rooms)if(room.id==*roomId && room.password){passwordRejected_=false;PromptPassword();return;}
+    }
     QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", name_->text()},
         {"roomId", host ? QString{} : *roomId}, {"password", password_->text()}, {"public", public_->isChecked()}, {"viewerLimit", viewerLimit_->value()},
         {"capture", QJsonObject::fromVariantMap(source_->currentData().toMap())},
@@ -596,8 +575,18 @@ void RoomBrowserWindow::Launch(bool host) {
         active_ = std::make_unique<RoomSessionWindow>(std::move(config), factory_, loopback_, &profile_);
         if (!host) {
             auto update = active_->session().statusChanged;
-            active_->session().statusChanged = [this, update, suppliedPassword = !password_->text().isEmpty()](const auto& status) {
+            active_->session().statusChanged = [this, update, suppliedPassword = !password_->text().isEmpty(), admitted = false](const auto& status) mutable {
                 if (update) update(status);
+                if(!closing_ && active_ && !admitted && (status.phase==v2::RoomPhase::Connecting || status.phase==v2::RoomPhase::Active)) {
+                    // Admission opens the viewer once. Later status updates must not
+                    // navigate away from profile or application settings.
+                    admitted = true;
+                    if(presentPage)presentPage(active_.get());else {active_->show();hide();}
+                }
+                if(!closing_ && active_ && !admitted && status.phase==v2::RoomPhase::Failed && status.error!=v2::RoomError::AdmissionDenied) {
+                    joinFailure_="Could not join the room. Check the room link and try again.";
+                    QTimer::singleShot(0,this,[this]{if(active_)active_->close();});
+                }
                 if (!passwordRetry_ && status.phase == v2::RoomPhase::Failed && status.error == v2::RoomError::AdmissionDenied) {
                     passwordRetry_ = true;
                     passwordRejected_ = suppliedPassword;
@@ -612,14 +601,17 @@ void RoomBrowserWindow::Launch(bool host) {
                 if (presentPage) presentPage(this); else show();
                 PromptPassword(); return;
             }
+            if(!joinFailure_.isEmpty()&&!closing_) {if(presentPage)presentPage(this);else show();SetError(joinFailure_);joinFailure_.clear();return;}
             if (closing_) close();
             else if (returnFromSession) returnFromSession();
             else if (presentPage) presentPage(this);
             else show();
         }); };
         password_->clear();
-        if (presentPage) presentPage(active_.get());
-        else { active_->show(); hide(); }
+        if(host) {
+            if (presentPage) presentPage(active_.get());
+            else { active_->show(); hide(); }
+        }
     } catch (...) { SetError("Invalid room or capture settings."); }
 }
 void RoomBrowserWindow::showEvent(QShowEvent* event) {

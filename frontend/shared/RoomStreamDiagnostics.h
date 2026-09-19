@@ -10,7 +10,7 @@
 inline QString StreamPeerState(const screenshare::v2::PeerStreamStatus& peer, uint64_t requested) {
     if (peer.rejected) return "rejected";
     if (!peer.appliedRevision || peer.appliedRevision != requested) return "pending";
-    if (!peer.appliedVideoBitrateBps) return "upload-paused";
+    if (!peer.appliedVideoBitrateBps) return peer.appliedPreferences && peer.appliedPreferences->videoPaused ? "video-paused" : "upload-paused";
     if (peer.observedRevision != requested) return "waiting-for-source";
     return "source-observed";
 }
