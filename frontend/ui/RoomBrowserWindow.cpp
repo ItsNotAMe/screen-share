@@ -192,6 +192,7 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     auto* error = new QLabel; error->setTextFormat(Qt::PlainText); error->setWordWrap(true); error->setObjectName("profileError"); layout->addWidget(error);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); layout->addWidget(buttons);
     buttons->button(QDialogButtonBox::Save)->setObjectName("saveProfile");
+    for (auto* button : buttons->buttons()) button->setFixedSize(104, 44);
     connect(buttons, &QDialogButtonBox::rejected, dialog, finish);
     connect(buttons, &QDialogButtonBox::accepted, dialog, [this, finish, nickname, decoder, volume, muted, error] {
         if (!RoomProfile::normalizeNickname(nickname->text())) { error->setText("Use 1–32 characters without control characters."); nickname->setFocus(); return; }

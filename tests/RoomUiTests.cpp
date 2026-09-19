@@ -404,6 +404,9 @@ void NormalHomeScenario(const QUrl& origin) {
         auto* settingsPage = host.window().findChild<QWidget*>("ProfilePreferences"); Check(settingsPage && !settingsPage->isWindow());
         snapshot(QString("settings-%1").arg(size.width()));
         if (!previews.isEmpty()) {
+            auto* volume = settingsPage->findChild<QSpinBox*>("profileVolume");
+            volume->setFocus(); volume->selectAll();
+            snapshot(QString("volume-focused-%1").arg(size.width()));
             auto* decoder = settingsPage->findChild<QComboBox*>("profileDecoder");
             decoder->showPopup(); QCoreApplication::processEvents();
             Check(QApplication::activePopupWidget());

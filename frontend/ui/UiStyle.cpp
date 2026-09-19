@@ -3,6 +3,31 @@
 #include <QAbstractItemView>
 #include <QStyledItemDelegate>
 #include <QFrame>
+#include <QEvent>
+#include <QPainter>
+#include <QPainterPath>
+
+namespace {
+class ComboPopupSurface final : public QObject {
+public:
+    explicit ComboPopupSurface(QWidget* popup) : QObject(popup), popup_(popup) { popup->installEventFilter(this); }
+    bool eventFilter(QObject*, QEvent* event) override {
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Show) {
+            QPainterPath shape; shape.addRoundedRect(QRectF(popup_->rect()), 8, 8);
+            popup_->setMask(QRegion(shape.toFillPolygon().toPolygon()));
+        }
+        if (event->type() == QEvent::Paint) {
+            QPainter painter(popup_); painter.setRenderHint(QPainter::Antialiasing);
+            painter.setPen(QColor("#385047")); painter.setBrush(QColor("#151d1b"));
+            painter.drawRoundedRect(QRectF(popup_->rect()).adjusted(.5,.5,-.5,-.5), 8, 8);
+            return true; // Suppress the native rectangular popup panel.
+        }
+        return false;
+    }
+private:
+    QWidget* popup_;
+};
+}
 
 void styleComboPopup(QComboBox* combo)
 {
@@ -15,6 +40,7 @@ void styleComboPopup(QComboBox* combo)
     popup->setAttribute(Qt::WA_TranslucentBackground);
     popup->setObjectName("ThemedComboPopup");
     if (auto* frame = qobject_cast<QFrame*>(popup)) frame->setFrameShape(QFrame::NoFrame);
+    new ComboPopupSurface(popup);
 }
 
 QString uiStyleSheet()
@@ -31,12 +57,12 @@ QComboBox { border-radius: 10px; padding-right: 36px; }
 QFrame#ThemedComboPopup { background: transparent; border: 0; }
 QComboBox::drop-down { subcontrol-origin: border; subcontrol-position: top right; width: 32px; border: 0; }
 QComboBox::down-arrow { image: url(:/screenshare/ui/icons/chevron-down.svg); width: 16px; height: 16px; }
-QComboBox QAbstractItemView { background: #151d1b; color: #edf5f2; selection-background-color: #21645b; border: 1px solid #385047; border-radius: 8px; padding: 6px; outline: 0; }
+QComboBox QAbstractItemView { background: #151d1b; color: #edf5f2; selection-background-color: #21645b; border: 0; border-radius: 8px; padding: 6px; outline: 0; }
 QComboBox QAbstractItemView::item { min-height: 30px; padding: 4px 10px; border: 0; border-radius: 6px; }
 QComboBox QAbstractItemView::item:hover { background: #29463c; color: #edf5f2; }
 QComboBox QAbstractItemView::item:selected { background: #21645b; color: #edf5f2; border: 0; }
 QSpinBox { padding-right: 30px; }
-QSpinBox::up-button, QSpinBox::down-button { subcontrol-origin: border; width: 28px; border: 0; background: #20312c; }
+QSpinBox::up-button, QSpinBox::down-button { subcontrol-origin: padding; width: 28px; border: 0; background: #20312c; }
 QSpinBox::up-button { subcontrol-position: top right; border-top-right-radius: 6px; }
 QSpinBox::down-button { subcontrol-position: bottom right; border-bottom-right-radius: 6px; }
 QSpinBox::up-arrow { image: url(:/screenshare/ui/icons/chevron-up.svg); width: 14px; height: 14px; }
