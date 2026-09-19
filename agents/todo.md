@@ -4,6 +4,20 @@ This file tracks unfinished work only. Completed release milestones belong in Gi
 
 ## Active Priorities
 
+### Frontend 1.0 redesign — current priority (2026-09-19)
+
+Backend Stages 2–4 are accepted for personal use; Stage 5 cutover is complete.
+This supersedes older acceptance priorities below. Do not restart that campaign.
+Design boards and implementation requirements: [frontend design](../docs/design/README.md).
+
+- [ ] Deliver shared darker theme/shell and complete Home/Create/Join flows.
+- [ ] Deliver Host/Viewer/room settings, profile/playback and auto-update flows;
+  remove replaced temporary UI code and verify resizing, input consent and updates.
+- [ ] Before the eventual main merge, consolidate remaining refactor backlog here,
+  retain essential durable docs/evidence, remove refactor/ and unnecessary MD/JSON,
+  and repair references. Preserve required configuration, fixtures and licenses.
+
+
 ### Backend v2 refactor — grouped delivery work
 
 Feature scope is frozen for backend closeout. See refactor/COMPARISON.md: the first
