@@ -40,6 +40,7 @@
 #include <QAction>
 #include <QScrollArea>
 #include <QFrame>
+#include <QShowEvent>
 #include <QDir>
 #include <QFontDatabase>
 #include <QPlainTextEdit>
@@ -487,15 +488,21 @@ void NormalHomeScenario(const QUrl& origin) {
         for (auto* label : advanced->findChildren<QLabel*>()) {
             if (!label->text().isEmpty()) Check(label->width() >= label->sizeHint().width());
         }
-        const auto beforeOptions = host.browser()->findChild<QWidget*>("SourceKinds")->geometry();
+        auto* section = host.browser()->findChild<QScrollArea*>("StreamSectionScroll");
+        const auto beforeOptions = section->geometry();
+        const int beforeScroll = section->verticalScrollBar()->value();
         advanced->click(); QCoreApplication::processEvents();
-        auto* optionsPopup = host.browser()->findChild<QFrame*>("AdvancedOptionsPopup");
-        Check(optionsPopup && optionsPopup->isVisible());
-        Check(host.browser()->findChild<QWidget*>("SourceKinds")->geometry()==beforeOptions);
+        auto* options = host.browser()->findChild<QWidget*>("AdvancedOptionsContent");
+        Check(options && options->isVisible() && !options->isWindow());
+        Check(section->geometry()==beforeOptions);
+        Check(section->verticalScrollBar()->value()==beforeScroll);
+        auto* resolution = host.browser()->findChild<QComboBox*>("createResolution");
+        resolution->setFocus(); const int chosen = resolution->currentIndex();
+        QWheelEvent wheel(QPointF(5,5),QPointF(resolution->mapToGlobal(QPoint(5,5))),QPoint(),QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+        QApplication::sendEvent(resolution,&wheel); Check(resolution->currentIndex()==chosen);
         if (const auto output = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !output.isEmpty())
-            Check(optionsPopup->grab().save(QDir(output).filePath(QString("advanced-%1.png").arg(size.width()))));
-        QKeyEvent dismiss(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier); QApplication::sendEvent(optionsPopup,&dismiss);
-        Check(!advanced->isChecked() && !optionsPopup->isVisible());
+            Check(section->grab().save(QDir(output).filePath(QString("advanced-%1.png").arg(size.width()))));
+        advanced->click(); Check(!options->isVisible());
         if (size.height() >= 820) Check(host.browser()->findChild<QScrollArea*>("RoomBrowserScroll")->verticalScrollBar()->maximum() == 0);
         host.browser()->findChild<QPushButton*>("roomBack")->click();
         host.home()->findChild<QPushButton*>("HomeSecondary")->click();
@@ -1383,8 +1390,17 @@ int main(int argc, char** argv) {
             app.show(); auto& browser = *app.browser();
             app.home()->findChild<QPushButton*>("HomePrimary")->click();
             auto* cards = browser.findChild<QListWidget*>("SourceCards");
+            const auto placeholder = cards->item(0)->icon().pixmap(144,80).toImage();
+            QShowEvent repeatedShow; QApplication::sendEvent(&browser,&repeatedShow);
             Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
             Check(cards->property("previewCaptureCount").toInt() > 0);
+            const auto thumbnail = cards->item(0)->icon().pixmap(144,80).toImage();
+            Check(thumbnail != placeholder);
+            if (const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !output.isEmpty())
+                Check(thumbnail.save(QDir(output).filePath("native-display-thumbnail.png")));
+            QSet<QRgb> thumbnailColors;
+            for (int y=0;y<thumbnail.height();y+=2) for (int x=0;x<thumbnail.width();x+=2) thumbnailColors.insert(thumbnail.pixel(x,y));
+            Check(thumbnailColors.size()>8); // This interactive proof expects a visible desktop, not a blank capture.
             browser.findChild<QPushButton*>("roomBack")->click();
             app.home()->findChild<QPushButton*>("HomePrimary")->click();
             Wait([&] { return cards->property("previewCaptureFinished").toBool(); });

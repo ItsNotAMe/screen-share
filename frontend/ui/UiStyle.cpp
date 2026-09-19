@@ -13,6 +13,9 @@
 #include <QTimer>
 #include <QFormLayout>
 #include <QLabel>
+#include <QWheelEvent>
+#include <QApplication>
+#include <QAbstractScrollArea>
 
 void alignOptionRows(QFormLayout* form)
 {
@@ -30,6 +33,24 @@ void alignOptionRows(QFormLayout* form)
 }
 
 namespace {
+class ComboWheelGuard final : public QObject {
+public:
+    explicit ComboWheelGuard(QComboBox* combo) : QObject(combo) { combo->installEventFilter(this); }
+    bool eventFilter(QObject* object, QEvent* event) override {
+        if (event->type()!=QEvent::Wheel) return false;
+        auto* combo = static_cast<QComboBox*>(object);
+        auto* wheel = static_cast<QWheelEvent*>(event);
+        for (auto* parent=combo->parentWidget(); parent; parent=parent->parentWidget()) {
+            if (auto* scroll=qobject_cast<QAbstractScrollArea*>(parent)) {
+                auto* viewport=scroll->viewport();
+                QWheelEvent forwarded(viewport->mapFromGlobal(wheel->globalPosition()),wheel->globalPosition(),
+                    wheel->pixelDelta(),wheel->angleDelta(),wheel->buttons(),wheel->modifiers(),wheel->phase(),wheel->inverted());
+                QApplication::sendEvent(viewport,&forwarded); event->accept(); return true;
+            }
+        }
+        event->ignore(); return true;
+    }
+};
 class ComboListStyle final : public QProxyStyle {
 public:
     ComboListStyle() : QProxyStyle("Fusion") {}
@@ -109,6 +130,7 @@ private:
 
 void styleComboPopup(QComboBox* combo)
 {
+    new ComboWheelGuard(combo);
     auto* style = new ComboListStyle; style->setParent(combo); combo->setStyle(style);
     auto* list = new QListView(combo);
     list->setUniformItemSizes(true);

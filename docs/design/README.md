@@ -40,16 +40,22 @@ action is removed. No nickname fields, helper descriptions, room counters, or
 invented host data were added. Backend admission and configuration remain shared.
 Create uses matching outline SVGs and password visibility toggles. Source cards
 keep identical dimensions regardless of title, selection or image aspect ratio.
-A background capture owner fetches real source thumbnails with no display fallback;
+A background Windows Graphics Capture owner fetches native-size stills and resizes
+them on the CPU, with no display fallback. Desktop Duplication returned black
+stills on the test desktop, so it is not used for these previews;
 closed, protected or minimized sources retain placeholders. Thumbnails are not saved.
 Gaming/Quality use controller/HD outline icons with their short descriptions.
-Advanced settings opens a compact anchored popover below stream controls, so the
-cards keep their size. Escape or clicking outside dismisses it. Home and Join use
+Advanced settings expands inline inside the stream card's own scroll area. The
+cards keep their size and expanding preserves the section's scroll position.
+Mouse-wheel events over dropdown controls scroll their containing section without
+changing the selection; clicking or keyboard selection still works. Home and Join use
 one RoomDirectoryWidget for search, headings, stable room rows, refresh and status.
 Preview
 cards have equal responsive widths and spaced rows. Set SCREENSHARE_SOURCE_PREVIEW_PROOF=1
 to additionally verify real display and window capture in the UI test (interactive
-desktop access required; no images are saved). Ordinary offscreen tests retain
+desktop access required). With SCREENSHARE_UI_PREVIEWS set, this opt-in check saves
+a small native thumbnail locally for visual inspection and checks pixel diversity
+to reject blank captures. Ordinary offscreen tests retain
 their synthetic source model.
 The native check enters Create from Home and repeats that navigation. Capture is
 started when the page becomes visible; hidden-page cancellation invalidates the

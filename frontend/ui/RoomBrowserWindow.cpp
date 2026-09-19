@@ -45,23 +45,6 @@ using namespace screenshare;
 using namespace screenshare::room::qt;
 
 namespace {
-class OptionsPopup final : public QFrame {
-public:
-    explicit OptionsPopup(QWidget* parent) : QFrame(parent,Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint) {
-        setObjectName("AdvancedOptionsPopup"); setAttribute(Qt::WA_TranslucentBackground);
-        setAttribute(Qt::WA_NoMouseReplay);
-    }
-    std::function<void()> dismissed;
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this); painter.setCompositionMode(QPainter::CompositionMode_Source);
-        painter.fillRect(rect(),Qt::transparent); painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-        painter.setRenderHint(QPainter::Antialiasing); painter.setPen(QPen(QColor("#3c4b45"),1));
-        painter.setBrush(QColor("#151d1b")); painter.drawRoundedRect(QRectF(rect()).adjusted(.5,.5,-.5,-.5),8,8);
-    }
-    void hideEvent(QHideEvent* event) override { QFrame::hideEvent(event); if (dismissed) dismissed(); }
-    void keyPressEvent(QKeyEvent* event) override { if(event->key()==Qt::Key_Escape) hide(); else QFrame::keyPressEvent(event); }
-};
 class ContentButton final : public QPushButton {
 public:
     using QPushButton::QPushButton;
@@ -75,7 +58,7 @@ public:
         painter->save(); painter->setRenderHint(QPainter::Antialiasing);
         const auto card = option.rect.adjusted(8,6,-8,-6);
         const bool selected = option.state & QStyle::State_Selected;
-        painter->setBrush(QColor(option.state & QStyle::State_MouseOver ? "#203b30" : "#101815"));
+        painter->setBrush(QColor(option.state & QStyle::State_MouseOver ? "#111d18" : "#080e0b"));
         painter->setPen(QPen(QColor(selected ? "#38d8c8" : "#30413a"),selected ? 1.5 : 1));
         painter->drawRoundedRect(card,7,7);
         const auto icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
@@ -154,20 +137,10 @@ QWidget* disclosure(const QString& title, QWidget* content, QWidget* owner) {
     label->setSizePolicy(QSizePolicy::Minimum,QSizePolicy::Preferred);
     toggle->setSizePolicy(QSizePolicy::Minimum,QSizePolicy::Fixed);
     layout->addWidget(toggle,0,Qt::AlignLeft);
-    auto* popup = new OptionsPopup(block); popup->setMinimumWidth(260);
-    auto* popupLayout = new QVBoxLayout(popup); popupLayout->setContentsMargins(16,16,16,16); popupLayout->addWidget(content);
-    popup->dismissed = [toggle,arrow] {
-        const QSignalBlocker blocked(toggle); toggle->setChecked(false); arrow->setPixmap(entryIcon("chevron-down").pixmap(14,14));
-    };
-    QObject::connect(toggle, &QPushButton::toggled, block, [arrow, popup,toggle,content](bool open) {
+    content->setObjectName("AdvancedOptionsContent"); layout->addWidget(content); content->hide();
+    QObject::connect(toggle, &QPushButton::toggled, block, [arrow,content](bool open) {
         arrow->setPixmap(entryIcon(open ? "chevron-up" : "chevron-down").pixmap(14,14));
-        if (!open) { popup->hide(); return; }
-        popup->adjustSize(); auto position = toggle->mapToGlobal(QPoint(0,toggle->height()+6));
-        const auto available = toggle->screen()->availableGeometry();
-        if (position.y()+popup->height()>available.bottom()) position.setY(toggle->mapToGlobal(QPoint(0,0)).y()-popup->height()-6);
-        position.setX(qBound(available.left(),position.x(),qMax(available.left(),available.right()-popup->width())));
-        popup->move(position); popup->show();
-        if (auto* input = content->findChild<QSpinBox*>()) input->setFocus();
+        content->setVisible(open);
     });
     return block;
 }
@@ -200,7 +173,13 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     passwordPanel_ = optionField("Password (optional)", password_); passwordPanel_->setObjectName("RoomPasswordPanel"); detailsBody_->addWidget(passwordPanel_);
     viewerLimit_ = new QSpinBox; viewerLimit_->setObjectName("createViewerLimit"); viewerLimit_->setRange(1,63); viewerLimit_->setValue(4);
     detailsBody_->addStretch();
-    auto* stream = new QWidget; stream->setObjectName("FormCard"); auto* streamBody = new QVBoxLayout(stream); createColumns_->addWidget(stream, 1);
+    auto* stream = new QWidget; stream->setObjectName("FormCard"); createColumns_->addWidget(stream, 1);
+    auto* streamFrame = new QVBoxLayout(stream); streamFrame->setContentsMargins(1,1,1,1);
+    auto* streamScroll = new QScrollArea; streamScroll->setObjectName("StreamSectionScroll"); streamScroll->setWidgetResizable(true);
+    streamScroll->setFrameShape(QFrame::NoFrame); streamScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto* streamContent = new QWidget; auto* streamBody = new QVBoxLayout(streamContent);
+    streamScroll->setWidget(streamContent); streamFrame->addWidget(streamScroll);
+    stream->setMinimumHeight(330);
     streamBody->setContentsMargins(20,16,20,16); streamBody->setSpacing(10);
     auto* sourceHeading = new QHBoxLayout;
     auto* streamHeading = new QLabel("Share source"); streamHeading->setObjectName("SectionHeading"); sourceHeading->addWidget(streamHeading, 1);
@@ -277,7 +256,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     quality->addWidget(optionField("Bitrate", bitrate_),1,0); quality->addWidget(optionField("Shared audio", audio_),1,1);
     quality->setColumnStretch(0,1); quality->setColumnStretch(1,1); streamBody->addLayout(quality);
     streamBody->addWidget(disclosure("Advanced settings", optionField("Viewer limit", viewerLimit_), stream)); streamBody->addStretch();
-    body->addWidget(createPanel_);
+    body->addWidget(createPanel_,1);
     joinPanel_ = new QWidget; joinBody_ = new QVBoxLayout(joinPanel_); joinBody_->setContentsMargins(0,0,0,0); joinBody_->setSpacing(16);
     roomId_ = new QLineEdit; roomId_->setObjectName("joinRoomId"); roomId_->setMaxLength(512);
     roomId_->setPlaceholderText("Paste a room link or room ID"); joinBody_->addWidget(fieldLabel("Room link"));
@@ -408,6 +387,7 @@ void RoomBrowserWindow::RefreshSources() {
 }
 void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
     ++previewRevision_;
+    if (previewThread_) previewThread_->requestInterruption();
     const QSignalBlocker blocked(sourceCards_);
     sourceCards_->clear();
     QListWidgetItem* selected = nullptr;
@@ -452,7 +432,7 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
 }
 void RoomBrowserWindow::LoadSourcePreviews() {
     if (!enumerateSources_ || closing_ || !isVisible() || createPanel_->isHidden()) return;
-    if (previewThread_) { previewThread_->requestInterruption(); return; }
+    if (previewThread_) return; // A repeated show event must not cancel the current capture pass.
     QVector<QVariantMap> sources;
     for (int row = 0; row < sourceCards_->count(); ++row) {
         const auto index = sourceCards_->item(row)->data(Qt::UserRole);
@@ -471,9 +451,11 @@ void RoomBrowserWindow::LoadSourcePreviews() {
             if (QThread::currentThread()->isInterruptionRequested()) break;
             QImage image;
             try {
-                CaptureConfig config; config.targetWidth = 288; config.targetHeight = 160; config.targetFps = 15;
+                // Read a native-size still and resize it on the CPU. The live
+                // video scaling path is unnecessary for a one-shot thumbnail.
+                CaptureConfig config; config.targetFps = 15;
                 config.sourceType = source.contains("window") ? CaptureSourceType::Window : CaptureSourceType::Display;
-                config.backend = source.contains("window") ? CaptureBackend::WindowsGraphicsCapture : CaptureBackend::DesktopDuplication;
+                config.backend = CaptureBackend::WindowsGraphicsCapture;
                 config.windowHandle = source.value("window").toULongLong(); config.displayIndex = source.value("display").toInt();
                 config.allowDisplayFallback = false;
                 DesktopCapturer capturer; capturer.Start(config);
