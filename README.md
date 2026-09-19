@@ -40,6 +40,17 @@ Follow [native setup and SDK instructions](refactor/BUILD.md). The earlier
 MinGW-only application path is retired; debug/release presets now use the native
 toolchain. Use a fresh build directory if an existing cache used MinGW.
 
+In VS Code, select the `release` or `debug` CMake configure preset. Workspace
+settings select the pinned Build Tools installation's native CMake and enable
+the Visual Studio developer environment; the presets request x64
+host/target tools without passing unsupported architecture flags to Ninja.
+If an earlier configure reported `rc` missing or `CMAKE_MT-NOTFOUND`, run
+**CMake: Delete Cache and Reconfigure** after reloading the window. Command-line
+builds still need an x64 Visual Studio developer shell. If Build Tools is installed
+elsewhere, adjust `cmake.cmakePath` in `.vscode/settings.json` to its bundled CMake;
+do not use the MSYS2 CMake for this native toolchain. See Microsoft's
+[CMake Tools preset guidance](https://github.com/microsoft/vscode-cmake-tools/blob/main/docs/cmake-presets.md).
+
 After preparing the native dependencies and environment:
 
 ```powershell

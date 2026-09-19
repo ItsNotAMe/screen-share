@@ -5,6 +5,8 @@
       "name": "native-base",
       "hidden": true,
       "generator": "Ninja",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "toolset": { "value": "host=x64", "strategy": "external" },
       "cacheVariables": {
         "CMAKE_C_COMPILER": "${sourceDir}/build/webrtc/checkout/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe",
         "CMAKE_CXX_COMPILER": "${sourceDir}/build/webrtc/checkout/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe",
