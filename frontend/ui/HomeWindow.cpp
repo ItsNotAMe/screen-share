@@ -102,7 +102,7 @@ HomeWindow::HomeWindow(Actions actions, QWidget* parent)
     setWindowIcon(QIcon(QStringLiteral(":/screenshare/brand/screenshare-mark.svg")));
     setStyleSheet(uiStyleSheet());
     resize(820, 640);
-    setMinimumSize(740, 560);
+    setMinimumSize(700, 500);
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -123,7 +123,6 @@ QWidget* HomeWindow::buildMainMenu()
     auto* actions = new QHBoxLayout;
     actions->setContentsMargins(0, 0, 0, 0);
     actions->setSpacing(16);
-    actions->addStretch(1);
     actions->addWidget(buildActionPanel(
         "share",
         "Start Sharing",
@@ -136,7 +135,6 @@ QWidget* HomeWindow::buildMainMenu()
         "Watch a stream",
         "HomeSecondary",
         actions_.joinRoom));
-    actions->addStretch(1);
     layout->addLayout(actions);
 
     layout->addWidget(buildRoomPanel(), 1);
@@ -155,7 +153,6 @@ QWidget* HomeWindow::buildActionPanel(
     button->setObjectName(buttonObjectName);
     button->setCursor(Qt::PointingHandCursor);
     button->setMinimumWidth(300);
-    button->setMaximumWidth(360);
     button->setMinimumHeight(94);
     button->setMaximumHeight(104);
     button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -163,8 +160,7 @@ QWidget* HomeWindow::buildActionPanel(
     auto* layout = new QHBoxLayout(button);
     layout->setContentsMargins(24, 12, 24, 12);
     layout->setSpacing(16);
-    layout->addStretch(1);
-    layout->addWidget(iconLabel(iconName, 38, QStringLiteral("#ffffff")), 0, Qt::AlignVCenter);
+    layout->addWidget(iconLabel(iconName, 38, buttonObjectName == "HomePrimary" ? QStringLiteral("#38d8c8") : QStringLiteral("#a3b5af")), 0, Qt::AlignVCenter);
 
     auto* textBlock = new QWidget(button);
     textBlock->setObjectName("HomeActionTextBlock");
@@ -188,6 +184,7 @@ QWidget* HomeWindow::buildActionPanel(
     text->addWidget(detailLabel, 0, Qt::AlignLeft);
     layout->addWidget(textBlock, 0, Qt::AlignVCenter);
     layout->addStretch(1);
+    auto* arrow = label("›", "HomeActionArrow"); layout->addWidget(arrow);
 
     QObject::connect(button, &QPushButton::clicked, button, [action = std::move(action)] {
         if (action) {
@@ -204,13 +201,15 @@ QWidget* HomeWindow::buildRoomPanel()
 
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(14);
+    layout->setSpacing(8);
 
     auto* heading = new QHBoxLayout;
     heading->setContentsMargins(0, 0, 0, 0);
     heading->addWidget(label("Available rooms", "HomeSectionTitle"), 1);
     search_ = new QLineEdit; search_->setObjectName("roomSearch"); search_->setPlaceholderText("Search rooms");
     search_->setAccessibleName("Search available rooms"); search_->setClearButtonEnabled(true);
+    search_->setMinimumWidth(220); search_->setMinimumHeight(28);
+    search_->addAction(QIcon(":/screenshare/ui/icons/search.svg"), QLineEdit::LeadingPosition);
     heading->addWidget(search_);
     connect(search_, &QLineEdit::textChanged, this, [this] { filterRooms(); });
     refreshRoomsButton_ = actionButton("Refresh", "HomeGhost", "refresh");
@@ -222,8 +221,19 @@ QWidget* HomeWindow::buildRoomPanel()
     directoryStatus_ = label("Connecting…", "HomeInfoSecondary");
     layout->addWidget(directoryStatus_);
 
-    auto* roomList = new QFrame;
-    roomList->setObjectName("HomeRoomList");
+    auto* columns = new QWidget;
+    columns->setObjectName("HomeRoomHeader");
+    auto* columnLayout = new QHBoxLayout(columns);
+    columnLayout->setContentsMargins(54, 6, 10, 6);
+    columnLayout->addWidget(label("Room", "HomeInfoTitle"), 1);
+    auto* access = label("Access", "HomeInfoTitle"); access->setFixedWidth(130);
+    columnLayout->addWidget(access);
+    auto* action = label("Join", "HomeInfoTitle"); action->setFixedWidth(84);
+    columnLayout->addWidget(action);
+    auto* listFrame = new QFrame; listFrame->setObjectName("HomeRoomList");
+    auto* listLayout = new QVBoxLayout(listFrame); listLayout->setContentsMargins(0, 0, 0, 0); listLayout->setSpacing(0);
+    listLayout->addWidget(columns);
+    auto* roomList = new QWidget;
     roomListLayout_ = new QVBoxLayout(roomList);
     roomListLayout_->setContentsMargins(0, 0, 0, 0);
     roomListLayout_->setSpacing(0);
@@ -231,17 +241,7 @@ QWidget* HomeWindow::buildRoomPanel()
     roomStatusLabel_->setAlignment(Qt::AlignCenter);
     roomListLayout_->addWidget(roomStatusLabel_, 1);
     auto* scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setWidget(roomList); layout->addWidget(scroll, 1);
-
-    auto* footer = new QHBoxLayout;
-    footer->setSpacing(10);
-    auto* roomMetric = buildMetric("-", "rooms");
-    roomCountValue_ = roomMetric->findChild<QLabel*>(QStringLiteral("HomeMetricValue"));
-    footer->addWidget(roomMetric);
-    auto* peerMetric = buildMetric("-", "peers");
-    peerCountValue_ = peerMetric->findChild<QLabel*>(QStringLiteral("HomeMetricValue"));
-    footer->addWidget(peerMetric);
-    layout->addLayout(footer);
+    scroll->setWidget(roomList); listLayout->addWidget(scroll, 1); layout->addWidget(listFrame, 1);
 
     return panel;
 }
@@ -275,10 +275,11 @@ QWidget* HomeWindow::buildRoomRow(const HomeActiveRoom& room)
         room.passwordProtected ? "HomeLockedStatus" : "HomePublicStatus");
     status->setAlignment(Qt::AlignCenter);
     status->setFixedHeight(22);
+    status->setFixedWidth(130);
     layout->addWidget(status, 0, Qt::AlignVCenter);
 
     auto* join = actionButton("Join", "HomeTinyButton", "watch");
-    join->setMinimumWidth(64);
+    join->setFixedWidth(84);
     join->setEnabled(room.joinable);
     QObject::connect(join, &QPushButton::clicked, this, [this, id = room.roomId] {
         if (actions_.openRoom) actions_.openRoom(id);
@@ -296,9 +297,10 @@ void HomeWindow::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QStr
 {
     if (!actions_.requestRooms) return;
     if (unavailable.isEmpty() || !rooms.empty()) updateRooms(rooms);
-    directoryStatus_->setText(unavailable.isEmpty() ? "Rooms update automatically" : unavailable);
-    refreshRoomsButton_->setText(unavailable.isEmpty() ? "Live updates" : "Reconnect");
-    refreshRoomsButton_->setEnabled(!unavailable.isEmpty());
+    directoryStatus_->setText(unavailable);
+    directoryStatus_->setVisible(!unavailable.isEmpty());
+    refreshRoomsButton_->setText("Refresh");
+    refreshRoomsButton_->setEnabled(true);
 }
 
 void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)
@@ -317,9 +319,7 @@ void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)
         }
     }
     roomStatusLabel_ = nullptr;
-    int peerCount = 0;
     for (const HomeActiveRoom& room : rooms) {
-        peerCount += room.peerCount;
         QWidget* row = nullptr;
         for (int i = 0; i < roomListLayout_->count(); ++i) {
             auto* candidate = roomListLayout_->itemAt(i)->widget();
@@ -344,12 +344,6 @@ void HomeWindow::updateRooms(const QVector<HomeActiveRoom>& rooms)
         roomListLayout_->addStretch(1);
     }
 
-    if (roomCountValue_ != nullptr) {
-        roomCountValue_->setText(QString::number(rooms.size()));
-    }
-    if (peerCountValue_ != nullptr) {
-        peerCountValue_->setText(QString::number(peerCount));
-    }
     filterRooms();
 }
 
@@ -373,22 +367,4 @@ void HomeWindow::showRoomStatus(const QString& message)
     roomStatusLabel_ = label(message, "HomeEmptyState");
     roomStatusLabel_->setAlignment(Qt::AlignCenter);
     roomListLayout_->addWidget(roomStatusLabel_, 1);
-    if (roomCountValue_ != nullptr) {
-        roomCountValue_->setText("-");
-    }
-    if (peerCountValue_ != nullptr) {
-        peerCountValue_->setText("-");
-    }
-}
-
-QWidget* HomeWindow::buildMetric(const QString& value, const QString& labelText)
-{
-    auto* panel = new QFrame;
-    panel->setObjectName("HomeMetric");
-    auto* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(14, 12, 14, 12);
-    layout->setSpacing(2);
-    layout->addWidget(label(value, "HomeMetricValue"));
-    layout->addWidget(label(labelText, "HomeMetricLabel"));
-    return panel;
 }

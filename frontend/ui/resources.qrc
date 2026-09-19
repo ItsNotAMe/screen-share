@@ -1,5 +1,9 @@
 <RCC>
   <qresource prefix="/screenshare">
+    <file alias="ui/icons/user-circle.svg">../../assets/ui/icons/user-circle.svg</file>
+    <file alias="ui/icons/search.svg">../../assets/ui/icons/search.svg</file>
+    <file alias="ui/icons/chevron-up.svg">../../assets/ui/icons/chevron-up.svg</file>
+    <file alias="ui/icons/check.svg">../../assets/ui/icons/check.svg</file>
     <file alias="brand/screenshare-mark.svg">../../assets/brand/screenshare-mark.svg</file>
     <file alias="brand/screenshare-logo.svg">../../assets/brand/screenshare-logo.svg</file>
     <file alias="ui/icons/audio.svg">../../assets/ui/icons/audio.svg</file>

@@ -7,6 +7,8 @@
 #include "rtc_base/logging.h"
 #include <QApplication>
 #include <QDialog>
+#include <QPointer>
+#include <QStackedWidget>
 #include <QDialogButtonBox>
 #include <QScrollArea>
 #include <QSpinBox>
@@ -139,11 +141,29 @@ void RoomBrowserWindow::resizeEvent(QResizeEvent* event) {
 void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     if (closing_) return;
     if (!owner) owner = window();
-    if (auto* existing = owner->findChild<QDialog*>("ProfilePreferences")) { existing->raise(); existing->activateWindow(); return; }
-    auto* dialog = new QDialog(owner); dialog->setObjectName("ProfilePreferences");
-    dialog->setWindowTitle("ScreenShare settings"); dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setWindowModality(Qt::WindowModal); dialog->resize(480, 340);
+    if (auto* existing = owner->findChild<QWidget*>("ProfilePreferences")) {
+        existing->findChild<QTabWidget*>()->setCurrentIndex(playback ? 1 : 0); return;
+    }
+    auto* dialog = new QWidget(owner); dialog->setObjectName("ProfilePreferences");
+    auto* stack = owner->findChild<QStackedWidget*>("AppPageStack");
+    QPointer<QWidget> previous = stack ? stack->currentWidget() : nullptr;
+    QPointer<QWidget> previousFocus = QApplication::focusWidget();
+    const bool keptDirectory = keepDirectoryOnHide;
+    if (stack) keepDirectoryOnHide = true;
+    auto finish = [this, stack, dialog, previous, previousFocus, keptDirectory] {
+        keepDirectoryOnHide = keptDirectory;
+        if (stack) {
+            if (stack->currentWidget() == dialog && previous) stack->setCurrentWidget(previous);
+            stack->removeWidget(dialog);
+        }
+        dialog->hide(); dialog->deleteLater();
+        if (previousFocus && previousFocus->isVisible()) previousFocus->setFocus();
+    };
     auto* layout = new QVBoxLayout(dialog); layout->setContentsMargins(24,24,24,24); layout->setSpacing(16);
+    auto* backButton = new QPushButton("‹ Back"); backButton->setObjectName("preferencesBack");
+    layout->addWidget(backButton, 0, Qt::AlignLeft);
+    connect(backButton, &QPushButton::clicked, dialog, finish);
+    auto* heading = new QLabel("Settings"); heading->setObjectName("PageHeading"); layout->addWidget(heading);
     auto* tabs = new QTabWidget; layout->addWidget(tabs);
     auto* profilePage = new QWidget; auto* profileForm = new QFormLayout(profilePage);
     auto* nickname = new QLineEdit(profile_.nickname()); nickname->setObjectName("profileNickname"); nickname->setMaxLength(32);
@@ -160,18 +180,22 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     auto* playbackHint = new QLabel("Defaults apply when joining your next room. Current playback is controlled from the viewer.");
     playbackHint->setWordWrap(true); playbackForm->addRow(playbackHint); tabs->addTab(playbackPage, "Playback");
     tabs->setCurrentIndex(playback ? 1 : 0);
+    layout->addStretch();
     auto* error = new QLabel; error->setTextFormat(Qt::PlainText); error->setWordWrap(true); error->setObjectName("profileError"); layout->addWidget(error);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); layout->addWidget(buttons);
     buttons->button(QDialogButtonBox::Save)->setObjectName("saveProfile");
-    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    connect(buttons, &QDialogButtonBox::accepted, dialog, [this, dialog, nickname, decoder, volume, muted, error] {
+    connect(buttons, &QDialogButtonBox::rejected, dialog, finish);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, [this, finish, nickname, decoder, volume, muted, error] {
         if (!RoomProfile::normalizeNickname(nickname->text())) { error->setText("Use 1–32 characters without control characters."); nickname->setFocus(); return; }
         if (!profile_.saveNickname(nickname->text()) || !profile_.saveDecoder(decoder->currentData().toString()) ||
             !profile_.savePlayback({volume->value(), muted->isChecked()})) { error->setText("Could not save all preferences. Check your settings folder is writable."); return; }
         decoder_->setCurrentIndex(decoder_->findData(profile_.decoder()));
-        if (profileChanged) profileChanged(); dialog->accept();
+        if (profileChanged) profileChanged(); finish();
     });
-    dialog->open(); if (!playback) nickname->setFocus();
+    if (stack) {
+        stack->addWidget(dialog); stack->setCurrentWidget(dialog); dialog->show();
+    } else dialog->show();
+    if (!playback) nickname->setFocus();
 }
 void RoomBrowserWindow::RefreshSources() {
     const auto previous = source_->currentData();

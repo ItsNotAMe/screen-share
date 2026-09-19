@@ -20,7 +20,12 @@ RoomApplication::RoomApplication(QUrl origin, QtRoomSession::Factory factory,
         actions.createRoom = [this] { OpenRoom(true); };
         actions.joinRoom = [this] { OpenRoom(false); };
         actions.openRoom = [this](const QString& id) { OpenRoom(false, id); };
-        actions.requestRooms = [this] { browser_->directory().Start(origin_); };
+        actions.requestRooms = [this] {
+            // Only an explicit Refresh replaces the live subscription.
+            if (browser_->directory().status().phase == screenshare::room::qt::RoomDirectory::Phase::Connecting) return;
+            browser_->directory().Stop();
+            browser_->directory().Start(origin_);
+        };
         home_ = std::make_unique<HomeWindow>(std::move(actions));
         browser_->back = browser_->returnFromSession = [this] { ShowHome(); };
         browser_->ShowBackButton();

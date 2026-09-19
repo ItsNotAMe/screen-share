@@ -8,8 +8,13 @@ application version; no release, update manifest or deployment was published.
 
 The original brand mark is now in a shared title bar with profile and Settings.
 Home has local search, stable live room rows and non-displacing reconnect status.
-Create and Join are separate views; neither edits the nickname. A top-bar dialog
+Create and Join are separate views; neither edits the nickname. An in-window settings page
 validates and saves the local nickname and playback defaults for future sessions.
+Back/Cancel returns to the previous page without discarding its room draft. The
+title bar retains the original logo, aligned text and a circular profile icon.
+Home uses a larger search field, a Refresh action and persistent list headings;
+automatic-update labels and the room/peer counters have been removed. Shared
+dropdowns, checkboxes and spin controls use the dark/teal theme with explicit arrows.
 Create exposes preset, resolution, FPS, bitrate limit, source, audio and capacity;
 it stacks cards at compact widths and uses two columns in wider windows. Primary
 actions stay outside the scrolling form. This replaces the combined temporary

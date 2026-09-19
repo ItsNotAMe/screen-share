@@ -188,7 +188,8 @@ QWidget* AppShellWindow::buildTitleBar()
     version->setObjectName("TitleVersion"); layout->addWidget(version);
     layout->addStretch();
     profileButton_ = new QPushButton("Profile"); profileButton_->setObjectName("TitleProfile");
-    profileButton_->setIcon(QIcon(renderSvgResource(":/screenshare/ui/icons/viewers.svg", QSize(18,18), "#a3b5af")));
+    profileButton_->setIcon(QIcon(renderSvgResource(":/screenshare/ui/icons/user-circle.svg", QSize(24,24), "#a3b5af")));
+    profileButton_->setIconSize(QSize(24,24));
     profileButton_->setAccessibleName("Open profile");
     connect(profileButton_, &QPushButton::clicked, this, [this] { if (openProfile) openProfile(); });
     layout->addWidget(profileButton_);

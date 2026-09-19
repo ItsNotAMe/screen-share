@@ -48,13 +48,10 @@ private:
     void updateRooms(const QVector<HomeActiveRoom>& rooms);
     void filterRooms();
     void showRoomStatus(const QString& message);
-    QWidget* buildMetric(const QString& value, const QString& label);
 
     Actions actions_;
     QVBoxLayout* roomListLayout_ = nullptr;
     QLabel* roomStatusLabel_ = nullptr;
-    QLabel* roomCountValue_ = nullptr;
-    QLabel* peerCountValue_ = nullptr;
     QPushButton* refreshRoomsButton_ = nullptr;
     QLabel* directoryStatus_ = nullptr;
     QLineEdit* search_ = nullptr;

@@ -10,7 +10,22 @@ QLineEdit, QComboBox, QSpinBox {
     background: #151d1b; color: #edf5f2; border: 1px solid #293631;
     border-radius: 6px; padding: 8px; min-height: 20px;
 }
-QComboBox QAbstractItemView { background: #151d1b; color: #edf5f2; selection-background-color: #21645b; }
+QComboBox { border-radius: 10px; padding-right: 36px; }
+QComboBox::drop-down { subcontrol-origin: border; subcontrol-position: top right; width: 32px; border: 0; }
+QComboBox::down-arrow { image: url(:/screenshare/ui/icons/chevron-down.svg); width: 16px; height: 16px; }
+QComboBox QAbstractItemView { background: #151d1b; color: #edf5f2; selection-background-color: #21645b; border: 1px solid #385047; border-radius: 8px; padding: 6px; outline: 0; }
+QComboBox QAbstractItemView::item { min-height: 30px; padding: 4px 10px; }
+QSpinBox { padding-right: 30px; }
+QSpinBox::up-button, QSpinBox::down-button { subcontrol-origin: border; width: 28px; border: 0; background: #20312c; }
+QSpinBox::up-button { subcontrol-position: top right; border-top-right-radius: 6px; }
+QSpinBox::down-button { subcontrol-position: bottom right; border-bottom-right-radius: 6px; }
+QSpinBox::up-arrow { image: url(:/screenshare/ui/icons/chevron-up.svg); width: 14px; height: 14px; }
+QSpinBox::down-arrow { image: url(:/screenshare/ui/icons/chevron-down.svg); width: 14px; height: 14px; }
+QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #365047; }
+QCheckBox { spacing: 9px; }
+QCheckBox::indicator { width: 18px; height: 18px; border: 1px solid #60786f; border-radius: 5px; background: #151d1b; }
+QCheckBox::indicator:checked { background: #38d8c8; border-color: #38d8c8; image: url(:/screenshare/ui/icons/check.svg); }
+QCheckBox::indicator:hover, QCheckBox::indicator:focus { border-color: #38d8c8; }
 QPushButton { background: #151d1b; color: #edf5f2; border: 1px solid #293631; border-radius: 6px; padding: 9px 14px; }
 QPushButton:hover { background: #20312c; border-color: #52746a; }
 QPushButton:disabled { color: #73877f; background: #111815; }
@@ -56,10 +71,12 @@ QWidget#AppTitleBar {
     background: #101815;
     border: 0;
 }
-QLabel#TitleBrand { font-size: 15pt; font-weight: 700; margin-left: 8px; margin-right: 8px; }
-QLabel#TitleVersion { color: #a3b5af; font-size: 9pt; }
-QPushButton#TitleProfile, QPushButton#TitleSettings { background: transparent; border: 0; }
-QPushButton#TitleProfile:focus, QPushButton#TitleSettings:focus { border: 2px solid #38d8c8; }
+QLabel#TitleBrand { font-size: 11pt; font-weight: 700; margin-left: 8px; margin-right: 8px; }
+QLabel#TitleVersion { color: #a3b5af; font-size: 11pt; }
+QPushButton#TitleProfile, QPushButton#TitleSettings { font-size: 11pt; background: transparent; border: 0; }
+QPushButton#TitleProfile:hover, QPushButton#TitleSettings:hover,
+QPushButton#TitleProfile:focus, QPushButton#TitleSettings:focus { background: #24362f; border: 0; }
+QPushButton#TitleProfile:pressed, QPushButton#TitleSettings:pressed { background: #304a40; }
 QWidget#Toast {
     background: rgba(24, 27, 26, 240);
     border: 1px solid #3a4543;
@@ -180,11 +197,6 @@ QFrame#HomeRoomRow {
 QFrame#HomeRoomRow:hover {
     background: #202725;
 }
-QFrame#HomeMetric {
-    background: #121a17;
-    border: 1px solid #2a302f;
-    border-radius: 8px;
-}
 QWidget#HomeActionTextBlock {
     background: transparent;
     border: 0;
@@ -214,26 +226,16 @@ QLabel#HomeLockedStatus {
     font-size: 8.5pt;
     font-weight: 700;
 }
-QLabel#HomeMetricValue {
-    color: #f4fbf9;
-    font-size: 13pt;
-    font-weight: 740;
-}
-QLabel#HomeMetricLabel {
-    color: #87928f;
-    font-size: 8.5pt;
-    font-weight: 650;
-}
 QPushButton#HomePrimary {
-    background: #123c35;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #163c35, stop:1 #101d19);
     color: #ffffff;
     border: 1px solid #38d8c8;
-    border-radius: 8px;
+    border-radius: 12px;
     padding: 14px 24px;
     font-weight: 750;
 }
 QPushButton#HomePrimary:hover {
-    background: #1aa99a;
+    background: #204d43;
 }
 QPushButton#HomePrimary:pressed {
     background: #107468;
@@ -242,7 +244,7 @@ QPushButton#HomeSecondary {
     background: #151d1b;
     color: #edf5f2;
     border: 1px solid #353e3c;
-    border-radius: 8px;
+    border-radius: 12px;
     padding: 14px 24px;
     font-weight: 720;
 }
@@ -251,7 +253,7 @@ QLabel#HomeActionTitle {
     background: transparent;
     border: 0;
     color: #ffffff;
-    font-size: 11pt;
+    font-size: 13pt;
     font-weight: 760;
     padding: 0;
     margin: 0;
@@ -260,7 +262,7 @@ QLabel#HomeActionDetailPrimary {
     background: transparent;
     border: 0;
     color: #e6fffb;
-    font-size: 8.3pt;
+    font-size: 10pt;
     font-weight: 520;
     padding: 0;
     margin: 0;
@@ -269,7 +271,7 @@ QLabel#HomeActionDetail {
     background: transparent;
     border: 0;
     color: #aeb9b5;
-    font-size: 8.3pt;
+    font-size: 10pt;
     font-weight: 520;
     padding: 0;
     margin: 0;
@@ -278,6 +280,7 @@ QPushButton#HomeSecondary:hover {
     border: 1px solid #4a5b58;
     background: #2c3331;
 }
+QLabel#HomeActionArrow { color: #a3b5af; font-size: 22pt; background: transparent; }
 QPushButton#HomeGhost {
     background: transparent;
     color: #9faaa6;
