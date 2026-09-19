@@ -75,7 +75,7 @@ QWidget#AppTitleBar {
 QLabel#TitleBrand { font-size: 11pt; font-weight: 700; margin-left: 8px; margin-right: 8px; }
 QLabel#TitleVersion { color: #a3b5af; font-size: 11pt; }
 QPushButton#TitleProfile, QPushButton#TitleSettings { font-size: 11pt; background: transparent; border: 0; }
-QPushButton#TitleProfile:focus, QPushButton#TitleSettings:focus { background: transparent; border: 0; text-decoration: underline; }
+QPushButton#TitleProfile:focus, QPushButton#TitleSettings:focus { background: transparent; border: 0; }
 QPushButton#TitleProfile:hover, QPushButton#TitleSettings:hover { background: #24362f; border: 0; }
 QPushButton#TitleProfile:pressed, QPushButton#TitleSettings:pressed { background: #304a40; }
 QWidget#Toast {
