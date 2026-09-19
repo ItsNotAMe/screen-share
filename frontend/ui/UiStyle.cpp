@@ -9,6 +9,8 @@
 #include <QLayout>
 #include <QListView>
 #include <QProxyStyle>
+#include <QScreen>
+#include <QTimer>
 
 namespace {
 class ComboListStyle final : public QProxyStyle {
@@ -60,8 +62,18 @@ private:
 };
 class ComboPopupSurface final : public QObject {
 public:
-    explicit ComboPopupSurface(QWidget* popup) : QObject(popup), popup_(popup) { popup->installEventFilter(this); }
+    ComboPopupSurface(QWidget* popup, QComboBox* combo) : QObject(popup), popup_(popup), combo_(combo) { popup->installEventFilter(this); }
     bool eventFilter(QObject*, QEvent* event) override {
+        if (event->type() == QEvent::Show) {
+            QTimer::singleShot(0, this, [this] {
+                if (!popup_->isVisible()) return;
+                const auto bounds = combo_->screen()->availableGeometry();
+                const int below = combo_->mapToGlobal(QPoint(0, combo_->height())).y() + 6;
+                const int above = combo_->mapToGlobal(QPoint(0, 0)).y() - popup_->height() - 6;
+                if (below + popup_->height() <= bounds.bottom() + 1) popup_->move(popup_->x(), below);
+                else if (above >= bounds.top()) popup_->move(popup_->x(), above);
+            });
+        }
         if (event->type() == QEvent::Paint) {
             // The list draws the only border. A second rounded border plus an
             // integer window mask clipped its antialiased corners on Windows.
@@ -74,6 +86,7 @@ public:
     }
 private:
     QWidget* popup_;
+    QComboBox* combo_;
 };
 }
 
@@ -103,7 +116,7 @@ void styleComboPopup(QComboBox* combo)
         popup->layout()->setContentsMargins(0, 0, 0, 0);
         popup->layout()->setSpacing(0);
     }
-    new ComboPopupSurface(popup);
+    new ComboPopupSurface(popup, combo);
 }
 
 QString uiStyleSheet()
@@ -127,8 +140,9 @@ QComboBox QScrollBar::handle:vertical { background: #727a76; min-height: 24px; b
 QComboBox QScrollBar::add-line:vertical, QComboBox QScrollBar::sub-line:vertical { height: 0; border: 0; }
 QComboBox QScrollBar::add-page:vertical, QComboBox QScrollBar::sub-page:vertical { background: transparent; }
 QComboBox QAbstractItemView::item { min-height: 34px; padding: 0 10px; border: 0; border-radius: 0; }
-QComboBox QAbstractItemView::item:hover { background: #3b6053; color: #edf5f2; }
-QComboBox QAbstractItemView::item:selected { background: #21645b; color: #edf5f2; border: 0; }
+QComboBox QAbstractItemView::item:hover { background: #2b3330; color: #ffffff; }
+QComboBox QAbstractItemView::item:selected { background: #183d35; color: #8ce4d5; border: 0; }
+QComboBox QAbstractItemView::item:selected:hover { background: #25584b; color: #c7fff2; }
 QSpinBox { padding-right: 30px; }
 QSpinBox::up-button, QSpinBox::down-button { subcontrol-origin: padding; width: 28px; border: 0; background: #20312c; }
 QSpinBox::up-button { subcontrol-position: top right; border-top-right-radius: 6px; }

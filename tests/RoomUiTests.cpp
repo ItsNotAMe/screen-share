@@ -419,6 +419,7 @@ void NormalHomeScenario(const QUrl& origin) {
             Check(!decoder->view()->verticalScrollBar()->isVisible());
             Check(decoder->view()->viewport()->rect().contains(decoder->view()->visualRect(decoder->model()->index(1,0))));
             Check(QApplication::activePopupWidget());
+            Check(QApplication::activePopupWidget()->y() >= decoder->mapToGlobal(QPoint(0, decoder->height())).y() + 6);
             Check(decoder->grab().save(QDir(previews).filePath(QString("dropdown-open-control-%1.png").arg(size.width()))));
             Check(QApplication::activePopupWidget()->grab().save(QDir(previews).filePath(QString("dropdown-%1.png").arg(size.width()))));
             auto* viewport = decoder->view()->viewport();
@@ -427,8 +428,14 @@ void NormalHomeScenario(const QUrl& origin) {
             QApplication::sendEvent(viewport, &hover); QCoreApplication::processEvents();
             const auto hoveredImage = viewport->grab().toImage();
             Check(hoveredImage.save(QDir(previews).filePath(QString("dropdown-hover-%1.png").arg(size.width()))));
+            const auto chosenPoint = decoder->view()->visualRect(decoder->model()->index(0,0)).center();
+            QMouseEvent chosenHover(QEvent::MouseMove, QPointF(chosenPoint), QPointF(viewport->mapToGlobal(chosenPoint)), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(viewport, &chosenHover); QCoreApplication::processEvents();
+            const auto chosenHoveredImage = viewport->grab().toImage();
+            Check(chosenHoveredImage.save(QDir(previews).filePath(QString("dropdown-chosen-hover-%1.png").arg(size.width()))));
             QEvent leave(QEvent::Leave); QApplication::sendEvent(viewport, &leave); QCoreApplication::processEvents();
             Check(hoveredImage != viewport->grab().toImage());
+            Check(chosenHoveredImage != viewport->grab().toImage());
             Check(QApplication::activePopupWidget()->grab().save(QDir(previews).filePath(QString("dropdown-left-%1.png").arg(size.width()))));
             decoder->hidePopup();
             for (int option = 0; option < 20; ++option) decoder->addItem(QString("Option %1").arg(option));
