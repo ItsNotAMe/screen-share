@@ -5,7 +5,6 @@
 #include <QFrame>
 #include <QEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <QMouseEvent>
 #include <QLayout>
 #include <QListView>
@@ -59,14 +58,12 @@ class ComboPopupSurface final : public QObject {
 public:
     explicit ComboPopupSurface(QWidget* popup) : QObject(popup), popup_(popup) { popup->installEventFilter(this); }
     bool eventFilter(QObject*, QEvent* event) override {
-        if (event->type() == QEvent::Resize || event->type() == QEvent::Show) {
-            QPainterPath shape; shape.addRoundedRect(QRectF(popup_->rect()), 8, 8);
-            popup_->setMask(QRegion(shape.toFillPolygon().toPolygon()));
-        }
         if (event->type() == QEvent::Paint) {
-            QPainter painter(popup_); painter.setRenderHint(QPainter::Antialiasing);
-            painter.setPen(QPen(QColor("#69716e"), 1)); painter.setBrush(QColor("#292c2b"));
-            painter.drawRoundedRect(QRectF(popup_->rect()).adjusted(.5,.5,-.5,-.5), 7, 7);
+            // The list draws the only border. A second rounded border plus an
+            // integer window mask clipped its antialiased corners on Windows.
+            QPainter painter(popup_);
+            painter.setCompositionMode(QPainter::CompositionMode_Source);
+            painter.fillRect(popup_->rect(), Qt::transparent);
             return true; // Suppress the native rectangular popup panel.
         }
         return false;
@@ -95,7 +92,7 @@ void styleComboPopup(QComboBox* combo)
     popup->setAttribute(Qt::WA_TranslucentBackground);
     popup->setObjectName("ThemedComboPopup");
     auto palette = popup->palette();
-    for (auto role : {QPalette::Window, QPalette::Base, QPalette::Button}) palette.setColor(role, QColor("#292c2b"));
+    for (auto role : {QPalette::Window, QPalette::Base, QPalette::Button}) palette.setColor(role, QColor("#191e1c"));
     popup->setPalette(palette);
     if (auto* frame = qobject_cast<QFrame*>(popup)) frame->setFrameShape(QFrame::NoFrame);
     if (popup->layout()) {
@@ -119,8 +116,8 @@ QComboBox { border-radius: 10px; padding-right: 36px; combobox-popup: 0; }
 QFrame#ThemedComboPopup { background: transparent; border: 0; }
 QComboBox::drop-down { subcontrol-origin: border; subcontrol-position: top right; width: 32px; border: 0; }
 QComboBox::down-arrow { image: url(:/screenshare/ui/icons/chevron-down.svg); width: 16px; height: 16px; }
-QComboBox QAbstractItemView { background: #292c2b; color: #edf5f2; selection-background-color: #21645b; border: 1px solid #69716e; border-radius: 6px; padding: 0; outline: 0; }
-QComboBox QScrollBar:vertical { background: #292c2b; width: 10px; margin: 0; border: 0; }
+QComboBox QAbstractItemView { background: #191e1c; color: #edf5f2; selection-background-color: #21645b; border: 1px solid #607068; border-radius: 6px; padding: 0; outline: 0; }
+QComboBox QScrollBar:vertical { background: #191e1c; width: 10px; margin: 0; border: 0; }
 QComboBox QScrollBar::handle:vertical { background: #727a76; min-height: 24px; border-radius: 5px; }
 QComboBox QScrollBar::add-line:vertical, QComboBox QScrollBar::sub-line:vertical { height: 0; border: 0; }
 QComboBox QScrollBar::add-page:vertical, QComboBox QScrollBar::sub-page:vertical { background: transparent; }
