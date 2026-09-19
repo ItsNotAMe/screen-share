@@ -1,0 +1,2064 @@
+[
+  {
+    "name": "room snapshot",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "room snapshot secret envelope",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10,
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "room snapshot secret payload",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ],
+        "token": "secret"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "room snapshot missing v",
+    "message": {
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "room snapshot missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "room snapshot missing payload",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory snapshot",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000
+          }
+        ]
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "ok": true
+  },
+  {
+    "name": "directory snapshot secret envelope",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000
+          }
+        ]
+      },
+      "revision": 10,
+      "token": "secret"
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory snapshot secret payload",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000
+          }
+        ],
+        "token": "secret"
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "directory snapshot missing v",
+    "message": {
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000
+          }
+        ]
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory snapshot missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000
+          }
+        ]
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory snapshot missing payload",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "policy",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "policy",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        }
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "policy secret envelope",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "policy",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        }
+      },
+      "roomId": "room",
+      "revision": 10,
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "policy secret payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "policy",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "token": "secret"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "policy missing v",
+    "message": {
+      "type": "state.delta",
+      "payload": {
+        "op": "policy",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        }
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "policy missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "op": "policy",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        }
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "policy missing payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "member.upsert",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "member.upsert",
+        "member": {
+          "peerId": "viewer",
+          "nickname": "Viewer",
+          "role": "viewer",
+          "status": "connected"
+        }
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "member.upsert secret envelope",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "member.upsert",
+        "member": {
+          "peerId": "viewer",
+          "nickname": "Viewer",
+          "role": "viewer",
+          "status": "connected"
+        }
+      },
+      "roomId": "room",
+      "revision": 10,
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "member.upsert secret payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "member.upsert",
+        "member": {
+          "peerId": "viewer",
+          "nickname": "Viewer",
+          "role": "viewer",
+          "status": "connected"
+        },
+        "token": "secret"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "member.upsert missing v",
+    "message": {
+      "type": "state.delta",
+      "payload": {
+        "op": "member.upsert",
+        "member": {
+          "peerId": "viewer",
+          "nickname": "Viewer",
+          "role": "viewer",
+          "status": "connected"
+        }
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "member.upsert missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "op": "member.upsert",
+        "member": {
+          "peerId": "viewer",
+          "nickname": "Viewer",
+          "role": "viewer",
+          "status": "connected"
+        }
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "member.upsert missing payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "member.remove",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "member.remove",
+        "peerId": "other"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "member.remove secret envelope",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "member.remove",
+        "peerId": "other"
+      },
+      "roomId": "room",
+      "revision": 10,
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "member.remove secret payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "member.remove",
+        "peerId": "other",
+        "token": "secret"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "member.remove missing v",
+    "message": {
+      "type": "state.delta",
+      "payload": {
+        "op": "member.remove",
+        "peerId": "other"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "member.remove missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "op": "member.remove",
+        "peerId": "other"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "member.remove missing payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "host.status",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "host.status",
+        "status": "reconnecting"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "host.status secret envelope",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "host.status",
+        "status": "reconnecting"
+      },
+      "roomId": "room",
+      "revision": 10,
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "host.status secret payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "host.status",
+        "status": "reconnecting",
+        "token": "secret"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "host.status missing v",
+    "message": {
+      "type": "state.delta",
+      "payload": {
+        "op": "host.status",
+        "status": "reconnecting"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "host.status missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "op": "host.status",
+        "status": "reconnecting"
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "host.status missing payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory upsert",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "upsert",
+        "room": {
+          "roomId": "room",
+          "name": "Game",
+          "viewerCount": 1,
+          "viewerLimit": 4,
+          "passwordProtected": false,
+          "status": "open",
+          "summaryVersion": 3,
+          "leaseExpiresAt": 180000
+        }
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "ok": true
+  },
+  {
+    "name": "directory upsert secret envelope",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "upsert",
+        "room": {
+          "roomId": "room",
+          "name": "Game",
+          "viewerCount": 1,
+          "viewerLimit": 4,
+          "passwordProtected": false,
+          "status": "open",
+          "summaryVersion": 3,
+          "leaseExpiresAt": 180000
+        }
+      },
+      "revision": 10,
+      "token": "secret"
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory upsert secret payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "upsert",
+        "room": {
+          "roomId": "room",
+          "name": "Game",
+          "viewerCount": 1,
+          "viewerLimit": 4,
+          "passwordProtected": false,
+          "status": "open",
+          "summaryVersion": 3,
+          "leaseExpiresAt": 180000
+        },
+        "token": "secret"
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "directory upsert missing v",
+    "message": {
+      "type": "state.delta",
+      "payload": {
+        "op": "upsert",
+        "room": {
+          "roomId": "room",
+          "name": "Game",
+          "viewerCount": 1,
+          "viewerLimit": 4,
+          "passwordProtected": false,
+          "status": "open",
+          "summaryVersion": 3,
+          "leaseExpiresAt": 180000
+        }
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory upsert missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "op": "upsert",
+        "room": {
+          "roomId": "room",
+          "name": "Game",
+          "viewerCount": 1,
+          "viewerLimit": 4,
+          "passwordProtected": false,
+          "status": "open",
+          "summaryVersion": 3,
+          "leaseExpiresAt": 180000
+        }
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory upsert missing payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory remove",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "remove",
+        "roomId": "room"
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "ok": true
+  },
+  {
+    "name": "directory remove secret envelope",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "remove",
+        "roomId": "room"
+      },
+      "revision": 10,
+      "token": "secret"
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory remove secret payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "payload": {
+        "op": "remove",
+        "roomId": "room",
+        "token": "secret"
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "directory remove missing v",
+    "message": {
+      "type": "state.delta",
+      "payload": {
+        "op": "remove",
+        "roomId": "room"
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory remove missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "op": "remove",
+        "roomId": "room"
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "directory remove missing payload",
+    "message": {
+      "v": 2,
+      "type": "state.delta",
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result ok",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "ok"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "result ok secret envelope",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "ok"
+      },
+      "roomId": "room",
+      "requestId": "request",
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result ok secret payload",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "ok",
+        "token": "secret"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "result ok missing v",
+    "message": {
+      "type": "command.result",
+      "payload": {
+        "status": "ok"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result ok missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "status": "ok"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result ok missing payload",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result conflict",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "conflict",
+        "currentRevision": 10
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "result conflict secret envelope",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "conflict",
+        "currentRevision": 10
+      },
+      "roomId": "room",
+      "requestId": "request",
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result conflict secret payload",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "conflict",
+        "currentRevision": 10,
+        "token": "secret"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "result conflict missing v",
+    "message": {
+      "type": "command.result",
+      "payload": {
+        "status": "conflict",
+        "currentRevision": 10
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result conflict missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "status": "conflict",
+        "currentRevision": 10
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result conflict missing payload",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result error",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "error",
+        "code": "forbidden"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "result error secret envelope",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "error",
+        "code": "forbidden"
+      },
+      "roomId": "room",
+      "requestId": "request",
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result error secret payload",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "payload": {
+        "status": "error",
+        "code": "forbidden",
+        "token": "secret"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "result error missing v",
+    "message": {
+      "type": "command.result",
+      "payload": {
+        "status": "error",
+        "code": "forbidden"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result error missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "status": "error",
+        "code": "forbidden"
+      },
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "result error missing payload",
+    "message": {
+      "v": 2,
+      "type": "command.result",
+      "roomId": "room",
+      "requestId": "request"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "closed",
+    "message": {
+      "v": 2,
+      "type": "room.closed",
+      "payload": {
+        "reason": "kicked"
+      },
+      "roomId": "room"
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "closed secret envelope",
+    "message": {
+      "v": 2,
+      "type": "room.closed",
+      "payload": {
+        "reason": "kicked"
+      },
+      "roomId": "room",
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "closed secret payload",
+    "message": {
+      "v": 2,
+      "type": "room.closed",
+      "payload": {
+        "reason": "kicked",
+        "token": "secret"
+      },
+      "roomId": "room"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "closed missing v",
+    "message": {
+      "type": "room.closed",
+      "payload": {
+        "reason": "kicked"
+      },
+      "roomId": "room"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "closed missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "reason": "kicked"
+      },
+      "roomId": "room"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "closed missing payload",
+    "message": {
+      "v": 2,
+      "type": "room.closed",
+      "roomId": "room"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay offer",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "payload": {
+        "sdp": "v=0\r\n"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "relay offer secret envelope",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "payload": {
+        "sdp": "v=0\r\n"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice",
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay offer secret payload",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "payload": {
+        "sdp": "v=0\r\n",
+        "token": "secret"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "relay offer missing v",
+    "message": {
+      "type": "signal.offer",
+      "payload": {
+        "sdp": "v=0\r\n"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay offer missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "sdp": "v=0\r\n"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay offer missing payload",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay answer",
+    "message": {
+      "v": 2,
+      "type": "signal.answer",
+      "payload": {
+        "sdp": "v=0\r\n"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "relay answer secret envelope",
+    "message": {
+      "v": 2,
+      "type": "signal.answer",
+      "payload": {
+        "sdp": "v=0\r\n"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice",
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay answer secret payload",
+    "message": {
+      "v": 2,
+      "type": "signal.answer",
+      "payload": {
+        "sdp": "v=0\r\n",
+        "token": "secret"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "relay answer missing v",
+    "message": {
+      "type": "signal.answer",
+      "payload": {
+        "sdp": "v=0\r\n"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay answer missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "sdp": "v=0\r\n"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay answer missing payload",
+    "message": {
+      "v": 2,
+      "type": "signal.answer",
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay candidate",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "payload": {
+        "candidate": "",
+        "sdpMid": null,
+        "sdpMLineIndex": null
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "relay candidate secret envelope",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "payload": {
+        "candidate": "",
+        "sdpMid": null,
+        "sdpMLineIndex": null
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice",
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay candidate secret payload",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "payload": {
+        "candidate": "",
+        "sdpMid": null,
+        "sdpMLineIndex": null,
+        "token": "secret"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "relay candidate missing v",
+    "message": {
+      "type": "signal.candidate",
+      "payload": {
+        "candidate": "",
+        "sdpMid": null,
+        "sdpMLineIndex": null
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay candidate missing type",
+    "message": {
+      "v": 2,
+      "payload": {
+        "candidate": "",
+        "sdpMid": null,
+        "sdpMLineIndex": null
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay candidate missing payload",
+    "message": {
+      "v": 2,
+      "type": "signal.candidate",
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay restart_request",
+    "message": {
+      "v": 2,
+      "type": "signal.restart_request",
+      "payload": {},
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "relay restart_request secret envelope",
+    "message": {
+      "v": 2,
+      "type": "signal.restart_request",
+      "payload": {},
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice",
+      "token": "secret"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay restart_request secret payload",
+    "message": {
+      "v": 2,
+      "type": "signal.restart_request",
+      "payload": {
+        "token": "secret"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "relay restart_request missing v",
+    "message": {
+      "type": "signal.restart_request",
+      "payload": {},
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay restart_request missing type",
+    "message": {
+      "v": 2,
+      "payload": {},
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "relay restart_request missing payload",
+    "message": {
+      "v": 2,
+      "type": "signal.restart_request",
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "missing self",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "missing",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "two hosts",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "host",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "no host",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "viewer",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "duplicate peer",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "host",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "noncanonical name",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": " Host ",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "wrong host status",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 4,
+          "passwordProtected": false
+        },
+        "status": "reconnecting",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "lowered limit preserves members",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "selfPeerId": "viewer",
+        "policy": {
+          "name": "Game",
+          "visibility": "public",
+          "viewerLimit": 1,
+          "passwordProtected": false
+        },
+        "status": "open",
+        "members": [
+          {
+            "peerId": "host",
+            "nickname": "Host",
+            "role": "host",
+            "status": "connected"
+          },
+          {
+            "peerId": "viewer",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          },
+          {
+            "peerId": "v2",
+            "nickname": "Viewer",
+            "role": "viewer",
+            "status": "connected"
+          }
+        ]
+      },
+      "roomId": "room",
+      "revision": 10
+    },
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "duplicate room",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000
+          },
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000
+          }
+        ]
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "directory roster leak",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000,
+            "members": []
+          }
+        ]
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "inconsistent full",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "full",
+            "summaryVersion": 3,
+            "leaseExpiresAt": 180000
+          }
+        ]
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "unsafe summary version",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": [
+          {
+            "roomId": "room",
+            "name": "Game",
+            "viewerCount": 1,
+            "viewerLimit": 4,
+            "passwordProtected": false,
+            "status": "open",
+            "summaryVersion": 9007199254740992,
+            "leaseExpiresAt": 180000
+          }
+        ]
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "null rooms",
+    "message": {
+      "v": 2,
+      "type": "state.snapshot",
+      "payload": {
+        "rooms": null
+      },
+      "revision": 10
+    },
+    "scope": "directory",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "relay self",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "payload": {
+        "sdp": "v=0"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "host",
+      "connectionId": "ice"
+    },
+    "scope": "room",
+    "error": "invalid_payload"
+  },
+  {
+    "name": "relay revision",
+    "message": {
+      "v": 2,
+      "type": "signal.offer",
+      "payload": {
+        "sdp": "v=0"
+      },
+      "roomId": "room",
+      "fromPeerId": "host",
+      "toPeerId": "viewer",
+      "connectionId": "ice",
+      "revision": 1
+    },
+    "scope": "room",
+    "error": "invalid_envelope"
+  },
+  {
+    "name": "room snapshot limit0",
+    "raw": "{\"v\":2,\"type\":\"state.snapshot\",\"payload\":{\"selfPeerId\":\"viewer\",\"policy\":{\"name\":\"Game\",\"visibility\":\"public\",\"viewerLimit\":4,\"passwordProtected\":false},\"status\":\"open\",\"members\":[{\"peerId\":\"host\",\"nickname\":\"Host\",\"role\":\"host\",\"status\":\"connected\"},{\"peerId\":\"viewer\",\"nickname\":\"Viewer\",\"role\":\"viewer\",\"status\":\"connected\"}]},\"roomId\":\"room\",\"revision\":10}",
+    "padding": 16024,
+    "scope": "room",
+    "ok": true
+  },
+  {
+    "name": "room snapshot limit1",
+    "raw": "{\"v\":2,\"type\":\"state.snapshot\",\"payload\":{\"selfPeerId\":\"viewer\",\"policy\":{\"name\":\"Game\",\"visibility\":\"public\",\"viewerLimit\":4,\"passwordProtected\":false},\"status\":\"open\",\"members\":[{\"peerId\":\"host\",\"nickname\":\"Host\",\"role\":\"host\",\"status\":\"connected\"},{\"peerId\":\"viewer\",\"nickname\":\"Viewer\",\"role\":\"viewer\",\"status\":\"connected\"}]},\"roomId\":\"room\",\"revision\":10}",
+    "padding": 16025,
+    "scope": "room",
+    "error": "too_large"
+  },
+  {
+    "name": "directory snapshot limit0",
+    "raw": "{\"v\":2,\"type\":\"state.snapshot\",\"payload\":{\"rooms\":[]},\"revision\":10}",
+    "padding": 262076,
+    "scope": "directory",
+    "ok": true
+  },
+  {
+    "name": "directory snapshot limit1",
+    "raw": "{\"v\":2,\"type\":\"state.snapshot\",\"payload\":{\"rooms\":[]},\"revision\":10}",
+    "padding": 262077,
+    "scope": "directory",
+    "error": "too_large"
+  },
+  {
+    "name": "directory delta limit0",
+    "raw": "{\"v\":2,\"type\":\"state.delta\",\"payload\":{\"op\":\"remove\",\"roomId\":\"room\"},\"revision\":10}",
+    "padding": 16300,
+    "scope": "directory",
+    "ok": true
+  },
+  {
+    "name": "directory delta limit1",
+    "raw": "{\"v\":2,\"type\":\"state.delta\",\"payload\":{\"op\":\"remove\",\"roomId\":\"room\"},\"revision\":10}",
+    "padding": 16301,
+    "scope": "directory",
+    "error": "too_large"
+  }
+]

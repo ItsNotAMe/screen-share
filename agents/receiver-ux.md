@@ -3,7 +3,7 @@
 ## Preview Window Controls
 
 - `ReceiverPreviewWindow` owns the native Win32/D3D11 preview window.
-- The first UX slice lives in `src/render/ReceiverPreviewWindow.*`.
+- The first UX slice lives in `backend/render/ReceiverPreviewWindow.*`.
 - F11 and Alt+Enter toggle borderless fullscreen on the nearest monitor.
 - Esc exits fullscreen without closing the receiver.
 - The preview swap chain disables DXGI's default Alt+Enter handling with `DXGI_MWA_NO_ALT_ENTER`; otherwise DXGI can race the app's borderless fullscreen restore and leave the window chrome/title bar missing.

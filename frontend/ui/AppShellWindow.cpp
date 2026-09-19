@@ -1,0 +1,539 @@
+#include "ui/AppShellWindow.h"
+
+#include "ui/Toast.h"
+#include "ui/UiStyle.h"
+
+#include <QtCore/QByteArray>
+#include <QtCore/QEvent>
+#include <QtCore/QFile>
+#include <QtCore/QIODevice>
+#include <QtCore/QRectF>
+#include <QtGui/QIcon>
+#include <QtGui/QCloseEvent>
+#include <QtGui/QPainter>
+#include <QtGui/QPixmap>
+#include <QMouseEvent>
+#include <QWindow>
+#include <QtMath>
+#include <QtSvg/QSvgRenderer>
+#include <QtWidgets/QFrame>
+#include <QtWidgets/QApplication>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QGridLayout>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QStackedWidget>
+#include <QtWidgets/QStyle>
+#include <QtWidgets/QVBoxLayout>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <windowsx.h>
+#endif
+
+namespace {
+
+QPixmap renderSvgResource(const QString& path, const QSize& size, const QString& color = QString())
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+
+    QByteArray svg = file.readAll();
+    if (!color.isEmpty()) {
+        svg.replace("currentColor", color.toUtf8());
+    }
+
+    QSvgRenderer renderer(svg);
+    if (!renderer.isValid()) {
+        return {};
+    }
+
+    QPixmap pixmap(size);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    renderer.render(&painter, QRectF(QPointF(0, 0), QSizeF(size)));
+    return pixmap;
+}
+
+#ifdef _WIN32
+// Global panic-revoke hotkey: Ctrl+Alt+Shift+F12. Chosen for being extremely
+// unlikely to collide with app or OS shortcuts. Registered against the shell
+// window so the host can instantly drop remote control from anywhere — the OS
+// delivers WM_HOTKEY on the UI thread even while a viewer is flooding input.
+constexpr int kPanicHotkeyId = 0xB001;
+constexpr unsigned kPanicHotkeyModifiers = MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT;
+constexpr unsigned kPanicHotkeyVk = VK_F12;
+
+void preferRoundedWindows(HWND hwnd)
+{
+    using DwmSetWindowAttributeFn = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+    constexpr DWORD DwmwaWindowCornerPreference = 33;
+    constexpr DWORD DwmwcpRound = 2;
+
+    HMODULE module = LoadLibraryW(L"dwmapi.dll");
+    if (module == nullptr) {
+        return;
+    }
+    auto* setWindowAttribute = reinterpret_cast<DwmSetWindowAttributeFn>(
+        GetProcAddress(module, "DwmSetWindowAttribute"));
+    if (setWindowAttribute != nullptr) {
+        const DWORD preference = DwmwcpRound;
+        setWindowAttribute(hwnd, DwmwaWindowCornerPreference, &preference, sizeof(preference));
+    }
+    FreeLibrary(module);
+}
+#endif
+
+} // namespace
+
+AppShellWindow::AppShellWindow(QWidget* parent) : QWidget(parent)
+{
+    setObjectName("AppShellWindow");
+    qApp->installEventFilter(this);
+    setWindowTitle("ScreenShare");
+    setWindowIcon(QIcon(QStringLiteral(":/screenshare/brand/screenshare-mark.svg")));
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint);
+    setStyleSheet(uiStyleSheet());
+
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
+
+    frame_ = new QFrame;
+    frame_->setObjectName("AppShellFrame");
+    auto* frameLayout = new QGridLayout(frame_);
+    frameLayout->setContentsMargins(1, 1, 1, 1);
+    frameLayout->setSpacing(0);
+
+    stack_ = new QStackedWidget;
+    stack_->setObjectName("AppPageStack");
+    frameLayout->addWidget(stack_, 1, 0);
+    frameLayout->setRowStretch(1, 1);
+
+    QWidget* titleBar = buildTitleBar();
+    frameLayout->addWidget(titleBar, 0, 0);
+    titleBar->raise();
+
+    root->addWidget(frame_, 1);
+}
+
+AppShellWindow::~AppShellWindow()
+{
+#ifdef _WIN32
+    unregisterPanicHotkey();
+#endif
+}
+
+void AppShellWindow::setPanicHotkeyHandler(std::function<void()> handler)
+{
+    panicHotkeyHandler_ = std::move(handler);
+#ifdef _WIN32
+    if (!panicHotkeyHandler_) unregisterPanicHotkey();
+    else if (isVisible()) registerPanicHotkey();
+#endif
+}
+
+void AppShellWindow::setCloseHandler(std::function<bool()> handler)
+{
+    closeHandler_ = std::move(handler);
+}
+
+void AppShellWindow::closeEvent(QCloseEvent* event)
+{
+    if (closeHandler_ && !closeHandler_()) event->ignore();
+    else QWidget::closeEvent(event);
+}
+
+int AppShellWindow::addPage(QWidget* page)
+{
+    return stack_->addWidget(page);
+}
+
+void AppShellWindow::setCurrentWidget(QWidget* page)
+{
+    stack_->setCurrentWidget(page);
+}
+
+void AppShellWindow::showToast(const QString& message)
+{
+    Toast::show(this, message);
+}
+
+void AppShellWindow::setChromeVisible(bool visible)
+{
+    if (titleBar_ != nullptr) {
+        titleBar_->setVisible(visible);
+    }
+    if (frame_ != nullptr) {
+        frame_->setProperty("chromeHidden", !visible);
+        frame_->style()->unpolish(frame_);
+        frame_->style()->polish(frame_);
+    }
+}
+
+QWidget* AppShellWindow::buildTitleBar()
+{
+    auto* frame = new QWidget;
+    frame->setObjectName("AppTitleBar");
+    frame->setMinimumHeight(58);
+    titleBar_ = frame;
+
+    auto* layout = new QHBoxLayout(frame);
+    layout->setContentsMargins(20, 8, 8, 8);
+    layout->setSpacing(4);
+
+    auto* mark = new QLabel;
+    mark->setPixmap(renderSvgResource(":/screenshare/brand/screenshare-mark.svg", QSize(36, 36)));
+    layout->addWidget(mark);
+    auto* brand = new QLabel("ScreenShare"); brand->setObjectName("TitleBrand");
+    layout->addWidget(brand);
+    auto* version = new QLabel(QStringLiteral("v") + QStringLiteral(SCREENSHARE_APP_VERSION));
+    version->setObjectName("TitleVersion"); layout->addWidget(version);
+    layout->addStretch();
+    profileButton_ = new QPushButton("Profile"); profileButton_->setObjectName("TitleProfile");
+    profileButton_->setIcon(QIcon(renderSvgResource(":/screenshare/ui/icons/user-circle.svg", QSize(24,24), "#a3b5af")));
+    profileButton_->setIconSize(QSize(24,24));
+    profileButton_->setAccessibleName("Open profile");
+    connect(profileButton_, &QPushButton::clicked, this, [this] { if (openProfile) openProfile(); });
+    layout->addWidget(profileButton_);
+    auto* settings = new QPushButton("Settings"); settings->setObjectName("TitleSettings");
+    settings->setIcon(QIcon(renderSvgResource(":/screenshare/ui/icons/settings.svg", QSize(18,18), "#a3b5af")));
+    connect(settings, &QPushButton::clicked, this, [this] { if (openSettings) openSettings(); });
+    layout->addWidget(settings);
+
+    auto* minimizeButton = windowButton("window-minimize", "WindowControlButton");
+    connect(minimizeButton, &QPushButton::clicked, this, [this] {
+#ifdef _WIN32
+        ShowWindow(reinterpret_cast<HWND>(winId()), SW_MINIMIZE);
+#else
+        showMinimized();
+#endif
+    });
+    layout->addWidget(minimizeButton);
+
+    maximizeButton_ = windowButton("window-maximize", "WindowControlButton");
+    connect(maximizeButton_, &QPushButton::clicked, this, [this] {
+        toggleMaximized();
+    });
+    layout->addWidget(maximizeButton_);
+
+    auto* closeButton = windowButton("window-close", "WindowCloseButton");
+    connect(closeButton, &QPushButton::clicked, this, [this] {
+        close();
+    });
+    layout->addWidget(closeButton);
+
+    return frame;
+}
+
+void AppShellWindow::setProfileName(const QString& name)
+{
+    profileButton_->setText(fontMetrics().elidedText(name, Qt::ElideRight, 140));
+    profileButton_->setToolTip(name + " — edit profile");
+}
+
+QPushButton* AppShellWindow::windowButton(const char* iconName, const QString& objectName)
+{
+    auto* button = new QPushButton;
+    button->setObjectName(objectName);
+    button->setCursor(Qt::PointingHandCursor);
+    button->setFixedSize(42, 32);
+    const QPixmap pixmap = renderSvgResource(
+        QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(QString::fromUtf8(iconName)),
+        QSize(18, 18),
+        QStringLiteral("#d7e0dd"));
+    if (!pixmap.isNull()) {
+        button->setIcon(QIcon(pixmap));
+        button->setIconSize(QSize(18, 18));
+    }
+    return button;
+}
+
+void AppShellWindow::toggleMaximized()
+{
+#ifdef _WIN32
+    applyNativeWindowStyle();
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd != nullptr) {
+        ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        updateChromeState();
+        return;
+    }
+#endif
+    isMaximized() ? showNormal() : showMaximized();
+    updateChromeState();
+}
+
+void AppShellWindow::updateChromeState()
+{
+    const bool maximized = isNativeMaximized();
+    if (maximizeButton_ != nullptr) {
+        const char* iconName = maximized ? "window-restore" : "window-maximize";
+        const QPixmap pixmap = renderSvgResource(
+            QStringLiteral(":/screenshare/ui/icons/%1.svg").arg(QString::fromUtf8(iconName)),
+            QSize(18, 18),
+            QStringLiteral("#d7e0dd"));
+        maximizeButton_->setIcon(QIcon(pixmap));
+    }
+    if (frame_ != nullptr) {
+        frame_->setProperty("maximized", maximized);
+        frame_->style()->unpolish(frame_);
+        frame_->style()->polish(frame_);
+    }
+}
+
+bool AppShellWindow::isTitleControl(const QWidget* widget) const
+{
+    const QWidget* current = widget;
+    while (current != nullptr && current != titleBar_) {
+        if (qobject_cast<const QPushButton*>(current) != nullptr) {
+            return true;
+        }
+        current = current->parentWidget();
+    }
+    return false;
+}
+
+bool AppShellWindow::isNativeMaximized() const
+{
+#ifdef _WIN32
+    const HWND hwnd = reinterpret_cast<HWND>(const_cast<AppShellWindow*>(this)->winId());
+    return hwnd != nullptr && IsZoomed(hwnd) != FALSE;
+#else
+    return isMaximized();
+#endif
+}
+
+void AppShellWindow::changeEvent(QEvent* event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange) {
+        updateChromeState();
+    }
+}
+
+void AppShellWindow::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    if (!initialFocusSet_) {
+        initialFocusSet_ = true;
+        // Start without selecting a chrome action. Tab still enters the normal
+        // focus chain; later shows preserve the user's existing focus.
+        setFocus(Qt::OtherFocusReason);
+    }
+#ifdef _WIN32
+    applyNativeWindowStyle();
+    registerPanicHotkey();
+#endif
+    updateChromeState();
+}
+
+bool AppShellWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::MouseButtonPress) {
+        auto* target = qobject_cast<QWidget*>(watched);
+        if (target && target->window() == this) {
+            if (titleBar_ && (target == titleBar_ || titleBar_->isAncestorOf(target)) && !isTitleControl(target)) {
+                auto* mouse = static_cast<QMouseEvent*>(event);
+                if (mouse->button() == Qt::LeftButton && windowHandle() && windowHandle()->startSystemMove()) return true;
+            }
+            bool control = false;
+            for (auto* ancestor = target; ancestor && ancestor != this; ancestor = ancestor->parentWidget()) {
+                if (ancestor->focusPolicy() != Qt::NoFocus) { control = true; break; }
+            }
+            if (!control) {
+                auto* focused = focusWidget();
+                if (focused) focused->clearFocus();
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+#ifdef _WIN32
+void AppShellWindow::applyNativeWindowStyle()
+{
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd == nullptr) {
+        return;
+    }
+
+    LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    style |= WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+    SetWindowLongPtr(hwnd, GWL_STYLE, style);
+    preferRoundedWindows(hwnd);
+    SetWindowPos(
+        hwnd,
+        nullptr,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+}
+
+void AppShellWindow::registerPanicHotkey()
+{
+    // A media-only room shell must not reserve a revoke shortcut it cannot use.
+    if (!panicHotkeyHandler_) return;
+    if (panicHotkeyRegistered_) {
+        return;
+    }
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd == nullptr) {
+        return;
+    }
+    // Best-effort: if the combination is already taken system-wide, the panic
+    // key is simply unavailable (the in-app revoke toggles still work). Never
+    // fail the session over it.
+    if (RegisterHotKey(hwnd, kPanicHotkeyId, kPanicHotkeyModifiers, kPanicHotkeyVk) != 0) {
+        panicHotkeyRegistered_ = true;
+    }
+}
+
+void AppShellWindow::unregisterPanicHotkey()
+{
+    if (!panicHotkeyRegistered_) {
+        return;
+    }
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd != nullptr) {
+        UnregisterHotKey(hwnd, kPanicHotkeyId);
+    }
+    panicHotkeyRegistered_ = false;
+}
+
+bool AppShellWindow::handleMinMaxInfo(void* message, qintptr* result)
+{
+    MSG* msg = static_cast<MSG*>(message);
+    auto* info = reinterpret_cast<MINMAXINFO*>(msg->lParam);
+    if (info == nullptr) {
+        return false;
+    }
+
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    const HMONITOR handle = MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST);
+    if (handle == nullptr || !GetMonitorInfo(handle, &monitor)) {
+        return false;
+    }
+
+    const RECT work = monitor.rcWork;
+    const RECT full = monitor.rcMonitor;
+    info->ptMaxPosition.x = work.left - full.left;
+    info->ptMaxPosition.y = work.top - full.top;
+    info->ptMaxSize.x = work.right - work.left;
+    info->ptMaxSize.y = work.bottom - work.top;
+    *result = 0;
+    return true;
+}
+
+bool AppShellWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result)
+{
+    Q_UNUSED(eventType);
+    MSG* msg = static_cast<MSG*>(message);
+    if (msg == nullptr) {
+        return QWidget::nativeEvent(eventType, message, result);
+    }
+
+    switch (msg->message) {
+    case WM_HOTKEY:
+        if (msg->wParam == kPanicHotkeyId) {
+            if (panicHotkeyHandler_) {
+                panicHotkeyHandler_();
+            }
+            *result = 0;
+            return true;
+        }
+        break;
+    case WM_GETMINMAXINFO:
+        return handleMinMaxInfo(message, result);
+    case WM_NCCALCSIZE:
+        if (msg->wParam == TRUE) {
+            *result = 0;
+            return true;
+        }
+        break;
+    case WM_SIZE:
+        updateChromeState();
+        break;
+    case WM_NCHITTEST: {
+        // Native hit tests use physical desktop pixels; Qt widgets use logical
+        // pixels. Convert relative to this HWND first for mixed-DPI monitors.
+        POINT clientPos{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};
+        if(!ScreenToClient(msg->hwnd,&clientPos))break;
+        const qreal scale = devicePixelRatioF();
+        const QPoint localPos(qFloor(clientPos.x/scale),qFloor(clientPos.y/scale));
+        QWidget* child = childAt(localPos);
+        if (isTitleControl(child)) {
+            *result = HTCLIENT;
+            return true;
+        }
+
+        const LRESULT nativeHit = DefWindowProc(msg->hwnd, msg->message, msg->wParam, msg->lParam);
+        if (nativeHit != HTCLIENT && nativeHit != HTMINBUTTON && nativeHit != HTMAXBUTTON && nativeHit != HTCLOSE) {
+            *result = nativeHit;
+            return true;
+        }
+
+        if (!IsZoomed(msg->hwnd)) {
+            const UINT dpi = GetDpiForWindow(msg->hwnd);
+            const int nativeBorder = GetSystemMetricsForDpi(SM_CXSIZEFRAME,dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
+            const int border = qCeil(qMax(8,nativeBorder)/scale);
+
+            const bool left = localPos.x() >= 0 && localPos.x() < border;
+            const bool right = localPos.x() <= width() && localPos.x() >= width() - border;
+            const bool top = localPos.y() >= 0 && localPos.y() < border;
+            const bool bottom = localPos.y() <= height() && localPos.y() >= height() - border;
+            if (top && left) {
+                *result = HTTOPLEFT;
+                return true;
+            }
+            if (top && right) {
+                *result = HTTOPRIGHT;
+                return true;
+            }
+            if (bottom && left) {
+                *result = HTBOTTOMLEFT;
+                return true;
+            }
+            if (bottom && right) {
+                *result = HTBOTTOMRIGHT;
+                return true;
+            }
+            if (left) {
+                *result = HTLEFT;
+                return true;
+            }
+            if (right) {
+                *result = HTRIGHT;
+                return true;
+            }
+            if (top) {
+                *result = HTTOP;
+                return true;
+            }
+            if (bottom) {
+                *result = HTBOTTOM;
+                return true;
+            }
+        }
+
+        constexpr int dragHeight = 54;
+        if (localPos.y() >= 0 && localPos.y() < dragHeight) {
+            if (!isTitleControl(child)) {
+                *result = HTCAPTION;
+                return true;
+            }
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    return QWidget::nativeEvent(eventType, message, result);
+}
+#endif

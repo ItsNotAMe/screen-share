@@ -2,7 +2,7 @@
 
 ## Current Shape
 
-- `src/transport/LanDiscovery.*` implements a small IPv4 UDP query/response helper.
+- `backend/transport/LanDiscovery.*` implements a small IPv4 UDP query/response helper.
 - Default discovery port: `47995`.
 - Receiver side opt-in: `--watch PORT --lan-advertise` or `--udp-recv PORT --lan-advertise`.
 - Sender side scan: `--lan-discover --lan-discover-seconds S`.

@@ -1,0 +1,11 @@
+{
+  "qtVersion": "6.10.3",
+  "qtArchitecture": "win64_msvc2022_64",
+  "qtModules": ["qtwebsockets"],
+  "aqtVersion": "3.3.0",
+  "vulkanHeadersRepository": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+  "vulkanHeadersCommit": "2cd90f9d20df57eac214c148f3aed885372ddcfe",
+  "windowsSdkPackage": "Microsoft.WindowsSDK.10.0.28000",
+  "windowsSdkPackageVersion": "10.0.28000.2526",
+  "windowsSdkIncludeVersion": "10.0.28000.0"
+}

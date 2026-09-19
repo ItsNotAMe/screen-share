@@ -1,0 +1,29 @@
+# Isolated development service. The default v1 entry/config is unchanged.
+name = "screenshare-signaling-v2"
+main = "src/v2/worker.ts"
+compatibility_date = "2026-05-21"
+
+# Isolated laptop-test deployment budget: decimal string from 1 through 500.
+# Invalid values block new rooms; existing room renewals and releases still work.
+[vars]
+V2_MAX_ROOMS = "10"
+
+[[durable_objects.bindings]]
+name = "V2_ROOMS"
+class_name = "V2Room"
+
+[[durable_objects.bindings]]
+name = "V2_CONTROL"
+class_name = "V2Control"
+
+[[durable_objects.bindings]]
+name = "V2_DIRECTORY"
+class_name = "V2Directory"
+
+[[migrations]]
+tag = "v2-initial"
+new_sqlite_classes = ["V2Room", "V2Control"]
+
+[[migrations]]
+tag = "v2-directory"
+new_sqlite_classes = ["V2Directory"]

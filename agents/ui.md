@@ -29,15 +29,15 @@
 
 ## Implementation Notes
 
-- `ScreenShareUi.exe` lives beside `ScreenShare.exe`; live Share/Watch sessions use `src/ui/QtSessionBackend.*` over the concrete `screenshare::ScreenShareSession` API.
+- `ScreenShareUi.exe` lives beside `ScreenShare.exe`; live Share/Watch sessions use `frontend/ui/QtSessionBackend.*` over the concrete `screenshare::ScreenShareSession` API.
 - `ScreenShareUi.exe` links `ScreenShareAPI`, which includes the concrete session API and runtime-backed Share/Watch execution without CLI parsing. Short helper diagnostics can still invoke `ScreenShare.exe` when useful.
-- The UI-facing session API is `src/api/ScreenShareAPI.h`; `src/runtime/ScreenShareRuntimeInternal.h` is private runtime plumbing shared with the current CLI implementation.
-- Runtime-owned saved-report and stdout/stderr capture support lives in `src/runtime/ScreenShareRuntimeSupport.*`, so typed UI sessions and CLI sessions now use the same report wrapper.
+- The UI-facing session API is `backend/api/ScreenShareAPI.h`; `backend/runtime/ScreenShareRuntimeInternal.h` is private runtime plumbing shared with the current CLI implementation.
+- Runtime-owned saved-report and stdout/stderr capture support lives in `backend/runtime/ScreenShareRuntimeSupport.*`, so typed UI sessions and CLI sessions now use the same report wrapper.
 - `ScreenShareSession` converts live engine telemetry into typed `SessionEvent` snapshots. The UI uses those events for Share viewer rows, the Live/Disconnected indicator, NAT hints, access-code/password failures, room-open conflicts, and preview-close stop handling instead of parsing those fields from stdout itself.
 - `SessionStatus::stream` carries typed stream telemetry for the future Active Share/Watch Session screens: output resolution, source resolution when available, FPS, bitrate, adaptation state, stream queue/drops, and UDP queue delay.
 - `SessionStatus::audio` carries typed audio telemetry for future active-session panels: capture/receive counters, codec/format, UDP audio transport, playback queue/render state, mute/volume, and A/V sync status.
-- Live Share/Watch sessions build engine options directly from typed configs for Worker rooms, direct/Nearby targets, and manual invite fallback. `src/core/SessionCommand.*` remains only for command previews/self-tests while that UI surface still exists.
-- CLI stop/control files and UI memory controls now flow through `src/core/SessionRuntimeControl.*`; the runtime API is typed around stream settings, with resolution as the first implemented live setting.
+- Live Share/Watch sessions build engine options directly from typed configs for Worker rooms, direct/Nearby targets, and manual invite fallback. `backend/core/SessionCommand.*` remains only for command previews/self-tests while that UI surface still exists.
+- CLI stop/control files and UI memory controls now flow through `backend/core/SessionRuntimeControl.*`; the runtime API is typed around stream settings, with resolution as the first implemented live setting.
 - `--share` is the sender preset, so it already enables system audio, adaptive bitrate, and adaptive resolution.
 - Share audio uses Windows' default output unless `--audio-device-id` is supplied. The UI should expose a sender-side output-device picker because virtual mixers can make the Windows default endpoint differ from the device that actually contains app audio.
 - `--watch` is the receiver preset, so it already enables preview, audio playback, and default A/V sync.

@@ -1,0 +1,12 @@
+{
+  "repository": "https://webrtc.googlesource.com/src",
+  "commit": "8d208e76fb1ad2b92d557f752e9d1d7d49059efa",
+  "depotToolsRepository": "https://chromium.googlesource.com/chromium/tools/depot_tools.git",
+  "depotToolsCommit": "48e2effc16e57e40185b4793dd00017c15540fd0",
+  "chromiumBuildCommit": "e6aa79b579ec7536ac9cbb92b47c1d3c2ecec984",
+  "buildtoolsCommit": "c202b4a9dac30e789ed6e3b2354efa94357a56f3",
+  "resolvedOn": "2026-09-14",
+  "clangPackage": "llvmorg-24-init-7747-g62397f8b-27",
+  "validatedMsvcToolset": "14.50.35717",
+  "status": "Debug/Release relocatable SDKs, MF/ADM media proofs and native portable startup validated locally; Gate A remains open"
+}

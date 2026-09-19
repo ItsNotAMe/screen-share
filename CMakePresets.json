@@ -2,9 +2,46 @@
   "version": 6,
   "configurePresets": [
     {
+      "name": "native-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "host=x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD": "OFF",
+        "SCREENSHARE_ENABLE_RELEASE_LTO": "OFF",
+        "SCREENSHARE_DEPENDENCY_ROOT": "${sourceDir}/.deps",
+        "SCREENSHARE_BOOTSTRAP_DEPENDENCIES": "ON"
+      }
+    },
+    {
+      "name": "native-debug",
+      "inherits": "native-base",
+      "binaryDir": "${sourceDir}/build/native-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebugDLL"
+      }
+    },
+    {
+      "name": "native-release",
+      "inherits": "native-base",
+      "binaryDir": "${sourceDir}/build/native-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDLL"
+      }
+    },
+    {
       "name": "debug",
       "displayName": "Debug",
-      "generator": "MinGW Makefiles",
+      "inherits": "native-debug",
       "binaryDir": "${sourceDir}/build/debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
@@ -13,7 +50,7 @@
     {
       "name": "release",
       "displayName": "Release",
-      "generator": "MinGW Makefiles",
+      "inherits": "native-release",
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
@@ -21,6 +58,16 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "native-debug",
+      "configurePreset": "native-debug",
+      "jobs": 8
+    },
+    {
+      "name": "native-release",
+      "configurePreset": "native-release",
+      "jobs": 8
+    },
     {
       "name": "debug",
       "configurePreset": "debug"

@@ -1,0 +1,43 @@
+#pragma once
+#include "NativeRoomRuntime.h"
+#include "capture/DesktopCapturer.h"
+#include "audio/WasapiCapture.h"
+#include "media/audio/PcmAudioEndpoint.h"
+#include "input/v2/DesktopTarget.h"
+
+namespace screenshare::media {
+// Windows binding for the shared runtime. Application owns WindowsMediaRuntime
+// and SSL. Presentation sinks must enqueue onto their window thread. Optional
+// audio endpoints permit headless tests without capturing/playing desktop audio.
+struct WindowsRoomRuntimeOptions {
+    CaptureConfig capture;
+    AudioCaptureConfig audio;
+    std::wstring playbackDeviceId;
+    unsigned playbackVolume = 100;
+    bool playbackMuted = false;
+    std::function<PlaybackControl::Factory(PlaybackSelection)> playbackForSelection;
+    std::optional<PcmEndpointFactories> audioEndpoints;
+    // Test/embedding override. Never fall back to physical capture when supplied.
+    std::function<AudioSwitchControl::Factory(AudioSelection)> audioForSelection;
+    StreamPreferences preferences;
+    // Embedding/diagnostic codec control. Hardware remains preferred by default;
+    // software mode keeps the same room/transport/capture pipeline for comparison.
+    bool preferHardwareEncoding = true;
+    // Local receiver compatibility choice; independent of the host encoder.
+    bool preferHardwareDecoding = true;
+    // Native embedding/diagnostic decorators; absent in normal application use.
+    std::function<std::unique_ptr<webrtc::VideoEncoderFactory>(std::unique_ptr<webrtc::VideoEncoderFactory>)> encoderDecorator;
+    std::function<std::unique_ptr<webrtc::VideoDecoderFactory>(std::unique_ptr<webrtc::VideoDecoderFactory>)> decoderDecorator;
+    std::function<CaptureSession::Factory(CaptureSession::Factory)> captureDecorator;
+    MediaEngine::PacketFactory packetFactory; // Optional embedding/test transport; absent in the application.
+    webrtc::PeerConnectionInterface::RTCConfiguration connection;
+    std::shared_ptr<PresentationTelemetry> presentation;
+    std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
+    std::shared_ptr<input::Sink> inputSink;
+    bool enableDesktopInput = false; // Explicit frontend opt-in; ignored when an injected sink exists.
+    std::shared_ptr<input::DesktopTargetState> inputTarget;
+    // Control/input-state only; receiver telemetry is owned by the runtime.
+    std::function<void(const std::string&, webrtc::scoped_refptr<webrtc::DataChannelInterface>)> channel;
+};
+v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions);
+}

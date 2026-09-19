@@ -13,10 +13,12 @@ param(
     [string]$InstallerSignatureDerPath,
 
     [string]$PublicKeyPath,
-    [string]$OpenSslPath = "openssl"
+    [string]$OpenSslPath = "openssl",
+    [string]$PassphraseFile = "$env:USERPROFILE/.screenshare-release/update-passphrase.dpapi"
 )
 
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot/UpdateSigning.ps1"
 
 function Read-DerLength {
     param(
@@ -146,10 +148,19 @@ foreach ($assetKey in $assetKeys) {
 
         if ($PSCmdlet.ParameterSetName -eq "PrivateKey") {
             $temporarySignature = Join-Path ([IO.Path]::GetTempPath()) ("screenshare-update-signature-" + [Guid]::NewGuid().ToString("N") + ".der")
-            Write-Host "Signing $assetKey for version $version. Enter the private-key passphrase when prompted."
-            & $openssl.Source dgst -sha256 -sign $resolvedPrivateKey -out $temporarySignature $messagePath
-            if ($LASTEXITCODE -ne 0) {
-                throw "OpenSSL failed to sign manifest asset '$assetKey'."
+            if ($PassphraseFile -and (Test-Path -LiteralPath $PassphraseFile)) {
+                $secret = (Get-Content -LiteralPath $PassphraseFile -Raw).Trim() | ConvertTo-SecureString
+                try {
+                    Invoke-OpenSslWithSecret -OpenSsl $openssl.Source -Arguments @(
+                        'dgst', '-sha256', '-sign', $resolvedPrivateKey, '-passin', 'stdin', '-out', $temporarySignature, $messagePath
+                    ) -Secret $secret
+                } finally { $secret.Dispose() }
+            } else {
+                Write-Host "Signing $assetKey for version $version. Enter the private-key passphrase when prompted."
+                & $openssl.Source dgst -sha256 -sign $resolvedPrivateKey -out $temporarySignature $messagePath
+                if ($LASTEXITCODE -ne 0) {
+                    throw "OpenSSL failed to sign manifest asset '$assetKey'."
+                }
             }
             $resolvedSignature = $temporarySignature
         } else {

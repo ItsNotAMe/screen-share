@@ -1,0 +1,40 @@
+# Exercise the shipped executable dispatch, not only its controller library.
+if(NOT DEFINED EXECUTABLE OR NOT DEFINED OUTPUT_DIRECTORY)
+    message(FATAL_ERROR "Executable and isolated output directory required")
+endif()
+file(MAKE_DIRECTORY "${OUTPUT_DIRECTORY}")
+execute_process(COMMAND "${EXECUTABLE}" --help
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+if(NOT result EQUAL 0 OR NOT output MATCHES "modular room backend")
+    message(FATAL_ERROR "Default CLI help did not select the modular application")
+endif()
+execute_process(COMMAND "${EXECUTABLE}" --create-room --signal-server http://127.0.0.1:1
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+if(NOT result EQUAL 1 OR NOT error MATCHES "HTTPS service origin is required")
+    message(FATAL_ERROR "Default create command did not validate the modular service before networking")
+endif()
+execute_process(COMMAND "${EXECUTABLE}" --watch 5000
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+if(NOT result EQUAL 1 OR NOT error MATCHES "Unsupported room option")
+    message(FATAL_ERROR "Retired legacy command was not rejected explicitly")
+endif()
+execute_process(COMMAND "${EXECUTABLE}" --join-room screenshare-room-v1\;old-room
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+if(NOT result EQUAL 1 OR NOT error MATCHES "Viewer requires a room ID or v2 room link")
+    message(FATAL_ERROR "Old room reference was not rejected before admission")
+endif()
+set(config "${OUTPUT_DIRECTORY}/invalid-room.json")
+file(WRITE "${config}" "{\"origin\":\"http://127.0.0.1:1\",\"host\":true,\"password\":\"never-echo-this-password\"}")
+execute_process(COMMAND "${EXECUTABLE}" --room-v2 "${config}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+if(NOT result EQUAL 1 OR NOT error MATCHES "HTTPS service origin is required")
+    message(FATAL_ERROR "Room CLI did not reject plaintext before starting a session")
+endif()
+if("${output}${error}" MATCHES "never-echo-this-password")
+    message(FATAL_ERROR "Room CLI exposed a configuration secret")
+endif()
+execute_process(COMMAND "${EXECUTABLE}" --room-v2
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+if(NOT result EQUAL 1 OR NOT error MATCHES "Usage: ScreenShare --room-v2")
+    message(FATAL_ERROR "Room CLI argument validation failed")
+endif()

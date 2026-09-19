@@ -12,7 +12,7 @@ property — a signed manifest verified against a public key pinned in the binar
 before install — is identical.
 
 **Until a key is pinned, auto-update is disabled (fail closed).** The pinned key
-lives in `kUpdatePublicKeyXy` in `src/ui/UpdateManager.cpp` (all zero by
+lives in `kUpdatePublicKeyXy` in `frontend/ui/UpdateManager.cpp` (all zero by
 default).
 
 ## 1. Generate the signing keypair (once)
@@ -37,7 +37,7 @@ openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
   -aes-256-cbc -out screenshare-update.key
 
 # Raw 64-byte public key (X||Y) as a C initializer to paste into
-# kUpdatePublicKeyXy in src/ui/UpdateManager.cpp:
+# kUpdatePublicKeyXy in frontend/ui/UpdateManager.cpp:
 openssl ec -in screenshare-update.key -pubout -outform DER 2>/dev/null \
   | tail -c 64 | xxd -i
 ```
@@ -45,6 +45,13 @@ openssl ec -in screenshare-update.key -pubout -outform DER 2>/dev/null \
 Paste the emitted bytes into `kUpdatePublicKeyXy` and rebuild.
 
 ## 2. Sign each release manifest
+
+For unattended local releases, run `scripts/set-update-signing-secret.ps1`
+once to verify and save the existing key passphrase using Windows DPAPI. The
+signing script automatically uses that account-bound encrypted file when it
+exists; it passes the decrypted value only through the OpenSSL process's stdin.
+No signing key is regenerated or shared with the assistant. See `docs/release.md`
+for the single-command build and publishing workflow.
 
 Each update asset is signed independently. The signed message is exactly these
 three fields joined by newlines (using the selected asset's `url` and `sha256`):

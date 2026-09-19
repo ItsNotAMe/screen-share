@@ -1,0 +1,1268 @@
+[
+  {
+    "directory": false,
+    "steps": [
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "viewer",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ]
+          },
+          "roomId": "room",
+          "revision": 10
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 10
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "payload": {
+            "op": "member.remove",
+            "peerId": "host"
+          },
+          "roomId": "room",
+          "revision": 11
+        },
+        "generation": 1,
+        "result": "resync",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 10
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "payload": {
+            "op": "member.remove",
+            "peerId": "host"
+          },
+          "roomId": "room",
+          "revision": 13
+        },
+        "generation": 1,
+        "result": "ignore",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 10
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "viewer",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ]
+          },
+          "roomId": "room",
+          "revision": 20
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 20
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "payload": {
+            "op": "host.status",
+            "status": "reconnecting"
+          },
+          "roomId": "room",
+          "revision": 21
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "reconnecting",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "reconnecting"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 21
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "viewer",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ]
+          },
+          "roomId": "room",
+          "revision": 20
+        },
+        "generation": 1,
+        "result": "ignore",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "reconnecting",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "reconnecting"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 21
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "viewer",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ]
+          },
+          "roomId": "room",
+          "revision": 100
+        },
+        "generation": 0,
+        "result": "ignore",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "reconnecting",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "reconnecting"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 21
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "viewer",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ],
+            "token": "secret"
+          },
+          "roomId": "room",
+          "revision": 20
+        },
+        "generation": 1,
+        "result": "invalid",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "reconnecting",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "reconnecting"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 21
+      }
+    ]
+  },
+  {
+    "directory": true,
+    "steps": [
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "rooms": [
+              {
+                "roomId": "room",
+                "name": "Game",
+                "viewerCount": 1,
+                "viewerLimit": 4,
+                "passwordProtected": false,
+                "status": "open",
+                "summaryVersion": 3,
+                "leaseExpiresAt": 180000
+              }
+            ]
+          },
+          "revision": 10
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 1,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "open",
+              "summaryVersion": 3,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 10
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "payload": {
+            "op": "remove",
+            "roomId": "room"
+          },
+          "revision": 11
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "rooms": []
+        },
+        "revision": 11
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "payload": {
+            "op": "remove",
+            "roomId": "room"
+          },
+          "revision": 12
+        },
+        "generation": 1,
+        "result": "resync",
+        "payload": {
+          "rooms": []
+        },
+        "revision": 11
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "payload": {
+            "op": "remove",
+            "roomId": "room"
+          },
+          "revision": 13
+        },
+        "generation": 1,
+        "result": "ignore",
+        "payload": {
+          "rooms": []
+        },
+        "revision": 11
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "rooms": [
+              {
+                "roomId": "room",
+                "name": "Game",
+                "viewerCount": 1,
+                "viewerLimit": 4,
+                "passwordProtected": false,
+                "status": "open",
+                "summaryVersion": 3,
+                "leaseExpiresAt": 180000
+              }
+            ]
+          },
+          "revision": 20
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 1,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "open",
+              "summaryVersion": 3,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 20
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "payload": {
+            "op": "upsert",
+            "room": {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 1,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "open",
+              "summaryVersion": 3,
+              "leaseExpiresAt": 180000
+            }
+          },
+          "revision": 21
+        },
+        "generation": 1,
+        "result": "resync",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 1,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "open",
+              "summaryVersion": 3,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 20
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "rooms": [
+              {
+                "roomId": "room",
+                "name": "Game",
+                "viewerCount": 1,
+                "viewerLimit": 4,
+                "passwordProtected": false,
+                "status": "open",
+                "summaryVersion": 3,
+                "leaseExpiresAt": 180000
+              }
+            ]
+          },
+          "revision": 20
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 1,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "open",
+              "summaryVersion": 3,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 20
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "rooms": [
+              {
+                "roomId": "room",
+                "name": "Game",
+                "viewerCount": 1,
+                "viewerLimit": 4,
+                "passwordProtected": false,
+                "status": "open",
+                "summaryVersion": 3,
+                "leaseExpiresAt": 180000
+              }
+            ]
+          },
+          "revision": 100
+        },
+        "generation": 0,
+        "result": "ignore",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 1,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "open",
+              "summaryVersion": 3,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 20
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "rooms": [
+              {
+                "roomId": "room",
+                "name": "Game",
+                "viewerCount": 1,
+                "viewerLimit": 4,
+                "passwordProtected": false,
+                "status": "open",
+                "summaryVersion": 3,
+                "leaseExpiresAt": 180000
+              }
+            ],
+            "token": "secret"
+          },
+          "revision": 20
+        },
+        "generation": 1,
+        "result": "invalid",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 1,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "open",
+              "summaryVersion": 3,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 20
+      }
+    ]
+  },
+  {
+    "directory": false,
+    "steps": [
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "viewer",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ]
+          },
+          "roomId": "room",
+          "revision": 10
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 10
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "viewer",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ]
+          },
+          "roomId": "other",
+          "revision": 11
+        },
+        "generation": 1,
+        "result": "invalid",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 10
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "host",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ]
+          },
+          "roomId": "room",
+          "revision": 11
+        },
+        "generation": 1,
+        "result": "invalid",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 10
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "roomId": "room",
+          "revision": 11,
+          "payload": {
+            "op": "member.upsert",
+            "member": {
+              "peerId": "v2",
+              "nickname": "Other",
+              "role": "viewer",
+              "status": "connected"
+            }
+          }
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "public",
+            "viewerLimit": 4,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            },
+            {
+              "peerId": "v2",
+              "nickname": "Other",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 11
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "roomId": "room",
+          "revision": 12,
+          "payload": {
+            "op": "policy",
+            "policy": {
+              "name": "Game",
+              "visibility": "unlisted",
+              "viewerLimit": 1,
+              "passwordProtected": false
+            }
+          }
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "unlisted",
+            "viewerLimit": 1,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            },
+            {
+              "peerId": "v2",
+              "nickname": "Other",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 12
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "roomId": "room",
+          "revision": 13,
+          "payload": {
+            "op": "member.remove",
+            "peerId": "v2"
+          }
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "unlisted",
+            "viewerLimit": 1,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 13
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "roomId": "room",
+          "revision": 14,
+          "payload": {
+            "op": "member.remove",
+            "peerId": "viewer"
+          }
+        },
+        "generation": 1,
+        "result": "resync",
+        "payload": {
+          "selfPeerId": "viewer",
+          "policy": {
+            "name": "Game",
+            "visibility": "unlisted",
+            "viewerLimit": 1,
+            "passwordProtected": false
+          },
+          "status": "open",
+          "members": [
+            {
+              "peerId": "host",
+              "nickname": "Host",
+              "role": "host",
+              "status": "connected"
+            },
+            {
+              "peerId": "viewer",
+              "nickname": "Viewer",
+              "role": "viewer",
+              "status": "connected"
+            }
+          ]
+        },
+        "revision": 13
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "room.closed",
+          "roomId": "room",
+          "payload": {
+            "reason": "kicked"
+          }
+        },
+        "generation": 1,
+        "result": "closed",
+        "payload": {},
+        "revision": null
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "selfPeerId": "viewer",
+            "policy": {
+              "name": "Game",
+              "visibility": "public",
+              "viewerLimit": 4,
+              "passwordProtected": false
+            },
+            "status": "open",
+            "members": [
+              {
+                "peerId": "host",
+                "nickname": "Host",
+                "role": "host",
+                "status": "connected"
+              },
+              {
+                "peerId": "viewer",
+                "nickname": "Viewer",
+                "role": "viewer",
+                "status": "connected"
+              }
+            ]
+          },
+          "roomId": "room",
+          "revision": 10
+        },
+        "generation": 1,
+        "result": "ignore",
+        "payload": {},
+        "revision": null
+      }
+    ]
+  },
+  {
+    "directory": true,
+    "steps": [
+      {
+        "message": {
+          "v": 2,
+          "type": "state.snapshot",
+          "payload": {
+            "rooms": [
+              {
+                "roomId": "room",
+                "name": "Game",
+                "viewerCount": 1,
+                "viewerLimit": 4,
+                "passwordProtected": false,
+                "status": "open",
+                "summaryVersion": 3,
+                "leaseExpiresAt": 180000
+              }
+            ]
+          },
+          "revision": 10
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 1,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "open",
+              "summaryVersion": 3,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 10
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "revision": 11,
+          "payload": {
+            "op": "upsert",
+            "room": {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 4,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "full",
+              "summaryVersion": 4,
+              "leaseExpiresAt": 180000
+            }
+          }
+        },
+        "generation": 1,
+        "result": "applied",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 4,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "full",
+              "summaryVersion": 4,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 11
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "revision": 13,
+          "payload": {
+            "op": "upsert",
+            "room": {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 4,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "full",
+              "summaryVersion": 4,
+              "leaseExpiresAt": 180000
+            }
+          }
+        },
+        "generation": 1,
+        "result": "resync",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 4,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "full",
+              "summaryVersion": 4,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 11
+      },
+      {
+        "message": {
+          "v": 2,
+          "type": "state.delta",
+          "revision": 12,
+          "payload": {
+            "op": "upsert",
+            "room": {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 4,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "full",
+              "summaryVersion": 4,
+              "leaseExpiresAt": 180000
+            }
+          }
+        },
+        "generation": 1,
+        "result": "ignore",
+        "payload": {
+          "rooms": [
+            {
+              "roomId": "room",
+              "name": "Game",
+              "viewerCount": 4,
+              "viewerLimit": 4,
+              "passwordProtected": false,
+              "status": "full",
+              "summaryVersion": 4,
+              "leaseExpiresAt": 180000
+            }
+          ]
+        },
+        "revision": 11
+      }
+    ]
+  }
+]

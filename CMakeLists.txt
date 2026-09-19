@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ScreenShareNative VERSION 0.3.4 LANGUAGES CXX)
+# Prepare the pinned toolchain before project() checks compiler availability.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
+
+project(ScreenShareNative VERSION 1.0.0 LANGUAGES CXX)
+
+# C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
+set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
+    "$<$<CXX_COMPILER_ID:Clang>:/clang:-mcx16>")
 
 include(CTest)
 
@@ -9,6 +16,7 @@ option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to Screen
 option(SCREENSHARE_PACKAGE_PORTABLE_ON_BUILD "Create the portable zip package after the normal ScreenShare build" ON)
 option(SCREENSHARE_BUILD_INSTALLER "Create an elevated ScreenShare Setup that provisions controller support" OFF)
 option(SCREENSHARE_BUILD_QT_UI "Build the Qt desktop control UI when Qt 6 Widgets and Svg are available" ON)
+option(SCREENSHARE_BUILD_FIELD_TEST "Build the silent, read-only physical acceptance scene" OFF)
 option(SCREENSHARE_ENABLE_RELEASE_LTO "Enable compiler-supported link-time optimization for Release builds" ON)
 option(SCREENSHARE_BUILD_PINNED_VIGEMCLIENT "Build the pinned ViGEm user-mode client from source" ON)
 set(SCREENSHARE_VIGEMCLIENT_DLL "" CACHE FILEPATH
@@ -49,17 +57,31 @@ function(screenshare_configure_release_lto_warnings target_name)
     endif()
 endfunction()
 
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
+include(cmake/WebRTC.cmake)
+if(NOT SCREENSHARE_WEBRTC_ARTIFACT_DIR)
+    message(FATAL_ERROR "The application now requires the pinned WebRTC artifact/SDK. Use a native preset or scripts/run-webrtc-proof.ps1 -Application; see docs/build.md.")
+endif()
+if(SCREENSHARE_WEBRTC_ARTIFACT_DIR)
+    screenshare_import_webrtc()
+    include(cmake/MediaNegotiation.cmake)
+    # The complete WebRTC archive includes its DEPS-pinned Opus implementation.
+    # The legacy audio adapter uses it during the build proof; v2 uses the ADM.
+    set(SCREENSHARE_OPUS_TARGET ScreenShare::WebRTC)
+elseif(NOT MSVC)
+    find_package(PkgConfig QUIET)
+endif()
+if(NOT SCREENSHARE_OPUS_TARGET AND PkgConfig_FOUND)
     pkg_check_modules(OPUS QUIET IMPORTED_TARGET opus)
 endif()
-if(OPUS_FOUND)
+if(SCREENSHARE_OPUS_TARGET)
+    # Verified native artifact selected above.
+elseif(OPUS_FOUND)
     set(SCREENSHARE_OPUS_TARGET PkgConfig::OPUS)
 else()
     find_path(SCREENSHARE_OPUS_INCLUDE_DIR
-        NAMES opus/opus.h
+        NAMES opus.h
         PATHS ENV OPUS_ROOT
-        PATH_SUFFIXES include
+        PATH_SUFFIXES include/opus include
     )
     find_library(SCREENSHARE_OPUS_LIBRARY
         NAMES opus
@@ -136,40 +158,40 @@ if(SCREENSHARE_BUILD_PINNED_VIGEMCLIENT)
 endif()
 
 add_library(ScreenShareCore STATIC
-    src/audio/OpusCodec.cpp
-    src/audio/WasapiCapture.cpp
-    src/audio/WasapiRenderer.cpp
-    src/capture/DesktopCapturer.cpp
-    src/codec/H264Bitstream.cpp
-    src/codec/H264FileEncoder.cpp
-    src/codec/H264EncoderProbe.cpp
-    src/codec/H264StreamDecoder.cpp
-    src/codec/H264StreamEncoder.cpp
-    src/core/ScreenShareSession.cpp
-    src/core/SessionCommand.cpp
-    src/core/SessionRuntimeControl.cpp
-    src/input/RemoteInputInjector.cpp
-    src/input/ViewerGamepad.cpp
-    src/input/VirtualGamepadBackend.cpp
-    src/input/XInputGamepad.cpp
-    src/render/Nv12D3D11Presenter.cpp
-    src/render/ReceiverPreviewWindow.cpp
-    src/transport/NatTraversal.cpp
-    src/transport/SignalingClient.cpp
-    src/transport/StunClient.cpp
-    src/transport/UdpCrypto.cpp
-    src/transport/LanDiscovery.cpp
-    src/transport/UdpProtocol.cpp
-    src/transport/UdpReceiver.cpp
-    src/transport/UdpSender.cpp
-    src/updater/UpdateSignature.cpp
-    src/video/Nv12Convert.cpp
+    backend/media/HostMediaSession.cpp
+    backend/media/capture/CaptureSession.cpp
+    backend/media/capture/CaptureDistributor.cpp
+    backend/audio/OpusCodec.cpp
+    backend/audio/WasapiCapture.cpp
+    backend/audio/WasapiRenderer.cpp
+    backend/capture/DesktopCapturer.cpp
+    backend/capture/DxgiCursor.cpp
+    backend/codec/H264Bitstream.cpp
+    backend/codec/H264FileEncoder.cpp
+    backend/codec/H264EncoderProbe.cpp
+    backend/codec/H264StreamDecoder.cpp
+    backend/codec/H264StreamEncoder.cpp
+    backend/core/ScreenShareSession.cpp
+    backend/core/SessionCommand.cpp
+    backend/core/SessionRuntimeControl.cpp
+    backend/input/RemoteInputInjector.cpp
+    backend/input/v2/GamepadSink.cpp
+    backend/input/v2/DesktopSink.cpp
+    backend/input/v2/GamepadPoller.cpp
+    backend/input/ViewerGamepad.cpp
+    backend/input/VirtualGamepadBackend.cpp
+    backend/input/XInputGamepad.cpp
+    backend/render/Nv12D3D11Presenter.cpp
+    backend/render/FramePresentationBackend.cpp
+    backend/render/ReceiverPreviewWindow.cpp
+    backend/updater/UpdateSignature.cpp
+    backend/video/Nv12Convert.cpp
 )
 
 target_compile_features(ScreenShareCore PUBLIC cxx_std_20)
 
 target_include_directories(ScreenShareCore PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend
 )
 
 if(WIN32)
@@ -210,6 +232,7 @@ target_link_libraries(ScreenShareCore PUBLIC
     user32
     uuid
     windowsapp
+    CoreMessaging
     bcrypt
     iphlpapi
     hid
@@ -217,31 +240,136 @@ target_link_libraries(ScreenShareCore PUBLIC
     winhttp
     ws2_32
 )
+if(MSVC)
+    target_link_libraries(ScreenShareCore PUBLIC wmcodecdspuuid)
+endif()
+if(TARGET ScreenShareNegotiation)
+    target_link_libraries(ScreenShareCore PRIVATE ScreenShareNegotiation)
+endif()
 
-add_library(ScreenShareAPI STATIC
-    src/api/ScreenShareAPI.cpp
-    src/runtime/ScreenShareRuntimeExecution.cpp
-    src/runtime/ScreenShareRuntimeSupport.cpp
-    src/runtime/ScreenShareSessionOptions.cpp
-    src/runtime/ScreenShareSessionRunner.cpp
+# Historical transport is retained only for reproducible comparison/regression
+# tools. Neither shipping entry point links this or the legacy session runner.
+add_library(ScreenShareLegacyTransport STATIC EXCLUDE_FROM_ALL
+    backend/transport/NatTraversal.cpp backend/transport/SignalingClient.cpp
+    backend/transport/StunClient.cpp backend/transport/UdpCrypto.cpp
+    backend/transport/LanDiscovery.cpp backend/transport/UdpProtocol.cpp
+    backend/transport/UdpReceiver.cpp backend/transport/UdpSender.cpp)
+target_link_libraries(ScreenShareLegacyTransport PUBLIC ScreenShareCore)
+if(MSVC)
+    # Room transport is a backend dependency, including CLI-only builds.
+    include(cmake/RoomTransport.cmake)
+    target_link_libraries(ScreenShareCore PRIVATE ScreenShareRoom)
+    if(TARGET ScreenShareNegotiation)
+        include(cmake/RoomSession.cmake)
+        target_link_libraries(ScreenShareCore PRIVATE ScreenShareRoomSession)
+        if(BUILD_TESTING)
+            add_executable(NativeRoomRuntimeTests tests/NativeRoomRuntimeTests.cpp)
+            target_link_libraries(NativeRoomRuntimeTests PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_executable(NativePcmAudioTests tools/webrtc-proof/PcmAudioDeviceTest.cpp)
+            target_link_libraries(NativePcmAudioTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
+            add_test(NAME native-pcm-audio COMMAND NativePcmAudioTests)
+            set_tests_properties(native-pcm-audio PROPERTIES TIMEOUT 90)
+            add_executable(NativeCaptureTests tools/webrtc-proof/CaptureBackendTest.cpp)
+            target_link_libraries(NativeCaptureTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
+            add_executable(RoomInputTests tools/webrtc-proof/PublicRoomSessionProof.cpp)
+            target_link_libraries(RoomInputTests PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_executable(RoomLifecycleStress tools/webrtc-proof/RoomLifecycleStress.cpp)
+            target_link_libraries(RoomLifecycleStress PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_executable(BackendComparison tools/backend-comparison/BackendComparison.cpp)
+            target_link_libraries(BackendComparison PRIVATE ScreenShareAPI ScreenShareRoomSession psapi)
+            include(cmake/NetworkImpairment.cmake)
+            if(SCREENSHARE_WEBRTC_TEST_SOURCE_DIR)
+                screenshare_add_network_model(BackendComparison)
+                target_compile_definitions(BackendComparison PRIVATE SCREENSHARE_COMPARISON_NETWORK)
+            endif()
+            find_package(Python3 REQUIRED COMPONENTS Interpreter)
+            add_test(NAME native-dependency-setup COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeDependencySetupTests.py")
+            set_tests_properties(native-dependency-setup PROPERTIES ENVIRONMENT "CMAKE_COMMAND=${CMAKE_COMMAND}" TIMEOUT 120)
+            add_test(NAME backend-comparison-evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/BackendComparisonTests.py")
+            add_test(NAME impaired-backend-comparison-evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/ImpairedBackendComparisonTests.py")
+            add_test(NAME native-room-runtime-link COMMAND NativeRoomRuntimeTests)
+            set_tests_properties(native-room-runtime-link PROPERTIES TIMEOUT 15)
+        endif()
+    endif()
+    if(BUILD_TESTING)
+        add_executable(RoomSocketTests tests/RoomSocketTests.cpp)
+        if(TARGET RoomInputTests)
+            add_dependencies(RoomInputTests RoomSocketTests) # Deploy the same Qt networking DLLs.
+            add_dependencies(RoomLifecycleStress RoomSocketTests)
+            add_dependencies(BackendComparison RoomSocketTests)
+        endif()
+        add_executable(RoomAdmissionTests tests/RoomAdmissionTests.cpp)
+        add_executable(RoomServiceTests tests/RoomServiceTests.cpp)
+        target_link_libraries(RoomServiceTests PRIVATE ScreenShareRoom)
+        add_dependencies(RoomServiceTests RoomSocketTests)
+        find_program(SCREENSHARE_NODE_EXECUTABLE node)
+        if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/node_modules/miniflare/package.json")
+            if(TARGET RoomInputTests)
+                add_test(NAME room-v2-input-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                    "$<TARGET_FILE:RoomInputTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-input-evidence" media)
+                set_tests_properties(room-v2-input-media PROPERTIES TIMEOUT 90)
+            endif()
+            add_test(NAME room-v2-native-worker COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                "$<TARGET_FILE:RoomServiceTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-service-evidence")
+            set_tests_properties(room-v2-native-worker PROPERTIES TIMEOUT 90)
+        else()
+            message(STATUS "Native Worker integration test requires Node and signaling-worker npm dependencies")
+        endif()
+        target_link_libraries(RoomAdmissionTests PRIVATE ScreenShareRoom)
+        add_test(NAME room-v2-admission COMMAND RoomAdmissionTests)
+        set_tests_properties(room-v2-admission PROPERTIES TIMEOUT 30)
+        # RoomSocketTests stages Qt DLLs into the shared test output directory.
+        add_dependencies(RoomAdmissionTests RoomSocketTests)
+        target_link_libraries(RoomSocketTests PRIVATE ScreenShareRoom)
+        add_custom_command(TARGET RoomSocketTests POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>"
+                "$<TARGET_FILE_DIR:RoomSocketTests>"
+            VERBATIM)
+        add_test(NAME room-v2-live-socket COMMAND RoomSocketTests)
+        set_tests_properties(room-v2-live-socket PROPERTIES TIMEOUT 75)
+    endif()
+endif()
+
+add_library(ScreenShareAPI STATIC EXCLUDE_FROM_ALL
+    backend/api/ScreenShareAPI.cpp
+    backend/runtime/ScreenShareRuntimeExecution.cpp
+    backend/runtime/ScreenShareRuntimeSupport.cpp
+    backend/runtime/ScreenShareSessionOptions.cpp
+    backend/runtime/ScreenShareSessionRunner.cpp
 )
 
 target_compile_features(ScreenShareAPI PUBLIC cxx_std_20)
 
 target_include_directories(ScreenShareAPI PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend
 )
 
 target_link_libraries(ScreenShareAPI PUBLIC
-    ScreenShareCore
+    ScreenShareLegacyTransport
 )
 
 if(BUILD_TESTING)
+    add_executable(InputServiceTests tests/InputServiceTests.cpp backend/input/v2/InputService.cpp)
+    target_compile_features(InputServiceTests PRIVATE cxx_std_20)
+    target_include_directories(InputServiceTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/backend")
+    add_test(NAME input-service COMMAND InputServiceTests)
+    add_executable(GamepadControlTests tests/GamepadControlTests.cpp)
+    target_link_libraries(GamepadControlTests PRIVATE ScreenShareCore)
+    add_test(NAME gamepad-control COMMAND GamepadControlTests)
+    add_executable(DesktopInputTests tests/DesktopInputTests.cpp)
+    target_link_libraries(DesktopInputTests PRIVATE ScreenShareCore)
+    add_test(NAME desktop-input COMMAND DesktopInputTests)
+    set_tests_properties(desktop-input PROPERTIES TIMEOUT 15)
+    set_tests_properties(gamepad-control PROPERTIES TIMEOUT 15)
+    set_tests_properties(input-service PROPERTIES TIMEOUT 20)
     add_executable(ControllerProtocolTests
         tests/ControllerProtocolTests.cpp
     )
     target_compile_features(ControllerProtocolTests PRIVATE cxx_std_20)
-    target_link_libraries(ControllerProtocolTests PRIVATE ScreenShareCore)
+    target_link_libraries(ControllerProtocolTests PRIVATE ScreenShareLegacyTransport)
     add_test(NAME controller-protocol COMMAND ControllerProtocolTests)
 
     add_executable(ViewerGamepadReportTests
@@ -255,7 +383,7 @@ if(BUILD_TESTING)
         tests/UdpSenderPacingTests.cpp
     )
     target_compile_features(UdpSenderPacingTests PRIVATE cxx_std_20)
-    target_link_libraries(UdpSenderPacingTests PRIVATE ScreenShareCore)
+    target_link_libraries(UdpSenderPacingTests PRIVATE ScreenShareLegacyTransport)
     add_test(NAME udp-sender-pacing COMMAND UdpSenderPacingTests)
 
     add_executable(AvSyncDiagnosticsTests
@@ -280,11 +408,88 @@ if(MSVC)
 endif()
 
 add_executable(ScreenShare
-    src/cli/ScreenShareMain.cpp
-    src/cli/ScreenShareCLI.cpp
+    frontend/cli/ScreenShareMain.cpp
 )
 
 target_compile_features(ScreenShare PRIVATE cxx_std_20)
+target_include_directories(ScreenShare PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
+if(TARGET ScreenShareRoomSession)
+    set(SCREENSHARE_DEFAULT_ROOM_ORIGIN "https://screenshare-signaling-v2.bit-yeet.workers.dev" CACHE STRING "Default modular room service HTTPS origin")
+    add_library(ScreenShareRoomFrontend STATIC frontend/shared/RoomSessionConfig.cpp frontend/shared/RoomProfile.cpp frontend/shared/RoomLaunch.cpp frontend/shared/RoomInputCommands.cpp frontend/shared/RoomDiagnosticReport.cpp)
+    target_compile_definitions(ScreenShareRoomFrontend PRIVATE SCREENSHARE_REPORT_VERSION="${PROJECT_VERSION}")
+    target_compile_definitions(ScreenShareRoomFrontend PRIVATE SCREENSHARE_DEFAULT_ROOM_ORIGIN="${SCREENSHARE_DEFAULT_ROOM_ORIGIN}")
+    target_include_directories(ScreenShareRoomFrontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
+    target_link_libraries(ScreenShareRoomFrontend PUBLIC ScreenShareCore ScreenShareRoomSession)
+    if(BUILD_TESTING)
+        add_executable(RoomDiagnosticReportTests tests/RoomDiagnosticReportTests.cpp)
+        target_link_libraries(RoomDiagnosticReportTests PRIVATE ScreenShareRoomFrontend)
+        add_test(NAME room-diagnostic-report COMMAND RoomDiagnosticReportTests)
+        set_tests_properties(room-diagnostic-report PROPERTIES TIMEOUT 15)
+    endif()
+    add_library(ScreenShareRoomCli STATIC frontend/cli/RoomCli.cpp)
+    target_include_directories(ScreenShareRoomCli PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/frontend")
+    target_link_libraries(ScreenShareRoomCli PUBLIC ScreenShareRoomFrontend)
+    target_link_libraries(ScreenShare PRIVATE ScreenShareRoomCli)
+    target_compile_definitions(ScreenShare PRIVATE SCREENSHARE_HAS_ROOM_V2_CLI)
+    if(BUILD_TESTING)
+        add_test(NAME room-cli-default-help COMMAND ScreenShare --help)
+        set_tests_properties(room-cli-default-help PROPERTIES PASS_REGULAR_EXPRESSION "modular room backend" TIMEOUT 15)
+        add_test(NAME room-cli-retired-command COMMAND ScreenShare --watch 5000)
+        set_tests_properties(room-cli-retired-command PROPERTIES WILL_FAIL TRUE TIMEOUT 15)
+    endif()
+    get_filename_component(_screenshare_cli_qt_bin "${Qt6_DIR}/../../../bin" ABSOLUTE)
+    find_program(SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE NAMES windeployqt6 windeployqt
+        PATHS "${_screenshare_cli_qt_bin}" NO_DEFAULT_PATH REQUIRED)
+    add_custom_command(TARGET ScreenShare POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE}"
+            "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:ScreenShare>"
+            "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
+            -DWINDEPLOYQT_HEADLESS=ON
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
+        COMMENT "Deploying Qt networking runtime next to ScreenShare.exe" VERBATIM)
+    if(TARGET BackendComparison)
+        add_custom_command(TARGET BackendComparison POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE}"
+                "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:BackendComparison>"
+                "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>" -DWINDEPLOYQT_HEADLESS=ON
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
+            COMMENT "Deploying Qt networking runtime for the backend comparison" VERBATIM)
+    endif()
+    if(BUILD_TESTING)
+        add_executable(RoomCliTests tests/RoomCliTests.cpp)
+        add_test(NAME room-v2-cli-entry COMMAND "${CMAKE_COMMAND}"
+            "-DEXECUTABLE=$<TARGET_FILE:ScreenShare>"
+            "-DOUTPUT_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/room-cli-entry"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RoomCliEntryTests.cmake")
+        set_tests_properties(room-v2-cli-entry PROPERTIES TIMEOUT 30)
+        add_test(NAME room-v2-cli-deployment COMMAND "${CMAKE_COMMAND}"
+            "-DEXECUTABLE=$<TARGET_FILE:ScreenShare>"
+            "-DOUTPUT_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/room-cli-deployment"
+            "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_CLI_WINDEPLOYQT_EXECUTABLE}"
+            "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RoomCliDeploymentTests.cmake")
+        set_tests_properties(room-v2-cli-deployment PROPERTIES TIMEOUT 60)
+        target_link_libraries(RoomCliTests PRIVATE ScreenShareRoomCli)
+        add_dependencies(RoomCliTests RoomSocketTests)
+        # Explicit generated-window check; routine CTest stays headless and silent.
+        add_executable(RoomCliWindowsTests tests/RoomCliTests.cpp)
+        target_compile_definitions(RoomCliWindowsTests PRIVATE SCREENSHARE_WINDOWS_CLI_PROOF)
+        target_link_libraries(RoomCliWindowsTests PRIVATE ScreenShareRoomCli gdi32)
+        add_dependencies(RoomCliWindowsTests RoomSocketTests)
+        if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/node_modules/miniflare/package.json")
+            add_test(NAME room-v2-cli-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                "$<TARGET_FILE:RoomCliTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-cli-evidence" media)
+            set_tests_properties(room-v2-cli-media PROPERTIES TIMEOUT 90)
+            add_test(NAME room-v2-cli-delayed-viewer COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                "$<TARGET_FILE:RoomCliTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-cli-delayed-evidence" media delayed-viewer)
+            set_tests_properties(room-v2-cli-delayed-viewer PROPERTIES TIMEOUT 90)
+        endif()
+    endif()
+endif()
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND SCREENSHARE_STATIC_MINGW_RUNTIME)
     target_link_options(ScreenShare PRIVATE -static)
@@ -293,7 +498,7 @@ endif()
 screenshare_configure_release_lto_warnings(ScreenShare)
 
 target_link_libraries(ScreenShare PRIVATE
-    ScreenShareAPI
+    ScreenShareCore
 )
 
 if(TARGET ScreenShareViGEmClient)
@@ -337,7 +542,7 @@ if(MSVC)
 endif()
 
 add_executable(ScreenShareUpdater WIN32
-    src/updater/ScreenShareUpdater.cpp
+    frontend/updater/ScreenShareUpdater.cpp
 )
 
 target_compile_features(ScreenShareUpdater PRIVATE cxx_std_20)
@@ -362,18 +567,22 @@ if(MSVC)
 endif()
 
 if(SCREENSHARE_BUILD_QT_UI)
-    if(WIN32 AND EXISTS "C:/msys64/ucrt64/lib/cmake/Qt6")
+    if(WIN32 AND NOT MSVC AND EXISTS "C:/msys64/ucrt64/lib/cmake/Qt6")
         list(APPEND CMAKE_PREFIX_PATH "C:/msys64/ucrt64")
     endif()
 
-    find_package(Qt6 QUIET COMPONENTS Network Svg Widgets)
+    if(MSVC)
+        find_package(Qt6 REQUIRED COMPONENTS Network WebSockets Svg Widgets)
+    else()
+        find_package(Qt6 QUIET COMPONENTS Network Svg Widgets)
+    endif()
     if(Qt6_FOUND)
         set(SCREENSHARE_UI_ICON_RC)
         if(WIN32)
             set(SCREENSHARE_UI_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/assets/brand/screenshare.ico")
             set(SCREENSHARE_UI_ICON_RC "${CMAKE_CURRENT_BINARY_DIR}/ScreenShareUiIcon.rc")
             configure_file(
-                "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ScreenShareUiIcon.rc.in"
+                "${CMAKE_CURRENT_SOURCE_DIR}/frontend/ui/ScreenShareUiIcon.rc.in"
                 "${SCREENSHARE_UI_ICON_RC}"
                 @ONLY
             )
@@ -411,32 +620,58 @@ if(SCREENSHARE_BUILD_QT_UI)
             endif()
         endif()
 
+        add_library(ScreenShareUiShell STATIC frontend/ui/AppShellWindow.cpp frontend/ui/ScreenAwakeGuard.cpp frontend/ui/Toast.cpp
+            frontend/ui/HomeWindow.cpp frontend/ui/UiReportPath.cpp)
+        if(SCREENSHARE_BUILD_FIELD_TEST)
+            add_executable(ScreenShareFieldScene WIN32 tools/field-test/FieldScene.cpp)
+            target_link_libraries(ScreenShareFieldScene PRIVATE ScreenShareCore Qt6::Widgets)
+            add_test(NAME field-scene-self-test COMMAND ScreenShareFieldScene --self-test)
+            set_tests_properties(field-scene-self-test PROPERTIES TIMEOUT 15 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        endif()
+        target_include_directories(ScreenShareUiShell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/frontend ${CMAKE_CURRENT_SOURCE_DIR}/backend)
+        target_link_libraries(ScreenShareUiShell PUBLIC Qt6::Widgets Qt6::Svg Qt6::Network)
+        target_compile_features(ScreenShareUiShell PUBLIC cxx_std_20)
+        target_compile_definitions(ScreenShareUiShell PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX SCREENSHARE_APP_VERSION="${PROJECT_VERSION}")
         add_executable(ScreenShareUi WIN32
-            src/ui/main.cpp
-            src/ui/QtSessionBackend.cpp
-            src/ui/ActiveShareWindow.cpp
-            src/ui/ActiveWatchWindow.cpp
-            src/ui/AppShellWindow.cpp
-            src/ui/CreateRoomWindow.cpp
-            src/ui/HomeWindow.cpp
-            src/ui/JoinRoomWindow.cpp
-            src/ui/RoomAccessCheck.cpp
-            src/ui/ScreenAwakeGuard.cpp
-            src/ui/Toast.cpp
-            src/ui/UiStyle.cpp
-            src/ui/UpdateManager.cpp
-            src/ui/UpdatePackageSelection.cpp
-            src/ui/UiReportPath.cpp
-            src/ui/VideoFrameWidget.cpp
-            src/ui/resources.qrc
+            frontend/ui/main.cpp
+            frontend/ui/UiStyle.cpp
+            frontend/ui/UpdateManager.cpp
+            frontend/ui/UpdatePackageSelection.cpp
+            frontend/ui/VideoFrameWidget.cpp
+            frontend/ui/resources.qrc
             ${SCREENSHARE_UI_ICON_RC}
         )
         set_property(TARGET ScreenShareUi PROPERTY AUTORCC ON)
         target_compile_features(ScreenShareUi PRIVATE cxx_std_20)
         target_include_directories(ScreenShareUi PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/frontend
         )
-        target_link_libraries(ScreenShareUi PRIVATE ScreenShareAPI Qt6::Network Qt6::Svg Qt6::Widgets shell32)
+        target_link_libraries(ScreenShareUi PRIVATE ScreenShareUiShell Qt6::Network Qt6::Svg Qt6::Widgets shell32)
+        if(TARGET ScreenShareRoomFrontend)
+            # The normal app and room entry points share one shell implementation.
+            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomGamepadControl.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/RoomApplication.cpp)
+            target_link_libraries(ScreenShareRoomUi PUBLIC ScreenShareRoomFrontend ScreenShareUiShell Qt6::Widgets)
+            target_link_libraries(ScreenShareUi PRIVATE ScreenShareRoomUi)
+            target_compile_definitions(ScreenShareUi PRIVATE SCREENSHARE_HAS_ROOM_V2_UI)
+            if(BUILD_TESTING)
+                foreach(ui_proof IN ITEMS RoomUiTests RoomUiWindowsTests)
+                    add_executable(${ui_proof} tests/RoomUiTests.cpp frontend/ui/VideoFrameWidget.cpp frontend/ui/UiStyle.cpp frontend/ui/resources.qrc)
+                    set_property(TARGET ${ui_proof} PROPERTY AUTORCC ON)
+                    target_link_libraries(${ui_proof} PRIVATE ScreenShareRoomUi gdi32)
+                endforeach()
+                target_compile_definitions(RoomUiWindowsTests PRIVATE SCREENSHARE_WINDOWS_UI_PROOF)
+                if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/node_modules/miniflare/package.json")
+                    add_test(NAME room-v2-qt-ui COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                        "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-ui-evidence" media)
+                    set_tests_properties(room-v2-qt-ui PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+                    add_test(NAME room-v2-mutation-ack-recovery COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                        "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-mutation-evidence" media mutation-ack-delay)
+                    set_tests_properties(room-v2-mutation-ack-recovery PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+                endif()
+            endif()
+        endif()
         target_compile_definitions(ScreenShareUi PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX
@@ -447,45 +682,73 @@ if(SCREENSHARE_BUILD_QT_UI)
         add_dependencies(ScreenShareUi ScreenShare)
 
         if(BUILD_TESTING)
+            add_executable(RoomProtocolTests
+                tests/RoomProtocolTests.cpp
+            )
+            if(TARGET ScreenShareRoom)
+                target_link_libraries(RoomProtocolTests PRIVATE ScreenShareRoom)
+            else()
+                target_sources(RoomProtocolTests PRIVATE
+                    backend/room/protocol/RoomProtocol.cpp backend/room/protocol/StateSubscription.cpp)
+            endif()
+            target_compile_features(RoomProtocolTests PRIVATE cxx_std_20)
+            target_include_directories(RoomProtocolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/backend)
+            target_compile_definitions(RoomProtocolTests PRIVATE
+                ROOM_V2_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/room-v2")
+            target_link_libraries(RoomProtocolTests PRIVATE Qt6::Core)
+            add_test(NAME room-v2-protocol COMMAND RoomProtocolTests)
+
             add_executable(UpdatePackageSelectionTests
                 tests/UpdatePackageSelectionTests.cpp
-                src/ui/UpdatePackageSelection.cpp
+                frontend/ui/UpdatePackageSelection.cpp
             )
             target_compile_features(UpdatePackageSelectionTests PRIVATE cxx_std_20)
             target_include_directories(UpdatePackageSelectionTests PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/src
+                ${CMAKE_CURRENT_SOURCE_DIR}/frontend
             )
             target_link_libraries(UpdatePackageSelectionTests PRIVATE Qt6::Core)
             add_test(NAME update-package-selection COMMAND UpdatePackageSelectionTests)
 
             add_executable(UiReportPathTests
                 tests/UiReportPathTests.cpp
-                src/ui/UiReportPath.cpp
+                frontend/ui/UiReportPath.cpp
             )
             target_compile_features(UiReportPathTests PRIVATE cxx_std_20)
             target_include_directories(UiReportPathTests PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/src
+                ${CMAKE_CURRENT_SOURCE_DIR}/frontend
             )
             target_link_libraries(UiReportPathTests PRIVATE Qt6::Core)
             add_test(NAME ui-report-path COMMAND UiReportPathTests)
 
             add_executable(VideoFrameInputTests
                 tests/VideoFrameInputTests.cpp
-                src/ui/VideoFrameWidget.cpp
+                frontend/ui/VideoFrameWidget.cpp
             )
             target_compile_features(VideoFrameInputTests PRIVATE cxx_std_20)
             target_include_directories(VideoFrameInputTests PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/src
+                ${CMAKE_CURRENT_SOURCE_DIR}/frontend
             )
             target_link_libraries(VideoFrameInputTests PRIVATE ScreenShareCore Qt6::Widgets)
             add_test(NAME video-frame-input COMMAND VideoFrameInputTests)
+            get_filename_component(_screenshare_qt_plugins "${Qt6_DIR}/../../../plugins" ABSOLUTE)
             set_tests_properties(video-frame-input PROPERTIES
-                ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=${_screenshare_qt_plugins}"
+                TIMEOUT 30
             )
         endif()
 
         if(MSVC)
             target_compile_options(ScreenShareUi PRIVATE /W4 /permissive- /EHsc)
+        endif()
+        if(WIN32 AND BUILD_TESTING)
+            add_executable(UpdateDeferralTests tests/UpdateDeferralTests.cpp frontend/ui/UpdateManager.cpp frontend/ui/UpdatePackageSelection.cpp frontend/ui/UiStyle.cpp frontend/ui/resources.qrc)
+            set_property(TARGET UpdateDeferralTests PROPERTY AUTORCC ON)
+            target_link_libraries(UpdateDeferralTests PRIVATE ScreenShareUiShell ScreenShareCore)
+            add_test(NAME update-session-deferral COMMAND UpdateDeferralTests)
+            set_tests_properties(update-session-deferral PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
+            add_executable(WindowChromeTests tests/WindowChromeTests.cpp frontend/ui/UiStyle.cpp frontend/ui/resources.qrc)
+            set_property(TARGET WindowChromeTests PROPERTY AUTORCC ON)
+            target_link_libraries(WindowChromeTests PRIVATE ScreenShareUiShell)
         endif()
 
         find_program(SCREENSHARE_WINDEPLOYQT_EXECUTABLE
@@ -493,15 +756,39 @@ if(SCREENSHARE_BUILD_QT_UI)
             HINTS
                 "C:/msys64/ucrt64/bin"
         )
+        if(MSVC)
+            get_filename_component(_screenshare_native_qt_bin "${Qt6_DIR}/../../../bin" ABSOLUTE)
+            find_program(SCREENSHARE_NATIVE_WINDEPLOYQT_EXECUTABLE NAMES windeployqt6 windeployqt
+                PATHS "${_screenshare_native_qt_bin}" NO_DEFAULT_PATH REQUIRED)
+            set(SCREENSHARE_WINDEPLOYQT_EXECUTABLE "${SCREENSHARE_NATIVE_WINDEPLOYQT_EXECUTABLE}")
+        endif()
         if(WIN32 AND SCREENSHARE_WINDEPLOYQT_EXECUTABLE)
+            # Test binaries deploy their own runtime. They must remain buildable
+            # while the user is running the application under field test.
+            foreach(ui_proof IN ITEMS RoomUiTests RoomUiWindowsTests WindowChromeTests)
+                if(TARGET ${ui_proof})
+                    add_custom_command(TARGET ${ui_proof} POST_BUILD
+                        COMMAND "${CMAKE_COMMAND}"
+                            "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_WINDEPLOYQT_EXECUTABLE}"
+                            "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:${ui_proof}>"
+                            "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
+                            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
+                        VERBATIM)
+                endif()
+            endforeach()
             add_custom_command(TARGET ScreenShareUi POST_BUILD
                 COMMAND "${CMAKE_COMMAND}"
                     "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_WINDEPLOYQT_EXECUTABLE}"
                     "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:ScreenShareUi>"
+                    "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
                 COMMENT "Deploying Qt runtime next to ScreenShareUi.exe"
                 VERBATIM
             )
+        endif()
+        if(BUILD_TESTING)
+            add_test(NAME ui-self-test COMMAND ScreenShareUi --self-test)
+            set_tests_properties(ui-self-test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
         endif()
     else()
         message(WARNING "Qt 6 Network, Svg, and Widgets were not found; ScreenShareUi target will not be built")
@@ -620,6 +907,17 @@ if(CMAKE_BUILD_TYPE)
 else()
     set(SCREENSHARE_PACKAGE_CONFIG build)
 endif()
+if(MSVC)
+    # Qt's deployment helper may not recognize a newer installed MSVC toolset.
+    # Stage the matching redistributable directly, including vcruntime140_1.
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+    include(InstallRequiredSystemLibraries)
+    foreach(runtime_file IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+        add_custom_command(TARGET ScreenShare POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${runtime_file}" "$<TARGET_FILE_DIR:ScreenShare>"
+            VERBATIM)
+    endforeach()
+endif()
 set(SCREENSHARE_PACKAGE_BASENAME
     "ScreenShare-${SCREENSHARE_PACKAGE_CONFIG}-${SCREENSHARE_PACKAGE_SYSTEM}-${SCREENSHARE_PACKAGE_ARCH}"
 )
@@ -628,11 +926,15 @@ if(CMAKE_CXX_COMPILER)
     get_filename_component(SCREENSHARE_PACKAGE_COMPILER_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     list(APPEND SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS "${SCREENSHARE_PACKAGE_COMPILER_BIN_DIR}")
 endif()
-if(WIN32 AND EXISTS "C:/msys64/ucrt64/bin")
+if(WIN32 AND NOT MSVC AND EXISTS "C:/msys64/ucrt64/bin")
     list(APPEND SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS "C:/msys64/ucrt64/bin")
 endif()
 list(REMOVE_DUPLICATES SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS)
 string(REPLACE ";" "|" SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS_ARG "${SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS}")
+get_property(SCREENSHARE_WEBRTC_PACKAGE_NOTICES GLOBAL PROPERTY SCREENSHARE_WEBRTC_NOTICES)
+if(Qt6_DIR)
+    get_filename_component(SCREENSHARE_QT_SBOM_DIR "${Qt6_DIR}/../../../sbom" ABSOLUTE)
+endif()
 set(SCREENSHARE_PACKAGE_ARGS
     -D "INPUT_DIR=$<TARGET_FILE_DIR:ScreenShare>"
     -D "EXECUTABLE_NAME=$<TARGET_FILE_NAME:ScreenShare>"
@@ -640,9 +942,15 @@ set(SCREENSHARE_PACKAGE_ARGS
     -D "STAGING_DIR=${CMAKE_BINARY_DIR}/package/${SCREENSHARE_PACKAGE_BASENAME}"
     -D "OUTPUT_ZIP=${CMAKE_BINARY_DIR}/${SCREENSHARE_PACKAGE_BASENAME}.zip"
     -D "RUNTIME_SEARCH_DIRS=${SCREENSHARE_PACKAGE_RUNTIME_SEARCH_DIRS_ARG}"
+    -D "REQUIRE_NATIVE_NOTICES=${MSVC}"
+    -D "WEBRTC_NOTICES_DIR=${SCREENSHARE_WEBRTC_PACKAGE_NOTICES}"
+    -D "QT_SBOM_DIR=${SCREENSHARE_QT_SBOM_DIR}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PackagePortable.cmake"
 )
 set(SCREENSHARE_PACKAGE_DEPENDS ScreenShare ScreenShareUpdater)
+if(TARGET ScreenShareFieldScene)
+    list(APPEND SCREENSHARE_PACKAGE_DEPENDS ScreenShareFieldScene)
+endif()
 if(TARGET ScreenShareUi)
     list(APPEND SCREENSHARE_PACKAGE_DEPENDS ScreenShareUi)
 endif()

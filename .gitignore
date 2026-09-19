@@ -67,8 +67,17 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+__pycache__/
 
 # JavaScript/Worker tooling
 node_modules/
 .wrangler/
 dist/
+
+# Downloaded/build-once native dependencies survive build output cleanup
+.deps/
+
+# Local release signing material must never enter source control.
+*.dpapi
+*.pfx
+*.key

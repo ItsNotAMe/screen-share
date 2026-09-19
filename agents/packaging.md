@@ -1,5 +1,7 @@
 # Packaging Notes
 
+Backend v2 native builds are documented in `docs/build.md`. Verified content-addressed Debug/Release SDK exports, relocation, WebRTC notices, native portable staging and extracted startup now pass. Native application suites have 9 tests, including UI self-test. Native packaging stages the matching MSVC runtime (including vcruntime140_1), selects native Qt tools/plugin paths and correct Debug/Release variants, includes WebRTC notices and Qt SBOMs, and rejects unresolved dependencies. Use the runner's -ArtifactDirectory/-BuildDirectory/-ViGEmSourceDirectory/-Package options. Automatic native packaging remains disabled; installer/fresh-machine testing and remaining distribution obligations/notices are still open. Do not publish based solely on this local validation.
+
 MinGW builds need runtime DLLs beside the exe when moved to another computer. Current main/PR history statically links GCC/C++/pthread runtime by default and stages remaining DLLs such as Opus, UCRT redist files, and `d3dcompiler_47.dll` when available.
 
 Portable zip packaging was merged separately from the live-streaming fixes in PR #46.
