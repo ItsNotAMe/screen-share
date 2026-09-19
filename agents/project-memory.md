@@ -1,3 +1,8 @@
+> Historical log: campaign documents mentioned below were removed during cleanup.
+> Current guidance is in [docs](../README.md#documentation) and [todo](todo.md).
+> Recover an old document with `git show 376d59a:<its recorded path>`; historical
+> milestones and test counts are not current implementation or release status.
+
 # Project Memory
 
 ## Local profile defaults — 2026-09-17

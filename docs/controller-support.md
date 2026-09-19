@@ -37,7 +37,7 @@ granted, and fewer are allowed when multiple local controllers are already conne
 
 Each virtual device belongs to a stable viewer identity. Complete state snapshots are encrypted and
 replay-protected by the existing control channel. A 300 ms keepalive timeout, revoke, panic hotkey,
-viewer disconnect, controller unplug, backend error, or session shutdown submits neutral input and
+viewer disconnect, backend error, or session shutdown submits neutral input and
 destroys only the affected virtual device.
 
 ## Long-term signed backend
@@ -47,3 +47,19 @@ production-signed driver. A VHF implementation would provide standard HID gamepa
 must be validated against XInput-only games before replacing the Xbox-compatible prerelease backend.
 Any replacement keeps the same rule: driver lifecycle belongs to ScreenShare Setup and updates, never
 normal application startup.
+
+## Current room UI
+
+Host viewer rows have independent mouse, keyboard and controller grant toggles.
+No request is required; requests can also be accepted with their listed capabilities.
+The viewer automatically detects a controller; a preferred device can be selected
+in playback settings. Missing/unplugged devices send neutral state and retain
+permission, resuming when a device is available. Focus loss pauses forwarding and
+releases held input without cancelling permissions. Keyboard grants require display
+capture. Explicit release, host revoke, source changes, disconnect and stale input
+retain their release safeguards. The CLI keeps its explicit focused-preview consent
+workflow; see [CLI controls](cli.md#cli-workflow).
+
+Multi-controller native allocation remains a known failed qualification despite
+passing injected tests. The GameSir Bluetooth repeated-grant reader fix passed
+field checks. See [known limitations](known-limitations.md) before native driver tests.

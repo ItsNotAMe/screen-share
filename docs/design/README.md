@@ -17,9 +17,9 @@ The viewer has a large video canvas, collapsible control panel, local volume/mut
 fullscreen with Escape, and Leave. Stop/Leave drains the session and returns Home.
 Viewer controller discovery selects the first available device automatically,
 including devices connected after joining. It preserves a manual choice across
-discovery updates; loss of that device releases control before selecting another.
-Controls expose separate capability choices and local consent; a host grant no
-longer requires a viewer request, but cannot bypass that local opt-out. Grants
+discovery updates; a missing controller sends neutral input while preserving grants.
+Controls expose separate capability choices and host grants; requests are optional.
+The viewer can release input explicitly. Grants
 use acknowledged state and preserve other capabilities. Losing viewer focus releases
 held input and pauses forwarding without withdrawing host permissions; returning to
 the viewer resumes input. Source changes still revoke control. Keyboard control is
@@ -72,8 +72,9 @@ At the default 1000x820 desktop size the collapsed Create form fits without page
 scrolling, checked at 100% and 150%; smaller windows retain overflow access.
 Source cards paint an explicit gap between their borders, and the Advanced settings
 button derives its size from its content so its label cannot be clipped.
-Join has equal-height Paste/Join actions and per-room Join buttons. A themed password
-dialog opens only after the server denies admission, including pasted/private links;
+Join has equal-height Paste/Join actions and per-room Join buttons. An embedded password
+prompt opens before showing the viewer; listed protected rooms prompt immediately,
+while unknown/private links first attempt hidden admission;
 cancel returns to the form and an incorrect password can be retried. Playback options
 live only in Settings. The obsolete separate selected-room
 action is removed. No nickname fields, helper descriptions, room counters, or
@@ -239,9 +240,8 @@ layout, accessibility or updater lifecycle validation is made by these images.
 3. Validate affected frontend flows, packaging and update handling, then consolidate:
    move every unfinished accepted item to agents/todo.md; retain only durable user,
    build, security, architecture and concise comparison/known-limit documentation.
-   Remove refactor/ and obsolete Markdown/JSON artifacts after important material
-   and required fixtures have been migrated. Update links, scripts and tests before
-   deletion. Do not delete runtime configuration, manifests, test fixtures or
+   Historical planning reports have been removed. Durable references now live in
+   docs/ and required dependency pins/patches in cmake/dependencies/. Do not delete runtime configuration, manifests, test fixtures or
    licensing just because their extension is JSON/Markdown.
    Keep these design boards only while useful; avoid archiving the entire campaign.
    Complete this cleanup before the eventual main merge. Publishing remains separate.

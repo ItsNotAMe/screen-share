@@ -21,23 +21,23 @@ playback device, mute/volume and preview. `--seconds N` bounds a CLI session;
 Ctrl+C requests orderly shutdown. Configuration-file automation remains available
 as `ScreenShare --room-v2 CONFIG.json`.
 
-See [ROOM-CLI.md](../refactor/ROOM-CLI.md) and
-[command options](../refactor/ADOPTION.md) for complete schemas and ranges.
+See [CLI configuration and options](cli.md) for complete schemas and ranges.
 Passwords use a UTF-8 file rather than command-line text. Links carry a room ID,
 not credentials or an arbitrary server address.
 
 ## Controls and diagnostics
 
-Remote input requires viewer request and explicit host consent. Room admission
-does not grant input. The host can revoke control; the panic shortcut is
-Ctrl+Alt+Shift+F12. Viewer focus loss, disconnect and stale input release control.
-See [desktop input](../refactor/DESKTOP-INPUT.md) and
-[controllers](../refactor/CONTROLLERS.md) for source restrictions and known limits.
+The host can grant mouse, keyboard and controller permissions independently,
+with or without a viewer request. Room admission does not grant input. The host
+can revoke each permission; the panic shortcut is Ctrl+Alt+Shift+F12. In the UI,
+focus loss releases held input and pauses forwarding without cancelling grants.
+Disconnect, source changes and stale input retain release safeguards. Keyboard
+control requires display sharing. See [controller support](controller-support.md).
 
 Use Save diagnostic report in the room page. The CLI supports `--report PATH`.
 Reports exclude room passwords and membership credentials. Generated tests are
 silent and require no mouse/keyboard operation; see
-[HEADLESS-TESTING.md](../refactor/HEADLESS-TESTING.md).
+[testing](testing.md).
 
 ## Upgrading
 
@@ -47,4 +47,4 @@ silently translated. Create a new room after updating both endpoints.
 The v1 Worker is not changed by installing this client.
 
 The current backend is accepted for personal use; remaining hardware/network
-qualification is documented in [BACKLOG.md](../refactor/BACKLOG.md).
+qualification is documented in [known limitations](known-limitations.md).

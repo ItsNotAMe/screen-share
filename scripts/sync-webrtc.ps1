@@ -5,8 +5,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$lock = Get-Content -LiteralPath (Join-Path $repoRoot 'refactor/webrtc-source.json') -Raw | ConvertFrom-Json
-if (-not $DependencyRoot) { $DependencyRoot = Join-Path $repoRoot 'build/webrtc' }
+$lock = Get-Content -LiteralPath (Join-Path $repoRoot 'cmake/dependencies/webrtc-source.json') -Raw | ConvertFrom-Json
+if (-not $DependencyRoot) { $DependencyRoot = Join-Path $repoRoot '.deps/webrtc' }
 $DependencyRoot = [IO.Path]::GetFullPath($DependencyRoot)
 $depotRoot = Join-Path $DependencyRoot 'depot_tools'
 $checkoutRoot = Join-Path $DependencyRoot 'checkout'

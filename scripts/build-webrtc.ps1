@@ -8,11 +8,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-if (-not $DependencyRoot) { $DependencyRoot = Join-Path $repoRoot 'build/webrtc' }
+if (-not $DependencyRoot) { $DependencyRoot = Join-Path $repoRoot '.deps/webrtc' }
 $DependencyRoot = [IO.Path]::GetFullPath($DependencyRoot)
 $sourceRoot = Join-Path $DependencyRoot 'checkout/src'
 $depotRoot = Join-Path $DependencyRoot 'depot_tools'
-$lock = Get-Content (Join-Path $repoRoot 'refactor/webrtc-source.json') -Raw | ConvertFrom-Json
+$lock = Get-Content (Join-Path $repoRoot 'cmake/dependencies/webrtc-source.json') -Raw | ConvertFrom-Json
 function Invoke-Checked {
     param([string]$Program, [string[]]$Arguments)
     & $Program @Arguments
@@ -29,7 +29,7 @@ $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
 if (-not (Test-Path (Join-Path $sdkRoot 'Lib/10.0.28000.0/um/x64/kernel32.lib'))) {
     throw 'Pinned Chromium build requires Windows SDK 10.0.28000.0. Install Microsoft.WindowsSDK.10.0.28000.'
 }
-$patch = Join-Path $repoRoot 'refactor/webrtc-build.patch'
+$patch = Join-Path $repoRoot 'cmake/dependencies/webrtc-build.patch'
 $buildRoot = Join-Path $sourceRoot 'build'
 & git -C $buildRoot apply --reverse --check $patch 2>$null
 if ($LASTEXITCODE -ne 0) {

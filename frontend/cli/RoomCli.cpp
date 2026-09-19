@@ -226,7 +226,7 @@ int RunRoomCli(int argc, char** argv) {
                 "  --preset gaming|quality, --resolution auto|native|WIDTHxHEIGHT, --fps auto|N, --bitrate auto|BPS,\n"
                 "  --audio none|system|microphone|process, --audio-device ID, --process-id PID,\n"
                 "  --playback-device ID, --volume 0..100, --mute, --unmute, --seconds N, --no-preview,\n"
-                "  --control-file PATH, --gamepad DEVICE_ID. See refactor/ROOM-CLI.md for input consent.\n"
+                "  --control-file PATH, --gamepad DEVICE_ID. See docs/cli.md for input consent.\n"
                 "Default service: " << DefaultRoomServiceOrigin().toStdString() << "\n"
                 "Old --share/--watch commands and v1 room links are retired; create a new room.\n";
             return 0;

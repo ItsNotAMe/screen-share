@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 
+# Prepare the pinned toolchain before project() checks compiler availability.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
+
 project(ScreenShareNative VERSION 1.0.0 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
@@ -56,7 +59,7 @@ endfunction()
 
 include(cmake/WebRTC.cmake)
 if(NOT SCREENSHARE_WEBRTC_ARTIFACT_DIR)
-    message(FATAL_ERROR "The application now requires the pinned WebRTC artifact/SDK. Use a native preset or scripts/run-webrtc-proof.ps1 -Application; see refactor/BUILD.md.")
+    message(FATAL_ERROR "The application now requires the pinned WebRTC artifact/SDK. Use a native preset or scripts/run-webrtc-proof.ps1 -Application; see docs/build.md.")
 endif()
 if(SCREENSHARE_WEBRTC_ARTIFACT_DIR)
     screenshare_import_webrtc()
@@ -274,6 +277,8 @@ if(MSVC)
                 target_compile_definitions(BackendComparison PRIVATE SCREENSHARE_COMPARISON_NETWORK)
             endif()
             find_package(Python3 REQUIRED COMPONENTS Interpreter)
+            add_test(NAME native-dependency-setup COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeDependencySetupTests.py")
+            set_tests_properties(native-dependency-setup PROPERTIES ENVIRONMENT "CMAKE_COMMAND=${CMAKE_COMMAND}" TIMEOUT 120)
             add_test(NAME backend-comparison-evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/BackendComparisonTests.py")
             add_test(NAME impaired-backend-comparison-evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/ImpairedBackendComparisonTests.py")
             add_test(NAME native-room-runtime-link COMMAND NativeRoomRuntimeTests)

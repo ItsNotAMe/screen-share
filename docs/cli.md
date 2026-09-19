@@ -1,56 +1,70 @@
-# Modular room CLI
+# Command-line rooms
 
-This is now the default CLI. `--backend v2` is optional; omitting
-`--signal-server` uses the configured v2 service. See CUTOVER.md for upgrade behavior.
+The modular room backend is the normal CLI. Both endpoints need v2 clients and a
+new room; legacy UDP commands and v1 links are not translated. See [usage](usage.md).
 
-Viewers can use `--decoder software` (or `"decoder": "software"` in room JSON)
-to avoid hardware-decoder compatibility problems. `auto` is the default and
-prefers hardware with the existing failure recovery. This is a local pre-join
-choice, independent of host encoding and room settings. CLI overrides apply to
-that run; normal joins inherit the saved UI preference. Host use, unknown values
-and non-string JSON values are rejected. Software decoding uses more CPU.
+## CLI options
 
-Controllers use explicit `--control-file PATH` commands and viewer `--gamepad DEVICE_ID`
-with a focused preview. See [CONTROLLERS.md](CONTROLLERS.md) for the command schema,
-fresh-consent rules, panic shortcut and recording-device tests. Mouse/keyboard
-commands now add explicit `capabilities` and require a presented frame and focused
-preview; see [DESKTOP-INPUT.md](DESKTOP-INPUT.md). `--gamepad` is required only for
-controllers. Input permissions are not persisted profile defaults.
+| Scope | Options |
+| --- | --- |
+| Required | Exactly one `--create-room` or `--join-room ID_OR_LINK` |
+| Service override | `--signal-server HTTPS_ORIGIN`; optional compatibility switch `--backend v2` |
+| Both roles | `--nickname NAME`, `--password-file PATH`, `--seconds 0..86400` |
+| Host room | `--name NAME`, `--private`, `--viewer-limit 1..63` |
+| Host capture | `--display INDEX` or `--window HWND` (not both) |
+| Host video | `--preset gaming\|quality`, `--resolution auto\|native\|WIDTHxHEIGHT`, `--fps auto\|N`, `--bitrate auto\|BPS`, `--upload-bps BPS` |
+| Host audio | `--audio system\|microphone\|process\|none`, `--audio-device ID`, `--process-id PID` as appropriate to the source |
+| Viewer | `--no-preview`, `--playback-device ID`, `--volume 0..100`, `--mute` or `--unmute`, `--decoder auto\|software` |
 
-Normal command-line room workflows are now available without JSON:
-`ScreenShare --backend v2 --signal-server HTTPS_ORIGIN --create-room` or
-`--join-room ID_OR_LINK`. They share the session/configuration implementation and
-saved profile defaults. See [ADOPTION.md](ADOPTION.md) for all options, bounded
-password-file handling and the explicit legacy compatibility limits.
+Nickname, stream, playback and viewer-decoder defaults come from the existing versioned RoomV2Profile.
+CLI overrides apply only to that invocation; they do not rewrite saved defaults.
+Manual numeric video choices stay Manual; `auto` explicitly selects Auto.
+`--bitrate auto` removes an inherited manual bitrate value. Existing backend
+validation still enforces dimensions, numeric bounds and audio-role constraints.
+`--no-preview` does not mute playback. Host sharing normally opens no preview.
 
-Host `"audio": {"source": "none"}` starts without opening an audio capture device.
-The same `source: "none"` works in timed `audioChanges`; a subsequent system,
-microphone or process change resumes capture. None rejects nonempty `deviceId` and
-nonzero `processId`. JSON status includes `audioSource` for the applied selection.
-The silent Opus track remains negotiated so resuming needs no peer reconnect; this
-does not disable viewers' playback devices or promise zero audio network traffic.
+Passwords are read from a bounded file containing one nonempty UTF-8 line
+(optional terminal LF/CRLF, meaningful spaces preserved, 128 UTF-8 bytes maximum,
+no control characters). Read errors never echo the filename or content. No
+password command-line value, room credential persistence or diagnostic loopback
+flag is exposed. Unknown, duplicate, conflicting and wrong-role options fail
+before admission. JSON entry points keep their existing independent defaults.
 
-`ScreenShare --room-v2 CONFIG.json` uses the shared v2 RoomSession and production
-Windows capture/audio runtime. Existing CLI commands and default UI launch retain
-their current path until cutover acceptance; normal home routing is opt-in.
-Requires the pinned native build and a
-Windows graphical session for capture/preview. No deployment is performed.
-The same configuration can now launch the opt-in Qt session window with
-`ScreenShareUi --room-v2 CONFIG.json`; see [ROOM-UI.md](ROOM-UI.md). Configuration
-validation lives in `frontend/shared/RoomSessionConfig`, shared by both frontends.
-Viewer `roomId` accepts either a raw identifier or `screenshare://room/v2/ROOM_ID`.
-The link never overrides `origin` and carries no password or membership token.
-Keep the service origin configured explicitly and supply any password separately.
-Unknown versions, embedded credentials, URL queries/fragments and encoded IDs fail
-local validation. The real-Worker CLI media test joins using this link form.
+
+## CLI workflow
+
+The v2 create/join command parser accepts `--control-file PATH`; viewers also require
+`--gamepad DEVICE_ID` and an enabled preview. These are command-line options, not
+persisted profile or JSON configuration fields. Use a private local file and replace
+it atomically with a new command. Polling is local at 100 ms, with no server requests.
+Existing content at startup is ignored. Commands have strictly increasing integer
+`sequence` values (1 through 2^53-1), exact allowed keys and a maximum size of 4096 bytes.
+
+```json
+{"sequence":2,"operation":"request","peer":"HOST_PEER_ID","consent":true}
+```
+
+The host writes `operation:"grant"` with the requesting viewer's exact peer ID and
+`consent:true`. Either endpoint writes `operation:"revoke"`; omit `peer` to revoke all.
+Status JSON exposes input readiness, requests, grants, pending state and reason.
+An `input-command` result's `accepted` means local queue acceptance, not remote grant.
+Invalid/unavailable commands are consumed, never automatically retried. A new
+sequence and fresh explicit consent are required after failure/revoke. Preview focus
+loss cancels local arming as well as remote permission. The CLI registers the same
+panic shortcut; failure to register aborts a control-enabled launch.
+
+
+## JSON session configuration
+
+Use `ScreenShare --room-v2 CONFIG.json` or `ScreenShareUi --room-v2 CONFIG.json`
+for diagnostic configurations. Validation is shared in `frontend/shared/RoomSessionConfig.cpp`.
 
 Optional `stream.aggregateUploadBps` sets the host's shared upload allowance
 (160,000–1,000,000,000 bits/s), including in timed full-settings changes. Omit it
 to disable. The backend reserves 20% plus 128 kbps audio per viewer, shares remaining
 video equally, and respects the individual cap. Too little allowance pauses video;
 audio continues. Status reports allocated/applied caps and nullable measured WebRTC
-transport rates separately. See [ROOM-UI.md](ROOM-UI.md#shared-upload-allowance) for
-the allocation rules and measurement limits. This is not an interface shaper.
+transport rates separately. This is not an interface shaper.
 
 Create a host configuration using your v2 service's HTTPS origin:
 
@@ -145,13 +159,10 @@ Nonzero exit means admission/runtime/settings command failure. Peer-level settin
 rejection is reported in status and preserves that peer's previous working settings.
 Status checks read local snapshots; they generate no service polling requests.
 
-The preview retains only the latest decoded frame and converts I420 to NV12 on the
-window thread. This bounds backlog and avoids rendering on decoder callbacks.
-The current receive path retains GPU frames through presentation, with an explicit
-CPU fallback; see GPU-RECEIVE.md. Live audio-device switching and guarded normal
-home/CLI adoption are integrated. Remote input, full default adoption, strict
-zero-copy, ICE-server configuration and remote network/latency acceptance remain
-outstanding. The shared browser/home provides pushed directory/profile workflows.
+The preview uses a latest-frame handoff and presents retained GPU frames when
+available, with CPU conversion/upload fallback. Audio-device switching, normal
+Home/CLI routing and remote input are integrated. Hardware compatibility and
+external network/latency qualification remain in [known limitations](known-limitations.md).
 
 ## Timed capture-source changes
 
@@ -205,7 +216,7 @@ Status now includes `audioHealth` and `playbackHealth`, each containing `state`
 (`inactive`, `running`, `silent`, `failed`) and cumulative `failures`. An endpoint
 startup/live failure alone preserves video and the room; a later timed command can
 retry the same source/device. There is no automatic retry and command failures still
-follow the existing exit policy. See [AUDIO-RECOVERY.md](AUDIO-RECOVERY.md).
+follow the existing exit policy. See [runtime ownership](architecture.md).
 
 Startup audio accepts `playbackDeviceId`, `playbackVolume` (0–100, default 100) and
 `playbackMuted` (default false). Viewers may also supply at most 64 strictly ordered
@@ -240,7 +251,8 @@ At exit the shipped CLI emits a `presentation` JSON record with `received`,
 `maximumFrameLatency`. With preview disabled there is no conversion/presentation;
 only the latest received frame is retained until shutdown. Counts describe local
 handoff/presentation operations, not physical display latency. Software decode and
-CPU-to-GPU upload remain; the record does not imply GPU zero-copy decoding.
+CPU-to-GPU upload remain available as fallback; these counts alone do not establish
+which path is active.
 
 ## Shared renderer and preview recovery
 
@@ -269,57 +281,3 @@ recovery/exhaustion/clear, scaling/fullscreen/minimize/restore, control callback
 malformed frames, legacy-frame compatibility and closing one of two previews.
 Only direct messages to test-owned HWNDs are used; no physical input or sound.
 Physical driver removal/hangs and external image/input latency remain separate gates.
-
-## Automated checks
-
-`room-v2-cli-entry` executes the shipped CLI and verifies argument handling,
-plaintext rejection and secret-free errors. `room-v2-cli-media` uses the same
-parser/controller against the local Worker with synthetic capture/audio. It checks
-live resolution change, decoded pixels, NV12 conversion, bounded latest-frame
-retention, source/sender revisions, graceful stop and credential-free reports.
-It also checks immediate cancellation and failed admission. `room-v2-cli-deployment`
-starts with only the executable in a fresh directory, deploys its runtime, checks
-Core/Network/WebSockets and the Windows TLS plugin, then runs entry validation.
-CLI runtime deployment is independent of test targets and UI deployment.
-
-The explicit Windows variant additionally captures a generated test window through
-WGC and presents decoded frames through the actual D3D preview, with synthetic
-audio and no physical input:
-
-```powershell
-node signaling-worker/tests/run-native-service.mjs build/sdk-app-release/RoomCliWindowsTests.exe build/webrtc/room-cli-windows windows-media
-```
-
-This requires an interactive Windows session. It is not registered in routine
-CTest, and may need execution outside the capture-restricted sandbox. These are
-correctness tests; they do not establish remote latency, NAT/TLS or resource gates.
-# Sender diagnostics additions (2026-09-17)
-
-Host peer `sender` contains videoPayloadBps, encodedFps, rttMs, jitterMs,
-lossFraction, availableOutgoingBps and limitingReason. Receiver reports now include
-ageSeconds from local receipt time. Unknown/stale numeric values remain null;
-RTT is not end-to-end latency. Full semantics: NETWORK-DIAGNOSTICS.md.
-
-Each host peer now includes `receiver`: sampleState (fresh/stale/unknown), width,
-height, framesDecoded and decodeFps. Missing/stale values are null; FPS zero is
-retained. Reports arrive over the encrypted peer channel and describe decoding,
-not remote display or latency. See [RECEIVER-TELEMETRY.md](RECEIVER-TELEMETRY.md).
-
-Viewer `presentation-status` now emits once per second plus immediate error
-transitions. It includes presented/dropped counts and a `diagnostics` object,
-also included in final `presentation`: `outcome`, `lastErrorCode`, `busyDrops`,
-`occludedDrops`, `minimizedDrops`, `unavailableDrops` and `backoffDrops`.
-Error codes are hexadecimal HRESULTs (null before errors/after explicit clear;
-untyped exceptions use E_FAIL). Counters are cumulative; explicit clear resets
-the recovery budget, last error and current outcome. They do not sum to total
-drops: queue replacement, unknown backends and terminal/error drops also exist.
-Outcome describes the last frame attempt, not continuing display freshness.
-No telemetry is sent to the room service.
-
-Status JSON now includes `requestedPreferences`; each peer includes
-`requestedRevision`, `state` and `transportSampleState`. States are `pending`,
-`rejected`, `upload-paused`, `waiting-for-source`, or `source-observed`.
-Sample state is `fresh`, `stale`, or `unknown`; `transportSendBps` is null when
-unknown/stale and numeric zero only for a fresh measured zero. Existing fields
-remain compatible. These values describe host sender/source observations, not
-receiver display, physical-interface throughput or a congestion diagnosis.

@@ -1,14 +1,7 @@
-# Room v2 wire and ownership reference
+# Room protocol and ownership
 
-Status: Checkpoint A contract foundation. `PLAN.md` remains authoritative. The
-command validators and subscription ordering tests exist; the running application
-and deployed Worker still use v1. Server event validation and native atomic state caches are also implemented.
-The native Qt WebSocket transport now has real local I/O tests; see
-[CHECKPOINT-C.md](CHECKPOINT-C.md). Server authenticated dispatch, HTTP handlers,
-application/media integration remain open. The isolated v2 Worker now implements
-all six endpoints, authenticated mutations/signaling, membership alarms and the
-directory, with local Durable Object runtime tests. Production cutover and service
-responsiveness/load/hibernation acceptance remain unfinished.
+The v2 protocol is used by the default UI and CLI. Implementation and contract
+tests live in `backend/room`, `signaling-worker/src/v2` and `tests`.
 
 ## Ownership and threading
 
@@ -146,7 +139,7 @@ future transport must close/recover that socket instead of repeatedly processing
 bad events. Signals/results return Ignore from this state-only cache and must be
 routed separately after target/connection-generation validation.
 
-## Admission (native client implemented; service pending)
+## Admission
 
 Native `RoomAdmission` executes one request at a time on networking and returns
 a typed future. The contract for the new service is:
@@ -174,8 +167,8 @@ a typed future. The contract for the new service is:
   bound room/peer/token and expectedRole. Socket snapshots cannot silently change
   that role. Callers must discard stale admission results and attach promptly.
 
-See [CHECKPOINT-C.md](CHECKPOINT-C.md) for native HTTP test evidence. This is not
-yet wired to a v2 Durable Object implementation or the normal UI/CLI workflow.
+See [testing](testing.md) for native HTTP and local Worker checks. The default
+UI and CLI use this admission flow with the v2 Worker.
 
 POST create/join returns server-generated peer ID and 256-bit membership token
 over HTTPS. Store only the token hash server-side, retain the token only in client
@@ -250,18 +243,3 @@ transactionally in the room and retry cross-object failure from alarms. Keep
 closure tombstone work until removal succeeds; lease expiry is the last fallback.
 Admission/reservation failure must fail closed. Measure actual free-tier usage in
 the deployed runtime before claiming the plan's request/storage headroom.
-
-## Validation
-
-`tests/fixtures/room-v2/commands.json` and `events.json` are executed by the Qt
-C++ test and Node test. Native `state-cache.json` traces assert complete payload
-and accepted revision after every event, including failed transitions.
-Fixtures may supply a message, exact raw string, hex bytes, padding, or a compact
-payload-field repeat descriptor for byte-boundary cases. `revisions.json` is an
-ordered trace: event, callback generation, incoming revision, expected decision,
-expected accepted revision. Start/stop entries omit the last two fields.
-
-Run `npm run typecheck` and `npm test` in signaling-worker (Node 24 supports the
-tests' native TypeScript stripping). Native application CTest includes
-`room-v2-protocol` when Qt/UI tests are enabled. These are pure boundary tests,
-not Cloudflare runtime, authorization, networking or end-to-end latency tests.

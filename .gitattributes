@@ -1,2 +1,2 @@
 # The dependency patch checksum is part of WebRTC artifact identity.
-refactor/*.patch text eol=lf
+cmake/dependencies/*.patch text eol=lf

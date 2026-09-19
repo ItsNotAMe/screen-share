@@ -16,7 +16,7 @@ D3D presenter, capture/codec and input code remains in use by the modular backen
 
 WebRTC native headers stay in `media/webrtc/`. Public commands must enqueue work
 and publish results without blocking the UI. Capture, signaling and room sockets
-retain their explicit thread/lifetime ownership. See `../refactor/PLAN.md`.
+retain their explicit thread/lifetime ownership. See `../docs/architecture.md`.
 
 `room/qt/RoomNetwork` owns the dedicated room-network event loop, admission and
 bounded socket command/event queues. `media/RoomPeerRoster` maps authenticated

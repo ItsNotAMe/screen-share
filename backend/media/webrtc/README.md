@@ -109,7 +109,7 @@ pipeline latency measurements.
 `MfDecoderAdapterTest --gpu` exercises texture ownership, aperture/planes, startup
 fallback, pressure, retired-device recovery and exhausted malformed-input retries.
 The actual v2 UI/CLI scenarios require native frames and hardware telemetry while
-resizing. See `refactor/GPU-RECEIVE.md`; physical latency and field acceptance stay open.
+resizing. See [runtime ownership](../../../docs/architecture.md); physical latency and field acceptance stay open.
 
 Tests cover local MF→WebRTC RTP/SRTP→MF video plus three encrypted data channels,
 zero-rate/resume, keyframes, 100-input burst replacement, reset/release, callback

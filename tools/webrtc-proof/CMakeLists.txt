@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
+# Prepare the pinned toolchain before project() checks compiler availability.
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PrepareNativeBuild.cmake")
+
 project(ScreenShareWebRTCProof LANGUAGES CXX)
 include(CTest)
 find_program(SCREENSHARE_POWERSHELL_EXECUTABLE NAMES powershell pwsh)
@@ -101,7 +104,7 @@ if(SCREENSHARE_WEBRTC_TEST_SOURCE_DIR)
     set(webrtcSource "${SCREENSHARE_WEBRTC_TEST_SOURCE_DIR}")
     find_package(Git REQUIRED)
     execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${webrtcSource}" rev-parse HEAD OUTPUT_VARIABLE testRevision OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    file(READ "${CMAKE_CURRENT_LIST_DIR}/../../refactor/webrtc-source.json" testLock)
+    file(READ "${CMAKE_CURRENT_LIST_DIR}/../../cmake/dependencies/webrtc-source.json" testLock)
     string(JSON expectedTestRevision GET "${testLock}" commit)
     if(NOT testRevision STREQUAL expectedTestRevision)
         message(FATAL_ERROR "Network impairment source must match the pinned WebRTC revision")

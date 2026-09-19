@@ -239,7 +239,7 @@ def main():
               'runnerSha256': runner.sha256(Path(__file__)),
               'handoffValidatorSha256': runner.sha256(ROOT / 'scripts/frame_handoff_evidence.py'),
               'fixtureSha256': runner.sha256(ROOT / 'signaling-worker/tests/run-native-service.mjs'),
-              'pinnedWebRtc': json.loads((ROOT / 'refactor/webrtc-source.json').read_text())['commit'],
+              'pinnedWebRtc': json.loads((ROOT / 'cmake/dependencies/webrtc-source.json').read_text())['commit'],
               'limitations': ['640x360@30 software H264; synthetic noise and discarded audio',
                               'One viewer UDP ingress only; no real NIC/NAT or physical input',
                               'Jitter is Gaussian (25 ms mean, 10 ms standard deviation), not capped at 50 ms',

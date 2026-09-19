@@ -29,14 +29,14 @@ CLI examples:
 Use the software decoder option on the tested laptop where hardware graphics
 resource behavior remains unqualified. The GameSir Bluetooth field checks and
 physical-reader regrant pass; multi-controller virtual-driver allocation remains
-a known limitation. See [backlog](refactor/BACKLOG.md) and
-[controller results](refactor/CONTROLLERS.md).
+a known limitation. See [known limitations](docs/known-limitations.md) and
+[controller support](docs/controller-support.md).
 
 ## Build and package
 
 The application requires Windows x64, the pinned clang-cl/WebRTC SDK, a matching
 MSVC/Windows SDK environment, and Qt 6 Core/Network/WebSockets/Widgets/Svg.
-Follow [native setup and SDK instructions](refactor/BUILD.md). The earlier
+Follow [native setup and SDK instructions](docs/build.md). The earlier
 MinGW-only application path is retired; debug/release presets now use the native
 toolchain. Use a fresh build directory if an existing cache used MinGW.
 
@@ -51,7 +51,12 @@ elsewhere, adjust `cmake.cmakePath` in `.vscode/settings.json` to its bundled CM
 do not use the MSYS2 CMake for this native toolchain. See Microsoft's
 [CMake Tools preset guidance](https://github.com/microsoft/vscode-cmake-tools/blob/main/docs/cmake-presets.md).
 
-After preparing the native dependencies and environment:
+No existing `build` folder is needed. Configure prepares missing pinned dependencies
+in the ignored `.deps/` cache before checking the compiler. The first run downloads
+and compiles them; later builds reuse them even after deleting `build/`.
+Visual Studio Build Tools, the pinned Windows SDK, Git and Python must be installed.
+
+From a native Visual Studio developer shell:
 
 ```powershell
 cmake --preset native-release
@@ -61,7 +66,7 @@ cmake --build build/native-release --target package-portable
 
 The equivalent Debug preset is `native-debug`. The portable archive is produced
 in the selected build directory. SDK-only/relocated build instructions and
-verification are in [BUILD.md](refactor/BUILD.md).
+verification are in [build instructions](docs/build.md).
 The hash-pinned ViGEm client is built from source; the application never installs
 or repairs drivers during normal startup. Installer publishing and signed update
 manifests remain separate release actions: [release instructions](docs/release.md).
@@ -79,16 +84,15 @@ manifests remain separate release actions: [release instructions](docs/release.m
 
 The modular path uses owned frames, bounded queues, independent per-viewer
 adaptation, explicit input consent and asynchronous teardown.
-[Normal-load comparison](refactor/COMPARISON.md) and
-[matched impairment comparison](refactor/MATCHED-NETWORK.md) record benefits and
-tradeoffs. Remaining qualification is deferred at the user's request;
-[TODO.md](refactor/TODO.md) defines cutover and the next frontend redesign.
+[Measured comparisons](docs/performance.md) record benefits and tradeoffs.
+Remaining qualification is deferred; [the maintenance backlog](agents/todo.md)
+tracks unresolved work and release preparation.
 
 ## Documentation
 
 - [Current usage](docs/usage.md)
-- [CLI configuration and controls](refactor/ROOM-CLI.md)
-- [Headless testing](refactor/HEADLESS-TESTING.md)
-- [Cutover and upgrade behavior](refactor/CUTOVER.md)
-- [Controller support](refactor/CONTROLLERS.md)
-- [Deferred work](refactor/BACKLOG.md)
+- [CLI configuration and controls](docs/cli.md)
+- [Headless testing](docs/testing.md)
+- [Cutover and upgrade behavior](docs/usage.md)
+- [Controller support](docs/controller-support.md)
+- [Deferred work](docs/known-limitations.md)

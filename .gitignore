@@ -73,3 +73,6 @@ __pycache__/
 node_modules/
 .wrangler/
 dist/
+
+# Downloaded/build-once native dependencies survive build output cleanup
+.deps/
