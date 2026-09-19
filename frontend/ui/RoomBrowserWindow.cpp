@@ -131,6 +131,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
         if (directoryChanged) directoryChanged(value);
         if (closing_ && !closedNotified_ && !active_ && !directory_.running()) QTimer::singleShot(0, this, [this] { close(); });
     };
+    for (auto* combo : findChildren<QComboBox*>()) styleComboPopup(combo);
     OpenCreate();
 }
 RoomBrowserWindow::~RoomBrowserWindow() = default;
@@ -178,6 +179,7 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     playbackForm->setContentsMargins(24,24,24,24); playbackForm->setVerticalSpacing(16);
     auto* playbackHeading = new QLabel("Playback defaults"); playbackHeading->setObjectName("SectionHeading"); playbackForm->addRow(playbackHeading);
     auto* decoder = new QComboBox; decoder->addItem("Automatic", "auto"); decoder->addItem("Software compatibility", "software");
+    styleComboPopup(decoder);
     decoder->setCurrentIndex(decoder->findData(profile_.decoder())); decoder->setObjectName("profileDecoder");
     playbackForm->addRow("Video decoding", decoder);
     auto* volume = new QSpinBox; volume->setRange(0,100); volume->setSuffix(" %"); volume->setValue(profile_.playback().volume); volume->setObjectName("profileVolume");

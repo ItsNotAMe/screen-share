@@ -403,6 +403,13 @@ void NormalHomeScenario(const QUrl& origin) {
         host.window().findChild<QPushButton*>("TitleSettings")->click();
         auto* settingsPage = host.window().findChild<QWidget*>("ProfilePreferences"); Check(settingsPage && !settingsPage->isWindow());
         snapshot(QString("settings-%1").arg(size.width()));
+        if (!previews.isEmpty()) {
+            auto* decoder = settingsPage->findChild<QComboBox*>("profileDecoder");
+            decoder->showPopup(); QCoreApplication::processEvents();
+            Check(QApplication::activePopupWidget());
+            Check(QApplication::activePopupWidget()->grab().save(QDir(previews).filePath(QString("dropdown-%1.png").arg(size.width()))));
+            decoder->hidePopup();
+        }
         settingsPage->findChild<QPushButton*>("preferencesBack")->click();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         Check(host.browser()->isVisible() && host.browser()->findChild<QLineEdit*>("roomName")->text() == "Friday games");

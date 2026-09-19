@@ -1,4 +1,21 @@
 #include "ui/UiStyle.h"
+#include <QComboBox>
+#include <QAbstractItemView>
+#include <QStyledItemDelegate>
+#include <QFrame>
+
+void styleComboPopup(QComboBox* combo)
+{
+    // The native combo delegate paints a menu frame over QSS item styling.
+    // A standard view delegate keeps hover/selection in the shared theme.
+    combo->setItemDelegate(new QStyledItemDelegate(combo));
+    combo->view()->setMouseTracking(true);
+    combo->view()->viewport()->setMouseTracking(true);
+    auto* popup = combo->view()->window();
+    popup->setAttribute(Qt::WA_TranslucentBackground);
+    popup->setObjectName("ThemedComboPopup");
+    if (auto* frame = qobject_cast<QFrame*>(popup)) frame->setFrameShape(QFrame::NoFrame);
+}
 
 QString uiStyleSheet()
 {
@@ -11,10 +28,13 @@ QLineEdit, QComboBox, QSpinBox {
     border-radius: 6px; padding: 8px; min-height: 20px;
 }
 QComboBox { border-radius: 10px; padding-right: 36px; }
+QFrame#ThemedComboPopup { background: transparent; border: 0; }
 QComboBox::drop-down { subcontrol-origin: border; subcontrol-position: top right; width: 32px; border: 0; }
 QComboBox::down-arrow { image: url(:/screenshare/ui/icons/chevron-down.svg); width: 16px; height: 16px; }
 QComboBox QAbstractItemView { background: #151d1b; color: #edf5f2; selection-background-color: #21645b; border: 1px solid #385047; border-radius: 8px; padding: 6px; outline: 0; }
-QComboBox QAbstractItemView::item { min-height: 30px; padding: 4px 10px; }
+QComboBox QAbstractItemView::item { min-height: 30px; padding: 4px 10px; border: 0; border-radius: 6px; }
+QComboBox QAbstractItemView::item:hover { background: #29463c; color: #edf5f2; }
+QComboBox QAbstractItemView::item:selected { background: #21645b; color: #edf5f2; border: 0; }
 QSpinBox { padding-right: 30px; }
 QSpinBox::up-button, QSpinBox::down-button { subcontrol-origin: border; width: 28px; border: 0; background: #20312c; }
 QSpinBox::up-button { subcontrol-position: top right; border-top-right-radius: 6px; }
@@ -22,15 +42,17 @@ QSpinBox::down-button { subcontrol-position: bottom right; border-bottom-right-r
 QSpinBox::up-arrow { image: url(:/screenshare/ui/icons/chevron-up.svg); width: 14px; height: 14px; }
 QSpinBox::down-arrow { image: url(:/screenshare/ui/icons/chevron-down.svg); width: 14px; height: 14px; }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #365047; }
-QCheckBox { spacing: 9px; min-height: 28px; padding: 0; }
+QCheckBox { spacing: 9px; min-height: 28px; padding: 0; outline: 0; }
 QCheckBox::indicator { subcontrol-position: center left; }
 QCheckBox::indicator { width: 18px; height: 18px; border: 1px solid #60786f; border-radius: 5px; background: #151d1b; }
 QCheckBox::indicator:checked { background: #38d8c8; border-color: #38d8c8; image: url(:/screenshare/ui/icons/check.svg); }
-QCheckBox::indicator:hover, QCheckBox::indicator:focus { border-color: #38d8c8; }
+QCheckBox::indicator:hover { border-color: #8aa99d; }
+QCheckBox:focus { color: #ffffff; }
 QPushButton { background: #151d1b; color: #edf5f2; border: 1px solid #293631; border-radius: 6px; padding: 9px 14px; }
 QPushButton:hover { background: #20312c; border-color: #52746a; }
 QPushButton:disabled { color: #73877f; background: #111815; }
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPushButton:focus { border: 2px solid #38d8c8; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPushButton:focus { border-color: #60786f; outline: 0; }
+QLineEdit, QSpinBox { selection-background-color: #365047; selection-color: #edf5f2; }
 QTableWidget { background: #151d1b; alternate-background-color: #18221e; gridline-color: #293631; border: 1px solid #293631; }
 QHeaderView::section { background: #151d1b; color: #a3b5af; border: 0; padding: 8px; }
 QTableWidget::item { padding: 6px; }
@@ -284,6 +306,8 @@ QPushButton#HomeSecondary:hover {
 QTabWidget#PreferencesTabs::pane { border: 1px solid #293631; border-radius: 14px; background: #121a17; top: 8px; }
 QTabWidget#PreferencesTabs QTabBar::tab { border: 1px solid #293631; border-radius: 16px; margin-right: 8px; margin-bottom: 12px; padding: 8px 22px; }
 QTabWidget#PreferencesTabs QTabBar::tab:selected { background: #38d8c8; color: #08251f; border-color: #38d8c8; }
+QTabWidget#PreferencesTabs QTabBar::tab:hover { background: #29463c; border-color: #60786f; }
+QTabWidget#PreferencesTabs QTabBar::tab:selected:hover { background: #65e3d6; color: #08251f; }
 QPushButton#preferencesBack { border-radius: 20px; padding: 0; }
 QPushButton#HomeGhost {
     background: transparent;
