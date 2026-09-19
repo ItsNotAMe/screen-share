@@ -11,8 +11,12 @@ This supersedes older acceptance priorities below. Do not restart that campaign.
 Design boards and implementation requirements: [frontend design](../docs/design/README.md).
 
 - [ ] Deliver shared darker theme/shell and complete Home/Create/Join flows.
+  Keep the original logo, profile/Settings in the title bar, and nickname editing
+  only through those menus (no Create/Join nickname fields).
 - [ ] Deliver Host/Viewer/room settings, profile/playback and auto-update flows;
   remove replaced temporary UI code and verify resizing, input consent and updates.
+  Each viewer row needs independent mouse/keyboard/controller grant/revoke icons;
+  host grants must work without a viewer request, including viewer-side lifecycle.
 - [ ] Before the eventual main merge, consolidate remaining refactor backlog here,
   retain essential durable docs/evidence, remove refactor/ and unnecessary MD/JSON,
   and repair references. Preserve required configuration, fixtures and licenses.
