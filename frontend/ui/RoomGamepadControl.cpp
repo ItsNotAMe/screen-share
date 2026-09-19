@@ -93,17 +93,19 @@ void RoomGamepadControl::SetVideo(VideoFrameWidget* video) {
         if(!port->Submit(requestedPeer_,*event))Revoke();
     });
 }
-void RoomGamepadControl::Revoke() {
-    actionError_.clear();
+void RoomGamepadControl::Revoke(const QString& explanation) {
+    actionError_ = explanation;
     armed_ = false; requestedPeer_.clear(); poller_.reset();
     if(video_)video_->setControlCapture(false,false,false);
     if (auto port = port_()) port->Revoke();
     const QSignalBlocker blocker(consent_); consent_->setChecked(false);
 }
 bool RoomGamepadControl::eventFilter(QObject* watched, QEvent* event) {
-    if (!host_ && watched == window() && (event->type() == QEvent::WindowDeactivate || event->type() == QEvent::Hide)) Revoke();
+    if (!host_ && watched == window() && (event->type() == QEvent::WindowDeactivate || event->type() == QEvent::Hide))
+        Revoke("Input stopped because the viewer was hidden or lost focus. Request fresh permission to resume.");
     if(!host_ && video_ && event->type()==QEvent::FocusOut && (watched==video_ || video_->isAncestorOf(qobject_cast<QWidget*>(watched))))
-        QTimer::singleShot(0,this,[this] {auto* focus=QApplication::focusWidget();if(video_ && focus!=video_ && !video_->isAncestorOf(focus))Revoke();});
+        QTimer::singleShot(0,this,[this] {auto* focus=QApplication::focusWidget();if(video_ && focus!=video_ && !video_->isAncestorOf(focus))
+            Revoke("Input stopped because focus left the video. Request fresh permission to resume.");});
     return QWidget::eventFilter(watched, event);
 }
 void RoomGamepadControl::Tick() {
@@ -142,8 +144,10 @@ void RoomGamepadControl::Tick() {
     action_->setEnabled(room.phase == v2::RoomPhase::Active && consent_->isChecked() && !peer.empty() &&
         (host_ ? (requested&caps)==caps : ((caps&input::Gamepad)?devices_->count()>0:video_ && video_->presentedInputMapping().Valid()) && permission && !armed_ && !revoking));
     if (!host_) {
-        if (armed_ && !granted && permission > requestPermission_) Revoke();
+        if (armed_ && !granted && permission > requestPermission_)
+            Revoke("Host permission ended. Request fresh permission to resume.");
         if (granted && (!armed_ || requestedPeer_ != peer || granted!=caps)) { port->Revoke(peer); granted = 0; }
+        if (poller_ && poller_->permission() != permission) poller_.reset();
         if ((granted & input::Gamepad) && !poller_) {
             const auto device = devices_->currentData().toString().toStdString();
             poller_ = std::make_unique<input::GamepadPoller>(port, peer, [read = read_, device]() -> std::optional<input::Event> {
@@ -153,7 +157,7 @@ void RoomGamepadControl::Tick() {
                 event.axes = {value->thumbLX, value->thumbLY, value->thumbRX, value->thumbRY}; return event;
             });
         }
-        if (!granted && poller_) Revoke();
+        if (!granted && poller_) Revoke("Controller input stopped. Check the selected device and request fresh permission.");
         if(video_)video_->setControlCapture(bool(granted&3),granted&input::Mouse,granted&input::Keyboard);
     }
     status_->setText(!actionError_.isEmpty()?actionError_:pending ? "Starting selected input…" : granted ? "Remote input active: " + active.join(", ") :

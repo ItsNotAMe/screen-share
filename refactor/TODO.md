@@ -12,8 +12,8 @@ index before frontend work.** The detailed gates and evidence live in
 
 | Remaining group | Done when | Status |
 | --- | --- | --- |
-| 1. Presentation, devices and gaming acceptance | Sustained GPU presentation and recovery are verified; source privacy/HDR/adapters, audio switching/unplug, controller/input release and external image/input/A-V timing have recorded results. | Native presentation portion passed: five minutes of software decoding plus GPU rendering and automatic window recovery. Physical device/source and external timing checks remain; full Qt field acceptance is separate. |
-| 2. Resource, network and service closeout | Resolve or explicitly scope the hardware receiver growth and original capture-handle failure; finish multi-viewer/reverse hardware load, matched impaired legacy comparison, Internet/NAT/interface recovery, billed usage/headroom and hibernation evidence. | Open. The software workaround does not itself close hardware resource acceptance. |
+| 1. Presentation, devices and gaming acceptance | Sustained GPU presentation and recovery are verified; source privacy/HDR/adapters, audio switching/unplug, controller/input release and external image/input/A-V timing have recorded results. | Native presentation and both-PC silent audio/capture privacy/recovery pass. Final Release/Debug matrices pass 17/17 each. Synthetic regrant passes; physical regrant, hardware changes and external timing remain. |
+| 2. Resource, network and service closeout | Resolve or explicitly scope the hardware receiver growth and original capture-handle failure; finish multi-viewer/reverse hardware load, matched impaired legacy comparison, Internet/NAT/interface recovery, billed usage/headroom and hibernation evidence. | Four-viewer LAN compatibility load and reverse-direction measurement complete. Hardware-resource qualification, matched impaired legacy comparison, Internet/NAT and service headroom remain open. |
 | 3. Stage 5 cutover and cleanup | After the acceptance gates pass, make v2 the normal path, remove superseded legacy code/commands, verify packaging and the final regression matrix. | Waiting for groups 1–2. |
 
 **Then Stage 6: frontend look-and-feel redesign.** No new backend features are
@@ -27,6 +27,14 @@ settling ([CONGESTION-WINDOW.md](CONGESTION-WINDOW.md)). Do not repeat these to
 substitute for the remaining field gates.
 
 Do not add unrelated backend features or repeat completed v2-only harness work.
+
+Unattended update: see `evidence/unattended-closeout-2026-09-19.json` for exact
+passes and retained failures, and `evidence/four-viewer-lan-2026-09-19.json` for
+load measurements. No user interaction or audible signal was needed. Physical
+controller regrant is not passed: one run failed at grant 4, then enumeration
+found no device. Do not substitute synthetic success for that result. The
+remaining matched impaired comparison can be developed unattended; actual
+hotspot/HDR/device changes and external timing require unavailable conditions.
 
 Field update (2026-09-19): GameSir Bluetooth delivery, explicit held-button
 release and held-button power-off cleanup pass on laptop → desktop. The native

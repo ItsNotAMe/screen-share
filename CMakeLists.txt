@@ -634,7 +634,6 @@ if(SCREENSHARE_BUILD_QT_UI)
                 foreach(ui_proof IN ITEMS RoomUiTests RoomUiWindowsTests)
                     add_executable(${ui_proof} tests/RoomUiTests.cpp frontend/ui/VideoFrameWidget.cpp frontend/ui/UiStyle.cpp)
                     target_link_libraries(${ui_proof} PRIVATE ScreenShareRoomUi gdi32)
-                    add_dependencies(${ui_proof} ScreenShareUi)
                 endforeach()
                 target_compile_definitions(RoomUiWindowsTests PRIVATE SCREENSHARE_WINDOWS_UI_PROOF)
                 if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/node_modules/miniflare/package.json")
@@ -730,6 +729,19 @@ if(SCREENSHARE_BUILD_QT_UI)
             set(SCREENSHARE_WINDEPLOYQT_EXECUTABLE "${SCREENSHARE_NATIVE_WINDEPLOYQT_EXECUTABLE}")
         endif()
         if(WIN32 AND SCREENSHARE_WINDEPLOYQT_EXECUTABLE)
+            # Test binaries deploy their own runtime. They must remain buildable
+            # while the user is running the application under field test.
+            foreach(ui_proof IN ITEMS RoomUiTests RoomUiWindowsTests)
+                if(TARGET ${ui_proof})
+                    add_custom_command(TARGET ${ui_proof} POST_BUILD
+                        COMMAND "${CMAKE_COMMAND}"
+                            "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_WINDEPLOYQT_EXECUTABLE}"
+                            "-DWINDEPLOYQT_TARGET=$<TARGET_FILE:${ui_proof}>"
+                            "-DWINDEPLOYQT_DEBUG=$<CONFIG:Debug>"
+                            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunWindeployQt.cmake"
+                        VERBATIM)
+                endif()
+            endforeach()
             add_custom_command(TARGET ScreenShareUi POST_BUILD
                 COMMAND "${CMAKE_COMMAND}"
                     "-DWINDEPLOYQT_EXECUTABLE=${SCREENSHARE_WINDEPLOYQT_EXECUTABLE}"

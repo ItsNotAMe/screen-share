@@ -18,7 +18,7 @@ public:
         Devices = screenshare::ViewerGamepad::ConnectedDevices,
         Read = screenshare::ViewerGamepad::ReadState);
     ~RoomGamepadControl() override;
-    void Revoke();
+    void Revoke(const QString& explanation = {});
     void SetVideo(VideoFrameWidget*);
     std::function<bool(uint8_t)> prepareGrant;
 protected:

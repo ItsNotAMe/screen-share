@@ -1,5 +1,36 @@
 # Headless media checks
 
+## Silent native device closeout
+
+These commands operate their own fixtures; no clicks, controller buttons or
+keyboard/mouse injection are needed:
+
+```powershell
+build/sdk-proof-release/PcmAudioDeviceTest.exe --wasapi
+build/sdk-proof-release/PcmAudioDeviceTest.exe --native-capture-silent
+build/sdk-proof-release/CaptureBackendTest.exe --live
+build/sdk-proof-release/CaptureRecoveryTest.exe --live
+```
+
+The WASAPI lifecycle now renders zeros instead of a tone. The separate capture
+command checks none/system/microphone/process sources, mono/stereo callbacks,
+mute and restart; it never starts playback or saves audio content. Both PCs pass
+these checks, generated-window minimize/restore/close privacy, and injected
+capture-device recovery. Listening quality, physical unplug and external A/V
+timing remain distinct. Evidence: `evidence/unattended-closeout-2026-09-19.json`.
+
+`SCREENSHARE_TEST_AUDIO_DEVICE` enables only silent native device CTests.
+The older audible Opus fidelity fixture requires the separate, default-off
+`SCREENSHARE_TEST_AUDIBLE_AUDIO` opt-in; do not enable it for unattended checks.
+UI proof executables deploy their own Qt dependencies and no longer require
+relinking the running application just to build a test.
+
+`RoomUiTests.exe HTTPS_ORIGIN controllers-physical` is an explicit real-reader
+mode with a recording host sink, requiring exactly one controller. It operates
+consent/grant widgets programmatically and injects no OS input. Ordinary controller
+tests remain deterministic and synthetic. Physical-reader results and limitations
+are recorded in CONTROLLERS.md; a missing/sleeping controller fails explicitly.
+
 For actual desktop/laptop 1080p hardware load, use the one-command SSH workflow in
 [HARDWARE-LAN.md](HARDWARE-LAN.md). It stages a hash-verified private test build,
 captures only a generated window, discards audio, validates actual codec paths

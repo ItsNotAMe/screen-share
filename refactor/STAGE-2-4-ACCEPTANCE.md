@@ -9,6 +9,18 @@ the **Working agreement** table at the top of [TODO.md](TODO.md). This document
 keeps the detailed acceptance requirements; its historical updates are not
 additional milestones.
 
+Unattended closeout (2026-09-19): Release/Debug room matrices pass 17/17 each.
+Both PCs pass silent native audio lifecycle, all four audio capture selections,
+generated-window minimize/restore/close privacy and injected capture recovery.
+Ten controller fixtures pass 140 grants plus ten expected backend denials after
+the permission-owner fix. Physical-reader regrant remains unaccepted: grant 4
+failed, then no controller was enumerated. Four independent laptop software
+viewers pass five-minute LAN load at 53.6 fresh FPS each with stable resources.
+The isolated collapse rerun passes the unchanged limit (141.6709 ms), while an
+earlier 151.2051 ms failure is preserved. These are partial gate results, not a
+backend cutover decision. See CONTROLLERS.md, HARDWARE-LAN.md, CONGESTION-WINDOW.md
+and `evidence/unattended-closeout-2026-09-19.json`.
+
 2026-09-19 field follow-up: GameSir Bluetooth delivery and held-input release/
 disconnect pass; intermittent repeat-grant behavior remains open. Reverse LAN
 delivery sustains 49.49 fresh FPS for five minutes with no invalid images, using

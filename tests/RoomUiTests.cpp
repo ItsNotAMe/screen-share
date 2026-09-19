@@ -34,6 +34,7 @@
 #include <QDialog>
 #include <QPlainTextEdit>
 #include <iostream>
+#include <deque>
 #include <source_location>
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
 #include "../tools/webrtc-proof/CaptureTestWindow.h"
@@ -797,7 +798,10 @@ void MutationAcknowledgementScenario(const std::string& origin) {
     host.close(); viewer.close(); Wait([&] { return !host.session().running() && !viewer.session().running(); });
     std::cout << "{\"passed\":true,\"missing_ack_timeout\":true,\"late_ack_isolated\":true,\"no_retry\":true,\"frames\":" << frames << "}\n";
 }
-void ControllerScenario(const std::string& origin) {
+void ControllerScenario(const std::string& origin, bool physicalReader = false) {
+    const auto devices = physicalReader ? screenshare::ViewerGamepad::ConnectedDevices() :
+        std::vector<screenshare::ViewerGamepadDevice>{{"test-pad", "Recording controller"}};
+    if (devices.size() != 1) throw std::runtime_error("Controller fixture requires exactly one connected device; found " + std::to_string(devices.size()));
     auto sink = std::make_shared<RecordingGamepadSink>();
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
     config.room.nickname = "Controller host"; config.room.name = "Controller test";
@@ -812,9 +816,10 @@ void ControllerScenario(const std::string& origin) {
     config.room.nickname = "Controller viewer"; config.media.inputSink.reset();
     std::atomic<bool> plugged{true}; std::atomic<uint16_t> buttons{1};
     RoomSessionWindow viewer(config, Factory(std::make_shared<proof::AudioEvidence>()), true, nullptr,
-        [] { return std::vector<screenshare::ViewerGamepadDevice>{{"test-pad", "Recording controller"}}; },
+        [devices] { return devices; },
         [&](std::string_view device) -> std::optional<screenshare::RemoteGamepadState> {
-            Check(device == "test-pad"); if (!plugged) return {};
+            Check(device == devices.front().id); if (!plugged) return {};
+            if (physicalReader) return screenshare::ViewerGamepad::ReadState(device);
             screenshare::RemoteGamepadState state; state.buttons = buttons.load(); return state;
         });
     viewer.setAttribute(Qt::WA_ShowWithoutActivating); viewer.show();
@@ -827,8 +832,27 @@ void ControllerScenario(const std::string& origin) {
     Wait([&] { return host.findChild<QComboBox*>("controllerPeer")->count() == 1; });
     Wait([&] { return viewer.findChild<QComboBox*>("controllerPeer")->count() == 1; });
     unsigned authorization = 0;
+    std::deque<std::string> transitions;
+    std::string previousTransition;
+    QTimer trace;
+    QObject::connect(&trace, &QTimer::timeout, [&] {
+        std::string line = "grant=" + std::to_string(authorization);
+        for (auto* window : {&host, &viewer}) {
+            line += window == &host ? " host:" : " viewer:";
+            if (auto port = window->session().input()) for (const auto& state : port->Read())
+                line += " epoch=" + std::to_string(state.permission) + " granted=" + std::to_string(state.granted) +
+                    " requested=" + std::to_string(state.requested) + " reason=" + std::to_string(int(state.reason)) +
+                    " releasing=" + std::to_string(state.revokePending);
+        }
+        if (line != previousTransition) {
+            previousTransition = line; transitions.push_back(std::move(line));
+            if (transitions.size() > 64) transitions.pop_front();
+        }
+    });
+    trace.start(1);
     auto authorize = [&] {
         ++authorization;
+        const auto before = sink->applied.load();
         viewerConsent->setChecked(true);
         try { Wait([&] { return request->isEnabled(); }); }
         catch (...) { throw std::runtime_error("Controller request disabled: " + viewer.findChild<QLabel*>("controllerStatus")->text().toStdString() +
@@ -837,13 +861,22 @@ void ControllerScenario(const std::string& origin) {
         Check(!grant->isEnabled()); hostConsent->setChecked(true);
         Wait([&] { return grant->isEnabled(); }); grant->click();
         Check(!hostConsent->isChecked());
-        try { Wait([&] { return sink->buttons == buttons.load(); }); }
-        catch (...) { throw std::runtime_error("Controller state missing at grant " + std::to_string(authorization) +
+        try { Wait([&] { return physicalReader ? sink->applied > before : sink->buttons == buttons.load(); }); }
+        catch (...) {
+            for (const auto& line : transitions) std::cerr << line << '\n';
+            throw std::runtime_error("Controller state missing at grant " + std::to_string(authorization) +
             "; host=" + host.findChild<QLabel*>("controllerStatus")->text().toStdString() +
             "; viewer=" + viewer.findChild<QLabel*>("controllerStatus")->text().toStdString()); }
     };
     Check(!request->isEnabled() && !grant->isEnabled()); authorize();
-    buttons = 2; Wait([&] { return sink->buttons == 2; });
+    // Exercise complete permission/poller lifetimes without refreshing the
+    // selected device. Every cycle requires new consent at both ends.
+    for (int cycle = 0; cycle < 10; ++cycle) {
+        host.revokeControl();
+        Wait([&] { return sink->buttons == 0 && !viewerConsent->isChecked(); });
+        authorize();
+    }
+    if (!physicalReader) { buttons = 2; Wait([&] { return sink->buttons == 2; }); }
     QEvent inactive(QEvent::WindowDeactivate); QApplication::sendEvent(&viewer, &inactive);
     Wait([&] { return sink->buttons == 0 && !viewerConsent->isChecked(); });
     authorize(); host.revokeControl(); Wait([&] { return sink->buttons == 0 && !viewerConsent->isChecked(); });
@@ -948,7 +981,7 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
-        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "desktop-input")));
+        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input")));
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         NativePresentationRecovery();
@@ -957,9 +990,11 @@ int main(int argc, char** argv) {
         if(argc==3 && std::string(argv[2])=="desktop-input") {
             DesktopInputScenario(argv[1]);std::cout<<"{\"passed\":true,\"mapped_input\":true,\"physical_input\":false}\n";
         }
-        else if (argc == 3 && std::string(argv[2]) == "controllers") {
-            ControllerScenario(argv[1]);
-            std::cout << "{\"passed\":true,\"controllers\":true,\"physical_input\":false}\n";
+        else if (argc == 3 && (std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical")) {
+            const bool physicalReader = std::string(argv[2]) == "controllers-physical";
+            ControllerScenario(argv[1], physicalReader);
+            std::cout << "{\"passed\":true,\"controllers\":true,\"physical_input\":false,\"physicalControllerRead\":"
+                      << (physicalReader ? "true" : "false") << ",\"successfulGrantCycles\":14,\"deniedGrantChecks\":1}\n";
         }
         else if (argc == 3) MutationAcknowledgementScenario(argv[1]);
         else {

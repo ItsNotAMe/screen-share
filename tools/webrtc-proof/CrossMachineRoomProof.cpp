@@ -167,19 +167,22 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
-        Check(argc >= 4 && argc <= 7);
+        Check(argc >= 4 && argc <= 8);
         const QUrl origin(QString::fromUtf8(argv[2]));
         Check(origin.isValid() && origin.scheme() == "https" && !origin.host().isEmpty() && origin.userInfo().isEmpty() &&
             !origin.hasQuery() && !origin.hasFragment() && (origin.path().isEmpty() || origin.path() == "/") && QSslSocket::supportsSsl());
         const std::string role = argv[1];
         if (role == "load-host" || role == "load-viewer") {
-            Check(argc >= 5 && argc <= 7);
+            Check(argc >= 5 && argc <= 8);
             const std::string decoder = argc >= 6 ? argv[5] : "hardware";
             Check(decoder == "hardware" || decoder == "software");
-            const std::string consumer = argc == 7 ? argv[6] : "pixels";
+            const std::string consumer = argc >= 7 ? argv[6] : "pixels";
             Check(consumer == "pixels" || consumer == "presentation");
             bool valid = false; const int seconds = QString::fromUtf8(argv[4]).toInt(&valid); Check(valid);
-            const auto metrics = loadproof::Run(role == "load-host", argv[2], QString::fromUtf8(argv[3]), seconds, decoder == "hardware", consumer == "presentation");
+            bool validViewers = true;
+            const int viewers = argc == 8 ? QString::fromUtf8(argv[7]).toInt(&validViewers) : 1;
+            Check(validViewers && (viewers == 1 || viewers == 4));
+            const auto metrics = loadproof::Run(role == "load-host", argv[2], QString::fromUtf8(argv[3]), seconds, decoder == "hardware", consumer == "presentation", unsigned(viewers));
             Print(metrics); Check(metrics["passed"].toBool());
         }
         else if (role == "host") { Check(argc == 4); Host(argv[2], QString::fromUtf8(argv[3])); }

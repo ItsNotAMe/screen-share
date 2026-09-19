@@ -90,6 +90,18 @@ the exceptions is justified. Retrieve attributable exception details and a match
 measurement interval before closing service reliability acceptance. No account
 plan, permission, deployment or service setting was changed during this inspection.
 
+Follow-up at 03:57 local time: the v2 **room namespace**, over the dashboard's
+last-24-hour interval, reports 182 GB-seconds billable duration, about 9k requests,
+15k rows read and 9k rows written. Its WebSocket chart reports about 7k inbound
+hibernatable messages and zero non-hibernatable messages. This verifies the
+deployed WebSocket path is hibernatable; it is not a controlled ten-room/eight-hour
+occupancy or a finalized account bill. Directory/control usage is additional.
+The room exception count remains two; CPU/memory-limit and internal errors remain
+zero. The Logs tab explicitly reports **Workers Observability is Disabled**, so
+historical stack traces cannot be recovered there. No logging, billing or security
+setting was changed. Aggregate overview errors (192) still include statuses not
+reconciled with the detailed disconnect/exception chart; they are not all crashes.
+
 `V2_MAX_ROOMS` is an optional string binding containing a decimal integer from
 1 through 500; omission keeps 500. The setting can reduce the safety cap, not
 raise the protocol/directory bound. Empty, malformed and out-of-range values

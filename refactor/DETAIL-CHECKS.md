@@ -4,6 +4,22 @@ Last reconciled: 2026-09-19 (including congestion-window settling, continuous di
 
 Specification: [PLAN.md](PLAN.md). The plan is authoritative; this checklist tracks execution and evidence.
 
+Unattended closeout update (2026-09-19): final Release/Debug room matrices pass
+17/17 each; ten repeated controller fixtures pass 140 grants and ten deliberate
+backend denials. Permission-owned pollers prevent late old-owner cleanup from
+cancelling a new grant. Native silent audio lifecycle, none/system/microphone/
+process capture, generated-window privacy and injected capture recovery pass on
+both PCs. Physical controller regrant remains unaccepted after one grant-4
+failure followed by zero enumerated devices. Four software viewers on the laptop
+pass five-minute LAN delivery at 53.6 fresh FPS each with stable resources.
+The final network matrix retains a 151.2051 ms settling failure; the isolated
+unchanged-policy rerun passes at 141.6709 ms. SERVICE-COST.md records deployed
+hibernatable-message activity, without claiming controlled billing/headroom.
+See CONTROLLERS.md, HARDWARE-LAN.md and
+[compact evidence](evidence/unattended-closeout-2026-09-19.json). These results
+do not close physical timing, hardware-resource, Internet/NAT or matched-impaired
+legacy comparison requirements.
+
 Native presentation acceptance (RECEIVER-RESOURCES.md): the five-minute laptop
 software-decoder/GPU-renderer run passes at 47.7 rendered / 48.3 fresh decoded
 FPS, zero invalid images/render errors, stable 11 Section handles and 89→91 MiB

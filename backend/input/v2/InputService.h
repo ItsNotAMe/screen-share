@@ -41,6 +41,10 @@ public:
     virtual bool Grant(const std::string&, uint8_t) = 0;
     virtual void Revoke(const std::string& peer = {}) = 0;
     virtual bool Submit(const std::string&, Event) = 0;
+    // Polling owners are tied to one grant. A late read/cleanup from an old
+    // owner must neither submit into nor revoke a newer permission epoch.
+    virtual bool SubmitIfCurrent(const std::string&, uint64_t permission, Event) = 0;
+    virtual void RevokeIfCurrent(const std::string&, uint64_t permission) = 0;
     virtual std::vector<Status> Read() const = 0;
 };
 struct Packet { bool reliable; std::vector<uint8_t> bytes; };
@@ -64,8 +68,11 @@ public:
     bool Grant(const std::string&, uint8_t) override;
     void Revoke(const std::string& peer = {}) override;
     bool Submit(const std::string&, Event) override;
+    bool SubmitIfCurrent(const std::string&, uint64_t permission, Event) override;
+    void RevokeIfCurrent(const std::string&, uint64_t permission) override;
     std::vector<Status> Read() const override;
 private:
+    bool SubmitImpl(const std::string&, Event, std::optional<uint64_t> permission);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

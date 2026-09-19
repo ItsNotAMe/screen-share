@@ -113,6 +113,7 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
             if (input) input->Revoke();
         }
         if (input) for (const auto& state : input->Read()) if (state.peer == requestedPeer) {
+            if (controller && controller->permission() != state.permission) controller.reset();
             if (state.granted && state.granted==requestedCapabilities) {controllerGranted=state.granted&input::Gamepad;desktopGranted=state.granted&3;}
             else if (!state.ready || state.permission > requestPermission) requestedPeer.clear();
         }

@@ -45,11 +45,16 @@ class TestPort final : public Port {
 public:
     std::atomic_bool granted{true};
     std::atomic<unsigned> submitted{0}, revoked{0};
+    std::atomic<uint64_t> permission{1};
     bool Request(const std::string&, uint8_t) override { return false; }
     bool Grant(const std::string&, uint8_t) override { return false; }
     void Revoke(const std::string&) override { granted = false; ++revoked; }
     bool Submit(const std::string&, Event event) override { Check(event.kind == Kind::Pad); ++submitted; return granted; }
-    std::vector<Status> Read() const override { Status s; s.peer = "host"; s.granted = granted ? Gamepad : 0; return {s}; }
+    bool SubmitIfCurrent(const std::string& peer, uint64_t epoch, Event event) override {
+        return permission == epoch && Submit(peer, event);
+    }
+    void RevokeIfCurrent(const std::string& peer, uint64_t epoch) override { if(permission == epoch) Revoke(peer); }
+    std::vector<Status> Read() const override { Status s; s.peer = "host"; s.permission = permission; s.granted = granted ? Gamepad : 0; return {s}; }
 };
 int main() {
     try {
@@ -78,6 +83,20 @@ int main() {
             plugged = false; Wait([&] { return port->revoked > 0; }); Check(!port->granted);
         }
         Check(state->created == state->destroyed);
+        // Hold an old reader across a new permission, then let its late read
+        // and destructor finish. Neither may affect the new grant.
+        port = std::make_shared<TestPort>();
+        std::atomic_bool reading{false}, finish{false};
+        {
+            GamepadPoller old(port, "host", [&]() -> std::optional<Event> {
+                reading = true;
+                while (!finish) std::this_thread::sleep_for(1ms);
+                Event e; e.kind = Kind::Pad; e.buttons = 1; return e;
+            });
+            Wait([&] { return reading.load(); });
+            port->permission = 2; finish = true;
+        }
+        Check(port->granted && port->submitted == 0 && port->revoked == 0);
         std::cout << "{\"passed\":true,\"physical_input\":false,\"gamepad_devices\":true}\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

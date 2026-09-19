@@ -1,5 +1,29 @@
 # Controller integration
 
+## Unattended regrant follow-up (2026-09-19)
+
+Polling owners now bind to the permission epoch that created them. A delayed
+read or destructor cannot submit into, or revoke, a newer grant. Atomic
+`SubmitIfCurrent` / `RevokeIfCurrent` service operations enforce this under the
+permission mutex; both UI and CLI replace a poller when its epoch changes.
+Deterministic blocked-reader and service tests cover this race. HID destruction
+also waits for cancelled overlapped I/O before releasing its buffer and state.
+The UI retains explanations for focus loss, ended permission and stopped input.
+
+The final Release and Debug room matrices pass 17/17 each. Five headless and
+five native Windows controller runs each pass 14 successful grants and one
+deliberate backend rejection, without refreshing devices. The recording sink
+does not inject OS input. A bounded state-transition trace is printed on a
+controller delivery failure; it contains no device paths or button values.
+
+Physical-reader mode is explicit: `RoomUiTests.exe HTTPS_ORIGIN controllers-physical`.
+It requires exactly one enumerated controller and uses the real reader with a
+recording host sink. The laptop run **failed at grant 4**; its follow-up found
+zero connected devices. The live-service synthetic control passes. These results
+do not prove the physical failure's cause or close physical repeat-grant acceptance.
+No stale-state timeout, consent, CRC or focus-safety check was relaxed.
+See [compact evidence](evidence/unattended-closeout-2026-09-19.json).
+
 ## GameSir Bluetooth field finding (2026-09-19)
 
 The user's Nova Lite identifies as `DualShock 4 (native HID)` on the laptop.

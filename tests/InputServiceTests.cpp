@@ -228,7 +228,31 @@ void Observations() {
     host.Bind("viewer", "replacement", true);
     Check(!Read(host).applied && !Read(host).rejected && !Read(host).coalesced && !Read(host).queueWaitUs);
 }
+void StalePollingOwner() {
+    auto sink = std::make_shared<RecordingSink>(); Service host(true, sink), viewer(false);
+    host.Bind("viewer", "connection", true); viewer.Bind("host", "connection", true);
+    auto pump = [&] {
+        for (const auto& p : host.Drain("viewer", true, true)) viewer.Receive("host", p.reliable, p.bytes);
+        for (const auto& p : viewer.Drain("host", true, true)) host.Receive("viewer", p.reliable, p.bytes);
+    };
+    Check(host.Grant("viewer", Gamepad));
+    Wait([&] { pump(); return Read(viewer,"host").granted == Gamepad; });
+    const auto old = Read(viewer,"host").permission;
+    host.Revoke();
+    Wait([&] { pump(); return !Read(viewer,"host").granted; });
+    Check(host.Grant("viewer", Gamepad));
+    Wait([&] { pump(); return Read(viewer,"host").granted == Gamepad; });
+    const auto current = Read(viewer,"host").permission;
+    Event e; e.kind = Kind::Pad;
+    Check(current > old && !viewer.SubmitIfCurrent("host", old, e));
+    Check(!viewer.SubmitIfCurrent("host", 0, e));
+    viewer.RevokeIfCurrent("host", old);
+    Check(Read(viewer,"host").granted == Gamepad);
+    Check(viewer.SubmitIfCurrent("host", current, e));
+    viewer.RevokeIfCurrent("host", current);
+    Check(!Read(viewer,"host").granted && Read(viewer,"host").revokePending);
+}
 int main() {
-    try {Protocol();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();Observations();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
+    try {Protocol();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

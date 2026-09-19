@@ -329,7 +329,7 @@ public:
         if (frames != 480 || rate != 48000 || bytes != channels * 2) { invalid = true; return -1; }
         auto* pcm = static_cast<int16_t*>(data);
         for (size_t i = 0; i < frames; ++i) {
-            const auto value = int16_t(200 * std::sin(double(position_++) * 2 * 3.141592653589793 * 440 / 48000));
+            const auto value = silentOutput ? int16_t(0) : int16_t(200 * std::sin(double(position_++) * 2 * 3.141592653589793 * 440 / 48000));
             for (size_t c = 0; c < channels; ++c) pcm[i * channels + c] = value;
         }
         produced = frames * channels; ++played; changed.notify_all(); return 0;
@@ -344,7 +344,48 @@ public:
     std::mutex mutex;
     std::condition_variable changed;
     uint64_t position_ = 0;
+    bool silentOutput = false;
 };
+void NativeCaptureSelections() {
+    // Actual capture endpoints, discarded in-memory callbacks only. No render
+    // endpoint starts, and no microphone/system content is written to disk.
+    bool passed = true;
+    for (const auto source : {screenshare::AudioCaptureSource::None, screenshare::AudioCaptureSource::SystemOutput,
+                             screenshare::AudioCaptureSource::Microphone, screenshare::AudioCaptureSource::ProcessOutput}) {
+        try {
+            screenshare::AudioCaptureConfig config; config.source = source;
+            if (source == screenshare::AudioCaptureSource::ProcessOutput) config.processId = GetCurrentProcessId();
+            auto diagnostics = std::make_shared<screenshare::media::PcmAudioDiagnostics>();
+            auto adm = screenshare::media::CreatePcmAudioDeviceModule(
+                screenshare::media::WasapiPcmEndpoints(config), diagnostics);
+            Transport transport;
+            struct Cleanup { webrtc::AudioDeviceModule& adm; ~Cleanup() { adm.Terminate(); } } cleanup{*adm};
+            for (const bool stereo : {false, true}) {
+                Require(adm->Init() == 0 && adm->RegisterAudioCallback(&transport) == 0 &&
+                    adm->SetStereoRecording(stereo) == 0 && adm->InitRecording() == 0, "Native capture initialization failed");
+                Require(adm->SetMicrophoneMute(false) == 0, "Capture unmute failed");
+                const auto before = transport.captured.load();
+                Require(adm->StartRecording() == 0, "Selected native capture unavailable");
+                transport.Wait([&] { return transport.captured >= before + 10; });
+                Require(adm->SetMicrophoneMute(true) == 0, "Capture mute failed");
+                const auto quiet = transport.silent.load();
+                transport.Wait([&] { return transport.silent >= quiet + 3; });
+                adm->Terminate();
+                Require(!adm->Recording() && !adm->Playing() && !transport.invalid && !transport.played,
+                    "Native capture format/lifetime or unwanted playback");
+            }
+            Require(diagnostics->captureErrors == 0, "Native capture errors");
+            std::cout << "{\"source\":\"" << screenshare::AudioCaptureSourceName(source)
+                      << "\",\"passed\":true,\"captureBlocks\":" << diagnostics->capturedBlocks
+                      << ",\"audiblePlayback\":false,\"audioContentSaved\":false}\n";
+        } catch (const std::exception& error) {
+            passed = false;
+            std::cout << "{\"source\":\"" << screenshare::AudioCaptureSourceName(source) << "\",\"passed\":false}\n";
+            std::cerr << screenshare::AudioCaptureSourceName(source) << ": " << error.what() << '\n';
+        }
+    }
+    Require(passed, "One or more native capture sources failed; see per-source results");
+}
 void Run(bool wasapi) {
     auto diagnostics = std::make_shared<screenshare::media::PcmAudioDiagnostics>();
     auto evidence = std::make_shared<proof::AudioEvidence>();
@@ -352,11 +393,12 @@ void Run(bool wasapi) {
     if (wasapi) {
         screenshare::AudioCaptureConfig config;
         config.source = screenshare::AudioCaptureSource::ProcessOutput;
-        config.processId = GetCurrentProcessId(); // Capture only this proof's quiet tone.
+        config.processId = GetCurrentProcessId(); // Capture only this proof's silent output.
         endpoints = screenshare::media::WasapiPcmEndpoints(config);
     }
     auto adm = screenshare::media::CreatePcmAudioDeviceModule(endpoints, diagnostics);
     Transport transport;
+    transport.silentOutput = wasapi; // Native endpoint tests must never play the synthetic tone.
     struct Cleanup { webrtc::AudioDeviceModule& adm; ~Cleanup() { adm.Terminate(); } } cleanup{*adm};
     for (unsigned cycle = 0; cycle < 3; ++cycle) {
         Require(adm->Init() == 0, "ADM init failed");
@@ -365,9 +407,10 @@ void Run(bool wasapi) {
         Require(adm->InitPlayout() == 0 && adm->InitRecording() == 0, "PCM initialization failed");
         adm->SetMicrophoneMute(false); adm->SetSpeakerMute(false); adm->SetSpeakerVolume(255);
         const auto heard = transport.audible.load();
+        const auto captured = transport.captured.load();
         Require(adm->StartPlayout() == 0, "Playout device startup failed");
         Require(adm->StartRecording() == 0, "Capture device startup failed");
-        transport.Wait([&] { return transport.audible >= heard + 10; });
+        transport.Wait([&] { return wasapi ? transport.captured >= captured + 10 : transport.audible >= heard + 10; });
         adm->SetMicrophoneMute(true);
         const auto quiet = transport.silent.load();
         transport.Wait([&] { return transport.silent >= quiet + 3; });
@@ -381,7 +424,7 @@ void Run(bool wasapi) {
     }
     Require(!transport.invalid && diagnostics->captureErrors == 0 && diagnostics->playoutErrors == 0, "PCM format or endpoint errors");
     Require(diagnostics->playoutBufferFrames > 0, "Actual playout buffer was not reported");
-    std::cout << (wasapi ? "WASAPI" : "Synthetic") << " PCM: mono/stereo, capture mute, three lifecycle cycles passed; capture_blocks="
+    std::cout << (wasapi ? "WASAPI silent endpoint lifecycle (signal fidelity not measured)" : "Synthetic") << " PCM: mono/stereo, capture mute, three lifecycle cycles passed; capture_blocks="
               << diagnostics->capturedBlocks << " output_buffer_frames=" << diagnostics->playoutBufferFrames
               << " output_engine_period_us=" << diagnostics->playoutEnginePeriodUs << '\n';
     // A bad explicit selection fails, and does not substitute another endpoint.
@@ -397,6 +440,10 @@ void Run(bool wasapi) {
 }
 }
 int main(int argc, char** argv) {
-    try { LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2 && std::string(argv[1]) == "--wasapi"); return 0; }
+    try {
+        if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
+        Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
+        LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
+    }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

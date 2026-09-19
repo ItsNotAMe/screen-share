@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "scope": "Desktop hardware host; four independent software-decoder laptop processes; LAN; CPU image consumers",
+  "passed": true,
+  "physicalInput": false,
+  "audibleOutput": false,
+  "externalLatencyVerified": false,
+  "executableSha256": "8e459108978f3b1c482e710ad3821b77f6e767f5668625ad76e10252f84fd8d0",
+  "host": {
+    "sha256": "725696df819560f157e978069166714ef8980180337f7e64cb5b7d629c5f0356",
+    "raw": "build\\four-viewer-final-retry-20260919\\host.json",
+    "passed": true,
+    "measuredSeconds": 303.0006441,
+    "freshFps": null,
+    "cpuCorePercent": 105.02762327296321,
+    "resources": {
+      "privateBytes": {
+        "first30Median": 315643904.0,
+        "last30Median": 309886976.0,
+        "peak": 328138752
+      },
+      "handles": {
+        "first30Median": 1241.0,
+        "last30Median": 1224.0,
+        "peak": 1316
+      }
+    },
+    "sectionsBefore": 12,
+    "sectionsAfter": 12,
+    "sectionsStopped": 9
+  },
+  "viewers": [
+    {
+      "sha256": "f5e8ea924861bfa38ae75d7ef062565eb9c9b4e4b44c7c48b217f8a32fbdd5a1",
+      "raw": "build\\four-viewer-final-retry-20260919\\viewers\\viewer-1.json",
+      "passed": true,
+      "measuredSeconds": 300.0153067,
+      "freshFps": 53.63726330167273,
+      "cpuCorePercent": 122.05106433657839,
+      "resources": {
+        "privateBytes": {
+          "first30Median": 33673216.0,
+          "last30Median": 34211840.0,
+          "peak": 40697856
+        },
+        "handles": {
+          "first30Median": 609.0,
+          "last30Median": 589.0,
+          "peak": 649
+        }
+      },
+      "sectionsBefore": 5,
+      "sectionsAfter": 5,
+      "sectionsStopped": 5
+    },
+    {
+      "sha256": "07dfccff76a3a65643071b15fb615e197e85eedf700f0d3e1a568851dd94353d",
+      "raw": "build\\four-viewer-final-retry-20260919\\viewers\\viewer-2.json",
+      "passed": true,
+      "measuredSeconds": 300.0154314,
+      "freshFps": 53.66390630265427,
+      "cpuCorePercent": 118.58765008845475,
+      "resources": {
+        "privateBytes": {
+          "first30Median": 33112064.0,
+          "last30Median": 34007040.0,
+          "peak": 40300544
+        },
+        "handles": {
+          "first30Median": 595.0,
+          "last30Median": 575.0,
+          "peak": 615
+        }
+      },
+      "sectionsBefore": 5,
+      "sectionsAfter": 5,
+      "sectionsStopped": 5
+    },
+    {
+      "sha256": "01f99370aded549c60f8b560abe4afc9ef1c7f46c603fd5725532ccc60c5e526",
+      "raw": "build\\four-viewer-final-retry-20260919\\viewers\\viewer-3.json",
+      "passed": true,
+      "measuredSeconds": 300.0154435,
+      "freshFps": 53.660570976573744,
+      "cpuCorePercent": 119.83237289583062,
+      "resources": {
+        "privateBytes": {
+          "first30Median": 33513472.0,
+          "last30Median": 34230272.0,
+          "peak": 40701952
+        },
+        "handles": {
+          "first30Median": 602.0,
+          "last30Median": 582.0,
+          "peak": 632
+        }
+      },
+      "sectionsBefore": 5,
+      "sectionsAfter": 5,
+      "sectionsStopped": 5
+    },
+    {
+      "sha256": "a1b70aebacd8fd5e2279c8370ff3f4015b83ac8de1d87e8a6e3db5f081ae9d61",
+      "raw": "build\\four-viewer-final-retry-20260919\\viewers\\viewer-4.json",
+      "passed": true,
+      "measuredSeconds": 300.0155885,
+      "freshFps": 53.62721344061094,
+      "cpuCorePercent": 114.84299090012118,
+      "resources": {
+        "privateBytes": {
+          "first30Median": 33095680.0,
+          "last30Median": 34111488.0,
+          "peak": 40468480
+        },
+        "handles": {
+          "first30Median": 587.5,
+          "last30Median": 568.0,
+          "peak": 598
+        }
+      },
+      "sectionsBefore": 5,
+      "sectionsAfter": 5,
+      "sectionsStopped": 5
+    }
+  ],
+  "earlierFailure": "build/four-viewer-final-20260919: host readiness timed out before viewer launch; retained as failed orchestration"
+}

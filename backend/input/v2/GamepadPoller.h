@@ -13,9 +13,11 @@ public:
     ~GamepadPoller();
     GamepadPoller(const GamepadPoller&) = delete;
     GamepadPoller& operator=(const GamepadPoller&) = delete;
+    uint64_t permission() const noexcept { return permission_; }
 private:
     std::shared_ptr<Port> port_;
     std::string peer_;
+    uint64_t permission_ = 0;
     std::jthread worker_;
 };
 }

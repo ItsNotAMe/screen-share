@@ -98,6 +98,28 @@ nine malformed timing reports are rejected. Release/Debug evidence CTests and
 the comparison evidence CTest pass. No production backend behavior changed in
 this measurement group.
 
+## Four-viewer LAN load: 2026-09-19
+
+The desktop hardware host and four independent software-decoder processes on
+the laptop pass five minutes at 1080p60/12 Mbps per viewer. All four viewers
+deliver 53.6 fresh FPS with zero invalid images. Every host sample in the
+300-second acceptance interval reports four peers, hardware encoders, software
+decoders and zero fallback. This qualifies the explicit laptop compatibility
+mode; it is not a four-hardware-decoder or four-separate-PC result.
+
+Host CPU is 105% of one core; private-memory medians fall from 301 to 295.5 MiB
+(313 MiB peak). Host Section handles stay at 12, then fall to nine after stop.
+Each viewer uses 115–122% of one core, approximately 32 MiB private memory
+(under 39 MiB peak), and five Section handles throughout. No physical input or
+audible output occurs. Consumers validate CPU pixels, not physical GPU displays.
+
+`CrossMachineRoomProof load` accepts an optional expected viewer count of one
+or four. The host validates that count throughout measurement and records actual
+per-peer codecs. Existing one-viewer runner validation remains one-viewer-only.
+Raw success: `build/four-viewer-final-retry-20260919`; the earlier startup timeout
+is retained in `build/four-viewer-final-20260919`. Both temporary tasks were removed.
+See [compact evidence](evidence/four-viewer-lan-2026-09-19.json).
+
 ## Reverse direction: 2026-09-19
 
 The laptop-host → desktop-viewer five-minute run delivers **49.49 fresh FPS**,

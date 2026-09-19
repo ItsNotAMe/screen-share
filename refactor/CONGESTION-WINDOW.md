@@ -1,5 +1,14 @@
 # Congestion settling and displayed-image freshness — 2026-09-19
 
+Final unattended follow-up: five of six network cases pass in
+`build/acceptance-network-final-20260919`; collapse fails the strict 150 ms
+settled-image limit at **151.2051 ms**. An isolated rerun with the identical
+policy and unchanged thresholds passes: stale images clear by **1.400 s** and
+maximum settled age is **141.6709 ms**. The failed run occurred alongside other
+work, but scheduling is not established as its cause. Preserve both outcomes;
+the narrow margin does not establish robustness under arbitrary CPU contention.
+See `evidence/unattended-closeout-2026-09-19.json`.
+
 ## Cause and retained change
 
 The pinned WebRTC controller normally permits 350 ms of additional in-flight

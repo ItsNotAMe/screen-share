@@ -290,8 +290,12 @@ struct PlayStationDevice {
 
     ~PlayStationDevice()
     {
-        if (handle.valid()) {
+        if (handle.valid() && readPending) {
             CancelIoEx(handle.get(), &overlapped);
+            // Cancellation is asynchronous: the driver may still reference
+            // inputBuffer/overlapped until completion has been observed.
+            DWORD ignored = 0;
+            GetOverlappedResult(handle.get(), &overlapped, &ignored, TRUE);
         }
     }
 

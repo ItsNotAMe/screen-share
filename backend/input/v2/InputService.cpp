@@ -240,10 +240,23 @@ void Service::Revoke(const std::string& id) {
     for(auto& [peer,p]:impl_->peers)if(id.empty() || id==peer)impl_->Revoke(p,Reason::Revoked);
 }
 bool Service::Submit(const std::string& id,Event e) {
+    return SubmitImpl(id, e, std::nullopt);
+}
+void Service::RevokeIfCurrent(const std::string& id,uint64_t permission) {
+    std::lock_guard lock(impl_->mutex);
+    const auto it=impl_->peers.find(id);
+    if(permission && it!=impl_->peers.end() && it->second.status.permission==permission)
+        impl_->Revoke(it->second,Reason::Revoked);
+}
+bool Service::SubmitIfCurrent(const std::string& id,uint64_t permission,Event e) {
+    return permission && SubmitImpl(id, e, permission);
+}
+bool Service::SubmitImpl(const std::string& id,Event e,std::optional<uint64_t> permission) {
     if(!Valid(e) || !Required(e.kind))return false;
     std::lock_guard lock(impl_->mutex); auto it=impl_->peers.find(id);
     if(impl_->closed || impl_->host || it==impl_->peers.end())return false;
     auto& p=it->second;
+    if(permission && p.status.permission!=*permission)return false;
     if(!p.status.ready || !(p.status.granted&Required(e.kind)) || (!Replaceable(e.kind) && !impl_->Capacity(p)))return false;
     if(e.kind==Kind::Pad)p.lastPad=e;
     impl_->Queue(p,e); return true;
