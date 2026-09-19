@@ -1,5 +1,7 @@
 <RCC>
   <qresource prefix="/screenshare">
+    <file alias="ui/icons/preset-gaming.svg">../../assets/ui/icons/preset-gaming.svg</file>
+    <file alias="ui/icons/preset-quality.svg">../../assets/ui/icons/preset-quality.svg</file>
     <file alias="ui/icons/globe.svg">../../assets/ui/icons/globe.svg</file>
     <file alias="ui/icons/window.svg">../../assets/ui/icons/window.svg</file>
     <file alias="ui/icons/eye.svg">../../assets/ui/icons/eye.svg</file>

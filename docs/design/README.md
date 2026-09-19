@@ -37,8 +37,12 @@ Create uses matching outline SVGs and password visibility toggles. Source cards
 keep identical dimensions regardless of title, selection or image aspect ratio.
 A background capture owner fetches real source thumbnails with no display fallback;
 closed, protected or minimized sources retain placeholders. Thumbnails are not saved.
-The offscreen suite uses a synthetic source model; real-device thumbnail capture
-still needs visual confirmation in the running app.
+Gaming/Quality use controller/HD outline icons with their short descriptions.
+Advanced settings is an inline gear disclosure below stream controls. Preview
+cards have equal responsive widths and spaced rows. Set SCREENSHARE_SOURCE_PREVIEW_PROOF=1
+to additionally verify real display and window capture in the UI test (interactive
+desktop access required; no images are saved). Ordinary offscreen tests retain
+their synthetic source model.
 
 Release UI/test targets build. The silent room-v2-qt-ui integration test passes at
 100% and 150% display scale, covering normal navigation, profile validation,

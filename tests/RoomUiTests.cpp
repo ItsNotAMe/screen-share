@@ -1343,6 +1343,17 @@ int main(int argc, char** argv) {
         held.stop(); Wait([&] { return !held.running(); }); Check(finished == 2);
         BrowserScenario(QUrl(QString::fromLocal8Bit(argv[1])));
         NormalHomeScenario(QUrl(QString::fromLocal8Bit(argv[1])));
+        if (qEnvironmentVariableIsSet("SCREENSHARE_SOURCE_PREVIEW_PROOF")) {
+            RoomBrowserWindow browser(QUrl(QString::fromLocal8Bit(argv[1])), screenshare::media::WindowsRoomRuntimeFactory, true, {}, true);
+            browser.show();
+            auto* cards = browser.findChild<QListWidget*>("SourceCards");
+            Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
+            Check(cards->property("previewCaptureCount").toInt() > 0);
+            browser.findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>()->button(1)->click();
+            Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
+            Check(cards->property("previewCaptureCount").toInt() > 0);
+            browser.close();
+        }
         MutationLifecycle(argv[1]);
           SourceSwitchScenario(argv[1]);
         std::cout << "{\"passed\":true,\"qt_ui\":true,\"normal_home\":true,\"browser\":true,\"directory_push\":true,\"nickname_persistence\":true,\"coalesced_settings\":true,\"responsive_stop\":true,\"restart_owner\":true,\"original_frames\":" << original << ",\"changed_frames\":" << changed << "}\n";

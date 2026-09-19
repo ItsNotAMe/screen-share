@@ -41,10 +41,21 @@ using namespace screenshare;
 using namespace screenshare::room::qt;
 
 namespace {
-QIcon entryIcon(const QString& name) {
+class SourceList final : public QListWidget {
+public:
+    using QListWidget::QListWidget;
+protected:
+    void resizeEvent(QResizeEvent* event) override {
+        QListWidget::resizeEvent(event);
+        const QSize cell(qMax(164, (viewport()->width()-24)/2),128);
+        setGridSize(cell);
+        for (int row=0; row<count(); ++row) item(row)->setSizeHint(cell);
+    }
+};
+QIcon entryIcon(const QString& name, const QByteArray& color = "#b7c8c0") {
     QFile file(QString(":/screenshare/ui/icons/%1.svg").arg(name)); if (!file.open(QIODevice::ReadOnly)) return {};
-    auto svg = file.readAll(); svg.replace("currentColor", "#b7c8c0");
-    QSvgRenderer renderer(svg); QPixmap pixels(24,24); pixels.fill(Qt::transparent);
+    auto svg = file.readAll(); svg.replace("currentColor", color);
+    QSvgRenderer renderer(svg); QPixmap pixels(56,56); pixels.fill(Qt::transparent);
     QPainter painter(&pixels); renderer.render(&painter); return QIcon(pixels);
 }
 QLabel* fieldLabel(const QString& text) {
@@ -80,13 +91,17 @@ QWidget* segments(const QStringList& labels, int selected, QWidget* owner, std::
 }
 QWidget* disclosure(const QString& title, QWidget* content, QWidget* owner) {
     auto* block = new QWidget(owner); block->setObjectName("DisclosureCard");
-    auto* layout = new QVBoxLayout(block); layout->setContentsMargins(10,6,10,10); layout->setSpacing(8);
+    auto* layout = new QVBoxLayout(block); layout->setContentsMargins(0,0,0,0); layout->setSpacing(8);
     auto* toggle = new QToolButton; toggle->setText(title); toggle->setCheckable(true);
-    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); toggle->setArrowType(Qt::RightArrow);
-    toggle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed); toggle->setObjectName("OptionsDisclosure");
-    layout->addWidget(toggle); layout->addWidget(content); content->hide();
-    QObject::connect(toggle, &QToolButton::toggled, block, [toggle, content](bool open) {
-        content->setVisible(open); toggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+    toggle->setText({}); toggle->setAccessibleName(title); toggle->setObjectName("OptionsDisclosure");
+    auto* row = new QHBoxLayout(toggle); row->setContentsMargins(6,6,6,6); row->setSpacing(8);
+    auto* gear = new QLabel; gear->setPixmap(entryIcon("settings").pixmap(18,18));
+    auto* label = new QLabel(title); auto* arrow = new QLabel; arrow->setPixmap(entryIcon("chevron-down").pixmap(14,14));
+    for (auto* part : {gear,label,arrow}) { part->setAttribute(Qt::WA_TransparentForMouseEvents); row->addWidget(part); }
+    toggle->setMinimumSize(row->sizeHint() + QSize(24,12));
+    layout->addWidget(toggle,0,Qt::AlignLeft); layout->addWidget(content); content->hide();
+    QObject::connect(toggle, &QToolButton::toggled, block, [arrow, content](bool open) {
+        content->setVisible(open); arrow->setPixmap(entryIcon(open ? "chevron-up" : "chevron-down").pixmap(14,14));
     });
     return block;
 }
@@ -118,9 +133,9 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     passwordEye(password_);
     passwordPanel_ = optionField("Password (optional)", password_); passwordPanel_->setObjectName("RoomPasswordPanel"); detailsBody_->addWidget(passwordPanel_);
     viewerLimit_ = new QSpinBox; viewerLimit_->setObjectName("createViewerLimit"); viewerLimit_->setRange(1,63); viewerLimit_->setValue(4);
-    detailsBody_->addWidget(disclosure("Advanced settings", optionField("Viewer limit", viewerLimit_), details)); detailsBody_->addStretch();
+    detailsBody_->addStretch();
     auto* stream = new QWidget; stream->setObjectName("FormCard"); auto* streamBody = new QVBoxLayout(stream); createColumns_->addWidget(stream, 1);
-    streamBody->setContentsMargins(20,20,20,20); streamBody->setSpacing(14);
+    streamBody->setContentsMargins(20,16,20,16); streamBody->setSpacing(10);
     auto* sourceHeading = new QHBoxLayout;
     auto* streamHeading = new QLabel("Share source"); streamHeading->setObjectName("SectionHeading"); sourceHeading->addWidget(streamHeading, 1);
     source_ = new QComboBox; source_->setObjectName("captureSource"); source_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -129,11 +144,11 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     streamBody->addLayout(sourceHeading);
     auto* sourceKinds = segments({"Display", "Window"}, 0, stream, [this](int index) { windowSources_ = index == 1; RefreshSourceCards(true); });
     sourceKinds->setObjectName("SourceKinds"); streamBody->addWidget(sourceKinds);
-    sourceCards_ = new QListWidget; sourceCards_->setObjectName("SourceCards");
+    sourceCards_ = new SourceList; sourceCards_->setObjectName("SourceCards");
     sourceCards_->setViewMode(QListView::IconMode); sourceCards_->setResizeMode(QListView::Adjust); sourceCards_->setMovement(QListView::Static);
     sourceCards_->setUniformItemSizes(true);
-    sourceCards_->setIconSize(QSize(144,80)); sourceCards_->setGridSize(QSize(164,120)); sourceCards_->setSpacing(4);
-    sourceCards_->setMinimumHeight(140); sourceCards_->setMaximumHeight(160); sourceCards_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    sourceCards_->setIconSize(QSize(144,80)); sourceCards_->setGridSize(QSize(184,128)); sourceCards_->setSpacing(10);
+    sourceCards_->setFixedHeight(140); sourceCards_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     streamBody->addWidget(sourceCards_);
     connect(sourceCards_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) {
         if (item && item->data(Qt::UserRole).isValid()) { source_->setCurrentIndex(item->data(Qt::UserRole).toInt()); error_->clear(); }
@@ -144,6 +159,27 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     preset_->setCurrentIndex(int(preferences.preset)); preset_->setParent(this); preset_->hide();
     auto* presets = segments({"Gaming", "Quality"}, preset_->currentIndex(), stream, [this](int index) { preset_->setCurrentIndex(index); });
     presets->setObjectName("StreamPresets");
+    const QStringList descriptions{"Lower latency, smoother gameplay", "Higher quality, best for work"};
+    for (int index = 0; index < 2; ++index) {
+        auto* button = qobject_cast<QPushButton*>(presets->findChild<QButtonGroup*>()->button(index));
+        const auto title = button->text(); button->setText({}); button->setIcon({});
+        button->setObjectName("PresetCard"); button->setAccessibleName(title); button->setAccessibleDescription(descriptions[index]);
+        button->setMinimumHeight(60); button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+        auto* row = new QHBoxLayout(button); row->setContentsMargins(12,8,12,8); row->setSpacing(12);
+        auto* icon = new QLabel; icon->setFixedSize(28,28); row->addWidget(icon);
+        auto* text = new QVBoxLayout; text->setSpacing(3); auto* name = new QLabel(title); name->setObjectName("PresetTitle");
+        auto* description = new QLabel(descriptions[index]); description->setObjectName("PresetDescription"); description->setWordWrap(true);
+        text->addWidget(name); text->addWidget(description); row->addLayout(text,1);
+        for (auto* label : {icon,name,description}) label->setAttribute(Qt::WA_TransparentForMouseEvents);
+        const auto iconName = index == 0 ? "preset-gaming" : "preset-quality";
+        auto refresh = [button,icon,name,description,iconName] {
+            const bool selected = button->isChecked();
+            icon->setPixmap(entryIcon(iconName, selected ? "#38d8c8" : "#b7c8c0").pixmap(28,28));
+            name->setStyleSheet(selected ? "color: #68dfd1; background: transparent; border: 0;" : "color: #edf5f2; background: transparent; border: 0;");
+            description->setStyleSheet(selected ? "color: #84c2b9; background: transparent; border: 0;" : "color: #a3b5af; background: transparent; border: 0;");
+        };
+        connect(button,&QPushButton::toggled,button,refresh); refresh();
+    }
     connect(preset_, &QComboBox::currentIndexChanged, presets, [presets](int index) { if(auto* button = presets->findChild<QButtonGroup*>()->button(index)) button->setChecked(true); });
     streamBody->addWidget(optionField("Streaming preset", presets));
     resolution_ = new QComboBox; resolution_->setObjectName("createResolution");
@@ -172,7 +208,8 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* quality = new QGridLayout; quality->setSpacing(12);
     quality->addWidget(optionField("Resolution", resolution_),0,0); quality->addWidget(optionField("Frame rate", fps_),0,1);
     quality->addWidget(optionField("Bitrate", bitrate_),1,0); quality->addWidget(optionField("Shared audio", audio_),1,1);
-    quality->setColumnStretch(0,1); quality->setColumnStretch(1,1); streamBody->addLayout(quality); streamBody->addStretch();
+    quality->setColumnStretch(0,1); quality->setColumnStretch(1,1); streamBody->addLayout(quality);
+    streamBody->addWidget(disclosure("Advanced settings", optionField("Viewer limit", viewerLimit_), stream)); streamBody->addStretch();
     body->addWidget(createPanel_);
     joinPanel_ = new QWidget; joinBody_ = new QVBoxLayout(joinPanel_); joinBody_->setContentsMargins(0,0,0,0); joinBody_->setSpacing(16);
     roomId_ = new QLineEdit; roomId_->setObjectName("joinRoomId"); roomId_->setMaxLength(512);
@@ -341,7 +378,7 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
           painter.drawPixmap((144-fitted.width())/2, (80-fitted.height())/2, fitted); }
         QIcon icon; icon.addPixmap(scaled, QIcon::Normal); icon.addPixmap(scaled, QIcon::Selected);
         auto* item = new QListWidgetItem(icon, shortName, sourceCards_);
-        item->setSizeHint(QSize(164,120)); item->setTextAlignment(Qt::AlignHCenter);
+        item->setSizeHint(sourceCards_->gridSize()); item->setTextAlignment(Qt::AlignHCenter);
         item->setToolTip(fullName); item->setData(Qt::AccessibleTextRole, fullName); item->setData(Qt::UserRole, index);
         if (index == source_->currentIndex()) selected = item;
     }
@@ -364,21 +401,25 @@ void RoomBrowserWindow::LoadSourcePreviews() {
         if (index.isValid()) sources.push_back(source_->itemData(index.toInt()).toMap());
     }
     if (sources.isEmpty()) return;
+    sourceCards_->setProperty("previewCaptureCount", 0);
+    sourceCards_->setProperty("previewCaptureFinished", false);
     const auto revision = previewRevision_;
     auto previews = std::make_shared<QVector<QImage>>();
+    auto failure = std::make_shared<QString>();
     // A single capture owner keeps GPU work off the UI thread. Never fall back
     // to another window/display when the requested source cannot be captured.
-    previewThread_ = QThread::create([sources, previews] {
+    previewThread_ = QThread::create([sources, previews, failure] {
         for (const auto& source : sources) {
             if (QThread::currentThread()->isInterruptionRequested()) break;
             QImage image;
             try {
                 CaptureConfig config; config.targetWidth = 288; config.targetHeight = 160; config.targetFps = 15;
                 config.sourceType = source.contains("window") ? CaptureSourceType::Window : CaptureSourceType::Display;
+                config.backend = source.contains("window") ? CaptureBackend::WindowsGraphicsCapture : CaptureBackend::DesktopDuplication;
                 config.windowHandle = source.value("window").toULongLong(); config.displayIndex = source.value("display").toInt();
                 config.allowDisplayFallback = false;
                 DesktopCapturer capturer; capturer.Start(config);
-                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(350);
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
                 while (!QThread::currentThread()->isInterruptionRequested() && std::chrono::steady_clock::now() < until) {
                     auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(30));
                     if (frame && frame->width > 0 && frame->height > 0 && !frame->pixels.empty()) {
@@ -386,13 +427,15 @@ void RoomBrowserWindow::LoadSourcePreviews() {
                                        frame->rowPitch, QImage::Format_RGB32).copy(); break;
                     }
                 }
-            } catch (...) { /* Closed/minimized/protected sources keep their placeholder. */ }
+            } catch (const std::exception& error) { *failure = QString::fromUtf8(error.what()); }
+            catch (...) { *failure = "Source unavailable"; }
             previews->push_back(std::move(image));
         }
     });
-    connect(previewThread_, &QThread::finished, this, [this, revision, previews] {
+    connect(previewThread_, &QThread::finished, this, [this, revision, previews, failure] {
         auto* completed = previewThread_; previewThread_ = nullptr; completed->deleteLater();
         if (revision != previewRevision_) { LoadSourcePreviews(); return; }
+        int captured = 0;
         for (int row = 0; row < previews->size() && row < sourceCards_->count(); ++row) {
             if ((*previews)[row].isNull()) continue;
             QPixmap thumbnail(144,80); thumbnail.fill(QColor("#0c1110"));
@@ -400,7 +443,11 @@ void RoomBrowserWindow::LoadSourcePreviews() {
             painter.drawImage((144-scaled.width())/2,(80-scaled.height())/2,scaled); painter.end();
             QIcon icon; icon.addPixmap(thumbnail,QIcon::Normal); icon.addPixmap(thumbnail,QIcon::Selected);
             sourceCards_->item(row)->setIcon(icon);
+            ++captured;
         }
+        sourceCards_->setProperty("previewCaptureCount", captured);
+        sourceCards_->setProperty("previewCaptureFinished", true);
+        sourceCards_->setProperty("previewCaptureError", *failure);
     });
     previewThread_->start();
 }

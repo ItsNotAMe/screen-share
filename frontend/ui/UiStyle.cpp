@@ -206,7 +206,13 @@ QListWidget#SourceCards { background: transparent; border: 0; outline: 0; }
 QListWidget#SourceCards::item { background: #0e1612; border: 1px solid #30413a; border-radius: 7px; padding: 6px; }
 QListWidget#SourceCards::item:selected { background: #15352d; border: 1px solid #38d8c8; color: #edf5f2; }
 QListWidget#SourceCards::item:hover { background: #203b30; }
-QWidget#DisclosureCard { background: #131c17; border: 1px solid #293631; border-radius: 8px; }
+QPushButton#PresetCard { background: #101815; border: 1px solid #30413a; border-radius: 7px; padding: 0; }
+QPushButton#PresetCard:checked { background: #153b34; border-color: #38d8c8; }
+QPushButton#PresetCard:hover { background: #263d33; }
+QPushButton#PresetCard:checked:hover { background: #204c42; }
+QLabel#PresetTitle { font-weight: 600; }
+QLabel#PresetDescription { font-size: 11px; }
+QWidget#DisclosureCard { background: transparent; border: 0; }
 QToolButton#OptionsDisclosure { background: transparent; color: #c5d1cb; border: 0; border-radius: 6px; padding: 6px; text-align: left; }
 QToolButton#OptionsDisclosure:hover { background: #263d33; }
 QPushButton#roomBack { background: transparent; border: 0; padding: 5px; color: #b7c8c0; }
