@@ -201,6 +201,14 @@ std::optional<RemoteGamepadState> ParsePlayStationReport(
     std::span<const uint8_t> report,
     uint8_t controllerSlot)
 {
+    // Windows HID reads can be padded to the collection's largest input report
+    // (547 bytes on the field-tested DS4-compatible device). Bluetooth CRC is
+    // attached to the 78-byte report, not the padded read buffer.
+    if (report.size() >= 78 &&
+        ((model == PlayStationGamepadModel::DualShock4 && report[0] == 0x11) ||
+         (model == PlayStationGamepadModel::DualSense && report[0] == 0x31))) {
+        report = report.first(78);
+    }
     size_t commonOffset = 0;
     size_t buttonOffset = 0;
     size_t triggerOffset = 0;

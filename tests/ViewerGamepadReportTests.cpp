@@ -7,6 +7,8 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -156,9 +158,44 @@ bool TestDualSenseUsbAndBluetooth()
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    // Explicit field diagnostic: read controllers only; never inject input or
+    // connect to a room.
+    if (argc == 2 && std::string_view(argv[1]) == "--device-probe") {
+        const auto devices = screenshare::ViewerGamepad::ConnectedDevices();
+        for (const auto& device : devices) {
+            unsigned valid = 0, missing = 0;
+            const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (std::chrono::steady_clock::now() < end) {
+                if (screenshare::ViewerGamepad::ReadState(device.id)) ++valid;
+                else ++missing;
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            }
+            std::cout << device.name << ": valid=" << valid << " missing=" << missing << '\n';
+        }
+        std::cout << "devices=" << devices.size() << '\n';
+        return 0;
+    }
     bool passed = true;
+    for (const auto model : {screenshare::PlayStationGamepadModel::DualShock4,
+                            screenshare::PlayStationGamepadModel::DualSense}) {
+        std::vector<uint8_t> packet(78);
+        packet[0] = model == screenshare::PlayStationGamepadModel::DualShock4 ? 0x11 : 0x31;
+        AddBluetoothCrc(packet);
+        const auto exact = screenshare::ViewerGamepad::ParsePlayStationReport(model, packet);
+        auto padded = packet; padded.resize(547, 0xa5);
+        const auto decoded = screenshare::ViewerGamepad::ParsePlayStationReport(model, padded);
+        passed &= Check(exact && decoded && exact->buttons == decoded->buttons &&
+            exact->thumbLX == decoded->thumbLX && exact->rightTrigger == decoded->rightTrigger,
+            "Padded Bluetooth report did not preserve controls.");
+        padded[20] ^= 1;
+        passed &= Check(!screenshare::ViewerGamepad::ParsePlayStationReport(model, padded),
+            "Padding bypassed Bluetooth checksum validation.");
+        packet.resize(77);
+        passed &= Check(!screenshare::ViewerGamepad::ParsePlayStationReport(model, packet),
+            "Truncated Bluetooth report was accepted.");
+    }
     passed &= TestDualShock4Usb();
     passed &= TestDualShock4BluetoothAndMinimal();
     passed &= TestDualSenseUsbAndBluetooth();

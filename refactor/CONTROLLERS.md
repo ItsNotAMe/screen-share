@@ -1,5 +1,23 @@
 # Controller integration
 
+## GameSir Bluetooth field finding (2026-09-19)
+
+The user's Nova Lite identifies as `DualShock 4 (native HID)` on the laptop.
+The production reader enumerated it but returned zero valid states in 439 reads.
+Read-only report inspection found report ID 0x11 delivered in a 547-byte buffer;
+the first 78 bytes pass the Bluetooth CRC. The parser previously required the
+entire read to be exactly 78 bytes, rejecting these padded buffers. DS4 0x11 and
+DualSense 0x31 now parse their 78-byte payload before checking CRC. Truncation and
+bad CRC still fail; no fallback disables integrity validation.
+
+Release and Debug parser tests cover padded packets, unchanged decoded controls,
+corruption and truncation. `ViewerGamepadReportTests --device-probe` performs a
+five-second read-only check per detected controller, printing valid/missing counts
+without HID paths or button contents. The fixed viewer was staged for the laptop;
+the subsequent probe found zero devices, so post-fix physical delivery/release
+acceptance remains pending reconnection. This finding explains rejected HID reads;
+it does not by itself prove every grant/revoke issue resolved.
+
 The opt-in v2 room UI and CLI now support explicitly authorized controllers.
 Mouse/keyboard control is now integrated; see [DESKTOP-INPUT.md](DESKTOP-INPUT.md).
 Stage 3/Gate D and physical acceptance
