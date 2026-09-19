@@ -37,17 +37,47 @@
 #include <QSvgRenderer>
 #include <QAction>
 #include <QThread>
+#include <QStyledItemDelegate>
 using namespace screenshare;
 using namespace screenshare::room::qt;
 
 namespace {
+class ContentButton final : public QPushButton {
+public:
+    using QPushButton::QPushButton;
+    QSize sizeHint() const override { return layout() ? (layout()->sizeHint()+QSize(12,8)).expandedTo(QSize(0,36)) : QPushButton::sizeHint(); }
+    QSize minimumSizeHint() const override { return sizeHint(); }
+};
+class SourceCardDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        painter->save(); painter->setRenderHint(QPainter::Antialiasing);
+        const auto card = option.rect.adjusted(8,6,-8,-6);
+        const bool selected = option.state & QStyle::State_Selected;
+        painter->setBrush(QColor(option.state & QStyle::State_MouseOver ? "#203b30" : "#101815"));
+        painter->setPen(QPen(QColor(selected ? "#38d8c8" : "#30413a"),selected ? 1.5 : 1));
+        painter->drawRoundedRect(card,7,7);
+        const auto icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
+        const QRect preview(card.left()+12,card.top()+10,card.width()-24,72);
+        icon.paint(painter,preview,Qt::AlignCenter,QIcon::Normal);
+        const int y = card.bottom()-17;
+        painter->setBrush(Qt::NoBrush); painter->setPen(QPen(QColor(selected ? "#38d8c8" : "#8b9d95"),1.5));
+        painter->drawEllipse(QPoint(card.left()+18,y),5,5);
+        if (selected) { painter->setBrush(QColor("#38d8c8")); painter->drawEllipse(QPoint(card.left()+18,y),2,2); }
+        painter->setFont(option.font); painter->setPen(QColor("#dce7e1"));
+        painter->drawText(QRect(card.left()+29,y-10,card.width()-37,20),Qt::AlignVCenter,
+            option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString(),Qt::ElideRight,card.width()-37));
+        painter->restore();
+    }
+};
 class SourceList final : public QListWidget {
 public:
     using QListWidget::QListWidget;
 protected:
     void resizeEvent(QResizeEvent* event) override {
         QListWidget::resizeEvent(event);
-        const QSize cell(qMax(164, (viewport()->width()-24)/2),128);
+        const QSize cell(qMax(140, viewport()->width()/2),128);
         setGridSize(cell);
         for (int row=0; row<count(); ++row) item(row)->setSizeHint(cell);
     }
@@ -92,15 +122,16 @@ QWidget* segments(const QStringList& labels, int selected, QWidget* owner, std::
 QWidget* disclosure(const QString& title, QWidget* content, QWidget* owner) {
     auto* block = new QWidget(owner); block->setObjectName("DisclosureCard");
     auto* layout = new QVBoxLayout(block); layout->setContentsMargins(0,0,0,0); layout->setSpacing(8);
-    auto* toggle = new QToolButton; toggle->setText(title); toggle->setCheckable(true);
+    auto* toggle = new ContentButton; toggle->setText(title); toggle->setCheckable(true);
     toggle->setText({}); toggle->setAccessibleName(title); toggle->setObjectName("OptionsDisclosure");
     auto* row = new QHBoxLayout(toggle); row->setContentsMargins(6,6,6,6); row->setSpacing(8);
     auto* gear = new QLabel; gear->setPixmap(entryIcon("settings").pixmap(18,18));
     auto* label = new QLabel(title); auto* arrow = new QLabel; arrow->setPixmap(entryIcon("chevron-down").pixmap(14,14));
     for (auto* part : {gear,label,arrow}) { part->setAttribute(Qt::WA_TransparentForMouseEvents); row->addWidget(part); }
-    toggle->setMinimumSize(row->sizeHint() + QSize(24,12));
+    label->setSizePolicy(QSizePolicy::Minimum,QSizePolicy::Preferred);
+    toggle->setSizePolicy(QSizePolicy::Minimum,QSizePolicy::Fixed);
     layout->addWidget(toggle,0,Qt::AlignLeft); layout->addWidget(content); content->hide();
-    QObject::connect(toggle, &QToolButton::toggled, block, [arrow, content](bool open) {
+    QObject::connect(toggle, &QPushButton::toggled, block, [arrow, content](bool open) {
         content->setVisible(open); arrow->setPixmap(entryIcon(open ? "chevron-up" : "chevron-down").pixmap(14,14));
     });
     return block;
@@ -111,7 +142,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     : origin_(std::move(origin)), factory_(std::move(factory)), loopback_(loopback), enumerateSources_(enumerateSources), profile_(profileFile), directory_(loopback) {
     setWindowTitle("ScreenShare — Rooms"); setStyleSheet(uiStyleSheet()); resize(900, 720);
     setObjectName("RoomBrowser");
-    auto* layout = new QVBoxLayout(this); layout->setContentsMargins(28, 20, 28, 24); layout->setSpacing(16);
+    auto* layout = new QVBoxLayout(this); layout->setContentsMargins(24, 12, 24, 16); layout->setSpacing(12);
     heading_ = new QLabel("Create a room"); heading_->setObjectName("PageHeading"); layout->addWidget(heading_);
     auto* scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
     scroll->setObjectName("RoomBrowserScroll");
@@ -145,9 +176,10 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* sourceKinds = segments({"Display", "Window"}, 0, stream, [this](int index) { windowSources_ = index == 1; RefreshSourceCards(true); });
     sourceKinds->setObjectName("SourceKinds"); streamBody->addWidget(sourceKinds);
     sourceCards_ = new SourceList; sourceCards_->setObjectName("SourceCards");
+    sourceCards_->setItemDelegate(new SourceCardDelegate(sourceCards_)); sourceCards_->setMouseTracking(true);
     sourceCards_->setViewMode(QListView::IconMode); sourceCards_->setResizeMode(QListView::Adjust); sourceCards_->setMovement(QListView::Static);
     sourceCards_->setUniformItemSizes(true);
-    sourceCards_->setIconSize(QSize(144,80)); sourceCards_->setGridSize(QSize(184,128)); sourceCards_->setSpacing(10);
+    sourceCards_->setIconSize(QSize(144,80)); sourceCards_->setGridSize(QSize(184,128)); sourceCards_->setSpacing(0);
     sourceCards_->setFixedHeight(140); sourceCards_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     streamBody->addWidget(sourceCards_);
     connect(sourceCards_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) {
@@ -393,7 +425,7 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
     LoadSourcePreviews();
 }
 void RoomBrowserWindow::LoadSourcePreviews() {
-    if (!enumerateSources_ || closing_ || createPanel_->isHidden()) return;
+    if (!enumerateSources_ || closing_ || !isVisible() || createPanel_->isHidden()) return;
     if (previewThread_) { previewThread_->requestInterruption(); return; }
     QVector<QVariantMap> sources;
     for (int row = 0; row < sourceCards_->count(); ++row) {
@@ -478,9 +510,11 @@ void RoomBrowserWindow::PromptPassword() {
     dialog->open(); field->setFocus();
 }
 void RoomBrowserWindow::ShowBackButton() {
-    auto* button = new QPushButton("‹ Home", this); button->setObjectName("roomBack");
-    button->setFlat(true);
-    static_cast<QVBoxLayout*>(layout())->insertWidget(0, button, 0, Qt::AlignLeft);
+    auto* button = new QPushButton("Home", this); button->setObjectName("roomBack");
+    button->setIcon(entryIcon("back")); button->setIconSize(QSize(24,24)); button->setMinimumHeight(42); button->setFlat(true);
+    auto* body = static_cast<QVBoxLayout*>(layout()); body->removeWidget(heading_);
+    auto* header = new QHBoxLayout; header->setSpacing(20); header->addWidget(button); header->addWidget(heading_); header->addStretch();
+    body->insertLayout(0,header);
     connect(button, &QPushButton::clicked, this, [this] { password_->clear(); if (back) back(); });
 }
 void RoomBrowserWindow::OpenCreate() {
@@ -597,8 +631,12 @@ void RoomBrowserWindow::Launch(bool host) {
         else { active_->show(); hide(); }
     } catch (...) { error_->setText("Invalid room or capture settings."); }
 }
-void RoomBrowserWindow::showEvent(QShowEvent* event) { QWidget::showEvent(event); if (!closing_) directory_.Start(origin_); }
+void RoomBrowserWindow::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    if (!closing_) { directory_.Start(origin_); if (!createPanel_->isHidden()) LoadSourcePreviews(); }
+}
 void RoomBrowserWindow::hideEvent(QHideEvent* event) {
+    ++previewRevision_; // A cancelled hidden-page pass must never satisfy a later Create visit.
     if (previewThread_) previewThread_->requestInterruption();
     if (!keepDirectoryOnHide) directory_.Stop(); QWidget::hideEvent(event);
 }

@@ -27,6 +27,11 @@ password inside Room details, and collapsed capacity controls. Source snapshots
 refresh on source enumeration or category changes; unavailable previews use a
 named placeholder, never a replacement capture source. Below 780 logical pixels,
 the cards stack. The create action remains outside the scrolling form.
+Home and the page title now share a header row, with a larger SVG Back icon.
+At the default 1000x820 desktop size the collapsed Create form fits without page
+scrolling, checked at 100% and 150%; smaller windows retain overflow access.
+Source cards paint an explicit gap between their borders, and the Advanced settings
+button derives its size from its content so its label cannot be clipped.
 Join has equal-height Paste/Join actions and per-room Join buttons. A themed password
 dialog opens only after the server denies admission, including pasted/private links;
 cancel returns to the form and an incorrect password can be retried. Playback options
@@ -43,6 +48,9 @@ cards have equal responsive widths and spaced rows. Set SCREENSHARE_SOURCE_PREVI
 to additionally verify real display and window capture in the UI test (interactive
 desktop access required; no images are saved). Ordinary offscreen tests retain
 their synthetic source model.
+The native check enters Create from Home and repeats that navigation. Capture is
+started when the page becomes visible; hidden-page cancellation invalidates the
+old pass so it cannot suppress previews on a later visit.
 
 Release UI/test targets build. The silent room-v2-qt-ui integration test passes at
 100% and 150% display scale, covering normal navigation, profile validation,

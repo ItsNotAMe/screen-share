@@ -213,9 +213,9 @@ QPushButton#PresetCard:checked:hover { background: #204c42; }
 QLabel#PresetTitle { font-weight: 600; }
 QLabel#PresetDescription { font-size: 11px; }
 QWidget#DisclosureCard { background: transparent; border: 0; }
-QToolButton#OptionsDisclosure { background: transparent; color: #c5d1cb; border: 0; border-radius: 6px; padding: 6px; text-align: left; }
-QToolButton#OptionsDisclosure:hover { background: #263d33; }
-QPushButton#roomBack { background: transparent; border: 0; padding: 5px; color: #b7c8c0; }
+QPushButton#OptionsDisclosure { background: transparent; color: #c5d1cb; border: 0; border-radius: 6px; padding: 0; text-align: left; }
+QPushButton#OptionsDisclosure:hover { background: #263d33; }
+QPushButton#roomBack { background: transparent; border: 0; padding: 6px 10px; color: #b7c8c0; font-size: 14px; }
 QPushButton#roomBack:hover { background: #20312c; }
 QPushButton#JoinListedRoom { background: #38d8c8; color: #08251f; border: 0; border-radius: 6px; padding: 5px 12px; font-weight: 600; }
 QPushButton#JoinListedRoom:hover { background: #65e3d6; }

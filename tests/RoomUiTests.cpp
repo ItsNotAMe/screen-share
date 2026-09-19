@@ -38,6 +38,7 @@
 #include <QScrollBar>
 #include <QDialog>
 #include <QAction>
+#include <QScrollArea>
 #include <QDir>
 #include <QFontDatabase>
 #include <QPlainTextEdit>
@@ -397,7 +398,7 @@ void NormalHomeScenario(const QUrl& origin) {
     preferences->findChild<QPushButton*>("preferencesBack")->click();
     Check(host.home()->isVisible() && host.browser()->profileName() == "Auto saved");
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    for (const auto size : {QSize(740,600), QSize(800,600), QSize(1200,850)}) {
+    for (const auto size : {QSize(740,600), QSize(800,600), QSize(1000,820), QSize(1200,850)}) {
         host.window().resize(size); QCoreApplication::processEvents();
         snapshot(QString("home-%1").arg(size.width()));
         host.home()->findChild<QPushButton*>("HomePrimary")->click();
@@ -466,6 +467,12 @@ void NormalHomeScenario(const QUrl& origin) {
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         Check(host.browser()->isVisible() && host.browser()->findChild<QLineEdit*>("roomName")->text() == "Friday games");
         snapshot(QString("create-%1").arg(size.width()));
+        auto* advanced = host.browser()->findChild<QPushButton*>("OptionsDisclosure");
+        Check(advanced && advanced->height() >= 30);
+        for (auto* label : advanced->findChildren<QLabel*>()) {
+            if (!label->text().isEmpty()) Check(label->width() >= label->sizeHint().width());
+        }
+        if (size.height() >= 820) Check(host.browser()->findChild<QScrollArea*>("RoomBrowserScroll")->verticalScrollBar()->maximum() == 0);
         host.browser()->findChild<QPushButton*>("roomBack")->click();
         host.home()->findChild<QPushButton*>("HomeSecondary")->click();
         Check(host.browser()->findChild<QPushButton*>("joinV2Room")->isVisible());
@@ -1344,9 +1351,14 @@ int main(int argc, char** argv) {
         BrowserScenario(QUrl(QString::fromLocal8Bit(argv[1])));
         NormalHomeScenario(QUrl(QString::fromLocal8Bit(argv[1])));
         if (qEnvironmentVariableIsSet("SCREENSHARE_SOURCE_PREVIEW_PROOF")) {
-            RoomBrowserWindow browser(QUrl(QString::fromLocal8Bit(argv[1])), screenshare::media::WindowsRoomRuntimeFactory, true, {}, true);
-            browser.show();
+            RoomApplication app(QUrl(QString::fromLocal8Bit(argv[1])), screenshare::media::WindowsRoomRuntimeFactory, true, {}, true, true);
+            app.show(); auto& browser = *app.browser();
+            app.home()->findChild<QPushButton*>("HomePrimary")->click();
             auto* cards = browser.findChild<QListWidget*>("SourceCards");
+            Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
+            Check(cards->property("previewCaptureCount").toInt() > 0);
+            browser.findChild<QPushButton*>("roomBack")->click();
+            app.home()->findChild<QPushButton*>("HomePrimary")->click();
             Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
             Check(cards->property("previewCaptureCount").toInt() > 0);
             browser.findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>()->button(1)->click();
