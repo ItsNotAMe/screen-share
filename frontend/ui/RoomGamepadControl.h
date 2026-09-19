@@ -3,6 +3,8 @@
 #include "input/ViewerGamepad.h"
 #include "input/v2/GamepadPoller.h"
 #include <QWidget>
+#include <QHash>
+class QVBoxLayout;
 class QCheckBox;
 class QComboBox;
 class QLabel;
@@ -25,6 +27,8 @@ protected:
     bool eventFilter(QObject*, QEvent*) override;
 private:
     void Tick();
+    QVBoxLayout* peerRows_ = nullptr;
+    QHash<QString,QWidget*> peerCards_;
     bool host_, armed_ = false;
     std::string requestedPeer_;
     uint64_t requestPermission_ = 0;

@@ -1,10 +1,33 @@
 # ScreenShare 1.0 frontend direction
 
-Status: shared shell, Home/Create/Join and profile/playback defaults implemented;
-Host/Viewer, room settings and update redesign remain. Version 1.0.0 is the next unreleased
+Status: shared shell, Home/Create/Join, Host/Viewer, room settings and profile/playback
+defaults implemented; update redesign remains. Version 1.0.0 is the next unreleased
 application version; no release, update manifest or deployment was published.
 
 ## Implemented foundation (2026-09-19)
+
+Host and Viewer now use a session dashboard with the shared spacing and title bar.
+The host has a source snapshot, source/audio actions, real transport statistics,
+and stable viewer rows with independent mouse/keyboard/controller grant toggles.
+The snapshot is captured once when a source is selected, off the UI thread; it is
+not a live monitor. Unavailable snapshots show a source icon, never another source.
+Pause is not exposed because the current session API has no video-pause operation.
+The viewer has a large video canvas, collapsible control panel, local volume/mute,
+fullscreen with Escape, and Leave. Stop/Leave drains the session and returns Home.
+Controls expose separate capability choices and local consent; a host grant no
+longer requires a viewer request, but cannot bypass that local opt-out. Grants
+use acknowledged state, preserve other capabilities, and retain focus/source-change
+release safety. Keyboard control is unavailable for window capture.
+Room settings stays in the same window with Stream/Room/Details tabs and a Back
+action. Stream Apply remains reachable outside the scroll area. Diagnostics and
+report export live in Details; session nickname fields are hidden in favor of
+the top-bar profile menu. Settings uses a full page rather than the board's drawer.
+Validation: silent Qt UI checks at 100%/150%, 740/1000/1200 logical-pixel layouts,
+live volume/mute, fullscreen, settings return, synthetic controller grant/release
+cycles (including unsolicited grant and opt-out), independent mouse/keyboard
+toggles, and the native Windows capture/presentation suite. Offscreen image grabs
+cannot include the native D3D plane. The native suite passed without optional
+offscreen popup-position screenshots, which assume no Windows screen-edge clamp.
 
 The original brand mark is now in a shared title bar with profile and Settings.
 Home has local search, stable live room rows and non-displacing reconnect status.
@@ -21,6 +44,9 @@ Settings now uses pill tabs, a rounded content panel and an inline circular Back
 button. Title actions only fill on hover/press, without a persistent focus underline.
 Home Refresh is icon-only with an accessible label. Viewers have their own column;
 host names are not exposed by the current public directory schema.
+Home, Create, Join, Settings and session content share page insets and section
+spacing through UiSpacing. Room-list and form section headings share typography;
+the browser scroll content adds no extra horizontal inset.
 Create now follows the two-card mockup: stacked field labels, Public/Private and
 Gaming/Quality segments, Display/Window source cards, a two-column quality grid,
 password inside Room details, and collapsed capacity controls. Source snapshots

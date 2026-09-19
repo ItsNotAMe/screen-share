@@ -130,12 +130,11 @@ QWidget* HomeWindow::buildMainMenu()
     auto* host = new QWidget;
     host->setObjectName("HomeContent");
     auto* layout = new QVBoxLayout(host);
-    layout->setContentsMargins(42, 32, 42, 32);
-    layout->setSpacing(24);
+    UiSpacing::applyPage(layout);
 
     auto* actions = new QHBoxLayout;
     actions->setContentsMargins(0, 0, 0, 0);
-    actions->setSpacing(16);
+    actions->setSpacing(UiSpacing::SectionGap);
     actions->addWidget(buildActionPanel(
         "share",
         "Start Sharing",

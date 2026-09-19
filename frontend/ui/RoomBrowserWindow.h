@@ -50,6 +50,7 @@ private:
     void LoadSourcePreviews();
     void JoinListedRoom(const QString& id);
     void PromptPassword();
+    void SetError(const QString& message = {});
     QUrl origin_;
     QtRoomSession::Factory factory_;
     bool loopback_, closing_ = false, closedNotified_ = false;
@@ -67,6 +68,7 @@ private:
     QComboBox *source_, *audio_;
     RoomDirectoryWidget* rooms_;
     QLabel* error_;
+    QWidget* actionFooter_;
     QWidget *passwordPanel_, *directoryPanel_;
     bool passwordRetry_ = false;
     bool passwordRejected_ = false;

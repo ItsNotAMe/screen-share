@@ -89,10 +89,7 @@ protected:
     }
 };
 QIcon entryIcon(const QString& name, const QByteArray& color = "#b7c8c0") {
-    QFile file(QString(":/screenshare/ui/icons/%1.svg").arg(name)); if (!file.open(QIODevice::ReadOnly)) return {};
-    auto svg = file.readAll(); svg.replace("currentColor", color);
-    QSvgRenderer renderer(svg); QPixmap pixels(56,56); pixels.fill(Qt::transparent);
-    QPainter painter(&pixels); renderer.render(&painter); return QIcon(pixels);
+    return uiIcon(name,color);
 }
 QLabel* fieldLabel(const QString& text) {
     auto* label = new QLabel(text); label->setObjectName("OptionLabel"); return label;
@@ -150,16 +147,16 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     : origin_(std::move(origin)), factory_(std::move(factory)), loopback_(loopback), enumerateSources_(enumerateSources), profile_(profileFile), directory_(loopback) {
     setWindowTitle("ScreenShare — Rooms"); setStyleSheet(uiStyleSheet()); resize(900, 720);
     setObjectName("RoomBrowser");
-    auto* layout = new QVBoxLayout(this); layout->setContentsMargins(24, 12, 24, 16); layout->setSpacing(12);
+    auto* layout = new QVBoxLayout(this); UiSpacing::applyPage(layout);
     heading_ = new QLabel("Create a room"); heading_->setObjectName("PageHeading"); layout->addWidget(heading_);
     auto* scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
     scroll->setObjectName("RoomBrowserScroll");
-    auto* content = new QWidget; auto* body = new QVBoxLayout(content); body->setContentsMargins(0,0,8,0); body->setSpacing(18);
+    auto* content = new QWidget; auto* body = new QVBoxLayout(content); body->setContentsMargins(0,0,0,0); body->setSpacing(UiSpacing::SectionGap);
     scroll->setWidget(content); layout->addWidget(scroll, 1);
     createPanel_ = new QWidget; createColumns_ = new QBoxLayout(QBoxLayout::TopToBottom, createPanel_);
-    createColumns_->setContentsMargins(0,0,0,0); createColumns_->setSpacing(24);
+    createColumns_->setContentsMargins(0,0,0,0); createColumns_->setSpacing(UiSpacing::SectionGap);
     auto* details = new QWidget; details->setObjectName("FormCard"); detailsBody_ = new QVBoxLayout(details); createColumns_->addWidget(details, 1);
-    detailsBody_->setContentsMargins(20,20,20,20); detailsBody_->setSpacing(18);
+    detailsBody_->setContentsMargins(UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset); detailsBody_->setSpacing(UiSpacing::SectionGap);
     auto* detailsHeading = new QLabel("Room details"); detailsHeading->setObjectName("SectionHeading"); detailsBody_->addWidget(detailsHeading);
     name_ = new QLineEdit("My room"); name_->setObjectName("roomName"); name_->setMaxLength(256); detailsBody_->addWidget(optionField("Room name", name_));
     public_ = new QCheckBox(this); public_->setObjectName("publicRoom"); public_->setChecked(true); public_->hide();
@@ -199,7 +196,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     sourceCards_->setFixedHeight(140); sourceCards_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     streamBody->addWidget(sourceCards_);
     connect(sourceCards_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) {
-        if (item && item->data(Qt::UserRole).isValid()) { source_->setCurrentIndex(item->data(Qt::UserRole).toInt()); error_->clear(); }
+        if (item && item->data(Qt::UserRole).isValid()) { source_->setCurrentIndex(item->data(Qt::UserRole).toInt()); SetError(); }
     });
     connect(refreshSources, &QPushButton::clicked, this, [this] { RefreshSources(); });
     const auto preferences = profile_.streamPreferences();
@@ -273,11 +270,11 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
         [this](const QString& id) { JoinListedRoom(id); }, this);
     rooms_->setObjectName("publicRooms"); rooms_->setMinimumHeight(260);
     directoryPanel_ = rooms_; body->addWidget(directoryPanel_,1);
-    body->addStretch();
-    error_ = new QLabel; error_->setObjectName("browserError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
-    auto* actions = new QHBoxLayout; actions->addStretch();
+    error_ = new QLabel; error_->setObjectName("browserError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true);
+    actionFooter_ = new QWidget;
+    auto* actions = new QHBoxLayout(actionFooter_); actions->setContentsMargins(0,0,0,0); actions->addWidget(error_, 1);
     auto* create = new QPushButton("Create && start sharing"); create->setObjectName("createV2Room"); actions->addWidget(create);
-    layout->addLayout(actions);
+    layout->addWidget(actionFooter_);
     connect(create, &QPushButton::clicked, this, [this] { Launch(true); });
     connect(join, &QPushButton::clicked, this, [this] { Launch(false); });
     directory_.changed = [this](const auto& value) {
@@ -317,7 +314,7 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
         dialog->hide(); dialog->deleteLater();
         if (previousFocus && previousFocus->isVisible()) previousFocus->setFocus();
     };
-    auto* layout = new QVBoxLayout(dialog); layout->setContentsMargins(24,24,24,24); layout->setSpacing(16);
+    auto* layout = new QVBoxLayout(dialog); UiSpacing::applyPage(layout);
     auto* headingRow = new QHBoxLayout;
     auto* backButton = new QPushButton; backButton->setObjectName("preferencesBack");
     backButton->setIcon(QIcon(":/screenshare/ui/icons/chevron-left.svg")); backButton->setIconSize(QSize(22,22));
@@ -328,7 +325,7 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     auto* tabs = new QTabWidget; tabs->setObjectName("PreferencesTabs"); layout->addWidget(tabs);
     auto* profilePage = new QWidget; auto* profileForm = new QFormLayout(profilePage);
     profileForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    profileForm->setContentsMargins(24,24,24,24); profileForm->setVerticalSpacing(16);
+    profileForm->setContentsMargins(UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset); profileForm->setVerticalSpacing(UiSpacing::SectionGap);
     auto* nickname = new QLineEdit(profile_.nickname()); nickname->setObjectName("profileNickname"); nickname->setMaxLength(32);
     profileForm->addRow("Nickname", nickname);
     auto* nicknameError = new QLabel; nicknameError->setObjectName("profileError"); nicknameError->setWordWrap(true);
@@ -336,7 +333,7 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     tabs->addTab(profilePage, "Profile");
     auto* playbackPage = new QWidget; auto* playbackForm = new QFormLayout(playbackPage);
     playbackForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    playbackForm->setContentsMargins(24,24,24,24); playbackForm->setVerticalSpacing(16);
+    playbackForm->setContentsMargins(UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset); playbackForm->setVerticalSpacing(UiSpacing::SectionGap);
     auto* playbackHeading = new QLabel("Playback defaults"); playbackHeading->setObjectName("SectionHeading"); playbackForm->addRow(playbackHeading);
     auto* decoder = new QComboBox; decoder->addItem("Automatic", "auto"); decoder->addItem("Software compatibility", "software");
     styleComboPopup(decoder);
@@ -390,7 +387,7 @@ void RoomBrowserWindow::RefreshSources() {
             source_->addItem(QString::fromStdWString(window.title), QVariantMap{{"window", QVariant::fromValue<qulonglong>(window.handle)}});
     } catch (...) { source_->clear(); }
     if (previous.isValid()) source_->setCurrentIndex(source_->findData(previous));
-    if (!source_->count()) error_->setText("No capture sources available. Refresh to try again.");
+    if (!source_->count()) SetError("No capture sources available. Refresh to try again.");
     RefreshSourceCards();
 }
 void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
@@ -426,7 +423,7 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
         auto* empty = new QListWidgetItem(windowSources_ ? "No available windows" : "No available displays", sourceCards_);
         empty->setFlags(Qt::NoItemFlags);
     }
-    if (selected) error_->clear();
+    if (selected) SetError();
     LoadSourcePreviews();
 }
 void RoomBrowserWindow::LoadSourcePreviews() {
@@ -494,7 +491,7 @@ void RoomBrowserWindow::LoadSourcePreviews() {
     previewThread_->start();
 }
 void RoomBrowserWindow::JoinListedRoom(const QString& id) {
-    error_->clear();
+    SetError();
     if (roomId_->text() != id) password_->clear();
     roomId_->setText(id);
     Launch(false);
@@ -527,20 +524,24 @@ void RoomBrowserWindow::ShowBackButton() {
     body->insertLayout(0,header);
     connect(button, &QPushButton::clicked, this, [this] { password_->clear(); if (back) back(); });
 }
+void RoomBrowserWindow::SetError(const QString& message) {
+    error_->setText(message);
+    actionFooter_->setVisible(!createPanel_->isHidden() || !message.isEmpty());
+}
 void RoomBrowserWindow::OpenCreate() {
     setWindowTitle("ScreenShare — Create room"); heading_->setText("Create a room");
     createPanel_->show(); joinPanel_->hide(); directoryPanel_->hide();
     detailsBody_->insertWidget(3, passwordPanel_); passwordPanel_->show();
     password_->findChild<QAction*>("togglePasswordVisibility")->setChecked(false);
     findChild<QPushButton*>("createV2Room")->show(); findChild<QPushButton*>("joinV2Room")->hide();
-    RefreshSources(); password_->clear(); error_->clear(); name_->setFocus();
+    RefreshSources(); password_->clear(); SetError(); name_->setFocus();
     QTimer::singleShot(0, this, [this] { findChild<QScrollArea*>("RoomBrowserScroll")->verticalScrollBar()->setValue(0); });
 }
 void RoomBrowserWindow::OpenJoin(const QString& roomId) {
     setWindowTitle("ScreenShare — Join room"); heading_->setText("Join a room");
     createPanel_->hide(); joinPanel_->show(); directoryPanel_->show();
     findChild<QPushButton*>("createV2Room")->hide(); findChild<QPushButton*>("joinV2Room")->show();
-    password_->clear(); error_->clear(); roomId_->setText(roomId); roomId_->setFocus();
+    password_->clear(); SetError(); roomId_->setText(roomId); roomId_->setFocus();
     QTimer::singleShot(0, this, [this] { findChild<QScrollArea*>("RoomBrowserScroll")->verticalScrollBar()->setValue(0); });
 }
 void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
@@ -560,10 +561,10 @@ void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
 }
 void RoomBrowserWindow::Launch(bool host) {
     if (active_ || closing_) return;
-    if (host && source_->currentIndex() < 0) { error_->setText("Choose an available capture source before sharing."); return; }
+    if (host && source_->currentIndex() < 0) { SetError("Choose an available capture source before sharing."); return; }
     const auto nickname = RoomProfile::normalizeNickname(profile_.nickname());
     const auto roomId = ParseRoomReference(roomId_->text().trimmed());
-    if (!nickname || (!host && !roomId)) { error_->setText("Enter a valid room ID or room link."); return; }
+    if (!nickname || (!host && !roomId)) { SetError("Enter a valid room ID or room link."); return; }
     QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", name_->text()},
         {"roomId", host ? QString{} : *roomId}, {"password", password_->text()}, {"public", public_->isChecked()}, {"viewerLimit", viewerLimit_->value()},
         {"capture", QJsonObject::fromVariantMap(source_->currentData().toMap())},
@@ -591,7 +592,7 @@ void RoomBrowserWindow::Launch(bool host) {
         }
         const auto playback = profile_.playback();
         config.media.playbackVolume = playback.volume; config.media.playbackMuted = playback.muted;
-        error_->clear();
+        SetError();
         active_ = std::make_unique<RoomSessionWindow>(std::move(config), factory_, loopback_, &profile_);
         if (!host) {
             auto update = active_->session().statusChanged;
@@ -619,7 +620,7 @@ void RoomBrowserWindow::Launch(bool host) {
         password_->clear();
         if (presentPage) presentPage(active_.get());
         else { active_->show(); hide(); }
-    } catch (...) { error_->setText("Invalid room or capture settings."); }
+    } catch (...) { SetError("Invalid room or capture settings."); }
 }
 void RoomBrowserWindow::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);

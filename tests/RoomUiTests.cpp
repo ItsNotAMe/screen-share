@@ -1,4 +1,6 @@
 #include "ui/RoomSessionWindow.h"
+#include <QTabWidget>
+#include <QSlider>
 #include "RecordingGamepadSink.h"
 #include "RecordingDesktopInput.h"
 #include <QMouseEvent>
@@ -1076,6 +1078,25 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
             "; viewer=" + viewer.findChild<QLabel*>("controllerStatus")->text().toStdString()); }
     };
     Check(!request->isEnabled() && !grant->isEnabled()); authorize();
+    host.revokeControl();
+    Wait([&]{return sink->buttons==0&&!viewerConsent->isChecked();});
+    QPushButton* directGrant=nullptr;
+    Wait([&] {
+        for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))
+            if(button->property("capability").toUInt()==screenshare::input::Gamepad)directGrant=button;
+        return directGrant&&directGrant->isEnabled();
+    });
+    // A direct host grant must work without a request, but never override opt-out.
+    directGrant->click();
+    const auto optOutUntil=std::chrono::steady_clock::now()+200ms;
+    Wait([&]{return std::chrono::steady_clock::now()>optOutUntil;});
+    Check(sink->buttons==0);
+    viewerConsent->setChecked(true);
+    Wait([&]{return directGrant->isEnabled();});directGrant->click();
+    Wait([&]{return physicalReader?sink->applied>0:sink->buttons==buttons.load();});
+    Wait([&]{return directGrant->isEnabled()&&directGrant->isChecked();});directGrant->click();
+    Wait([&]{return sink->buttons==0&&!viewerConsent->isChecked();});
+    authorize();
     // Exercise complete permission/poller lifetimes without refreshing the
     // selected device. Every cycle requires new consent at both ends.
     for (int cycle = 0; cycle < 10; ++cycle) {
@@ -1162,6 +1183,13 @@ void DesktopInputScenario(const std::string& origin) {
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
     QKeyEvent key(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,0x1e,0x41,0);QApplication::sendEvent(video,&key);
     Wait([&]{return evidence->keys==1;});
+    QPushButton* keyboardToggle=nullptr;
+    for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))if(button->property("capability").toUInt()==screenshare::input::Keyboard)keyboardToggle=button;
+    Check(keyboardToggle);Wait([&]{return keyboardToggle->isEnabled();});keyboardToggle->click();
+    Wait([&]{for(const auto& state:viewer.session().input()->Read())if(state.granted==screenshare::input::Mouse)return true;return false;});
+    Check(viewer.findChild<QCheckBox*>("controllerConsent")->isChecked());
+    Wait([&]{return keyboardToggle->isEnabled();});keyboardToggle->click();
+    Wait([&]{for(const auto& state:viewer.session().input()->Read())if(state.granted==caps)return true;return false;});
 #endif
     QEvent inactive(QEvent::WindowDeactivate);QApplication::sendEvent(&viewer,&inactive);
     Wait([&]{return evidence->released>0 && !viewer.findChild<QCheckBox*>("controllerConsent")->isChecked();});
@@ -1243,10 +1271,32 @@ int main(int argc, char** argv) {
         Wait([&] { return original >= 20 && viewerAudio->audibleBlocks >= 20; });
         Wait([&] { return host.findChild<QLabel*>("roomMembers")->text().contains(QString::fromStdString(viewer.session().status().peerId)); });
         Check(host.findChild<QLabel*>("roomMembers")->text().contains(QString::fromStdString(host.session().status().peerId)));
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);
+            for(const auto size:{QSize(740,600),QSize(1000,820),QSize(1200,850)}) {
+                host.resize(size);viewer.resize(size);QCoreApplication::processEvents();
+                Check(host.grab().save(QDir(output).filePath(QString("host-%1.png").arg(size.width()))));
+                Check(viewer.grab().save(QDir(output).filePath(QString("viewer-%1.png").arg(size.width()))));
+                host.findChild<QPushButton*>("openSessionSettings")->click();QCoreApplication::processEvents();
+                Check(host.grab().save(QDir(output).filePath(QString("host-settings-%1.png").arg(size.width()))));
+                host.findChild<QPushButton*>("sessionSettingsBack")->click();
+            }
+        }
+        auto* controlsToggle=viewer.findChild<QPushButton*>("toggleSessionControls");
+        controlsToggle->click();Check(!viewer.findChild<QScrollArea*>("SessionControlsScroll")->isVisible());
+        controlsToggle->click();Check(viewer.findChild<QScrollArea*>("SessionControlsScroll")->isVisible());
+        auto* full=viewer.findChild<QPushButton*>("sessionFullscreen");full->click();Check(viewer.isFullScreen());full->click();Check(!viewer.isFullScreen());
+        auto* muteAction=viewer.findChild<QPushButton*>("sessionMute");muteAction->click();
+        Wait([&]{return viewer.session().status().playback.selected.muted;});
+        viewer.findChild<QSlider*>("sessionVolume")->setValue(41);muteAction->click();
+        Wait([&]{const auto p=viewer.session().status().playback.selected;return !p.muted&&p.volume==41;});
+        host.findChild<QPushButton*>("openSessionSettings")->click();
+        host.findChild<QTabWidget*>("SessionSettingsTabs")->setCurrentIndex(1);
         host.findChild<QSpinBox*>("liveViewerLimit")->setValue(5);
         Check(host.findChild<QLabel*>("capacityWarning")->isVisible());
         host.findChild<QSpinBox*>("liveViewerLimit")->setValue(4);
         Check(!host.findChild<QLabel*>("capacityWarning")->isVisible());
+        host.findChild<QPushButton*>("sessionSettingsBack")->click();
         auto* localDiagnostics = viewer.findChild<QLabel*>("viewerPresentationDiagnostics");
         Check(localDiagnostics);
         Wait([&] { return localDiagnostics->text().contains("do not measure end-to-end latency"); });

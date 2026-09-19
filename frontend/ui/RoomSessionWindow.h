@@ -12,6 +12,8 @@ class QPushButton;
 class VideoFrameWidget;
 class RoomProfile;
 class RoomGamepadControl;
+class QBoxLayout;
+class QThread;
 
 class RoomSessionWindow final : public QWidget {
 public:
@@ -28,6 +30,7 @@ public:
     std::function<void()> closed;
 protected:
     void closeEvent(QCloseEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
 private:
     screenshare::media::StreamPreferences ReadPreferences() const;
     QtRoomSession session_;
@@ -65,5 +68,11 @@ private:
     uint64_t editRevision_ = 0, nicknameRevision_ = 0;
     bool editingRoom_ = false, editingNickname_ = false, updatingNickname_ = false;
     bool closing_ = false;
+    QBoxLayout* sessionColumns_ = nullptr;
+    QLabel* hostPreview_ = nullptr;
+    QThread* previewWorker_ = nullptr;
+    screenshare::media::CaptureSelection previewSource_;
+    uint64_t previewRevision_ = 0;
+    void RefreshHostPreview();
 };
 int RunRoomSessionWindow(const QString& configurationPath);

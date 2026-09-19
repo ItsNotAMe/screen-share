@@ -16,6 +16,16 @@
 #include <QWheelEvent>
 #include <QApplication>
 #include <QAbstractScrollArea>
+#include <QFile>
+#include <QSvgRenderer>
+
+QIcon uiIcon(const QString& name, const QByteArray& color) {
+    QFile file(QString(":/screenshare/ui/icons/%1.svg").arg(name));
+    if(!file.open(QIODevice::ReadOnly))return {};
+    auto svg=file.readAll();svg.replace("currentColor",color);
+    QSvgRenderer renderer(svg);QPixmap pixels(80,80);pixels.fill(Qt::transparent);
+    QPainter painter(&pixels);renderer.render(&painter);return QIcon(pixels);
+}
 
 void alignOptionRows(QFormLayout* form)
 {
@@ -217,7 +227,22 @@ QTabWidget::pane { border: 1px solid #293631; }
 QTabBar::tab { background: #151d1b; padding: 10px 18px; }
 QTabBar::tab:selected { border-bottom: 2px solid #38d8c8; }
 QLabel#PageHeading { font-size: 23pt; font-weight: 650; }
-QLabel#SectionHeading { font-size: 13pt; font-weight: 650; padding-bottom: 6px; }
+QLabel#SessionTitle { font-size: 18pt; font-weight: 650; }
+QWidget#RoomSession, QWidget#SessionDashboard, QWidget#SessionSettings { background: #0c1110; color: #edf5f2; }
+QScrollArea#SessionControlsScroll { background: #121a17; border: 0; }
+QSlider#sessionVolume::groove:horizontal { height: 4px; background: #40534a; border-radius: 2px; }
+QSlider#sessionVolume::sub-page:horizontal { background: #38d8c8; border-radius: 2px; }
+QSlider#sessionVolume::handle:horizontal { background: #38d8c8; width: 14px; margin: -5px 0; border-radius: 7px; }
+QWidget#SessionCard { background: #121a17; border: 1px solid #293631; border-radius: 8px; }
+QLabel#SessionSourceSummary { font-size: 13pt; color: #edf5f2; }
+QLabel#roomPhase, QLabel#SessionConnection { color: #7bdbb8; }
+QPushButton#stopRoom { color: #ffafa6; border: 1px solid #af5550; padding: 10px 16px; }
+QPushButton#stopRoom:hover { background: #422521; }
+QPushButton#controllerAction, QPushButton#applyStream { background: #38d8c8; color: #102c28; }
+QPushButton#PeerCapability { padding: 8px; border-radius: 7px; }
+QPushButton#PeerCapability:checked { background: #194b43; border: 1px solid #38d8c8; }
+QPushButton#PeerCapability:hover { background: #263c34; }
+QLabel#SectionHeading, QLabel#HomeSectionTitle { color: #edf5f2; font-size: 13pt; font-weight: 650; }
 QWidget#FormCard { background: #121a17; border: 1px solid #293631; border-radius: 8px; }
 QLabel#OptionLabel { color: #c5d1cb; background: transparent; }
 QPushButton#SegmentButton { background: #101815; border: 1px solid #30413a; border-radius: 7px; padding: 8px 12px; }
@@ -240,7 +265,7 @@ QLabel#FormHint { color: #a3b5af; }
 QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
 QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }
 QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#joinWithPassword {
-    background: #38d8c8; color: #ffffff; font-weight: 650; min-height: 24px;
+    background: #38d8c8; color: #102c28; font-weight: 650; min-height: 24px;
 }
 QWidget#AppShellWindow,
 QStackedWidget#AppPageStack,
@@ -361,11 +386,6 @@ QLabel#HomeVersion {
     border-radius: 7px;
     padding: 3px 8px;
     font-size: 9.5pt;
-    font-weight: 720;
-}
-QLabel#HomeSectionTitle {
-    color: #edf5f2;
-    font-size: 12pt;
     font-weight: 720;
 }
 QFrame#HomeDivider {
