@@ -35,6 +35,8 @@
 #include <QPainter>
 #include <QFile>
 #include <QSvgRenderer>
+#include <QAction>
+#include <QThread>
 using namespace screenshare;
 using namespace screenshare::room::qt;
 
@@ -54,6 +56,14 @@ QWidget* optionField(const QString& text, QWidget* control) {
     auto* label = fieldLabel(text); label->setBuddy(control);
     layout->addWidget(label); layout->addWidget(control); return field;
 }
+void passwordEye(QLineEdit* field) {
+    auto* eye = field->addAction(entryIcon("eye"), QLineEdit::TrailingPosition);
+    eye->setObjectName("togglePasswordVisibility"); eye->setCheckable(true); eye->setText("Show password");
+    QObject::connect(eye, &QAction::toggled, field, [field, eye](bool visible) {
+        field->setEchoMode(visible ? QLineEdit::Normal : QLineEdit::Password);
+        eye->setIcon(entryIcon(visible ? "eye-off" : "eye")); eye->setText(visible ? "Hide password" : "Show password");
+    });
+}
 QWidget* segments(const QStringList& labels, int selected, QWidget* owner, std::function<void(int)> change) {
     auto* widget = new QWidget(owner); widget->setObjectName("SegmentGroup");
     auto* layout = new QHBoxLayout(widget); layout->setContentsMargins(0,0,0,0); layout->setSpacing(6);
@@ -61,6 +71,8 @@ QWidget* segments(const QStringList& labels, int selected, QWidget* owner, std::
     for (int i = 0; i < labels.size(); ++i) {
         auto* button = new QPushButton(labels[i]); button->setCheckable(true); button->setChecked(i == selected);
         button->setObjectName("SegmentButton"); button->setMinimumHeight(42);
+        const QMap<QString, QString> icons{{"Public","globe"},{"Private","lock"},{"Display","display"},{"Window","window"},{"Gaming","gamepad"},{"Quality","quality"}};
+        button->setIcon(entryIcon(icons.value(labels[i]))); button->setIconSize(QSize(20,20));
         group->addButton(button, i); layout->addWidget(button, 1);
     }
     QObject::connect(group, &QButtonGroup::idClicked, owner, std::move(change));
@@ -103,13 +115,8 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     detailsBody_->addWidget(optionField("Room visibility", visibility));
     password_ = new QLineEdit; password_->setObjectName("roomPassword"); password_->setEchoMode(QLineEdit::Password); password_->setMaxLength(256);
     password_->setPlaceholderText("Password");
+    passwordEye(password_);
     passwordPanel_ = optionField("Password (optional)", password_); passwordPanel_->setObjectName("RoomPasswordPanel"); detailsBody_->addWidget(passwordPanel_);
-    passwordActions_ = new QWidget; auto* passwordActions = new QHBoxLayout(passwordActions_); passwordActions->setContentsMargins(0,0,0,0); passwordActions->addStretch();
-    auto* cancelPassword = new QPushButton("Cancel"); cancelPassword->setObjectName("cancelRoomPassword"); passwordActions->addWidget(cancelPassword);
-    auto* joinPassword = new QPushButton("Join"); joinPassword->setObjectName("joinWithPassword"); passwordActions->addWidget(joinPassword);
-    static_cast<QVBoxLayout*>(passwordPanel_->layout())->addWidget(passwordActions_); passwordActions_->hide();
-    connect(cancelPassword, &QPushButton::clicked, this, [this] { password_->clear(); passwordPanel_->hide(); findChild<QPushButton*>("JoinPasswordToggle")->setChecked(false); });
-    connect(joinPassword, &QPushButton::clicked, this, [this] { Launch(false); });
     viewerLimit_ = new QSpinBox; viewerLimit_->setObjectName("createViewerLimit"); viewerLimit_->setRange(1,63); viewerLimit_->setValue(4);
     detailsBody_->addWidget(disclosure("Advanced settings", optionField("Viewer limit", viewerLimit_), details)); detailsBody_->addStretch();
     auto* stream = new QWidget; stream->setObjectName("FormCard"); auto* streamBody = new QVBoxLayout(stream); createColumns_->addWidget(stream, 1);
@@ -124,6 +131,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     sourceKinds->setObjectName("SourceKinds"); streamBody->addWidget(sourceKinds);
     sourceCards_ = new QListWidget; sourceCards_->setObjectName("SourceCards");
     sourceCards_->setViewMode(QListView::IconMode); sourceCards_->setResizeMode(QListView::Adjust); sourceCards_->setMovement(QListView::Static);
+    sourceCards_->setUniformItemSizes(true);
     sourceCards_->setIconSize(QSize(144,80)); sourceCards_->setGridSize(QSize(164,120)); sourceCards_->setSpacing(4);
     sourceCards_->setMinimumHeight(140); sourceCards_->setMaximumHeight(160); sourceCards_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     streamBody->addWidget(sourceCards_);
@@ -169,19 +177,12 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     joinPanel_ = new QWidget; joinBody_ = new QVBoxLayout(joinPanel_); joinBody_->setContentsMargins(0,0,0,0); joinBody_->setSpacing(16);
     roomId_ = new QLineEdit; roomId_->setObjectName("joinRoomId"); roomId_->setMaxLength(512);
     roomId_->setPlaceholderText("Paste a room link or room ID"); joinBody_->addWidget(fieldLabel("Room link"));
+    roomId_->addAction(entryIcon("link"), QLineEdit::LeadingPosition);
     auto* linkRow = new QHBoxLayout; linkRow->setSpacing(10); linkRow->addWidget(roomId_, 1);
     auto* paste = new QPushButton("Paste"); paste->setObjectName("pasteRoomLink"); paste->setIcon(entryIcon("paste")); linkRow->addWidget(paste);
     connect(paste, &QPushButton::clicked, this, [this] { roomId_->setText(QApplication::clipboard()->text().trimmed().left(512)); roomId_->setFocus(); });
     auto* join = new QPushButton("Join room"); join->setObjectName("joinV2Room"); linkRow->addWidget(join); joinBody_->addLayout(linkRow);
-    auto* passwordToggle = new QPushButton("Use a password"); passwordToggle->setObjectName("JoinPasswordToggle"); passwordToggle->setCheckable(true);
-    joinBody_->addWidget(passwordToggle, 0, Qt::AlignLeft);
-    connect(passwordToggle, &QPushButton::toggled, this, [this](bool open) {
-        if (open) joinBody_->insertWidget(3, passwordPanel_);
-        passwordPanel_->setVisible(open);
-    });
-    decoder_ = new QComboBox; decoder_->setObjectName("roomDecoder");
-    decoder_->addItem("Automatic (prefer hardware)", "auto"); decoder_->addItem("Software (compatibility)", "software");
-    decoder_->setCurrentIndex(decoder_->findData(profile_.decoder()));
+    for (auto* control : {static_cast<QWidget*>(roomId_), static_cast<QWidget*>(paste), static_cast<QWidget*>(join)}) control->setFixedHeight(42);
     body->addWidget(joinPanel_);
     directoryPanel_ = new QWidget; auto* directoryBody = new QVBoxLayout(directoryPanel_); directoryBody->setContentsMargins(0,0,0,0); directoryBody->setSpacing(12);
     auto* available = new QLabel("Available rooms"); available->setObjectName("SectionHeading"); directoryBody->addWidget(available);
@@ -194,7 +195,6 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     rooms_->verticalHeader()->setDefaultSectionSize(58);
     rooms_->verticalHeader()->hide(); rooms_->setMinimumHeight(120); directoryBody->addWidget(rooms_, 1);
     retry_ = new QPushButton("Reconnect to room list"); retry_->setEnabled(false); directoryBody->addWidget(retry_);
-    directoryBody->addWidget(disclosure("Playback options", optionField("Video decoding", decoder_), directoryPanel_));
     body->addWidget(directoryPanel_);
     body->addStretch();
     error_ = new QLabel; error_->setObjectName("browserError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
@@ -213,7 +213,9 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     for (auto* combo : findChildren<QComboBox*>()) styleComboPopup(combo);
     OpenCreate();
 }
-RoomBrowserWindow::~RoomBrowserWindow() = default;
+RoomBrowserWindow::~RoomBrowserWindow() {
+    if (previewThread_) { previewThread_->requestInterruption(); previewThread_->wait(); delete previewThread_; }
+}
 void RoomBrowserWindow::resizeEvent(QResizeEvent* event) {
     createColumns_->setDirection(event->size().width() >= 780 ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
     QWidget::resizeEvent(event);
@@ -281,7 +283,6 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     connect(decoder, &QComboBox::currentIndexChanged, dialog, [this, decoder, error] {
         if (!profile_.saveDecoder(decoder->currentData().toString())) { error->setText("Could not save video decoding preference."); return; }
         error->clear();
-        decoder_->setCurrentIndex(decoder_->findData(profile_.decoder()));
     });
     auto savePlayback = [this, volume, muted, error] {
         if (!profile_.savePlayback({volume->value(), muted->isChecked()})) error->setText("Could not save playback preferences.");
@@ -299,8 +300,10 @@ void RoomBrowserWindow::RefreshSources() {
     source_->clear();
     if (!enumerateSources_) source_->addItem("Default display", QVariantMap{{"display", 0}});
     else try {
-        for (const auto& display : DesktopCapturer::EnumerateDisplays()) if (display.attachedToDesktop)
-            source_->addItem(QString("Display %1 — %2").arg(display.index).arg(QString::fromStdWString(display.outputName)), QVariantMap{{"display", display.index}});
+        for (const auto& display : DesktopCapturer::EnumerateDisplays()) if (display.attachedToDesktop) {
+            source_->addItem(QString("Display %1 · %2 × %3").arg(display.index + 1).arg(display.right-display.left).arg(display.bottom-display.top), QVariantMap{{"display", display.index}});
+            source_->setItemData(source_->count()-1, QString::fromStdWString(display.outputName), Qt::UserRole+1);
+        }
         for (const auto& window : DesktopCapturer::EnumerateWindows())
             source_->addItem(QString::fromStdWString(window.title), QVariantMap{{"window", QVariant::fromValue<qulonglong>(window.handle)}});
     } catch (...) { source_->clear(); }
@@ -309,6 +312,7 @@ void RoomBrowserWindow::RefreshSources() {
     RefreshSourceCards();
 }
 void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
+    ++previewRevision_;
     const QSignalBlocker blocked(sourceCards_);
     sourceCards_->clear();
     QListWidgetItem* selected = nullptr;
@@ -317,10 +321,8 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
         if (data.contains("window") != windowSources_) continue;
         QPixmap preview;
         if (enumerateSources_) {
-            if (windowSources_) {
-                if (auto* screen = QGuiApplication::primaryScreen()) preview = screen->grabWindow(WId(data["window"].toULongLong()));
-            } else {
-                const auto name = source_->itemText(index).section(QString::fromUtf8(" — "), 1);
+            if (!windowSources_) {
+                const auto name = source_->itemData(index, Qt::UserRole+1).toString();
                 for (auto* screen : QGuiApplication::screens()) {
                     if (screen->name() == name) { preview = screen->grabWindow(0); break; }
                 }
@@ -334,9 +336,12 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
         }
         const auto fullName = source_->itemText(index);
         const auto shortName = fontMetrics().elidedText(fullName, Qt::ElideRight, 146);
-        const auto scaled = preview.scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+        QPixmap scaled(144,80); scaled.fill(QColor("#0c1110"));
+        { QPainter painter(&scaled); const auto fitted = preview.scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+          painter.drawPixmap((144-fitted.width())/2, (80-fitted.height())/2, fitted); }
         QIcon icon; icon.addPixmap(scaled, QIcon::Normal); icon.addPixmap(scaled, QIcon::Selected);
         auto* item = new QListWidgetItem(icon, shortName, sourceCards_);
+        item->setSizeHint(QSize(164,120)); item->setTextAlignment(Qt::AlignHCenter);
         item->setToolTip(fullName); item->setData(Qt::AccessibleTextRole, fullName); item->setData(Qt::UserRole, index);
         if (index == source_->currentIndex()) selected = item;
     }
@@ -348,19 +353,82 @@ void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
         empty->setFlags(Qt::NoItemFlags);
     }
     if (selected) error_->clear();
+    LoadSourcePreviews();
 }
-void RoomBrowserWindow::JoinListedRoom(const QString& id, bool passwordRequired) {
+void RoomBrowserWindow::LoadSourcePreviews() {
+    if (!enumerateSources_ || closing_ || createPanel_->isHidden()) return;
+    if (previewThread_) { previewThread_->requestInterruption(); return; }
+    QVector<QVariantMap> sources;
+    for (int row = 0; row < sourceCards_->count(); ++row) {
+        const auto index = sourceCards_->item(row)->data(Qt::UserRole);
+        if (index.isValid()) sources.push_back(source_->itemData(index.toInt()).toMap());
+    }
+    if (sources.isEmpty()) return;
+    const auto revision = previewRevision_;
+    auto previews = std::make_shared<QVector<QImage>>();
+    // A single capture owner keeps GPU work off the UI thread. Never fall back
+    // to another window/display when the requested source cannot be captured.
+    previewThread_ = QThread::create([sources, previews] {
+        for (const auto& source : sources) {
+            if (QThread::currentThread()->isInterruptionRequested()) break;
+            QImage image;
+            try {
+                CaptureConfig config; config.targetWidth = 288; config.targetHeight = 160; config.targetFps = 15;
+                config.sourceType = source.contains("window") ? CaptureSourceType::Window : CaptureSourceType::Display;
+                config.windowHandle = source.value("window").toULongLong(); config.displayIndex = source.value("display").toInt();
+                config.allowDisplayFallback = false;
+                DesktopCapturer capturer; capturer.Start(config);
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(350);
+                while (!QThread::currentThread()->isInterruptionRequested() && std::chrono::steady_clock::now() < until) {
+                    auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(30));
+                    if (frame && frame->width > 0 && frame->height > 0 && !frame->pixels.empty()) {
+                        image = QImage(reinterpret_cast<const uchar*>(frame->pixels.data()), frame->width, frame->height,
+                                       frame->rowPitch, QImage::Format_RGB32).copy(); break;
+                    }
+                }
+            } catch (...) { /* Closed/minimized/protected sources keep their placeholder. */ }
+            previews->push_back(std::move(image));
+        }
+    });
+    connect(previewThread_, &QThread::finished, this, [this, revision, previews] {
+        auto* completed = previewThread_; previewThread_ = nullptr; completed->deleteLater();
+        if (revision != previewRevision_) { LoadSourcePreviews(); return; }
+        for (int row = 0; row < previews->size() && row < sourceCards_->count(); ++row) {
+            if ((*previews)[row].isNull()) continue;
+            QPixmap thumbnail(144,80); thumbnail.fill(QColor("#0c1110"));
+            QPainter painter(&thumbnail); const auto scaled = (*previews)[row].scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+            painter.drawImage((144-scaled.width())/2,(80-scaled.height())/2,scaled); painter.end();
+            QIcon icon; icon.addPixmap(thumbnail,QIcon::Normal); icon.addPixmap(thumbnail,QIcon::Selected);
+            sourceCards_->item(row)->setIcon(icon);
+        }
+    });
+    previewThread_->start();
+}
+void RoomBrowserWindow::JoinListedRoom(const QString& id) {
     error_->clear();
     if (roomId_->text() != id) password_->clear();
     roomId_->setText(id);
-    if (passwordRequired && password_->text().isEmpty()) {
-        findChild<QPushButton*>("JoinPasswordToggle")->setChecked(true);
-        static_cast<QVBoxLayout*>(directoryPanel_->layout())->insertWidget(3, passwordPanel_);
-        passwordPanel_->show();
-        findChild<QScrollArea*>("RoomBrowserScroll")->ensureWidgetVisible(passwordPanel_);
-        password_->setFocus(); return;
-    }
     Launch(false);
+}
+void RoomBrowserWindow::PromptPassword() {
+    auto* dialog = new QDialog(this); dialog->setObjectName("RoomPasswordDialog");
+    dialog->setWindowTitle("Room password"); dialog->setWindowModality(Qt::WindowModal); dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setMinimumWidth(360); dialog->setStyleSheet(uiStyleSheet());
+    auto* body = new QVBoxLayout(dialog); body->setContentsMargins(24,24,24,24); body->setSpacing(16);
+    auto* title = new QLabel(passwordRejected_ ? "Incorrect password. Try again." : "Enter room password"); title->setObjectName("SectionHeading"); body->addWidget(title);
+    auto* field = new QLineEdit; field->setObjectName("joinPassword"); field->setEchoMode(QLineEdit::Password); field->setMaxLength(128);
+    field->setPlaceholderText("Password"); passwordEye(field); body->addWidget(field);
+    auto* actions = new QHBoxLayout; actions->addStretch();
+    auto* cancel = new QPushButton("Cancel"); cancel->setObjectName("cancelRoomPassword");
+    auto* join = new QPushButton("Join room"); join->setObjectName("joinWithPassword"); join->setDefault(true);
+    for (auto* button : {cancel, join}) { button->setFixedSize(110,42); actions->addWidget(button); }
+    body->addLayout(actions);
+    connect(cancel, &QPushButton::clicked, dialog, &QDialog::reject);
+    connect(join, &QPushButton::clicked, dialog, [this, dialog, field] {
+        if (field->text().isEmpty()) { field->setFocus(); return; }
+        password_->setText(field->text()); field->clear(); dialog->accept(); Launch(false);
+    });
+    dialog->open(); field->setFocus();
 }
 void RoomBrowserWindow::ShowBackButton() {
     auto* button = new QPushButton("‹ Home", this); button->setObjectName("roomBack");
@@ -372,7 +440,7 @@ void RoomBrowserWindow::OpenCreate() {
     setWindowTitle("ScreenShare — Create room"); heading_->setText("Create a room");
     createPanel_->show(); joinPanel_->hide(); directoryPanel_->hide(); rooms_->hide(); retry_->hide(); status_->hide();
     detailsBody_->insertWidget(3, passwordPanel_); passwordPanel_->show();
-    passwordActions_->hide(); passwordPanel_->findChild<QLabel*>("OptionLabel")->setText("Password (optional)");
+    password_->findChild<QAction*>("togglePasswordVisibility")->setChecked(false);
     findChild<QPushButton*>("createV2Room")->show(); findChild<QPushButton*>("joinV2Room")->hide();
     RefreshSources(); password_->clear(); error_->clear(); name_->setFocus();
     QTimer::singleShot(0, this, [this] { findChild<QScrollArea*>("RoomBrowserScroll")->verticalScrollBar()->setValue(0); });
@@ -380,14 +448,9 @@ void RoomBrowserWindow::OpenCreate() {
 void RoomBrowserWindow::OpenJoin(const QString& roomId) {
     setWindowTitle("ScreenShare — Join room"); heading_->setText("Join a room");
     createPanel_->hide(); joinPanel_->show(); directoryPanel_->show(); rooms_->show(); retry_->setVisible(directory_.status().phase == RoomDirectory::Phase::Failed);
-    passwordActions_->show(); passwordPanel_->findChild<QLabel*>("OptionLabel")->setText("Room password");
-    joinBody_->insertWidget(3, passwordPanel_); findChild<QPushButton*>("JoinPasswordToggle")->setChecked(false); passwordPanel_->hide();
     status_->setVisible(directory_.status().phase != RoomDirectory::Phase::Ready);
     findChild<QPushButton*>("createV2Room")->hide(); findChild<QPushButton*>("joinV2Room")->show();
     password_->clear(); error_->clear(); roomId_->setText(roomId); roomId_->setFocus();
-    for (const auto& room : directory_.status().rooms) {
-        if (room.id == roomId && room.password) findChild<QPushButton*>("JoinPasswordToggle")->setChecked(true);
-    }
     QTimer::singleShot(0, this, [this] { findChild<QScrollArea*>("RoomBrowserScroll")->verticalScrollBar()->setValue(0); });
 }
 void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
@@ -406,12 +469,11 @@ void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
         auto* cell = rooms_->cellWidget(int(i), 4);
         if (!cell || cell->property("roomId").toString() != room.id) {
             cell = new QWidget; cell->setProperty("roomId", room.id);
-            auto* rowActions = new QHBoxLayout(cell); rowActions->setContentsMargins(8,10,8,10);
-            auto* join = new QPushButton("Join"); join->setObjectName("JoinListedRoom"); join->setMinimumHeight(34); rowActions->addWidget(join);
-            connect(join, &QPushButton::clicked, this, [this, cell, id = room.id] { JoinListedRoom(id, cell->property("passwordRequired").toBool()); });
+            auto* rowActions = new QHBoxLayout(cell); rowActions->setContentsMargins(8,7,8,7);
+            auto* join = new QPushButton("Join"); join->setObjectName("JoinListedRoom"); join->setFixedHeight(42); rowActions->addWidget(join);
+            connect(join, &QPushButton::clicked, this, [this, id = room.id] { JoinListedRoom(id); });
             rooms_->setCellWidget(int(i), 4, cell);
         }
-        cell->setProperty("passwordRequired", room.password);
         cell->findChild<QPushButton*>()->setEnabled(state.phase == RoomDirectory::Phase::Ready && room.status == "open");
         if (room.id == selected) rooms_->selectRow(int(i));
     }
@@ -439,7 +501,7 @@ void RoomBrowserWindow::Launch(bool host) {
     auto capture = input["capture"].toObject();
     if (capture.contains("window")) capture["window"] = QString::number(source_->currentData().toMap()["window"].toULongLong());
     input["capture"] = capture;
-    if (!host) input["decoder"] = decoder_->currentData().toString();
+    if (!host) input["decoder"] = profile_.decoder();
     try {
         auto config = ParseRoomSessionConfig(input, loopback_);
         config.media.preferences = profile_.streamPreferences();
@@ -458,11 +520,26 @@ void RoomBrowserWindow::Launch(bool host) {
         }
         const auto playback = profile_.playback();
         config.media.playbackVolume = playback.volume; config.media.playbackMuted = playback.muted;
-        if (!host && !profile_.saveDecoder(decoder_->currentData().toString())) { error_->setText("Could not save the decoding preference."); return; }
         error_->clear();
         active_ = std::make_unique<RoomSessionWindow>(std::move(config), factory_, loopback_, &profile_);
+        if (!host) {
+            auto update = active_->session().statusChanged;
+            active_->session().statusChanged = [this, update, suppliedPassword = !password_->text().isEmpty()](const auto& status) {
+                if (update) update(status);
+                if (!passwordRetry_ && status.phase == v2::RoomPhase::Failed && status.error == v2::RoomError::AdmissionDenied) {
+                    passwordRetry_ = true;
+                    passwordRejected_ = suppliedPassword;
+                    QTimer::singleShot(0, this, [this] { if (active_) active_->close(); });
+                }
+            };
+        }
         active_->closed = [this] { QTimer::singleShot(0, this, [this] {
             active_.reset();
+            if (passwordRetry_ && !closing_) {
+                passwordRetry_ = false;
+                if (presentPage) presentPage(this); else show();
+                PromptPassword(); return;
+            }
             if (closing_) close();
             else if (returnFromSession) returnFromSession();
             else if (presentPage) presentPage(this);
@@ -474,7 +551,10 @@ void RoomBrowserWindow::Launch(bool host) {
     } catch (...) { error_->setText("Invalid room or capture settings."); }
 }
 void RoomBrowserWindow::showEvent(QShowEvent* event) { QWidget::showEvent(event); if (!closing_) directory_.Start(origin_); }
-void RoomBrowserWindow::hideEvent(QHideEvent* event) { if (!keepDirectoryOnHide) directory_.Stop(); QWidget::hideEvent(event); }
+void RoomBrowserWindow::hideEvent(QHideEvent* event) {
+    if (previewThread_) previewThread_->requestInterruption();
+    if (!keepDirectoryOnHide) directory_.Stop(); QWidget::hideEvent(event);
+}
 void RoomBrowserWindow::closeEvent(QCloseEvent* event) {
     closing_ = true;
     if (active_ || directory_.running()) {

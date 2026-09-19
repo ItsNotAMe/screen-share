@@ -209,8 +209,8 @@ QListWidget#SourceCards::item:hover { background: #203b30; }
 QWidget#DisclosureCard { background: #131c17; border: 1px solid #293631; border-radius: 8px; }
 QToolButton#OptionsDisclosure { background: transparent; color: #c5d1cb; border: 0; border-radius: 6px; padding: 6px; text-align: left; }
 QToolButton#OptionsDisclosure:hover { background: #263d33; }
-QPushButton#roomBack, QPushButton#JoinPasswordToggle { background: transparent; border: 0; padding: 5px; color: #b7c8c0; }
-QPushButton#roomBack:hover, QPushButton#JoinPasswordToggle:hover { background: #20312c; }
+QPushButton#roomBack { background: transparent; border: 0; padding: 5px; color: #b7c8c0; }
+QPushButton#roomBack:hover { background: #20312c; }
 QPushButton#JoinListedRoom { background: #38d8c8; color: #08251f; border: 0; border-radius: 6px; padding: 5px 12px; font-weight: 600; }
 QPushButton#JoinListedRoom:hover { background: #65e3d6; }
 QPushButton#JoinListedRoom:disabled { background: #20312c; color: #73877f; }

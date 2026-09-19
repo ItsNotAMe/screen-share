@@ -27,10 +27,18 @@ password inside Room details, and collapsed capacity controls. Source snapshots
 refresh on source enumeration or category changes; unavailable previews use a
 named placeholder, never a replacement capture source. Below 780 logical pixels,
 the cards stack. The create action remains outside the scrolling form.
-Join has inline Paste/Join actions, per-room Join buttons, a password prompt under
-the directory, and collapsed playback options. The obsolete separate selected-room
+Join has equal-height Paste/Join actions and per-room Join buttons. A themed password
+dialog opens only after the server denies admission, including pasted/private links;
+cancel returns to the form and an incorrect password can be retried. Playback options
+live only in Settings. The obsolete separate selected-room
 action is removed. No nickname fields, helper descriptions, room counters, or
 invented host data were added. Backend admission and configuration remain shared.
+Create uses matching outline SVGs and password visibility toggles. Source cards
+keep identical dimensions regardless of title, selection or image aspect ratio.
+A background capture owner fetches real source thumbnails with no display fallback;
+closed, protected or minimized sources retain placeholders. Thumbnails are not saved.
+The offscreen suite uses a synthetic source model; real-device thumbnail capture
+still needs visual confirmation in the running app.
 
 Release UI/test targets build. The silent room-v2-qt-ui integration test passes at
 100% and 150% display scale, covering normal navigation, profile validation,

@@ -37,6 +37,7 @@
 #include <QAbstractItemView>
 #include <QScrollBar>
 #include <QDialog>
+#include <QAction>
 #include <QDir>
 #include <QFontDatabase>
 #include <QPlainTextEdit>
@@ -404,6 +405,10 @@ void NormalHomeScenario(const QUrl& origin) {
         Check(host.browser()->findChild<QPushButton*>("createV2Room")->isVisible());
         Check(!host.browser()->findChild<QPushButton*>("joinV2Room")->isVisible());
         host.browser()->findChild<QLineEdit*>("roomName")->setText("Friday games");
+        auto* passwordField = host.browser()->findChild<QLineEdit*>("roomPassword");
+        auto* eye = passwordField->findChild<QAction*>("togglePasswordVisibility");
+        eye->trigger(); Check(passwordField->echoMode() == QLineEdit::Normal);
+        eye->trigger(); Check(passwordField->echoMode() == QLineEdit::Password);
         auto* visibility = host.browser()->findChild<QWidget*>("RoomVisibility")->findChild<QButtonGroup*>();
         visibility->button(1)->click(); Check(!host.browser()->findChild<QCheckBox*>("publicRoom")->isChecked());
         visibility->button(0)->click();
@@ -584,20 +589,25 @@ void BrowserScenario(const QUrl& origin) {
     const auto parsed = ParseRoomSessionConfig(QJsonObject{{"origin", origin.toString()}, {"roomId", roomLink}}, true);
     Check(parsed.room.origin == origin.toString().toStdString() && parsed.room.roomId == host.activeSession()->session().status().roomId);
     list->cellWidget(0,4)->findChild<QPushButton*>()->click();
-    Check(!viewer.activeSession() && viewer.findChild<QLineEdit*>("roomPassword")->isVisible());
+    Wait([&] { return !viewer.activeSession() && viewer.findChild<QDialog*>("RoomPasswordDialog"); });
+    auto* passwordPrompt = viewer.findChild<QDialog*>("RoomPasswordDialog");
+    Check(passwordPrompt->isVisible());
     if (const auto previews = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !previews.isEmpty()) {
         QCoreApplication::processEvents(); QDir().mkpath(previews);
-        const auto ratio = viewerApp.window().devicePixelRatioF(); QPixmap image(viewerApp.window().size()*ratio);
-        image.setDevicePixelRatio(ratio); image.fill(Qt::transparent); viewerApp.window().render(&image);
+        const auto ratio = passwordPrompt->devicePixelRatioF(); QPixmap image(passwordPrompt->size()*ratio);
+        image.setDevicePixelRatio(ratio); image.fill(Qt::transparent); passwordPrompt->render(&image);
         Check(image.save(QDir(previews).filePath("join-protected.png")));
     }
     viewer.findChild<QPushButton*>("cancelRoomPassword")->click();
-    Check(viewer.findChild<QLineEdit*>("roomPassword")->isHidden() || !viewer.findChild<QLineEdit*>("roomPassword")->isVisible());
+    Wait([&] { return !viewer.findChild<QDialog*>("RoomPasswordDialog"); });
+    Wait([&] { return viewer.directory().status().phase == Directory::Phase::Ready && list->rowCount() == 1 && list->cellWidget(0,4); });
     list->cellWidget(0,4)->findChild<QPushButton*>()->click();
-    viewer.findChild<QLineEdit*>("roomPassword")->setText("wrong-password");
+    Wait([&] { return !viewer.activeSession() && viewer.findChild<QDialog*>("RoomPasswordDialog"); });
+    viewer.findChild<QLineEdit*>("joinPassword")->setText("wrong-password");
     viewer.findChild<QPushButton*>("joinWithPassword")->click();
-    Wait([&] { return viewer.activeSession() && viewer.activeSession()->session().status().phase == RoomPhase::Failed; });
-    viewer.activeSession()->close();
+    Wait([&] { return !viewer.activeSession() && viewer.findChild<QDialog*>("RoomPasswordDialog"); });
+    viewer.findChild<QPushButton*>("cancelRoomPassword")->click();
+    Wait([&] { return !viewer.findChild<QDialog*>("RoomPasswordDialog"); });
     Wait([&] { return !viewer.activeSession() && viewer.isVisible() && viewer.directory().status().phase == Directory::Phase::Ready; });
     Check(viewerStack->count() == 1 && viewerStack->currentWidget() == &viewer && !viewerApp.keepingScreenAwake());
     viewerApp.window().findChild<QPushButton*>("TitleProfile")->click();
@@ -616,13 +626,13 @@ void BrowserScenario(const QUrl& origin) {
     initialMute->setChecked(false);
     auto* initialDecoder = profileDialog->findChild<QComboBox*>("profileDecoder");
     initialDecoder->setCurrentIndex(1); Check(RoomProfile(viewerFile).decoder() == "software");
-    initialDecoder->setCurrentIndex(0);
     profileDialog->findChild<QPushButton*>("preferencesBack")->click();
     Check(viewer.profileName() == "Browser viewer");
-    viewer.findChild<QLineEdit*>("roomPassword")->setText("browser-test-secret"); list->selectRow(0);
     viewer.findChild<QLineEdit*>("joinRoomId")->setText(roomLink);
-    viewer.findChild<QComboBox*>("roomDecoder")->setCurrentIndex(1);
-    viewer.findChild<QPushButton*>("joinV2Room")->click(); Check(viewer.activeSession());
+    viewer.findChild<QPushButton*>("joinV2Room")->click();
+    Wait([&] { return !viewer.activeSession() && viewer.findChild<QDialog*>("RoomPasswordDialog"); });
+    viewer.findChild<QLineEdit*>("joinPassword")->setText("browser-test-secret");
+    viewer.findChild<QPushButton*>("joinWithPassword")->click(); Check(viewer.activeSession());
     Check(softwareDecoderSelected && RoomProfile(viewerFile).decoder() == "software");
     unsigned frames = 0; auto present = viewer.activeSession()->session().frameReady;
     viewer.activeSession()->session().frameReady = [&](auto frame) { ++frames; present(std::move(frame)); };

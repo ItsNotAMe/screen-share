@@ -219,7 +219,8 @@ struct RoomSession::Impl {
             if (admission.valid() && admission.wait_for(0ms) == std::future_status::ready) {
                 auto result = admission.get();
                 if (result.error != RoomAdmission::Error::None || !result.membership) {
-                    Reply(RoomError::Admission, result.outcomeUnconfirmed); BeginStop(RoomError::Admission); return;
+                    const auto error = result.error == RoomAdmission::Error::Forbidden ? RoomError::AdmissionDenied : RoomError::Admission;
+                    Reply(error, result.outcomeUnconfirmed); BeginStop(error); return;
                 }
                 membership = std::move(*result.membership);
                 RoomIdentity identity{membership.expectedRole == "host", membership.roomId.toStdString(), membership.selfPeerId.toStdString()};

@@ -23,7 +23,7 @@ struct RoomOptions {
     int viewerLimit = 4;
 };
 enum class RoomPhase { Idle, Admitting, Connecting, Active, Reconnecting, Stopping, Stopped, Failed };
-enum class RoomError { None, Busy, Cancelled, Admission, Transport, Media };
+enum class RoomError { None, Busy, Cancelled, Admission, Transport, Media, AdmissionDenied };
 struct RoomResult { RoomError error = RoomError::None; bool outcomeUnconfirmed = false; };
 struct RoomPolicy { std::string name; bool publicRoom = true; int viewerLimit = 4; };
 struct RoomMember { std::string peerId, nickname; bool host = false; };
