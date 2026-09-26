@@ -1,4 +1,5 @@
 #include "media/webrtc/MfVideoEncoderFactory.h"
+#include "media/CodecDiagnostics.h"
 #include "media/webrtc/MfHardwareSession.h"
 #include "codec/HardwareFrameWait.h"
 #include "media/webrtc/MappedVideoBuffer.h"
@@ -21,8 +22,8 @@ namespace {
 struct RetiredVideoFrame {};
 class MfVideoEncoder final : public webrtc::VideoEncoder {
 public:
-    explicit MfVideoEncoder(std::shared_ptr<MfHardwareSession> hardware, int level)
-        : worker_(webrtc::Thread::Create()), hardware_(std::move(hardware)), level_(level) {
+    explicit MfVideoEncoder(std::shared_ptr<MfHardwareSession> hardware, int level, std::shared_ptr<DiagnosticHistory> diagnostics)
+        : worker_(webrtc::Thread::Create()), hardware_(std::move(hardware)), diagnostics_(std::move(diagnostics)), level_(level) {
         worker_->SetName("MF encoder", nullptr);
         if (!worker_->Start()) throw std::runtime_error("MF encoder worker startup failed");
     }
@@ -53,7 +54,7 @@ public:
                 suspended_ = config_.bitrate == 0;
                 keyframe_ = true;
                 return WEBRTC_VIDEO_CODEC_OK;
-            } catch (...) { encoder_.reset(); return WEBRTC_VIDEO_CODEC_ERROR; }
+            } catch (const std::exception& error) { CodecFailure(diagnostics_, "encoder-configure-failed", error); encoder_.reset(); return WEBRTC_VIDEO_CODEC_ERROR; }
         });
     }
     int32_t RegisterEncodeCompleteCallback(webrtc::EncodedImageCallback* callback) override {
@@ -122,6 +123,7 @@ public:
                 if (restart) { StartTransform(); std::lock_guard lock(mutex_); keyframe_ = true; }
                 else if (!encoder_->TryUpdateBitrate(bitrate)) throw std::runtime_error("MF rejected assigned bitrate");
             } catch (const std::exception& error) {
+                CodecFailure(diagnostics_, "encoder-rate-update-failed", error);
                 if (hardwareActive_) {
                     try { SoftwareFallback(error.what()); } catch (const std::exception& failure) { Fail(failure.what()); }
                 } else Fail(error.what());
@@ -154,6 +156,7 @@ private:
             [&] { return Cancelled(generation); });
     }
     void SoftwareFallback(const char* reason) {
+        if (diagnostics_) diagnostics_->Event("encoder-software-fallback");
         RTC_LOG(LS_WARNING) << "MF hardware quarantined for this session: " << reason;
         if (hardware_) { hardware_->quarantined = true; ++hardware_->softwareFallbacks; }
         hardwareActive_ = false;
@@ -188,11 +191,13 @@ private:
                     if (!HardwarePacket(probe, generation).isKeyframe) throw std::runtime_error("Hardware keyframe probe failed");
                 }
                 hardwareActive_ = true;
+                if (diagnostics_) diagnostics_->Event("encoder-hardware-ready", config_.width, config_.height);
                 return;
             } catch (const HardwareFrameCancelled&) { throw; }
-            catch (const std::exception& error) { SoftwareFallback(error.what()); return; }
+            catch (const std::exception& error) { CodecFailure(diagnostics_, "encoder-hardware-failed", error); SoftwareFallback(error.what()); return; }
         }
         encoder_->Start(config_);
+        if (diagnostics_) diagnostics_->Event("encoder-software-ready", config_.width, config_.height);
     }
     CapturedFrame RawFrame(const webrtc::VideoFrame& frame) {
         if (IsRetiredFrame(frame)) throw RetiredVideoFrame{};
@@ -242,6 +247,7 @@ private:
         scheduled_ = false;
     }
     void Fail(const char* error) {
+        if (diagnostics_) diagnostics_->Event("encoder-terminal-failure");
         RTC_LOG(LS_WARNING) << "MF encoder failed: " << error;
         std::lock_guard lock(mutex_);
         failed_ = true;
@@ -270,6 +276,7 @@ private:
                 try { packet = EncodePacket(*frame, keyframe, generation); }
                 catch (const HardwareFrameCancelled&) { throw; }
                 catch (const std::exception& error) {
+                    CodecFailure(diagnostics_, "encoder-frame-fallback", error);
                     if (!hardwareActive_) throw;
                     SoftwareFallback(error.what());
                     packet = EncodePacket(*frame, true, generation);
@@ -310,6 +317,7 @@ private:
             } catch (const HardwareFrameCancelled&) {
                 // Release/reset owns retirement. Never quarantine a cancelled GPU.
             } catch (const std::exception& error) {
+                CodecFailure(diagnostics_, "encoder-frame-failed", error);
                 if (IsRetiredFrame(*frame)) {
                     std::lock_guard lock(mutex_); keyframe_ = true;
                 } else Fail(error.what());
@@ -323,6 +331,7 @@ private:
     }
     std::unique_ptr<webrtc::Thread> worker_;
     std::shared_ptr<MfHardwareSession> hardware_;
+    std::shared_ptr<DiagnosticHistory> diagnostics_;
     std::atomic<bool> hardwareActive_{false};
     int64_t hardwareSampleId_ = 0;
     const int level_;
@@ -353,6 +362,6 @@ webrtc::VideoEncoderFactory::CodecSupport MfVideoEncoderFactory::QueryCodecSuppo
 std::unique_ptr<webrtc::VideoEncoder> MfVideoEncoderFactory::Create(const webrtc::Environment&,
     const webrtc::SdpVideoFormat& format) {
     if (!QueryCodecSupport(format, std::nullopt, std::nullopt).is_supported) return nullptr;
-    return std::make_unique<MfVideoEncoder>(hardware_,format.parameters.at("profile-level-id")=="640034"?52:42);
+    return std::make_unique<MfVideoEncoder>(hardware_,format.parameters.at("profile-level-id")=="640034"?52:42, diagnostics_);
 }
 }

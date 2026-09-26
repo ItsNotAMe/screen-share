@@ -11,6 +11,7 @@ struct NegotiationResult {
     uint64_t operation = 0, generation = 0;
     NegotiationError error = NegotiationError::None;
     std::string sdp;
+    int rtcErrorType = 0, rtcErrorDetail = 0;
 };
 // Private WebRTC adapter boundary. Invoke every method, including destruction,
 // on the peer's signaling executor. Operations return immediately; futures may

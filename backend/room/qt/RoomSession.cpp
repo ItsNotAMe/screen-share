@@ -21,6 +21,7 @@ struct RoomSession::Impl {
         RoomRuntimeFactory factory;
         mutable std::mutex mutex;
         RoomStatus status;
+        media::DiagnosticHistory events;
         std::shared_ptr<input::Port> inputPort;
         bool started = false, stopQueued = false, scheduled = false, stopping = false;
         bool settingsQueued = false;
@@ -55,7 +56,9 @@ struct RoomSession::Impl {
         RoomError terminalError = RoomError::Transport;
         State(Impl& o, RoomRuntimeFactory f) : owner(o), factory(std::move(f)) {}
         void Phase(RoomPhase value, RoomError error = RoomError::None) {
+            events.Event("room-phase", int(value), int(error));
             std::lock_guard lock(mutex); status.phase = value; status.error = error;
+            status.sessionEvents = events.Read();
         }
         void Reply(RoomError error, bool unconfirmed = false) {
             if (startReply) { startReply->set_value({error, unconfirmed}); startReply.reset(); }
@@ -85,6 +88,10 @@ struct RoomSession::Impl {
             Phase(error == RoomError::None ? RoomPhase::Stopping : RoomPhase::Failed, error);
             Reply(error == RoomError::None ? RoomError::Cancelled : error, admission.valid());
             if (session) session->Stop();
+            if (runtime) {
+                try { const auto finalStream = runtime->StreamSettings(); std::lock_guard lock(mutex); status.stream = finalStream; }
+                catch (...) { events.Event("final-snapshot-failed"); }
+            }
             try { if (runtime) mediaStopped = runtime->BeginStop(); }
             catch (...) { Phase(RoomPhase::Failed, RoomError::Media); }
             if (error == RoomError::None && admittedSnapshot && !terminal) {
@@ -112,7 +119,7 @@ struct RoomSession::Impl {
                 runtime->Advance();
                 for (const auto& peer : runtime->FailedPeers()) session->FailPeer(peer);
                 session->Advance();
-            } catch (...) { terminal = true; terminalError = RoomError::Media; Schedule(); return; }
+            } catch (...) { events.Event("runtime-advance-failed"); terminal = true; terminalError = RoomError::Media; Schedule(); return; }
             const auto current = session->status();
             const auto stream = runtime->StreamSettings();
             {
@@ -120,6 +127,7 @@ struct RoomSession::Impl {
                 status.activePeers = current.activePeers; status.failedPeers = current.failedPeers;
                 status.pendingPeers = current.pendingPeers; status.generation = current.generation;
                 status.stream = stream;
+                status.sessionEvents = events.Read();
                 status.capture = runtime->CaptureSelection();
                 status.audio = runtime->AudioSelection();
                 status.playback = runtime->Playback();
@@ -128,6 +136,8 @@ struct RoomSession::Impl {
             if (current.state == RoomMediaSession::State::Failed) { terminal = true; terminalError = RoomError::Media; Schedule(); }
         }
         void Event(const RoomSocket::Event& event) {
+            if (event.kind != RoomSocket::EventKind::Signal && event.kind != RoomSocket::EventKind::Result)
+                events.Event("room-socket", int(event.kind), int(event.error));
             if (stopping) {
                 if (event.kind == RoomSocket::EventKind::Closed || event.kind == RoomSocket::EventKind::Error ||
                     (event.kind == RoomSocket::EventKind::Result && event.value["requestId"] == "session_leave")) leaveDone = true;
@@ -218,6 +228,7 @@ struct RoomSession::Impl {
             }
             if (admission.valid() && admission.wait_for(0ms) == std::future_status::ready) {
                 auto result = admission.get();
+                events.Event("room-admission", int(result.error), result.outcomeUnconfirmed);
                 if (result.error != RoomAdmission::Error::None || !result.membership) {
                     const auto error = result.error == RoomAdmission::Error::Forbidden ? RoomError::AdmissionDenied : RoomError::Admission;
                     Reply(error, result.outcomeUnconfirmed); BeginStop(error); return;
@@ -225,14 +236,18 @@ struct RoomSession::Impl {
                 membership = std::move(*result.membership);
                 RoomIdentity identity{membership.expectedRole == "host", membership.roomId.toStdString(), membership.selfPeerId.toStdString()};
                 { std::lock_guard lock(mutex); status.roomId = identity.roomId; status.peerId = identity.peerId; }
+                events.Event("runtime-create");
                 runtime = factory(identity, [weak = weak_from_this()](const auto& target, auto signal) {
                     auto state = weak.lock();
-                    return state && !state->stopping && state->coordinator->Send(1,
+                    const bool sent = state && !state->stopping && state->coordinator->Send(1,
                         EncodeRoomSignal(signal, state->membership.roomId, QString::fromStdString(target)));
+                    if (state && !sent) state->events.Event("room-signal-send-rejected", int(signal.kind));
+                    return sent;
                 });
                 if (!runtime) { BeginStop(RoomError::Media); return; }
+                events.Event("runtime-ready");
                 session = std::make_unique<RoomMediaSession>(owner.executor, identity.host, identity.peerId,
-                    [this](const auto& peer) { return runtime->Add(peer); },
+                    [this](const auto& peer) { const bool added = runtime->Add(peer); if (!added) events.Event("runtime-peer-add-failed"); return added; },
                     [this](const auto& peer) { runtime->Remove(peer); },
                     [this](const auto& peer, auto signal) { return runtime->Receive(peer, std::move(signal)); },
                     [this](const auto& peer) { return runtime->Ready(peer); });
@@ -272,6 +287,7 @@ std::future<RoomResult> RoomSession::Start(RoomOptions options) {
         std::lock_guard lock(state->mutex);
         if (state->started || state->stopQueued) { reply->set_value({RoomError::Busy}); return future; }
         state->started = true; state->status.phase = RoomPhase::Admitting;
+        state->status.host = options.host;
         // Publication is ordered with concurrent Stop under the same mutex.
         impl_->executor.Post([state, reply, options = std::move(options)] {
             state->startReply = reply;

@@ -56,7 +56,7 @@ void RoomDirectory::Tick() {
             for (auto value : event.value["rooms"].toArray()) {
                 const auto row = value.toObject();
                 status_.rooms.push_back({row["roomId"].toString(), row["name"].toString(), row["status"].toString(),
-                    row["viewerCount"].toInt(), row["viewerLimit"].toInt(), row["passwordProtected"].toBool()});
+                    row["viewerCount"].toInt(), row["viewerLimit"].toInt(), row["passwordProtected"].toBool(), row["hostNickname"].toString()});
             }
             Publish(); if (stopping_.valid() || !desired_) return; break;
         case RoomSocket::EventKind::Reconnecting: {

@@ -57,6 +57,9 @@ struct StreamStatus {
     std::vector<PeerStreamStatus> peers;
     media::CapturePipelineStatus capture;
     media::CodecPipelineStatus codec;
+    std::vector<media::PeerConnectionStatus> connections;
+    media::DiagnosticHistorySnapshot mediaEvents;
+    media::DiagnosticHistorySnapshot performance;
 };
 struct RoomStatus {
     RoomPhase phase = RoomPhase::Idle;
@@ -71,6 +74,8 @@ struct RoomStatus {
     media::CaptureSelectionStatus capture;
     media::AudioSelectionStatus audio;
     media::PlaybackStatus playback;
+    bool host = false;
+    media::DiagnosticHistorySnapshot sessionEvents;
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
 // into the public control API. All runtime methods execute on owned signaling.

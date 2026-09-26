@@ -153,7 +153,8 @@ bool Member(QJsonValue v) {
 }
 bool Summary(QJsonValue v) {
     auto p = v.toObject();
-    return v.isObject() && Keys(p, {"roomId", "name", "viewerCount", "viewerLimit", "passwordProtected", "status", "summaryVersion", "leaseExpiresAt"}) &&
+    return v.isObject() && Keys(p, {"roomId", "name", "viewerCount", "viewerLimit", "passwordProtected", "status", "summaryVersion", "leaseExpiresAt"}, {"hostNickname"}) &&
+        (!p.contains("hostNickname") || CanonicalName(p["hostNickname"])) &&
         Id(p["roomId"]) && CanonicalName(p["name"], 64, 256) && Integer(p["viewerCount"], 0, 63) &&
         Integer(p["viewerLimit"], 1, 63) && p["passwordProtected"].isBool() &&
         QStringList{"open", "full", "reconnecting"}.contains(p["status"].toString()) && Integer(p["summaryVersion"]) && Integer(p["leaseExpiresAt"]) &&

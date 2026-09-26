@@ -31,6 +31,7 @@ struct NativeRoomRuntimeOptions {
     std::shared_ptr<PresentationTelemetry> presentation;
     std::function<CodecPipelineStatus()> codecStatus;
     webrtc::PeerConnectionInterface::RTCConfiguration connection;
+    std::shared_ptr<DiagnosticHistory> diagnostics;
 };
 std::unique_ptr<v2::RoomRuntime> CreateNativeRoomRuntime(
     v2::RoomIdentity, v2::RoomSend, NativeRoomRuntimeOptions);

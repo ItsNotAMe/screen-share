@@ -8,7 +8,7 @@ namespace screenshare::room::qt {
 class RoomDirectory final : public QObject {
 public:
     enum class Phase { Stopped, Connecting, Ready, Reconnecting, Failed };
-    struct Room { QString id, name, status; int viewers = 0, limit = 0; bool password = false; };
+    struct Room { QString id, name, status; int viewers = 0, limit = 0; bool password = false; QString hostNickname; };
     struct Status { Phase phase = Phase::Stopped; uint64_t revision = 0; std::vector<Room> rooms; };
     explicit RoomDirectory(bool diagnosticLoopback = false, QObject* parent = nullptr);
     ~RoomDirectory() override;

@@ -76,7 +76,7 @@ try {
     & "$PSScriptRoot/create-update-manifest.ps1" -Version $version `
         -ZipPath build/release/ScreenShare-release-windows-x64.zip `
         -InstallerPath "build/release/ScreenShare-Setup-$version-windows-x64.exe" `
-        -OutputPath $manifest -Notes @('Rebuilt room streaming and desktop UI.', 'Upgrade both host and viewer; old rooms and invites are incompatible.', 'Improved audio, input and display scaling; updates wait until you leave the room.')
+        -OutputPath $manifest -Notes @('Expanded connection, codec and performance diagnostic reports.', 'Improved internet connection discovery, decoder compatibility and isolation of stalled viewers.', 'Added the host nickname to the room list.')
     & "$PSScriptRoot/sign-update-manifest.ps1" -ManifestPath $manifest -PrivateKeyPath $privateKey -PublicKeyPath $publicKey -PassphraseFile $passphrase
     & "$PSScriptRoot/verify-update-manifest.ps1" -ManifestPath $manifest -PublicKeyPath $publicKey
     if ((& git rev-parse HEAD).Trim() -ne $commit -or (& git status --porcelain)) { throw 'The source changed during the release build.' }

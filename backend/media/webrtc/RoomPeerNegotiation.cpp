@@ -6,14 +6,26 @@
 
 namespace screenshare::media {
 RoomPeerNegotiation::RoomPeerNegotiation(webrtc::scoped_refptr<webrtc::PeerConnectionInterface> peer,
-    PeerNegotiation& negotiation, uint64_t generation, bool host, Send send)
-    : peer_(std::move(peer)), negotiation_(negotiation), peerGeneration_(generation), host_(host), send_(std::move(send)) {
+    PeerNegotiation& negotiation, uint64_t generation, bool host, Send send, std::shared_ptr<DiagnosticHistory> diagnostics)
+    : peer_(std::move(peer)), negotiation_(negotiation), peerGeneration_(generation), host_(host),
+      diagnostics_(diagnostics ? std::move(diagnostics) : std::make_shared<DiagnosticHistory>()), send_(std::move(send)) {
     if (!webrtc::Thread::Current() || !peer_ || !generation || !send_)
         throw std::logic_error("Room negotiation requires a signaling thread and live peer");
 }
 RoomPeerNegotiation::~RoomPeerNegotiation() { Close(); }
 bool RoomPeerNegotiation::ready() const { return stage_ == Stage::Ready; }
-bool RoomPeerNegotiation::Fail() { Close(); return false; }
+bool RoomPeerNegotiation::Fail(const char* reason) {
+    if (failure_ == std::string_view("none")) { failure_ = reason; diagnostics_->Event(reason, int(stage_)); }
+    Close(); return false;
+}
+const char* RoomPeerNegotiation::stageName() const {
+    switch (stage_) {
+    case Stage::Idle: return "idle"; case Stage::CreatingOffer: return "creating-offer";
+    case Stage::AwaitAnswer: return "awaiting-answer"; case Stage::ApplyingOffer: return "applying-offer";
+    case Stage::CreatingAnswer: return "creating-answer"; case Stage::ApplyingAnswer: return "applying-answer";
+    case Stage::Ready: return "ready"; case Stage::Closed: return "closed";
+    } return "unknown";
+}
 void RoomPeerNegotiation::Schedule() {
     webrtc::Thread::Current()->PostDelayedTask([this, weak = std::weak_ptr<int>(scheduleLifetime_)] {
         // Destruction, close and replacement generations invalidate queued work.
@@ -38,10 +50,15 @@ bool RoomPeerNegotiation::Begin(std::string id) {
     if (incoming_) incoming_->Close();
     if (outgoing_) outgoing_->Close();
     id_ = std::move(id); ++iceGeneration_;
+    diagnostics_->Event("negotiation-begin", iceGeneration_);
+    localCandidates_ = remoteCandidates_ = 0;
+    negotiated_ = false;
     deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(20);
     incoming_ = std::make_shared<IceCandidateHandoff>(iceGeneration_, [this](const auto& ice) {
         std::unique_ptr<webrtc::IceCandidate> value(webrtc::CreateIceCandidate(ice.mid, ice.line, ice.candidate, nullptr));
-        return value && peer_->AddIceCandidate(value.get());
+        const bool accepted = value && peer_->AddIceCandidate(value.get());
+        if (!accepted) diagnostics_->Event("candidate-apply-failed", value ? 1 : 0);
+        return accepted;
     });
     outgoing_ = std::make_shared<IceCandidateHandoff>(iceGeneration_, [this](const auto& ice) {
         return send_({RoomPeerSignal::Kind::Candidate, id_, {}, ice});
@@ -58,44 +75,54 @@ bool RoomPeerNegotiation::Offer(std::string id, bool restart) {
     stage_ = Stage::CreatingOffer; return true;
 }
 bool RoomPeerNegotiation::Receive(RoomPeerSignal message) {
+    if (message.kind != RoomPeerSignal::Kind::Candidate) diagnostics_->Event("signal-received", int(message.kind), int(stage_));
     if (stage_ == Stage::Closed) return false;
     if (message.kind == RoomPeerSignal::Kind::Offer) {
-        if (host_ || !Begin(std::move(message.connectionId))) return false;
+        if (host_ || !Begin(std::move(message.connectionId))) return Fail("unexpected-offer");
         pending_ = negotiation_.ApplyRemote(peerGeneration_, true, std::move(message.sdp));
         stage_ = Stage::ApplyingOffer; return true;
     }
     if (message.connectionId != id_) return true; // Retired ICE/answers never reach native state.
-    if (message.kind == RoomPeerSignal::Kind::Candidate)
-        return incoming_ && (incoming_->Push(iceGeneration_, std::move(message.ice)) == IceHandoffError::None || Fail());
+    if (message.kind == RoomPeerSignal::Kind::Candidate) {
+        ++remoteCandidates_;
+        return incoming_ && (incoming_->Push(iceGeneration_, std::move(message.ice)) == IceHandoffError::None || Fail("candidate-handoff-failed"));
+    }
     if (message.kind == RoomPeerSignal::Kind::Answer && host_ && stage_ == Stage::AwaitAnswer) {
         pending_ = negotiation_.ApplyRemote(peerGeneration_, false, std::move(message.sdp));
         stage_ = Stage::ApplyingAnswer; return true;
     }
     // Restart requests are handled by the host lifecycle/recovery budget.
-    return false;
+    return Fail("unexpected-signal");
 }
 void RoomPeerNegotiation::LocalCandidate(const webrtc::IceCandidate* candidate) {
     if (!outgoing_ || stage_ == Stage::Closed || stage_ == Stage::ApplyingOffer || candidate->candidate().username() != negotiation_.localUsername()) return;
     IceCandidateMessage message;
-    if (!candidate->ToString(&message.candidate)) { Fail(); return; }
+    if (!candidate->ToString(&message.candidate)) { Fail("candidate-serialization-failed"); return; }
     message.mid = candidate->sdp_mid(); message.line = candidate->sdp_mline_index();
-    if (outgoing_->Push(iceGeneration_, std::move(message)) != IceHandoffError::None) Fail();
+    ++localCandidates_;
+    if (outgoing_->Push(iceGeneration_, std::move(message)) != IceHandoffError::None) Fail("candidate-send-failed");
 }
 bool RoomPeerNegotiation::Poll() {
     if (stage_ == Stage::Closed) return false;
     if (stage_ == Stage::Idle || stage_ == Stage::Ready) return true;
-    if (std::chrono::steady_clock::now() >= deadline_) return Fail();
+    if (std::chrono::steady_clock::now() >= deadline_) return Fail("negotiation-timeout");
     if (!pending_.valid() || pending_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return true;
     auto result = pending_.get();
-    if (result.error != NegotiationError::None) return Fail();
+    diagnostics_->Event(stageName(), int(result.error), result.rtcErrorType);
+    if (result.error != NegotiationError::None) {
+        diagnostics_->Event("sdp-native-error", result.rtcErrorType, result.rtcErrorDetail);
+        return Fail("sdp-failed");
+    }
     if (stage_ == Stage::ApplyingOffer || stage_ == Stage::ApplyingAnswer) {
-        if (incoming_->RemoteDescriptionReady(iceGeneration_) != IceHandoffError::None) return Fail();
-        if (stage_ == Stage::ApplyingAnswer) { stage_ = Stage::Ready; return true; }
+        if (incoming_->RemoteDescriptionReady(iceGeneration_) != IceHandoffError::None) return Fail("candidate-apply-failed");
+        if (stage_ == Stage::ApplyingAnswer) { stage_ = Stage::Ready; negotiated_ = true; return true; }
         pending_ = negotiation_.CreateLocal(peerGeneration_, false); stage_ = Stage::CreatingAnswer; return true;
     }
     const bool offer = stage_ == Stage::CreatingOffer;
-    if (!send_({offer ? RoomPeerSignal::Kind::Offer : RoomPeerSignal::Kind::Answer, id_, std::move(result.sdp), {}})) return Fail();
+    if (!send_({offer ? RoomPeerSignal::Kind::Offer : RoomPeerSignal::Kind::Answer, id_, std::move(result.sdp), {}})) return Fail("sdp-send-failed");
+    diagnostics_->Event(offer ? "offer-sent" : "answer-sent");
     stage_ = offer ? Stage::AwaitAnswer : Stage::Ready;
-    return outgoing_->LocalDescriptionReady(iceGeneration_) == IceHandoffError::None || Fail();
+    negotiated_ = !offer;
+    return outgoing_->LocalDescriptionReady(iceGeneration_) == IceHandoffError::None || Fail("candidate-send-failed");
 }
 }

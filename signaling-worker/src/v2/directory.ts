@@ -1,11 +1,11 @@
 import { json } from './admission';
 import { validateClientCommand, validateServerEvent } from './protocol';
 
-export type Summary = { roomId: string; name: string; viewerCount: number; viewerLimit: number;
+export type Summary = { roomId: string; name: string; hostNickname?: string; viewerCount: number; viewerLimit: number;
   passwordProtected: boolean; status: 'open' | 'full' | 'reconnecting' };
 export type Publication = { roomId: string; version: number; leaseExpiresAt: number; room: Summary | null };
 type Row = Publication;
-type Subscriber = { connectedAt: number; window: number; count: number };
+type Subscriber = { connectedAt: number; window: number; count: number; hostNickname?: boolean };
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 
 // Listing reads one directory object and never contacts individual rooms.
@@ -16,7 +16,12 @@ export class V2Directory {
   }
   private wire(row: Row) { return { ...row.room!, summaryVersion: row.version, leaseExpiresAt: row.leaseExpiresAt }; }
   private send(ws: WebSocket, value: unknown): void {
-    try { ws.send(JSON.stringify(value)); } catch { try { ws.close(1011, 'delivery_failed'); } catch {} }
+    try { ws.send(this.encodeFor(value, !!(ws.deserializeAttachment() as Subscriber)?.hostNickname)); } catch { try { ws.close(1011, 'delivery_failed'); } catch {} }
+  }
+  private encodeFor(value: unknown, hostNickname: boolean): string {
+    // v1.0.0 validates exact summary keys. Feature opt-in also survives DO
+    // hibernation, while attachments created before deployment default to off.
+    return JSON.stringify(value, (key, item) => key === 'hostNickname' && !hostNickname ? undefined : item);
   }
   private async snapshot() {
     const rows = await this.ctx.storage.list<Row>({ prefix: 'room:' });
@@ -78,13 +83,15 @@ export class V2Directory {
         await this.schedule();
         return new Response(null, { status: 204 });
       }
-      if (path === '/snapshot' && request.method === 'GET') return json(await this.snapshot());
+      const hostNickname = request.headers.get('X-ScreenShare-Directory-Features') === 'host-nickname';
+      if (path === '/snapshot' && request.method === 'GET') return new Response(this.encodeFor(await this.snapshot(), hostNickname), {
+        headers: { 'Content-Type': 'application/json' } });
       if (path !== '/events' || request.method !== 'GET' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket')
         return json({ error: 'invalid_request' }, 400);
       if (this.ctx.getWebSockets().length >= 512) return json({ v: 2, error: 'full' }, 409);
       const pair = new WebSocketPair();
       this.ctx.acceptWebSocket(pair[1]);
-      pair[1].serializeAttachment({ connectedAt: Date.now(), window: 0, count: 0 } satisfies Subscriber);
+      pair[1].serializeAttachment({ connectedAt: Date.now(), window: 0, count: 0, hostNickname } satisfies Subscriber);
       this.send(pair[1], await this.snapshot());
       await this.schedule();
       return new Response(null, { status: 101, webSocket: pair[0] });

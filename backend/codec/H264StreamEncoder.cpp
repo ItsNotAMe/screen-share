@@ -1,4 +1,5 @@
 #include "codec/H264StreamEncoder.h"
+#include "core/MediaOperationError.h"
 
 #include "codec/H264Bitstream.h"
 #include "codec/HardwareFrameWait.h"
@@ -28,7 +29,7 @@ namespace {
 void ThrowIfFailed(HRESULT hr, const char* operation)
 {
     if (FAILED(hr)) {
-        throw std::runtime_error(std::string(operation) + " failed: " + HResultMessage(hr));
+        throw MediaOperationError(operation, hr, std::string(operation) + " failed: " + HResultMessage(hr));
     }
 }
 

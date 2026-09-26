@@ -40,6 +40,7 @@ public:
     void Stop();
 
     [[nodiscard]] bool isRunning() const noexcept { return transform_ != nullptr; }
+    [[nodiscard]] bool lowLatencyEnabled() const noexcept { return lowLatencyEnabled_; }
 
 private:
     bool TryConfigureOutputType();
@@ -60,6 +61,7 @@ private:
     bool outputTypeConfigured_ = false;
     bool comInitialized_ = false;
     bool mfStarted_ = false;
+    bool lowLatencyEnabled_ = false;
     int maxWidth_ = 16384;
     int maxHeight_ = 16384;
 };

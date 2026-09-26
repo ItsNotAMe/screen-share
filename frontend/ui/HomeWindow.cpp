@@ -243,6 +243,7 @@ QWidget* RoomDirectoryWidget::buildRoomPanel()
     columnLayout->setContentsMargins(54, 6, 10, 6);
     columnLayout->addWidget(label("Room", "HomeInfoTitle"), 1);
     columnLayout->setSpacing(12);
+    auto* host = label("Host", "HomeInfoTitle"); host->setFixedWidth(140); columnLayout->addWidget(host);
     auto* viewers = label("Viewers", "HomeInfoTitle"); viewers->setFixedWidth(70);
     viewers->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); columnLayout->addWidget(viewers);
     auto* access = label("Access", "HomeInfoTitle"); access->setFixedWidth(130);
@@ -286,6 +287,8 @@ QWidget* RoomDirectoryWidget::buildRoomRow(const HomeActiveRoom& room)
     text->setSpacing(1);
     text->addWidget(label(room.name, "HomeInfoPrimary"));
     layout->addLayout(text, 1);
+    auto* host = label({}, "HomeHostNickname"); host->setTextFormat(Qt::PlainText);
+    host->setFixedWidth(140); layout->addWidget(host);
     auto* viewers = label(QString::number(room.peerCount), "HomeViewerCount");
     viewers->setFixedWidth(70); viewers->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); layout->addWidget(viewers);
 
@@ -347,6 +350,9 @@ void RoomDirectoryWidget::updateRooms(const QVector<HomeActiveRoom>& rooms)
         row->setProperty("searchName", room.name);
         row->findChild<QLabel*>("HomeInfoPrimary")->setText(room.name);
         row->findChild<QLabel*>("HomeViewerCount")->setText(QString::number(room.peerCount));
+        auto* host = row->findChild<QLabel*>("HomeHostNickname");
+        host->setText(host->fontMetrics().elidedText(room.hostNickname.isEmpty() ? QStringLiteral("\u2014") : room.hostNickname, Qt::ElideRight, host->width()));
+        host->setToolTip(room.hostNickname);
         row->findChild<QPushButton*>("HomeTinyButton")->setEnabled(room.joinable);
         auto* badge = row->findChild<QLabel*>("HomeLockedStatus");
         if (!badge) badge = row->findChild<QLabel*>("HomePublicStatus");

@@ -91,7 +91,8 @@ export default {
       if (listing || directoryEvents) {
         if (request.headers.has('Authorization')) throw new AdmissionError(400, 'invalid_request');
         return await env.V2_DIRECTORY.get(env.V2_DIRECTORY.idFromName('directory')).fetch('https://internal/' + (listing ? 'snapshot' : 'events'), {
-          headers: directoryEvents ? { Upgrade: request.headers.get('Upgrade') ?? '' } : {} });
+          headers: { ...(directoryEvents ? { Upgrade: request.headers.get('Upgrade') ?? '' } : {}),
+            'X-ScreenShare-Directory-Features': request.headers.get('X-ScreenShare-Directory-Features') === 'host-nickname' ? 'host-nickname' : '' } });
       }
       if (create) {
         // Validate before reserving capacity. Forward only a canonical bounded

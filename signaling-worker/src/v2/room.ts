@@ -46,7 +46,7 @@ export class V2Room {
   }
   private async save(state: State): Promise<void> {
     const room: Summary | null = !state.closed && state.members[0].attached && state.policy.visibility === 'public' ? {
-      roomId: state.roomId, name: state.policy.name, viewerCount: state.members.length - 1, viewerLimit: state.policy.viewerLimit,
+      roomId: state.roomId, name: state.policy.name, hostNickname: state.members[0].nickname, viewerCount: state.members.length - 1, viewerLimit: state.policy.viewerLimit,
       passwordProtected: !!state.verifier, status: this.status(state) === 'reconnecting' ? 'reconnecting' :
         state.members.length - 1 >= state.policy.viewerLimit ? 'full' : 'open' } : null;
     const directory = state.directory ??= { version: 0, signature: 'null', nextRenew: 0 };

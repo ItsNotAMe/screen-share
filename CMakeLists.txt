@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Prepare the pinned toolchain before project() checks compiler availability.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
 
-project(ScreenShareNative VERSION 1.0.0 LANGUAGES CXX)
+project(ScreenShareNative VERSION 1.0.1 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
 set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
@@ -265,6 +265,10 @@ if(MSVC)
         if(BUILD_TESTING)
             add_executable(NativeRoomRuntimeTests tests/NativeRoomRuntimeTests.cpp)
             target_link_libraries(NativeRoomRuntimeTests PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_executable(RoomPeerIsolationTests tests/RoomPeerIsolationTests.cpp)
+            target_link_libraries(RoomPeerIsolationTests PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_test(NAME room-peer-isolation COMMAND RoomPeerIsolationTests)
+            set_tests_properties(room-peer-isolation PROPERTIES TIMEOUT 90)
             add_executable(NativePcmAudioTests tools/webrtc-proof/PcmAudioDeviceTest.cpp)
             target_link_libraries(NativePcmAudioTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
             add_test(NAME native-pcm-audio COMMAND NativePcmAudioTests)

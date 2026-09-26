@@ -1,4 +1,5 @@
 #include "media/webrtc/MfVideoDecoderFactory.h"
+#include "media/CodecDiagnostics.h"
 #include "media/webrtc/OwnedNv12Buffer.h"
 #include "media/webrtc/D3dVideoFrameBuffer.h"
 #include "media/webrtc/MappedVideoBuffer.h"
@@ -51,8 +52,8 @@ private:
 };
 class MfVideoDecoder final : public webrtc::VideoDecoder {
 public:
-    MfVideoDecoder(bool preferHardware, MfVideoDecoderFactory::DeviceFactory factory, std::shared_ptr<std::atomic<bool>> quarantine)
-        : worker_(webrtc::Thread::Create()), preferHardware_(preferHardware), deviceFactory_(std::move(factory)), hardwareQuarantined_(std::move(quarantine)) {
+    MfVideoDecoder(bool preferHardware, MfVideoDecoderFactory::DeviceFactory factory, std::shared_ptr<std::atomic<bool>> quarantine, std::shared_ptr<DiagnosticHistory> diagnostics)
+        : worker_(webrtc::Thread::Create()), preferHardware_(preferHardware), deviceFactory_(std::move(factory)), diagnostics_(std::move(diagnostics)), hardwareQuarantined_(std::move(quarantine)) {
         worker_->SetName("MF decoder", nullptr);
         if (!worker_->Start()) throw std::runtime_error("MF decoder thread startup failed");
     }
@@ -75,8 +76,10 @@ public:
                         RequireGpuPresentation(gpu_->device());
                         decoder_->Start(4096, 4096, gpu_->device());
                         hardware_ = true;
+                        if (diagnostics_) diagnostics_->Event("decoder-hardware-ready", decoder_->lowLatencyEnabled());
                         return true;
                     } catch (const std::exception& error) {
+                        CodecFailure(diagnostics_, "decoder-hardware-fallback", error);
                         *hardwareQuarantined_ = true;
                         RTC_LOG(LS_WARNING) << "MF hardware decoder unavailable: " << error.what();
                         decoder_->Stop(); gpu_.reset();
@@ -84,7 +87,7 @@ public:
                 }
                 StartTransform();
                 return true;
-            } catch (...) { Reset(); return false; }
+            } catch (const std::exception& error) { CodecFailure(diagnostics_, "decoder-configure-failed", error); Reset(); return false; }
         });
     }
 
@@ -150,6 +153,7 @@ public:
                 needsKeyframe_ = false;
                 return WEBRTC_VIDEO_CODEC_OK;
             } catch (const std::exception& error) {
+                CodecFailure(diagnostics_, "decoder-frame-failed", error);
                 RTC_LOG(LS_WARNING) << "MF decode failed: " << error.what();
                 frames.clear();
                 timestamps_.clear();
@@ -184,6 +188,7 @@ private:
         // signal a type change. Bound allocation globally; validate visible output
         // against the initial hint or bounded keyframe declaration once returned.
         decoder_->Start(4096, 4096);
+        if (diagnostics_) diagnostics_->Event("decoder-software-ready", decoder_->lowLatencyEnabled());
     }
     void Reset() {
         decoder_.reset();
@@ -198,6 +203,7 @@ private:
     std::unique_ptr<H264StreamDecoder> decoder_;
     bool preferHardware_;
     MfVideoDecoderFactory::DeviceFactory deviceFactory_;
+    std::shared_ptr<DiagnosticHistory> diagnostics_;
     std::shared_ptr<std::atomic<bool>> hardwareQuarantined_;
     std::shared_ptr<D3dVideoDevice> gpu_;
     std::shared_ptr<std::atomic<unsigned>> retained_ = std::make_shared<std::atomic<unsigned>>(0);
@@ -232,6 +238,6 @@ webrtc::VideoDecoderFactory::CodecSupport MfVideoDecoderFactory::QueryCodecSuppo
 std::unique_ptr<webrtc::VideoDecoder> MfVideoDecoderFactory::Create(
     const webrtc::Environment&, const webrtc::SdpVideoFormat& format) {
     if (!QueryCodecSupport(format, false, std::nullopt).is_supported) return nullptr;
-    return std::make_unique<MfVideoDecoder>(preferHardware_, deviceFactory_, hardwareQuarantined_);
+    return std::make_unique<MfVideoDecoder>(preferHardware_, deviceFactory_, hardwareQuarantined_, diagnostics_);
 }
 } // namespace screenshare::media

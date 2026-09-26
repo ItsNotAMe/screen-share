@@ -101,7 +101,8 @@ function member(v: unknown): v is WireObject {
     ["connected", "reconnecting"].includes(v.status as string);
 }
 function summary(v: unknown): v is WireObject {
-  return object(v) && keys(v, ["roomId", "name", "viewerCount", "viewerLimit", "passwordProtected", "status", "summaryVersion", "leaseExpiresAt"]) &&
+  return object(v) && keys(v, ["roomId", "name", "viewerCount", "viewerLimit", "passwordProtected", "status", "summaryVersion", "leaseExpiresAt"], ["hostNickname"]) &&
+    (v.hostNickname === undefined || canonicalName(v.hostNickname)) &&
     identifier(v.roomId) && canonicalName(v.name, 64, 256) && integer(v.viewerCount, 0, 63) &&
     integer(v.viewerLimit, 1, 63) && typeof v.passwordProtected === "boolean" &&
     ["open", "full", "reconnecting"].includes(v.status as string) && integer(v.summaryVersion) && integer(v.leaseExpiresAt) &&

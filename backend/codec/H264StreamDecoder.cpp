@@ -1,4 +1,5 @@
 #include "codec/H264StreamDecoder.h"
+#include "codec/DecoderLowLatency.h"
 
 #include <Windows.h>
 #include <codecapi.h>
@@ -27,7 +28,7 @@ constexpr GUID H264DecoderClsid = {
 void ThrowIfFailed(HRESULT hr, const char* operation)
 {
     if (FAILED(hr)) {
-        throw std::runtime_error(std::string(operation) + " failed: " + HResultMessage(hr));
+        throw MediaOperationError(operation, hr, std::string(operation) + " failed: " + HResultMessage(hr));
     }
 }
 
@@ -41,10 +42,10 @@ void SetInputSubtype(IMFTransform* transform, DWORD streamId, REFGUID subtype)
     ThrowIfFailed(transform->SetInputType(streamId, inputType.Get(), 0), "IMFTransform::SetInputType(decoder)");
 }
 
-void ConfigureLowLatencyDecoderOptions(IMFTransform* transform)
+bool ConfigureLowLatencyDecoderOptions(IMFTransform* transform)
 {
     if (transform == nullptr) {
-        return;
+        return false;
     }
 
     Microsoft::WRL::ComPtr<IMFAttributes> attributes;
@@ -59,19 +60,15 @@ void ConfigureLowLatencyDecoderOptions(IMFTransform* transform)
         {0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda},
     };
     Microsoft::WRL::ComPtr<ICodecAPI> codecApi;
-    ThrowIfFailed(transform->QueryInterface(codecApiInterfaceId, reinterpret_cast<void**>(codecApi.GetAddressOf())),
-        "H264 decoder codec API");
+    const HRESULT queried = transform->QueryInterface(codecApiInterfaceId, reinterpret_cast<void**>(codecApi.GetAddressOf()));
     // The Microsoft H264 decoder is the documented exception: this property
     // requires VT_UI4, unlike the encoder's VT_BOOL. Never silently ignore a
     // rejected request and then advertise a low-latency decoder.
     VARIANT value{}; value.vt = VT_UI4; value.ulVal = 1;
-    ThrowIfFailed(codecApi->SetValue(&CODECAPI_AVLowLatencyMode, &value), "H264 decoder low latency");
-    VARIANT actual{};
-    const HRESULT read = codecApi->GetValue(&CODECAPI_AVLowLatencyMode, &actual);
-    const bool enabled = SUCCEEDED(read) && actual.vt == VT_UI4 && actual.ulVal != 0;
-    VariantClear(&actual);
-    ThrowIfFailed(read, "H264 decoder low-latency readback");
-    if (!enabled) throw std::runtime_error("H264 decoder did not retain low-latency mode");
+    return ConfigureDecoderLowLatencyProperty(queried,
+        [&] { return codecApi->IsSupported(&CODECAPI_AVLowLatencyMode); },
+        [&] { return codecApi->SetValue(&CODECAPI_AVLowLatencyMode, &value); },
+        [&](VARIANT* actual) { return codecApi->GetValue(&CODECAPI_AVLowLatencyMode, actual); });
 }
 
 DWORD Nv12BufferBytes(UINT32 width, UINT32 height)
@@ -234,7 +231,7 @@ void H264StreamDecoder::Start(int maxWidth, int maxHeight, ID3D11Device* device)
     ThrowIfFailed(
         CoCreateInstance(H264DecoderClsid, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform_)),
         "CoCreateInstance(CMSH264DecoderMFT)");
-    ConfigureLowLatencyDecoderOptions(transform_.Get());
+    lowLatencyEnabled_ = ConfigureLowLatencyDecoderOptions(transform_.Get());
     if (device) {
         Microsoft::WRL::ComPtr<IMFAttributes> attributes;
         ThrowIfFailed(transform_->GetAttributes(&attributes), "Decoder attributes");

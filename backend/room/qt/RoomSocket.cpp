@@ -96,6 +96,7 @@ void RoomSocket::Open() {
     url.setPath(config_.directory ? "/v2/directory/events" : "/v2/rooms/" + config_.roomId + "/events");
     QNetworkRequest request(url);
     if (!config_.directory) request.setRawHeader("Authorization", "Bearer " + config_.token);
+    else request.setRawHeader("X-ScreenShare-Directory-Features", "host-nickname");
     // Keep Qt certificate/hostname validation; do not ignore SSL errors.
     deadline_.start(10000);
     Emit(EventKind::Connecting);

@@ -1,4 +1,5 @@
 #include "media/webrtc/D3dVideoFrameBuffer.h"
+#include "core/MediaOperationError.h"
 #include "D3dNv12Scaler.h"
 #include "api/make_ref_counted.h"
 #include "api/video/i420_buffer.h"
@@ -14,7 +15,7 @@
 
 namespace screenshare::media {
 namespace {
-void Check(HRESULT result) { if (FAILED(result)) throw std::runtime_error("D3D frame operation failed: " + HResultMessage(result)); }
+void Check(HRESULT result) { if (FAILED(result)) throw screenshare::MediaOperationError("d3d-frame-operation", result, "D3D frame operation failed: " + HResultMessage(result)); }
 // BlockingCall does not marshal C++ exceptions across the worker boundary.
 template<class F> auto OnOwner(webrtc::Thread& owner, F&& work) {
     using Result = std::invoke_result_t<F>;

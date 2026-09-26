@@ -38,7 +38,7 @@ RoomApplication::RoomApplication(QUrl origin, QtRoomSession::Factory factory,
             using Directory = screenshare::room::qt::RoomDirectory;
             QVector<HomeActiveRoom> rooms;
             for (const auto& room : state.rooms)
-                rooms.push_back({room.id, room.name, room.viewers, room.password, 0, room.status == "open"});
+                rooms.push_back({room.id, room.name, room.viewers, room.password, 0, room.status == "open", room.hostNickname});
             home_->setPushedRooms(rooms, state.phase == Directory::Phase::Ready ? QString{} :
                 state.phase == Directory::Phase::Failed ? "Room list unavailable. Reconnect to try again." : "Connecting to room list…");
         };

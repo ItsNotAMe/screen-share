@@ -201,6 +201,17 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         const auto input = session_.input();
         auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
         report["decodedFrameHandoff"] = FrameQueueDiagnostics(session_.frameStatistics());
+        const auto presentation = video_->presentationStats();
+        auto renderer = PresentationDiagnosticsJson(presentation.renderer);
+        renderer["presented"] = qint64(presentation.presentedFrames);
+        renderer["dropped"] = qint64(presentation.droppedFrames);
+        renderer["queued"] = int(presentation.queuedFrames);
+        renderer["averagePresentMs"] = presentation.averagePresentMs;
+        renderer["maxPresentMs"] = presentation.maxPresentMs;
+        renderer["errors"] = qint64(presentation.presentErrors);
+        renderer["recoveries"] = qint64(presentation.recoveries);
+        renderer["terminal"] = presentation.terminal;
+        report["presentation"] = renderer;
         const bool saved=WriteRoomDiagnosticReport(path, report);
         reportResult->setText(saved ? "Saved diagnostic report: " + QDir::toNativeSeparators(path) : "Could not save diagnostic report. Check the destination is writable.");
         showReport->setProperty("reportPath",saved?path:QString());showReport->setEnabled(saved);
@@ -392,8 +403,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         error_->clear();streamSaveError_.clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
     });
     session_.statusChanged = [this, peerDiagnostics, capacityWarning, host = config.room.host](const auto& value) {
-        phase_->setText(Phase(value.phase));
-        phase_->setToolTip(QString("%1 connected, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
+        phase_->setText(!host && value.phase == RoomPhase::Active && value.failedPeers ? "Connection failed — leave and rejoin" : Phase(value.phase));
+        phase_->setToolTip(QString("%1 media peers, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
         room_->setText((host ? "Hosting: " : "") + QString::fromStdString(value.policy.name.empty()?value.roomId:value.policy.name));
         roomLink_->setText(MakeRoomLink(QString::fromStdString(value.roomId)));
         copyLink_->setEnabled(value.phase == RoomPhase::Active && !roomLink_->text().isEmpty());

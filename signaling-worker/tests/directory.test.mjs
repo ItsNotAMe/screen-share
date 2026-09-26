@@ -75,8 +75,8 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
     const response = await request('/v2/rooms'); assert.equal(response.status, 200);
     const value = await response.json(); assert.equal(validateServerEvent(new TextEncoder().encode(JSON.stringify(value)), 'directory').ok, true); return value;
   };
-  async function socket(path, token) {
-    const response = await request(path, undefined, { Upgrade: 'websocket', ...(token ? { Authorization: 'Bearer ' + token } : {}) });
+  async function socket(path, token, features = {}) {
+    const response = await request(path, undefined, { Upgrade: 'websocket', ...features, ...(token ? { Authorization: 'Bearer ' + token } : {}) });
     assert.equal(response.status, 101);
     const ws = response.webSocket, messages = [];
     ws.addEventListener('message', event => messages.push(event.data === 'v2:pong' ? event.data : JSON.parse(event.data)));
@@ -85,6 +85,7 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
     return { ws, messages };
   }
   const subscription = await socket('/v2/directory/events');
+  const modern = await socket('/v2/directory/events', undefined, { 'X-ScreenShare-Directory-Features': 'host-nickname' });
   assert.deepEqual(subscription.messages[0].payload.rooms, []);
   subscription.ws.send('v2:ping'); await until(() => subscription.messages.includes('v2:pong'));
   const host = await (await request('/v2/rooms', { v: 2, nickname: 'Host', password: 'secret', policy: { name: 'Public', visibility: 'public', viewerLimit: 2 } })).json();
@@ -102,6 +103,13 @@ test('directory publication, subscriptions, retries and leases in workerd', { ti
   await until(() => subscription.messages.some(m => m.payload?.op === 'upsert'));
   const listed = await list();
   assert.equal(listed.payload.rooms[0].name, 'Public');
+  assert.equal(Object.hasOwn(listed.payload.rooms[0], 'hostNickname'), false);
+  assert.equal(Object.hasOwn(subscription.messages.find(m => m.payload?.op === 'upsert').payload.room, 'hostNickname'), false);
+  await until(() => modern.messages.some(m => m.payload?.room?.hostNickname === 'Host'));
+  const modernList = await (await request('/v2/rooms', undefined, { 'X-ScreenShare-Directory-Features': 'host-nickname' })).json();
+  assert.equal(modernList.payload.rooms[0].hostNickname, 'Host');
+  const modernSnapshot = await socket('/v2/directory/events', undefined, { 'X-ScreenShare-Directory-Features': 'host-nickname' });
+  assert.equal(modernSnapshot.messages[0].payload.rooms[0].hostNickname, 'Host');
   assert.equal(listed.payload.rooms[0].passwordProtected, true);
   assert.equal((await state()).directory.pending, undefined);
   for (let i = 0; i < 2; ++i) assert.equal((await request(`/v2/rooms/${host.roomId}/join`, { v: 2, nickname: 'Viewer', password: 'secret' })).status, 200);

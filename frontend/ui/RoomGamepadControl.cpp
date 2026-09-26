@@ -257,7 +257,12 @@ void RoomGamepadControl::Tick() {
             card->findChild<QLabel*>("PeerAvatar")->setText(name.left(1).toUpper());
             auto state=std::find_if(states.begin(),states.end(),[&](const auto& s){return s.peer==member.peerId;});
             const bool ready=state!=states.end()&&state->ready;
-            card->findChild<QLabel*>("PeerControlState")->setText(!ready?"Connecting…":state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->requested?"Requests control":state->granted?"Control granted":"Watching");
+            const auto connection=std::find_if(room.stream.connections.begin(),room.stream.connections.end(),
+                [&](const auto& value){return value.peerId==member.peerId;});
+            const bool failed=connection!=room.stream.connections.end() &&
+                (connection->recovery.state==screenshare::media::PeerLifecycleState::Failed ||
+                 connection->recovery.state==screenshare::media::PeerLifecycleState::Closed);
+            card->findChild<QLabel*>("PeerControlState")->setText(!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->requested?"Requests control":state->granted?"Control granted":"Watching");
             QStringList requestedNames;
             if(ready)for(const auto& entry:{std::pair{input::Mouse,"mouse"},std::pair{input::Keyboard,"keyboard"},std::pair{input::Gamepad,"controller"}})if(state->requested&entry.first)requestedNames<<entry.second;
             if(!requestedNames.empty())card->findChild<QLabel*>("PeerControlState")->setText("Requests " + requestedNames.join(", "));

@@ -2,6 +2,7 @@
 #include "api/stats/rtc_stats_collector_callback.h"
 #include "api/stats/rtcstats_objects.h"
 #include "media/SenderVideoStatus.h"
+#include "TransportDiagnostics.h"
 #include <cmath>
 #include <chrono>
 #include <memory>
@@ -27,6 +28,7 @@ struct TransportSendRate {
     uint64_t videoBytes = 0;
     int64_t videoTimestampUs = 0;
     std::chrono::steady_clock::time_point sampled{}, next{};
+    DiagnosticHistory history{60, false};
     struct Snapshot { std::optional<uint64_t> bitsPerSecond; bool stale; SenderVideoObservation sender; std::optional<uint64_t> receiveBps; };
     Snapshot Read(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) {
         std::lock_guard lock(mutex);
@@ -53,6 +55,7 @@ public:
             bytes += *transport->bytes_sent; transports += transport->id() + ";";
         }
         const auto at = report->timestamp().us();
+        state_->history.Add(TransportDiagnostics(*report));
         std::lock_guard lock(state_->mutex);
         state_->pending = false; state_->bitsPerSecond.reset();state_->receiveBps.reset();
         if (!transports.empty() && transports == state_->transports)

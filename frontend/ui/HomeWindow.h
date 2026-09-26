@@ -20,6 +20,7 @@ struct HomeActiveRoom {
     bool passwordProtected = false;
     qint64 updatedAt = 0;
     bool joinable = true;
+    QString hostNickname;
 };
 
 class HomeWindow final : public QWidget {

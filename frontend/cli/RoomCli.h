@@ -8,6 +8,7 @@ struct RoomCliHooks {
     std::function<std::optional<screenshare::input::Event>()> gamepad; // Explicit test/embedding source.
     std::function<bool()> controlActive; // False cancels local consent as well as the remote grant.
     std::function<void(uint8_t,std::function<void(const screenshare::input::Event&)>)> inputCapture;
+    std::function<QJsonObject()> diagnostics; // Local queue/renderer evidence, sampled only at export.
 };
 int RunRoomCliSession(const RoomSessionConfig&, screenshare::v2::RoomRuntimeFactory,
                       RoomCliHooks, bool diagnosticLoopback = false);

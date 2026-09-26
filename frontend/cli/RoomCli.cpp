@@ -83,7 +83,8 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
     const auto started = std::chrono::steady_clock::now();
     auto nextReport = started;
     QJsonObject lastReport;
-    QJsonObject diagnosticReport;
+    std::optional<RoomStatus> diagnosticStatus;
+    std::vector<input::Status> diagnosticInput;
     auto report = [&](QJsonObject value) { if (hooks.report) hooks.report(value); };
     while (true) {
         const auto now = std::chrono::steady_clock::now();
@@ -131,8 +132,10 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
         }
         if (!controllerGranted && controller) { controller.reset(); requestedPeer.clear(); }
         if (now >= nextReport) {
-            if (!config.reportFile.isEmpty() && (status.phase == RoomPhase::Active || diagnosticReport.isEmpty()))
-                diagnosticReport = RoomDiagnosticReport(status, input ? input->Read() : std::vector<input::Status>{});
+            if (!config.reportFile.isEmpty()) {
+                diagnosticStatus = status;
+                diagnosticInput = input ? input->Read() : std::vector<input::Status>{};
+            }
             auto value = Status(status);
             QJsonArray controls;
             if (input) for (const auto& state : input->Read()) controls.append(screenshare::frontend::InputStatus(state));
@@ -207,7 +210,14 @@ int RunRoomCliSession(const RoomSessionConfig& config, RoomRuntimeFactory factor
     }
     const auto status = session.Status(); report(Status(status));
     if (!config.reportFile.isEmpty()) {
-        if (diagnosticReport.isEmpty()) diagnosticReport = RoomDiagnosticReport(status);
+        auto diagnosticReport = RoomDiagnosticReport(diagnosticStatus.value_or(status), diagnosticInput);
+        diagnosticReport["finalPhase"] = int(status.phase);
+        diagnosticReport["finalError"] = int(status.error);
+        diagnosticReport["sessionEvents"] = DiagnosticHistoryJson(status.sessionEvents);
+        if (hooks.diagnostics) {
+            const auto frontend = hooks.diagnostics();
+            for (auto it = frontend.begin(); it != frontend.end(); ++it) diagnosticReport[it.key()] = it.value();
+        }
         const bool saved = WriteRoomDiagnosticReport(config.reportFile, diagnosticReport);
         report({{"type", "diagnostic-report"}, {"saved", saved}});
         if (!saved) failed = true;
@@ -262,6 +272,18 @@ int RunRoomCli(int argc, char** argv) {
         std::unique_ptr<ReceiverPreviewWindow> preview;
         if (!config.room.host && config.preview) { preview = std::make_unique<ReceiverPreviewWindow>(); preview->SetLowLatency(true); preview->Show(); }
         RoomCliHooks hooks;
+        hooks.diagnostics = [&] {
+            QJsonObject value{{"decodedFrameHandoff", FrameQueueDiagnostics(frames->statistics())}};
+            if (preview) {
+                const auto stats = preview->presentationStats();
+                auto renderer = PresentationDiagnosticsJson(stats);
+                renderer["presented"] = qint64(preview->framesPresented());
+                renderer["dropped"] = qint64(preview->framesDropped());
+                renderer["errors"] = qint64(stats.errors); renderer["recoveries"] = qint64(stats.recoveries);
+                renderer["terminal"] = stats.terminal; value["presentation"] = renderer;
+            }
+            return value;
+        };
         hooks.inputCapture = [&](uint8_t caps,auto callback) {if(preview)preview->SetRemoteInput(caps,std::move(callback));};
         constexpr int panicId = 0x5353;
         const bool needsControl = !config.inputCommandsFile.isEmpty();

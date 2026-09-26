@@ -40,12 +40,12 @@ struct PeerNegotiation::State : std::enable_shared_from_this<State> {
         else request.reply.set_value({operation, generation, error, {}});
         return {operation, error == NegotiationError::None, std::move(reply)};
     }
-    void Complete(uint64_t operation, NegotiationError error) {
+    void Complete(uint64_t operation, NegotiationError error, int type = 0, int detail = 0) {
         if (!Active(operation)) return;
         auto request = std::move(*pending);
         pending.reset();
         request.reply.set_value({operation, generation, error,
-                                error == NegotiationError::None ? std::move(request.sdp) : std::string{}});
+                                error == NegotiationError::None ? std::move(request.sdp) : std::string{}, type, detail});
     }
     void ApplyCreated(uint64_t operation, std::unique_ptr<webrtc::SessionDescriptionInterface> description);
 };
@@ -54,8 +54,8 @@ class PeerNegotiation::State::Applied : public webrtc::SetSessionDescriptionObse
 public:
     Applied(std::weak_ptr<State> state, uint64_t operation) : state_(std::move(state)), operation_(operation) {}
     void OnSuccess() override { if (auto state = state_.lock()) state->Complete(operation_, NegotiationError::None); }
-    void OnFailure(webrtc::RTCError) override {
-        if (auto state = state_.lock()) state->Complete(operation_, NegotiationError::ApplyFailed);
+    void OnFailure(webrtc::RTCError error) override {
+        if (auto state = state_.lock()) state->Complete(operation_, NegotiationError::ApplyFailed, int(error.type()), int(error.error_detail()));
     }
 private:
     std::weak_ptr<State> state_;
@@ -68,8 +68,8 @@ public:
         std::unique_ptr<webrtc::SessionDescriptionInterface> description(value);
         if (auto state = state_.lock()) state->ApplyCreated(operation_, std::move(description));
     }
-    void OnFailure(webrtc::RTCError) override {
-        if (auto state = state_.lock()) state->Complete(operation_, NegotiationError::CreateFailed);
+    void OnFailure(webrtc::RTCError error) override {
+        if (auto state = state_.lock()) state->Complete(operation_, NegotiationError::CreateFailed, int(error.type()), int(error.error_detail()));
     }
 private:
     std::weak_ptr<State> state_;

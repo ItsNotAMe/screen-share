@@ -5,10 +5,13 @@
 #include "ReceiverTelemetryChannel.h"
 #include "InputChannels.h"
 #include "media/capture/SwitchableCaptureSource.h"
+#include "media/ProcessDiagnostics.h"
 #include "api/make_ref_counted.h"
 #include "api/transport/bitrate_settings.h"
 #include <map>
 #include <set>
+#include <atomic>
+#include <deque>
 
 namespace screenshare::media {
 using namespace std::chrono_literals;
@@ -42,6 +45,12 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
         bool settingsRejected = false;
         SettingsApplyError settingsError = SettingsApplyError::None;
         bool retired = false, removing = false;
+        // Capture callbacks run on a separate delivery worker. Do not scale or
+        // submit frames for an unconnected peer on the shared capture device.
+        std::shared_ptr<std::atomic<bool>> deliverFrames = std::make_shared<std::atomic<bool>>(false);
+        std::shared_ptr<DiagnosticHistory> events = std::make_shared<DiagnosticHistory>();
+        DiagnosticHistory mediaHistory{60, false};
+        std::chrono::steady_clock::time_point nextMediaSample{};
         std::shared_ptr<TransportSendRate> sendRate = std::make_shared<TransportSendRate>();
         std::string statsConnection;
         // Destroy/unregister observer before native peer/channel destruction.
@@ -62,6 +71,11 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
     size_t allocatedViewers_ = 0;
     std::map<std::string, std::unique_ptr<Entry>> peers_;
     std::set<std::string> failed_;
+    std::deque<PeerConnectionStatus> retiredConnections_;
+    DiagnosticHistory performance_{60, false};
+    std::chrono::steady_clock::time_point lastAdvance_{}, nextPerformanceSample_{};
+    double maxAdvanceGapMs_ = 0;
+    ProcessDiagnostics processDiagnostics_;
     // Destroy the registry before native entries it references.
     std::unique_ptr<HostPeerRegistry> owner_;
     bool stopping_ = false, stopped_ = false;
@@ -74,6 +88,7 @@ public:
         if (!options_.engine || !send_ || (identity_.host && (!options_.capture || !options_.deliver)))
             throw std::invalid_argument("Native room runtime requires media dependencies");
         ValidateStreamPreferences(options_.preferences);
+        if (!options_.diagnostics) options_.diagnostics = std::make_shared<DiagnosticHistory>();
         input_ = std::make_shared<input::Service>(identity_.host, options_.inputSink);
         input_->Configure(options_.initialCapture.kind == CaptureKind::Window ? uint8_t(input::Mouse | input::Gamepad) : uint8_t(7), 0);
         if (identity_.host) {
@@ -100,31 +115,41 @@ public:
     bool Add(const std::string& id) override {
         if (!Ready(id) || peers_.size() >= (identity_.host ? 63u : 1u)) return false;
         failed_.erase(id);
+        std::erase_if(retiredConnections_, [&](const auto& value) { return value.peerId == id; });
         auto entry = std::make_unique<Entry>(); entry->generation = ++next_;
+        const auto trace = entry->events;
+        const char* constructionStage = "peer-setup";
+        try {
         entry->telemetry = std::make_unique<ReceiverTelemetryChannel>(identity_.host, options_.presentation);
         if (!options_.channel) entry->input = std::make_unique<InputChannels>(input_, id);
         auto* raw = entry.get();
+        entry->events->Event("peer-added", next_);
+        constructionStage = "peer-connection-create";
         entry->peer = std::make_unique<MediaPeer>(*engine_, next_, options_.frames.get(),
             [this, id, raw](auto channel) {
                 if (channel->label() == "telemetry") raw->telemetry->Attach(std::move(channel));
                 else if (raw->input) raw->input->Attach(std::move(channel));
                 else if (options_.channel) options_.channel(id, std::move(channel));
-            }, options_.connection);
+            }, options_.connection, entry->events);
         auto send = [this, id](auto signal) { return send_(id, std::move(signal)); };
         entry->negotiation = std::make_unique<RoomPeerNegotiation>(entry->peer->connection,
-            entry->peer->Negotiation(), next_, identity_.host, send);
+            entry->peer->Negotiation(), next_, identity_.host, send, entry->events);
         entry->peer->candidateObserver = [raw](auto* candidate) { raw->negotiation->LocalCandidate(candidate); };
         if (identity_.host) {
+            constructionStage = "host-track-attach";
             entry->source = webrtc::make_ref_counted<CaptureVideoSource>();
             entry->source->Configure(options_.preferences, settingsRevision_ - 1);
             entry->peer->OpenHostChannels(*engine_);
             entry->sender = engine_->AttachHostMedia(*entry->peer->connection, entry->source, audio_);
         }
         peers_.emplace(id, std::move(entry));
+        constructionStage = "capture-subscribe";
         // The map pins native references through registry/capture retirement.
         if (identity_.host) {
             auto attachment = capture_.AddViewer(captureGeneration_, next_, next_,
-                [source = raw->source, deliver = options_.deliver](auto sample) { deliver(*source, sample); });
+                [source = raw->source, enabled = raw->deliverFrames, deliver = options_.deliver](auto sample) {
+                    if (enabled->load(std::memory_order_relaxed)) deliver(*source, sample);
+                });
             const auto prefix = "media_" + std::to_string(next_);
             return owner_->Add(next_, std::make_unique<RoomManagedPeer>(raw->peer->lifecycle,
                 *raw->negotiation, std::move(attachment), prefix,
@@ -133,12 +158,38 @@ public:
         }
         return owner_->Add(next_, std::make_unique<ViewerPeer>(*raw->peer, *raw->negotiation,
             std::move(send), [raw] { raw->retired = true; }));
+        } catch (...) {
+            trace->Event(constructionStage, -1);
+            PeerConnectionStatus failed;
+            failed.peerId = id; failed.generation = next_; failed.retained = true;
+            failed.recovery.state = PeerLifecycleState::Failed; failed.recovery.operationFailed = true;
+            failed.current.labels["failureStage"] = constructionStage; failed.events = trace->Read();
+            if (retiredConnections_.size() == 63) retiredConnections_.pop_front();
+            retiredConnections_.push_back(std::move(failed));
+            // No native owner was installed on an exception. Capture callbacks
+            // own their source/gate independently and are removed asynchronously.
+            if (peers_.contains(id)) {
+                if (identity_.host) capture_.RemoveViewer(captureGeneration_, next_, next_);
+                peers_.erase(id);
+            }
+            return false;
+        }
     }
     void Remove(const std::string& id) noexcept override {
         failed_.erase(id);
         const auto found = peers_.find(id);
         if (found == peers_.end() || found->second->removing) return;
-        auto& entry = *found->second; entry.removing = true;
+        auto& entry = *found->second;
+        entry.deliverFrames->store(false, std::memory_order_relaxed);
+        try {
+            auto last = ConnectionStatus(id, entry);
+            last.retained = true;
+            if (last.recovery.state != PeerLifecycleState::Failed) last.recovery.state = PeerLifecycleState::Closed;
+            // Bound historical evidence across arbitrary join/leave churn.
+            if (retiredConnections_.size() == 63) retiredConnections_.pop_front();
+            retiredConnections_.push_back(std::move(last));
+        } catch (...) { /* Diagnostics must never prevent noexcept peer cleanup. */ }
+        entry.removing = true;
         input_->Remove(id);
         if (owner_) owner_->Remove(entry.generation, entry.generation);
     }
@@ -191,6 +242,11 @@ public:
     }
     v2::StreamStatus StreamSettings() const override {
         v2::StreamStatus result;
+        result.mediaEvents = options_.diagnostics->Read();
+        result.performance = performance_.Read();
+        result.connections.assign(retiredConnections_.begin(), retiredConnections_.end());
+        for (const auto& [id, entry] : peers_) if (!entry->removing && !entry->retired)
+            result.connections.push_back(ConnectionStatus(id, *entry));
         if (!identity_.host) {
             for(const auto& [id,entry]:peers_) if(!entry->removing && !entry->retired) {
                 const auto sample=entry->sendRate->Read();
@@ -228,6 +284,32 @@ public:
     }
     void Advance() override {
         if (stopped_) return;
+        const auto now = std::chrono::steady_clock::now();
+        if (lastAdvance_ != std::chrono::steady_clock::time_point{})
+            maxAdvanceGapMs_ = std::max(maxAdvanceGapMs_, std::chrono::duration<double, std::milli>(now - lastAdvance_).count());
+        lastAdvance_ = now;
+        if (now >= nextPerformanceSample_) {
+            DiagnosticRecord sample;
+            sample.numbers = {{"maxAdvanceGapMs", maxAdvanceGapMs_}, {"nativePeers", double(peers_.size())},
+                {"failedPeers", double(failed_.size())}};
+            processDiagnostics_.Sample(sample);
+            if (identity_.host) {
+                const auto capture = capture_.snapshot();
+                sample.numbers["captureState"] = int(capture.state);
+                sample.numbers["captureFailure"] = int(capture.captureFailure);
+                sample.numbers["captureGeneration"] = double(capture.sourceGeneration);
+            }
+            const auto audio = AudioSelection(); const auto playback = Playback();
+            sample.numbers["audioCaptureFailures"] = double(audio.health.failures);
+            sample.numbers["audioPlaybackFailures"] = double(playback.health.failures);
+            if (options_.presentation) if (const auto presentation = options_.presentation->Read()) {
+                sample.numbers["presented"] = double(presentation->presented);
+                sample.numbers["presentationDropped"] = double(presentation->dropped);
+                sample.numbers["presentationQueued"] = presentation->queued;
+                sample.numbers["presentationOutcome"] = presentation->outcome;
+            }
+            performance_.Add(std::move(sample)); maxAdvanceGapMs_ = 0; nextPerformanceSample_ = now + 1s;
+        }
         if (starting_.valid() && starting_.wait_for(0ms) == std::future_status::ready) {
             const auto result = starting_.get();
             if (result.error != HostOperationError::None) throw std::runtime_error("Capture startup failed");
@@ -315,7 +397,11 @@ public:
                 // An initial rejection cannot satisfy the initial stream contract.
                 if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
             }
-            if (!entry.removing && entry.negotiation->ready()) {
+            entry.deliverFrames->store(identity_.host && !entry.removing && !failed_.contains(it->first) &&
+                entry.negotiation->ready() && status && !status->peerClosed &&
+                status->state == PeerLifecycleState::Connected && entry.settings.revision() != 0 &&
+                entry.settings.appliedVideoBitrateBps() > 0, std::memory_order_relaxed);
+            if (!entry.removing && !entry.negotiation->closed()) {
                 bool request = false;
                 { std::lock_guard lock(entry.sendRate->mutex);
                   const auto now = std::chrono::steady_clock::now();
@@ -324,16 +410,70 @@ public:
                   } }
                 if (request) entry.peer->connection->GetStats(webrtc::make_ref_counted<TransportSendRateCallback>(entry.sendRate).get());
             }
+            if (!entry.removing && now >= entry.nextMediaSample) {
+                DiagnosticRecord sample;
+                sample.numbers["deliveryEnabled"] = entry.deliverFrames->load();
+                sample.numbers["lifecycle"] = status ? int(status->state) : -1;
+                sample.numbers["negotiated"] = entry.negotiation->negotiated();
+                sample.numbers["allocatedVideoBps"] = AllocateViewerVideo(options_.preferences, allocatedViewers_);
+                sample.numbers["appliedVideoBps"] = entry.settings.appliedVideoBitrateBps();
+                if (entry.source) {
+                    const auto source = entry.source->settingsStats();
+                    sample.numbers["sourceDropped"] = double(source.dropped);
+                    sample.numbers["sourceScaled"] = double(source.scaled);
+                    sample.numbers["gpuBusyDrops"] = double(source.gpuBusyDrops);
+                    sample.numbers["gpuReadbacks"] = double(source.gpuReadbackFallbacks);
+                    sample.numbers["sourceWidth"] = source.width; sample.numbers["sourceHeight"] = source.height;
+                }
+                for (const auto& viewer : delivery.viewers) if (viewer.viewer == entry.generation) {
+                    sample.numbers["captureDelivered"] = double(viewer.delivery.delivered);
+                    sample.numbers["captureReplaced"] = double(viewer.delivery.replaced);
+                    sample.numbers["maxCaptureHandoffMs"] = double(viewer.delivery.maxHandoffAge.count()) / 1e6;
+                }
+                const auto receiver = entry.telemetry->Status();
+                if (receiver.observation && !receiver.stale) {
+                    sample.numbers["remoteDecoded"] = double(receiver.observation->framesDecoded);
+                    if (receiver.observation->fpsMilli) sample.numbers["remoteDecodeFps"] = *receiver.observation->fpsMilli / 1000.0;
+                    if (receiver.observation->presentation) {
+                        sample.numbers["remotePresented"] = double(receiver.observation->presentation->presented);
+                        sample.numbers["remotePresentationDropped"] = double(receiver.observation->presentation->dropped);
+                    }
+                }
+                entry.mediaHistory.Add(std::move(sample)); entry.nextMediaSample = now + 1s;
+            }
             ++it;
         }
     }
     std::shared_future<void> BeginStop() override {
+        for (auto& [id, entry] : peers_) entry->deliverFrames->store(false, std::memory_order_relaxed);
         input_->Close();
         if (options_.playback) options_.playback->Close();
         if (options_.audioSwitch) options_.audioSwitch->Close();
         stopping_ = true;
         if (owner_) owner_->BeginStop();
         return stoppedFuture_;
+    }
+private:
+    PeerConnectionStatus ConnectionStatus(const std::string& id, const Entry& entry) const {
+        PeerConnectionStatus result;
+        result.peerId = id; result.negotiated = entry.negotiation->negotiated();
+        result.generation = entry.generation; result.ageMs = entry.events->elapsedMs();
+        result.current = entry.peer->Diagnostics();
+        result.current.labels["negotiationStage"] = entry.negotiation->stageName();
+        result.current.labels["negotiationFailure"] = entry.negotiation->failure();
+        result.events = entry.events->Read(); result.transportHistory = entry.sendRate->history.Read();
+        result.mediaHistory = entry.mediaHistory.Read();
+        {
+            std::lock_guard lock(entry.sendRate->mutex);
+            if (entry.sendRate->sampled != std::chrono::steady_clock::time_point{})
+                result.statsAgeMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - entry.sendRate->sampled).count();
+        }
+        result.localCandidates = entry.negotiation->localCandidates();
+        result.remoteCandidates = entry.negotiation->remoteCandidates();
+        if (owner_) if (const auto state = owner_->snapshot(entry.generation))
+            result.recovery = {state->state, state->failure, state->restartRevision,
+                state->restartDispatchFailed, state->operationFailed};
+        return result;
     }
 };
 }

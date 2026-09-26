@@ -1,4 +1,5 @@
 #include "ui/RoomSessionWindow.h"
+#include "ui/RoomGamepadControl.h"
 #include <QTabWidget>
 #include <QSlider>
 #include "RecordingGamepadSink.h"
@@ -266,6 +267,23 @@ void MutationLifecycle(const std::string& origin) {
     } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
 }
 void ProfileSettingsScenario() {
+    {
+        RoomStatus room; room.members.push_back({"failed-viewer", "Viewer", false});
+        screenshare::media::PeerConnectionStatus connection;
+        connection.peerId = "failed-viewer";
+        room.stream.connections.push_back(connection);
+        RoomGamepadControl controls(true, [] { return std::shared_ptr<screenshare::input::Port>{}; },
+            [&] { return room; }, nullptr, [] { return std::vector<screenshare::ViewerGamepadDevice>{}; },
+            [](auto) { return std::optional<screenshare::RemoteGamepadState>{}; });
+        Wait([&] { const auto* label = controls.findChild<QLabel*>("PeerControlState");
+            return label && label->text() == QString::fromUtf8("Connecting…"); });
+        room.stream.connections[0].recovery.state = PeerLifecycleState::Failed;
+        room.stream.connections[0].retained = true;
+        Wait([&] { return controls.findChild<QLabel*>("PeerControlState")->text().contains("Connection failed"); });
+        room.stream.connections[0].recovery.state = PeerLifecycleState::Connecting;
+        room.stream.connections[0].retained = false;
+        Wait([&] { return controls.findChild<QLabel*>("PeerControlState")->text() == QString::fromUtf8("Connecting…"); });
+    }
     PeerStreamStatus diagnostic;
     Check(StreamPeerState(diagnostic, 2) == "pending");
     Check(StreamPeerJson(diagnostic, 2)["transportSendBps"].isNull());
@@ -1633,6 +1651,10 @@ int main(int argc, char** argv) {
         Check(diagnostics->rowCount() == 2 && diagnostics->item(1, 0)->toolTip().contains("sender-rejected"));
         host.session().statusChanged(host.session().status());
         Check(diagnostics->rowCount() == 1);
+        auto failedViewer = viewer.session().status(); failedViewer.failedPeers = 1;
+        viewer.session().statusChanged(failedViewer);
+        Check(viewer.findChild<QLabel*>("roomPhase")->text().contains("Connection failed"));
+        viewer.session().statusChanged(viewer.session().status());
         const auto source = host.session().status().stream.peers[0].source;
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
         Check(source.imageLeft == 0 && source.imageTop == 0 && source.imageWidth == 160 && source.imageHeight == 90);

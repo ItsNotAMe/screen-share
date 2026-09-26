@@ -1,5 +1,11 @@
 # Testing
 
+Diagnostic coverage and report collection are described in [diagnostics](diagnostics.md).
+`room-diagnostic-report` checks older decoder interface compatibility, bounded
+history, default ICE configuration, cross-report correlation and redaction of
+synthetic transport secrets. `room-v2-input-media` includes a real ICE restart
+while other viewers continue streaming. These do not qualify Windows 7 or WAN NATs.
+
 `update-session-deferral` exercises a verified local download while a room is
 active, readiness after leaving, the new-room-before-click race, and closing
 the update UI during a transfer. `room-v2-qt-ui` checks the shell's session
@@ -8,6 +14,13 @@ guard with the real room application lifecycle.
 Build tests with the same native toolchain as the application; see [build](build.md).
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
+
+`room-peer-isolation` uses real native peers with synthetic video/audio. One
+viewer receives media while a second completes SDP but has no usable ICE path.
+It checks that the unconnected viewer never processes capture frames, the healthy
+viewer continues receiving frames through the connection timeout/removal, and
+both endpoints retain the timeout evidence after cleanup. It does not establish
+real-WAN FPS or Windows 7 compatibility.
 
 ```powershell
 cmake --build build/release --target RoomUiTests RoomUiWindowsTests

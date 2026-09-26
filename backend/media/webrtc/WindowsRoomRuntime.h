@@ -31,6 +31,7 @@ struct WindowsRoomRuntimeOptions {
     std::function<CaptureSession::Factory(CaptureSession::Factory)> captureDecorator;
     MediaEngine::PacketFactory packetFactory; // Optional embedding/test transport; absent in the application.
     webrtc::PeerConnectionInterface::RTCConfiguration connection;
+    bool useDefaultStun = true; // Explicit ICE servers take precedence. Synthetic tests stay offline.
     std::shared_ptr<PresentationTelemetry> presentation;
     std::shared_ptr<webrtc::VideoSinkInterface<webrtc::VideoFrame>> frames;
     std::shared_ptr<input::Sink> inputSink;

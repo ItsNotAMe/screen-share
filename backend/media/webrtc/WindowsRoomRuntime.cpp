@@ -1,4 +1,5 @@
 #include "WindowsRoomRuntime.h"
+#include "RoomIceConfiguration.h"
 #include "MicrophoneCapture.h"
 #include "media/capture/WindowsCaptureSource.h"
 #include "media/audio/WasapiPcmEndpoint.h"
@@ -7,6 +8,7 @@
 #include "MfVideoDecoderFactory.h"
 #include "PcmAudioDeviceModule.h"
 #include "input/v2/DesktopSink.h"
+#include "capture/CaptureBackendPolicy.h"
 #include <mutex>
 
 namespace screenshare::media {
@@ -14,16 +16,23 @@ namespace {
 struct DeviceState {
     std::mutex mutex;
     std::shared_ptr<MfHardwareSession> hardware;
+    std::shared_ptr<DiagnosticHistory> diagnostics = std::make_shared<DiagnosticHistory>();
     std::shared_ptr<MfHardwareSession> Get() { std::lock_guard lock(mutex); return hardware; }
 };
 class DeviceCapture final : public ICaptureSource {
     WindowsCaptureSource source_;
     std::shared_ptr<DeviceState> state_;
+    template<class Work> auto Observe(const char* operation, Work work) {
+        try { return work(); }
+        catch (const CaptureBackendError& error) { state_->diagnostics->Event(operation, uint32_t(error.result())); throw; }
+        catch (const CaptureDeviceLostError& error) { state_->diagnostics->Event(operation, uint32_t(error.reason())); throw; }
+        catch (...) { state_->diagnostics->Event(operation, -1); throw; }
+    }
 public:
     DeviceCapture(CaptureConfig config, std::shared_ptr<DeviceState> state, std::shared_ptr<input::DesktopTargetState> target) : source_(config,std::move(target)), state_(std::move(state)) {}
-    void Start() override { source_.Start(); }
+    void Start() override { Observe("capture-start-failed", [&] { source_.Start(); }); }
     std::optional<CaptureSample> Poll() override {
-        auto sample = source_.Poll();
+        auto sample = Observe("capture-poll-failed", [&] { return source_.Poll(); });
         if (sample) {
             const auto resource = std::static_pointer_cast<WindowsCaptureResource>(sample->resource);
             std::lock_guard lock(state_->mutex);
@@ -35,7 +44,7 @@ public:
     bool Minimized() const override { return source_.Minimized(); }
     CaptureSourceInfo Info() const override { return source_.Info(); }
     void Retire() noexcept override { source_.Retire(); }
-    void Rebuild() override { source_.Rebuild(); }
+    void Rebuild() override { state_->diagnostics->Event("capture-rebuild"); Observe("capture-rebuild-failed", [&] { source_.Rebuild(); }); }
 };
 }
 v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions options) {
@@ -45,6 +54,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         auto target = options.inputTarget ? options.inputTarget :
             options.inputSink || options.enableDesktopInput ? std::make_shared<input::DesktopTargetState>() : nullptr;
         NativeRoomRuntimeOptions native;
+        native.diagnostics = state->diagnostics;
         auto endpoints = options.audioEndpoints.value_or(WasapiPcmEndpoints(options.audio, options.playbackDeviceId));
         if (identity.host) {
             AudioSelection initial{options.audio.source == AudioCaptureSource::Microphone ? AudioKind::Microphone :
@@ -76,9 +86,9 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         native.engine = [endpoints = std::move(endpoints), state, preferHardware = options.preferHardwareEncoding,
                          hardwareDecode = options.preferHardwareDecoding,
                          encoderDecorator = options.encoderDecorator, decoderDecorator = options.decoderDecorator,
-                         packetFactory = options.packetFactory] {
-            std::unique_ptr<webrtc::VideoEncoderFactory> encoder = std::make_unique<MfVideoEncoderFactory>(preferHardware ? state->Get() : nullptr);
-            std::unique_ptr<webrtc::VideoDecoderFactory> decoder = std::make_unique<MfVideoDecoderFactory>(hardwareDecode);
+                         packetFactory = options.packetFactory, diagnostics = native.diagnostics] {
+            std::unique_ptr<webrtc::VideoEncoderFactory> encoder = std::make_unique<MfVideoEncoderFactory>(preferHardware ? state->Get() : nullptr, diagnostics);
+            std::unique_ptr<webrtc::VideoDecoderFactory> decoder = std::make_unique<MfVideoDecoderFactory>(hardwareDecode, MfVideoDecoderFactory::DeviceFactory{}, diagnostics);
             if (encoderDecorator) encoder = encoderDecorator(std::move(encoder));
             if (decoderDecorator) decoder = decoderDecorator(std::move(decoder));
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, std::make_shared<PcmAudioDiagnostics>()),
@@ -87,7 +97,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         native.engineReady = [state] { return bool(state->Get()); };
         native.capture = [capture = options.capture, state, target] { return std::make_unique<DeviceCapture>(capture, state, target); };
         if (options.captureDecorator) native.capture = options.captureDecorator(std::move(native.capture));
-        native.connection = options.connection;
+        native.connection = RoomIceConfiguration(options.connection, options.useDefaultStun && !options.audioEndpoints && !options.packetFactory);
         native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,
             options.capture.displayIndex, options.capture.windowHandle, options.capture.targetFps};
         native.captureForSelection = [base = options.capture, state, target, decorate = options.captureDecorator](CaptureSelection selection) -> CaptureSession::Factory {
