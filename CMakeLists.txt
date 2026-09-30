@@ -658,7 +658,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_link_libraries(ScreenShareUi PRIVATE ScreenShareUiShell Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         if(TARGET ScreenShareRoomFrontend)
             # The normal app and room entry points share one shell implementation.
-            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomGamepadControl.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/RoomApplication.cpp)
+            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomGamepadControl.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/SessionDetailsWidget.cpp frontend/ui/RoomApplication.cpp)
             target_link_libraries(ScreenShareRoomUi PUBLIC ScreenShareRoomFrontend ScreenShareUiShell Qt6::Widgets)
             target_link_libraries(ScreenShareUi PRIVATE ScreenShareRoomUi)
             target_compile_definitions(ScreenShareUi PRIVATE SCREENSHARE_HAS_ROOM_V2_UI)

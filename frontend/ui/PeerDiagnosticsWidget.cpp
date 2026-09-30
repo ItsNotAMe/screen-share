@@ -17,7 +17,7 @@ PeerDiagnosticsWidget::PeerDiagnosticsWidget(QWidget* parent) : QWidget(parent) 
     layout->setContentsMargins(0, 0, 0, 0);
     auto* diagnostics = new QTableWidget(0, 8, this);
     diagnostics->setObjectName("peerDiagnostics");
-    diagnostics->setHorizontalHeaderLabels({"Viewer", "Settings", "Source size", "Applied cap", "Transport upload", "Receiver decoded", "Video / FPS", "WebRTC limit"});
+    diagnostics->setHorizontalHeaderLabels({"Viewer", "Settings", "Encoded size", "Applied cap", "Transport upload", "Receiver decoded", "Video / FPS", "WebRTC limit"});
     diagnostics->setEditTriggers(QAbstractItemView::NoEditTriggers);
     diagnostics->setSelectionBehavior(QAbstractItemView::SelectRows);
     diagnostics->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -167,7 +167,7 @@ void PeerDiagnosticsWidget::Update(const screenshare::v2::RoomStatus& value) {
             detail += QString("\nRecent jitter-buffer residence: %1 ms (last fresh interval; not end-to-end latency).")
                 .arg(receiverMetric("jitterBufferRecentMs"));
             detail += QString("\nEncoder target: %1; completed-packet send delay: %2 (lifetime average). Encoded frames: %3; keyframes: %4.")
-                .arg(metric("targetVideoBps", 1000000, " Mbps")).arg(metric("meanPacketSendDelayMs", 1, " ms"))
+                .arg(metric("targetVideoBps", 0.000001, " Mbps")).arg(metric("meanPacketSendDelayMs", 1, " ms"))
                 .arg(metric("framesEncoded", 1, "")).arg(metric("keyFramesEncoded", 1, ""));
             const auto source = rows[index].toObject()["source"].toObject();
             const auto activeImage = source["activeImage"].toObject();

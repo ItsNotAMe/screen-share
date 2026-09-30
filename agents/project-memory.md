@@ -5,6 +5,23 @@
 
 # Project Memory
 
+## Session details and log folder — 2026-09-30
+
+The owner requested clearer host/viewer Details. SessionDetailsWidget renders
+existing immutable status snapshots with an Overview for Connection, Video and
+Audio. The host selector retains peer identity across updates/renames and stays
+visible while metrics scroll. Advanced retains the complete diagnostic table and
+text, with selection synchronized to Overview. Missing and stale measurements
+are distinct; encoder output and viewer-reported decode are labelled separately.
+Viewer frame size/rate uses the existing decoded-frame/FPS path. No extra polling
+or service requests. The encoder target in Advanced correctly converts bps to Mbps.
+
+Open log folder replaces Show in Explorer, is always enabled and opens the
+configured report's parent directory (or the app reports directory for defaults).
+OpenUiLogFolder creates the directory if needed before passing a local-file URL
+to the native opener. It works before save, after deletion and after failed save.
+Save report remains separate; log actions stay outside the scrolling tab pages.
+
 ## Room input request flow — 2026-09-30
 
 Viewer controls start off and request immediately when clicked. Icon-only tiles

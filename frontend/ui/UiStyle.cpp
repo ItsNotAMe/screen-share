@@ -247,6 +247,15 @@ QPushButton#sessionStreamAdvanced:hover { background: #263d33; }
 QWidget#SessionAdvancedContent { background: transparent; }
 QDialog#RoomPasswordDialog, QDialog#SourcePickerDialog, QDialog#SessionDetailsPopup { background: rgba(0,0,0,150); color: #edf5f2; }
 QWidget#SessionPopupPanel { background: #151d1b; border: 1px solid #35473f; border-radius: 10px; }
+QTabWidget#SessionDetailsTabs::pane { border: 0; border-top: 1px solid #293631; }
+QTabWidget#SessionDetailsTabs QTabBar::tab { background: transparent; color: #a3b5af; padding: 10px 18px; border-bottom: 2px solid transparent; }
+QTabWidget#SessionDetailsTabs QTabBar::tab:selected { color: #8ce4d5; border-bottom-color: #38d8c8; }
+QTabWidget#SessionDetailsTabs QTabBar::tab:hover { background: #20312c; }
+QScrollArea#SessionDetailsScroll, QWidget#SessionDetailsOverview, QWidget#DetailsMetrics, QWidget#DetailsSection { background: transparent; border: 0; }
+QLabel#DetailsSectionTitle { color: #edf5f2; font-size: 11pt; font-weight: 600; }
+QLabel#DetailsCaption, QLabel#DetailsHint, QLabel#detailsNotice, QLabel#roomReportResult { color: #a3b5af; }
+QLabel[detailValue="true"] { color: #edf5f2; font-weight: 600; }
+QLabel#roomReportResult[reportError="true"] { color: #ffafa6; }
 QLabel#MetricCaption, QLabel#SessionElapsed { color: #a3b5af; font-size: 9pt; }
 QLabel#MetricValue, QLabel#SessionHealth { color: #edf5f2; font-size: 10pt; font-weight: 600; }
 QLabel#PeerName { font-size: 12pt; font-weight: 600; }

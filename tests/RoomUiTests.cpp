@@ -1,5 +1,7 @@
 #include "ui/RoomSessionWindow.h"
 #include "ui/RoomGamepadControl.h"
+#include "ui/SessionDetailsWidget.h"
+#include "ui/PeerDiagnosticsWidget.h"
 #include <QTabWidget>
 #include <QSlider>
 #include "RecordingGamepadSink.h"
@@ -93,6 +95,44 @@ void RespondToInputRequest(RoomSessionWindow& host, uint8_t capability, bool all
     auto* action=menu->findChild<QAction*>(allow?"allowRequestedControl":"denyRequestedControl");Check(action && action->isEnabled());
     Check(action->text()==QString("%1 %2").arg(allow?"Allow":"Deny",capability==screenshare::input::Mouse?"mouse":capability==screenshare::input::Keyboard?"keyboard":"controller"));
     action->trigger();menu->close();
+}
+void DetailsSnapshotScenario() {
+    SessionDetailsWidget details(true);
+    RoomStatus status;status.phase=RoomPhase::Active;
+    status.members={{"host","Host",true},{"first","Same name",false},{"second","Same name",false}};
+    PeerStreamStatus first;first.peerId="first";first.recovery.state=PeerLifecycleState::Connected;
+    first.observedRevision=1;first.width=640;first.height=360;first.transportSendBps=1000000;
+    first.sender.rttMs=0;first.sender.encodedFps=30;first.sender.encoder=CodecImplementation::MfH264Software;
+    first.sender.targetVideoBps=12000000;
+    first.appliedRevision=1;first.appliedVideoBitrateBps=12000000;
+    ReceiverVideoObservation decoded;decoded.width=320;decoded.height=180;decoded.fpsMilli=17000;first.receiver.observation=decoded;
+    PeerStreamStatus second;second.peerId="second";second.recovery.state=PeerLifecycleState::Connecting;
+    status.stream.peers={first,second};details.Update(status);
+    auto metric=[&](const char* name){return details.findChild<QLabel*>(name)->text();};
+    auto* viewers=details.findChild<QComboBox*>("detailsViewer");
+    Check(viewers->count()==2 && viewers->itemText(0)!=viewers->itemText(1));
+    Check(metric("detailsRtt")=="0 ms" && metric("detailsTraffic")=="1.00 Mbps");
+    Check(metric("detailsDecodedSize")=="320 × 180" && metric("detailsDecodedFps")=="17.0 FPS");
+    PeerDiagnosticsWidget technical;technical.Update(status);
+    Check(technical.findChild<QTableWidget*>("peerDiagnostics")->item(0,0)->toolTip().contains("Encoder target: 12.00 Mbps"));
+    status.stream.capture.state=HostMediaState::Minimized;details.Update(status);
+    Check(metric("detailsVideoState")=="Shared window minimized" && details.findChild<QLabel*>("detailsNotice")->text().contains("Restore"));
+    status.stream.capture.state=HostMediaState::Running;
+    details.SelectPeer("second");Check(metric("detailsTraffic")=="Not available");
+    std::swap(status.members[1],status.members[2]);status.members[1].nickname="Long <viewer> name & details remain plain text";
+    details.Update(status);Check(details.SelectedPeer()=="second");
+    details.SelectPeer("first");status.stream.peers[0].transportSampleStale=true;status.stream.peers[0].receiver.stale=true;details.Update(status);
+    Check(metric("detailsRtt")=="Stale" && metric("detailsTraffic")=="Stale" && metric("detailsDecodedSize")=="Stale");
+    status.members.resize(1);status.stream.peers.clear();details.Update(status);
+    Check(!viewers->isEnabled() && metric("detailsConnectionState")=="Waiting for viewers");
+    SessionDetailsWidget viewer(false);status.playback.selected.muted=true;status.playback.selected.volume=42;
+    viewer.Update(status);viewer.SetVideo({640,360},17);
+    Check(viewer.findChild<QLabel*>("detailsAudioState")->text()=="Muted");
+    Check(viewer.findChild<QLabel*>("detailsAudioSource")->text()=="42%");
+    Check(viewer.findChild<QLabel*>("detailsDecodedSize")->text()=="640 × 360");
+    status.phase=RoomPhase::Stopped;viewer.Update(status);
+    Check(viewer.findChild<QLabel*>("detailsConnectionState")->text()=="Stopped");
+    Check(viewer.findChild<QLabel*>("detailsDecodedSize")->text()=="Not available");
 }
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
 // Inject typed loss after actual GPU work, then let the production worker tear
@@ -1490,16 +1530,28 @@ int main(int argc, char** argv) {
         config.media.preferences.width = 320; config.media.preferences.height = 180; config.media.preferences.fps = 30;
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
+        DetailsSnapshotScenario();
+        auto* reveal=host.findChild<QPushButton*>("showRoomReport");
+        Check(reveal && reveal->isEnabled() && reveal->text()=="Open log folder");
+        Check(reveal->property("logFolder").toString()==reports.path() && !QFileInfo::exists(config.reportFile));
         Wait([&] { return host.session().status().phase == RoomPhase::Active; });
         Check(!host.session().start(config));
         host.findChild<QPushButton*>("saveRoomReport")->click();
         { QFile saved(config.reportFile); Check(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll();
           Check(!bytes.contains("UiHost") && !bytes.contains("UI media"));
           Check(host.findChild<QLabel*>("roomReportResult")->text().startsWith("Saved diagnostic report:"));
-          auto* reveal=host.findChild<QPushButton*>("showRoomReport");Check(reveal&&reveal->isEnabled()&&QFileInfo::exists(reveal->property("reportPath").toString())); }
+          Check(reveal->isEnabled()&&QFileInfo::exists(reveal->property("reportPath").toString())); }
+        Check(QFile::remove(config.reportFile) && reveal->isEnabled());
+        // A failed save must not gate access to the log directory.
+        Check(QDir().mkpath(config.reportFile));host.findChild<QPushButton*>("saveRoomReport")->click();
+        Check(host.findChild<QLabel*>("roomReportResult")->text().startsWith("Could not save") && reveal->isEnabled());
+        Check(QDir().rmdir(config.reportFile));
+        host.findChild<QPushButton*>("saveRoomReport")->click();
+        Check(!host.findChild<QLabel*>("roomReportResult")->property("reportError").toBool() && QFileInfo::exists(config.reportFile));
         config.room.host = false; config.room.roomId = host.session().status().roomId; config.room.nickname = "UiHost";
         auto viewerAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow viewer(config, Factory(viewerAudio), true); viewer.show();
+        Check(viewer.findChild<QPushButton*>("showRoomReport")->isEnabled());
         unsigned original = 0, changed = 0;
         auto present = viewer.session().frameReady;
         viewer.session().frameReady = [&](auto frame) {
@@ -1543,13 +1595,38 @@ int main(int argc, char** argv) {
         Wait([&]{return !host.session().capturePending();});
         if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
             QDir().mkpath(output);
-            for(const auto size:{QSize(740,600),QSize(1000,820),QSize(1200,850)}) {
+            for(const auto size:{QSize(740,600),QSize(860,500),QSize(1000,820),QSize(1200,850)}) {
                 host.resize(size);viewer.resize(size);QCoreApplication::processEvents();
                 Check(host.grab().save(QDir(output).filePath(QString("host-%1.png").arg(size.width()))));
                 Check(viewer.grab().save(QDir(output).filePath(QString("viewer-%1.png").arg(size.width()))));
                 host.findChild<QPushButton*>("openSessionSettings")->click();Wait([&]{auto* overlay=host.findChild<QWidget*>("SessionSettingsOverlay");return overlay->findChild<QWidget*>("SessionSettings")->x()==overlay->width()-qMin(520,overlay->width());});
                 Check(host.grab().save(QDir(output).filePath(QString("host-settings-%1.png").arg(size.width()))));
                 host.findChild<QPushButton*>("sessionSettingsBack")->click();Wait([&]{return !host.findChild<QWidget*>("SessionSettingsOverlay")->isVisible();});
+                for(auto* screen:{&host,&viewer}) {
+                    screen->activateWindow();Wait([&]{return QApplication::activeWindow()==screen;});
+                    auto* open=screen->findChild<QPushButton*>("sessionDetails");open->setFocus(Qt::MouseFocusReason);open->click();
+                    auto* popup=screen->findChild<QDialog*>("SessionDetailsPopup");Check(popup && popup->isVisible());
+                    Check(screen->rect().contains(popup->geometry()));
+                    auto* tabs=popup->findChild<QTabWidget*>("SessionDetailsTabs");Check(tabs && tabs->currentIndex()==0);
+                    QCoreApplication::processEvents();
+                    auto* overview=popup->findChild<QScrollArea*>("SessionDetailsScroll");
+                    Check(overview->horizontalScrollBar()->maximum()==0);
+                    const auto role=screen==&host?"host":"viewer";
+                    Check(screen->grab().save(QDir(output).filePath(QString("%1-details-%2.png").arg(role).arg(size.width()))));
+                    auto* folder=popup->findChild<QPushButton*>("showRoomReport");Check(folder && folder->isVisible() && folder->isEnabled());
+                    const auto position=folder->mapTo(popup,QPoint());
+                    overview->verticalScrollBar()->setValue(overview->verticalScrollBar()->maximum());QCoreApplication::processEvents();
+                    Check(folder->mapTo(popup,QPoint())==position);
+                    if(screen==&host)Check(popup->findChild<QComboBox*>("detailsViewer")->isVisible());
+                    Check(screen->grab().save(QDir(output).filePath(QString("%1-details-bottom-%2.png").arg(role).arg(size.width()))));
+                    overview->verticalScrollBar()->setValue(0);
+                    for(int step=0;step<12;++step) {
+                        QKeyEvent next(QEvent::KeyPress,Qt::Key_Tab,Qt::NoModifier);QApplication::sendEvent(QApplication::focusWidget(),&next);
+                        Check(popup->isAncestorOf(QApplication::focusWidget()));
+                    }
+                    QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier);QApplication::sendEvent(popup,&escape);
+                    Check(!popup->isVisible() && QApplication::focusWidget()==open);
+                }
             }
         }
         Check(!viewer.findChild<QCheckBox*>("controllerConsent")->isVisible());
@@ -1593,6 +1670,10 @@ int main(int argc, char** argv) {
         auto* sessionDetails=host.findChild<QDialog*>("SessionDetailsPopup");Check(sessionDetails&&sessionDetails->isVisible()&&!sessionDetails->isWindow());
         Check(!sessionDetails->findChild<QLineEdit*>("roomLink"));
         auto* reportTable=host.findChild<QTableWidget*>("peerDiagnostics");
+        auto* detailTabs=sessionDetails->findChild<QTabWidget*>("SessionDetailsTabs");
+        Check(detailTabs->currentIndex()==0 && !reportTable->isVisible());
+        Check(sessionDetails->findChild<QLabel*>("detailsConnectionState")->text()=="Connected");
+        Check(sessionDetails->findChild<QComboBox*>("detailsViewer")->currentData().toString()==QString::fromStdString(viewer.session().status().peerId));
         for(int column=0;column<reportTable->columnCount();++column)
             Check(reportTable->columnWidth(column)>reportTable->fontMetrics().horizontalAdvance(reportTable->horizontalHeaderItem(column)->text()));
         Check(host.findChild<QTabWidget*>("SessionSettingsTabs")->count()==2);
@@ -1693,6 +1774,8 @@ int main(int argc, char** argv) {
         diagnostics->selectRow(0);
         Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Physical display and end-to-end latency: unknown"));
         const auto diagnosticPeer = diagnostics->item(0, 0)->data(Qt::UserRole);
+        host.findChild<QPushButton*>("sessionDetails")->click();detailTabs->setCurrentIndex(1);
+        Check(host.findChild<QPushButton*>("openPeerDetails")->isVisible());
         host.findChild<QPushButton*>("openPeerDetails")->click();
         auto* popup = host.findChild<QDialog*>("peerDetailsDialog");
         auto* popupText = popup->findChild<QPlainTextEdit*>("peerDetailsText");

@@ -3,6 +3,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QUrl>
 
 QString DefaultUiReportsDirectory()
 {
@@ -41,4 +42,12 @@ QString ResolveUiReportPath(const QString& configuredPath, const QString& report
         resolvedPath = QDir::cleanPath(rootDirectory.absoluteFilePath(fileName));
     }
     return resolvedPath;
+}
+
+bool OpenUiLogFolder(const QString& folder, const std::function<bool(const QUrl&)>& openUrl)
+{
+    const QFileInfo directory(folder);
+    if (folder.trimmed().isEmpty() || !directory.isAbsolute() || !openUrl ||
+        !QDir().mkpath(directory.absoluteFilePath())) return false;
+    return openUrl(QUrl::fromLocalFile(directory.absoluteFilePath()));
 }
