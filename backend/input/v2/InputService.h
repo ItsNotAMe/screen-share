@@ -37,8 +37,10 @@ public:
 class Port {
 public:
     virtual ~Port() = default;
+    // Requests accumulate independently of already granted controls.
     virtual bool Request(const std::string&, uint8_t) = 0;
     virtual bool Grant(const std::string&, uint8_t) = 0;
+    virtual void Deny(const std::string&, uint8_t capabilities = 7) = 0; // Dismiss these requests; current grants remain active.
     virtual void Revoke(const std::string& peer = {}) = 0;
     virtual bool Submit(const std::string&, Event) = 0;
     // Polling owners are tied to one grant. A late read/cleanup from an old
@@ -66,6 +68,7 @@ public:
     void Close();
     bool Request(const std::string&, uint8_t) override;
     bool Grant(const std::string&, uint8_t) override;
+    void Deny(const std::string&, uint8_t capabilities = 7) override;
     void Revoke(const std::string& peer = {}) override;
     bool Submit(const std::string&, Event) override;
     bool SubmitIfCurrent(const std::string&, uint64_t permission, Event) override;

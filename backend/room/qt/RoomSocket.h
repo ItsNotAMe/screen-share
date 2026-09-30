@@ -24,7 +24,7 @@ public:
         QByteArray token;
         bool directory = false;
     };
-    enum class SendResult { Sent, NotReady, Invalid, Forbidden, Backpressure };
+    enum class SendResult { Sent, NotReady, Invalid, Forbidden, Backpressure, TargetUnavailable };
     using Notify = std::function<void(const Event&)>;
     // Plain loopback is an explicit diagnostic-only opt-in; remote ws is never allowed.
     explicit RoomSocket(Notify, bool allowPlainLoopback = false, QObject* parent = nullptr);

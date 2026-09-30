@@ -106,14 +106,13 @@ test('v2 admission and membership in workerd', { timeout: 60000 }, async t => {
   await signal(recovered, viewing, 'signal.offer', 'media2', { sdp: 'v=0\r\n' });
   await signal(viewing, recovered, 'signal.answer', 'media2', { sdp: 'v=0\r\n' });
   assert.equal((await (await room.fetch('https://internal/test/state')).json()).revision, beforeSignals);
-  let staleClosed = false;
-  viewing.ws.addEventListener('close', () => { staleClosed = true; });
   const hostMessages = recovered.messages.length;
   viewing.ws.send(JSON.stringify({ v: 2, type: 'signal.candidate', roomId: host.roomId, connectionId: 'media1', toPeerId: host.peerId,
     payload: { candidate: 'stale-marker', sdpMid: '0', sdpMLineIndex: 0 } }));
-  await until(() => staleClosed);
+  const viewerMessages = viewing.messages.length;
+  viewing.ws.send(JSON.stringify({ v: 2, type: 'state.resync', roomId: host.roomId, payload: {} }));
+  await until(() => viewing.messages.slice(viewerMessages).some(raw => JSON.parse(raw).type === 'state.snapshot'));
   assert.equal(recovered.messages.slice(hostMessages).some(raw => JSON.parse(raw).payload?.candidate === 'stale-marker'), false);
-  viewing = await attach(readmitted);
   assert.equal((await request('/v2/rooms', { ...input, role: 'host' })).status, 400);
   assert.equal((await request('/v2/rooms', { ...input, password: '😀'.repeat(33) })).status, 400);
   assert.equal((await request('/v2/rooms', input, { Origin: 'https://evil.test' })).status, 403);

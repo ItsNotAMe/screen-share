@@ -50,6 +50,7 @@ public:
     std::atomic<uint64_t> permission{1};
     bool Request(const std::string&, uint8_t) override { return false; }
     bool Grant(const std::string&, uint8_t) override { return false; }
+    void Deny(const std::string&, uint8_t) override {}
     void Revoke(const std::string&) override { granted = false; ++revoked; }
     bool Submit(const std::string&, Event event) override { Check(event.kind == Kind::Pad); ++submitted; return granted; }
     bool SubmitIfCurrent(const std::string& peer, uint64_t epoch, Event event) override {

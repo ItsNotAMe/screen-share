@@ -148,6 +148,16 @@ RoomSocket::SendResult RoomSocket::Send(const QByteArray& bytes) {
     if (!active_ || !ready_) return SendResult::NotReady;
     const auto decoded = wire::ValidateClientCommand(bytes, config_.directory);
     if (!decoded.ok || (!config_.directory && decoded.message["roomId"] != config_.roomId)) return SendResult::Invalid;
+    if (decoded.message["type"].toString().startsWith("signal.")) {
+        bool connected = false;
+        for (const auto& member : cache_.Payload()["members"].toArray()) {
+            const auto item = member.toObject();
+            if (item["peerId"] == decoded.message["toPeerId"] && item["status"] == "connected") connected = true;
+        }
+        // Membership can advance before a queued media send reaches this
+        // networking thread. This is a per-peer cancellation, not socket loss.
+        if (!connected) return SendResult::TargetUnavailable;
+    }
     if (!Allowed(decoded.message, false)) return SendResult::Forbidden;
     const auto canonical = QJsonDocument(decoded.message).toJson(QJsonDocument::Compact);
     if (!Write(canonical)) { Drop(Error::Backpressure, true); return SendResult::Backpressure; }

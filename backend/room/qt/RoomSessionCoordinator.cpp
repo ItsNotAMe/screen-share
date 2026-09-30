@@ -73,7 +73,7 @@ struct RoomSessionCoordinator::State : std::enable_shared_from_this<State> {
             const auto entry = entries.find(socket);
             // The reconnect event already retired the old generation. Its late
             // send failure must not tear down a replacement connection.
-            if (result != RoomSocket::SendResult::Sent && entry != entries.end() &&
+            if (result != RoomSocket::SendResult::Sent && result != RoomSocket::SendResult::TargetUnavailable && entry != entries.end() &&
                 (!generation || generation == entry->second.generation))
                 sendErrors.emplace_back(socket, result == RoomSocket::SendResult::Backpressure ? RoomSocket::Error::Backpressure : RoomSocket::Error::Transport);
         }

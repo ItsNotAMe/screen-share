@@ -271,6 +271,19 @@ QPushButton#controllerAction:disabled { background: #263c35; color: #a3b5af; }
 QPushButton#PeerCapability { padding: 4px; border-radius: 7px; }
 QPushButton#PeerCapability:checked { background: #194b43; border: 1px solid #38d8c8; }
 QPushButton#PeerCapability:hover { background: #263c34; }
+QPushButton#PeerCapability[pendingRequest="true"] { background: #40351f; border-color: #d6ad59; }
+QPushButton#PeerCapability[pendingRequest="true"][requestPulse="true"] { background: #554423; border-color: #efc977; }
+QPushButton#PeerCapability[pendingRequest="true"]:hover { background: #655027; }
+QMenu#PeerRequestMenu { background: #191e1c; color: #edf5f2; border: 1px solid #3c4b45; padding: 5px; }
+QMenu#PeerRequestMenu::item { padding: 9px 14px; border-radius: 4px; }
+QMenu#PeerRequestMenu::item:selected { background: #25584b; color: #c7fff2; }
+QToolButton[inputChoice="true"] { background: #151d1b; color: #a3b5af; border: 1px solid transparent; border-radius: 8px; padding: 10px 3px; outline: 0; }
+QToolButton[inputChoice="true"]:hover { background: #20312c; }
+QToolButton[inputChoice="true"][controlState="requested"] { background: #40351f; }
+QToolButton[inputChoice="true"][controlState="requested"]:hover { background: #554423; }
+QToolButton[inputChoice="true"][controlState="granted"] { background: #17473d; }
+QToolButton[inputChoice="true"][controlState="granted"]:hover { background: #25584b; }
+QToolButton[inputChoice="true"][keyboardFocus="true"]:focus { border: 2px dashed #edf5f2; padding: 9px 2px; }
 QLabel#SectionHeading, QLabel#HomeSectionTitle { color: #edf5f2; font-size: 13pt; font-weight: 650; }
 QWidget#FormCard { background: #121a17; border: 1px solid #293631; border-radius: 8px; }
 QLabel#OptionLabel { color: #c5d1cb; background: transparent; }

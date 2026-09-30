@@ -2,6 +2,8 @@
 
 ## Current UI Direction
 
+- Room viewer controls are icon-only Mouse/Keyboard/Controller buttons, all off initially. Clicking requests immediately; amber means requested and teal means granted. Keep tooltips and accessible names. Requests accumulate without revoking existing grants.
+- Host pending icons pulse amber (respect Windows animation preference); clicking opens Allow/Deny for that control only. Requests gather per viewer, while approval and denial remain independent. Denial preserves existing grants and held input. Viewer selection uses fill colors without borders; focus indication appears only for keyboard navigation.
 - Use Qt Widgets for the first real desktop UI.
 - The UI should call the native backend in-process for live Share/Watch sessions instead of being a launcher shell.
 - Visual direction: modern, simple, practical. Avoid dense advanced settings until the core flow feels good.

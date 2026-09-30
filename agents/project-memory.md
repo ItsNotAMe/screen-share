@@ -5,6 +5,48 @@
 
 # Project Memory
 
+## Room input request flow — 2026-09-30
+
+Viewer controls start off and request immediately when clicked. Icon-only tiles
+use amber for requested and teal for granted, with tooltips/accessibility names.
+Keep them focusable while pending/granted: disabling a clicked tile moves Qt
+focus to the next control and misleadingly highlights Keyboard after Mouse.
+Duplicate clicks do not resend requests. Host requests gather per viewer, but
+each amber icon's Allow/Deny menu applies only to that control. Pulses honor
+Windows animation settings. Viewer state uses fill colors without selection
+borders; focus indication is limited to keyboard navigation. Allow adds the
+selected input to existing grants. RequestDenied (kind 9, one capability byte)
+clears only the denied requests at the current permission epoch, on the reliable
+lane with a newer sequence, without releasing held input. Pending denial packets
+survive a following grant. Existing wire kinds/payloads remain unchanged; older
+viewers ignore the new denial message. Same-epoch Permission messages cannot
+alter grants. Release cancels ungranted requests. Focus changes pause input
+without withdrawing permission.
+
+## Backlog scope and retired laptop test target — 2026-09-30
+
+The owner removed validation/qualification tasks from agents/todo.md, including
+fresh-machine installation, virtual-device cleanup/hardware qualification and
+field/resource/service validation. Do not recreate that validation backlog or
+use the laptop for tests. Investigate the reported hardware decoder Section-handle
+growth, encoder output deadlines and capture cleanup through code instead.
+Historical failures in docs/known-limitations.md remain evidence, not completed
+fixes. Routine checks for actual code changes remain separate from the removed
+qualification campaign.
+
+## Viewer departure signaling isolation — 2026-09-30
+
+Late SDP/ICE for a disconnected/removed viewer used to close the sender's Worker
+WebSocket (`target_unavailable`), disrupting every peer when the sender was the
+host. Discard unavailable destinations and retired connection IDs without a
+socket close; malformed/forbidden/rate-limited signaling retains its checks.
+RoomSocket returns TargetUnavailable for cached absent/reconnecting destinations;
+RoomSessionCoordinator treats that as peer cancellation instead of transport loss.
+The workerd departure regression fails against the original Worker and passes
+after the fix. Native `room-peer-departure` checks the actual network/coordinator
+queue and healthy-peer delivery. Changes require the rebuilt client and v2 Worker
+deployment to reach live users; editing/testing locally does not deploy them.
+
 ## Local profile defaults — 2026-09-17
 
 RoomProfile persists normalized nickname plus allowlisted stream/v1 and playback/v1

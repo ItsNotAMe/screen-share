@@ -29,12 +29,15 @@ protected:
     bool eventFilter(QObject*, QEvent*) override;
 private:
     void Tick();
+    void RequestControl(uint8_t capability);
+    void RespondToRequest(const QString& peer, uint8_t capability, bool allow);
     void PauseInput();
     std::shared_ptr<std::atomic_bool> inputPaused_ = std::make_shared<std::atomic_bool>(false);
     std::map<int, std::pair<screenshare::input::Event,uint64_t>> heldInput_;
     QVBoxLayout* peerRows_ = nullptr;
     QHash<QString,QWidget*> peerCards_;
     bool host_, armed_ = false, capturingDesktop_ = false;
+    bool keyboardNavigation_ = false;
     std::string requestedPeer_;
     uint64_t requestPermission_ = 0, blockedPermission_ = 0;
     std::shared_ptr<std::atomic<std::shared_ptr<const std::string>>> selectedDevice_ = std::make_shared<std::atomic<std::shared_ptr<const std::string>>>();
