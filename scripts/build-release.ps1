@@ -76,7 +76,7 @@ try {
     & "$PSScriptRoot/create-update-manifest.ps1" -Version $version `
         -ZipPath build/release/ScreenShare-release-windows-x64.zip `
         -InstallerPath "build/release/ScreenShare-Setup-$version-windows-x64.exe" `
-        -OutputPath $manifest -Notes @('Fixed room disruption when a viewer leaves.', 'Request and grant mouse, keyboard and controller access independently without losing existing permissions.', 'Clearer host and viewer session details, with an always-available Open log folder action.')
+        -OutputPath $manifest -Notes @('Fixed reconnection getting stuck on Connecting when a room socket is replaced.', 'Restored remote controls and viewer telemetry after reconnecting while other viewers keep streaming.')
     & "$PSScriptRoot/sign-update-manifest.ps1" -ManifestPath $manifest -PrivateKeyPath $privateKey -PublicKeyPath $publicKey -PassphraseFile $passphrase
     & "$PSScriptRoot/verify-update-manifest.ps1" -ManifestPath $manifest -PublicKeyPath $publicKey
     if ((& git rev-parse HEAD).Trim() -ne $commit -or (& git status --porcelain)) { throw 'The source changed during the release build.' }

@@ -5,6 +5,34 @@
 
 # Project Memory
 
+## Version 1.0.3 release preparation — 2026-10-01
+
+Version 1.0.3 packages the room socket replacement fix and its regression coverage.
+The updater manifest notes and versioned release notes describe reconnection,
+restored controls/telemetry and isolation of unaffected viewers. Publication must
+use the clean merged main commit and the existing build/publish scripts with the
+pinned update signing identity. The v2 Worker deployment is separate from the
+desktop release; its existing protocol also supports 1.0.2 clients.
+
+## Room socket replacement recovery — 2026-10-01
+
+Paired host/viewer reports showed video decoding continuing after viewer socket
+reconnects while the host retained an old peer with closed SCTP channels. If a
+replacement socket arrived before the old close callback, the service announced
+only connected and the remote roster never retired that peer. V2Room attachment
+now advances the socket generation and broadcasts reconnecting before connected
+for an already attached member, using existing wire messages. Host replacement
+uses the corresponding host.status transitions. Initial attachment is unchanged.
+The fix requires deploying the v2 Worker; no application update is required.
+
+The Worker replacement test and native delayed-close regression failed before
+the fix and pass after it. The native test covers two viewer reconnects, one host
+reconnect, peer replacement, fresh telemetry and real encrypted control delivery;
+other viewers retain their peers during viewer recovery. All 202 Worker tests,
+typecheck and existing native media/departure/service checks passed. Tests use
+synthetic media/input and a loopback-only generated fault route. No deployment
+was performed during implementation.
+
 ## Session details and log folder — 2026-09-30
 
 The owner requested clearer host/viewer Details. SessionDetailsWidget renders

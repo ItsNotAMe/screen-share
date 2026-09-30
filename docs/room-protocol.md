@@ -106,6 +106,13 @@ Room deltas each carry one atomic operation:
 - `{op: "member.remove", peerId}` removes a viewer other than the receiver itself.
 - `{op: "host.status", status}` changes room status and host member status together.
 
+Reattaching an existing member first broadcasts reconnecting, then connected
+(or host status open), in consecutive revisions. This transition is required
+even if the old socket's close callback has not arrived. Clients must retire the
+old media peer before recreating it under the same room identity; an ICE restart
+alone cannot restore its closed control and telemetry channels. Old socket
+generations are excluded before either transition is published.
+
 A host departure closes subscriptions; it never elects another host. Send
 `room.closed` to the departing/kicked viewer rather than removing its own identity
 from its roster. Closed reasons are host_left, host_expired, kicked, server_shutdown.

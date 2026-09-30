@@ -14,7 +14,7 @@ const executable = resolve(process.argv[2] ?? '');
 const fault = process.argv[5] ?? '';
 const impairment = process.argv[4] === 'network-impairment';
 if (impairment ? !['collapse', 'loss2', 'loss5', 'reorder', 'duplicate', 'processes'].includes(fault) :
-    fault && !['mutation-ack-delay', 'controllers', 'desktop-input', 'native-resolution', 'delayed-viewer'].includes(fault)) throw new Error('Unknown native service scenario');
+    fault && !['mutation-ack-delay', 'controllers', 'desktop-input', 'native-resolution', 'delayed-viewer', 'socket-reconnect'].includes(fault)) throw new Error('Unknown native service scenario');
 if (!process.argv[2] || !process.argv[3]) throw new Error('Usage: node run-native-service.mjs <RoomServiceTests.exe> <artifact-root>');
 const artifact = join(resolve(process.argv[3]), 'native-service-' + randomUUID());
 await mkdir(artifact, { recursive: true });
@@ -41,10 +41,28 @@ try {
         if (!delay) return super.send(ws, value);
         this.testContext.waitUntil(new Promise(resolve => setTimeout(() => { super.send(ws, value); resolve(); }, delay)));
       }
+    }` : fault === 'socket-reconnect' ? `
+    // Drop a native client's socket while delaying its server-side close
+    // notification. Its automatic reattachment must retire the remote peer.
+    export class V2Room extends BaseRoom {
+      constructor(ctx, env) { super(ctx, env); this.testContext = ctx; this.retired = new WeakSet(); }
+      async fetch(request) {
+        const url = new URL(request.url);
+        if (url.pathname !== '/test/reconnect') return super.fetch(request);
+        const sockets = this.testContext.getWebSockets(url.searchParams.get('peer')).filter(ws => ws.readyState === 1);
+        if (sockets.length !== 1) return new Response(null, { status: 409 });
+        this.retired.add(sockets[0]); sockets[0].close(1001, 'test_reconnect');
+        return new Response(null, { status: 204 });
+      }
+      async disconnected(ws) { if (!this.retired.has(ws)) return super.disconnected(ws); }
     }` : 'export { BaseRoom as V2Room };'}
     export default { fetch(request, env, ctx) {
       const url = new URL(request.url);
       if (url.hostname !== '127.0.0.1') return new Response(null, { status: 403 });
+      ${fault === 'socket-reconnect' ? `
+      const reconnect = url.pathname.match(/^\\/test\\/reconnect\\/([A-Za-z0-9_-]+)\\/([A-Za-z0-9_-]+)$/);
+      if (reconnect) return env.V2_ROOMS.get(env.V2_ROOMS.idFromName(reconnect[1])).fetch('https://internal/test/reconnect?peer=' + reconnect[2]);
+      ` : ''}
       url.protocol = 'https:';
       const headers = new Headers(request.headers); headers.set('CF-Connecting-IP', '127.0.0.1');
       return worker.fetch(new Request(url, { method: request.method, headers, body: request.body }), env, ctx);

@@ -59,7 +59,7 @@ test('viewer departure and retired ICE do not disconnect the host or other viewe
     send(destination, 'signal.answer', { toPeerId: source.member.peerId, connectionId, payload: { sdp: 'v=0\r\n' } });
     await until(() => source.messages.some(message => message.type === 'signal.answer' && message.connectionId === connectionId));
   }
-  const hosting = await attach(host);
+  let hosting = await attach(host);
   const survivor = await join();
   await offer(hosting, survivor, 'survivor');
   for (const mode of ['disconnect', 'leave', 'kick']) {
@@ -94,9 +94,42 @@ test('viewer departure and retired ICE do not disconnect the host or other viewe
       await command(departing, 'peer.leave', {});
     }
   }
-  const newcomer = await join();
+  let newcomer = await join();
   await offer(hosting, newcomer, 'newcomer');
   assert.equal((await resync(hosting)).payload.members.length, 3);
+  // Replace a still-open socket: no close callback has announced a disconnect.
+  // Both transitions must reach the native roster, so it retires the old peer
+  // before receiving another offer under the same room identity.
+  for (let attempt = 0; attempt < 2; ++attempt) {
+    const start = hosting.messages.length;
+    const healthyStart = survivor.messages.length;
+    const old = newcomer;
+    newcomer = await attach(old.member);
+    await resync(hosting);
+    const changes = hosting.messages.slice(start).filter(message => message.payload?.member?.peerId === newcomer.member.peerId);
+    assert.deepEqual(changes.map(message => message.payload.member.status), ['reconnecting', 'connected']);
+    assert.equal(changes[1].revision, changes[0].revision + 1);
+    await until(() => old.closed);
+    await offer(hosting, newcomer, 'replacement-' + attempt);
+    candidate(hosting, newcomer, 'newcomer', 'retired-replacement');
+    candidate(hosting, survivor, 'survivor', 'healthy-replacement-' + attempt);
+    await until(() => survivor.messages.slice(healthyStart).some(message => message.payload?.candidate === 'healthy-replacement-' + attempt));
+    await resync(newcomer);
+    assert.equal(newcomer.messages.some(message => message.payload?.candidate === 'retired-replacement'), false);
+    assert.equal(hosting.closed || survivor.closed, false);
+  }
+  const start = survivor.messages.length;
+  const oldHost = hosting;
+  hosting = await attach(host);
+  await resync(survivor);
+  const changes = survivor.messages.slice(start).filter(message => message.payload?.op === 'host.status');
+  assert.deepEqual(changes.map(message => message.payload.status), ['reconnecting', 'open']);
+  assert.equal(changes[1].revision, changes[0].revision + 1);
+  await until(() => oldHost.closed);
+  await offer(hosting, survivor, 'replacement-host-survivor');
+  await offer(hosting, newcomer, 'replacement-host-newcomer');
+  assert.equal((await resync(hosting)).payload.members.length, 3);
+  assert.equal(hosting.closed || survivor.closed || newcomer.closed, false);
 });
 
 async function until(predicate) {

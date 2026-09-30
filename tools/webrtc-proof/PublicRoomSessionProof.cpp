@@ -1,5 +1,7 @@
 #include "PublicRoomSessionFixture.h"
 #include <QSslSocket>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     webrtc::LoggingConfig logging; logging.set_min_severity(webrtc::LS_NONE); logging.set_debug_severity(webrtc::LS_NONE); logging.set_log_to_stderr(false);
@@ -8,7 +10,8 @@ int main(int argc, char** argv) {
     int result = 0;
     std::optional<int64_t> inputResponseMs;
     try {
-        Check(argc == 2);
+        const bool socketReconnect = argc == 3 && std::string(argv[2]) == "socket-reconnect";
+        Check(argc == 2 || socketReconnect);
         // HTTPS runs exercise the production transport policy. Only the local
         // Worker fixture needs the diagnostic plaintext exception.
         const bool diagnosticPlaintext = std::string(argv[1]).starts_with("http://");
@@ -174,6 +177,56 @@ int main(int argc, char** argv) {
                 return peer.receiver.observation && !peer.receiver.stale;
             });
         });
+        if (socketReconnect) {
+            Check(diagnosticPlaintext);
+            auto generation = [](const RoomSession& session, const std::string& peer) {
+                for (const auto& connection : session.Status().stream.connections)
+                    if (connection.peerId == peer && !connection.retained) return connection.generation;
+                return uint64_t(0);
+            };
+            auto ready = [](RoomSession& session, const std::string& peer) {
+                if (auto input = session.Input()) for (const auto& state : input->Read())
+                    if (state.peer == peer && state.ready && state.permission) return true;
+                return false;
+            };
+            QNetworkAccessManager network;
+            for (const auto& reconnecting : {controllerId, controllerId, hostId}) {
+                const auto oldHost = generation(host, controllerId);
+                const auto oldViewer = generation(*viewers[0], hostId);
+                const auto healthyGeneration = generation(host, viewers[1]->Status().peerId);
+                const auto before = evidence[0]->frames.load(), healthyBefore = evidence[1]->frames.load();
+                const auto healthyOffers = evidence[1]->offers.load();
+                QUrl url(QString::fromLocal8Bit(argv[1]));
+                url.setPath(QString::fromStdString("/test/reconnect/" + host.Status().roomId + "/" + reconnecting));
+                auto* reply = network.get(QNetworkRequest(url));
+                Wait([&] { QCoreApplication::processEvents(); return reply->isFinished(); });
+                Check(reply->error() == QNetworkReply::NoError && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 204);
+                reply->deleteLater();
+                Wait([&] {
+                    if (generation(host, controllerId) <= oldHost || generation(*viewers[0], hostId) <= oldViewer ||
+                        evidence[0]->frames < before + 30 || evidence[1]->frames < healthyBefore + 30 ||
+                        host.Status().activePeers != 4 || !ready(host, controllerId) || !ready(*viewers[0], hostId)) return false;
+                    const auto peers = host.Status().stream.peers;
+                    return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) {
+                        return peer.receiver.observation && !peer.receiver.stale && peer.receiver.observation->framesDecoded > 0;
+                    });
+                });
+                if (reconnecting == controllerId) {
+                    Check(generation(host, viewers[1]->Status().peerId) == healthyGeneration && evidence[1]->offers == healthyOffers);
+                }
+                // Readiness must mean the rebuilt control lane delivers input,
+                // not just that RTP resumed after an ICE restart.
+                Check(viewers[0]->Input()->Request(hostId, capability));
+                Wait([&] { for (const auto& state : host.Input()->Read()) if (state.peer == controllerId && state.requested == capability) return true; return false; });
+                Check(host.Input()->Grant(controllerId, capability));
+                Wait([&] { return granted(viewers[0]->Input(), hostId) == capability; });
+                const auto applied = hostEvidence->input->applied.load();
+                Check(viewers[0]->Input()->Submit(hostId, press));
+                Wait([&] { return hostEvidence->input->applied > applied; });
+                host.Input()->Revoke();
+                Wait([&] { return !granted(viewers[0]->Input(), hostId); });
+            }
+        }
         live.resolution = ResolutionMode::Fixed; live.width = 320; live.height = 180;
         live.preset = StreamPreset::Quality;
         live.fps = 20; live.bitrateMode = SettingMode::Manual; live.bitrateLimitBps = 1000000;
@@ -202,8 +255,12 @@ int main(int argc, char** argv) {
             Check(peer.source.scalingPath == SourceScalingPath::Gpu && peer.source.gpuScaled > 0 &&
                 peer.source.gpuReadbackFallbacks == 0 && peer.source.imageWidth == 320 && peer.source.imageHeight == 180);
 #endif
-        evidence[0]->restart = true;
-        Wait([&] { return evidence[0]->offers >= 2 && evidence[0]->frames >= restartingBefore + 30 && evidence[1]->frames >= healthyBefore + 30; });
+        // The reconnect scenario already uses all four permitted offers in a
+        // rolling minute. The ordinary scenario separately exercises ICE reuse.
+        if (!socketReconnect) {
+            evidence[0]->restart = true;
+            Wait([&] { return evidence[0]->offers >= 2 && evidence[0]->frames >= restartingBefore + 30 && evidence[1]->frames >= healthyBefore + 30; });
+        }
         Wait([&] { const auto peers = host.Status().stream.peers;
             return peers.size() == 4 && std::all_of(peers.begin(), peers.end(), [](const auto& peer) {
                 return peer.receiver.observation && peer.receiver.observation->width == 320 && !peer.receiver.stale;
@@ -300,6 +357,7 @@ int main(int argc, char** argv) {
         Check(failedCapture.Status().error == RoomError::Media);
         auto failedStop = failedCapture.Stop(); Get(failedStop);
         std::cout << "{\"passed\":true,\"public_session\":true,\"native_runtime\":true,\"rejoin\":true,\"viewers\":4,\"decoded_frames\":" << frames
+            << ",\"socket_reconnect\":" << (socketReconnect ? "true" : "false")
             << ",\"authorized_input\":true,\"input_response_internal_ms\":" << (inputResponseMs ? std::to_string(*inputResponseMs) : "null")
             << ",\"cancel_admission\":true,\"coalesced_stop\":true,\"media_drain_barrier\":true,\"production_tls_required\":true,\"diagnostic_plaintext\":"
             << (diagnosticPlaintext ? "true" : "false") << "}\n";

@@ -161,6 +161,12 @@ export class V2Room {
       if (!member || member.expires <= Date.now() && !this.sockets(member).length) throw new AdmissionError(403, 'forbidden');
       const previous = this.ctx.getWebSockets(member.peerId);
       ++member.generation;
+      // A replacement can arrive before the old socket's close callback. Native
+      // clients recreate their local peer on reconnect; the remote roster must
+      // retire its peer too, including SCTP channels, before seeing connected.
+      // Advancing the generation first excludes every old socket from delivery.
+      if (member.attached) await this.delta(state, member.role === 'host' ?
+        { op: 'host.status', status: 'reconnecting' } : { op: 'member.upsert', member: this.view(member) });
       member.recent = [];
       member.attached = true;
       member.expires = Date.now() + 90000;
