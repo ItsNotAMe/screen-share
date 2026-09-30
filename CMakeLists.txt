@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Prepare the pinned toolchain before project() checks compiler availability.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
 
-project(ScreenShareNative VERSION 1.0.1 LANGUAGES CXX)
+project(ScreenShareNative VERSION 1.0.2 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
 set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
@@ -269,6 +269,10 @@ if(MSVC)
             target_link_libraries(RoomPeerIsolationTests PRIVATE ScreenShareCore ScreenShareRoomSession)
             add_test(NAME room-peer-isolation COMMAND RoomPeerIsolationTests)
             set_tests_properties(room-peer-isolation PROPERTIES TIMEOUT 90)
+            add_executable(RoomPeerDepartureTests tests/RoomPeerDepartureTests.cpp)
+            target_link_libraries(RoomPeerDepartureTests PRIVATE ScreenShareRoomSession)
+            add_test(NAME room-peer-departure COMMAND RoomPeerDepartureTests)
+            set_tests_properties(room-peer-departure PROPERTIES TIMEOUT 15)
             add_executable(NativePcmAudioTests tools/webrtc-proof/PcmAudioDeviceTest.cpp)
             target_link_libraries(NativePcmAudioTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
             add_test(NAME native-pcm-audio COMMAND NativePcmAudioTests)
@@ -299,6 +303,7 @@ if(MSVC)
         add_executable(RoomSocketTests tests/RoomSocketTests.cpp)
         if(TARGET RoomInputTests)
             add_dependencies(RoomInputTests RoomSocketTests) # Deploy the same Qt networking DLLs.
+            add_dependencies(RoomPeerDepartureTests RoomSocketTests)
             add_dependencies(RoomLifecycleStress RoomSocketTests)
             add_dependencies(BackendComparison RoomSocketTests)
         endif()
@@ -653,7 +658,7 @@ if(SCREENSHARE_BUILD_QT_UI)
         target_link_libraries(ScreenShareUi PRIVATE ScreenShareUiShell Qt6::Network Qt6::Svg Qt6::Widgets shell32)
         if(TARGET ScreenShareRoomFrontend)
             # The normal app and room entry points share one shell implementation.
-            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomGamepadControl.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/RoomApplication.cpp)
+            add_library(ScreenShareRoomUi STATIC frontend/ui/QtRoomSession.cpp frontend/ui/RoomSessionWindow.cpp frontend/ui/RoomGamepadControl.cpp frontend/ui/RoomBrowserWindow.cpp frontend/ui/PeerDiagnosticsWidget.cpp frontend/ui/SessionDetailsWidget.cpp frontend/ui/RoomApplication.cpp)
             target_link_libraries(ScreenShareRoomUi PUBLIC ScreenShareRoomFrontend ScreenShareUiShell Qt6::Widgets)
             target_link_libraries(ScreenShareUi PRIVATE ScreenShareRoomUi)
             target_compile_definitions(ScreenShareUi PRIVATE SCREENSHARE_HAS_ROOM_V2_UI)

@@ -4,6 +4,8 @@
 #include "shared/RoomLink.h"
 #include "shared/RoomProfile.h"
 #include "ui/PeerDiagnosticsWidget.h"
+#include "ui/SessionDetailsWidget.h"
+#include "ui/SessionPopup.h"
 #include "shared/PresentationDiagnostics.h"
 #include "shared/PipelineDiagnostics.h"
 #include "shared/RoomDiagnosticReport.h"
@@ -26,6 +28,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QSignalBlocker>
+#include <QStyle>
 #include <QScrollArea>
 #include <QMessageBox>
 #include <QPushButton>
@@ -40,7 +43,9 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QElapsedTimer>
-#include <QProcess>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QTableWidget>
 #include <QDir>
 #include <QFileInfo>
 #include <QScrollBar>
@@ -186,16 +191,25 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     copyLink_ = new QPushButton("Copy room link"); copyLink_->setObjectName("copyRoomLink"); copyLink_->setEnabled(false); layout->addWidget(copyLink_);
     connect(copyLink_, &QPushButton::clicked, this, [this] { if (!roomLink_->text().isEmpty()) QApplication::clipboard()->setText(roomLink_->text()); });
     error_ = new QLabel; error_->setObjectName("roomError"); error_->setTextFormat(Qt::PlainText); error_->setWordWrap(true); layout->addWidget(error_);
-    auto* exportReport = new QPushButton("Save diagnostic report", this); exportReport->setObjectName("saveRoomReport"); layout->addWidget(exportReport);
+    auto* exportReport = new QPushButton("Save report", this); exportReport->setObjectName("saveRoomReport");exportReport->setIcon(uiIcon("report"));layout->addWidget(exportReport);
     auto* reportResult = new QLabel(this); reportResult->setObjectName("roomReportResult"); reportResult->setTextFormat(Qt::PlainText);
     reportResult->setWordWrap(true); reportResult->setTextInteractionFlags(Qt::TextSelectableByMouse); layout->addWidget(reportResult);
-    auto* showReport=new QPushButton("Show in Explorer");showReport->setObjectName("showRoomReport");showReport->setEnabled(false);layout->addWidget(showReport);
-    connect(showReport,&QPushButton::clicked,this,[showReport,reportResult]{
-        const auto path=showReport->property("reportPath").toString();
-        if(!QFileInfo::exists(path)){reportResult->setText("The saved report is no longer at: "+path);showReport->setEnabled(false);return;}
-        if(!QProcess::startDetached("explorer.exe",{QStringLiteral("/select,"),QDir::toNativeSeparators(path)}))reportResult->setText("Could not open Explorer. Report saved at: "+path);
+    reportResult->setText("Save a snapshot of this session for troubleshooting.");
+    reportResult->setMinimumHeight(reportResult->fontMetrics().lineSpacing()*2);
+    reportResult->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+    auto reportFeedback=[reportResult](const QString& text,bool failed) {
+        reportResult->setText(text);reportResult->setProperty("reportError",failed);
+        reportResult->style()->unpolish(reportResult);reportResult->style()->polish(reportResult);reportResult->update();
+    };
+    const auto logFolder=config.reportFile.trimmed().isEmpty()?DefaultUiReportsDirectory():QFileInfo(ResolveUiReportPath(config.reportFile)).absolutePath();
+    auto* showReport=new QPushButton("Open log folder");showReport->setObjectName("showRoomReport");showReport->setIcon(uiIcon("folder"));
+    showReport->setProperty("logFolder",logFolder);showReport->setToolTip(QDir::toNativeSeparators(logFolder));layout->addWidget(showReport);
+    connect(showReport,&QPushButton::clicked,this,[showReport,reportFeedback]{
+        const auto folder=showReport->property("logFolder").toString();
+        const bool opened=OpenUiLogFolder(folder,QDesktopServices::openUrl);
+        reportFeedback(opened?"Opened the log folder.":"Could not open the log folder. Check its location and folder permissions.",!opened);
     });
-    connect(exportReport, &QPushButton::clicked, this, [this, reportResult, showReport, configured = config.reportFile] {
+    connect(exportReport, &QPushButton::clicked, this, [this, reportResult, reportFeedback, showReport, configured = config.reportFile] {
         const auto file = configured.isEmpty() ? "room-v2-" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".json" : configured;
         const auto path = ResolveUiReportPath(file);
         const auto input = session_.input();
@@ -213,8 +227,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         renderer["terminal"] = presentation.terminal;
         report["presentation"] = renderer;
         const bool saved=WriteRoomDiagnosticReport(path, report);
-        reportResult->setText(saved ? "Saved diagnostic report: " + QDir::toNativeSeparators(path) : "Could not save diagnostic report. Check the destination is writable.");
-        showReport->setProperty("reportPath",saved?path:QString());showReport->setEnabled(saved);
+        reportFeedback(saved ? "Saved diagnostic report: " + QFileInfo(path).fileName() : "Could not save diagnostic report. Check the destination is writable.",!saved);
+        reportResult->setToolTip(QDir::toNativeSeparators(path));
+        showReport->setProperty("reportPath",saved?path:QString());
     });
     auto* roomForm = new QFormLayout;
     roomForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -392,6 +407,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     uploadState_ = new QLabel; uploadState_->setWordWrap(true); uploadState_->setObjectName("uploadState"); uploadState_->setVisible(config.room.host); layout->addWidget(uploadState_);
     auto* peerDiagnostics = new PeerDiagnosticsWidget(this);
     peerDiagnostics->setVisible(config.room.host); layout->addWidget(peerDiagnostics);
+    auto* sessionDetails=new SessionDetailsWidget(config.room.host,this);
     gamepad_ = new RoomGamepadControl(config.room.host, [this] { return session_.input(); },
         [this] { return session_.status(); }, this, std::move(devices), std::move(read));
     layout->addWidget(gamepad_);
@@ -402,7 +418,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     connect(apply_, &QPushButton::clicked, this, [this] {
         error_->clear();streamSaveError_.clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
     });
-    session_.statusChanged = [this, peerDiagnostics, capacityWarning, host = config.room.host](const auto& value) {
+    session_.statusChanged = [this, peerDiagnostics, sessionDetails, capacityWarning, host = config.room.host](const auto& value) {
+        sessionDetails->Update(value);
         phase_->setText(!host && value.phase == RoomPhase::Active && value.failedPeers ? "Connection failed — leave and rejoin" : Phase(value.phase));
         phase_->setToolTip(QString("%1 media peers, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
         room_->setText((host ? "Hosting: " : "") + QString::fromStdString(value.policy.name.empty()?value.roomId:value.policy.name));
@@ -453,6 +470,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         refreshCapture_->setEnabled(host && !session_.capturePending()); captureSource_->setEnabled(host && !session_.capturePending());
         if (host) {
             peerDiagnostics->Update(value);
+            if(sessionDetails->selectedPeerChanged)sessionDetails->selectedPeerChanged(sessionDetails->SelectedPeer());
             qint64 allocated = 0, applied = 0; uint64_t measured = 0; size_t paused = 0, measuredPeers = 0;
             for (const auto& peer : value.stream.peers) {
                 allocated += peer.allocatedVideoBitrateBps; applied += peer.appliedVideoBitrateBps;
@@ -684,9 +702,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         controlsBody->addWidget(detailsButton);
         auto decoded=std::make_shared<unsigned>(0);auto* fpsTimer=new QTimer(this);fpsTimer->setInterval(1000);
         auto sampleClock=std::make_shared<QElapsedTimer>();sampleClock->start();
-        connect(fpsTimer,&QTimer::timeout,this,[decoded,fpsInfo,sampleClock]{const auto ms=sampleClock->restart();fpsInfo->setText(QString::number(ms?1000.0*(*decoded)/ms:0,'f',0));*decoded=0;});fpsTimer->start();
+        auto decodedSize=std::make_shared<QSize>();
+        connect(fpsTimer,&QTimer::timeout,this,[decoded,decodedSize,sessionDetails,fpsInfo,sampleClock]{const auto ms=sampleClock->restart();const auto fps=ms?1000.0*(*decoded)/ms:0;fpsInfo->setText(QString::number(fps,'f',0));sessionDetails->SetVideo(*decodedSize,fps);*decoded=0;});fpsTimer->start();
         auto present=session_.frameReady;
-        session_.frameReady=[present,videoInfo,decoded](auto frame){++*decoded;videoInfo->setText(QString("%1 %2 %3").arg(frame.width).arg(QChar(0x00d7)).arg(frame.height));if(present)present(std::move(frame));};
+        session_.frameReady=[present,videoInfo,decoded,decodedSize](auto frame){++*decoded;*decodedSize=QSize(frame.width,frame.height);videoInfo->setText(QString("%1 %2 %3").arg(frame.width).arg(QChar(0x00d7)).arg(frame.height));if(present)present(std::move(frame));};
     }
     layout->removeWidget(sourceSettings); layout->removeWidget(playbackWidget);
     // Compact source actions and progressive disclosure keep the common stream
@@ -826,7 +845,25 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         });
         connect(switchAudio_,&QPushButton::clicked,audioSave,&QTimer::stop);switchAudio_->hide();
     }
-    auto* detailsPopup=new SessionPopup("Stream details",this);detailsPopup->setObjectName("SessionDetailsPopup");detailsPopup->body->addWidget(scroll,1);scroll->show();
+    auto* detailsPopup=new SessionPopup("Stream details",this);detailsPopup->setObjectName("SessionDetailsPopup");detailsPopup->setPanelSize({720,700});
+    auto* detailsTabs=new QTabWidget;detailsTabs->setObjectName("SessionDetailsTabs");
+    detailsTabs->addTab(sessionDetails,"Overview");detailsTabs->addTab(scroll,"Advanced");
+    detailsPopup->body->addWidget(detailsTabs,1);
+    // Keep log actions reachable while either details page is scrolled.
+    auto* logActions=new QHBoxLayout;logActions->setSpacing(10);
+    move(showReport,logActions,1);move(exportReport,logActions,1);
+    detailsPopup->body->addLayout(logActions);move(reportResult,detailsPopup->body);
+    for(auto* button:{showReport,exportReport}) {button->setMinimumHeight(40);button->setIconSize(QSize(18,18));}
+    if(config.room.host) {
+        auto* table=peerDiagnostics->findChild<QTableWidget*>("peerDiagnostics");
+        sessionDetails->selectedPeerChanged=[table](const QString& id) {
+            if(auto* current=table->item(table->currentRow(),0);current && current->data(Qt::UserRole).toString()==id)return;
+            for(int row=0;row<table->rowCount();++row)if(table->item(row,0)->data(Qt::UserRole).toString()==id) {table->setCurrentCell(row,0);table->selectRow(row);break;}
+        };
+        connect(table,&QTableWidget::itemSelectionChanged,sessionDetails,[table,sessionDetails] {
+            if(auto* item=table->item(table->currentRow(),0))sessionDetails->SelectPeer(item->data(Qt::UserRole).toString());
+        });
+    }
     connect(detailsPopup,&QDialog::finished,this,[this,showVideo=!config.room.host&&config.preview]{video_->setVisible(showVideo);});
     connect(detailsButton,&QPushButton::clicked,this,[this,detailsPopup]{video_->hide();detailsPopup->open();});
     auto* footer=new QHBoxLayout; footer->setSpacing(12); dashboardLayout->addLayout(footer);

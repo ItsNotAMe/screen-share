@@ -40,7 +40,7 @@ void Protocol() {
     Message golden{"x",0x0102030405060708ULL,0x1112131415161718ULL,{}};
     const std::vector<uint8_t> expected{'S','I','N',2,3,1,1,2,3,4,5,6,7,8,17,18,19,20,21,22,23,24,'x'};
     Check(Encode(golden)==expected);
-    for(unsigned k=0;k<=8;++k) {
+    for(unsigned k=0;k<=uint8_t(Kind::RequestDenied);++k) {
         Message m{"connection_restart_7",9,12,{}}; auto& e=m.event;
         e.kind=Kind(k); e.capabilities=7; e.x=.25f; e.y=.75f; e.button=4; e.down=true;
         e.key=65; e.scan=0x11e; e.wheelX=-1200; e.wheelY=1200;
@@ -75,6 +75,58 @@ void RepeatedRevoke() {
     Check(viewer.Request("host",Gamepad)); pump(); Check(Read(host).requested==Gamepad);
     Check(host.Grant("viewer",Gamepad));
     Wait([&] {pump();return Read(viewer,"host").granted==Gamepad;});
+}
+void AdditiveRequests() {
+    auto sink=std::make_shared<RecordingSink>(); Service host(true,sink),viewer(false);
+    host.Bind("viewer","connection",true);viewer.Bind("host","connection",true);
+    auto pump=[&] {
+        for(const auto& p:host.Drain("viewer",true,true))viewer.Receive("host",p.reliable,p.bytes);
+        for(const auto& p:viewer.Drain("host",true,true))host.Receive("viewer",p.reliable,p.bytes);
+    };
+    Check(host.Grant("viewer",Keyboard));
+    Wait([&]{pump();return Read(viewer,"host").granted==Keyboard;});
+    const auto permission=Read(viewer,"host").permission;
+    const auto releases=sink->releases.load();
+    Check(viewer.Request("host",Mouse));Check(viewer.Request("host",Gamepad));pump();
+    Check(Read(host).requested==(Mouse|Gamepad) && Read(host).granted==Keyboard);
+    Check(Read(viewer,"host").requested==(Mouse|Gamepad) && Read(viewer,"host").granted==Keyboard);
+    Check(Read(host).permission==permission && sink->releases==releases);
+    Event key;key.kind=Kind::Key;key.key=65;
+    Check(viewer.SubmitIfCurrent("host",permission,key));
+    Wait([&]{pump();return sink->applied>0;});
+    host.Deny("viewer",Mouse);pump();
+    Check(Read(host).requested==Gamepad && Read(viewer,"host").requested==Gamepad);
+    Check(Read(viewer,"host").granted==Keyboard && Read(host).permission==permission && sink->releases==releases);
+    // Stale/lane-forged denials cannot dismiss another pending control.
+    viewer.Receive("host",false,Encode({"connection",permission,9999,{Kind::RequestDenied,Gamepad}}));
+    viewer.Receive("host",true,Encode({"connection",permission+1,9999,{Kind::RequestDenied,Gamepad}}));
+    Check(Read(viewer,"host").requested==Gamepad);
+    host.Receive("viewer",true,Encode({"connection",permission,9999,{Kind::RequestDenied,Gamepad}}));
+    Check(Read(host).requested==Gamepad);
+    host.Deny("viewer",Gamepad);pump();
+    Check(!Read(host).requested && !Read(viewer,"host").requested);
+    Check(Read(viewer,"host").granted==Keyboard && Read(host).permission==permission && sink->releases==releases);
+    // Same-epoch acknowledgements cannot authorize a changed set of controls.
+    viewer.Receive("host",true,Encode({"connection",permission,10000,{Kind::Permission,7}}));
+    Check(Read(viewer,"host").granted==Keyboard);
+    Check(viewer.Request("host",Mouse));pump();
+    Check(viewer.Request("host",Gamepad));pump();
+    // A quick deny followed by grant must retain the unsent denial response.
+    host.Deny("viewer",Gamepad);
+    Check(host.Grant("viewer",Read(host).granted|Read(host).requested));
+    Wait([&]{pump();return Read(viewer,"host").granted==(Keyboard|Mouse);});
+    Check(!Read(host).requested && !Read(viewer,"host").requested);
+    Check(viewer.Request("host",Gamepad));pump();
+    Check(Read(host).requested==Gamepad && Read(host).granted==(Keyboard|Mouse));
+    viewer.Revoke();pump();pump();
+    Check(!Read(host).granted && !Read(host).requested && !Read(viewer,"host").revokePending);
+    // Release also cancels a request before any control has been granted.
+    Check(viewer.Request("host",Mouse));pump();Check(Read(host).requested==Mouse);
+    viewer.Revoke();pump();pump();Check(!Read(host).requested && !Read(viewer,"host").revokePending);
+    // Initial permission must preserve all independent unsent requests.
+    host.Bind("viewer","new_connection",true);viewer.Bind("host","new_connection",true);
+    Check(viewer.Request("host",Mouse));Check(viewer.Request("host",Keyboard));pump();
+    Check(Read(host).requested==(Mouse|Keyboard));
 }
 void Safety() {
     auto sink=std::make_shared<RecordingSink>(); Service host(true,sink),viewer(false);
@@ -141,6 +193,30 @@ void Safety() {
     host.Bind("viewer","connection_restart_2",true); Check(!Read(host).granted);
     host.Receive("viewer",true,Encode(stale)); Check(sink->applied==count);
     host.Close(); viewer.Close(); Check(!host.Grant("viewer",Mouse) && !viewer.Submit("host",move));
+}
+void RequestDuringGrant() {
+    class Delayed final : public Sink {
+    public:
+        std::promise<void> entered, unblock;
+        std::shared_future<void> released=unblock.get_future().share();
+        bool Grant(const std::string&,uint8_t,int) override {entered.set_value();released.wait();return true;}
+        bool Apply(const std::string&,const Event&) override {return true;}
+        void Release(const std::string&) noexcept override {}
+    };
+    auto sink=std::make_shared<Delayed>();Service host(true,sink),viewer(false);
+    host.Bind("viewer","connection",true);viewer.Bind("host","connection",true);
+    auto pump=[&] {
+        for(const auto& p:host.Drain("viewer",true,true))viewer.Receive("host",p.reliable,p.bytes);
+        for(const auto& p:viewer.Drain("host",true,true))host.Receive("viewer",p.reliable,p.bytes);
+    };
+    pump();Check(viewer.Request("host",Keyboard));pump();Check(host.Grant("viewer",Keyboard));
+    sink->entered.get_future().wait();
+    const bool accepted=viewer.Request("host",Mouse);pump();
+    const auto pending=Read(host).requested;
+    sink->unblock.set_value(); // Always release the input owner before assertions.
+    Check(accepted && (pending&Mouse)); // Keyboard may still be applying.
+    Wait([&]{pump();return Read(viewer,"host").granted==Keyboard;});
+    Check(Read(host).requested==Mouse && Read(viewer,"host").requested==Mouse);
 }
 void Congestion() {
     auto sink=std::make_shared<RecordingSink>(); Service host(true,sink);
@@ -253,6 +329,6 @@ void StalePollingOwner() {
     Check(!Read(viewer,"host").granted && Read(viewer,"host").revokePending);
 }
 int main() {
-    try {Protocol();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
+    try {Protocol();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();AdditiveRequests();RequestDuringGrant();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

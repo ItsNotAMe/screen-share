@@ -3,6 +3,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QUrl>
 
 #include <iostream>
 
@@ -52,5 +53,18 @@ int main()
     passed &= Check(
         QFileInfo(defaultDirectory).isAbsolute() && defaultDirectory.endsWith("/ScreenShare/reports"),
         "The default report directory must be an absolute ScreenShare-specific location.");
+    QString openedFolder;
+    const auto logFolder=QDir(temporaryDirectory.path()).filePath("new/logs with spaces");
+    passed &= Check(!QFileInfo::exists(logFolder), "The log folder fixture should start absent.");
+    passed &= Check(OpenUiLogFolder(logFolder,[&](const QUrl& url) {
+        openedFolder=url.toLocalFile();return url.isLocalFile() && QFileInfo(openedFolder).isDir();
+    }) && openedFolder==logFolder, "Opening logs must create/open the folder before any report exists.");
+    passed &= Check(!OpenUiLogFolder(logFolder,[](const QUrl&) {return false;}) && QFileInfo(logFolder).isDir(),
+        "An Explorer failure must retain the folder for a retry.");
+    QFile blocker(QDir(temporaryDirectory.path()).filePath("not-a-folder"));
+    passed &= Check(blocker.open(QIODevice::WriteOnly), "Could not create the blocked folder fixture.");blocker.close();
+    bool called=false;
+    passed &= Check(!OpenUiLogFolder(blocker.fileName(),[&](const QUrl&) {called=true;return true;}) && !called,
+        "A path occupied by a file must fail without asking Explorer to open it.");
     return passed ? 0 : 1;
 }

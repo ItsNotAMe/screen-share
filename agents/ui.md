@@ -2,6 +2,10 @@
 
 ## Current UI Direction
 
+- Host/viewer Details opens to a readable Overview with labelled connection, video and audio measurements. The host viewer picker and status note stay visible during scrolling; long diagnostics and the per-viewer table live under Advanced. Missing/stale values are explicit, RTT is network round trip, and host encoder output is distinct from viewer-reported decode.
+- Details keeps Open log folder and Save report reachable below both tabs. The folder action always remains enabled, creates its directory on demand and opens the folder independently of report-file existence or save success.
+- Room viewer controls are icon-only Mouse/Keyboard/Controller buttons, all off initially. Clicking requests immediately; amber means requested and teal means granted. Keep tooltips and accessible names. Requests accumulate without revoking existing grants.
+- Host pending icons pulse amber (respect Windows animation preference); clicking opens Allow/Deny for that control only. Requests gather per viewer, while approval and denial remain independent. Denial preserves existing grants and held input. Viewer selection uses fill colors without borders; focus indication appears only for keyboard navigation.
 - Use Qt Widgets for the first real desktop UI.
 - The UI should call the native backend in-process for live Share/Watch sessions instead of being a launcher shell.
 - Visual direction: modern, simple, practical. Avoid dense advanced settings until the core flow feels good.

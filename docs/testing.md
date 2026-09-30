@@ -15,12 +15,25 @@ Build tests with the same native toolchain as the application; see [build](build
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 
+Input service regressions cover accumulating requests, denial preserving existing
+grants/held input, requests arriving during grant application and cancellation.
+The native room UI scenarios check immediate icon requests, independent host menus,
+distinct pending/granted states and preserving keyboard when requesting mouse.
+
 `room-peer-isolation` uses real native peers with synthetic video/audio. One
 viewer receives media while a second completes SDP but has no usable ICE path.
 It checks that the unconnected viewer never processes capture frames, the healthy
 viewer continues receiving frames through the connection timeout/removal, and
 both endpoints retain the timeout evidence after cleanup. It does not establish
 real-WAN FPS or Windows 7 compatibility.
+
+`room-peer-departure` exercises the host's real networking thread and signaling
+coordinator after a viewer becomes reconnecting or leaves. Queued sends to that
+viewer are discarded while another viewer's signaling continues without a room
+transport error. The Worker `viewer-departure.test.mjs` covers disconnect, Leave,
+kick, late ICE from retired connections, and joining afterward. Run it through
+`npm test` in `signaling-worker`; these are local fixtures, not a deployed-service
+or WAN qualification.
 
 ```powershell
 cmake --build build/release --target RoomUiTests RoomUiWindowsTests

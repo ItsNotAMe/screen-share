@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
                 auto forbidden = signal; forbidden["type"] = "signal.offer";
                 Check(client->Send(Bytes(forbidden)) == RoomSocket::SendResult::Forbidden);
                 forbidden = signal; forbidden["toPeerId"] = "unknown";
-                Check(client->Send(Bytes(forbidden)) == RoomSocket::SendResult::Forbidden);
+                Check(client->Send(Bytes(forbidden)) == RoomSocket::SendResult::TargetUnavailable);
                 auto wrongRoom = signal; wrongRoom["roomId"] = "other";
                 Check(client->Send(Bytes(wrongRoom)) == RoomSocket::SendResult::Invalid);
             });

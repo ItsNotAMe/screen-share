@@ -1,5 +1,7 @@
 #include "ui/RoomSessionWindow.h"
 #include "ui/RoomGamepadControl.h"
+#include "ui/SessionDetailsWidget.h"
+#include "ui/PeerDiagnosticsWidget.h"
 #include <QTabWidget>
 #include <QSlider>
 #include "RecordingGamepadSink.h"
@@ -44,6 +46,7 @@
 #include <QScrollBar>
 #include <QDialog>
 #include <QAction>
+#include <QMenu>
 #include <QScrollArea>
 #include <QFrame>
 #include <QShowEvent>
@@ -73,6 +76,63 @@ template<class F> void Wait(F condition, std::source_location where = std::sourc
         Check(std::chrono::steady_clock::now() < deadline, where);
         QCoreApplication::processEvents(); std::this_thread::sleep_for(1ms);
     }
+}
+void RespondToInputRequest(RoomSessionWindow& host, uint8_t capability, bool allow=true) {
+    QPushButton* control=nullptr;
+    Wait([&] {
+        for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))if(button->property("capability").toUInt()==capability)
+            control=button;
+        return control && control->isEnabled() && control->property("pendingRequest").toBool();
+    });
+    Check(!host.findChild<QPushButton*>("acceptPeerRequest") && !host.findChild<QPushButton*>("denyPeerRequest"));
+    control->click();
+    auto* menu=control->findChild<QMenu*>("PeerRequestMenu");Check(menu && menu->isVisible());
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        QDir().mkpath(output);
+        Check(host.grab().save(QDir(output).filePath(QString("host-request-%1.png").arg(capability))));
+        Check(menu->grab().save(QDir(output).filePath(QString("host-request-menu-%1.png").arg(capability))));
+    }
+    auto* action=menu->findChild<QAction*>(allow?"allowRequestedControl":"denyRequestedControl");Check(action && action->isEnabled());
+    Check(action->text()==QString("%1 %2").arg(allow?"Allow":"Deny",capability==screenshare::input::Mouse?"mouse":capability==screenshare::input::Keyboard?"keyboard":"controller"));
+    action->trigger();menu->close();
+}
+void DetailsSnapshotScenario() {
+    SessionDetailsWidget details(true);
+    RoomStatus status;status.phase=RoomPhase::Active;
+    status.members={{"host","Host",true},{"first","Same name",false},{"second","Same name",false}};
+    PeerStreamStatus first;first.peerId="first";first.recovery.state=PeerLifecycleState::Connected;
+    first.observedRevision=1;first.width=640;first.height=360;first.transportSendBps=1000000;
+    first.sender.rttMs=0;first.sender.encodedFps=30;first.sender.encoder=CodecImplementation::MfH264Software;
+    first.sender.targetVideoBps=12000000;
+    first.appliedRevision=1;first.appliedVideoBitrateBps=12000000;
+    ReceiverVideoObservation decoded;decoded.width=320;decoded.height=180;decoded.fpsMilli=17000;first.receiver.observation=decoded;
+    PeerStreamStatus second;second.peerId="second";second.recovery.state=PeerLifecycleState::Connecting;
+    status.stream.peers={first,second};details.Update(status);
+    auto metric=[&](const char* name){return details.findChild<QLabel*>(name)->text();};
+    auto* viewers=details.findChild<QComboBox*>("detailsViewer");
+    Check(viewers->count()==2 && viewers->itemText(0)!=viewers->itemText(1));
+    Check(metric("detailsRtt")=="0 ms" && metric("detailsTraffic")=="1.00 Mbps");
+    Check(metric("detailsDecodedSize")=="320 × 180" && metric("detailsDecodedFps")=="17.0 FPS");
+    PeerDiagnosticsWidget technical;technical.Update(status);
+    Check(technical.findChild<QTableWidget*>("peerDiagnostics")->item(0,0)->toolTip().contains("Encoder target: 12.00 Mbps"));
+    status.stream.capture.state=HostMediaState::Minimized;details.Update(status);
+    Check(metric("detailsVideoState")=="Shared window minimized" && details.findChild<QLabel*>("detailsNotice")->text().contains("Restore"));
+    status.stream.capture.state=HostMediaState::Running;
+    details.SelectPeer("second");Check(metric("detailsTraffic")=="Not available");
+    std::swap(status.members[1],status.members[2]);status.members[1].nickname="Long <viewer> name & details remain plain text";
+    details.Update(status);Check(details.SelectedPeer()=="second");
+    details.SelectPeer("first");status.stream.peers[0].transportSampleStale=true;status.stream.peers[0].receiver.stale=true;details.Update(status);
+    Check(metric("detailsRtt")=="Stale" && metric("detailsTraffic")=="Stale" && metric("detailsDecodedSize")=="Stale");
+    status.members.resize(1);status.stream.peers.clear();details.Update(status);
+    Check(!viewers->isEnabled() && metric("detailsConnectionState")=="Waiting for viewers");
+    SessionDetailsWidget viewer(false);status.playback.selected.muted=true;status.playback.selected.volume=42;
+    viewer.Update(status);viewer.SetVideo({640,360},17);
+    Check(viewer.findChild<QLabel*>("detailsAudioState")->text()=="Muted");
+    Check(viewer.findChild<QLabel*>("detailsAudioSource")->text()=="42%");
+    Check(viewer.findChild<QLabel*>("detailsDecodedSize")->text()=="640 × 360");
+    status.phase=RoomPhase::Stopped;viewer.Update(status);
+    Check(viewer.findChild<QLabel*>("detailsConnectionState")->text()=="Stopped");
+    Check(viewer.findChild<QLabel*>("detailsDecodedSize")->text()=="Not available");
 }
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
 // Inject typed loss after actual GPU work, then let the production worker tear
@@ -1087,8 +1147,23 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
     }
     auto* viewerConsent = viewer.findChild<QCheckBox*>("controllerConsent");
     auto* hostConsent = host.findChild<QCheckBox*>("controllerConsent");
-    auto* request = viewer.findChild<QPushButton*>("controllerAction");
+    auto* request = viewer.findChild<QToolButton*>("selectControllerInput");
     auto* grant = host.findChild<QPushButton*>("controllerAction");
+    auto* selectController = viewer.findChild<QToolButton*>("selectControllerInput");
+    Check(selectController && !selectController->isChecked() && !viewer.findChild<QPushButton*>("controllerAction"));
+    Check(viewer.findChild<QComboBox*>("inputCapabilities")->currentData().toUInt() == 0);
+    Check(!viewer.findChild<QToolButton*>("selectMouseInput")->isChecked() && !viewer.findChild<QToolButton*>("selectKeyboardInput")->isChecked());
+    viewer.activateWindow();Wait([&]{return QApplication::activeWindow()==&viewer;});
+    auto* mouseChoice=viewer.findChild<QToolButton*>("selectMouseInput");
+    auto* keyboardChoice=viewer.findChild<QToolButton*>("selectKeyboardInput");
+    mouseChoice->setFocus(Qt::MouseFocusReason);
+    QKeyEvent navigate(QEvent::KeyPress,Qt::Key_Tab,Qt::NoModifier);QApplication::sendEvent(mouseChoice,&navigate);
+    Check(QApplication::focusWidget()==keyboardChoice && keyboardChoice->property("keyboardFocus").toBool());
+    Check(!mouseChoice->isChecked() && !keyboardChoice->isChecked());
+    keyboardChoice->setFocus(Qt::MouseFocusReason);
+    // A mouse focus change clears keyboard-only indication without selecting.
+    mouseChoice->setFocus(Qt::MouseFocusReason);
+    Check(!keyboardChoice->property("keyboardFocus").toBool() && !mouseChoice->property("keyboardFocus").toBool());
     Wait([&] { return host.findChild<QComboBox*>("controllerPeer")->count() == 1; });
     Wait([&] { return viewer.findChild<QComboBox*>("controllerPeer")->count() == 1; });
     unsigned authorization = 0;
@@ -1116,10 +1191,15 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
         try { Wait([&] { return request->isEnabled(); }); }
         catch (...) { throw std::runtime_error("Controller request disabled: " + viewer.findChild<QLabel*>("controllerStatus")->text().toStdString() +
             "; consent=" + std::to_string(viewerConsent->isChecked()) + "; devices=" + std::to_string(viewer.findChild<QComboBox*>("controllerDevice")->count())); }
-        request->click();
-        Check(!grant->isEnabled()); hostConsent->setChecked(true);
-        Wait([&] { return grant->isEnabled(); }); grant->click();
+        if(authorization==1) {
+            request->setFocus();
+            QKeyEvent press(QEvent::KeyPress,Qt::Key_Space,Qt::NoModifier),release(QEvent::KeyRelease,Qt::Key_Space,Qt::NoModifier);
+            QApplication::sendEvent(request,&press);QApplication::sendEvent(request,&release);
+        } else request->click();
+        Wait([&]{for(const auto& state:host.session().input()->Read())if(state.requested==screenshare::input::Gamepad)return true;return false;});
+        RespondToInputRequest(host,screenshare::input::Gamepad);
         Check(!hostConsent->isChecked());
+        viewer.activateWindow();Wait([&]{return QApplication::activeWindow()==&viewer;});
         try { Wait([&] { return physicalReader ? sink->applied > before : sink->buttons == (availableDevices.empty()?0:buttons.load()); }); }
         catch (...) {
             for (const auto& line : transitions) std::cerr << line << '\n';
@@ -1146,7 +1226,7 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
         host.revokeControl();Wait([&]{return !viewerConsent->isChecked();});
         availableDevices.clear();Wait([&]{return controllerChoice->count()==0;});
         authorize(); // A grant can be accepted before hardware is connected.
-        Wait([&]{return viewer.findChild<QLabel*>("permissionController")->property("granted").toBool();});
+        Wait([&]{return viewer.findChild<QToolButton*>("selectControllerInput")->property("granted").toBool();});
         availableDevices=devices;Wait([&]{return controllerChoice->count()==1 && sink->buttons==buttons.load();});
     }
     // Exercise complete permission/poller lifetimes without refreshing the
@@ -1180,7 +1260,7 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
     Check(sink->released >= 3 && sink->applied >= 4 && host.session().status().activePeers == 1);
     plugged = true; sink->fail = true;
     viewerConsent->setChecked(true); Wait([&] { return request->isEnabled(); }); request->click();
-    hostConsent->setChecked(true); Wait([&] { return grant->isEnabled(); }); grant->click();
+    RespondToInputRequest(host,screenshare::input::Gamepad);
     Wait([&] { return !viewerConsent->isChecked() && host.findChild<QLabel*>("controllerStatus")->text().contains("unavailable"); });
     Check(host.session().status().activePeers == 1 && !sink->buttons);
     viewer.session().stop(); host.session().stop();
@@ -1222,26 +1302,89 @@ void DesktopInputScenario(const std::string& origin) {
     constexpr uint8_t caps=screenshare::input::Mouse|screenshare::input::Keyboard;
     Check(original.top>0); // Encoded padding, in addition to widget letterboxing.
 #endif
-    viewerCaps->setCurrentIndex(viewerCaps->findData(caps));hostCaps->setCurrentIndex(hostCaps->findData(caps));
+    Check(!viewer.findChild<QPushButton*>("controllerAction"));
+    hostCaps->setCurrentIndex(hostCaps->findData(caps));
     auto authorize=[&] {
         Wait([&]{return viewer.findChild<QComboBox*>("controllerPeer")->count()==1 && host.findChild<QComboBox*>("controllerPeer")->count()==1;});
-        auto* request=viewer.findChild<QPushButton*>("controllerAction");Wait([&]{return request->isEnabled();});
         // Clicking the sidebar after watching video must not queue a revoke
         // for the fresh request when no desktop control was active.
         QFocusEvent videoBlur(QEvent::FocusOut,Qt::MouseFocusReason);QApplication::sendEvent(video,&videoBlur);
-        request->click();
+        for(const auto& entry:{std::pair{screenshare::input::Mouse,"selectMouseInput"},std::pair{screenshare::input::Keyboard,"selectKeyboardInput"}})if(caps&entry.first) {
+            auto* request=viewer.findChild<QToolButton*>(entry.second);Wait([&]{return request->isEnabled();});
+            if(entry.first==screenshare::input::Mouse) {
+                viewer.activateWindow();Wait([&]{return QApplication::activeWindow()==&viewer;});
+                request->setFocus(Qt::MouseFocusReason);
+            }
+            request->click();
+            Check(request->text().isEmpty() && request->toolButtonStyle()==Qt::ToolButtonIconOnly);
+            Check(request->property("controlState").toString()=="requested");
+            if(entry.first==screenshare::input::Mouse) {
+                Check(QApplication::focusWidget()==request);
+                Check(!viewer.findChild<QToolButton*>("selectKeyboardInput")->isChecked());
+                request->click(); // Pending buttons stay focusable; no duplicate/toggle.
+                Check(request->isChecked() && QApplication::focusWidget()==request);
+                Check(!request->property("keyboardFocus").toBool());
+            }
+        }
         QCoreApplication::processEvents();
         Wait([&]{for(const auto& state:host.session().input()->Read())if(state.requested==caps)return true;return false;});
-        auto* accept=host.findChild<QPushButton*>("acceptPeerRequest");
-        Wait([&]{return accept && accept->isVisible() && accept->isEnabled();});
-        Check(host.findChild<QLabel*>("PeerControlState")->text().contains("mouse"));accept->click();
+        Wait([&]{return host.findChild<QLabel*>("PeerControlState")->text().contains("mouse");});
+        RespondToInputRequest(host,screenshare::input::Mouse);
+        Wait([&]{return viewer.session().input()->Read().front().granted==screenshare::input::Mouse;});
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+        Check(host.session().input()->Read().front().requested==screenshare::input::Keyboard);
+        Check(viewer.session().input()->Read().front().requested==screenshare::input::Keyboard);
+        RespondToInputRequest(host,screenshare::input::Keyboard);
+#endif
         Wait([&]{for(const auto& state:viewer.session().input()->Read())if(state.granted==caps)return true;return false;});
+        viewer.activateWindow();Wait([&]{return QApplication::activeWindow()==&viewer;});
         // Drive the real preview event route after the panel's grant observation.
         Wait([&]{return video->hasMouseTracking();});
-        Wait([&]{return viewer.findChild<QLabel*>("permissionMouse")->property("granted").toBool();});
+        Wait([&]{return viewer.findChild<QToolButton*>("selectMouseInput")->property("granted").toBool();});
         Check(!viewer.findChild<QLabel*>("controllerStatus")->isVisible());
     };
     auto move=[&](QPointF point) {QMouseEvent event(QEvent::MouseMove,point,point,Qt::NoButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(video,&event);};
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    // Adding and denying mouse requests must preserve the active keyboard grant.
+    auto* requestKeyboard=viewer.findChild<QToolButton*>("selectKeyboardInput");
+    auto* requestMouse=viewer.findChild<QToolButton*>("selectMouseInput");
+    auto* requestController=viewer.findChild<QToolButton*>("selectControllerInput");
+    Wait([&]{return requestKeyboard->isEnabled();});requestKeyboard->click();
+    Wait([&]{return host.session().input()->Read().front().requested==screenshare::input::Keyboard;});
+    RespondToInputRequest(host,screenshare::input::Keyboard);
+    Wait([&]{return requestKeyboard->property("granted").toBool();});
+    const auto keyboardPermission=viewer.session().input()->Read().front().permission;
+    Wait([&]{return requestMouse->isEnabled();});requestMouse->click();
+    Wait([&]{return host.session().input()->Read().front().requested==screenshare::input::Mouse;});
+    Check(host.session().input()->Read().front().granted==screenshare::input::Keyboard);
+    Check(viewer.session().input()->Read().front().granted==screenshare::input::Keyboard);
+    Check(viewer.session().input()->Read().front().permission==keyboardPermission);
+    Check(requestKeyboard->property("granted").toBool());
+    Wait([&]{return requestMouse->property("controlState").toString()=="requested";});
+    Check(requestKeyboard->property("controlState").toString()=="granted");
+    requestController->click();
+    Wait([&]{return host.session().input()->Read().front().requested==(screenshare::input::Mouse|screenshare::input::Gamepad);});
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        QDir().mkpath(output);Check(viewer.grab().save(QDir(output).filePath("viewer-input-mixed.png")));
+    }
+    RespondToInputRequest(host,screenshare::input::Mouse,false);
+    Wait([&]{return viewer.session().input()->Read().front().requested==screenshare::input::Gamepad;});
+    Wait([&]{return requestMouse->property("controlState").toString()=="off" && requestController->property("controlState").toString()=="requested";});
+    Check(viewer.session().input()->Read().front().granted==screenshare::input::Keyboard);
+    Check(viewer.session().input()->Read().front().permission==keyboardPermission);
+    RespondToInputRequest(host,screenshare::input::Gamepad,false);
+    Wait([&]{return !viewer.session().input()->Read().front().requested;});
+    requestMouse->click();
+    Wait([&]{return host.session().input()->Read().front().requested==screenshare::input::Mouse;});
+    RespondToInputRequest(host,screenshare::input::Mouse);
+    Wait([&]{return viewer.session().input()->Read().front().granted==caps;});
+    viewer.activateWindow();Wait([&]{return QApplication::activeWindow()==&viewer;});
+    auto* releaseControl=viewer.findChild<QPushButton*>("revokeController");
+    releaseControl->setFocus(Qt::MouseFocusReason);releaseControl->click();
+    Wait([&]{return !viewer.session().input()->Read().front().granted && !viewer.session().input()->Read().front().revokePending;});
+    Wait([&]{return requestMouse->property("controlState").toString()=="off" && requestKeyboard->property("controlState").toString()=="off";});
+    Check(!requestMouse->isChecked() && !requestKeyboard->isChecked() && !requestMouse->property("keyboardFocus").toBool());
+#endif
     authorize();move(QPointF(video->width()/2.0,video->height()/2.0));
     Wait([&]{return evidence->applied>0;});Check(std::abs(evidence->x-.5f)<.02f && std::abs(evidence->y-.5f)<.02f);
     const auto before=evidence->applied.load();move({0,0});
@@ -1302,8 +1445,9 @@ void DesktopInputScenario(const std::string& origin) {
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
     Check(host.session().input()->Grant(viewer.session().status().peerId,screenshare::input::Keyboard));
     Wait([&]{for(const auto& state:viewer.session().input()->Read())if(state.granted==screenshare::input::Keyboard)return true;return false;});
-    QCoreApplication::processEvents();
+    Wait([&]{return viewer.findChild<QToolButton*>("selectKeyboardInput")->property("granted").toBool();});
     auto* surface=video->findChild<QWidget*>("D3DVideoSurface");Check(surface);
+    viewer.activateWindow();Wait([&]{return QApplication::activeWindow()==&viewer && surface->focusPolicy()==Qt::StrongFocus;});
     QMouseEvent keyboardFocus(QEvent::MouseButtonPress,center,center,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(surface,&keyboardFocus);
     Check(QApplication::focusWidget()==surface);
     const auto keyboardBefore=evidence->keys.load();
@@ -1386,16 +1530,28 @@ int main(int argc, char** argv) {
         config.media.preferences.width = 320; config.media.preferences.height = 180; config.media.preferences.fps = 30;
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
+        DetailsSnapshotScenario();
+        auto* reveal=host.findChild<QPushButton*>("showRoomReport");
+        Check(reveal && reveal->isEnabled() && reveal->text()=="Open log folder");
+        Check(reveal->property("logFolder").toString()==reports.path() && !QFileInfo::exists(config.reportFile));
         Wait([&] { return host.session().status().phase == RoomPhase::Active; });
         Check(!host.session().start(config));
         host.findChild<QPushButton*>("saveRoomReport")->click();
         { QFile saved(config.reportFile); Check(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll();
           Check(!bytes.contains("UiHost") && !bytes.contains("UI media"));
           Check(host.findChild<QLabel*>("roomReportResult")->text().startsWith("Saved diagnostic report:"));
-          auto* reveal=host.findChild<QPushButton*>("showRoomReport");Check(reveal&&reveal->isEnabled()&&QFileInfo::exists(reveal->property("reportPath").toString())); }
+          Check(reveal->isEnabled()&&QFileInfo::exists(reveal->property("reportPath").toString())); }
+        Check(QFile::remove(config.reportFile) && reveal->isEnabled());
+        // A failed save must not gate access to the log directory.
+        Check(QDir().mkpath(config.reportFile));host.findChild<QPushButton*>("saveRoomReport")->click();
+        Check(host.findChild<QLabel*>("roomReportResult")->text().startsWith("Could not save") && reveal->isEnabled());
+        Check(QDir().rmdir(config.reportFile));
+        host.findChild<QPushButton*>("saveRoomReport")->click();
+        Check(!host.findChild<QLabel*>("roomReportResult")->property("reportError").toBool() && QFileInfo::exists(config.reportFile));
         config.room.host = false; config.room.roomId = host.session().status().roomId; config.room.nickname = "UiHost";
         auto viewerAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow viewer(config, Factory(viewerAudio), true); viewer.show();
+        Check(viewer.findChild<QPushButton*>("showRoomReport")->isEnabled());
         unsigned original = 0, changed = 0;
         auto present = viewer.session().frameReady;
         viewer.session().frameReady = [&](auto frame) {
@@ -1439,13 +1595,38 @@ int main(int argc, char** argv) {
         Wait([&]{return !host.session().capturePending();});
         if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
             QDir().mkpath(output);
-            for(const auto size:{QSize(740,600),QSize(1000,820),QSize(1200,850)}) {
+            for(const auto size:{QSize(740,600),QSize(860,500),QSize(1000,820),QSize(1200,850)}) {
                 host.resize(size);viewer.resize(size);QCoreApplication::processEvents();
                 Check(host.grab().save(QDir(output).filePath(QString("host-%1.png").arg(size.width()))));
                 Check(viewer.grab().save(QDir(output).filePath(QString("viewer-%1.png").arg(size.width()))));
                 host.findChild<QPushButton*>("openSessionSettings")->click();Wait([&]{auto* overlay=host.findChild<QWidget*>("SessionSettingsOverlay");return overlay->findChild<QWidget*>("SessionSettings")->x()==overlay->width()-qMin(520,overlay->width());});
                 Check(host.grab().save(QDir(output).filePath(QString("host-settings-%1.png").arg(size.width()))));
                 host.findChild<QPushButton*>("sessionSettingsBack")->click();Wait([&]{return !host.findChild<QWidget*>("SessionSettingsOverlay")->isVisible();});
+                for(auto* screen:{&host,&viewer}) {
+                    screen->activateWindow();Wait([&]{return QApplication::activeWindow()==screen;});
+                    auto* open=screen->findChild<QPushButton*>("sessionDetails");open->setFocus(Qt::MouseFocusReason);open->click();
+                    auto* popup=screen->findChild<QDialog*>("SessionDetailsPopup");Check(popup && popup->isVisible());
+                    Check(screen->rect().contains(popup->geometry()));
+                    auto* tabs=popup->findChild<QTabWidget*>("SessionDetailsTabs");Check(tabs && tabs->currentIndex()==0);
+                    QCoreApplication::processEvents();
+                    auto* overview=popup->findChild<QScrollArea*>("SessionDetailsScroll");
+                    Check(overview->horizontalScrollBar()->maximum()==0);
+                    const auto role=screen==&host?"host":"viewer";
+                    Check(screen->grab().save(QDir(output).filePath(QString("%1-details-%2.png").arg(role).arg(size.width()))));
+                    auto* folder=popup->findChild<QPushButton*>("showRoomReport");Check(folder && folder->isVisible() && folder->isEnabled());
+                    const auto position=folder->mapTo(popup,QPoint());
+                    overview->verticalScrollBar()->setValue(overview->verticalScrollBar()->maximum());QCoreApplication::processEvents();
+                    Check(folder->mapTo(popup,QPoint())==position);
+                    if(screen==&host)Check(popup->findChild<QComboBox*>("detailsViewer")->isVisible());
+                    Check(screen->grab().save(QDir(output).filePath(QString("%1-details-bottom-%2.png").arg(role).arg(size.width()))));
+                    overview->verticalScrollBar()->setValue(0);
+                    for(int step=0;step<12;++step) {
+                        QKeyEvent next(QEvent::KeyPress,Qt::Key_Tab,Qt::NoModifier);QApplication::sendEvent(QApplication::focusWidget(),&next);
+                        Check(popup->isAncestorOf(QApplication::focusWidget()));
+                    }
+                    QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier);QApplication::sendEvent(popup,&escape);
+                    Check(!popup->isVisible() && QApplication::focusWidget()==open);
+                }
             }
         }
         Check(!viewer.findChild<QCheckBox*>("controllerConsent")->isVisible());
@@ -1489,6 +1670,10 @@ int main(int argc, char** argv) {
         auto* sessionDetails=host.findChild<QDialog*>("SessionDetailsPopup");Check(sessionDetails&&sessionDetails->isVisible()&&!sessionDetails->isWindow());
         Check(!sessionDetails->findChild<QLineEdit*>("roomLink"));
         auto* reportTable=host.findChild<QTableWidget*>("peerDiagnostics");
+        auto* detailTabs=sessionDetails->findChild<QTabWidget*>("SessionDetailsTabs");
+        Check(detailTabs->currentIndex()==0 && !reportTable->isVisible());
+        Check(sessionDetails->findChild<QLabel*>("detailsConnectionState")->text()=="Connected");
+        Check(sessionDetails->findChild<QComboBox*>("detailsViewer")->currentData().toString()==QString::fromStdString(viewer.session().status().peerId));
         for(int column=0;column<reportTable->columnCount();++column)
             Check(reportTable->columnWidth(column)>reportTable->fontMetrics().horizontalAdvance(reportTable->horizontalHeaderItem(column)->text()));
         Check(host.findChild<QTabWidget*>("SessionSettingsTabs")->count()==2);
@@ -1589,6 +1774,8 @@ int main(int argc, char** argv) {
         diagnostics->selectRow(0);
         Check(host.findChild<QLabel*>("peerDiagnosticsDetails")->text().contains("Physical display and end-to-end latency: unknown"));
         const auto diagnosticPeer = diagnostics->item(0, 0)->data(Qt::UserRole);
+        host.findChild<QPushButton*>("sessionDetails")->click();detailTabs->setCurrentIndex(1);
+        Check(host.findChild<QPushButton*>("openPeerDetails")->isVisible());
         host.findChild<QPushButton*>("openPeerDetails")->click();
         auto* popup = host.findChild<QDialog*>("peerDetailsDialog");
         auto* popupText = popup->findChild<QPlainTextEdit*>("peerDetailsText");

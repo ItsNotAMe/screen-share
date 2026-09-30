@@ -195,12 +195,20 @@ export class V2Room {
       if (message.type === 'state.resync') { this.snapshot(ws, state, member); return; }
       if (signal) {
         const target = state.members.find(peer => peer.peerId === message.toPeerId && peer.attached);
-        if (!target || !this.sockets(target).length) { ws.close(1008, 'target_unavailable'); return; }
+        // A peer can leave while SDP/ICE is already in flight. Losing that
+        // destination must not disconnect the sender (especially the host,
+        // whose socket serves every viewer in the room).
+        if (!target || !this.sockets(target).length) return;
         const viewer = member.role === 'viewer' ? member : target;
         const key = 'signal:' + viewer.peerId;
         const current = await this.ctx.storage.get<SignalSession>(key);
         const decision = authorizeSignal(message, member, target, current, await tokenHash(message.connectionId as string), Date.now());
-        if (!decision.ok) { ws.close(1008, decision.reason); return; }
+        if (!decision.ok) {
+          // Reattachment/recovery can retire a connection before its last
+          // candidates arrive. Discard them without disturbing live peers.
+          if (decision.reason !== 'stale_connection') ws.close(1008, decision.reason);
+          return;
+        }
         // Persist only identity/counters/digests, never SDP or ICE contents.
         // Direct delivery has no retry queue and does not change room revision.
         await this.ctx.storage.put(key, decision.session);

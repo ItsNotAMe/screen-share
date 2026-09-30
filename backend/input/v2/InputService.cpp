@@ -72,7 +72,7 @@ struct Service::Impl {
     void Revoke(Peer& p, Reason reason, bool notify = true) {
         work=true; wake.notify_one();
         const bool had=p.status.granted!=0;
-        const bool releasing = !host && (had || p.status.revokePending) && notify && p.status.ready;
+        const bool releasing = !host && (had || p.status.requested || p.status.revokePending) && notify && p.status.ready;
         Clear(p); p.grant.reset(); p.status.granted=0; p.status.requested=0; p.status.grantPending=false;
         p.status.reason=reason; p.padSlot=-1;
         p.release=p.release || had;
@@ -146,10 +146,13 @@ struct Service::Impl {
                     if (p.status.permission != permission || closed) continue;
                     Revoke(p,busy?Reason::Ownership:Reason::Backend); continue;
                 }
-                Clear(p); p.status.granted=caps; p.status.requested=0; p.status.grantPending=false;
+                uint8_t denied=0;
+                for(const auto& queued:p.outgoing)if(queued.event.kind==Kind::RequestDenied)denied|=queued.event.capabilities;
+                Clear(p); p.status.granted=caps; p.status.requested&=~caps; p.status.grantPending=false;
                 p.status.permission=++nextPermission; p.status.reason=Reason::None;
                 p.padSlot=slot; p.lastInput=Clock::now();
                 Event e; e.kind=Kind::Permission; e.capabilities=caps; Queue(p,e);
+                if(denied) {e.kind=Kind::RequestDenied;e.capabilities=denied;Queue(p,e);}
             }
             if(host && p.status.granted) {
                 const auto permission = p.status.permission;
@@ -228,12 +231,29 @@ bool Service::Request(const std::string& id,uint8_t caps) {
     std::lock_guard lock(impl_->mutex); auto it=impl_->peers.find(id);
     if(impl_->closed || impl_->host || it==impl_->peers.end() || !it->second.status.ready || it->second.status.revokePending || !caps || (caps&~7))return false;
     auto& p=it->second; if(!impl_->Capacity(p))return false;
-    Event e; e.kind=Kind::Request; e.capabilities=caps; impl_->Queue(p,e); return true;
+    const auto added=uint8_t(caps & ~(p.status.granted | p.status.requested));
+    if (!added) return true;
+    p.status.requested |= added;
+    Event e; e.kind=Kind::Request; e.capabilities=added; impl_->Queue(p,e); return true;
 }
 bool Service::Grant(const std::string& id,uint8_t caps) {
     std::lock_guard lock(impl_->mutex); auto it=impl_->peers.find(id);
     if(impl_->closed || !impl_->host || !impl_->sink || it==impl_->peers.end() || !it->second.status.ready || !caps || (caps&~impl_->allowed))return false;
-    auto& p=it->second; impl_->Revoke(p,Reason::Revoked,false); p.grant=caps; p.status.grantPending=true; return true;
+    auto& p=it->second; const auto requested=uint8_t(p.status.requested & ~caps);
+    std::deque<Message> denied;
+    for(const auto& queued:p.outgoing)if(queued.event.kind==Kind::RequestDenied)denied.push_back(queued);
+    impl_->Revoke(p,Reason::Revoked,false); p.outgoing=std::move(denied);
+    p.status.requested=requested; p.grant=caps; p.status.grantPending=true; return true;
+}
+void Service::Deny(const std::string& id, uint8_t caps) {
+    std::lock_guard lock(impl_->mutex); auto it=impl_->peers.find(id);
+    if(impl_->closed || !impl_->host || it==impl_->peers.end() || !it->second.status.ready || it->second.status.grantPending || !caps || (caps&~7))return;
+    auto& p=it->second;
+    const auto denied=uint8_t(p.status.requested & caps);
+    if(!denied || !impl_->Capacity(p))return;
+    p.status.requested &= ~denied;
+    // Dismiss only these requests without releasing held input or ownership.
+    Event e; e.kind=Kind::RequestDenied; e.capabilities=denied; impl_->Queue(p,e);
 }
 void Service::Revoke(const std::string& id) {
     std::lock_guard lock(impl_->mutex);
@@ -270,20 +290,30 @@ void Service::Receive(const std::string& id,bool reliable,std::span<const uint8_
     auto& seen=reliable?p.controlSeen:p.stateSeen[StateSlot(kind)];
     if(m->sequence<=seen) {++p.status.rejected;return;}
     if(!impl_->host) {
+        if(kind==Kind::RequestDenied && m->permission==p.status.permission) {
+            seen=m->sequence; p.status.requested&=~m->event.capabilities;
+            if(!p.status.granted && !p.status.requested)p.status.reason=Reason::Revoked;
+            return;
+        }
         if(kind!=Kind::Permission || m->permission<=p.status.permission) {++p.status.rejected;return;}
-        std::optional<Event> request;
-        for(const auto& queued:p.outgoing)if(queued.event.kind==Kind::Request)request=queued.event;
+        uint8_t queuedRequested=0;
+        for(const auto& queued:p.outgoing)if(queued.event.kind==Kind::Request)queuedRequested|=queued.event.capabilities;
+        const auto requested=uint8_t(m->event.capabilities ? p.status.requested & ~m->event.capabilities :
+            !p.status.permission ? p.status.requested : 0);
         seen=m->sequence; impl_->Clear(p); p.status.permission=m->permission; p.status.granted=m->event.capabilities;
+        p.status.requested=requested;
         p.status.revokePending=false;
-        if(request)impl_->Queue(p,*request);
+        if(const auto unsent=uint8_t(queuedRequested&requested);unsent) {
+            Event request;request.kind=Kind::Request;request.capabilities=unsent;impl_->Queue(p,request);
+        }
         p.status.reason=p.status.granted?Reason::None:Reason::Revoked; p.lastSend={};
         impl_->work=true; impl_->wake.notify_one(); return;
     }
-    if(kind==Kind::Permission) {++p.status.rejected;return;}
-    if(kind==Kind::Request) { seen=m->sequence; p.status.requested=m->event.capabilities; return; }
+    if(kind==Kind::Permission || kind==Kind::RequestDenied) {++p.status.rejected;return;}
+    if(kind==Kind::Request) { seen=m->sequence; p.status.requested|=m->event.capabilities & ~(p.status.granted | p.grant.value_or(0)); return; }
+    if(kind==Kind::Release && m->permission==p.status.permission) {seen=m->sequence;impl_->Revoke(p,Reason::Revoked);return;}
     if(!p.status.granted || m->permission!=p.status.permission) {++p.status.rejected;return;}
     seen=m->sequence;
-    if(kind==Kind::Release) {impl_->Revoke(p,Reason::Revoked);return;}
     Impl::Pending pending{std::move(*m),Clock::now()};
     if(reliable) {if(impl_->Capacity(p))p.incoming.push_back(std::move(pending));}
     else {
