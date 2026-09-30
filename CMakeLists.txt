@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Prepare the pinned toolchain before project() checks compiler availability.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
 
-project(ScreenShareNative VERSION 1.0.2 LANGUAGES CXX)
+project(ScreenShareNative VERSION 1.0.3 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
 set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
@@ -318,6 +318,10 @@ if(MSVC)
                     "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                     "$<TARGET_FILE:RoomInputTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-input-evidence" media)
                 set_tests_properties(room-v2-input-media PROPERTIES TIMEOUT 90)
+                add_test(NAME room-v2-socket-reconnect COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                    "$<TARGET_FILE:RoomInputTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-reconnect-evidence" media socket-reconnect)
+                set_tests_properties(room-v2-socket-reconnect PROPERTIES TIMEOUT 90)
             endif()
             add_test(NAME room-v2-native-worker COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"

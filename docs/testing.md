@@ -20,6 +20,13 @@ grants/held input, requests arriving during grant application and cancellation.
 The native room UI scenarios check immediate icon requests, independent host menus,
 distinct pending/granted states and preserving keyboard when requesting mouse.
 
+`room-v2-socket-reconnect` delays the server's socket-close notification and
+forces two viewer reconnects plus a host reconnect using the real native room
+runtime and local Worker. It checks replacement peer generations, fresh viewer
+telemetry, restored control requests/grants/input delivery and continued media.
+Viewer reconnects preserve the other viewers' peers. Capture, audio and input
+are synthetic; the fault route exists only in the generated loopback fixture.
+
 `room-peer-isolation` uses real native peers with synthetic video/audio. One
 viewer receives media while a second completes SDP but has no usable ICE path.
 It checks that the unconnected viewer never processes capture frames, the healthy
