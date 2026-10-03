@@ -326,7 +326,7 @@ void RemoteInputInjector::ReleasePressedMouseButtons()
 void RemoteInputInjector::RefreshTargetState()
 {
     if (HasTargetWindow() && !IsTargetWindowForeground()) {
-        ReleasePressedMouseButtons();
+        ReleaseAllInjectedInput();
     }
 }
 
@@ -426,10 +426,17 @@ bool RemoteInputInjector::InjectMouseScroll(int wheelDeltaX, int wheelDeltaY)
 
 bool RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool down)
 {
-    // Keyboard injection remains confined to a full-display share. Window
-    // mouse targeting is coordinate-scoped, but SendInput keyboard events go
-    // only to the foreground thread and cannot be constrained to a client rect.
-    if (!HasTargetBounds()) {
+    if (HasTargetWindow()) {
+        if (!IsTargetWindowForeground()) {
+            ReleaseAllInjectedInput();
+            return true; // Focus loss pauses input without revoking permission.
+        }
+        // A press discarded while unfocused must not produce an orphan release
+        // when the window becomes focused again.
+        if (!down && std::none_of(pressedKeys_.begin(), pressedKeys_.end(), [&](const PressedKey& key) {
+            return key.virtualKey == virtualKey && key.scancode == scancode;
+        })) return true;
+    } else if (!HasTargetBounds()) {
         return false;
     }
     INPUT input{};
@@ -453,6 +460,7 @@ bool RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool
     } else if (existing != pressedKeys_.end()) {
         pressedKeys_.erase(existing);
     }
+    RefreshTargetState();
     return true;
 }
 

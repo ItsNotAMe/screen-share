@@ -22,8 +22,9 @@ Controls expose separate capability choices and host grants; requests are option
 The viewer can release input explicitly. Grants
 use acknowledged state and preserve other capabilities. Losing viewer focus releases
 held input and pauses forwarding without withdrawing host permissions; returning to
-the viewer resumes input. Source changes still revoke control. Keyboard control is
-unavailable for window capture.
+the viewer resumes input. Source changes still revoke control. Window mouse and
+keyboard input also pauses while the shared window is not focused, releasing held
+input and retaining permissions until focus returns.
 Room settings opens on the right with Stream/Room tabs and a Close
 action. Stream presets and room policy changes apply automatically after a short
 debounce; errors remain visible. Resolution and bitrate use predefined choices.
@@ -185,7 +186,8 @@ feedback, accessible pressed state and tooltips such as "Grant mouse to Maya" /
 "Revoke mouse from Maya". Explain unavailable capabilities without hiding them.
 Requests can highlight the corresponding button and still support denial.
 Include release-all and the existing panic
-shortcut. Window-capture keyboard restrictions remain visible. Show per-peer RTT
+shortcut. Explain that window mouse and keyboard input pauses while the shared
+window is not focused. Show per-peer RTT
 and actual stream statistics in Details; RTT is not input-to-image latency.
 Source previews, video pause/resume and the thumbnail source picker are implemented.
 

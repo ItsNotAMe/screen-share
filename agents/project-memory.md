@@ -5,6 +5,19 @@
 
 # Project Memory
 
+## Version 1.0.4 window keyboard control — 2026-10-03
+
+Window sharing now supports keyboard grants through direct host clicks and
+request acceptance. Desktop input separates temporary focus loss from invalid
+capture identity/geometry: unfocused events are consumed without injection,
+periodic health polling releases held input and permissions remain active.
+Returning focus resumes new events without replaying discarded input. The Windows
+injector also checks focus immediately before keyboard injection and ignores
+unmatched window key releases. Source changes and invalid targets still revoke.
+Input unit tests, the mapped desktop UI scenario and the normal room UI suite
+passed with synthetic input. No physical two-PC keyboard qualification is claimed.
+Versioned release notes and updater notes describe this behavior.
+
 ## Version 1.0.3 release preparation — 2026-10-01
 
 Version 1.0.3 packages the room socket replacement fix and its regression coverage.

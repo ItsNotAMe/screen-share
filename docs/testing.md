@@ -19,6 +19,9 @@ Input service regressions cover accumulating requests, denial preserving existin
 grants/held input, requests arriving during grant application and cancellation.
 The native room UI scenarios check immediate icon requests, independent host menus,
 distinct pending/granted states and preserving keyboard when requesting mouse.
+Window keyboard regressions check direct grants and accepting requests. Desktop
+input tests check background input suppression, releasing held keys during idle
+health polling, retained ownership and resumption without replaying dropped input.
 
 `room-v2-socket-reconnect` delays the server's socket-close notification and
 forces two viewer reconnects plus a host reconnect using the real native room

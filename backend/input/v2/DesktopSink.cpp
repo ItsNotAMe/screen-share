@@ -14,7 +14,7 @@ bool DesktopSink::Grant(const std::string& peer,uint8_t caps,int slot) {
     if(!caps || (caps&~7) || owners_.contains(peer))return false;
     const auto target=target_->Read();std::unique_ptr<DesktopDevice> device;
     if(caps&(Mouse|Keyboard)) {
-        if(!target.generation || (target.target.window && (caps&Keyboard)))return false;
+        if(!target.generation)return false;
         for(const auto& [id,owner]:owners_)if(caps&owner.capabilities&(Mouse|Keyboard))return false;
         device=factory_(target.target,caps&3);
         if(!device || !device->Healthy())return false;
@@ -25,15 +25,24 @@ bool DesktopSink::Grant(const std::string& peer,uint8_t caps,int slot) {
 bool DesktopSink::Healthy(const std::string& peer) {
     const auto it=owners_.find(peer);if(it==owners_.end())return false;
     const auto& owner=it->second;
-    return (!(owner.capabilities&Gamepad) || pads_->Healthy(peer)) &&
+    const bool healthy=(!(owner.capabilities&Gamepad) || pads_->Healthy(peer)) &&
         (!owner.device || (target_->Read().generation==owner.generation && owner.device->Healthy()));
+    // The service polls health even without incoming events. Release held input
+    // on focus loss, but retain ownership so returning to the window resumes it.
+    if(healthy && owner.device && !owner.device->Focused())owner.device->ReleaseHeldInput();
+    return healthy;
 }
 bool DesktopSink::Apply(const std::string& peer,const Event& event) {
     const auto it=owners_.find(peer);if(it==owners_.end() || !Valid(event) || !Healthy(peer))return false;
     auto& owner=it->second;
     if(event.kind==Kind::Pad)return (owner.capabilities&Gamepad) && pads_->Apply(peer,event);
     const uint8_t required=event.kind==Kind::Key?Keyboard:Mouse;
-    return owner.device && (owner.capabilities&required) && event.sourceGeneration==owner.generation && owner.device->Apply(event);
+    if(!owner.device || !(owner.capabilities&required) || event.sourceGeneration!=owner.generation)return false;
+    if(!owner.device->Focused()) {
+        owner.device->ReleaseHeldInput();
+        return true; // Consume and discard; never replay input after focus returns.
+    }
+    return owner.device->Apply(event);
 }
 void DesktopSink::Release(const std::string& peer) noexcept {
     const auto it=owners_.find(peer);if(it==owners_.end()) {if(pads_)pads_->Release(peer);return;}
@@ -60,13 +69,15 @@ public:
         DWORD pid=0;GetWindowThreadProcessId(window,&pid);
         RECT rect{};
         return pid==target_.process && GetPropW(window,property_.c_str())==reinterpret_cast<HANDLE>(target_.source) && IsWindowVisible(window) && !IsIconic(window) &&
-            GetAncestor(GetForegroundWindow(),GA_ROOT)==GetAncestor(window,GA_ROOT) &&
             SUCCEEDED(DwmGetWindowAttribute(window,DWMWA_EXTENDED_FRAME_BOUNDS,&rect,sizeof(rect))) &&
             rect.left==target_.left && rect.top==target_.top && rect.right-rect.left==target_.width && rect.bottom-rect.top==target_.height;
     }
+    bool Focused() override {return !target_.window || injector_.IsTargetWindowForeground();}
+    void ReleaseHeldInput() noexcept override {injector_.ReleaseAllInjectedInput();}
     bool Apply(const Event& event) override {
         if(!Healthy())return false;
-        if(event.kind==Kind::Key)return (caps_&Keyboard) && !target_.window && injector_.InjectKey(event.key,event.scan,event.down);
+        if(!Focused()) {ReleaseHeldInput();return true;}
+        if(event.kind==Kind::Key)return (caps_&Keyboard) && injector_.InjectKey(event.key,event.scan,event.down);
         if(!(caps_&Mouse))return false;
         auto point=std::pair{event.x,event.y};
         if(target_.window) {

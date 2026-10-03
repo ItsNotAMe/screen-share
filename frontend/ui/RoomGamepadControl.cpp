@@ -45,7 +45,7 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
     peers_ = new QComboBox(this); peers_->setObjectName("controllerPeer"); layout->addWidget(peers_);
     capabilities_ = new QComboBox(this); capabilities_->setObjectName("inputCapabilities");
     capabilities_->addItem("Controller",input::Gamepad); capabilities_->addItem("Mouse",input::Mouse);
-    capabilities_->addItem("Keyboard (display sharing only)",input::Keyboard); capabilities_->addItem("Mouse and keyboard (display sharing only)",input::Mouse|input::Keyboard);
+    capabilities_->addItem("Keyboard",input::Keyboard); capabilities_->addItem("Mouse and keyboard",input::Mouse|input::Keyboard);
     layout->addWidget(capabilities_);
     devices_ = new QComboBox(this); devices_->setObjectName("controllerDevice");
     devices_->setVisible(!host); layout->addWidget(devices_);
@@ -103,7 +103,7 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
         if (!port || peer.empty() || (host_ && !consent_->isChecked())) return;
         const auto caps=uint8_t(capabilities_->currentData().toUInt());
         if ((prepareGrant && !prepareGrant(caps)) || !port->Grant(peer, caps)) {
-            actionError_="Selected input is unavailable. Keyboard requires display sharing; restore the shared window before granting mouse control.";
+            actionError_="Selected input is unavailable. Restore the shared window or check the controller driver and slots.";
         }
         consent_->setChecked(false); // Consent applies only to this action/peer.
         Tick();
@@ -296,9 +296,6 @@ void RoomGamepadControl::Tick() {
                                 const auto control=cap==input::Mouse?"mouse":cap==input::Keyboard?"keyboard":"controller";
                                 auto* allow=menu->addAction(QString("Allow %1").arg(control));allow->setObjectName("allowRequestedControl");
                                 auto* deny=menu->addAction(QString("Deny %1").arg(control));deny->setObjectName("denyRequestedControl");
-                                if(cap==input::Keyboard&&room_().capture.selected.kind==media::CaptureKind::Window) {
-                                    allow->setEnabled(false);allow->setToolTip("Keyboard control requires display sharing.");
-                                }
                                 connect(allow,&QAction::triggered,this,[this,id,cap]{RespondToRequest(id,cap,true);});
                                 connect(deny,&QAction::triggered,this,[this,id,cap]{RespondToRequest(id,cap,false);});
                                 connect(menu,&QMenu::aboutToHide,menu,&QObject::deleteLater);
@@ -337,12 +334,13 @@ void RoomGamepadControl::Tick() {
                     button->setProperty("pendingRequest",waiting);button->setProperty("requestPulse",false);
                     button->style()->unpolish(button);button->style()->polish(button);button->update();
                 }
-                const bool supported=!(cap==input::Keyboard&&room.capture.selected.kind==media::CaptureKind::Window);
-                button->setChecked(on);button->setEnabled(ready&&(supported||waiting)&&!state->grantPending&&!state->revokePending);
+                button->setChecked(on);button->setEnabled(ready&&!state->grantPending&&!state->revokePending);
                 const auto control=cap==input::Mouse?"mouse":cap==input::Keyboard?"keyboard":"controller";
                 const auto label=waiting?QString("%1 requested %2. Click to allow or deny %2.").arg(name,control):
                     QString("%1 %2 %3 %4").arg(on?"Revoke":"Grant",control,on?"from":"to",name);
-                button->setToolTip((supported||waiting)?label:"Keyboard control requires display sharing");button->setAccessibleName(label);
+                const auto focusHint=room.capture.selected.kind==media::CaptureKind::Window && (cap&(input::Mouse|input::Keyboard))?
+                    QString(" Input pauses while the shared window is not focused."):QString{};
+                button->setToolTip(label+focusHint);button->setAccessibleName(label+focusHint);
             }
         }
         for(const auto& id:peerCards_.keys())if(!present.contains(id))delete peerCards_.take(id);
@@ -433,7 +431,7 @@ void RoomGamepadControl::Tick() {
                 button->style()->unpolish(button);button->style()->polish(button);button->update();
                 const auto description=QString("%1: %2").arg(entry.first,allowed?"Permission granted":selected?"Waiting for host permission":"Click to request control");
                 button->setAccessibleName(description);
-                button->setToolTip(entry.first==QStringLiteral("Keyboard")?description+". Keyboard control requires display sharing.":description);
+                button->setToolTip(entry.first==QStringLiteral("Keyboard")?description+". For window sharing, input pauses while the shared window is not focused.":description);
             }
         }
         const auto notice=status_->text();

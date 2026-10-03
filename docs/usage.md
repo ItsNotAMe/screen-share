@@ -32,7 +32,9 @@ with or without a viewer request. Room admission does not grant input. The host
 can revoke each permission; the panic shortcut is Ctrl+Alt+Shift+F12. In the UI,
 focus loss releases held input and pauses forwarding without cancelling grants.
 Disconnect, source changes and stale input retain release safeguards. Keyboard
-control requires display sharing. See [controller support](controller-support.md).
+control works for display and window sharing. Window mouse and keyboard input pauses
+while the shared window is not focused, releases held input, and resumes with the
+same permission when focus returns. See [controller support](controller-support.md).
 
 Use Save diagnostic report in the room page. The CLI supports `--report PATH`.
 Reports exclude room passwords and membership credentials. Generated tests are
