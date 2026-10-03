@@ -9,6 +9,9 @@ class DesktopDevice {
 public:
     virtual ~DesktopDevice()=default;
     virtual bool Healthy()=0;
+    // Focus is temporary availability, not a reason to revoke permission.
+    virtual bool Focused()=0;
+    virtual void ReleaseHeldInput() noexcept=0;
     virtual bool Apply(const Event&)=0;
     virtual void Release() noexcept=0;
 };

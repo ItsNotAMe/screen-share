@@ -35,18 +35,19 @@ public:
     // bounds, or a captured window's client rect in screen space). Required
     // before mouse coordinates can be mapped.
     void SetTargetBounds(int left, int top, int width, int height);
-    // Select a captured window as the dynamic mouse target. Input is accepted
+    // Select a captured window as the dynamic input target. Input is accepted
     // only while this window is visible, not minimized, foreground, and owns
-    // the mapped screen point. Keyboard injection remains display-only.
+    // the mapped screen point (for mouse input).
     void SetTargetWindow(uint64_t windowHandle);
     // The physical-mouse arbitration hook is needed only while a viewer owns
     // mouse control. Keyboard-only and view-only sessions must not install it.
     void SetMouseMonitoringEnabled(bool enabled);
-    // Release any injected mouse buttons as soon as a window target loses
+    // Release any injected mouse buttons and keys as soon as a window target loses
     // focus. Call regularly while a remote-control grant is active.
     void RefreshTargetState();
     [[nodiscard]] bool HasTargetBounds() const { return width_ > 0 && height_ > 0; }
     [[nodiscard]] bool HasTargetWindow() const { return windowHandle_ != 0; }
+    [[nodiscard]] bool IsTargetWindowForeground() const;
 
     // normX/normY are [0..1] across the captured surface.
     bool InjectMouseMove(float normX, float normY);
@@ -61,7 +62,6 @@ public:
     void ReleaseAllInjectedInput();
 
 private:
-    [[nodiscard]] bool IsTargetWindowForeground() const;
     [[nodiscard]] bool ResolveMousePoint(float normX, float normY, int& absX, int& absY) const;
     void ReleasePressedMouseButtons();
     void ReleasePressedKeys();

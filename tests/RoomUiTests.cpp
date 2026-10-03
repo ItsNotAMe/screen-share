@@ -96,6 +96,48 @@ void RespondToInputRequest(RoomSessionWindow& host, uint8_t capability, bool all
     Check(action->text()==QString("%1 %2").arg(allow?"Allow":"Deny",capability==screenshare::input::Mouse?"mouse":capability==screenshare::input::Keyboard?"keyboard":"controller"));
     action->trigger();menu->close();
 }
+void WindowKeyboardControlScenario() {
+    using namespace screenshare::input;
+    auto target=std::make_shared<DesktopTargetState>();
+    target->Publish({1,123,42,0,0,640,480});
+    auto evidence=std::make_shared<DesktopInputEvidence>();
+    auto sink=std::make_shared<DesktopSink>(target,nullptr,
+        [evidence](auto,uint8_t){return std::make_unique<RecordingDesktopDevice>(evidence);});
+    auto host=std::make_shared<Service>(true,sink);
+    Service viewer(false);host->Bind("viewer","window-input",true);viewer.Bind("host","window-input",true);
+    auto pump=[&] {
+        target->Touch({1,123,42,0,0,640,480});
+        for(const auto& packet:host->Drain("viewer",true,true))viewer.Receive("host",packet.reliable,packet.bytes);
+        for(const auto& packet:viewer.Drain("host",true,true))host->Receive("viewer",packet.reliable,packet.bytes);
+    };
+    RoomStatus room;room.phase=RoomPhase::Active;
+    room.capture.selected.kind=CaptureKind::Window;room.capture.selected.window=123;
+    room.members={{"host","Host",true},{"viewer","Viewer",false}};
+    RoomGamepadControl controls(true,[host]{return host;},[&room]{return room;},nullptr);
+    controls.resize(420,180);controls.show();
+    QPushButton* keyboard=nullptr;
+    Wait([&] {
+        pump();
+        for(auto* button:controls.findChildren<QPushButton*>("PeerCapability"))if(button->property("capability").toUInt()==Keyboard)keyboard=button;
+        return keyboard && keyboard->isEnabled() && viewer.Read().front().permission;
+    });
+    Check(keyboard->toolTip().contains("not focused"));
+    keyboard->click(); // Direct grant must work with window capture selected.
+    Wait([&]{pump();return viewer.Read().front().granted==Keyboard && keyboard->isChecked();});
+    host->Revoke("viewer");
+    Wait([&]{pump();return !viewer.Read().front().granted && !keyboard->isChecked();});
+    Check(viewer.Request("host",Keyboard));
+    Wait([&]{pump();return keyboard->property("pendingRequest").toBool();});
+    keyboard->click();
+    auto* menu=keyboard->findChild<QMenu*>("PeerRequestMenu");Check(menu && menu->isVisible());
+    auto* allow=menu->findChild<QAction*>("allowRequestedControl");Check(allow && allow->isEnabled());
+    allow->trigger();menu->close();
+    Wait([&]{pump();return viewer.Read().front().granted==Keyboard && keyboard->isChecked();});
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        QDir().mkpath(output);Check(controls.grab().save(QDir(output).filePath("window-keyboard-granted.png")));
+    }
+    controls.close();host->Close();viewer.Close();
+}
 void DetailsSnapshotScenario() {
     SessionDetailsWidget details(true);
     RoomStatus status;status.phase=RoomPhase::Active;
@@ -1506,6 +1548,7 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution")));
+        WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         NativePresentationRecovery();

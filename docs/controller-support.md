@@ -55,8 +55,11 @@ No request is required; requests can also be accepted with their listed capabili
 The viewer automatically detects a controller; a preferred device can be selected
 in playback settings. Missing/unplugged devices send neutral state and retain
 permission, resuming when a device is available. Focus loss pauses forwarding and
-releases held input without cancelling permissions. Keyboard grants require display
-capture. Explicit release, host revoke, source changes, disconnect and stale input
+releases held input without cancelling permissions. Keyboard grants support display
+and window capture. For window capture, mouse and keyboard input pauses while the
+shared window is not focused; held input is released and permission is retained.
+Returning focus resumes new input without replaying discarded events.
+Explicit release, host revoke, source changes, disconnect and stale input
 retain their release safeguards. The CLI keeps its explicit focused-preview consent
 workflow; see [CLI controls](cli.md#cli-workflow).
 

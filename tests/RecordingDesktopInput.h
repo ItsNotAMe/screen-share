@@ -12,6 +12,8 @@ class RecordingDesktopDevice final:public screenshare::input::DesktopDevice {
 public:
     explicit RecordingDesktopDevice(std::shared_ptr<DesktopInputEvidence> state):state_(std::move(state)){}
     bool Healthy() override {return state_->healthy;}
+    bool Focused() override {return true;}
+    void ReleaseHeldInput() noexcept override {}
     bool Apply(const screenshare::input::Event& event) override {
         state_->x=event.x;state_->y=event.y;
         if(event.kind==screenshare::input::Kind::Key)++state_->keys;

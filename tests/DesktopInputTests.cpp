@@ -7,13 +7,18 @@ using namespace screenshare::input;
 void Check(bool value,std::source_location where=std::source_location::current()) {
     if(!value)throw std::runtime_error("Desktop input assertion at "+std::to_string(where.line()));
 }
-struct Evidence {unsigned applied=0,released=0;bool healthy=true,fail=false;};
+struct Evidence {unsigned applied=0,released=0,neutralized=0;bool healthy=true,focused=true,held=false,fail=false;};
 class Device final:public DesktopDevice {
     std::shared_ptr<Evidence> evidence_;
 public:
     explicit Device(std::shared_ptr<Evidence> evidence):evidence_(std::move(evidence)){}
     bool Healthy() override {return evidence_->healthy;}
-    bool Apply(const Event&) override {++evidence_->applied;return !evidence_->fail;}
+    bool Focused() override {return evidence_->focused;}
+    void ReleaseHeldInput() noexcept override {
+        if(evidence_->held)++evidence_->neutralized;
+        evidence_->held=false;
+    }
+    bool Apply(const Event& event) override {++evidence_->applied;evidence_->held=event.down;return !evidence_->fail;}
     void Release() noexcept override {++evidence_->released;}
 };
 int main() {try {
@@ -39,7 +44,22 @@ int main() {try {
     Check(sink.Apply("viewer",move));move.sourceGeneration=generation+1;Check(!sink.Apply("viewer",move));
     Check(evidence->applied==1);target.left=0;state->Touch(target);Check(!sink.Healthy("viewer"));sink.Release("viewer");Check(evidence->released==1);
     const auto next=state->Publish(target);Check(next>generation);target.window=123;target.process=42;state->Publish(target);
-    Check(!sink.Grant("viewer",Keyboard,0));Check(sink.Grant("viewer",Mouse,0));
+    const auto windowGeneration=state->Read().generation;
+    // Window keyboard grants work even while the host is using another app.
+    evidence->focused=false;Check(sink.Grant("viewer",Keyboard,0));
+    Event key;key.kind=Kind::Key;key.key=0x41;key.down=true;key.sourceGeneration=windowGeneration;
+    const auto applied=evidence->applied;
+    Check(sink.Healthy("viewer") && sink.Apply("viewer",key));
+    Check(evidence->applied==applied && !evidence->held && evidence->released==1);
+    evidence->focused=true;Check(sink.Apply("viewer",key));Check(evidence->held);
+    // Health polling releases held keys even when no next input packet arrives.
+    evidence->focused=false;Check(sink.Healthy("viewer"));
+    Check(!evidence->held && evidence->neutralized==1 && evidence->released==1);
+    Check(sink.Apply("viewer",key));Check(evidence->applied==applied+1);
+    Check(!sink.Grant("other",Keyboard,0)); // Pausing retains exclusive ownership.
+    key.sourceGeneration=windowGeneration+1;Check(!sink.Apply("viewer",key));
+    key.sourceGeneration=windowGeneration;
+    evidence->focused=true;Check(sink.Apply("viewer",key));Check(evidence->applied==applied+2);
     evidence->healthy=false;Check(!sink.Healthy("viewer"));sink.Release("viewer");
     evidence->healthy=true;Check(sink.Grant("viewer",Mouse,0));state->Invalidate();Check(!sink.Healthy("viewer"));sink.Release("viewer");
     Check(evidence->released==3);

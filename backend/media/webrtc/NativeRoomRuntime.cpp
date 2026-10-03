@@ -211,7 +211,7 @@ public:
             ValidateCaptureSelection(selection);
             auto factory = options_.captureForSelection(selection);
             // Revoke every grant. The Windows sink additionally requires fresh
-            // captured geometry and refuses keyboard control on window sources.
+            // captured geometry and pauses window input while unfocused.
             input_->Configure(7, 0);
             return captureSwitch_->Submit(selection, std::move(factory));
         }
