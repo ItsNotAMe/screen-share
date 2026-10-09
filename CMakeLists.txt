@@ -3,13 +3,22 @@ cmake_minimum_required(VERSION 3.24)
 # Prepare the pinned toolchain before project() checks compiler availability.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
 
-project(ScreenShareNative VERSION 1.0.4 LANGUAGES CXX)
+project(ScreenShareNative VERSION 1.0.5 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
 set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
     "$<$<CXX_COMPILER_ID:Clang>:/clang:-mcx16>")
 
 include(CTest)
+if(BUILD_TESTING)
+    add_executable(SourcePcmCaptureTests tests/SourcePcmCaptureTests.cpp)
+    target_include_directories(SourcePcmCaptureTests PRIVATE backend)
+    target_compile_features(SourcePcmCaptureTests PRIVATE cxx_std_20)
+    target_compile_options(SourcePcmCaptureTests PRIVATE /EHsc /GR)
+    target_compile_definitions(SourcePcmCaptureTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    add_test(NAME source-pcm-capture COMMAND SourcePcmCaptureTests)
+    set_tests_properties(source-pcm-capture PROPERTIES TIMEOUT 15)
+endif()
 
 option(SCREENSHARE_STATIC_MINGW_RUNTIME "Statically link MinGW GCC/C++/pthread runtime libraries" ON)
 option(SCREENSHARE_COPY_RUNTIME_DLLS "Copy remaining runtime DLLs next to ScreenShare.exe after build" ON)

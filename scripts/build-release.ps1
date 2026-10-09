@@ -76,7 +76,7 @@ try {
     & "$PSScriptRoot/create-update-manifest.ps1" -Version $version `
         -ZipPath build/release/ScreenShare-release-windows-x64.zip `
         -InstallerPath "build/release/ScreenShare-Setup-$version-windows-x64.exe" `
-        -OutputPath $manifest -Notes @('Enabled remote keyboard control when sharing a specific window.', 'Window mouse and keyboard input pauses while the shared window is not focused, releases held input, and resumes with existing permission when focus returns.')
+        -OutputPath $manifest -Notes @('Window sharing now defaults to the selected app''s audio instead of all system audio.', 'Shared source audio follows window/display changes and mute/unmute. Unavailable app audio stays silent while video continues.', 'Windows captures audio per app process and its children, so other windows or tabs in the same app may be included. Requires Windows build 20348 or later.')
     & "$PSScriptRoot/sign-update-manifest.ps1" -ManifestPath $manifest -PrivateKeyPath $privateKey -PublicKeyPath $publicKey -PassphraseFile $passphrase
     & "$PSScriptRoot/verify-update-manifest.ps1" -ManifestPath $manifest -PublicKeyPath $publicKey
     if ((& git rev-parse HEAD).Trim() -ne $commit -or (& git status --porcelain)) { throw 'The source changed during the release build.' }

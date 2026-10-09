@@ -20,6 +20,7 @@ enum class AudioCaptureSource {
     Microphone,
     ProcessOutput,
     None,
+    SharedSource, // Resolved by the room runtime from the selected video source.
 };
 
 struct AudioDeviceInfo {

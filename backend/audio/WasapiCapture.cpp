@@ -489,6 +489,7 @@ void WasapiCapture::Start(const AudioCaptureConfig& config, std::stop_token stop
 {
     Stop();
     if (config.source == AudioCaptureSource::None) throw std::invalid_argument("No shared audio requires the device-free PCM endpoint");
+    if (config.source == AudioCaptureSource::SharedSource) throw std::invalid_argument("Shared-source audio requires the room capture selection");
     InitializeCom();
     config_ = config;
 
@@ -724,6 +725,8 @@ const char* AudioCaptureSourceName(AudioCaptureSource source)
         return "process";
     case AudioCaptureSource::None:
         return "none";
+    case AudioCaptureSource::SharedSource:
+        return "shared";
     default:
         return "unknown";
     }

@@ -3,6 +3,8 @@
 #include "MicrophoneCapture.h"
 #include "media/capture/WindowsCaptureSource.h"
 #include "media/audio/WasapiPcmEndpoint.h"
+#include "media/audio/SourcePcmCapture.h"
+#include "media/capture/SwitchableCaptureSource.h"
 #include "MfHardwareSession.h"
 #include "MfVideoEncoderFactory.h"
 #include "MfVideoDecoderFactory.h"
@@ -17,6 +19,7 @@ struct DeviceState {
     std::mutex mutex;
     std::shared_ptr<MfHardwareSession> hardware;
     std::shared_ptr<DiagnosticHistory> diagnostics = std::make_shared<DiagnosticHistory>();
+    std::weak_ptr<AudioSwitchControl> audioControl;
     std::shared_ptr<MfHardwareSession> Get() { std::lock_guard lock(mutex); return hardware; }
 };
 class DeviceCapture final : public ICaptureSource {
@@ -55,23 +58,51 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
             options.inputSink || options.enableDesktopInput ? std::make_shared<input::DesktopTargetState>() : nullptr;
         NativeRoomRuntimeOptions native;
         native.diagnostics = state->diagnostics;
+        native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,
+            options.capture.displayIndex, options.capture.windowHandle, options.capture.targetFps};
+        if (identity.host) native.captureSwitch = std::make_shared<CaptureSwitchControl>(native.initialCapture);
         auto endpoints = options.audioEndpoints.value_or(WasapiPcmEndpoints(options.audio, options.playbackDeviceId));
         if (identity.host) {
             AudioSelection initial{options.audio.source == AudioCaptureSource::Microphone ? AudioKind::Microphone :
                 options.audio.source == AudioCaptureSource::ProcessOutput ? AudioKind::Process :
-                options.audio.source == AudioCaptureSource::None ? AudioKind::None : AudioKind::System,
+                options.audio.source == AudioCaptureSource::None ? AudioKind::None :
+                options.audio.source == AudioCaptureSource::SharedSource ? AudioKind::SharedSource : AudioKind::System,
                 options.audio.deviceId, options.audio.processId};
             ValidateAudioSelection(initial);
-            native.audioSwitch = std::make_shared<AudioSwitchControl>(initial, endpoints.capture, ProcessMicrophone);
-            endpoints.capture = [control = native.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
             if (options.audioForSelection) native.audioForSelection = options.audioForSelection;
-            else if (!options.audioEndpoints) native.audioForSelection = [](AudioSelection selection) {
+            else if (!options.audioEndpoints) native.audioForSelection = [capture = native.captureSwitch, state](AudioSelection selection) -> AudioSwitchControl::Factory {
+                if (selection.kind == AudioKind::SharedSource) return [capture, state] {
+                    auto resolve = [capture, window = uint64_t(0), process = DWORD(0)]() mutable -> AudioSelection {
+                        const auto selected = capture->Status().selected;
+                        if (selected.kind == CaptureKind::Display) { window = 0; process = 0; return {}; }
+                        DWORD pid = 0;
+                        const auto handle = reinterpret_cast<HWND>(selected.window);
+                        if (!IsWindow(handle) || !GetWindowThreadProcessId(handle, &pid) || !pid)
+                            throw std::runtime_error("Shared audio window is unavailable");
+                        if (window != selected.window) { window = selected.window; process = pid; }
+                        if (process != pid) throw std::runtime_error("Shared audio window identity changed");
+                        return {AudioKind::Process, {}, pid};
+                    };
+                    return std::make_unique<SourcePcmCapture>(std::move(resolve), [](AudioSelection source) {
+                        AudioCaptureConfig config;
+                        config.source = source.kind == AudioKind::Process ? AudioCaptureSource::ProcessOutput : AudioCaptureSource::SystemOutput;
+                        config.processId = source.processId;
+                        return WasapiPcmEndpoints(config).capture();
+                    }, [state](bool ready) {
+                        if (auto control = state->audioControl.lock()) { if (ready) control->Ready(); else control->Failed(); }
+                    });
+                };
                 AudioCaptureConfig config;
                 config.source = selection.kind == AudioKind::Microphone ? AudioCaptureSource::Microphone :
                     selection.kind == AudioKind::Process ? AudioCaptureSource::ProcessOutput : AudioCaptureSource::SystemOutput;
                 config.deviceId = selection.deviceId; config.processId = selection.processId;
                 return WasapiPcmEndpoints(config).capture;
             };
+            const auto initialFactory = initial.kind == AudioKind::SharedSource && !options.audioEndpoints ?
+                native.audioForSelection(initial) : endpoints.capture;
+            native.audioSwitch = std::make_shared<AudioSwitchControl>(initial, initialFactory, ProcessMicrophone);
+            state->audioControl = native.audioSwitch;
+            endpoints.capture = [control = native.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
         }
         if (!identity.host) {
             PlaybackSelection initial{options.playbackDeviceId, options.playbackVolume, options.playbackMuted};
@@ -98,8 +129,6 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         native.capture = [capture = options.capture, state, target] { return std::make_unique<DeviceCapture>(capture, state, target); };
         if (options.captureDecorator) native.capture = options.captureDecorator(std::move(native.capture));
         native.connection = RoomIceConfiguration(options.connection, options.useDefaultStun && !options.audioEndpoints && !options.packetFactory);
-        native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,
-            options.capture.displayIndex, options.capture.windowHandle, options.capture.targetFps};
         native.captureForSelection = [base = options.capture, state, target, decorate = options.captureDecorator](CaptureSelection selection) -> CaptureSession::Factory {
             auto config = base; config.sourceType = selection.kind == CaptureKind::Window ? CaptureSourceType::Window : CaptureSourceType::Display;
             config.displayIndex = selection.display; config.windowHandle = selection.window; config.targetFps = selection.fps;

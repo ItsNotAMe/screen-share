@@ -1630,6 +1630,16 @@ int main(int argc, char** argv) {
         Wait([&]{return !host.session().audioPending()&&host.session().status().audio.selected.kind==AudioKind::None;});
         sourceAudio->setCurrentIndex(0);QMetaObject::invokeMethod(sourceAudio,"activated",Q_ARG(int,0));
         Wait([&]{return !host.session().audioPending()&&host.session().status().audio.selected.kind==AudioKind::System;});
+        sourceAudio->setCurrentIndex(4);QMetaObject::invokeMethod(sourceAudio,"activated",Q_ARG(int,4));
+        Wait([&]{return !host.session().audioPending()&&host.session().status().audio.selected.kind==AudioKind::SharedSource;});
+        Check(!host.findChild<QComboBox*>("liveAudioDevice")->isVisible());
+        auto* sharedMute=host.findChild<QPushButton*>("muteSharedAudio");
+        Wait([&]{return sharedMute->isEnabled();});sharedMute->click();
+        Wait([&]{return !host.session().audioPending()&&host.session().status().audio.selected.kind==AudioKind::None;});
+        Wait([&]{return sharedMute->isEnabled();});sharedMute->click();
+        Wait([&]{return !host.session().audioPending()&&host.session().status().audio.selected.kind==AudioKind::SharedSource;});
+        sourceAudio->setCurrentIndex(0);QMetaObject::invokeMethod(sourceAudio,"activated",Q_ARG(int,0));
+        Wait([&]{return !host.session().audioPending()&&host.session().status().audio.selected.kind==AudioKind::System;});
         Check(sourcePicker->findChild<QListWidget*>("SourceCards")->count()>0);
         if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
             QDir().mkpath(output);Check(host.grab().save(QDir(output).filePath("source-picker.png")));

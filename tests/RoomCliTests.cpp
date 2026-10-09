@@ -337,6 +337,12 @@ RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proo
 #endif
 }
 void CommandScenario() {
+    const QStringList hostAudio{"--create-room", "--window", "123"};
+    Check(ParseRoomCommand(hostAudio).media.audio.source == screenshare::AudioCaptureSource::SharedSource);
+    Check(ParseRoomCommand(hostAudio + QStringList{"--audio", "system"}).media.audio.source == screenshare::AudioCaptureSource::SystemOutput);
+    Check(ParseRoomCommand(hostAudio + QStringList{"--audio-device", "output"}).media.audio.source == screenshare::AudioCaptureSource::SystemOutput);
+    Reject([&] { ParseRoomCommand(hostAudio + QStringList{"--audio", "shared", "--process-id", "12"}); });
+    Reject([&] { ParseRoomCommand(hostAudio + QStringList{"--audio", "shared", "--audio-device", "output"}); });
     const QStringList base{"--backend", "v2", "--signal-server", "https://example.test", "--create-room"};
     auto config = ParseRoomCommand(base + QStringList{"--nickname", "  Player  ", "--resolution", "1920x1080", "--fps", "144", "--bitrate", "9000000"});
     Check(config.room.host && config.room.nickname == "Player" && config.media.preferences.resolution == ResolutionMode::Fixed &&

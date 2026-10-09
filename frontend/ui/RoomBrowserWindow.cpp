@@ -220,7 +220,8 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     int rateIndex = bitrate_->findData(rate);
     if(rateIndex < 0) { bitrate_->addItem(QString("%1 Mbps limit").arg(rate/1000000.0), rate); rateIndex = bitrate_->count()-1; }
     bitrate_->setCurrentIndex(rateIndex);
-    audio_ = new QComboBox; audio_->addItems({"System audio", "Microphone", "No shared audio"});
+    audio_ = new QComboBox; audio_->addItems({"Shared source audio", "Microphone", "No shared audio", "System audio"});
+    audio_->setToolTip("Window sharing captures the selected app's audio, including its child processes. Display sharing captures system audio.");
     auto* quality = new QGridLayout; quality->setSpacing(12);
     quality->addWidget(optionField("Resolution", resolution_),0,0); quality->addWidget(optionField("Frame rate", fps_),0,1);
     quality->addWidget(optionField("Bitrate", bitrate_),1,0); quality->addWidget(optionField("Shared audio", audio_),1,1);
@@ -547,7 +548,7 @@ void RoomBrowserWindow::Launch(bool host) {
     QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", name_->text()},
         {"roomId", host ? QString{} : *roomId}, {"password", password_->text()}, {"public", public_->isChecked()}, {"viewerLimit", viewerLimit_->value()},
         {"capture", QJsonObject::fromVariantMap(source_->currentData().toMap())},
-        {"audio", QJsonObject{{"source", audio_->currentIndex() == 0 ? "system" : audio_->currentIndex() == 1 ? "microphone" : "none"}}}};
+        {"audio", QJsonObject{{"source", audio_->currentIndex() == 0 ? "shared" : audio_->currentIndex() == 1 ? "microphone" : audio_->currentIndex() == 2 ? "none" : "system"}}}};
     // Window handles are strings at the shared configuration boundary.
     auto capture = input["capture"].toObject();
     if (capture.contains("window")) capture["window"] = QString::number(source_->currentData().toMap()["window"].toULongLong());

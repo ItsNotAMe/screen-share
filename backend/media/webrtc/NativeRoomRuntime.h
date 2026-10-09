@@ -8,6 +8,7 @@
 #include "media/audio/PlaybackControl.h"
 
 namespace screenshare::media {
+class CaptureSwitchControl;
 // Private native composition boundary. Factories run on signaling/capture owners,
 // respectively. Delivery runs on each viewer's capture worker. Shared sinks and
 // dependencies are retained until joined shutdown; UI presentation must enqueue.
@@ -17,6 +18,7 @@ struct NativeRoomRuntimeOptions {
     CaptureSession::Factory capture;
     CaptureSelection initialCapture;
     std::function<CaptureSession::Factory(CaptureSelection)> captureForSelection;
+    std::shared_ptr<CaptureSwitchControl> captureSwitch;
     std::shared_ptr<AudioSwitchControl> audioSwitch;
     std::function<AudioSwitchControl::Factory(AudioSelection)> audioForSelection;
     std::shared_ptr<PlaybackControl> playback;
