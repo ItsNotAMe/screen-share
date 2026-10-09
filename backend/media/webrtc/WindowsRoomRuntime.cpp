@@ -4,6 +4,7 @@
 #include "media/capture/WindowsCaptureSource.h"
 #include "media/audio/WasapiPcmEndpoint.h"
 #include "media/audio/SourcePcmCapture.h"
+#include "media/audio/WindowsApplicationAudioTarget.h"
 #include "media/capture/SwitchableCaptureSource.h"
 #include "MfHardwareSession.h"
 #include "MfVideoEncoderFactory.h"
@@ -72,16 +73,20 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
             if (options.audioForSelection) native.audioForSelection = options.audioForSelection;
             else if (!options.audioEndpoints) native.audioForSelection = [capture = native.captureSwitch, state](AudioSelection selection) -> AudioSwitchControl::Factory {
                 if (selection.kind == AudioKind::SharedSource) return [capture, state] {
-                    auto resolve = [capture, window = uint64_t(0), process = DWORD(0)]() mutable -> AudioSelection {
+                    auto resolve = [capture, window = uint64_t(0), process = DWORD(0),
+                                    audio = std::shared_ptr<WindowsApplicationAudioTarget>{}]() mutable -> AudioSelection {
                         const auto selected = capture->Status().selected;
-                        if (selected.kind == CaptureKind::Display) { window = 0; process = 0; return {}; }
+                        if (selected.kind == CaptureKind::Display) { window = 0; process = 0; audio.reset(); return {}; }
                         DWORD pid = 0;
                         const auto handle = reinterpret_cast<HWND>(selected.window);
                         if (!IsWindow(handle) || !GetWindowThreadProcessId(handle, &pid) || !pid)
                             throw std::runtime_error("Shared audio window is unavailable");
-                        if (window != selected.window) { window = selected.window; process = pid; }
+                        if (window != selected.window) {
+                            audio.reset(); window = selected.window; process = pid;
+                        }
                         if (process != pid) throw std::runtime_error("Shared audio window identity changed");
-                        return {AudioKind::Process, {}, pid};
+                        if (!audio) audio = std::make_shared<WindowsApplicationAudioTarget>(pid);
+                        return {AudioKind::Process, {}, audio->Resolve()};
                     };
                     return std::make_unique<SourcePcmCapture>(std::move(resolve), [](AudioSelection source) {
                         AudioCaptureConfig config;

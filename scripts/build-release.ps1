@@ -76,7 +76,7 @@ try {
     & "$PSScriptRoot/create-update-manifest.ps1" -Version $version `
         -ZipPath build/release/ScreenShare-release-windows-x64.zip `
         -InstallerPath "build/release/ScreenShare-Setup-$version-windows-x64.exe" `
-        -OutputPath $manifest -Notes @('Preserve stereo audio over WebRTC, including one-sided and opposite-phase sounds.', 'Preserve front-channel audio levels when sharing system audio from 5.1 or 7.1 outputs; reduce only mixes that would clip.', 'Verify received audio levels and channel separation through encrypted Opus transport at 100% viewer volume.')
+        -OutputPath $manifest -Notes @('Fix missing audio when sharing Miyomu and other apps that play sound through WebView2 helpers.', 'Automatically follow the selected app audio process as playback starts or helpers restart, while keeping other apps outside the capture.')
     & "$PSScriptRoot/sign-update-manifest.ps1" -ManifestPath $manifest -PrivateKeyPath $privateKey -PublicKeyPath $publicKey -PassphraseFile $passphrase
     & "$PSScriptRoot/verify-update-manifest.ps1" -ManifestPath $manifest -PublicKeyPath $publicKey
     if ((& git rev-parse HEAD).Trim() -ne $commit -or (& git status --porcelain)) { throw 'The source changed during the release build.' }

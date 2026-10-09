@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Prepare the pinned toolchain before project() checks compiler availability.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
 
-project(ScreenShareNative VERSION 1.0.8 LANGUAGES CXX)
+project(ScreenShareNative VERSION 1.0.9 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
 set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
@@ -286,6 +286,10 @@ if(MSVC)
             target_link_libraries(NativePcmAudioTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
             add_test(NAME native-pcm-audio COMMAND NativePcmAudioTests)
             set_tests_properties(native-pcm-audio PROPERTIES TIMEOUT 90)
+            add_executable(ApplicationAudioTargetTests tests/ApplicationAudioTargetTests.cpp)
+            target_link_libraries(ApplicationAudioTargetTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
+            add_test(NAME application-audio-target COMMAND ApplicationAudioTargetTests)
+            set_tests_properties(application-audio-target PROPERTIES TIMEOUT 15)
             add_executable(SharedAudioLevelTests tests/SharedAudioLevelTests.cpp)
             target_link_libraries(SharedAudioLevelTests PRIVATE ScreenShareCore ScreenShareRoomSession)
             add_test(NAME shared-audio-level COMMAND SharedAudioLevelTests)

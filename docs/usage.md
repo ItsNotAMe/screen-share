@@ -26,6 +26,10 @@ Shared source audio is the default: window sharing captures the selected app's
 audio and its child processes; display sharing captures system audio. It follows
 source changes and mute/unmute. Windows isolates app processes rather than
 individual windows, so other windows or tabs in the same app may be audible.
+For apps that render sound in helpers (including Miyomu's WebView2 player),
+shared source audio follows the app's render sessions and targets their smallest
+common process subtree. It refreshes as playback starts or helpers restart and
+does not include sessions belonging to another app.
 App audio needs Windows build 20348 or later (including Windows 11). If capture
 fails, video continues with silence. Choose System audio to share all apps instead.
 

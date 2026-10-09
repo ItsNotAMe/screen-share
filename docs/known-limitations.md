@@ -24,6 +24,11 @@ Active follow-ups live in [the maintenance backlog](../agents/todo.md).
   522 MiB hardware / 924 MiB software versus legacy 398 / 500 MiB; not total GPU RAM.
 - Physical input confinement, HDR/multiple adapters, unplug/driver-loss, listening
   quality and external capture/input/A-V latency need broader qualification.
+- App audio discovers the selected app's render sessions, including WebView2
+  helpers. Apps rendering simultaneously in independent helper branches still
+  depend on Windows capturing their common process subtree; Windows can omit
+  helper audio at that ancestor. The single WebView2 audio-service path was
+  verified with live Miyomu playback; all multi-helper combinations are unverified.
 - Internet/NAT/interface changes beyond measured LAN and simulated impairment
   are unverified. Simulated-network wins do not establish real-WAN reliability.
 - Provider billing/hibernation reconciliation and 50% free-tier headroom remain
