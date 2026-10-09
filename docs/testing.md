@@ -22,6 +22,11 @@ distinct pending/granted states and preserving keyboard when requesting mouse.
 Window keyboard regressions check direct grants and accepting requests. Desktop
 input tests check background input suppression, releasing held keys during idle
 health polling, retained ownership and resumption without replaying dropped input.
+They also inspect the Windows key payload for arrows, right modifiers, keypad
+keys and releases without calling SendInput. `capture-dispatcher-lifecycle`
+checks replacement-source queue ownership and external queue borrowing.
+The `desktop-input` UI scenario covers visible backend grant failures and checks
+that host/viewer media failure sends Leave and promptly updates the room directory.
 
 `room-v2-socket-reconnect` delays the server's socket-close notification and
 forces two viewer reconnects plus a host reconnect using the real native room
@@ -88,6 +93,9 @@ checks 30/60 FPS on its own stationary test window, including minimize/restore;
 it saves no pixels. `build/release/NativePcmAudioTests.exe --wasapi` checks silent
 native playback and process-only capture. Neither proves audible signal fidelity
 or end-to-end behavior on a second computer.
+`build/release/NativeCaptureTests.exe --switch` checks six generated-window source
+replacements, continued frames/input geometry, and keyboard grants while minimized
+past the normal target freshness timeout. It does not inject keyboard input.
 
 `WindowChromeTests` checks native caption-button hit testing in normal, maximized,
 and restored windows. Build that target, then run it on a Windows desktop with

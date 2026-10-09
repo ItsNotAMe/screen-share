@@ -1,5 +1,6 @@
 #include "input/v2/DesktopSink.h"
 #include "codec/InputMappingSei.h"
+#include "input/WindowsKeyInput.h"
 #include <iostream>
 #include <stdexcept>
 #include <source_location>
@@ -21,7 +22,52 @@ public:
     bool Apply(const Event& event) override {++evidence_->applied;evidence_->held=event.down;return !evidence_->fail;}
     void Release() noexcept override {++evidence_->released;}
 };
+void MinimizedKeyboardGrant() {
+    // Use a real minimized HWND and the production Windows device, but never
+    // call Apply/SendInput. Geometry stands in for a previously captured frame.
+    struct Window {
+        HWND handle = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"Paused input test", WS_OVERLAPPEDWINDOW,
+            0, 0, 320, 180, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~Window() { if (handle) DestroyWindow(handle); }
+    } window;
+    Check(window.handle != nullptr);
+    ShowWindow(window.handle, SW_SHOWMINNOACTIVE);
+    Check(IsWindowVisible(window.handle) && IsIconic(window.handle));
+    const auto source = (uint64_t(GetCurrentProcessId()) << 32) | 1;
+    const auto property = WindowIdentityProperty(source);
+    Check(SetPropW(window.handle, property.c_str(), reinterpret_cast<HANDLE>(source)));
+    auto target = std::make_shared<DesktopTargetState>();
+    target->Publish({source, reinterpret_cast<uint64_t>(window.handle), GetCurrentProcessId(), 0, 0, 320, 180});
+    auto sink = CreateWindowsDesktopSink(target);
+    Check(sink->Grant("paused", Keyboard, 0) && sink->Healthy("paused"));
+    // Minimization may pause injection; losing source identity must still revoke.
+    RemovePropW(window.handle, property.c_str());
+    Check(!sink->Healthy("paused"));
+    sink->Release("paused");
+}
 int main() {try {
+    MinimizedKeyboardGrant();
+    // Inspect Windows payloads without calling SendInput or changing local keys.
+    for (const auto [key, scan] : {std::pair{VK_LEFT, 0x14b}, {VK_UP, 0x148},
+            {VK_RIGHT, 0x14d}, {VK_DOWN, 0x150}, {VK_RCONTROL, 0x11d},
+            {VK_RMENU, 0x138}, {VK_RETURN, 0x11c}, {VK_DELETE, 0x153}}) {
+        for (bool down : {false, true}) {
+            const auto input = screenshare::WindowsKeyInput(key, scan, down);
+            Check(input.type == INPUT_KEYBOARD && input.ki.wVk == 0 && input.ki.wScan == (scan & 0xff));
+            Check(input.ki.dwFlags == (KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY | (down ? 0 : KEYEVENTF_KEYUP)));
+        }
+    }
+    // The keypad shares scan bytes with navigation keys, without the E0 prefix.
+    for (const auto [key, scan] : {std::pair{VK_NUMPAD4, 0x4b}, {VK_NUMPAD8, 0x48},
+            {VK_NUMPAD6, 0x4d}, {VK_NUMPAD2, 0x50}, {VK_LCONTROL, 0x1d},
+            {VK_RETURN, 0x1c}, {0x41, 0x1e}}) {
+        const auto input = screenshare::WindowsKeyInput(key, scan, true);
+        Check(input.ki.wScan == scan && input.ki.dwFlags == KEYEVENTF_SCANCODE);
+    }
+    const auto fallback = screenshare::WindowsKeyInput(VK_LEFT, 0, true);
+    Check(fallback.ki.wVk == VK_LEFT && fallback.ki.dwFlags == KEYEVENTF_EXTENDEDKEY);
+    const auto pause = screenshare::WindowsKeyInput(VK_PAUSE, 0x45, true);
+    Check(pause.ki.wVk == VK_PAUSE && !(pause.ki.dwFlags & KEYEVENTF_SCANCODE));
     const FrameMapping mapping{0x100000001,640,480,0,60,640,360};
     Check(mapping.Valid() && !mapping.Point(.5f,0) && !mapping.Point(.5f,1));
     const auto center=mapping.Point(.5f,.5f);Check(center && std::abs(center->first-.5f)<.001f && std::abs(center->second-.5f)<.001f);

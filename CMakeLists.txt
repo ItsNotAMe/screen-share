@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Prepare the pinned toolchain before project() checks compiler availability.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
 
-project(ScreenShareNative VERSION 1.0.5 LANGUAGES CXX)
+project(ScreenShareNative VERSION 1.0.6 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
 set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
@@ -384,6 +384,10 @@ if(BUILD_TESTING)
     add_executable(DesktopInputTests tests/DesktopInputTests.cpp)
     target_link_libraries(DesktopInputTests PRIVATE ScreenShareCore)
     add_test(NAME desktop-input COMMAND DesktopInputTests)
+    add_executable(CaptureDispatcherTest tools/webrtc-proof/CaptureDispatcherTest.cpp)
+    target_link_libraries(CaptureDispatcherTest PRIVATE ScreenShareCore)
+    add_test(NAME capture-dispatcher-lifecycle COMMAND CaptureDispatcherTest)
+    set_tests_properties(capture-dispatcher-lifecycle PROPERTIES TIMEOUT 15)
     set_tests_properties(desktop-input PROPERTIES TIMEOUT 15)
     set_tests_properties(gamepad-control PROPERTIES TIMEOUT 15)
     set_tests_properties(input-service PROPERTIES TIMEOUT 20)

@@ -68,8 +68,11 @@ public:
         const auto window=reinterpret_cast<HWND>(target_.window);
         DWORD pid=0;GetWindowThreadProcessId(window,&pid);
         RECT rect{};
-        return pid==target_.process && GetPropW(window,property_.c_str())==reinterpret_cast<HANDLE>(target_.source) && IsWindowVisible(window) && !IsIconic(window) &&
-            SUCCEEDED(DwmGetWindowAttribute(window,DWMWA_EXTENDED_FRAME_BOUNDS,&rect,sizeof(rect))) &&
+        if (pid != target_.process || GetPropW(window,property_.c_str()) != reinterpret_cast<HANDLE>(target_.source) || !IsWindowVisible(window)) return false;
+        // Minimize is a temporary input pause, including while the host grants
+        // control from another window. Focused() prevents all injection here.
+        if (IsIconic(window)) return true;
+        return SUCCEEDED(DwmGetWindowAttribute(window,DWMWA_EXTENDED_FRAME_BOUNDS,&rect,sizeof(rect))) &&
             rect.left==target_.left && rect.top==target_.top && rect.right-rect.left==target_.width && rect.bottom-rect.top==target_.height;
     }
     bool Focused() override {return !target_.window || injector_.IsTargetWindowForeground();}

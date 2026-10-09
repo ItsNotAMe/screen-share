@@ -3,6 +3,7 @@
 #include <future>
 #include <stdexcept>
 #include <iostream>
+#include <memory>
 
 namespace {
 void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -39,7 +40,7 @@ void Run() {
     Require(!DispatcherQueue::GetForCurrentThread(), "Unexpected preexisting dispatcher");
     for (int cycle = 0; cycle < 20; ++cycle) {
         {
-            WindowsCaptureDispatcher owner;
+            auto owner = std::make_unique<WindowsCaptureDispatcher>();
             auto queue = DispatcherQueue::GetForCurrentThread();
             Require(bool(queue), "Capture dispatcher missing");
             { WindowsCaptureDispatcher borrowed; }
@@ -54,9 +55,34 @@ void Run() {
                 "Message pump swallowed or changed WM_QUIT");
             Require(!WindowsCaptureDispatcher::Wait([] { return false; },
                 std::chrono::steady_clock::now() + std::chrono::milliseconds(1)), "Unsignaled wait incorrectly completed");
+            // A live source switch starts its replacement before retiring the
+            // original. The replacement must keep their shared queue alive.
+            auto replacement = std::make_unique<WindowsCaptureDispatcher>();
+            owner.reset();
+            Require(bool(DispatcherQueue::GetForCurrentThread()), "Source retirement shut down the replacement's dispatcher");
+            called = false;
+            Require(queue.TryEnqueue([&] { called = true; }), "Replacement queue stopped accepting callbacks");
+            Require(WindowsCaptureDispatcher::Wait([&] { return called; },
+                std::chrono::steady_clock::now() + std::chrono::seconds(1)), "Replacement callback was not dispatched");
         }
         Require(!DispatcherQueue::GetForCurrentThread(), "Owned dispatcher remained after shutdown");
     }
+    // An externally owned queue is still borrowed, never shut down by capture.
+    winrt::Windows::System::DispatcherQueueController external{nullptr};
+    DispatcherQueueOptions options{sizeof(options), DQTYPE_THREAD_CURRENT, DQTAT_COM_NONE};
+    winrt::check_hresult(CreateDispatcherQueueController(options,
+        reinterpret_cast<ABI::Windows::System::IDispatcherQueueController**>(winrt::put_abi(external))));
+    auto queue = DispatcherQueue::GetForCurrentThread();
+    { WindowsCaptureDispatcher borrowed; }
+    bool called = false;
+    Require(queue.TryEnqueue([&] { called = true; }), "Capture shut down an external queue");
+    Require(WindowsCaptureDispatcher::Wait([&] { return called; },
+        std::chrono::steady_clock::now() + std::chrono::seconds(1)), "External callback was not dispatched");
+    auto shutdown = external.ShutdownQueueAsync();
+    Require(WindowsCaptureDispatcher::Wait([&] { return shutdown.Status() != winrt::Windows::Foundation::AsyncStatus::Started; },
+        std::chrono::steady_clock::now() + std::chrono::seconds(1)), "External dispatcher shutdown timed out");
+    shutdown.GetResults();
+    shutdown.Close();
 }
 }
 int main() {

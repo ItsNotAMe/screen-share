@@ -71,9 +71,9 @@ void Cycle(uint64_t cycle) {
     const auto property = input::WindowIdentityProperty(original.target.source);
     window.Invoke([&] { ShowWindow(window.handle(), SW_MINIMIZE); });
     wait([&] { return session.status().state == CaptureState::Minimized; });
-    Require(!target->Read().generation, "Minimized capture retained an input target");
+    Require(target->Read().generation == original.generation, "Minimize discarded captured input permission identity");
     window.Invoke([&] { ShowWindow(window.handle(), SW_SHOWNOACTIVATE); });
-    wait([&] { return target->Read().generation > original.generation; });
+    wait([&] { return session.status().state == CaptureState::Running && target->Read().generation; });
     auto previous = target->Read();
     window.Invoke([&] { SetWindowPos(window.handle(), nullptr, 0, 0, 800, 480, SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER); });
     wait([&] { const auto current = target->Read(); return current.generation > previous.generation &&

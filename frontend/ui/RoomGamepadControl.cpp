@@ -323,7 +323,9 @@ void RoomGamepadControl::Tick() {
             const bool failed=connection!=room.stream.connections.end() &&
                 (connection->recovery.state==screenshare::media::PeerLifecycleState::Failed ||
                  connection->recovery.state==screenshare::media::PeerLifecycleState::Closed);
-            card->findChild<QLabel*>("PeerControlState")->setText(!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->requested?"Requests control":state->granted?"Control granted":"Watching");
+            card->findChild<QLabel*>("PeerControlState")->setText(!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->requested?"Requests control":state->granted?"Control granted":
+                state->reason==input::Reason::Backend?"Input unavailable — check the shared source or controller":
+                state->reason==input::Reason::Ownership?"Selected input is already in use":"Watching");
             QStringList requestedNames;
             if(ready)for(const auto& entry:{std::pair{input::Mouse,"mouse"},std::pair{input::Keyboard,"keyboard"},std::pair{input::Gamepad,"controller"}})if(state->requested&entry.first)requestedNames<<entry.second;
             if(!requestedNames.empty())card->findChild<QLabel*>("PeerControlState")->setText("Requests " + requestedNames.join(", "));

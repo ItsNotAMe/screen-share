@@ -2,6 +2,7 @@
 #include "capture/DxgiCursor.h"
 #include "media/capture/WindowsCaptureSource.h"
 #include "media/capture/SwitchableCaptureSource.h"
+#include "input/v2/DesktopSink.h"
 #include "core/WindowsMediaRuntime.h"
 #include "core/ShortWait.h"
 #include "CaptureTestWindow.h"
@@ -181,10 +182,58 @@ void StaticCadence() {
         Wait([&]{frame=source.Poll();return frame.has_value();});
     }
 }
+void SourceSwitches() {
+    WindowsMediaRuntime runtime;
+    Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
+    proof::TestWindow original, replacement;
+    auto target = std::make_shared<input::DesktopTargetState>();
+    CaptureConfig config;
+    config.sourceType = CaptureSourceType::Window;
+    config.targetWidth = 320; config.targetHeight = 180;
+    config.windowHandle = reinterpret_cast<uint64_t>(original.handle());
+    auto factory = [target](CaptureConfig selected) -> CaptureSession::Factory {
+        return [selected, target] { return std::make_unique<WindowsCaptureSource>(selected, target); };
+    };
+    auto control = std::make_shared<CaptureSwitchControl>(CaptureSelection{CaptureKind::Window, 0, config.windowHandle, 60});
+    CaptureSession session(1, [=] { return std::make_unique<SwitchableCaptureSource>(factory(config), control); }, [](auto) {});
+    session.EnableDelivery();
+    try { Wait([&] { return session.status().delivered >= 5 && target->Read().generation; }); }
+    catch (...) {
+        const auto status = session.status();
+        std::cerr << "Initial switch source state " << int(status.state) << " failure " << int(status.failure)
+            << " frames " << status.delivered << " input generation " << target->Read().generation << '\n';
+        throw;
+    }
+    auto sink = input::CreateWindowsDesktopSink(target);
+    const auto beforeMinimize = target->Read().generation;
+    original.Invoke([&] { ShowWindow(original.handle(), SW_MINIMIZE); });
+    Wait([&] { return session.status().state == CaptureState::Minimized; });
+    // Wait beyond the normal one-second target expiry to exercise paused
+    // liveness. Grant/health checks do not inject any desktop input.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    Require(target->Read().generation == beforeMinimize, "Minimized source lost its captured input identity");
+    Require(sink->Grant("paused-viewer", input::Keyboard, 0) && sink->Healthy("paused-viewer"), "Minimized window rejected keyboard permission");
+    sink->Release("paused-viewer");
+    original.Invoke([&] { ShowWindow(original.handle(), SW_SHOWNOACTIVATE); });
+    Wait([&] { return session.status().state == CaptureState::Running; });
+    for (int cycle = 0; cycle < 6; ++cycle) {
+        config.windowHandle = reinterpret_cast<uint64_t>((cycle % 2 ? original : replacement).handle());
+        const auto before = session.status().delivered;
+        auto changed = control->Submit({CaptureKind::Window, 0, config.windowHandle, 60}, factory(config));
+        Wait([&] { return changed.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready; });
+        Require(changed.get().error == CaptureUpdateError::None, "Generated window switch failed");
+        Wait([&] { return session.status().delivered >= before + 10 && target->Read().target.window == config.windowHandle; });
+        Require(session.status().state == CaptureState::Running, "Replacement capture stopped");
+    }
+    session.Stop();
+    Require(!target->Read().generation, "Switched capture retained its input target after stop");
+    std::cout << "Six generated-window source switches kept frames and input geometry flowing\n";
+}
 int main(int argc, char** argv) try {
     Policy(); CursorPixels();
     if (argc > 1 && std::string_view(argv[1]) == "--live") WindowLifecycle();
     if (argc > 1 && std::string_view(argv[1]) == "--display") DisplayRebuild();
     if (argc > 1 && std::string_view(argv[1]) == "--cadence") StaticCadence();
+    if (argc > 1 && std::string_view(argv[1]) == "--switch") SourceSwitches();
     std::cout << "Capture backend checks passed\n"; return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
