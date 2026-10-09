@@ -76,7 +76,7 @@ try {
     & "$PSScriptRoot/create-update-manifest.ps1" -Version $version `
         -ZipPath build/release/ScreenShare-release-windows-x64.zip `
         -InstallerPath "build/release/ScreenShare-Setup-$version-windows-x64.exe" `
-        -OutputPath $manifest -Notes @('Fix arrow keys and other extended keyboard keys during remote control.', 'Keep keyboard permission while a previously captured game window is minimized. Input resumes when the window is visible and focused.', 'Fix capture event-queue ownership during source switches and promptly remove room membership after media failure.', 'Show host-side input grant failures beside the affected viewer.')
+        -OutputPath $manifest -Notes @('Fix viewer-side encoding of arrow keys and other extended keyboard keys so they reach the host.', 'Allow keyboard-only grants for a captured window when its mouse-coordinate mapping is unavailable. Keep window identity, focus and mouse mapping checks.', 'Record input-target availability and window marker failures in saved diagnostic reports.')
     & "$PSScriptRoot/sign-update-manifest.ps1" -ManifestPath $manifest -PrivateKeyPath $privateKey -PublicKeyPath $publicKey -PassphraseFile $passphrase
     & "$PSScriptRoot/verify-update-manifest.ps1" -ManifestPath $manifest -PublicKeyPath $publicKey
     if ((& git rev-parse HEAD).Trim() -ne $commit -or (& git status --porcelain)) { throw 'The source changed during the release build.' }

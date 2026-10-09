@@ -6,9 +6,11 @@
 
 #include <iostream>
 #include <vector>
+#include <tuple>
 #include "render/Nv12D3D11Presenter.h"
 #include "shared/PresentationDiagnostics.h"
 #include "shared/MappedInput.h"
+#include "input/WindowsKeyInput.h"
 #include <dxgi.h>
 #include <chrono>
 #include <thread>
@@ -56,6 +58,48 @@ template<class F> void Await(F predicate) {
 void Require(bool value, std::source_location where = std::source_location::current()) {
     if (!value) throw std::runtime_error("Presentation recovery assertion failed at line " + std::to_string(where.line()));
 }
+void NativeNavigationKeys(VideoFrameWidget& widget, QWidget* recipient) {
+    using namespace screenshare::input;
+    Require(recipient != nullptr);
+    std::vector<Event> received;
+    widget.setRemoteInputHandler([&](const auto& value) {
+        if (auto event = MappedInput(value)) {
+            const auto bytes = Encode({"navigation-test", 1, received.size() + 1, *event});
+            auto decoded = Decode(bytes);
+            Require(decoded.has_value());
+            received.push_back(decoded->event);
+        }
+    });
+    // Qt's Windows mapper uses E0xx, unlike the protocol's bit-8 E0 flag.
+    for (const auto [qtKey, virtualKey, nativeScan] : {
+            std::tuple{Qt::Key_Left, VK_LEFT, 0xe04b},
+            std::tuple{Qt::Key_Up, VK_UP, 0xe048},
+            std::tuple{Qt::Key_Right, VK_RIGHT, 0xe04d},
+            std::tuple{Qt::Key_Down, VK_DOWN, 0xe050},
+            std::tuple{Qt::Key_Control, VK_CONTROL, 0xe01d},
+            std::tuple{Qt::Key_Alt, VK_MENU, 0xe038},
+            std::tuple{Qt::Key_Enter, VK_RETURN, 0xe01c},
+            std::tuple{Qt::Key_Left, VK_LEFT, 0x4b}, // Keypad with Num Lock off.
+            std::tuple{Qt::Key_8, VK_NUMPAD8, 0x48}}) {
+        for (bool down : {true, false}) {
+            const auto before = received.size();
+            QKeyEvent key(down ? QEvent::KeyPress : QEvent::KeyRelease,
+                qtKey, Qt::NoModifier, nativeScan, virtualKey, 0);
+            QApplication::sendEvent(recipient, &key);
+            Require(received.size() == before + 1);
+            const auto& event = received.back();
+            const bool extended = (nativeScan & 0xff00) == 0xe000;
+            Require(event.kind == Kind::Key && event.key == virtualKey && event.down == down);
+            Require(event.scan == ((nativeScan & 0xff) | (extended ? 0x100 : 0)));
+            Require(event.sourceGeneration == 1);
+            const auto input = screenshare::WindowsKeyInput(event.key, event.scan, event.down);
+            Require(input.ki.wScan == (nativeScan & 0xff));
+            Require(input.ki.dwFlags == (KEYEVENTF_SCANCODE |
+                (extended ? KEYEVENTF_EXTENDEDKEY : 0) | (down ? 0 : KEYEVENTF_KEYUP)));
+        }
+    }
+    widget.setRemoteInputHandler({});
+}
 void PresentationRecoveryScenario() {
     auto state = std::make_shared<RendererEvidence>();
     const auto mainThread = std::this_thread::get_id();
@@ -95,6 +139,8 @@ void PresentationRecoveryScenario() {
             QApplication::sendEvent(&widget,&down);QApplication::sendEvent(&widget,&up);
         }
         Require(downs==6 && ups==6);
+        NativeNavigationKeys(widget, &widget);
+        NativeNavigationKeys(widget, widget.findChild<QWidget*>("D3DVideoSurface"));
         widget.setRemoteInputHandler({});
         const auto busyBefore=widget.presentationStats().renderer.busyDrops;
         for (const auto outcome : {Busy, Occluded, Minimized, Unavailable, Unknown}) {

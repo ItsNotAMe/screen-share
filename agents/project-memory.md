@@ -5,6 +5,43 @@
 
 # Project Memory
 
+## Window keyboard grants without mouse geometry — 2026-10-09
+
+The owner confirmed the game is launched normally. Capture previously published
+no input generation when WGC source pixels differed from DWM frame bounds or
+those bounds were unavailable, and the Windows device also required exact bounds
+for keyboard-only grants. Capture now publishes a verified, live source identity
+with the captured dimensions and an explicit mouseMapped flag. Mouse grants
+require that flag; keyboard-only Windows device health checks identity/visibility
+without requiring DWM geometry. Existing generation, focus, minimized pause and
+held-input cleanup rules remain. Real source changes still require fresh grants.
+Source diagnostics record marker setup failures and transitions among unavailable,
+keyboard-only and mapped targets through the existing safe media event history.
+
+A generated HWND regression fails the prior keyboard-grant check and passes the
+correction. Mismatched/missing bounds admit keyboard and reject mouse/combined
+grants; hidden windows, removed markers and changed process IDs are rejected.
+Input service, video event, desktop, report and recording room UI tests pass.
+Active-desktop NativeCaptureTests --switch passes a borderless source keyboard
+grant, minimized liveness and six replacements. No physical key delivery or
+Silksong validation is claimed. This follow-up and the arrow fix prepare 1.0.7
+through the maintained build/sign/publish workflow with the existing update key.
+
+## Qt extended-key capture correction — 2026-10-09
+
+The owner reports arrows still fail with full-display keyboard grants in 1.0.6.
+The pinned Qt 6.10.3 Windows key mapper encodes extended scans as E0xx, whereas
+the input protocol accepts only a low scan byte plus bit 8 (maximum 0x1ff).
+VideoFrameWidget forwarded the native value unchanged, so MappedInput rejected
+arrows before transport. The 1.0.6 injection fix alone could not address this.
+The viewer now converts Qt E0xx into the existing protocol format for presses
+and releases, preserving unprefixed keypad scans. A regression through widget
+and native video surface events, mapping, wire encode/decode and Windows payload
+construction fails on 1.0.6 and passes with this correction; video-frame-input,
+desktop-input and input-service pass. No physical key or Silksong test is claimed.
+This follow-up is included in 1.0.7 preparation. The window-grant investigation is
+recorded above; the arrow conversion itself does not affect grant availability.
+
 ## Version 1.0.6 keyboard/source-switch fixes — 2026-10-09
 
 Windows keyboard injection now preserves the native scan byte and E0 flag for

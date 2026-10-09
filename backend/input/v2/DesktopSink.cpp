@@ -14,7 +14,7 @@ bool DesktopSink::Grant(const std::string& peer,uint8_t caps,int slot) {
     if(!caps || (caps&~7) || owners_.contains(peer))return false;
     const auto target=target_->Read();std::unique_ptr<DesktopDevice> device;
     if(caps&(Mouse|Keyboard)) {
-        if(!target.generation)return false;
+        if(!target.generation || ((caps&Mouse) && !target.target.mouseMapped))return false;
         for(const auto& [id,owner]:owners_)if(caps&owner.capabilities&(Mouse|Keyboard))return false;
         device=factory_(target.target,caps&3);
         if(!device || !device->Healthy())return false;
@@ -72,6 +72,8 @@ public:
         // Minimize is a temporary input pause, including while the host grants
         // control from another window. Focused() prevents all injection here.
         if (IsIconic(window)) return true;
+        if (!(caps_&Mouse)) return true;
+        if (!target_.mouseMapped) return false;
         return SUCCEEDED(DwmGetWindowAttribute(window,DWMWA_EXTENDED_FRAME_BOUNDS,&rect,sizeof(rect))) &&
             rect.left==target_.left && rect.top==target_.top && rect.right-rect.left==target_.width && rect.bottom-rect.top==target_.height;
     }
