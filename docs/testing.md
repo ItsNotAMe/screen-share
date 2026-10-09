@@ -17,6 +17,16 @@ input, driver allocation and audible-output tests explicit.
 
 Input service regressions cover accumulating requests, denial preserving existing
 grants/held input, requests arriving during grant application and cancellation.
+`desktop-input` uses generated HWNDs to check keyboard grants with mismatched or
+missing capture-to-desktop bounds while mouse grants remain refused. Hidden
+windows, removed identity markers and changed processes still revoke input.
+`NativeCaptureTests --switch` includes a captured borderless window, minimized
+keyboard grants and six source replacements; it requires an active desktop and
+does not inject keys. These fixtures do not establish Silksong compatibility.
+`video-frame-input` checks Qt's native E0-prefixed navigation/modifier scans through
+both video event paths, mapping, protocol encoding/decoding and Windows input
+payload construction. Dedicated arrows retain the extended flag; keypad scans
+remain unprefixed. It does not inject physical input or qualify a specific game.
 The native room UI scenarios check immediate icon requests, independent host menus,
 distinct pending/granted states and preserving keyboard when requesting mouse.
 Window keyboard regressions check direct grants and accepting requests. Desktop

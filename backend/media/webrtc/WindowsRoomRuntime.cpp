@@ -32,7 +32,7 @@ class DeviceCapture final : public ICaptureSource {
         catch (...) { state_->diagnostics->Event(operation, -1); throw; }
     }
 public:
-    DeviceCapture(CaptureConfig config, std::shared_ptr<DeviceState> state, std::shared_ptr<input::DesktopTargetState> target) : source_(config,std::move(target)), state_(std::move(state)) {}
+    DeviceCapture(CaptureConfig config, std::shared_ptr<DeviceState> state, std::shared_ptr<input::DesktopTargetState> target) : source_(config,std::move(target),state->diagnostics), state_(std::move(state)) {}
     void Start() override { Observe("capture-start-failed", [&] { source_.Start(); }); }
     std::optional<CaptureSample> Poll() override {
         auto sample = Observe("capture-poll-failed", [&] { return source_.Poll(); });

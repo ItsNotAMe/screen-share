@@ -3,7 +3,8 @@
 #include <cstdint>
 
 namespace screenshare {
-// Qt and the Win32 preview encode the E0 prefix in scan-code bit 8.
+// The input protocol and Win32 preview encode the E0 prefix in scan-code bit 8.
+// The Qt viewer converts its native E0xx representation at the capture boundary.
 // SendInput requires the low scan byte and a separate extended-key flag.
 inline INPUT WindowsKeyInput(uint16_t virtualKey, uint16_t scancode, bool down) {
     INPUT input{};

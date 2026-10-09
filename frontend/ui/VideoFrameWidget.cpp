@@ -651,6 +651,11 @@ void VideoFrameWidget::emitKey(QKeyEvent* event, bool pressed)
     input.kind = screenshare::RemoteInputKind::Key;
     input.key = static_cast<int>(event->nativeVirtualKey());
     input.scancode = static_cast<int>(event->nativeScanCode());
+    // Qt's Windows mapper encodes extended scans as E0xx. The input protocol
+    // uses the low scan byte plus bit 8, matching the Win32 preview path.
+    // Convert before validation, otherwise navigation keys are dropped locally.
+    if ((input.scancode & 0xff00) == 0xe000)
+        input.scancode = (input.scancode & 0xff) | 0x100;
     input.pressed = pressed;
     // Keys need the displayed source identity, not a pixel-to-viewport mapping.
     // Resizing the viewport must not suppress typing while its redraw completes.

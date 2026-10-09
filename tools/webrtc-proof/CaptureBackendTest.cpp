@@ -186,6 +186,11 @@ void SourceSwitches() {
     WindowsMediaRuntime runtime;
     Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
     proof::TestWindow original, replacement;
+    original.Invoke([&] {
+        SetWindowLongPtrW(original.handle(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(original.handle(), nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    });
     auto target = std::make_shared<input::DesktopTargetState>();
     CaptureConfig config;
     config.sourceType = CaptureSourceType::Window;
@@ -205,6 +210,9 @@ void SourceSwitches() {
         throw;
     }
     auto sink = input::CreateWindowsDesktopSink(target);
+    Require(sink->Grant("window-viewer", input::Keyboard, 0) && sink->Healthy("window-viewer"),
+        "Borderless captured window rejected keyboard permission");
+    sink->Release("window-viewer");
     const auto beforeMinimize = target->Read().generation;
     original.Invoke([&] { ShowWindow(original.handle(), SW_MINIMIZE); });
     Wait([&] { return session.status().state == CaptureState::Minimized; });

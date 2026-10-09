@@ -2,6 +2,7 @@
 #include "CaptureSession.h"
 #include "media/webrtc/D3dVideoFrameBuffer.h"
 #include "input/v2/DesktopTarget.h"
+#include "media/DiagnosticHistory.h"
 #include <atomic>
 
 namespace screenshare::media {
@@ -13,7 +14,7 @@ struct WindowsCaptureResource final : CaptureResource {
 // factory. WindowsMediaRuntime must outlive the joined session.
 class WindowsCaptureSource final : public ICaptureSource {
 public:
-    explicit WindowsCaptureSource(CaptureConfig config, std::shared_ptr<input::DesktopTargetState> target = {}) : config_(config), target_(std::move(target)), sourceId_((uint64_t(GetCurrentProcessId())<<32)|++nextSource_), property_(input::WindowIdentityProperty(sourceId_)) {
+    explicit WindowsCaptureSource(CaptureConfig config, std::shared_ptr<input::DesktopTargetState> target = {}, std::shared_ptr<DiagnosticHistory> diagnostics = {}) : config_(config), target_(std::move(target)), sourceId_((uint64_t(GetCurrentProcessId())<<32)|++nextSource_), property_(input::WindowIdentityProperty(sourceId_)), diagnostics_(std::move(diagnostics)) {
         config_.allowDisplayFallback = true;
         config_.includeNv12 = config_.ownedNv12 = true;
         config_.includeNv12Readback = config_.includeBgraReadback = false;
@@ -26,8 +27,11 @@ public:
     }
     void Start() override {
         capture_.Start(config_);
-        if(target_ && config_.sourceType==CaptureSourceType::Window)
-            SetPropW(reinterpret_cast<HWND>(config_.windowHandle),property_.c_str(),reinterpret_cast<HANDLE>(sourceId_));
+        if(target_ && config_.sourceType==CaptureSourceType::Window &&
+            !SetPropW(reinterpret_cast<HWND>(config_.windowHandle),property_.c_str(),reinterpret_cast<HANDLE>(sourceId_))) {
+            const auto error = GetLastError();
+            if(diagnostics_)diagnostics_->Event("input-window-marker-failed", error);
+        }
     }
     std::optional<CaptureSample> Poll() override {
         try {
@@ -58,7 +62,10 @@ public:
             if(nextFrame_ <= now)nextFrame_ = now + period; // Skip missed slots, without accumulating poll jitter.
             if (!frame) {
                 if(target_) {
-                    if(auto target=Target())target_->Touch(*target);else target_->Invalidate(sourceId_);
+                    if(inputTarget_) {
+                        if(auto target=Target(inputTarget_->width,inputTarget_->height))target_->Touch(*target);
+                        else target_->Invalidate(sourceId_);
+                    } else target_->Invalidate(sourceId_);
                     if(retained_ && target_->Read().generation != retained_->inputGeneration)retained_.reset();
                 }
                 if(retained_)return CaptureSample{retained_,now};
@@ -70,8 +77,14 @@ public:
             resource->buffer = device_->RetainCapture(*frame);
             resource->device = device_;
             if(target_) {
-                const auto target=Target();
-                if(target && target->width==frame->sourceWidth && target->height==frame->sourceHeight) {
+                const auto target=Target(frame->sourceWidth,frame->sourceHeight);
+                const int availability = !target ? 0 : target->mouseMapped ? 2 : 1;
+                if(diagnostics_ && inputAvailability_ != availability) {
+                    diagnostics_->Event(!target ? "capture-input-target-unavailable" : target->mouseMapped ?
+                        "capture-input-target-ready" : "capture-input-keyboard-only");
+                    inputAvailability_ = availability;
+                }
+                if(target) {
                     resource->inputGeneration=target_->Publish(*target);
                     inputTarget_ = *target;
                 }
@@ -91,16 +104,18 @@ public:
     void Retire() noexcept override { retained_.reset(); if(target_)target_->Invalidate(sourceId_); if (device_) device_->Retire(); }
     void Rebuild() override { retained_.reset(); nextFrame_={}; capture_.RebuildDevice(); device_.reset(); }
 private:
-    std::optional<input::DesktopTarget> Target() const {
-        const auto bounds=capture_.InputBounds();if(!bounds)return {};
+    std::optional<input::DesktopTarget> Target(int width,int height) const {
+        const auto bounds=capture_.InputBounds();
+        if(!bounds && config_.sourceType!=CaptureSourceType::Window)return {};
         input::DesktopTarget result{sourceId_,config_.sourceType==CaptureSourceType::Window?config_.windowHandle:0,0,
-            bounds->left,bounds->top,bounds->right-bounds->left,bounds->bottom-bounds->top};
+            bounds?bounds->left:0,bounds?bounds->top:0,bounds?bounds->right-bounds->left:0,bounds?bounds->bottom-bounds->top:0};
         if(result.window) {
             const auto window=reinterpret_cast<HWND>(result.window);
-            if(GetPropW(window,property_.c_str())!=reinterpret_cast<HANDLE>(sourceId_))return {};
-            DWORD pid=0;GetWindowThreadProcessId(window,&pid);result.process=pid;
+            if(!IsWindowVisible(window) || GetPropW(window,property_.c_str())!=reinterpret_cast<HANDLE>(sourceId_))return {};
+            DWORD pid=0;if(!GetWindowThreadProcessId(window,&pid) || !pid)return {};result.process=pid;
         }
-        return result;
+        result=input::CapturedInputTarget(result,width,height);
+        return result.Valid()?std::optional(result):std::nullopt;
     }
     inline static std::atomic<uint64_t> nextSource_{0};
     std::shared_ptr<input::DesktopTargetState> target_;
@@ -111,6 +126,8 @@ private:
     std::shared_ptr<D3dVideoDevice> device_;
     std::shared_ptr<WindowsCaptureResource> retained_;
     std::optional<input::DesktopTarget> inputTarget_;
+    std::shared_ptr<DiagnosticHistory> diagnostics_;
+    int inputAvailability_ = -1;
     std::chrono::steady_clock::time_point nextFrame_;
 };
 }
