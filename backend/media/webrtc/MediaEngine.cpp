@@ -1,9 +1,8 @@
 #include "media/webrtc/MediaEngine.h"
 #include "media/webrtc/MediaNetworkPolicy.h"
+#include "media/webrtc/SharedAudioCodecs.h"
 #include "api/audio_codecs/audio_decoder_factory_template.h"
 #include "api/audio_codecs/audio_encoder_factory_template.h"
-#include "api/audio_codecs/opus/audio_decoder_opus.h"
-#include "api/audio_codecs/opus/audio_encoder_opus.h"
 #include "api/create_modular_peer_connection_factory.h"
 #include "api/enable_media.h"
 #include "api/environment/environment_factory.h"
@@ -28,8 +27,8 @@ MediaEngine::MediaEngine(webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio,
     dependencies.worker_thread = worker_.get();
     dependencies.signaling_thread = signaling_;
     dependencies.adm = std::move(audio);
-    dependencies.audio_encoder_factory = webrtc::CreateAudioEncoderFactory<webrtc::AudioEncoderOpus>();
-    dependencies.audio_decoder_factory = webrtc::CreateAudioDecoderFactory<webrtc::AudioDecoderOpus>();
+    dependencies.audio_encoder_factory = webrtc::CreateAudioEncoderFactory<SharedAudioEncoder>();
+    dependencies.audio_decoder_factory = webrtc::CreateAudioDecoderFactory<SharedAudioDecoder>();
     dependencies.video_encoder_factory = std::move(encoder);
     dependencies.video_decoder_factory = std::move(decoder);
     if (packetFactory) {

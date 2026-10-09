@@ -10,11 +10,23 @@
 
 namespace screenshare::media {
 // PCM16 in WAVE speaker-mask order. Mono is duplicated; stereo is unchanged.
-// Center/surround contribute -3 dB, LFE is omitted. Fixed normalization supplies
-// headroom for coherent full-scale channels without clipping or pumping gain.
+// Center/surround contribute -3 dB, LFE is omitted. Front channels retain unity
+// gain, including stereo content on a surround endpoint. Only blocks whose mix
+// would clip are scaled, with one gain for both channels to preserve balance.
 class StereoDownmix {
     unsigned channels_;
+    bool overloadPossible_ = false;
     std::array<std::array<double, 2>, 8> weights_{};
+    std::array<double, 2> Mix(std::span<const std::byte> input, size_t frame) const {
+        std::array<double, 2> mixed{};
+        for (unsigned channel = 0; channel < channels_; ++channel) {
+            int16_t sample;
+            std::memcpy(&sample, input.data() + (frame * channels_ + channel) * 2, 2);
+            mixed[0] += sample * weights_[channel][0];
+            mixed[1] += sample * weights_[channel][1];
+        }
+        return mixed;
+    }
 public:
     StereoDownmix(unsigned channels, uint32_t mask) : channels_(channels) {
         if (channels == 1 && !mask) mask = 4;
@@ -36,20 +48,24 @@ public:
         double left = 0, right = 0;
         for (const auto& weight : weights_) { left += weight[0]; right += weight[1]; }
         if (!left && !right) throw std::invalid_argument("No full-range audio channels");
-        for (auto& weight : weights_) { weight[0] /= std::max(1.0, left); weight[1] /= std::max(1.0, right); }
+        overloadPossible_ = left > 1 || right > 1;
     }
     void Convert(std::span<const std::byte> input, std::span<int16_t> output) const {
         if (output.size() % 2 || input.size() != output.size() / 2 * channels_ * 2)
             throw std::invalid_argument("Invalid downmix PCM block");
-        for (size_t frame = 0; frame < output.size() / 2; ++frame) {
-            double left = 0, right = 0;
-            for (unsigned channel = 0; channel < channels_; ++channel) {
-                int16_t sample;
-                std::memcpy(&sample, input.data() + (frame * channels_ + channel) * 2, 2);
-                left += sample * weights_[channel][0]; right += sample * weights_[channel][1];
+        double gain = 1;
+        if (overloadPossible_) {
+            for (size_t frame = 0; frame < output.size() / 2; ++frame) {
+                for (const auto sample : Mix(input, frame)) {
+                    if (sample > 32767) gain = std::min(gain, 32767 / sample);
+                    else if (sample < -32768) gain = std::min(gain, -32768 / sample);
+                }
             }
-            output[frame * 2] = int16_t(std::clamp(std::lround(left), -32768l, 32767l));
-            output[frame * 2 + 1] = int16_t(std::clamp(std::lround(right), -32768l, 32767l));
+        }
+        for (size_t frame = 0; frame < output.size() / 2; ++frame) {
+            const auto mixed = Mix(input, frame);
+            output[frame * 2] = int16_t(std::clamp(std::lround(mixed[0] * gain), -32768l, 32767l));
+            output[frame * 2 + 1] = int16_t(std::clamp(std::lround(mixed[1] * gain), -32768l, 32767l));
         }
     }
 };
