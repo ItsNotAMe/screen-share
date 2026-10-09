@@ -5,6 +5,18 @@
 
 # Project Memory
 
+## Shared-source window audio — 2026-10-09
+
+Room UI/CLI hosts now default to shared-source audio. The Windows runtime follows
+the committed capture selection: process-tree loopback for a window, system output
+for a display. The audio worker replaces endpoints and discards a read spanning a
+source change. Invalid windows and unsupported process capture produce silence;
+explicit system, microphone, process and no-audio modes remain available. Muting
+retains the shared-source mode so unmute resolves the current source. Windows
+process isolation may include other windows/tabs of the same app and requires
+build 20348+. Coverage uses synthetic PCM and room UI/CLI scenarios; audible
+two-app isolation has not been physically qualified.
+
 ## Version 1.0.4 window keyboard control — 2026-10-03
 
 Window sharing now supports keyboard grants through direct host clicks and

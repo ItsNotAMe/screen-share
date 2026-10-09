@@ -347,7 +347,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         else selection.display = selected["display"].toInt();
         captureState_->setText("Waiting for the new source…"); switchCapture_->setEnabled(false); session_.switchCapture(selection);
     });
-    audioKind_ = combo("Shared audio", {"System output", "Microphone", "Process output", "No shared audio"}, int(config.media.audio.source));
+    audioKind_ = combo("Shared audio", {"System output", "Microphone", "Process output", "No shared audio", "Shared source audio"}, int(config.media.audio.source));
+    audioKind_->setToolTip("Shared source audio follows the selected window's app, including child processes. Display sharing captures system audio.");
     audioKind_->setObjectName("liveAudioKind");
     audioDevice_ = new QComboBox; audioDevice_->setObjectName("liveAudioDevice"); form->addRow("Audio device", audioDevice_);
     audioDevice_->addItem(config.media.audio.deviceId.empty() ? "Default device" : "Current device", QString::fromStdWString(config.media.audio.deviceId));
@@ -373,7 +374,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     connect(switchAudio_, &QPushButton::clicked, this, [this] {
         AudioSelection selection; selection.kind = AudioKind(audioKind_->currentIndex());
         if (selection.kind == AudioKind::Process) selection.processId = uint32_t(audioProcess_->value());
-        else if (selection.kind != AudioKind::None) selection.deviceId = audioDevice_->currentData().toString().toStdWString();
+        else if (selection.kind == AudioKind::System || selection.kind == AudioKind::Microphone) selection.deviceId = audioDevice_->currentData().toString().toStdWString();
         audioState_->setText("Waiting for the new audio source…"); switchAudio_->setEnabled(false); session_.switchAudio(std::move(selection));
     });
     session_.audioUpdated = [this](const AudioUpdateResult& result) {
@@ -636,7 +637,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         });
         auto* muteAudio=new QPushButton("Mute audio");muteAudio->setObjectName("muteSharedAudio");muteAudio->setIcon(uiIcon("volume"));sourceActions->addWidget(muteAudio);
         for(auto* button:{changeSource,pauseVideo,muteAudio}){button->setMinimumHeight(42);button->setIconSize(QSize(22,22));}
-        auto previousAudio=std::make_shared<AudioSelection>();
+        auto previousAudio=std::make_shared<AudioSelection>(AudioSelection{AudioKind::SharedSource});
         connect(muteAudio,&QPushButton::clicked,this,[this,previousAudio] {
             const auto current=session_.status().audio.selected;
             if(current.kind==AudioKind::None)session_.switchAudio(*previousAudio);

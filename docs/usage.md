@@ -22,6 +22,12 @@ Ctrl+C requests orderly shutdown. Configuration-file automation remains availabl
 as `ScreenShare --room-v2 CONFIG.json`.
 
 See [CLI configuration and options](cli.md) for complete schemas and ranges.
+Shared source audio is the default: window sharing captures the selected app's
+audio and its child processes; display sharing captures system audio. It follows
+source changes and mute/unmute. Windows isolates app processes rather than
+individual windows, so other windows or tabs in the same app may be audible.
+App audio needs Windows build 20348 or later (including Windows 11). If capture
+fails, video continues with silence. Choose System audio to share all apps instead.
 Passwords use a UTF-8 file rather than command-line text. Links carry a room ID,
 not credentials or an arbitrary server address.
 

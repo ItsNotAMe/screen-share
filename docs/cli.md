@@ -13,7 +13,7 @@ new room; legacy UDP commands and v1 links are not translated. See [usage](usage
 | Host room | `--name NAME`, `--private`, `--viewer-limit 1..63` |
 | Host capture | `--display INDEX` or `--window HWND` (not both) |
 | Host video | `--preset gaming\|quality`, `--resolution auto\|native\|WIDTHxHEIGHT`, `--fps auto\|N`, `--bitrate auto\|BPS`, `--upload-bps BPS` |
-| Host audio | `--audio system\|microphone\|process\|none`, `--audio-device ID`, `--process-id PID` as appropriate to the source |
+| Host audio | `--audio shared\|system\|microphone\|process\|none` (default `shared`), `--audio-device ID`, `--process-id PID` as appropriate to the source |
 | Viewer | `--no-preview`, `--playback-device ID`, `--volume 0..100`, `--mute` or `--unmute`, `--decoder auto\|software` |
 
 Nickname, stream, playback and viewer-decoder defaults come from the existing versioned RoomV2Profile.
@@ -120,9 +120,11 @@ sources. Native capture dimensions are retained; per-viewer adaptation controls
 output dimensions. Capture FPS defaults to initial stream FPS; set `capture.fps`
 high enough for scheduled changes. Live settings do not reconfigure the device.
 
-Audio fields are `source: system|microphone|process|none`, optional `deviceId`, optional
+Audio fields are `source: shared|system|microphone|process|none`, optional `deviceId`, optional
 `playbackDeviceId`, and a required positive `processId` for process output. Device
 IDs are the Windows endpoint IDs from the existing `--list-audio-devices` command.
+`shared` follows window app audio or display system audio and accepts no device/PID.
+Hosts default to `shared`; supplying a device without a source selects `system`.
 
 Stream fields support `preset: gaming|quality`, `resolution: auto|fixed|native`,
 `fpsMode: auto|manual`, and `bitrateMode: auto|manual`. Manual bitrate requires

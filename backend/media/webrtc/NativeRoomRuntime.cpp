@@ -93,7 +93,7 @@ public:
         input_->Configure(options_.initialCapture.kind == CaptureKind::Window ? uint8_t(input::Mouse | input::Gamepad) : uint8_t(7), 0);
         if (identity_.host) {
             if (options_.captureForSelection) {
-                captureSwitch_ = std::make_shared<CaptureSwitchControl>(options_.initialCapture);
+                captureSwitch_ = options_.captureSwitch ? options_.captureSwitch : std::make_shared<CaptureSwitchControl>(options_.initialCapture);
                 starting_ = capture_.Start([initial = options_.capture, control = captureSwitch_] {
                     return std::make_unique<SwitchableCaptureSource>(initial, control);
                 });

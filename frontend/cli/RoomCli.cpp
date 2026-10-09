@@ -234,7 +234,7 @@ int RunRoomCli(int argc, char** argv) {
                 "  ScreenShare --room-v2 CONFIG.json\n"
                 "Options: --signal-server HTTPS_ORIGIN, --password-file PATH, --private, --viewer-limit N,\n"
                 "  --preset gaming|quality, --resolution auto|native|WIDTHxHEIGHT, --fps auto|N, --bitrate auto|BPS,\n"
-                "  --audio none|system|microphone|process, --audio-device ID, --process-id PID,\n"
+                "  --audio shared|none|system|microphone|process (default shared), --audio-device ID, --process-id PID,\n"
                 "  --playback-device ID, --volume 0..100, --mute, --unmute, --seconds N, --no-preview,\n"
                 "  --control-file PATH, --gamepad DEVICE_ID. See docs/cli.md for input consent.\n"
                 "Default service: " << DefaultRoomServiceOrigin().toStdString() << "\n"
