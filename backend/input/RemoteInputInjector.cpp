@@ -7,6 +7,7 @@
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#include "input/WindowsKeyInput.h"
 
 #include <algorithm>
 #include <atomic>
@@ -169,14 +170,7 @@ RemoteInputInjector::~RemoteInputInjector()
 void RemoteInputInjector::ReleasePressedKeys()
 {
     for (const auto& key : pressedKeys_) {
-        INPUT input{};
-        input.type = INPUT_KEYBOARD;
-        input.ki.wVk = key.virtualKey;
-        input.ki.wScan = key.scancode;
-        input.ki.dwFlags = KEYEVENTF_KEYUP;
-        if (key.scancode != 0 && key.virtualKey == 0) {
-            input.ki.dwFlags |= KEYEVENTF_SCANCODE;
-        }
+        auto input = WindowsKeyInput(key.virtualKey, key.scancode, false);
         static_cast<void>(SendInput(1, &input, sizeof(INPUT)));
     }
     pressedKeys_.clear();
@@ -439,14 +433,7 @@ bool RemoteInputInjector::InjectKey(uint16_t virtualKey, uint16_t scancode, bool
     } else if (!HasTargetBounds()) {
         return false;
     }
-    INPUT input{};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = virtualKey;
-    input.ki.wScan = scancode;
-    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
-    if (scancode != 0 && virtualKey == 0) {
-        input.ki.dwFlags |= KEYEVENTF_SCANCODE;
-    }
+    auto input = WindowsKeyInput(virtualKey, scancode, down);
     if (SendInput(1, &input, sizeof(INPUT)) != 1) {
         return false;
     }

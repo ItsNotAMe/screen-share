@@ -37,7 +37,22 @@ public:
             // Sample the last owned texture at the configured cadence instead
             // of waiting for damage (or WebRTC's slow idle refresh).
             auto frame = capture_.TryCaptureFrame(std::chrono::milliseconds(0));
-            if (Closed() || Minimized()) { retained_.reset(); return std::nullopt; }
+            if (Closed()) { retained_.reset(); if (target_) target_->Invalidate(sourceId_); return std::nullopt; }
+            if (Minimized()) {
+                retained_.reset();
+                // A fullscreen game may minimize when the host opens the Grant
+                // controls. Preserve its last captured input identity while
+                // paused; never publish new geometry or replay old pixels.
+                if (target_) {
+                    const auto window = reinterpret_cast<HWND>(config_.windowHandle);
+                    DWORD process = 0; GetWindowThreadProcessId(window, &process);
+                    if (inputTarget_ && process == inputTarget_->process && IsWindowVisible(window) &&
+                        GetPropW(window, property_.c_str()) == reinterpret_cast<HANDLE>(sourceId_))
+                        target_->Touch(*inputTarget_);
+                    else target_->Invalidate(sourceId_);
+                }
+                return std::nullopt;
+            }
             const auto period = std::chrono::nanoseconds(1000000000 / std::max(1, config_.targetFps));
             nextFrame_ += period;
             if(nextFrame_ <= now)nextFrame_ = now + period; // Skip missed slots, without accumulating poll jitter.
@@ -56,8 +71,10 @@ public:
             resource->device = device_;
             if(target_) {
                 const auto target=Target();
-                if(target && target->width==frame->sourceWidth && target->height==frame->sourceHeight)
+                if(target && target->width==frame->sourceWidth && target->height==frame->sourceHeight) {
                     resource->inputGeneration=target_->Publish(*target);
+                    inputTarget_ = *target;
+                }
                 else target_->Invalidate(sourceId_);
             }
             retained_ = resource;
@@ -93,6 +110,7 @@ private:
     DesktopCapturer capture_;
     std::shared_ptr<D3dVideoDevice> device_;
     std::shared_ptr<WindowsCaptureResource> retained_;
+    std::optional<input::DesktopTarget> inputTarget_;
     std::chrono::steady_clock::time_point nextFrame_;
 };
 }

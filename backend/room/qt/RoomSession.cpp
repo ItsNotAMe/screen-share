@@ -94,7 +94,10 @@ struct RoomSession::Impl {
             }
             try { if (runtime) mediaStopped = runtime->BeginStop(); }
             catch (...) { Phase(RoomPhase::Failed, RoomError::Media); }
-            if (error == RoomError::None && admittedSnapshot && !terminal) {
+            // A local media failure ends membership too. Closing only the
+            // socket leaves a ghost viewer/full room or reconnecting host until
+            // the service lease expires. Retain leases for transport recovery.
+            if (admittedSnapshot && ((error == RoomError::None && !terminal) || error == RoomError::Media)) {
                 leaving = coordinator->Send(1, QJsonDocument(QJsonObject{{"v", 2}, {"type", "peer.leave"},
                     {"roomId", membership.roomId}, {"requestId", "session_leave"}, {"payload", QJsonObject{}}}).toJson(QJsonDocument::Compact));
                 leaveDeadline = std::chrono::steady_clock::now() + 1s;

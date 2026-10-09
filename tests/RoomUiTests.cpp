@@ -315,15 +315,48 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSiz
 }
 class HeldRuntime final : public RoomRuntime {
     std::shared_future<void> barrier_;
+    std::shared_ptr<std::atomic<bool>> fail_;
+    bool stopping_ = false;
 public:
-    explicit HeldRuntime(std::shared_future<void> barrier) : barrier_(barrier) {}
-    void Advance() override {}
+    explicit HeldRuntime(std::shared_future<void> barrier, std::shared_ptr<std::atomic<bool>> fail = {}) : barrier_(barrier), fail_(std::move(fail)) {}
+    void Advance() override { if (!stopping_ && fail_ && fail_->load()) throw std::runtime_error("Injected media failure"); }
     bool Ready(const std::string&) override { return true; }
     bool Add(const std::string&) override { return true; }
     void Remove(const std::string&) noexcept override {}
     bool Receive(const std::string&, RoomPeerSignal) override { return true; }
-    std::shared_future<void> BeginStop() override { return barrier_; }
+    std::shared_future<void> BeginStop() override { stopping_ = true; return barrier_; }
 };
+void MediaFailureCleanup(const std::string& origin) {
+    using Directory = screenshare::room::qt::RoomDirectory;
+    Directory directory(true);
+    Check(directory.Start(QUrl(QString::fromStdString(origin))));
+    Wait([&] { return directory.status().phase == Directory::Phase::Ready && directory.status().rooms.empty(); });
+    std::promise<void> ready; ready.set_value(); auto barrier = ready.get_future().share();
+    auto hostFailure = std::make_shared<std::atomic<bool>>(false), viewerFailure = std::make_shared<std::atomic<bool>>(false);
+    auto factory = [barrier](auto fail) -> QtRoomSession::Factory {
+        return [barrier, fail](auto) { return [barrier, fail](auto, auto) { return std::make_unique<HeldRuntime>(barrier, fail); }; };
+    };
+    QtRoomSession host(nullptr, factory(hostFailure), true), viewer(nullptr, factory(viewerFailure), true);
+    RoomSessionConfig config; config.room.origin = origin; config.room.host = true; config.room.nickname = "Failure host"; config.room.name = "Media failure cleanup";
+    Check(host.start(config));
+    Wait([&] { return host.status().phase == RoomPhase::Active && directory.status().rooms.size() == 1; });
+    config.room.host = false; config.room.roomId = host.status().roomId; config.room.nickname = "Failure viewer";
+    Check(viewer.start(config));
+    Wait([&] { return viewer.status().phase == RoomPhase::Active && host.status().members.size() == 2 && directory.status().rooms.front().viewers == 1; });
+    viewerFailure->store(true);
+    Wait([&] { return !viewer.running(); });
+    Check(viewer.status().error == RoomError::Media);
+    Wait([&] { return host.status().members.size() == 1 && directory.status().rooms.size() == 1 && directory.status().rooms.front().viewers == 0; });
+    Check(directory.status().rooms.front().status == "open");
+    viewerFailure->store(false);
+    Check(viewer.start(config));
+    Wait([&] { return viewer.status().phase == RoomPhase::Active && host.status().members.size() == 2; });
+    hostFailure->store(true);
+    Wait([&] { return !host.running(); });
+    Check(host.status().error == RoomError::Media);
+    Wait([&] { return directory.status().rooms.empty() && !viewer.running(); });
+    directory.Stop();
+}
 struct MutationBarrier { std::atomic<bool> pause{false}, entered{false}; std::promise<void> release; std::shared_future<void> ready = release.get_future().share(); };
 class PausedRuntime final : public RoomRuntime {
     std::shared_ptr<MutationBarrier> barrier_;
@@ -1497,6 +1530,20 @@ void DesktopInputScenario(const std::string& origin) {
     Wait([&]{return evidence->keys>keyboardBefore;});
 #endif
     host.revokeControl();Wait([&]{return !viewer.findChild<QCheckBox*>("controllerConsent")->isChecked();});
+    // Backend rejection arrives after a locally accepted host click. Keep its
+    // explanation visible beside the affected viewer, then allow a fresh retry.
+    evidence->healthy = false;
+    QPushButton* keyboardGrant = nullptr;
+    for (auto* button : host.findChildren<QPushButton*>("PeerCapability"))
+        if (button->property("capability").toUInt() == screenshare::input::Keyboard) keyboardGrant = button;
+    Check(keyboardGrant != nullptr);
+    Wait([&]{return keyboardGrant->isEnabled();}); keyboardGrant->click();
+    Wait([&]{return host.findChild<QLabel*>("PeerControlState")->text().contains("Input unavailable");});
+    Check(!keyboardGrant->isChecked());
+    evidence->healthy = true;
+    keyboardGrant->click();
+    Wait([&]{return keyboardGrant->isChecked() && host.findChild<QLabel*>("PeerControlState")->text()=="Control granted";});
+    host.revokeControl();Wait([&]{return !viewer.findChild<QCheckBox*>("controllerConsent")->isChecked();});
     authorize();
     CaptureSelection selection;
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
@@ -1556,6 +1603,7 @@ int main(int argc, char** argv) {
 #endif
         if(argc==3 && std::string(argv[2])=="native-resolution") {NativeResolutionScenario(argv[1]);std::cout<<"{\"passed\":true,\"native_resolution\":true}\n";}
         else if(argc==3 && std::string(argv[2])=="desktop-input") {
+            MediaFailureCleanup(argv[1]);
             DesktopInputScenario(argv[1]);std::cout<<"{\"passed\":true,\"mapped_input\":true,\"physical_input\":false}\n";
         }
         else if (argc == 3 && (std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical")) {

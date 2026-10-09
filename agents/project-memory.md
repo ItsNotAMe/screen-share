@@ -5,6 +5,33 @@
 
 # Project Memory
 
+## Version 1.0.6 keyboard/source-switch fixes — 2026-10-09
+
+Windows keyboard injection now preserves the native scan byte and E0 flag for
+presses and releases, including cleanup of held keys. Scan codes drive ordinary
+keys; Pause retains its virtual-key E1 handling. Previously arrows/right modifiers
+lost their extended identity. Minimized windows with previously captured geometry
+retain input identity/permission while capture refreshes liveness; desktop health
+accepts this pause and foreground checks suppress injection. Restore still requires
+valid captured geometry; closed/hidden/replaced sources remain invalid.
+
+Overlapping WGC sources now share ownership of their thread's capture dispatcher.
+Retiring the original source previously shut down the replacement's borrowed queue.
+Local media failures now send peer.leave after admission instead of retaining a
+ghost viewer/full room or reconnecting host for the service lease. Transport
+recovery retains its existing lease behavior. Host viewer rows expose asynchronous
+backend grant refusal instead of silently returning to Watching.
+
+Dispatcher and media-failure cleanup regressions fail against the prior code and
+pass with fixes; key payload/service/presentation and recording desktop UI checks
+pass. The production Windows keyboard sink also accepts a minimized test window
+and rejects it after its capture identity is removed, without injecting input.
+Native generated-window capture requires the active interactive desktop; the
+current checks ran on a separate test desktop. Do not claim Silksong/two-PC input
+or full WGC-switch acceptance. NativeCaptureTests --switch covers that path on
+an interactive desktop. Version and updater notes prepare 1.0.6; the application
+release uses the existing signed update identity. No Worker change is required.
+
 ## Shared-source window audio — 2026-10-09
 
 Room UI/CLI hosts now default to shared-source audio. The Windows runtime follows
