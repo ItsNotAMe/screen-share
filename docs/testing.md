@@ -98,6 +98,14 @@ separation for equal, left-only, right-only and opposite-phase signals. It opens
 no physical audio devices. The video/input test forwards six complete key presses
 across two busy GPU presents, so renderer frame drops cannot silently discard key events.
 
+`ApplicationAudioTargetTests` checks rendering-helper selection, multiple audio
+sessions, unrelated apps, stale/recycled parent PIDs, helper restarts during a PCM
+read, playback starting after sharing, and silence after the window owner exits.
+Its default run opens no audio devices. On an interactive Windows desktop, run
+`build/release/ApplicationAudioTargetTests.exe --app PID` while that app plays
+audio to check the actual discovery and shared-source PCM capture path. It prints
+the selected process and levels, discards samples, and saves or replays no audio.
+
 ```powershell
 cmake --build build/release --target NativePcmAudioTests SharedAudioLevelTests VideoFrameInputTests NativeCaptureTests
 ctest --test-dir build/release -R '^(native-pcm-audio|shared-audio-level|video-frame-input)$' --output-on-failure
