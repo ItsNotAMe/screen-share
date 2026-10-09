@@ -28,6 +28,13 @@ source changes and mute/unmute. Windows isolates app processes rather than
 individual windows, so other windows or tabs in the same app may be audible.
 App audio needs Windows build 20348 or later (including Windows 11). If capture
 fails, video continues with silence. Choose System audio to share all apps instead.
+
+Shared audio negotiates stereo between current versions. At 100% viewer volume,
+the app applies no playback attenuation. System capture from 5.1/7.1 outputs
+preserves front-channel levels, mixes center/surround at -3 dB and omits LFE.
+Only mixes that would clip are reduced to fit PCM16. Windows mixer levels and
+output-device settings still affect the loudness heard by the viewer.
+
 Passwords use a UTF-8 file rather than command-line text. Links carry a room ID,
 not credentials or an arbitrary server address.
 

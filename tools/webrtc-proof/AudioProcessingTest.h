@@ -14,13 +14,16 @@ inline void Downmix() {
     };
     Check(mix(1, 0, {-32768, 0, 32767}) == std::vector<int16_t>({-32768, -32768, 0, 0, 32767, 32767}));
     Check(mix(2, 3, {-32768, 32767, 123, -456}) == std::vector<int16_t>({-32768, 32767, 123, -456}));
+    // Unusual two-channel masks can also sum into the same stereo channel.
+    Check(mix(2, 0x104, {30000, 30000, 15000, 15000}) ==
+        std::vector<int16_t>({32767, 32767, 16384, 16384}));
     // 5.1 back and side layouts, and 7.1: verify each channel independently.
     for (auto [channels, mask] : {std::pair{6u, 0x3fu}, std::pair{6u, 0x60fu}, std::pair{8u, 0x63fu}}) {
         for (unsigned channel = 0; channel < channels; ++channel) {
             std::vector<int16_t> input(channels); input[channel] = 24000;
             auto output = mix(channels, mask, input);
-            if (channel == 0) Check(output[0] == (channels == 6 ? 9941 : 7689));
-            if (channel == 2) Check(output[0] == (channels == 6 ? 7029 : 5437));
+            if (channel == 0) Check(output[0] == 24000);
+            if (channel == 2) Check(output[0] == 16971);
             if (channel == 3) Check(output[0] == 0 && output[1] == 0); // LFE
             else if (channel == 2) Check(output[0] > 0 && output[0] == output[1]); // center
             else if (channel == 0 || channel == 4 || channel == 6) Check(output[0] > 0 && output[1] == 0);
@@ -30,6 +33,18 @@ inline void Downmix() {
         auto minimum = mix(channels, mask, std::vector<int16_t>(channels, -32768));
         Check(maximum[0] == 32767 && maximum[1] == 32767 && minimum[0] == -32768 && minimum[1] == -32768);
         Check(mix(channels, mask, std::vector<int16_t>(channels * 480)) == std::vector<int16_t>(960));
+        // Stereo content on a surround endpoint must retain its full level.
+        std::vector<int16_t> stereo(channels * 2);
+        stereo[0] = 24000; stereo[1] = -12000;
+        stereo[channels] = -32768; stereo[channels + 1] = 32767;
+        Check(mix(channels, mask, stereo) == std::vector<int16_t>({24000, -12000, -32768, 32767}));
+        // Overload limiting preserves waveform and L/R balance instead of
+        // hard clipping, and does not attenuate the following quiet block.
+        std::vector<int16_t> overload(channels * 2, 32767);
+        for (unsigned i = 0; i < channels; ++i) overload[channels + i] = 16384;
+        auto limited = mix(channels, mask, overload);
+        Check(limited[0] == 32767 && limited[1] == 32767 && limited[2] == 16384 && limited[3] == 16384);
+        Check(mix(channels, mask, stereo) == std::vector<int16_t>({24000, -12000, -32768, 32767}));
     }
     for (auto [channels, mask] : {std::pair{0u, 0u}, std::pair{9u, 0u}, std::pair{6u, 0u},
             std::pair{6u, 3u}, std::pair{2u, 0x8001u}, std::pair{1u, 8u}}) {

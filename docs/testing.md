@@ -89,13 +89,18 @@ presentation counters and native rendering checks, not a black grab, as evidence
 
 Audio cadence and retained-frame resize regressions run without physical input:
 
-The audio test checks ordered PCM blocks delivered in 50ms bursts, with no gaps
-after startup. The video/input test forwards six complete key presses across two
-busy GPU presents, so renderer frame drops cannot silently discard key events.
+The PCM audio test checks ordered blocks delivered in 50ms bursts, with no gaps
+after startup, and unity-level stereo content in 5.1/7.1 layouts with overload
+protection. `SharedAudioLevelTests` sends synthetic audio through the shipping
+MediaEngine and encrypted Opus transport at 100% viewer volume. It checks stereo
+SDP in both directions, mono codec compatibility, received RMS levels and channel
+separation for equal, left-only, right-only and opposite-phase signals. It opens
+no physical audio devices. The video/input test forwards six complete key presses
+across two busy GPU presents, so renderer frame drops cannot silently discard key events.
 
 ```powershell
-cmake --build build/release --target NativePcmAudioTests VideoFrameInputTests NativeCaptureTests
-ctest --test-dir build/release -R '^(native-pcm-audio|video-frame-input)$' --output-on-failure
+cmake --build build/release --target NativePcmAudioTests SharedAudioLevelTests VideoFrameInputTests NativeCaptureTests
+ctest --test-dir build/release -R '^(native-pcm-audio|shared-audio-level|video-frame-input)$' --output-on-failure
 ```
 
 On an interactive Windows desktop, `build/release/NativeCaptureTests.exe --cadence`

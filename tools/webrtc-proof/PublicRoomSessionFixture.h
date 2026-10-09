@@ -56,6 +56,7 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<unsigned> smallFrames{0};
     std::shared_ptr<proof::CaptureLifetime> capture = std::make_shared<proof::CaptureLifetime>();
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
+    std::optional<PcmEndpointFactories> audioEndpoints;
     MediaEngine::PacketFactory packetFactory;
     MediaEngine::EventLogFactory eventLogFactory;
     CaptureSession::Factory captureFactory;
@@ -98,7 +99,7 @@ public:
 #else
         NativeRoomRuntimeOptions options;
         options.inputSink = evidence_->input;
-        auto endpoints = proof::SyntheticAudio(evidence_->audio);
+        auto endpoints = evidence_->audioEndpoints.value_or(proof::SyntheticAudio(evidence_->audio));
         if (identity.host) {
             options.audioSwitch = std::make_shared<AudioSwitchControl>(screenshare::media::AudioSelection{}, endpoints.capture, ProcessMicrophone);
             endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
