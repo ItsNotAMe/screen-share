@@ -11,8 +11,9 @@
 - Show host-side input grant failures beside the affected viewer.
 
 Automated checks cover key encoding, minimized-window grants without input
-injection, capture dispatcher lifetime, room cleanup and reconnection. Full
-Silksong sessions and two-computer keyboard input remain unverified.
+injection, capture dispatcher lifetime, generated-window source switches,
+native Windows room UI, room cleanup and reconnection. Full Silksong sessions
+and two-computer keyboard input remain unverified.
 
 Setup and portable packages use the existing signed update manifest. Application
 and Setup executables are not Authenticode-signed. Qt source archives are

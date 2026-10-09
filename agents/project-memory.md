@@ -26,11 +26,13 @@ Dispatcher and media-failure cleanup regressions fail against the prior code and
 pass with fixes; key payload/service/presentation and recording desktop UI checks
 pass. The production Windows keyboard sink also accepts a minimized test window
 and rejects it after its capture identity is removed, without injecting input.
-Native generated-window capture requires the active interactive desktop; the
-current checks ran on a separate test desktop. Do not claim Silksong/two-PC input
-or full WGC-switch acceptance. NativeCaptureTests --switch covers that path on
-an interactive desktop. Version and updater notes prepare 1.0.6; the application
-release uses the existing signed update identity. No Worker change is required.
+The release checks additionally pass NativeCaptureTests --switch on an active
+desktop (six WGC source switches, continued frames/geometry and minimized grants)
+and the native Windows room UI source-switch scenario. The full 37-test application
+suite, update signing/tamper checks and packaged UI self-test pass. Full Silksong
+and two-computer keyboard input remain unverified. Version and updater notes
+prepare 1.0.6; the application release uses the existing signed update identity.
+No Worker change is required.
 
 ## Shared-source window audio — 2026-10-09
 
