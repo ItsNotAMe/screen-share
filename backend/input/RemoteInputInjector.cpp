@@ -8,6 +8,7 @@
 #endif
 #include <Windows.h>
 #include "input/WindowsKeyInput.h"
+#include "input/WindowsMouseInput.h"
 
 #include <algorithm>
 #include <atomic>
@@ -414,6 +415,40 @@ bool RemoteInputInjector::InjectMouseScroll(int wheelDeltaX, int wheelDeltaY)
         input.mi.dwFlags = MOUSEEVENTF_HWHEEL;
         input.mi.mouseData = static_cast<DWORD>(wheelDeltaX);
         if (SendInput(1, &input, sizeof(INPUT)) != 1) return false;
+    }
+    return true;
+}
+
+bool RemoteInputInjector::InjectRelativeMouseMove(int deltaX, int deltaY)
+{
+    if(HasTargetWindow() && !IsTargetWindowForeground()) {RefreshTargetState();return true;}
+    // Games warp the cursor to their center with SetCursorPos. Those events
+    // can look physical to the desktop hook; applying its cooldown here would
+    // suppress every subsequent camera movement. Relative control is shared
+    // with the local mouse; focus loss and host revoke still stop it immediately.
+    auto input=WindowsRelativeMouseInput(deltaX,deltaY);
+    return SendInput(1,&input,sizeof(input))==1;
+}
+
+bool RemoteInputInjector::InjectRelativeMouseButton(MouseButton button, bool down)
+{
+    const auto index=static_cast<size_t>(button);
+    DWORD flags=0,data=0;
+    if(index>=pressedMouseButtons_.size() || !MouseButtonInput(button,down,flags,data))return false;
+    if(HasTargetWindow() && !IsTargetWindowForeground()) {RefreshTargetState();return true;}
+    if(!down && !pressedMouseButtons_[index])return true;
+    const bool sent=SendMouseButtonOnly(flags,data);
+    if(sent)pressedMouseButtons_[index]=down;
+    return sent;
+}
+
+bool RemoteInputInjector::InjectRelativeMouseScroll(int wheelDeltaX, int wheelDeltaY)
+{
+    if(HasTargetWindow() && !IsTargetWindowForeground()) {RefreshTargetState();return true;}
+    for(const auto [delta,flag]:{std::pair{wheelDeltaX,DWORD(MOUSEEVENTF_HWHEEL)},std::pair{wheelDeltaY,DWORD(MOUSEEVENTF_WHEEL)}}) {
+        if(!delta)continue;
+        INPUT input{};input.type=INPUT_MOUSE;input.mi.dwFlags=flag;input.mi.mouseData=DWORD(delta);
+        if(SendInput(1,&input,sizeof(input))!=1)return false;
     }
     return true;
 }

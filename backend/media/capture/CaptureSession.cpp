@@ -26,10 +26,12 @@ struct CaptureSession::Impl {
             bool awaitingFrame = true;
             auto deadline = std::chrono::steady_clock::now() + startupTimeout;
             uint64_t sequence = 0;
+            unsigned skippedFrames = 0;
             while (!stop.stop_requested()) {
                 failure = CaptureFailure::Recovery;
                 const bool ready = recovery.Poll([&] {
                     source->Rebuild();
+                    skippedFrames = 0;
                     awaitingFrame = true;
                     deadline = std::chrono::steady_clock::now() + startupTimeout;
                 });
@@ -37,6 +39,18 @@ struct CaptureSession::Impl {
                     failure = CaptureFailure::Source;
                     std::optional<CaptureSample> sample;
                     try { sample = source->Poll(); }
+                    catch (const CaptureFrameSkipped&) {
+                        // One late GPU frame must not tear down the room. If
+                        // acquisition keeps stalling, use the same bounded,
+                        // cancellable recovery as device loss.
+                        if (++skippedFrames >= 3) {
+                            failure = CaptureFailure::Recovery;
+                            recovery.Lost([&] { source->Retire(); });
+                            std::lock_guard lock(mutex);
+                            status.state = CaptureState::Recovering;
+                        } else if (!stop.stop_requested()) idle.Wait();
+                        continue;
+                    }
                     catch (const CaptureLost&) {
                         failure = CaptureFailure::Recovery;
                         recovery.Lost([&] { source->Retire(); });
@@ -54,6 +68,7 @@ struct CaptureSession::Impl {
                         std::lock_guard lock(mutex);
                         status.state = CaptureState::Minimized;
                     } else if (sample) {
+                        skippedFrames = 0;
                         if (!sample->resource) throw std::runtime_error("Missing captured resource");
                         awaitingFrame = false;
                         bool send;

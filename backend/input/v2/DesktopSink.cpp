@@ -14,7 +14,7 @@ bool DesktopSink::Grant(const std::string& peer,uint8_t caps,int slot) {
     if(!caps || (caps&~7) || owners_.contains(peer))return false;
     const auto target=target_->Read();std::unique_ptr<DesktopDevice> device;
     if(caps&(Mouse|Keyboard)) {
-        if(!target.generation || ((caps&Mouse) && !target.target.mouseMapped))return false;
+        if(!target.generation || ((caps&Mouse) && !target.target.mouseMapped && !target.target.window))return false;
         for(const auto& [id,owner]:owners_)if(caps&owner.capabilities&(Mouse|Keyboard))return false;
         device=factory_(target.target,caps&3);
         if(!device || !device->Healthy())return false;
@@ -73,7 +73,9 @@ public:
         // control from another window. Focused() prevents all injection here.
         if (IsIconic(window)) return true;
         if (!(caps_&Mouse)) return true;
-        if (!target_.mouseMapped) return false;
+        // Raw game input only needs identity. Absolute input below still needs
+        // the exact pixel mapping and is discarded when it is unavailable.
+        if (!target_.mouseMapped) return true;
         return SUCCEEDED(DwmGetWindowAttribute(window,DWMWA_EXTENDED_FRAME_BOUNDS,&rect,sizeof(rect))) &&
             rect.left==target_.left && rect.top==target_.top && rect.right-rect.left==target_.width && rect.bottom-rect.top==target_.height;
     }
@@ -84,6 +86,10 @@ public:
         if(!Focused()) {ReleaseHeldInput();return true;}
         if(event.kind==Kind::Key)return (caps_&Keyboard) && injector_.InjectKey(event.key,event.scan,event.down);
         if(!(caps_&Mouse))return false;
+        if(event.kind==Kind::RelativePointer)return injector_.InjectRelativeMouseMove(int(event.x),int(event.y));
+        if(event.kind==Kind::RelativeButton)return injector_.InjectRelativeMouseButton(RemoteInputInjector::MouseButton(event.button),event.down);
+        if(event.kind==Kind::RelativeWheel)return injector_.InjectRelativeMouseScroll(event.wheelX,event.wheelY);
+        if(!target_.mouseMapped)return true;
         auto point=std::pair{event.x,event.y};
         if(target_.window) {
             const auto window=reinterpret_cast<HWND>(target_.window);

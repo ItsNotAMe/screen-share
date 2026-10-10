@@ -103,7 +103,16 @@ void WindowKeyboardControlScenario() {
     auto evidence=std::make_shared<DesktopInputEvidence>();
     auto sink=std::make_shared<DesktopSink>(target,nullptr,
         [evidence](auto,uint8_t){return std::make_unique<RecordingDesktopDevice>(evidence);});
-    auto host=std::make_shared<Service>(true,sink);
+    // Use the production runtime's startup permission policy. A bare Service
+    // misses source-specific configuration applied before any viewer joins.
+    NativeRoomRuntimeOptions options;
+    options.initialCapture.kind=CaptureKind::Window;options.initialCapture.window=123;
+    options.inputSink=sink;
+    options.engine=[] {return std::unique_ptr<MediaEngine>{};}; // No media peers in this control fixture.
+    options.capture=[] {return std::make_unique<SyntheticCaptureSource>(64,64);};
+    options.deliver=[](auto&,const auto&) {};
+    auto runtime=CreateNativeRoomRuntime({true,"window-input","host"},[](const auto&,auto){return true;},std::move(options));
+    auto host=std::dynamic_pointer_cast<Service>(runtime->Input());Check(bool(host));
     Service viewer(false);host->Bind("viewer","window-input",true);viewer.Bind("host","window-input",true);
     auto pump=[&] {
         target->Touch({1,123,42,0,0,640,480});
@@ -122,8 +131,13 @@ void WindowKeyboardControlScenario() {
         return keyboard && keyboard->isEnabled() && viewer.Read().front().permission;
     });
     Check(keyboard->toolTip().contains("not focused"));
-    keyboard->click(); // Direct grant must work with window capture selected.
-    Wait([&]{pump();return viewer.Read().front().granted==Keyboard && keyboard->isChecked();});
+    Check(host->Grant("viewer",Mouse));
+    Wait([&]{pump();return viewer.Read().front().granted==Mouse;});
+    keyboard->click(); // Add keyboard to working mouse control at window startup.
+    Wait([&]{pump();return viewer.Read().front().granted==(Mouse|Keyboard) && keyboard->isChecked();});
+    Event key;key.kind=Kind::Key;key.key=65;key.down=true;key.sourceGeneration=target->Read().generation;
+    Check(viewer.Submit("host",key));
+    Wait([&]{pump();return evidence->keys>0;});
     host->Revoke("viewer");
     Wait([&]{pump();return !viewer.Read().front().granted && !keyboard->isChecked();});
     Check(viewer.Request("host",Keyboard));
@@ -415,6 +429,9 @@ void ProfileSettingsScenario() {
         room.stream.connections[0].recovery.state = PeerLifecycleState::Failed;
         room.stream.connections[0].retained = true;
         Wait([&] { return controls.findChild<QLabel*>("PeerControlState")->text().contains("Connection failed"); });
+        room.phase=RoomPhase::Failed;
+        Wait([&] { return controls.findChild<QLabel*>("PeerControlState")->text()=="Room ended — start sharing again"; });
+        room.phase=RoomPhase::Active;
         room.stream.connections[0].recovery.state = PeerLifecycleState::Connecting;
         room.stream.connections[0].retained = false;
         Wait([&] { return controls.findChild<QLabel*>("PeerControlState")->text() == QString::fromUtf8("Connecting…"); });
@@ -1462,6 +1479,20 @@ void DesktopInputScenario(const std::string& origin) {
 #endif
     authorize();move(QPointF(video->width()/2.0,video->height()/2.0));
     Wait([&]{return evidence->applied>0;});Check(std::abs(evidence->x-.5f)<.02f && std::abs(evidence->y-.5f)<.02f);
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    // Mode change pauses input. FocusIn clears that pause before MousePress;
+    // the press must synchronously enable capture rather than need a second click.
+    auto* gameMode=viewer.findChild<QCheckBox*>("gameMouseMode");Check(gameMode);
+    gameMode->setChecked(true);Check(!video->hasMouseTracking());
+    QFocusEvent gameFocus(QEvent::FocusIn,Qt::MouseFocusReason);QApplication::sendEvent(video,&gameFocus);
+    const auto captureBefore=evidence->applied.load();const QPointF gameCenter(video->width()/2.0,video->height()/2.0);
+    QMouseEvent captureClick(QEvent::MouseButtonPress,gameCenter,gameCenter,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+    QApplication::sendEvent(video,&captureClick);Check(video->hasMouseTracking());
+    Check(evidence->applied==captureBefore); // The capture click never fires in the game.
+    gameMode->setChecked(false);
+    QEvent gameResume(QEvent::WindowActivate);QApplication::sendEvent(&viewer,&gameResume);
+    Wait([&]{return video->hasMouseTracking();});
+#endif
     const auto before=evidence->applied.load();move({0,0});
     const auto until=std::chrono::steady_clock::now()+80ms;Wait([&]{return std::chrono::steady_clock::now()>until;});Check(evidence->applied==before);
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
@@ -1528,6 +1559,26 @@ void DesktopInputScenario(const std::string& origin) {
     const auto keyboardBefore=evidence->keys.load();
     QKeyEvent keyboardPress(QEvent::KeyPress,Qt::Key_B,Qt::NoModifier,0x30,0x42,0);QApplication::sendEvent(surface,&keyboardPress);
     Wait([&]{return evidence->keys>keyboardBefore;});
+    // Escape must reach the game through both preview recipients in fullscreen.
+    auto* full=viewer.findChild<QPushButton*>("sessionFullscreen");full->click();Check(viewer.isFullScreen());
+    for(auto* recipient:{static_cast<QWidget*>(video),surface}) {
+        const auto keys=evidence->keys.load();
+        QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier,0x01,VK_ESCAPE,0);
+        QKeyEvent escapeUp(QEvent::KeyRelease,Qt::Key_Escape,Qt::NoModifier,0x01,VK_ESCAPE,0);
+        QApplication::sendEvent(recipient,&escape);QApplication::sendEvent(recipient,&escapeUp);
+        Wait([&]{return evidence->keys>=keys+2;});Check(viewer.isFullScreen());
+    }
+    QKeyEvent exitGameFull(QEvent::KeyPress,Qt::Key_F,Qt::ControlModifier|Qt::AltModifier|Qt::ShiftModifier,0x21,0x46,0);
+    QApplication::sendEvent(surface,&exitGameFull);Check(!viewer.isFullScreen());
+    QKeyEvent releaseFull(QEvent::KeyRelease,Qt::Key_F,Qt::NoModifier,0x21,0x46,0);QApplication::sendEvent(surface,&releaseFull);
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        auto* mode=viewer.findChild<QCheckBox*>("gameMouseMode");Check(mode);mode->setChecked(true);
+        QCoreApplication::processEvents();Check(viewer.grab().save(QDir(output).filePath("viewer-game-mouse.png")));
+        mode->setChecked(false);
+    }
+    QKeyEvent releaseControlKey(QEvent::KeyPress,Qt::Key_Q,Qt::ControlModifier|Qt::AltModifier|Qt::ShiftModifier,0x10,0x51,0);
+    QApplication::sendEvent(surface,&releaseControlKey);
+    Wait([&]{return !viewer.session().input()->Read().front().granted && !host.session().input()->Read().front().granted;});
 #endif
     host.revokeControl();Wait([&]{return !viewer.findChild<QCheckBox*>("controllerConsent")->isChecked();});
     // Backend rejection arrives after a locally accepted host click. Keep its

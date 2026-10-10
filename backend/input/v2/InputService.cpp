@@ -19,9 +19,15 @@ template<class F> auto External(std::unique_lock<std::mutex>& lock, F&& fn) {
     } unlocked(lock);
     return fn();
 }
-unsigned StateSlot(Kind kind) { return kind == Kind::Pointer ? 0 : kind == Kind::Pad ? 1 : 2; }
+unsigned StateSlot(Kind kind) { return kind == Kind::Pointer ? 0 : kind == Kind::Pad ? 1 : kind == Kind::RelativePointer ? 3 : 2; }
+void AccumulateMotion(Event& next, const Event& previous) {
+    if(next.kind!=Kind::RelativePointer || previous.kind!=next.kind || next.sourceGeneration!=previous.sourceGeneration)return;
+    next.x=std::clamp(next.x+previous.x,-32767.f,32767.f);
+    next.y=std::clamp(next.y+previous.y,-32767.f,32767.f);
+}
 uint8_t Required(Kind kind) {
-    if(kind==Kind::Pointer || kind==Kind::Button || kind==Kind::Wheel) return Mouse;
+    if(kind==Kind::Pointer || kind==Kind::Button || kind==Kind::Wheel ||
+        kind==Kind::RelativePointer || kind==Kind::RelativeButton || kind==Kind::RelativeWheel) return Mouse;
     if(kind==Kind::Key) return Keyboard;
     if(kind==Kind::Pad) return Gamepad;
     return 0;
@@ -33,11 +39,11 @@ struct Service::Impl {
         Status status;
         std::string connection;
         uint64_t sent = 0, controlSeen = 0;
-        std::array<uint64_t,3> stateSeen{};
+        std::array<uint64_t,4> stateSeen{};
         std::deque<Pending> incoming;
         std::deque<Message> outgoing;
-        std::array<std::optional<Pending>,3> incomingState;
-        std::array<std::optional<Message>,3> outgoingState;
+        std::array<std::optional<Pending>,4> incomingState;
+        std::array<std::optional<Message>,4> outgoingState;
         std::optional<Event> lastPad;
         std::optional<uint8_t> grant;
         bool release = false, removed = false;
@@ -65,7 +71,7 @@ struct Service::Impl {
         Message m{p.connection,p.status.permission,++p.sent,e};
         if(Replaceable(e.kind)) {
             auto& slot=p.outgoingState[StateSlot(e.kind)];
-            if(slot) ++p.status.coalesced;
+            if(slot) {++p.status.coalesced;AccumulateMotion(m.event,slot->event);}
             slot=std::move(m);
         } else p.outgoing.push_back(std::move(m));
     }
@@ -317,7 +323,16 @@ void Service::Receive(const std::string& id,bool reliable,std::span<const uint8_
     Impl::Pending pending{std::move(*m),Clock::now()};
     if(reliable) {if(impl_->Capacity(p))p.incoming.push_back(std::move(pending));}
     else {
-        auto& slot=p.incomingState[StateSlot(kind)]; if(slot)++p.status.coalesced; slot=std::move(pending);
+        auto& slot=p.incomingState[StateSlot(kind)];
+        if(slot) {
+            ++p.status.coalesced;
+            // Expired motion must not be revived by a fresh mouse sample.
+            if(pending.received-slot->received<300ms) {
+                AccumulateMotion(pending.message.event,slot->message.event);
+                if(kind==Kind::RelativePointer)pending.received=slot->received;
+            }
+        }
+        slot=std::move(pending);
     }
 }
 std::vector<Packet> Service::Drain(const std::string& id,bool reliableWritable,bool stateWritable) {

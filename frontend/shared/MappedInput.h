@@ -14,7 +14,11 @@ inline std::optional<screenshare::input::Event> MappedInput(const screenshare::R
     case RemoteInputKind::Key:event.kind=input::Kind::Key;event.key=uint16_t(value.key);event.scan=uint16_t(value.scancode);event.down=value.pressed;break;
     default:return {};
     }
-    if(event.kind!=input::Kind::Key) {
+    if(value.relativeMouse && event.kind!=input::Kind::Key) {
+        if(event.kind==input::Kind::Pointer) {event.kind=input::Kind::RelativePointer;event.x=value.normX;event.y=value.normY;}
+        else if(event.kind==input::Kind::Button)event.kind=input::Kind::RelativeButton;
+        else if(event.kind==input::Kind::Wheel)event.kind=input::Kind::RelativeWheel;
+    } else if(event.kind!=input::Kind::Key) {
         const auto point=value.sourceMapping.Point(value.normX,value.normY);if(!point)return {};
         event.x=point->first;event.y=point->second;
     }

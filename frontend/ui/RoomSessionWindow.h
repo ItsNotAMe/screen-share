@@ -74,6 +74,8 @@ private:
     bool autoRoomUpdate_ = false;
     QString streamSaveError_;
     bool closing_ = false, streamFullscreen_ = false, swallowEscapeRelease_ = false;
+    bool swallowFullscreenRelease_ = false;
+    QPushButton* fullscreenButton_ = nullptr;
     std::function<void()> exitFullscreen_;
     uint64_t profileNicknameEdit_ = 0;
     bool applyingProfileNickname_ = false;

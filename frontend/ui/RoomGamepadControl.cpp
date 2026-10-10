@@ -155,11 +155,24 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
         layout->insertWidget(layout->indexOf(consent_),selection);
         auto* hint=new QLabel("Click an input to ask the host for control.",this);hint->setObjectName("FormHint");hint->setWordWrap(true);
         layout->insertWidget(layout->indexOf(selection),hint);
+        gameMouseMode_=new QCheckBox("Game mouse",this);gameMouseMode_->setObjectName("gameMouseMode");
+        gameMouseMode_->setProperty("roomSwitch",true);
+        gameMouseMode_->setToolTip("For 3D camera control: click the video to lock the cursor. Ctrl+Alt+Shift+Q releases control. Escape goes to the game; Ctrl+Alt+Shift+F toggles fullscreen.");
+        layout->insertWidget(layout->indexOf(selection)+1,gameMouseMode_);
+        auto* gameHint=new QLabel(this);
+        gameHint->setObjectName("gameMouseHint");gameHint->setWordWrap(true);
+        layout->insertWidget(layout->indexOf(gameMouseMode_)+1,gameHint);
+        connect(gameMouseMode_,&QCheckBox::toggled,this,[this](bool enabled){
+            PauseInput();if(video_)video_->setGameMouseMode(enabled);
+        });
         capabilities_->setCurrentIndex(capabilities_->findData(0));
         refresh->click();
     }
 }
-RoomGamepadControl::~RoomGamepadControl() { qApp->removeEventFilter(this); Revoke(); }
+RoomGamepadControl::~RoomGamepadControl() {
+    qApp->removeEventFilter(this);Revoke();
+    if(video_) {video_->setRemoteInputHandler({});video_->inputCaptureFailed={};video_->gameMouseCaptureStarted={};}
+}
 void RoomGamepadControl::RequestControl(uint8_t capability) {
     const auto port=port_();const auto peer=peers_->currentData().toString().toStdString();
     if(!port || peer.empty())return;
@@ -176,6 +189,9 @@ void RoomGamepadControl::RequestControl(uint8_t capability) {
 }
 void RoomGamepadControl::SetVideo(VideoFrameWidget* video) {
     video_=video;
+    video_->inputCaptureFailed=[this](const QString& message){Toast::show(window(),message);};
+    video_->gameMouseCaptureStarted=[this]{Toast::show(window(),"Mouse captured. Ctrl+Alt+Shift+Q releases control. Ctrl+Alt+Shift+F toggles fullscreen.",6500);};
+    if(gameMouseMode_)video_->setGameMouseMode(gameMouseMode_->isChecked());
     video_->setRemoteInputHandler([this](const auto& value) {
         if(value.kind==RemoteInputKind::ReleaseControl) {Revoke();return;}
         const auto event=MappedInput(value);const auto port=port_();
@@ -195,7 +211,7 @@ void RoomGamepadControl::SetVideo(VideoFrameWidget* video) {
         uint64_t permission=0;
         for(const auto& state:port->Read())if(state.peer==requestedPeer_)permission=state.permission;
         if(!port->SubmitIfCurrent(requestedPeer_,permission,*event)){Revoke();return;}
-        if(event->kind==input::Kind::Key || event->kind==input::Kind::Button) {
+        if(event->kind==input::Kind::Key || event->kind==input::Kind::Button || event->kind==input::Kind::RelativeButton) {
             const int id=event->kind==input::Kind::Key?event->key:256+event->button;
             if(event->down)heldInput_[id]={*event,permission};else heldInput_.erase(id);
         }
@@ -240,6 +256,15 @@ void RoomGamepadControl::PauseInput() {
 bool RoomGamepadControl::eventFilter(QObject* watched, QEvent* event) {
     if(host_)return QWidget::eventFilter(watched,event);
     const auto* widget=qobject_cast<QWidget*>(watched);
+    if(widget && (widget==window() || window()->isAncestorOf(widget)) &&
+        (event->type()==QEvent::ShortcutOverride || event->type()==QEvent::KeyPress)) {
+        const auto* key=static_cast<QKeyEvent*>(event);
+        if(key->key()==Qt::Key_Q && (key->modifiers()&(Qt::ControlModifier|Qt::AltModifier|Qt::ShiftModifier))==
+            (Qt::ControlModifier|Qt::AltModifier|Qt::ShiftModifier)) {
+            if(event->type()==QEvent::KeyPress && !key->isAutoRepeat())Revoke();
+            event->accept();return true;
+        }
+    }
     if(widget && (widget==window() || window()->isAncestorOf(widget))) {
         if(event->type()==QEvent::MouseButtonPress)keyboardNavigation_=false;
         else if(event->type()==QEvent::KeyPress) {
@@ -264,7 +289,9 @@ bool RoomGamepadControl::eventFilter(QObject* watched, QEvent* event) {
     }
     const bool videoFocus=video_ && (watched==video_ || video_->isAncestorOf(qobject_cast<QWidget*>(watched)));
     if(videoFocus && event->type()==QEvent::FocusIn)inputPaused_->store(false);
-    if(videoFocus && event->type()==QEvent::MouseButtonPress && inputPaused_->load()){inputPaused_->store(false);Tick();}
+    // FocusIn can clear the pause before this press arrives. Refresh capture
+    // now so the first click after changing mode/focus can lock the mouse.
+    if(videoFocus && event->type()==QEvent::MouseButtonPress){inputPaused_->store(false);Tick();}
     if(videoFocus && capturingDesktop_ && event->type()==QEvent::FocusOut)
         QTimer::singleShot(0,this,[this] {auto* focus=QApplication::focusWidget();if(video_ && focus!=video_ && !video_->isAncestorOf(focus))PauseInput();});
     return QWidget::eventFilter(watched, event);
@@ -323,7 +350,8 @@ void RoomGamepadControl::Tick() {
             const bool failed=connection!=room.stream.connections.end() &&
                 (connection->recovery.state==screenshare::media::PeerLifecycleState::Failed ||
                  connection->recovery.state==screenshare::media::PeerLifecycleState::Closed);
-            card->findChild<QLabel*>("PeerControlState")->setText(!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->requested?"Requests control":state->granted?"Control granted":
+            const bool ended=room.phase==v2::RoomPhase::Failed || room.phase==v2::RoomPhase::Stopped;
+            card->findChild<QLabel*>("PeerControlState")->setText(ended?"Room ended — start sharing again":!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->requested?"Requests control":state->granted?"Control granted":
                 state->reason==input::Reason::Backend?"Input unavailable — check the shared source or controller":
                 state->reason==input::Reason::Ownership?"Selected input is already in use":"Watching");
             QStringList requestedNames;
@@ -418,6 +446,11 @@ void RoomGamepadControl::Tick() {
     if(host_)status_->setVisible(!actionError_.isEmpty());
     else {
         status_->hide();
+        const auto mouseState=!gameMouseMode_->isChecked()?QString("For 3D games, enable Game mouse above, then click the video."):
+            !(granted&input::Mouse)?QString("Game mouse: request mouse access, then click the video."):
+            video_ && video_->gameMouseCaptured()?QString("Game mouse captured — cursor hidden and locked."):
+            QString("Game mouse ready — click the video to hide and lock the cursor.");
+        findChild<QLabel*>("gameMouseHint")->setText(mouseState+"\nCtrl+Alt+Shift+F: toggle fullscreen\nCtrl+Alt+Shift+Q: release control\nWith keyboard access, Escape goes to the game.");
         for(const auto& entry:{std::pair{"Mouse","mouse"},std::pair{"Keyboard","keyboard"},std::pair{"Controller","gamepad"}}) {
             auto* button=findChild<QToolButton*>(QString("select%1Input").arg(entry.first));
             const bool allowed=granted & button->property("capability").toUInt();

@@ -28,6 +28,8 @@ class DeviceCapture final : public ICaptureSource {
     std::shared_ptr<DeviceState> state_;
     template<class Work> auto Observe(const char* operation, Work work) {
         try { return work(); }
+        catch (const CaptureFrameSkipped&) { state_->diagnostics->Event("capture-gpu-frame-skipped"); throw; }
+        catch (const CaptureLost&) { state_->diagnostics->Event("capture-device-lost"); throw; }
         catch (const CaptureBackendError& error) { state_->diagnostics->Event(operation, uint32_t(error.result())); throw; }
         catch (const CaptureDeviceLostError& error) { state_->diagnostics->Event(operation, uint32_t(error.reason())); throw; }
         catch (...) { state_->diagnostics->Event(operation, -1); throw; }

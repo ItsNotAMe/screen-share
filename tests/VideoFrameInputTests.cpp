@@ -2,6 +2,7 @@
 
 #include <QtGui/QKeyEvent>
 #include <QtGui/QWheelEvent>
+#include <QtGui/QShortcut>
 #include <QtWidgets/QApplication>
 
 #include <iostream>
@@ -79,6 +80,8 @@ void NativeNavigationKeys(VideoFrameWidget& widget, QWidget* recipient) {
             std::tuple{Qt::Key_Control, VK_CONTROL, 0xe01d},
             std::tuple{Qt::Key_Alt, VK_MENU, 0xe038},
             std::tuple{Qt::Key_Enter, VK_RETURN, 0xe01c},
+            std::tuple{Qt::Key_Escape, VK_ESCAPE, 0x01},
+            std::tuple{Qt::Key_Tab, VK_TAB, 0x0f},
             std::tuple{Qt::Key_Left, VK_LEFT, 0x4b}, // Keypad with Num Lock off.
             std::tuple{Qt::Key_8, VK_NUMPAD8, 0x48}}) {
         for (bool down : {true, false}) {
@@ -99,6 +102,61 @@ void NativeNavigationKeys(VideoFrameWidget& widget, QWidget* recipient) {
         }
     }
     widget.setRemoteInputHandler({});
+}
+void GameMappingScenario() {
+    using namespace screenshare;
+    RemoteInputEvent value;value.relativeMouse=true;value.sourceMapping={12,640,480,0,60,640,360};
+    value.normX=-35;value.normY=70;
+    auto motion=MappedInput(value);
+    Require(motion && motion->kind==input::Kind::RelativePointer && motion->x==-35 && motion->y==70 && motion->sourceGeneration==12);
+    value.kind=RemoteInputKind::MouseButton;value.button=4;value.pressed=true;
+    auto button=MappedInput(value);Require(button && button->kind==input::Kind::RelativeButton && button->button==4 && button->down);
+    value.kind=RemoteInputKind::MouseScroll;value.scrollX=-30;value.scrollY=120;
+    auto wheel=MappedInput(value);Require(wheel && wheel->kind==input::Kind::RelativeWheel && wheel->wheelX==-30 && wheel->wheelY==120);
+    value.sourceMapping={};Require(!MappedInput(value));
+}
+void NativeGameCaptureScenario() {
+    auto state=std::make_shared<RendererEvidence>();
+    VideoFrameWidget widget(nullptr,[state]{return std::make_unique<TestRenderer>(state);});
+    widget.resize(320,180);widget.show();widget.activateWindow();QApplication::processEvents();
+    screenshare::Nv12VideoFrame frame;frame.width=frame.height=2;frame.nv12.resize(6);frame.inputMapping={1,2,2,0,0,2,2};
+    widget.setVideoFrame(std::move(frame));
+    Await([&]{return widget.presentationStats().presentedFrames==1;});
+    QApplication::processEvents();
+    std::vector<screenshare::RemoteInputEvent> events;
+    unsigned captureNotices=0;widget.gameMouseCaptureStarted=[&]{++captureNotices;};
+    widget.setRemoteInputHandler([&](const auto& value){events.push_back(value);});
+    widget.setControlCapture(true,true,true);widget.setGameMouseMode(true);
+    auto* surface=widget.findChild<QWidget*>("D3DVideoSurface");Require(surface);
+    auto click=[&] {
+        const QPointF point(160,90);
+        QMouseEvent down(QEvent::MouseButtonPress,point,point,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+        QMouseEvent up(QEvent::MouseButtonRelease,point,point,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(surface,&down);QApplication::sendEvent(surface,&up);
+    };
+    // Native registration/confinement only. The handler records events and never
+    // injects into the OS or a game. Always release confinement during unwinding.
+    click();Require(widget.gameMouseCaptured() && events.empty() && captureNotices==1);
+    Require(surface->cursor().shape()==Qt::BlankCursor);
+    auto checkClip=[&] {
+        RECT client{},clip{};const auto handle=reinterpret_cast<HWND>(surface->winId());
+        Require(GetClientRect(handle,&client) && GetClipCursor(&clip));
+        POINT centre{client.right/2,client.bottom/2};Require(ClientToScreen(handle,&centre));
+        Require(clip.left==centre.x && clip.top==centre.y && clip.right==centre.x+1 && clip.bottom==centre.y+1);
+    };
+    checkClip();widget.resize(400,240);QApplication::processEvents();checkClip();
+    Await([&]{return widget.presentedInputMapping().Valid();});
+    widget.setControlCapture(true,true,false);Require(surface->cursor().shape()==Qt::BlankCursor && captureNotices==1);
+    QMouseEvent down(QEvent::MouseButtonPress,QPointF(160,90),QPointF(160,90),Qt::RightButton,Qt::RightButton,Qt::NoModifier);
+    QApplication::sendEvent(surface,&down);
+    Require(events.size()==1 && events.back().relativeMouse && events.back().pressed);
+    QWheelEvent wheel(QPointF(160,90),QPointF(160,90),QPoint(),QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+    QApplication::sendEvent(surface,&wheel);Require(events.size()==2 && events.back().relativeMouse && events.back().scrollY==120);
+    widget.setControlCapture(false,false,false);Require(!widget.gameMouseCaptured());
+    widget.setControlCapture(true,true,true);click();Require(widget.gameMouseCaptured());
+    QFocusEvent blur(QEvent::FocusOut,Qt::OtherFocusReason);QApplication::sendEvent(surface,&blur);
+    Require(!widget.gameMouseCaptured());
+    click();Require(widget.gameMouseCaptured());widget.clearFrame();Require(!widget.gameMouseCaptured());
 }
 void PresentationRecoveryScenario() {
     auto state = std::make_shared<RendererEvidence>();
@@ -141,6 +199,14 @@ void PresentationRecoveryScenario() {
         Require(downs==6 && ups==6);
         NativeNavigationKeys(widget, &widget);
         NativeNavigationKeys(widget, widget.findChild<QWidget*>("D3DVideoSurface"));
+        unsigned shortcuts=0;
+        QShortcut escape(QKeySequence(Qt::Key_Escape),&widget);
+        QObject::connect(&escape,&QShortcut::activated,[&]{++shortcuts;});
+        for(auto* recipient:{static_cast<QWidget*>(&widget),widget.findChild<QWidget*>("D3DVideoSurface")}) {
+            QKeyEvent override(QEvent::ShortcutOverride,Qt::Key_Escape,Qt::NoModifier);
+            override.ignore();QApplication::sendEvent(recipient,&override);Require(override.isAccepted());
+        }
+        Require(shortcuts==0);
         widget.setRemoteInputHandler({});
         const auto busyBefore=widget.presentationStats().renderer.busyDrops;
         for (const auto outcome : {Busy, Occluded, Minimized, Unavailable, Unknown}) {
@@ -229,7 +295,10 @@ bool Check(bool condition, const char* message)
 int main(int argc, char** argv)
 {
     QApplication application(argc, argv);
-    try { PresentationRecoveryScenario(); }
+    try {
+        GameMappingScenario();PresentationRecoveryScenario();
+        if(argc==2 && std::string(argv[1])=="--game-mouse")NativeGameCaptureScenario();
+    }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
     VideoFrameWidget widget;
     std::vector<screenshare::RemoteInputEvent> inputs;

@@ -90,7 +90,9 @@ public:
         ValidateStreamPreferences(options_.preferences);
         if (!options_.diagnostics) options_.diagnostics = std::make_shared<DiagnosticHistory>();
         input_ = std::make_shared<input::Service>(identity_.host, options_.inputSink);
-        input_->Configure(options_.initialCapture.kind == CaptureKind::Window ? uint8_t(input::Mouse | input::Gamepad) : uint8_t(7), 0);
+        // Both capture kinds support keyboard input. The desktop sink validates
+        // the captured target and pauses window input while it is unfocused.
+        input_->Configure(input::Mouse | input::Keyboard | input::Gamepad, 0);
         if (identity_.host) {
             if (options_.captureForSelection) {
                 captureSwitch_ = options_.captureSwitch ? options_.captureSwitch : std::make_shared<CaptureSwitchControl>(options_.initialCapture);

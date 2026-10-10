@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 class D3DVideoSurface;
 class D3DFramePresenter;
@@ -54,8 +55,15 @@ public:
     // handler (which the watch window sends to the host).
     void setRemoteInputHandler(std::function<void(const screenshare::RemoteInputEvent&)> handler);
     void setControlCapture(bool enabled, bool mouse, bool keyboard);
+    void setGameMouseMode(bool enabled);
+    [[nodiscard]] bool gameMouseCaptured() const { return gameMouseCaptured_; }
+    [[nodiscard]] bool capturesKeyboard() const { return controlActive_ && controlKeyboard_; }
+    void releaseGameMouse();
+    std::function<void(const QString&)> inputCaptureFailed;
+    std::function<void()> gameMouseCaptureStarted;
 
 protected:
+    bool event(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
@@ -75,6 +83,9 @@ private:
     void emitMouseButton(QMouseEvent* event, bool pressed);
     void emitWheel(QWheelEvent* event);
     void emitKey(QKeyEvent* event, bool pressed);
+    bool captureGameMouse();
+    void updateGameMouseClip();
+    void emitRelativeMotion(int x, int y);
 
     D3DVideoSurface* d3dSurface_ = nullptr;
     std::shared_ptr<D3DFramePresenter> framePresenter_;
@@ -91,6 +102,9 @@ private:
     bool controlActive_ = false;
     bool controlMouse_ = false;
     bool controlKeyboard_ = false;
+    bool gameMouseMode_ = false, gameMouseCaptured_ = false;
+    Qt::MouseButton captureClickButton_ = Qt::NoButton;
+    std::optional<RAWINPUTDEVICE> previousRawMouse_;
     screenshare::input::FrameMapping pendingImageMapping_, paintedMapping_;
     mutable screenshare::input::FrameMapping mappedForInput_;
 };

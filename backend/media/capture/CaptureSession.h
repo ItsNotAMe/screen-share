@@ -28,6 +28,7 @@ struct CaptureStatus {
     CaptureSourceInfo source;
 };
 struct CaptureLost : std::runtime_error { CaptureLost() : std::runtime_error("Capture device lost") {} };
+struct CaptureFrameSkipped : std::runtime_error { CaptureFrameSkipped() : std::runtime_error("Capture GPU frame missed its deadline") {} };
 class ICaptureSource {
 public:
     virtual ~ICaptureSource() = default;

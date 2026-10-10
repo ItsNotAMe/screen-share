@@ -57,16 +57,13 @@ int main(int argc, char** argv) {
         };
         const uint8_t capability =
 #ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
-            screenshare::input::Mouse;
+            screenshare::input::Mouse | screenshare::input::Keyboard;
 #else
             screenshare::input::Keyboard;
 #endif
         Check(viewers[0]->Input()->Request(hostId, capability));
         Wait([&] { for (const auto& p : host.Input()->Read()) if (p.peer == controllerId && p.requested == capability) return true; return false; });
         Check(!granted(host.Input(), controllerId));
-#ifdef SCREENSHARE_WINDOWS_ROOM_PROOF
-        Check(!host.Input()->Grant(controllerId, screenshare::input::Keyboard));
-#endif
         Check(host.Input()->Grant(controllerId, capability));
         Wait([&] { return granted(viewers[0]->Input(), hostId) == capability; });
         screenshare::input::Event press;

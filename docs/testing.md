@@ -18,7 +18,8 @@ input, driver allocation and audible-output tests explicit.
 Input service regressions cover accumulating requests, denial preserving existing
 grants/held input, requests arriving during grant application and cancellation.
 `desktop-input` uses generated HWNDs to check keyboard grants with mismatched or
-missing capture-to-desktop bounds while mouse grants remain refused. Hidden
+missing capture-to-desktop bounds. Window mouse grants allow relative game input;
+absolute events remain suppressed without exact bounds. Hidden
 windows, removed identity markers and changed processes still revoke input.
 `NativeCaptureTests --switch` includes a captured borderless window, minimized
 keyboard grants and six source replacements; it requires an active desktop and
@@ -27,10 +28,44 @@ does not inject keys. These fixtures do not establish Silksong compatibility.
 both video event paths, mapping, protocol encoding/decoding and Windows input
 payload construction. Dedicated arrows retain the extended flag; keypad scans
 remain unprefixed. It does not inject physical input or qualify a specific game.
+Game-input regressions cover relative wire payloads, accumulation instead of
+replacement of motion samples, generation isolation, permission removal,
+Escape/Tab routing and relative Windows payloads without absolute flags. The
+recording desktop UI scenario forwards Escape press/release in fullscreen through
+both video recipients, exits using Ctrl+Alt+Shift+F and releases control with
+Ctrl+Alt+Shift+Q. These do not establish hardware mouse sampling or game delivery.
+`VideoFrameInputTests --game-mouse` with `QT_QPA_PLATFORM=windows` also checks
+native registration/confinement at the video centre (including resize), the consumed capture click, relative buttons and
+wheel, a hidden cursor across grant updates, and unlocking on permission removal,
+focus loss and stream clear. It creates a temporary window, confines the local
+cursor briefly and records events without delivering input to a game.
+
+For a two-PC game check, run the same updated build on host and viewer, create a
+fresh room and share the game window. Grant Mouse and Keyboard while the host is
+in ScreenShare: granting must preserve focus. The host then selects the game;
+the viewer enables Game mouse and clicks the video. Check continuous camera
+turns past screen edges, combined movement and camera input, buttons/wheel, Tab,
+and Escape opening the game menu while viewer fullscreen remains active. Check
+Ctrl+Alt+Shift+F for fullscreen and Ctrl+Alt+Shift+Q for release, then request/grant
+again. Alt+Tab must release held input and unlock the viewer cursor; click the
+video to recapture. Host focus loss pauses game input, and host revoke or
+Ctrl+Alt+Shift+F12 must release held keys. Save reports on both PCs for any failure,
+including the failed step and game display mode. This real connection check is
+separate from recording-sink regressions.
+Also leave and rejoin the same room several times, confirming the host stays
+active and accepts a new viewer. If the room itself ends, restart sharing on the
+host; an ended room cannot be repaired by rejoining from the viewer.
+`CaptureSessionTest` in the WebRTC proof suite injects GPU frame deadline misses:
+one miss must preserve capture and its generation; three consecutive misses use
+bounded recovery, while cancellation and the lifetime retry budget still apply.
+Native media reports distinguish `capture-gpu-frame-skipped` from a source error.
 The native room UI scenarios check immediate icon requests, independent host menus,
 distinct pending/granted states and preserving keyboard when requesting mouse.
-Window keyboard regressions check direct grants and accepting requests. Desktop
-input tests check background input suppression, releasing held keys during idle
+Window keyboard regressions check direct grants and accepting requests.
+The window keyboard UI fixture constructs the production runtime with window
+capture selected at startup, adds keyboard to an existing mouse grant and records
+delivery of a key. This covers runtime capability configuration as well as the UI.
+Desktop input tests check background input suppression, releasing held keys during idle
 health polling, retained ownership and resumption without replaying dropped input.
 They also inspect the Windows key payload for arrows, right modifiers, keypad
 keys and releases without calling SendInput. `capture-dispatcher-lifecycle`

@@ -40,7 +40,7 @@ void Protocol() {
     Message golden{"x",0x0102030405060708ULL,0x1112131415161718ULL,{}};
     const std::vector<uint8_t> expected{'S','I','N',2,3,1,1,2,3,4,5,6,7,8,17,18,19,20,21,22,23,24,'x'};
     Check(Encode(golden)==expected);
-    for(unsigned k=0;k<=uint8_t(Kind::RequestDenied);++k) {
+    for(unsigned k=0;k<=uint8_t(Kind::RelativeWheel);++k) {
         Message m{"connection_restart_7",9,12,{}}; auto& e=m.event;
         e.kind=Kind(k); e.capabilities=7; e.x=.25f; e.y=.75f; e.button=4; e.down=true;
         e.key=65; e.scan=0x11e; e.wheelX=-1200; e.wheelY=1200;
@@ -57,6 +57,47 @@ void Protocol() {
     bad.event.x=1.01f; Check(Encode(bad).empty());
     bad.event.x=0; bad.event.kind=Kind::Key; bad.event.key=256; Check(Encode(bad).empty());
     bad.event.kind=Kind::Pad; bad.event.buttons=0x400; Check(Encode(bad).empty());
+    bad.event.kind=Kind::RelativePointer;bad.event.x=-27;bad.event.y=50;
+    Check(Decode(Encode(bad))->event.x==-27);
+    bad.event.x=32768;Check(Encode(bad).empty());
+    bad.event.x=std::numeric_limits<float>::infinity();Check(Encode(bad).empty());
+    bad.event.kind=Kind::RelativeButton;bad.event.button=5;Check(Encode(bad).empty());
+}
+void RelativeMotion() {
+    auto sink=std::make_shared<RecordingSink>();Service host(true,sink),viewer(false);
+    host.Bind("viewer","relative",true);viewer.Bind("host","relative",true);
+    auto pump=[&] {
+        for(const auto& packet:host.Drain("viewer",true,true))viewer.Receive("host",packet.reliable,packet.bytes);
+        for(const auto& packet:viewer.Drain("host",true,true))host.Receive("viewer",packet.reliable,packet.bytes);
+    };
+    Check(host.Grant("viewer",Mouse));Wait([&]{pump();return Read(viewer,"host").granted==Mouse;});
+    Event motion;motion.kind=Kind::RelativePointer;motion.sourceGeneration=9;motion.x=3;motion.y=-2;
+    for(int i=0;i<100;++i)Check(viewer.Submit("host",motion));
+    std::optional<Event> sent;
+    Wait([&]{
+        for(const auto& packet:viewer.Drain("host",true,true)) {
+            auto message=Decode(packet.bytes);Check(message.has_value());
+            if(message->event.kind==Kind::RelativePointer) {Check(!packet.reliable);sent=message->event;}
+            host.Receive("viewer",packet.reliable,packet.bytes);
+        }
+        return sent.has_value();
+    });
+    Check(sent->x==300 && sent->y==-200 && sent->sourceGeneration==9);
+    Wait([&]{return sink->applied>0;});
+    {std::lock_guard lock(sink->mutex);Check(sink->last.kind==Kind::RelativePointer && sink->last.x==300 && sink->last.y==-200);}
+    // Do not combine motion from different captured sources.
+    Check(viewer.Submit("host",motion));motion.sourceGeneration=10;motion.x=-4;motion.y=7;
+    Check(viewer.Submit("host",motion));sent.reset();
+    Wait([&]{for(const auto& packet:viewer.Drain("host",true,true))if(auto m=Decode(packet.bytes);m && m->event.kind==Kind::RelativePointer)sent=m->event;return sent.has_value();});
+    Check(sent->sourceGeneration==10 && sent->x==-4 && sent->y==7);
+    Event button;button.kind=Kind::RelativeButton;button.sourceGeneration=10;button.down=true;
+    Check(viewer.Submit("host",button));
+    auto packets=viewer.Drain("host",true,true);Check(packets.size()==1 && packets.front().reliable);
+    host.Receive("viewer",true,packets.front().bytes);
+    Wait([&]{return sink->applied>=2;});
+    {std::lock_guard lock(sink->mutex);Check(sink->last.kind==Kind::RelativeButton && sink->last.down);}
+    host.Revoke();Wait([&]{pump();return !Read(viewer,"host").granted;});
+    Check(!viewer.Submit("host",motion));
 }
 void RepeatedRevoke() {
     auto sink=std::make_shared<RecordingSink>(); Service host(true,sink),viewer(false);
@@ -329,6 +370,6 @@ void StalePollingOwner() {
     Check(!Read(viewer,"host").granted && Read(viewer,"host").revokePending);
 }
 int main() {
-    try {Protocol();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();AdditiveRequests();RequestDuringGrant();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
+    try {Protocol();RelativeMotion();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();AdditiveRequests();RequestDuringGrant();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

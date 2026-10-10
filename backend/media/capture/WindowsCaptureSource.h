@@ -92,7 +92,8 @@ public:
             }
             retained_ = resource;
             return CaptureSample{std::move(resource), captured};
-        } catch (const CaptureDeviceLostError&) { throw CaptureLost(); }
+        } catch (const CaptureGpuTimeoutError&) { throw CaptureFrameSkipped(); }
+        catch (const CaptureDeviceLostError&) { throw CaptureLost(); }
         catch (...) { if (Closed()) return std::nullopt; throw; }
     }
     bool Closed() const override { return capture_.sourceState() == CaptureSourceState::Closed; }

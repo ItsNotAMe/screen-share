@@ -5,6 +5,77 @@
 
 # Project Memory
 
+## Remote 3D game input — 2026-10-10
+
+Grant preparation no longer activates the shared game; the input worker validates
+identity and grants while it is unfocused/minimized. The host selects the game
+when ready. Viewer Game mouse is opt-in: the first video click consumes its own
+press/release and registers foreground raw mouse input, hides/confines the cursor,
+and sends relative motion/buttons/wheel with the displayed source generation.
+Capture releases on blur, grant removal, mode change, hidden/cleared video and
+destruction. Registration restores the prior process mouse registration. Native
+capture failures use a toast. Relative input bypasses desktop physical-mouse
+cooldown because game cursor warps can trigger it; host focus/revoke still stop it.
+
+SIN v2 adds kinds 10/11/12 without changing existing payloads. Relative movement
+has a separate bounded state slot and accumulates counts; buttons/wheel stay on
+the reliable lane. Window mouse grants accept verified identity without exact
+desktop bounds for relative control; absolute events still require exact mapping.
+Both endpoints need the updated app; no Worker change is needed. Escape and Tab
+reach the controlled video/game. Ctrl+Alt+Shift+F toggles fullscreen;
+Ctrl+Alt+Shift+Q releases viewer control. Global host panic remains unchanged.
+The viewer Controls panel always displays both shortcuts and Escape behavior.
+Entering fullscreen and successfully capturing the mouse show a 6.5-second,
+non-blocking reminder so the exit/release controls remain discoverable.
+
+The complete native build and all 39 CTest regressions pass, alongside recording
+desktop UI and native mouse registration/confinement scenarios. A local probe
+using the production capture source and desktop sink captured the actual Stellar
+Blade window at 2560x1440 and granted Mouse+Keyboard without changing focus;
+it injected no input. A separate local keyboard/menu check succeeded. No remote
+Stellar Blade gameplay or hardware mouse sampling is claimed. SendInput remains
+subject to Windows integrity restrictions and game compatibility.
+An isolated portable game-input preview (still compiled as 1.0.9) includes the
+current workspace, runtime dependencies, notices and a friend-test checklist.
+Extracted CLI help and UI self-test pass. Both endpoints must run this preview;
+published 1.0.9 lacks these changes. No stable version bump or publication occurred.
+
+Friend-test follow-up: the first preview still rejected keyboard grants when
+starting with window capture because NativeRoomRuntime configured only Mouse and
+Gamepad at construction. Display capture or a source switch configured all three.
+Startup now enables all three and delegates target validity/focus to the sink.
+The window keyboard UI fixture now constructs the production runtime instead of
+a bare input Service, adds Keyboard to an existing Mouse grant, and delivers a
+recorded key. It reproduces the first preview failure before the runtime fix.
+The native window room proof also requests/grants Mouse+Keyboard rather than
+asserting that keyboard must be rejected. Portable preview revision 2 includes
+this correction; compiled app version remains 1.0.9.
+
+Preview revision 3 follow-up: user initially missed Game mouse, then reported a
+cursor at the edges after enabling it. Keep the existing control location and
+label, but use the app's SVG toggle style (user explicitly requested a toggle,
+with no extra footer button). Show ready/captured guidance. Confinement now uses
+one native pixel at the video centre, avoiding borders/rounded corners and DPI
+rounding. Native click fixture verifies confinement survives release and the
+capture toast; input is recorded only. Verify OS confinement and Qt cursor state
+rather than relying on pointer overlays in automation screenshots.
+
+The friend-test host report ended with source capture
+failure before runtime shutdown; no viewer departure appears in its session
+events. Exact exception was not preserved. A GPU completion deadline was one
+generic source-failure path: type it explicitly, skip isolated unfinished frames,
+and use existing bounded device recovery after three consecutive skips. Report
+the fixed vocabulary event capture-gpu-frame-skipped. The CaptureSession proof
+checks skips/recovery and 100 restarts. Do not claim this proves the user's exact
+leave/rejoin failure fixed. Failed/stopped room rows now say the room ended, rather
+than telling viewers to rejoin it. Stable publication is still pending.
+Revision 3 validation: full Release build, 38/39 CTest checks passed with one
+desktop-input timeout; isolated retry passed in 0.07 s. CaptureSession deadline
+proof passed including 100 restarts; native game mouse test passed. Native UI
+fixture renders the toggle and verifies one-pixel clipping/blank Qt cursor after
+real click/release/toast. Extracted v3 UI self-test and CLI help pass. ZIP SHA256:
+6cf4b8dfd5f57316dc836c4d53d868c6a2056bc6f0345a68135b7140e7dd763e.
+
 ## Window keyboard grants without mouse geometry — 2026-10-09
 
 The owner confirmed the game is launched normally. Capture previously published

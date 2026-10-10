@@ -862,14 +862,16 @@ QCheckBox#RoomSwitch {
     margin: 0;
     spacing: 0;
 }
-QCheckBox#RoomSwitch::indicator {
+QCheckBox#RoomSwitch::indicator,
+QCheckBox[roomSwitch="true"]::indicator {
     background: transparent;
     border: 0;
     width: 44px;
     height: 24px;
     image: url(:/screenshare/ui/icons/toggle-off.svg);
 }
-QCheckBox#RoomSwitch::indicator:checked {
+QCheckBox#RoomSwitch::indicator:checked,
+QCheckBox[roomSwitch="true"]::indicator:checked {
     image: url(:/screenshare/ui/icons/toggle-on.svg);
 }
 QFrame#RoomSettingsPanel {
