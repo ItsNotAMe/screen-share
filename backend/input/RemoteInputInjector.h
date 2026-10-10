@@ -53,6 +53,9 @@ public:
     bool InjectMouseMove(float normX, float normY);
     bool InjectMouseButton(MouseButton button, bool down, float normX, float normY);
     bool InjectMouseScroll(int wheelDeltaX, int wheelDeltaY);
+    bool InjectRelativeMouseMove(int deltaX, int deltaY);
+    bool InjectRelativeMouseButton(MouseButton button, bool down);
+    bool InjectRelativeMouseScroll(int wheelDeltaX, int wheelDeltaY);
 
     // Virtual-key code (Windows VK_*) and hardware scancode; either may drive the
     // injection (scancode preferred when non-zero).

@@ -1611,7 +1611,9 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
             if (status == S_OK && complete) break;
             const HRESULT reason = device_->GetDeviceRemovedReason();
             if (FAILED(reason)) throw CaptureDeviceLostError(reason);
-            if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("Capture GPU completion deadline exceeded");
+            // Never publish an unfinished texture. A busy game can exceed this
+            // frame's budget without losing the source or graphics device.
+            if (std::chrono::steady_clock::now() >= deadline) throw CaptureGpuTimeoutError();
             thread_local ShortWait completionWait;
             completionWait.Wait();
         }

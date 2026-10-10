@@ -50,6 +50,7 @@ private:
     QComboBox* capabilities_;
     VideoFrameWidget* video_ = nullptr;
     QCheckBox* consent_;
+    QCheckBox* gameMouseMode_ = nullptr;
     QPushButton* action_;
     QLabel* status_;
     QLabel* diagnostics_;

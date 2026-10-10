@@ -76,7 +76,7 @@ try {
     & "$PSScriptRoot/create-update-manifest.ps1" -Version $version `
         -ZipPath build/release/ScreenShare-release-windows-x64.zip `
         -InstallerPath "build/release/ScreenShare-Setup-$version-windows-x64.exe" `
-        -OutputPath $manifest -Notes @('Fix missing audio when sharing Miyomu and other apps that play sound through WebView2 helpers.', 'Automatically follow the selected app audio process as playback starts or helpers restart, while keeping other apps outside the capture.')
+        -OutputPath $manifest -Notes @('Enable Game mouse for 3D camera control with a hidden, locked cursor. Update both computers, then click the video to capture.', 'Fix keyboard grants for shared game windows without switching the host focus. Escape reaches the game; Ctrl+Alt+Shift+F toggles fullscreen and Ctrl+Alt+Shift+Q releases control.', 'Recover from brief GPU capture stalls and clarify when a room has ended.')
     & "$PSScriptRoot/sign-update-manifest.ps1" -ManifestPath $manifest -PrivateKeyPath $privateKey -PublicKeyPath $publicKey -PassphraseFile $passphrase
     & "$PSScriptRoot/verify-update-manifest.ps1" -ManifestPath $manifest -PublicKeyPath $publicKey
     if ((& git rev-parse HEAD).Trim() -ne $commit -or (& git status --porcelain)) { throw 'The source changed during the release build.' }

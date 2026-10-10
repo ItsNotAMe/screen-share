@@ -14,9 +14,9 @@ struct DesktopTarget {
     bool operator==(const DesktopTarget&) const = default;
     bool Valid() const { return source && width > 1 && height > 1 && width <= 32768 && height <= 32768; }
 };
-// Keyboard input needs the captured source identity, not a pixel-to-desktop
-// transform. Preserve that identity when WGC and desktop bounds disagree;
-// mouse grants still require an exact, verified mapping.
+// Keyboard and relative game input need the captured source identity, not a
+// pixel-to-desktop transform. Preserve it when WGC and desktop bounds disagree;
+// absolute mouse events still require an exact, verified mapping.
 inline DesktopTarget CapturedInputTarget(DesktopTarget target, int width, int height) {
     target.mouseMapped = target.width == width && target.height == height && target.Valid();
     target.width = width; target.height = height;

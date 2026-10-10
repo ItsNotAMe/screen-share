@@ -13,14 +13,11 @@ QtRoomSession::QtRoomSession(QObject* parent, Factory factory, bool loopback)
 }
 QtRoomSession::~QtRoomSession() { timer_.stop(); session_.reset(); }
 bool QtRoomSession::prepareInputGrant(uint8_t capabilities) {
-    if(loopback_ || !(capabilities&screenshare::input::Mouse))return true;
-    const auto selected=status().capture.selected;
-    if(selected.kind!=screenshare::media::CaptureKind::Window)return true;
-    const auto window=reinterpret_cast<HWND>(selected.window);
-    // This follows the host's explicit Grant click. Never restore a minimized or
-    // hidden source, and never try to bypass foreground restrictions.
-    return IsWindowVisible(window) && !IsIconic(window) &&
-        (GetForegroundWindow()==GetAncestor(window,GA_ROOT) || SetForegroundWindow(window));
+    // The input owner validates the captured identity asynchronously. Granting
+    // permission must never activate a game (which can change its capture size).
+    // The host chooses when to focus it; input remains paused until then.
+    (void)capabilities;
+    return true;
 }
 bool QtRoomSession::start(RoomSessionConfig config) {
     if (session_) return false;

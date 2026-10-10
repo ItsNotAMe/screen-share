@@ -10,7 +10,8 @@
 
 namespace screenshare::input {
 enum Capability : uint8_t { Mouse = 1, Keyboard = 2, Gamepad = 4 };
-enum class Kind : uint8_t { Request, Permission, Release, Heartbeat, Pointer, Button, Wheel, Key, Pad, RequestDenied };
+enum class Kind : uint8_t { Request, Permission, Release, Heartbeat, Pointer, Button, Wheel, Key, Pad, RequestDenied,
+    RelativePointer, RelativeButton, RelativeWheel };
 struct Event {
     Kind kind = Kind::Heartbeat;
     uint8_t capabilities = 0, button = 0;
@@ -27,12 +28,20 @@ struct Message {
     uint64_t permission = 0, sequence = 0;
     Event event;
 };
-inline bool Replaceable(Kind kind) { return kind == Kind::Pointer || kind == Kind::Pad || kind == Kind::Heartbeat; }
+inline bool Replaceable(Kind kind) { return kind == Kind::Pointer || kind == Kind::RelativePointer || kind == Kind::Pad || kind == Kind::Heartbeat; }
+inline bool DesktopEvent(Kind kind) {
+    return kind==Kind::Pointer || kind==Kind::Button || kind==Kind::Wheel || kind==Kind::Key ||
+        kind==Kind::RelativePointer || kind==Kind::RelativeButton || kind==Kind::RelativeWheel;
+}
 inline bool Valid(const Event& e) {
-    if (uint8_t(e.kind) > uint8_t(Kind::RequestDenied)) return false;
+    if (uint8_t(e.kind) > uint8_t(Kind::RelativeWheel)) return false;
     switch (e.kind) {
     case Kind::Request: case Kind::RequestDenied: return e.capabilities && !(e.capabilities & ~7);
     case Kind::Permission: return !(e.capabilities & ~7);
+    case Kind::RelativePointer:
+        return std::isfinite(e.x) && std::isfinite(e.y) && std::abs(e.x)<=32767 && std::abs(e.y)<=32767;
+    case Kind::RelativeButton: return e.button < 5;
+    case Kind::RelativeWheel: return e.wheelX >= -1200 && e.wheelX <= 1200 && e.wheelY >= -1200 && e.wheelY <= 1200;
     case Kind::Pointer: case Kind::Button:
         return std::isfinite(e.x) && std::isfinite(e.y) && e.x >= 0 && e.x <= 1 && e.y >= 0 && e.y <= 1 &&
             (e.kind != Kind::Button || e.button < 5);
@@ -53,12 +62,14 @@ inline std::vector<uint8_t> Encode(const Message& m) {
     put(m.permission,8); put(m.sequence,8);
     b.insert(b.end(),m.connection.begin(),m.connection.end());
     const auto& e=m.event;
-    if(e.kind==Kind::Pointer || e.kind==Kind::Button || e.kind==Kind::Wheel || e.kind==Kind::Key)put(e.sourceGeneration,8);
+    if(DesktopEvent(e.kind))put(e.sourceGeneration,8);
     switch (e.kind) {
     case Kind::Request: case Kind::Permission: case Kind::RequestDenied: put(e.capabilities,1); break;
-    case Kind::Pointer: case Kind::Button:
+    case Kind::RelativePointer: case Kind::Pointer: case Kind::Button:
         put(std::bit_cast<uint32_t>(e.x),4); put(std::bit_cast<uint32_t>(e.y),4);
         if(e.kind==Kind::Button) { put(e.button,1); put(e.down,1); } break;
+    case Kind::RelativeButton: put(e.button,1); put(e.down,1); break;
+    case Kind::RelativeWheel: put(uint16_t(e.wheelX),2); put(uint16_t(e.wheelY),2); break;
     case Kind::Wheel: put(uint16_t(e.wheelX),2); put(uint16_t(e.wheelY),2); put(std::bit_cast<uint32_t>(e.x),4); put(std::bit_cast<uint32_t>(e.y),4); break;
     case Kind::Key: put(e.key,2); put(e.scan,2); put(e.down,1); break;
     case Kind::Pad:
@@ -69,20 +80,25 @@ inline std::vector<uint8_t> Encode(const Message& m) {
     return b;
 }
 inline std::optional<Message> Decode(std::span<const uint8_t> b) {
-    if(b.size()<23 || b.size()>170 || b[0]!='S' || b[1]!='I' || b[2]!='N' || b[3]!=2 || b[4]>9 || !b[5] || b[5]>128) return {};
-    constexpr unsigned sizes[]={1,1,0,0,16,18,20,13,12,1};
+    if(b.size()<23 || b.size()>170 || b[0]!='S' || b[1]!='I' || b[2]!='N' || b[3]!=2 || b[4]>12 || !b[5] || b[5]>128) return {};
+    constexpr unsigned sizes[]={1,1,0,0,16,18,20,13,12,1,16,10,12};
     if(b.size()!=22+b[5]+sizes[b[4]]) return {};
     size_t at=6;
     auto get=[&](unsigned size) { uint64_t n=0; while(size--) n=(n<<8)|b[at++]; return n; };
     Message m; m.event.kind=Kind(b[4]); m.permission=get(8); m.sequence=get(8);
     m.connection.assign(reinterpret_cast<const char*>(b.data()+at),b[5]); at+=b[5];
     auto& e=m.event;
-    if(e.kind==Kind::Pointer || e.kind==Kind::Button || e.kind==Kind::Wheel || e.kind==Kind::Key)e.sourceGeneration=get(8);
+    if(DesktopEvent(e.kind))e.sourceGeneration=get(8);
     switch(e.kind) {
     case Kind::Request: case Kind::Permission: case Kind::RequestDenied: e.capabilities=uint8_t(get(1)); break;
-    case Kind::Pointer: case Kind::Button:
+    case Kind::RelativePointer: case Kind::Pointer: case Kind::Button:
         e.x=std::bit_cast<float>(uint32_t(get(4))); e.y=std::bit_cast<float>(uint32_t(get(4)));
         if(e.kind==Kind::Button) { e.button=uint8_t(get(1)); const auto down=get(1); if(down>1)return {}; e.down=down!=0; } break;
+    case Kind::RelativeButton: {
+        e.button=uint8_t(get(1)); const auto down=get(1); if(down>1)return {}; e.down=down!=0; break;
+    }
+    case Kind::RelativeWheel:
+        e.wheelX=std::bit_cast<int16_t>(uint16_t(get(2))); e.wheelY=std::bit_cast<int16_t>(uint16_t(get(2))); break;
     case Kind::Wheel: e.wheelX=std::bit_cast<int16_t>(uint16_t(get(2))); e.wheelY=std::bit_cast<int16_t>(uint16_t(get(2)));
         e.x=std::bit_cast<float>(uint32_t(get(4))); e.y=std::bit_cast<float>(uint32_t(get(4))); break;
     case Kind::Key: {

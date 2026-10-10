@@ -1,6 +1,7 @@
 #include "input/v2/DesktopSink.h"
 #include "codec/InputMappingSei.h"
 #include "input/WindowsKeyInput.h"
+#include "input/WindowsMouseInput.h"
 #include <dwmapi.h>
 #include <iostream>
 #include <stdexcept>
@@ -71,13 +72,16 @@ void WindowKeyboardWithoutMouseGeometry() {
     DesktopSink mappingGate(state, {}, [&](auto, uint8_t) {
         ++devices; return std::make_unique<Device>(std::make_shared<Evidence>());
     });
-    Check(!mappingGate.Grant("mouse", Mouse, 0));
-    Check(!mappingGate.Grant("combined", Mouse | Keyboard, 0));
-    Check(devices == 0 && mappingGate.Grant("keyboard", Keyboard, 0));
+    Check(mappingGate.Grant("mouse", Mouse, 0));mappingGate.Release("mouse");
+    Check(mappingGate.Grant("combined", Mouse | Keyboard, 0));mappingGate.Release("combined");
+    Check(devices == 2 && mappingGate.Grant("keyboard", Keyboard, 0));
     mappingGate.Release("keyboard");
     auto sink = CreateWindowsDesktopSink(state);
     Check(sink->Grant("keyboard", Keyboard, 0) && sink->Healthy("keyboard"));
-    Check(!sink->Grant("mouse", Mouse, 0));
+    const auto foreground=GetForegroundWindow();
+    Check(sink->Grant("mouse", Mouse, 0));
+    Check(sink->Healthy("mouse") && GetForegroundWindow()==foreground);
+    sink->Release("mouse");
     ShowWindow(window.handle, SW_HIDE);
     Check(!sink->Healthy("keyboard"));
     sink->Release("keyboard");
@@ -94,7 +98,7 @@ void WindowKeyboardWithoutMouseGeometry() {
     state->Publish(noBounds);
     Check(sink->Grant("keyboard", Keyboard, 0));
     sink->Release("keyboard");
-    Check(!sink->Grant("combined", Mouse | Keyboard, 0));
+    Check(sink->Grant("combined", Mouse | Keyboard, 0));sink->Release("combined");
     Check(sink->Grant("keyboard", Keyboard, 0));
     auto wrongProcess = noBounds; ++wrongProcess.process;
     state->Publish(wrongProcess);
@@ -108,6 +112,9 @@ void WindowKeyboardWithoutMouseGeometry() {
     RemovePropW(window.handle, property.c_str());
 }
 int main() {try {
+    const auto relative=screenshare::WindowsRelativeMouseInput(-123,456);
+    Check(relative.type==INPUT_MOUSE && relative.mi.dx==-123 && relative.mi.dy==456);
+    Check(relative.mi.dwFlags==(MOUSEEVENTF_MOVE|MOUSEEVENTF_MOVE_NOCOALESCE));
     MinimizedKeyboardGrant();
     WindowKeyboardWithoutMouseGeometry();
     // Inspect Windows payloads without calling SendInput or changing local keys.

@@ -236,6 +236,7 @@ struct RemoteInputEvent {
     RemoteInputKind kind = RemoteInputKind::MouseMove;
     float normX = 0.0f; // [0..1] across the video frame
     float normY = 0.0f;
+    bool relativeMouse = false; // Game mode: normX/normY hold raw motion counts.
     int button = 0;     // mouse button id (0=left,1=right,2=middle,3=x1,4=x2)
     bool pressed = false;
     int scrollX = 0;    // wheel deltas (WHEEL_DELTA units)

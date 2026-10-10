@@ -3,6 +3,24 @@
 The v2 protocol is used by the default UI and CLI. Implementation and contract
 tests live in `backend/room`, `signaling-worker/src/v2` and `tests`.
 
+## Game mouse input
+
+The encrypted input protocol retains SIN version 2 and adds kinds 10
+(RelativePointer), 11 (RelativeButton) and 12 (RelativeWheel). Existing kind bytes
+and payloads remain unchanged. All three carry the captured source generation
+as a big-endian uint64. RelativePointer adds two finite float32 motion counts in
+[-32767,32767]; RelativeButton adds a button byte (0..4) and a boolean byte;
+RelativeWheel adds two int16 wheel deltas in [-1200,1200]. Both endpoints need
+these kinds for Game mouse; older clients discard unknown kinds.
+
+RelativePointer uses an independent slot on the unordered state lane. Queued
+counts add, saturating at the motion bounds, instead of replacing previous motion;
+different source generations never combine. Expired host samples are discarded.
+Buttons and wheels use the reliable lane. Permission epochs, sequence validation,
+source identity, exclusive mouse ownership, watchdog and release rules apply to
+relative input exactly as they do to absolute input. Backpressure drops motion
+instead of building a delayed camera backlog. No Worker deployment is needed.
+
 ## Ownership and threading
 
 Native RoomSocket snapshot events include an optional accepted revision together

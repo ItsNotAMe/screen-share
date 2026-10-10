@@ -18,6 +18,7 @@ template<class Predicate> void Wait(Predicate predicate) {
 }
 struct Evidence {
     std::atomic<int> living{0}, retired{0}, rebuilt{0};
+    std::atomic<unsigned> skipped{0};
     std::atomic<bool> loss{false}, closed{false}, wrongThread{false}, silent{false};
     std::atomic<bool> minimized{false}, closeOnPoll{false}, closeOnRebuild{false};
 };
@@ -30,6 +31,7 @@ public:
         Check();
         if (evidence_.closeOnPoll.exchange(false)) { evidence_.closed = true; throw std::runtime_error("Closed during acquisition"); }
         if (evidence_.loss.exchange(false)) throw CaptureLost();
+        if (evidence_.skipped.load()) { --evidence_.skipped; throw CaptureFrameSkipped(); }
         if (evidence_.silent) return std::nullopt;
         return source_.Poll();
     }
@@ -64,7 +66,15 @@ int main() try {
     Require(session.status().delivered == 0, "Delivered before subscriber enabled");
     session.EnableDelivery();
     Wait([&] { return session.status().delivered >= 20; });
-    for (uint64_t generation = 2; generation <= 4; ++generation) {
+    const auto delivered=session.status().delivered;
+    evidence.skipped=1;
+    Wait([&] { return !evidence.skipped && session.status().delivered>delivered; });
+    Require(session.status().generation==1 && evidence.rebuilt==0,"One late GPU frame ended or rebuilt capture");
+    evidence.skipped=3;
+    Wait([&] { return session.status().state==CaptureState::Recovering; });
+    Wait([&] { return session.status().generation==2; });
+    Require(evidence.rebuilt==1,"Repeated GPU stalls did not recover capture");
+    for (uint64_t generation = 3; generation <= 4; ++generation) {
         evidence.loss = true;
         Wait([&] { return session.status().state == CaptureState::Recovering; });
         Wait([&] { return session.status().generation == generation; });

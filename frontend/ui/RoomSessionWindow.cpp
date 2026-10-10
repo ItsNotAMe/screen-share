@@ -14,6 +14,7 @@
 #include <QClipboard>
 #include "ui/VideoFrameWidget.h"
 #include "ui/UiStyle.h"
+#include "ui/Toast.h"
 #include "ui/SourcePickerDialog.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
@@ -895,6 +896,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         connect(playbackVolume_,&QSpinBox::valueChanged,this,[this,volumeDelay]{if(playbackVolume_->hasFocus())volumeDelay->start();});
         connect(playbackMuted_,&QCheckBox::clicked,this,[volumeDelay]{volumeDelay->start();});
         auto* fullscreen=new QPushButton("Fullscreen"); fullscreen->setObjectName("sessionFullscreen");fullscreen->setIcon(uiIcon("fullscreen"));fullscreen->setFixedHeight(42);fullscreen->setIconSize(QSize(20,20));footer->addWidget(fullscreen);
+        fullscreenButton_=fullscreen;fullscreen->setToolTip("Toggle fullscreen: Ctrl+Alt+Shift+F. Escape goes to the game while keyboard control is active.");
         auto* cinema=new QWidget;cinema->setObjectName("StreamFullscreen");auto* cinemaLayout=new QVBoxLayout(cinema);cinemaLayout->setContentsMargins(0,0,0,0);cinemaLayout->setSpacing(0);pages->addWidget(cinema);
         auto previousState=std::make_shared<Qt::WindowStates>();
         qApp->installEventFilter(this);
@@ -909,6 +911,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             *previousState=window()->windowState();streamFullscreen_=true;video_->setCornerRadius(0);cinemaLayout->addWidget(video_);pages->setCurrentWidget(cinema);video_->show();
             if(auto* app=dynamic_cast<AppShellWindow*>(window()))app->setChromeVisible(false);
             window()->showFullScreen();video_->setFocus();
+            Toast::show(window(),"Fullscreen. Ctrl+Alt+Shift+F exits fullscreen. Ctrl+Alt+Shift+Q releases control. With keyboard access, Escape goes to the game.",6500);
         });
         auto* escape=new QShortcut(QKeySequence(Qt::Key_Escape),this);connect(escape,&QShortcut::activated,this,[this,settingsPage,hideSettings]{if(streamFullscreen_){exitFullscreen_();return;}if(settingsPage->isVisible())hideSettings();});
         auto* toggle=new QPushButton("Controls"); toggle->setObjectName("toggleSessionControls");toggle->setIcon(uiIcon("controls"));toggle->setIconSize(QSize(20,20));toggle->setFixedHeight(42);toggle->setCheckable(true);toggle->setChecked(true);footer->addWidget(toggle);
@@ -937,8 +940,20 @@ bool RoomSessionWindow::eventFilter(QObject* watched,QEvent* event) {
     auto* widget=qobject_cast<QWidget*>(watched);
     if(widget && (widget==this || isAncestorOf(widget)) && (event->type()==QEvent::ShortcutOverride || event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease)) {
         auto* key=static_cast<QKeyEvent*>(event);
+        if(key->key()==Qt::Key_F && fullscreenButton_) {
+            if(event->type()==QEvent::KeyRelease && swallowFullscreenRelease_) {swallowFullscreenRelease_=false;event->accept();return true;}
+            if((key->modifiers()&(Qt::ControlModifier|Qt::AltModifier|Qt::ShiftModifier))==
+                (Qt::ControlModifier|Qt::AltModifier|Qt::ShiftModifier)) {
+                if(event->type()==QEvent::KeyPress && !key->isAutoRepeat()) {swallowFullscreenRelease_=true;fullscreenButton_->click();}
+                event->accept();return true;
+            }
+        }
         if(key->key()==Qt::Key_Escape) {
             if(event->type()==QEvent::KeyRelease && swallowEscapeRelease_){swallowEscapeRelease_=false;event->accept();return true;}
+            if(video_->capturesKeyboard() && (widget==video_ || video_->isAncestorOf(widget))) {
+                if(event->type()==QEvent::ShortcutOverride) {event->accept();return true;}
+                return false;
+            }
             if(streamFullscreen_){
                 if(event->type()==QEvent::KeyPress){swallowEscapeRelease_=true;exitFullscreen_();}
                 event->accept();return true;

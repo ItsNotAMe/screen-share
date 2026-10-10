@@ -10,6 +10,7 @@
 #include <QtGui/QMouseEvent>
 #include <QtGui/QResizeEvent>
 #include <QtGui/QWheelEvent>
+#include <QtGui/QCursor>
 #include <QtWidgets/QSizePolicy>
 
 #include <algorithm>
@@ -260,6 +261,8 @@ private:
 
 class D3DVideoSurface final : public QWidget {
 public:
+    std::function<void(int,int)> rawMotion;
+    std::function<void()> positionChanged;
     explicit D3DVideoSurface(QWidget* parent = nullptr)
         : QWidget(parent)
     {
@@ -279,6 +282,19 @@ public:
     }
 
 protected:
+    bool nativeEvent(const QByteArray& type, void* message, qintptr* result) override
+    {
+        const auto* msg=static_cast<MSG*>(message);
+        if(msg->message==WM_WINDOWPOSCHANGED && positionChanged)positionChanged();
+        if(msg->message==WM_INPUT && rawMotion) {
+            RAWINPUT raw{};UINT bytes=sizeof(raw);
+            if(GetRawInputData(reinterpret_cast<HRAWINPUT>(msg->lParam),RID_INPUT,&raw,&bytes,sizeof(RAWINPUTHEADER))!=UINT(-1) &&
+                raw.header.dwType==RIM_TYPEMOUSE && !(raw.data.mouse.usFlags&MOUSE_MOVE_ABSOLUTE))
+                rawMotion(raw.data.mouse.lLastX,raw.data.mouse.lLastY);
+        }
+        // Qt/DefWindowProc must still clean up foreground WM_INPUT.
+        return QWidget::nativeEvent(type,message,result);
+    }
     void resizeEvent(QResizeEvent* event) override
     {
         QWidget::resizeEvent(event);
@@ -348,10 +364,12 @@ VideoFrameWidget::VideoFrameWidget(QWidget* parent, FramePresentationFactory fac
     // events instead of this widget while video is rendering. Filter its events
     // so remote-control capture works over live video, not just the QImage path.
     d3dSurface_->installEventFilter(this);
+    d3dSurface_->rawMotion=[this](int x,int y){emitRelativeMotion(x,y);};
+    d3dSurface_->positionChanged=[this]{updateGameMouseClip();};
     updateD3DTarget();
 }
 
-VideoFrameWidget::~VideoFrameWidget() = default;
+VideoFrameWidget::~VideoFrameWidget() { releaseGameMouse();d3dSurface_->rawMotion={};d3dSurface_->positionChanged={}; }
 void VideoFrameWidget::setLowLatency(bool enabled) { framePresenter_->setLowLatency(enabled); }
 
 void VideoFrameWidget::setStatusText(const QString& text)
@@ -458,6 +476,7 @@ screenshare::input::FrameMapping VideoFrameWidget::presentedInputMapping() const
 
 void VideoFrameWidget::clearFrame()
 {
+    releaseGameMouse();
     pendingImageMapping_ = paintedMapping_ = mappedForInput_ = {};
     if (d3dSurface_ != nullptr) {
         d3dSurface_->hide();
@@ -480,10 +499,11 @@ void VideoFrameWidget::setControlCapture(bool enabled, bool mouse, bool keyboard
     controlActive_ = enabled;
     controlMouse_ = enabled && mouse;
     controlKeyboard_ = enabled && keyboard;
+    if(!controlMouse_)releaseGameMouse();
     setMouseTracking(controlMouse_);
     if (controlActive_) {
         setFocusPolicy(Qt::StrongFocus);
-        setCursor(controlMouse_ ? Qt::CrossCursor : Qt::ArrowCursor);
+        setCursor(gameMouseCaptured_ ? Qt::BlankCursor : controlMouse_ ? Qt::CrossCursor : Qt::ArrowCursor);
         // Do not steal focus from the button that activated this window.
     } else {
         setFocusPolicy(Qt::NoFocus);
@@ -495,7 +515,7 @@ void VideoFrameWidget::setControlCapture(bool enabled, bool mouse, bool keyboard
         d3dSurface_->setMouseTracking(controlMouse_);
         if (controlActive_) {
             d3dSurface_->setFocusPolicy(Qt::StrongFocus);
-            d3dSurface_->setCursor(controlMouse_ ? Qt::CrossCursor : Qt::ArrowCursor);
+            d3dSurface_->setCursor(gameMouseCaptured_ ? Qt::BlankCursor : controlMouse_ ? Qt::CrossCursor : Qt::ArrowCursor);
             // Pointer interaction gives the video focus when requested.
         } else {
             d3dSurface_->setFocusPolicy(Qt::NoFocus);
@@ -504,13 +524,96 @@ void VideoFrameWidget::setControlCapture(bool enabled, bool mouse, bool keyboard
     }
 }
 
+void VideoFrameWidget::setGameMouseMode(bool enabled)
+{
+    if(gameMouseMode_==enabled)return;
+    releaseGameMouse();gameMouseMode_=enabled;
+}
+
+bool VideoFrameWidget::captureGameMouse()
+{
+    if(!gameMouseMode_ || !controlMouse_ || !isVisible())return false;
+    if(!presentedInputMapping().Valid()) {
+        if(inputCaptureFailed)inputCaptureFailed("Waiting for the shared video. Click the video again to capture the game mouse.");
+        return false;
+    }
+    UINT count=0;
+    previousRawMouse_.reset();
+    if(GetRegisteredRawInputDevices(nullptr,&count,sizeof(RAWINPUTDEVICE))==0 && count<=128) {
+        std::vector<RAWINPUTDEVICE> devices(count);
+        if(count && GetRegisteredRawInputDevices(devices.data(),&count,sizeof(RAWINPUTDEVICE))!=UINT(-1))
+            for(const auto& existing:devices)if(existing.usUsagePage==1 && existing.usUsage==2)previousRawMouse_=existing;
+    }
+    const RAWINPUTDEVICE device{1,2,0,reinterpret_cast<HWND>(d3dSurface_->winId())};
+    if(!RegisterRawInputDevices(&device,1,sizeof(device))) {
+        if(inputCaptureFailed)inputCaptureFailed("Could not capture the game mouse. Click the video to retry.");
+        return false;
+    }
+    gameMouseCaptured_=true;
+    setCursor(Qt::BlankCursor);d3dSurface_->setCursor(Qt::BlankCursor);
+    updateGameMouseClip();
+    if(!gameMouseCaptured_ && inputCaptureFailed)inputCaptureFailed("Could not lock the game mouse. Click the video to retry.");
+    if(gameMouseCaptured_ && gameMouseCaptureStarted)gameMouseCaptureStarted();
+    return gameMouseCaptured_;
+}
+
+void VideoFrameWidget::updateGameMouseClip()
+{
+    if(!gameMouseCaptured_)return;
+    const auto handle=reinterpret_cast<HWND>(d3dSurface_->winId());
+    RECT client{};
+    if(!GetClientRect(handle,&client) || client.right<=client.left || client.bottom<=client.top) {releaseGameMouse();return;}
+    // Raw motion does not depend on cursor travel. Keep the pointer at the
+    // native video's centre, away from window borders, controls and rounded
+    // corners. Native coordinates also avoid mixed-DPI rounding errors.
+    POINT native{(client.left+client.right)/2,(client.top+client.bottom)/2};
+    if(!ClientToScreen(handle,&native)) {releaseGameMouse();return;}
+    RECT bounds{native.x,native.y,native.x+1,native.y+1};
+    if(!ClipCursor(&bounds))releaseGameMouse();
+}
+
+void VideoFrameWidget::releaseGameMouse()
+{
+    if(!gameMouseCaptured_)return;
+    gameMouseCaptured_=false;captureClickButton_=Qt::NoButton;
+    ClipCursor(nullptr);
+    const RAWINPUTDEVICE device=previousRawMouse_.value_or(RAWINPUTDEVICE{1,2,RIDEV_REMOVE,nullptr});
+    RegisterRawInputDevices(&device,1,sizeof(device));
+    previousRawMouse_.reset();
+    setCursor(controlMouse_?Qt::CrossCursor:Qt::ArrowCursor);
+    d3dSurface_->setCursor(controlMouse_?Qt::CrossCursor:Qt::ArrowCursor);
+}
+
+void VideoFrameWidget::emitRelativeMotion(int x,int y)
+{
+    if(!gameMouseCaptured_ || !controlMouse_ || !inputHandler_ || (!x && !y))return;
+    screenshare::RemoteInputEvent input;input.kind=screenshare::RemoteInputKind::MouseMove;
+    input.relativeMouse=true;input.normX=float(std::clamp(x,-32767,32767));input.normY=float(std::clamp(y,-32767,32767));
+    input.sourceMapping=presentedInputMapping();inputHandler_(input);
+}
+
+bool VideoFrameWidget::event(QEvent* event)
+{
+    if(event->type()==QEvent::Hide)releaseGameMouse();
+    if(controlKeyboard_ && event->type()==QEvent::ShortcutOverride) {event->accept();return true;}
+    // QWidget normally interprets Tab as local focus traversal.
+    if(controlKeyboard_ && event->type()==QEvent::KeyPress) {emitKey(static_cast<QKeyEvent*>(event),true);return true;}
+    if(controlKeyboard_ && event->type()==QEvent::KeyRelease) {emitKey(static_cast<QKeyEvent*>(event),false);return true;}
+    return QWidget::event(event);
+}
+
 bool VideoFrameWidget::eventFilter(QObject* watched, QEvent* event)
 {
     if (watched != d3dSurface_ || !controlActive_) {
         return QWidget::eventFilter(watched, event);
     }
     switch (event->type()) {
+    case QEvent::Hide: case QEvent::FocusOut: releaseGameMouse();break;
+    case QEvent::ShortcutOverride:
+        if(controlKeyboard_) {event->accept();return true;}
+        break;
     case QEvent::MouseMove:
+        if(gameMouseMode_ && controlMouse_)return true;
         if (controlMouse_ && inputHandler_) {
             auto* mouseEvent = static_cast<QMouseEvent*>(event);
             float normX = 0.0f;
@@ -532,11 +635,16 @@ bool VideoFrameWidget::eventFilter(QObject* watched, QEvent* event)
         // or the host only ever sees a single click.
         if (controlActive_) {
             d3dSurface_->setFocus(Qt::MouseFocusReason);
+            if(gameMouseMode_ && controlMouse_ && !gameMouseCaptured_) {
+                if(captureGameMouse())captureClickButton_=static_cast<QMouseEvent*>(event)->button();
+                return true;
+            }
             if (controlMouse_) emitMouseButton(static_cast<QMouseEvent*>(event), true);
             return true;
         }
         break;
     case QEvent::MouseButtonRelease:
+        if(captureClickButton_==static_cast<QMouseEvent*>(event)->button()) {captureClickButton_=Qt::NoButton;return true;}
         if (controlMouse_) {
             emitMouseButton(static_cast<QMouseEvent*>(event), false);
             return true;
@@ -619,6 +727,12 @@ void VideoFrameWidget::emitMouseButton(QMouseEvent* event, bool pressed)
     if (button < 0) {
         return;
     }
+    if(gameMouseMode_) {
+        if(!gameMouseCaptured_)return;
+        screenshare::RemoteInputEvent input;input.kind=screenshare::RemoteInputKind::MouseButton;
+        input.relativeMouse=true;input.button=button;input.pressed=pressed;
+        input.sourceMapping=presentedInputMapping();inputHandler_(input);return;
+    }
     float normX = 0.0f;
     float normY = 0.0f;
     const bool mapped = mapToNormalized(event->position().toPoint(), normX, normY);
@@ -682,16 +796,26 @@ void VideoFrameWidget::emitWheel(QWheelEvent* event)
     }
     screenshare::RemoteInputEvent input;
     input.kind = screenshare::RemoteInputKind::MouseScroll;
-    if(!mapToNormalized(event->position().toPoint(),input.normX,input.normY))return;
+    if(gameMouseMode_) {
+        if(!gameMouseCaptured_)return;
+        input.relativeMouse=true;input.sourceMapping=presentedInputMapping();
+    } else {
+        if(!mapToNormalized(event->position().toPoint(),input.normX,input.normY))return;
+        input.sourceMapping=mappedForInput_;
+    }
     input.scrollX = delta.x();
     input.scrollY = delta.y();
-    input.sourceMapping = mappedForInput_; inputHandler_(input);
+    inputHandler_(input);
 }
 
 void VideoFrameWidget::mousePressEvent(QMouseEvent* event)
 {
     if (controlActive_) {
         setFocus(Qt::MouseFocusReason);
+        if(gameMouseMode_ && controlMouse_ && !gameMouseCaptured_) {
+            if(captureGameMouse())captureClickButton_=event->button();
+            event->accept();return;
+        }
         if (controlMouse_) emitMouseButton(event, true);
         event->accept();
         return;
@@ -701,6 +825,7 @@ void VideoFrameWidget::mousePressEvent(QMouseEvent* event)
 
 void VideoFrameWidget::mouseReleaseEvent(QMouseEvent* event)
 {
+    if(captureClickButton_==event->button()) {captureClickButton_=Qt::NoButton;event->accept();return;}
     if (controlMouse_) {
         emitMouseButton(event, false);
         event->accept();
@@ -711,6 +836,7 @@ void VideoFrameWidget::mouseReleaseEvent(QMouseEvent* event)
 
 void VideoFrameWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    if(gameMouseMode_ && controlMouse_) {event->accept();return;}
     if (controlMouse_ && inputHandler_) {
         float normX = 0.0f;
         float normY = 0.0f;
@@ -829,6 +955,7 @@ void VideoFrameWidget::resizeEvent(QResizeEvent* event)
     }
     updateCornerMask();
     updateD3DTarget();
+    updateGameMouseClip();
 }
 
 void VideoFrameWidget::updateD3DTarget()

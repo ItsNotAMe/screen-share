@@ -49,6 +49,11 @@ enum class CaptureSourceType {
 
 enum class CaptureSourceState { Stopped, Active, Minimized, Closed };
 
+class CaptureGpuTimeoutError : public std::runtime_error {
+public:
+    CaptureGpuTimeoutError() : std::runtime_error("Capture GPU completion deadline exceeded") {}
+};
+
 class CaptureDeviceLostError : public std::runtime_error {
 public:
     explicit CaptureDeviceLostError(HRESULT reason) : std::runtime_error("Capture graphics device lost"), reason_(reason) {}

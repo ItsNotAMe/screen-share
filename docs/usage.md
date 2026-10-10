@@ -53,6 +53,31 @@ control works for display and window sharing. Window mouse and keyboard input pa
 while the shared window is not focused, releases held input, and resumes with the
 same permission when focus returns. See [controller support](controller-support.md).
 
+For 3D games, update both computers, share the game window, and grant Mouse and
+Keyboard. Granting permission leaves the host's current window focused; the host
+then selects the game when ready to play. On the viewer, turn on the **Game mouse** toggle and
+click the video. The first click captures the mouse without clicking in the game.
+Movement uses raw relative counts, with the hidden viewer cursor locked at the video centre, so camera
+turning continues at screen edges. Clicks and wheel input do not reposition the
+host cursor. Disable Game mouse for ordinary desktop pointing.
+
+With keyboard control active over the video, Escape opens the game's menu and
+Tab reaches the game. **Ctrl+Alt+Shift+F** toggles viewer fullscreen;
+**Ctrl+Alt+Shift+Q** releases viewer control and unlocks the mouse. Focus loss,
+permission removal, source changes and closing the viewer also unlock it and
+release held input. After a focus change, click the video to capture again.
+The host's global panic shortcut remains Ctrl+Alt+Shift+F12. In Game mouse mode,
+local and remote mouse input can both reach the game; the desktop mouse cooldown
+is bypassed because a game's cursor recentering can trigger it.
+The Controls panel always shows the shortcuts. Entering fullscreen or capturing
+the game mouse also shows a brief reminder over the video without stealing focus.
+
+Game mouse can use a verified window identity even when capture pixels differ
+from desktop window bounds; absolute pointing still needs exact bounds. Input
+uses Windows SendInput. A game running at a higher integrity level can reject it,
+and games that require hardware input may need controller support or a different
+input backend. Native regressions do not establish Stellar Blade compatibility.
+
 Use Save diagnostic report in the room page. The CLI supports `--report PATH`.
 Reports exclude room passwords and membership credentials. Generated tests are
 silent and require no mouse/keyboard operation; see
