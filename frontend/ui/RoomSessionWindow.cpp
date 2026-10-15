@@ -16,6 +16,7 @@
 #include "ui/UiStyle.h"
 #include "ui/Toast.h"
 #include "ui/SourcePickerDialog.h"
+#include "ui/SourcePreviewLabel.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
 #include "rtc_base/logging.h"
@@ -143,18 +144,6 @@ protected:
     }
 private:
     void Move(QMouseEvent* event){setValue(QStyle::sliderValueFromPosition(minimum(),maximum(),qBound(0,int(event->position().x())-7,width()-14),qMax(1,width()-14)));}
-};
-class SourcePreviewLabel final : public QLabel {
-public:
-    using QLabel::QLabel;
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);painter.fillRect(rect(),QColor("#080e0b"));
-        if(pixmap().isNull()) {painter.setPen(QColor("#a3b5af"));painter.drawText(rect().adjusted(20,20,-20,-20),Qt::AlignCenter|Qt::TextWordWrap,text());return;}
-        const auto original=pixmap();const auto target=original.width()<=80?QSize(80,80):size();
-        const auto image=original.scaled(target,Qt::KeepAspectRatio,Qt::SmoothTransformation);
-        painter.drawPixmap((width()-image.width())/2,(height()-image.height())/2,image);
-    }
 };
 QString Phase(RoomPhase phase) {
     switch (phase) {
@@ -616,7 +605,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         hostPreview_->setPixmap(uiIcon("display").pixmap(80,80));primary->addWidget(hostPreview_,1);
         auto* previewActivity=new QTimer(this);previewActivity->setInterval(100);
         connect(previewActivity,&QTimer::timeout,this,[this,loopback] {
-            const bool active=!loopback&&!closing_&&hostPreview_->isVisible()&&window()->isActiveWindow()&&!window()->isMinimized()&&!session_.status().stream.preferences.videoPaused;
+            const bool active=!loopback&&!closing_&&hostPreview_->isVisible()&&window()->isActiveWindow()&&!window()->isMinimized()&&!session_.status().stream.preferences.videoPaused&&session_.status().stream.capture.state!=HostMediaState::SourceUnavailable;
             if(active!=previewActive_){previewActive_=active;RefreshHostPreview();}
         });previewActivity->start();
         auto* sourceSummary=new QLabel; sourceSummary->setObjectName("SessionSourceSummary"); sourceSummary->setWordWrap(true); primary->addWidget(sourceSummary);
@@ -669,10 +658,15 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             if(!status.stream.peers.empty()&&status.stream.peers.front().width>0){resolution=QSize(status.stream.peers.front().width,status.stream.peers.front().height);streamResolution=true;}
             sourceSummary->setText((resolution.isValid()?QString("%1 × %2  ·  ").arg(resolution.width()).arg(resolution.height()):QString("Resolution pending  ·  "))+sourceSummary->text());
             sourceSummary->setToolTip(streamResolution?"Observed stream resolution for the first viewer; per-viewer measurements are in Details.":"Captured source resolution; stream resolution appears when a viewer connects.");
+            if (status.stream.capture.state == HostMediaState::SourceUnavailable) {
+                sourceTitle->setText("Shared window closed");
+                sourceSummary->setText("Choose Change source to resume sharing. Everyone stays in the room.");
+                hostPreview_->setText("Shared window closed");
+            }
             controlsTitle->setText(QString("Viewers · %1").arg(status.activePeers));
             uint64_t upload=0; bool sampled=false;
             for(const auto& peer:status.stream.peers) if(peer.transportSendBps){upload+=*peer.transportSendBps;sampled=true;}
-            health->setText(status.stream.preferences.videoPaused?"Paused":!status.activePeers?"Waiting":status.failedPeers?"Degraded":"Connected");
+            health->setText(status.stream.capture.state==HostMediaState::SourceUnavailable?"Choose source":status.stream.preferences.videoPaused?"Paused":!status.activePeers?"Waiting":status.failedPeers?"Degraded":"Connected");
             bitrate->setText(sampled?QString("%1 Mbps").arg(upload/1000000.0,0,'f',1):"—");bitrate->setToolTip("Total measured transport upload across viewers");rtt->setText("—");sentFps->setText("—");
             if(status.stream.peers.size()==1) {
                 const auto& sender=status.stream.peers.front().sender;
@@ -992,7 +986,7 @@ void RoomSessionWindow::RefreshHostPreview() {
                 const auto nextFrame=std::chrono::steady_clock::now()+std::chrono::milliseconds(33);
                 auto frame=capturer.TryCaptureFrame(std::chrono::milliseconds(30));
                 if(frame&&!frame->pixels.empty()&&!pending->exchange(true)) {
-                    auto image=QImage(reinterpret_cast<const uchar*>(frame->pixels.data()),frame->width,frame->height,frame->rowPitch,QImage::Format_RGB32).scaled(640,360,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+                    auto image=CapturePreviewImage(*frame,{640,360});
                     const QSize sourceSize(frame->sourceWidth,frame->sourceHeight);
                     QMetaObject::invokeMethod(this,[this,image,sourceSize,revision,pending]{pending->store(false);if(revision==previewRevision_&&previewActive_){previewSourceSize_=sourceSize;hostPreview_->setPixmap(QPixmap::fromImage(image));}},Qt::QueuedConnection);
                 }

@@ -15,7 +15,7 @@ public:
         painter->setPen(QPen(QColor(selected ? "#38d8c8" : "#30413a"),selected ? 1.5 : 1));
         painter->drawRoundedRect(card,7,7);
         const auto icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
-        const QRect preview(card.left()+12,card.top()+10,card.width()-24,72);
+        const QRect preview(card.left()+12,card.top()+10,card.width()-24,qMax(1,card.height()-48));
         icon.paint(painter,preview,Qt::AlignCenter,QIcon::Normal);
         const int y = card.bottom()-17;
         painter->setBrush(Qt::NoBrush); painter->setPen(QPen(QColor(selected ? "#38d8c8" : "#8b9d95"),1.5));
@@ -35,7 +35,8 @@ protected:
         QListWidget::resizeEvent(event);
         // Reserve scrollbar width even while it is hidden. Using viewport width
         // here made wrapping add/remove the scrollbar and oscillate indefinitely.
-        const QSize cell(qMax(120, (width()-24)/2),128);
+        const int cellWidth=qMax(120,(width()-24)/2);
+        const QSize cell(cellWidth,qBound(128,(cellWidth-40)*9/16+60,220));
         if (gridSize() == cell) return;
         setGridSize(cell);
         for (int row=0; row<count(); ++row) item(row)->setSizeHint(cell);

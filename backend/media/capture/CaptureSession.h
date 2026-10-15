@@ -14,7 +14,7 @@ struct CaptureSample {
     std::chrono::steady_clock::time_point capturedAt;
     uint64_t session = 0, generation = 0, sequence = 0;
 };
-enum class CaptureState { Starting, Running, Recovering, Closed, Failed, Stopped, Minimized };
+enum class CaptureState { Starting, Running, Recovering, Closed, Failed, Stopped, Minimized, Unavailable };
 enum class CaptureFailure { None, Source, StartupTimeout, Recovery, Consumer };
 enum class CaptureImplementation { Unknown, WindowsGraphicsCapture, DesktopDuplication };
 struct CaptureSourceInfo {
@@ -36,6 +36,8 @@ public:
     virtual std::optional<CaptureSample> Poll() = 0;
     virtual bool Closed() const = 0;
     virtual bool Minimized() const { return false; }
+    // A switchable source can wait for a new selection without ending capture.
+    virtual bool Unavailable() const { return false; }
     virtual CaptureSourceInfo Info() const { return {}; }
     virtual void Retire() noexcept = 0;
     virtual void Rebuild() = 0;

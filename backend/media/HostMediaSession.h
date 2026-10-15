@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace screenshare::media {
-enum class HostMediaState { Idle, Starting, WaitingForViewers, Running, Recovering, Stopping, Stopped, Failed, Minimized, SourceClosed };
+enum class HostMediaState { Idle, Starting, WaitingForViewers, Running, Recovering, Stopping, Stopped, Failed, Minimized, SourceClosed, SourceUnavailable };
 enum class HostOperationError { None, InvalidState, StaleGeneration, InvalidViewer, Capacity, Cancelled, Internal };
 struct HostOperationResult {
     uint64_t operation = 0, generation = 0;

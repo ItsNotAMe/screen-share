@@ -105,9 +105,12 @@ void WindowLifecycle() {
         return std::make_unique<SwitchableCaptureSource>([=] { return std::make_unique<WindowsCaptureSource>(config); }, control);
     }, [](auto) {}, std::chrono::milliseconds(200));
     session.EnableDelivery();
+    const char* stage="initial minimize";
+    try {
     Wait([&] { return session.status().state == CaptureState::Minimized; });
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     Require(session.status().delivered == 0 && session.status().state == CaptureState::Minimized, "Minimized startup was not paused");
+    stage="restore first frames";
     window.Invoke([&] { ShowWindow(window.handle(), SW_SHOWNOACTIVATE); });
     Wait([&] { return session.status().delivered > 2; });
     Require(session.status().source.implementation == CaptureImplementation::WindowsGraphicsCapture &&
@@ -117,9 +120,24 @@ void WindowLifecycle() {
     const auto paused = session.status().delivered;
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     Require(session.status().delivered == paused, "Minimized source leaked queued frames");
+    stage="closed source becomes unavailable";
     window.Close();
-    Wait([&] { return session.status().state == CaptureState::Closed; }); session.Stop();
+    Wait([&] { return session.status().state == CaptureState::Unavailable; });
+    stage="replacement source";
+    const auto beforeReplacement = session.status().delivered;
+    proof::TestWindow replacement;
+    config.windowHandle = reinterpret_cast<uint64_t>(replacement.handle());
+    auto changed = control->Submit({CaptureKind::Window,0,config.windowHandle,60},
+        [=] { return std::make_unique<WindowsCaptureSource>(config); });
+    Wait([&] { return changed.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready; });
+    Require(changed.get().error == CaptureUpdateError::None, "Closed window prevented source replacement");
+    Wait([&] { return session.status().delivered > beforeReplacement + 2; });
+    session.Stop();
     Require(session.status().failure == CaptureFailure::None, "Closed source became generic failure");
+    } catch (...) {
+        const auto state=session.status();
+        std::cerr<<stage<<": state="<<int(state.state)<<" failure="<<int(state.failure)<<" frames="<<state.delivered<<'\n';throw;
+    }
     config.backend = CaptureBackend::DesktopDuplication; config.allowDisplayFallback = true;
     DesktopCapturer invalid; bool rejected = false;
     try { invalid.Start(config); } catch (const std::invalid_argument&) { rejected = true; }

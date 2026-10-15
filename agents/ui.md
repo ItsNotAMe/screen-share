@@ -2,6 +2,12 @@
 
 ## Current UI Direction
 
+- Create room retains a selected-source live preview and opens the same enlarged
+  SourcePickerDialog used by the host room. Keep explicit confirmation/cancel,
+  current selection on cancellation, full-title tooltips and keyboard focus return.
+  Closed shared windows keep the room alive and show Change source guidance.
+
+
 - Host/viewer Details opens to a readable Overview with labelled connection, video and audio measurements. The host viewer picker and status note stay visible during scrolling; long diagnostics and the per-viewer table live under Advanced. Missing/stale values are explicit, RTT is network round trip, and host encoder output is distinct from viewer-reported decode.
 - Details keeps Open log folder and Save report reachable below both tabs. The folder action always remains enabled, creates its directory on demand and opens the folder independently of report-file existence or save success.
 - Room viewer controls are icon-only Mouse/Keyboard/Controller buttons, all off initially. Clicking requests immediately; amber means requested and teal means granted. Keep tooltips and accessible names. Requests accumulate without revoking existing grants.

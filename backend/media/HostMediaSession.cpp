@@ -79,6 +79,7 @@ struct HostMediaSession::Impl {
         case CaptureState::Running:
             current.state = viewers.empty() ? HostMediaState::WaitingForViewers : HostMediaState::Running; break;
         case CaptureState::Minimized: current.state = HostMediaState::Minimized; break;
+        case CaptureState::Unavailable: current.state = HostMediaState::SourceUnavailable; break;
         case CaptureState::Closed:
             Teardown(); current.state = HostMediaState::SourceClosed; break;
         case CaptureState::Stopped:

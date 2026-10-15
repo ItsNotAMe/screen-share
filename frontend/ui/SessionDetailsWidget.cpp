@@ -162,7 +162,7 @@ void SessionDetailsWidget::Refresh() {
     if(status_.phase==RoomPhase::Failed || connection=="Connection failed")notice="The connection has failed. Leave and rejoin to try again.";
     else if(status_.phase==RoomPhase::Reconnecting || connection=="Reconnecting")notice="Reconnecting. Measurements will return when the connection recovers.";
     else if(!active)notice="Measurements will appear when the session is connected.";
-    else if(host_ && (status_.stream.capture.state==HostMediaState::Failed || status_.stream.capture.state==HostMediaState::SourceClosed))notice="The shared source is unavailable. Use Change source to choose an available source.";
+    else if(host_ && (status_.stream.capture.state==HostMediaState::Failed || status_.stream.capture.state==HostMediaState::SourceClosed || status_.stream.capture.state==HostMediaState::SourceUnavailable))notice="The shared source is unavailable. Use Change source to choose an available source.";
     else if(host_ && status_.stream.capture.state==HostMediaState::Minimized)notice="The shared window is minimized. Restore it to resume video.";
     else if(host_ && !peer)notice=peer_ && peer_->count()?"Waiting for measurements from this viewer.":"A viewer's measurements will appear here after they connect.";
     else if(host_ && peer->transportSampleStale)notice="Connection measurements are stale. Waiting for a fresh sample.";
@@ -172,7 +172,7 @@ void SessionDetailsWidget::Refresh() {
     note_->setText(notice);
     QString video=active?"Waiting for video":"Inactive";
     if(active && (connection=="Connection failed" || connection=="Disconnected"))video="Connection unavailable";
-    else if(active && host_ && (status_.stream.capture.state==HostMediaState::Failed || status_.stream.capture.state==HostMediaState::SourceClosed))video="Shared source unavailable";
+    else if(active && host_ && (status_.stream.capture.state==HostMediaState::Failed || status_.stream.capture.state==HostMediaState::SourceClosed || status_.stream.capture.state==HostMediaState::SourceUnavailable))video="Shared source unavailable";
     else if(active && host_ && status_.stream.capture.state==HostMediaState::Minimized)video="Shared window minimized";
     else if(active && host_ && status_.stream.capture.state==HostMediaState::Recovering)video="Recovering capture";
     else if(active && host_ && peer) {

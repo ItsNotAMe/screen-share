@@ -3,7 +3,8 @@
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
 #include "ui/UiStyle.h"
-#include "ui/SourceCards.h"
+#include "ui/SourcePickerDialog.h"
+#include "ui/SourcePreviewLabel.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/win32_socket_init.h"
 #include "rtc_base/logging.h"
@@ -43,10 +44,72 @@
 #include <QFrame>
 #include <QHideEvent>
 #include <QKeyEvent>
+#include <atomic>
 using namespace screenshare;
 using namespace screenshare::room::qt;
 
 namespace {
+// One selected source, sampled at a modest cadence while the form is visible.
+// This stays independent of the chooser's one-shot thumbnails and never falls
+// back to another window or display if the selected source disappears.
+class SelectedSourcePreview final : public SourcePreviewLabel {
+    QVariantMap source_;
+    bool enabled_, suspended_=false;
+    QThread* worker_=nullptr;
+    uint64_t revision_=0;
+    void Refresh() {
+        const auto revision=++revision_;
+        if(worker_){worker_->requestInterruption();return;}
+        if(!enabled_||suspended_||!isVisible()||source_.isEmpty())return;
+        const auto source=source_;
+        auto pending=std::make_shared<std::atomic_bool>(false);
+        worker_=QThread::create([this,source,revision,pending] {
+            try {
+                CaptureConfig config;config.targetFps=5;config.allowDisplayFallback=false;
+                config.backend=CaptureBackend::WindowsGraphicsCapture;
+                config.sourceType=source.contains("window")?CaptureSourceType::Window:CaptureSourceType::Display;
+                config.windowHandle=source.value("window").toULongLong();config.displayIndex=source.value("display").toInt();
+                DesktopCapturer capture;capture.Start(config);
+                while(!QThread::currentThread()->isInterruptionRequested()) {
+                    const auto frame=capture.TryCaptureFrame(std::chrono::milliseconds(30));
+                    if(capture.sourceState()==CaptureSourceState::Closed)break;
+                    if(frame&&!frame->pixels.empty()&&!pending->exchange(true)) {
+                        auto image=CapturePreviewImage(*frame,{640,360});
+                        QMetaObject::invokeMethod(this,[this,image,revision,pending] {
+                            pending->store(false);if(revision!=revision_||!isVisible())return;
+                            setPixmap(QPixmap::fromImage(image));setProperty("previewReady",true);
+                        },Qt::QueuedConnection);
+                    }
+                    QThread::msleep(200);
+                }
+            }catch(...){}
+            if(!QThread::currentThread()->isInterruptionRequested())QMetaObject::invokeMethod(this,[this,revision] {
+                if(revision==revision_){setText("Preview unavailable. Choose another source");setProperty("previewReady",false);}
+            },Qt::QueuedConnection);
+        });
+        connect(worker_,&QThread::finished,this,[this,revision] {
+            auto* worker=worker_;worker_=nullptr;worker->deleteLater();
+            if(revision!=revision_)Refresh();
+        });worker_->start();
+    }
+public:
+    explicit SelectedSourcePreview(bool enabled):enabled_(enabled) {
+        setObjectName("createSourcePreview");setAccessibleName("Selected share source preview");
+        setAlignment(Qt::AlignCenter);setFixedHeight(160);setMinimumWidth(0);setWordWrap(true);
+        setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+    }
+    ~SelectedSourcePreview() override {if(worker_){worker_->requestInterruption();worker_->wait();delete worker_;}}
+    void Select(QVariantMap source) {
+        source_=std::move(source);setProperty("previewReady",false);
+        if(enabled_)setText(source_.isEmpty()?"Choose a source to preview":"Loading preview...");
+        else setPixmap(uiIcon(source_.contains("window")?"window":"display").pixmap(80,80));
+        Refresh();
+    }
+    void Suspend(bool suspended){suspended_=suspended;Refresh();}
+protected:
+    void showEvent(QShowEvent* event) override {QLabel::showEvent(event);Refresh();}
+    void hideEvent(QHideEvent* event) override {++revision_;if(worker_)worker_->requestInterruption();QLabel::hideEvent(event);}
+};
 class ContentButton final : public QPushButton {
 public:
     using QPushButton::QPushButton;
@@ -155,21 +218,38 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* streamHeading = new QLabel("Share source"); streamHeading->setObjectName("SectionHeading"); sourceHeading->addWidget(streamHeading, 1);
     source_ = new QComboBox; source_->setObjectName("captureSource"); source_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     source_->setParent(this); source_->hide();
-    auto* refreshSources = new QPushButton; refreshSources->setIcon(entryIcon("refresh")); refreshSources->setToolTip("Refresh sources"); refreshSources->setAccessibleName("Refresh sources"); refreshSources->setFixedSize(36,36); refreshSources->setObjectName("refreshCaptureSources"); sourceHeading->addWidget(refreshSources);
     streamBody->addLayout(sourceHeading);
-    auto* sourceKinds = segments({"Display", "Window"}, 0, stream, [this](int index) { windowSources_ = index == 1; RefreshSourceCards(true); });
-    sourceKinds->setObjectName("SourceKinds"); streamBody->addWidget(sourceKinds);
-    sourceCards_ = new SourceList; sourceCards_->setObjectName("SourceCards");
-    sourceCards_->setItemDelegate(new SourceCardDelegate(sourceCards_)); sourceCards_->setMouseTracking(true);
-    sourceCards_->setViewMode(QListView::IconMode); sourceCards_->setResizeMode(QListView::Adjust); sourceCards_->setMovement(QListView::Static);
-    sourceCards_->setUniformItemSizes(true);
-    sourceCards_->setIconSize(QSize(144,80)); sourceCards_->setGridSize(QSize(184,128)); sourceCards_->setSpacing(0);
-    sourceCards_->setFixedHeight(140); sourceCards_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    streamBody->addWidget(sourceCards_);
-    connect(sourceCards_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) {
-        if (item && item->data(Qt::UserRole).isValid()) { source_->setCurrentIndex(item->data(Qt::UserRole).toInt()); SetError(); }
+    auto* sourcePreview = new SelectedSourcePreview(enumerateSources_);streamBody->addWidget(sourcePreview);
+    connect(source_, &QComboBox::currentIndexChanged, this, [this,sourcePreview] {sourcePreview->Select(source_->currentData().toMap());});
+    auto* selectedSource = new QLabel; selectedSource->setObjectName("createSourceSummary");
+    selectedSource->setTextFormat(Qt::PlainText); selectedSource->setWordWrap(true);
+    selectedSource->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+    streamBody->addWidget(selectedSource);
+    connect(source_, &QComboBox::currentTextChanged, this, [this,selectedSource] {
+        selectedSource->setText(source_->currentIndex() < 0 ? "Choose a display or window to share." : source_->currentText());
     });
-    connect(refreshSources, &QPushButton::clicked, this, [this] { RefreshSources(); });
+    auto* chooseSource = new QPushButton("Choose source"); chooseSource->setObjectName("chooseCaptureSource");
+    chooseSource->setIcon(entryIcon("display")); streamBody->addWidget(chooseSource);
+    connect(chooseSource, &QPushButton::clicked, this, [this,sourcePreview] {
+        if (auto* existing = findChild<QDialog*>("SourcePickerDialog")) { existing->open(); return; }
+        media::CaptureSelection current;
+        const auto data = source_->currentData().toMap();
+        if (data.contains("window")) { current.kind = media::CaptureKind::Window; current.window = data["window"].toULongLong(); }
+        else current.display = data["display"].toInt();
+        auto* picker = new SourcePickerDialog(current, enumerateSources_, this, "Choose share source", "Use selected source");
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        sourcePreview->Suspend(true);
+        connect(picker,&QDialog::finished,this,[sourcePreview]{sourcePreview->Suspend(false);});
+        picker->chosen = [this,picker](media::CaptureSelection selected) {
+            const auto data = selected.kind == media::CaptureKind::Window ?
+                QVariantMap{{"window",QVariant::fromValue<qulonglong>(selected.window)}} : QVariantMap{{"display",selected.display}};
+            auto index = source_->findData(data);
+            if (index < 0) { index = source_->count(); source_->addItem(picker->selectedName(),data); }
+            else source_->setItemText(index,picker->selectedName());
+            source_->setCurrentIndex(index); SetError();
+        };
+        picker->open();
+    });
     const auto preferences = profile_.streamPreferences();
     preset_ = new QComboBox; preset_->setObjectName("createPreset"); preset_->addItems({"Gaming — responsiveness", "Quality — detail"});
     preset_->setCurrentIndex(int(preferences.preset)); preset_->setParent(this); preset_->hide();
@@ -258,9 +338,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     for (auto* combo : findChildren<QComboBox*>()) styleComboPopup(combo);
     OpenCreate();
 }
-RoomBrowserWindow::~RoomBrowserWindow() {
-    if (previewThread_) { previewThread_->requestInterruption(); previewThread_->wait(); delete previewThread_; }
-}
+RoomBrowserWindow::~RoomBrowserWindow() = default;
 void RoomBrowserWindow::resizeEvent(QResizeEvent* event) {
     createColumns_->setDirection(event->size().width() >= 780 ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
     QWidget::resizeEvent(event);
@@ -345,12 +423,6 @@ void RoomBrowserWindow::OpenPreferences(bool playback, QWidget* owner) {
     if (!playback) nickname->setFocus();
 }
 void RoomBrowserWindow::RefreshSources() {
-    ++previewRevision_;
-    if (previewThread_) previewThread_->requestInterruption();
-    sourcePreviews_.clear();
-    previewsLoaded_ = false;
-    sourceCards_->setProperty("previewCaptureCount", 0);
-    sourceCards_->setProperty("previewCaptureFinished", false);
     const auto previous = source_->currentData();
     source_->clear();
     if (!enumerateSources_) source_->addItem("Default display", QVariantMap{{"display", 0}});
@@ -364,107 +436,6 @@ void RoomBrowserWindow::RefreshSources() {
     } catch (...) { source_->clear(); }
     if (previous.isValid()) source_->setCurrentIndex(source_->findData(previous));
     if (!source_->count()) SetError("No capture sources available. Refresh to try again.");
-    RefreshSourceCards();
-}
-void RoomBrowserWindow::RefreshSourceCards(bool selectFirst) {
-    const QSignalBlocker blocked(sourceCards_);
-    sourceCards_->clear();
-    QListWidgetItem* selected = nullptr;
-    for (int index = 0; index < source_->count(); ++index) {
-        const auto data = source_->itemData(index).toMap();
-        if (data.contains("window") != windowSources_) continue;
-        QPixmap preview;
-        if (preview.isNull()) {
-            preview = QPixmap(144,80); preview.fill(QColor("#0c1110"));
-            QPainter painter(&preview); painter.setPen(QColor("#a3b5af"));
-            painter.drawRect(52,16,40,28); painter.drawLine(72,44,72,52); painter.drawLine(61,52,83,52);
-            painter.drawText(QRect(0,56,144,20), Qt::AlignCenter, windowSources_ ? "Window" : "Display");
-        }
-        const auto fullName = source_->itemText(index);
-        const auto shortName = fontMetrics().elidedText(fullName, Qt::ElideRight, 146);
-        QPixmap scaled(144,80); scaled.fill(QColor("#0c1110"));
-        { QPainter painter(&scaled); const auto fitted = preview.scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation);
-          painter.drawPixmap((144-fitted.width())/2, (80-fitted.height())/2, fitted); }
-        QIcon icon; icon.addPixmap(scaled, QIcon::Normal); icon.addPixmap(scaled, QIcon::Selected);
-        if (sourcePreviews_.contains(index)) icon = sourcePreviews_.value(index);
-        auto* item = new QListWidgetItem(icon, shortName, sourceCards_);
-        item->setSizeHint(sourceCards_->gridSize()); item->setTextAlignment(Qt::AlignHCenter);
-        item->setToolTip(fullName); item->setData(Qt::AccessibleTextRole, fullName); item->setData(Qt::UserRole, index);
-        if (index == source_->currentIndex()) selected = item;
-    }
-    if (!selected && selectFirst && sourceCards_->count()) selected = sourceCards_->item(0);
-    if (selected) { sourceCards_->setCurrentItem(selected); source_->setCurrentIndex(selected->data(Qt::UserRole).toInt()); }
-    else if (selectFirst) source_->setCurrentIndex(-1);
-    if (!sourceCards_->count()) {
-        auto* empty = new QListWidgetItem(windowSources_ ? "No available windows" : "No available displays", sourceCards_);
-        empty->setFlags(Qt::NoItemFlags);
-    }
-    if (selected) SetError();
-    LoadSourcePreviews();
-}
-void RoomBrowserWindow::LoadSourcePreviews() {
-    if (!enumerateSources_ || closing_ || !isVisible() || createPanel_->isHidden()) return;
-    if (previewThread_ || previewsLoaded_) return;
-    QVector<QVariantMap> sources;
-    // Capture both categories once; tab switches only render the in-memory cache.
-    for (int index = 0; index < source_->count(); ++index)
-        sources.push_back(source_->itemData(index).toMap());
-    if (sources.isEmpty()) return;
-    sourceCards_->setProperty("previewCaptureCount", 0);
-    sourceCards_->setProperty("previewCaptureFinished", false);
-    const auto revision = previewRevision_;
-    auto failure = std::make_shared<QString>();
-    // A single capture owner keeps GPU work off the UI thread. Never fall back
-    // to another window/display when the requested source cannot be captured.
-    previewThread_ = QThread::create([this, revision, sources, failure] {
-        for (int index = 0; index < sources.size(); ++index) {
-            const auto& source = sources[index];
-            if (QThread::currentThread()->isInterruptionRequested()) break;
-            QImage image;
-            try {
-                // Read a native-size still and resize it on the CPU. The live
-                // video scaling path is unnecessary for a one-shot thumbnail.
-                CaptureConfig config; config.targetFps = 15;
-                config.sourceType = source.contains("window") ? CaptureSourceType::Window : CaptureSourceType::Display;
-                config.backend = CaptureBackend::WindowsGraphicsCapture;
-                config.windowHandle = source.value("window").toULongLong(); config.displayIndex = source.value("display").toInt();
-                config.allowDisplayFallback = false;
-                DesktopCapturer capturer; capturer.Start(config);
-                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
-                while (!QThread::currentThread()->isInterruptionRequested() && std::chrono::steady_clock::now() < until) {
-                    auto frame = capturer.TryCaptureFrame(std::chrono::milliseconds(30));
-                    if (frame && frame->width > 0 && frame->height > 0 && !frame->pixels.empty()) {
-                        image = QImage(reinterpret_cast<const uchar*>(frame->pixels.data()), frame->width, frame->height,
-                                       frame->rowPitch, QImage::Format_RGB32).scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation); break;
-                    }
-                }
-            } catch (const std::exception& error) { *failure = QString::fromUtf8(error.what()); }
-            catch (...) { *failure = "Source unavailable"; }
-            if (image.isNull()) continue;
-            QMetaObject::invokeMethod(this, [this, revision, index, image] {
-                if (revision != previewRevision_) return;
-                QPixmap thumbnail(144,80); thumbnail.fill(QColor("#0c1110"));
-                QPainter painter(&thumbnail);
-                painter.drawImage((144-image.width())/2,(80-image.height())/2,image); painter.end();
-                QIcon icon; icon.addPixmap(thumbnail,QIcon::Normal); icon.addPixmap(thumbnail,QIcon::Selected);
-                sourcePreviews_.insert(index, icon);
-                for (int row = 0; row < sourceCards_->count(); ++row) {
-                    auto* item = sourceCards_->item(row);
-                    if (item->data(Qt::UserRole).isValid() && item->data(Qt::UserRole).toInt() == index)
-                        item->setIcon(icon);
-                }
-                sourceCards_->setProperty("previewCaptureCount", sourcePreviews_.size());
-            }, Qt::QueuedConnection);
-        }
-    });
-    connect(previewThread_, &QThread::finished, this, [this, revision, failure] {
-        auto* completed = previewThread_; previewThread_ = nullptr; completed->deleteLater();
-        if (revision != previewRevision_) { LoadSourcePreviews(); return; }
-        previewsLoaded_ = true;
-        sourceCards_->setProperty("previewCaptureFinished", true);
-        sourceCards_->setProperty("previewCaptureError", *failure);
-    });
-    previewThread_->start();
 }
 void RoomBrowserWindow::JoinListedRoom(const QString& id) {
     SetError();
@@ -617,11 +588,9 @@ void RoomBrowserWindow::Launch(bool host) {
 }
 void RoomBrowserWindow::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
-    if (!closing_) { directory_.Start(origin_); if (!createPanel_->isHidden()) LoadSourcePreviews(); }
+    if (!closing_) directory_.Start(origin_);
 }
 void RoomBrowserWindow::hideEvent(QHideEvent* event) {
-    ++previewRevision_; // A cancelled hidden-page pass must never satisfy a later Create visit.
-    if (previewThread_) previewThread_->requestInterruption();
     if (!keepDirectoryOnHide) directory_.Stop(); QWidget::hideEvent(event);
 }
 void RoomBrowserWindow::closeEvent(QCloseEvent* event) {

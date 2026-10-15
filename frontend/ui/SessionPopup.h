@@ -25,7 +25,7 @@ public:
         connect(close,&QPushButton::clicked,this,&QDialog::reject);
         parent->installEventFilter(this);hide();
     }
-    void open() override { previousFocus_=QApplication::focusWidget();Fit();show();raise();focusNextPrevChild(true); }
+    void open() override { previousFocus_=parentWidget()->window()->focusWidget();Fit();show();raise();focusNextPrevChild(true); }
     void setPanelSize(QSize size){panelSize_=size;Fit();}
     QVBoxLayout* body;
     QHBoxLayout* heading;

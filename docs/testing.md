@@ -115,6 +115,25 @@ node signaling-worker/tests/run-native-service.mjs build/release/RoomUiTests.exe
 node signaling-worker/tests/run-native-service.mjs build/release/RoomUiWindowsTests.exe build/ui-native-evidence windows-media
 ```
 
+The shared source chooser is exercised from both room creation and the host room.
+Room UI regressions cover cancel/confirm, keyboard dismissal and focus return,
+long source titles, scrolling and popup layouts at several window sizes. The
+create form retains the selected-source preview. `SCREENSHARE_SOURCE_PREVIEW_PROOF=1`
+opts into actual WGC preview/thumbnail capture with the room UI fixture. Preview
+ownership checks include capture frames that already match the thumbnail size.
+The source-switch scenario closes the selected source with two viewers connected,
+rejects an unavailable replacement, then resumes both viewers without replacing
+their connections. The Windows variant closes an actual generated HWND;
+`NativeCaptureTests --live` also checks close-and-replace on the capture worker.
+To run just the room source lifecycle scenario, use
+`node signaling-worker/tests/run-native-service.mjs build/release/RoomUiWindowsTests.exe build/source-close-evidence windows-media source-switch`
+(or `RoomUiTests.exe` with `media` for synthetic capture).
+Set `SCREENSHARE_SOURCE_SOAK_SECONDS=30` for a steady two-viewer interval before
+closing the source. The test accepts 0-40 seconds, checks both viewers' progress
+and room health, and records hardware frame/fallback counts in its JSON result.
+The generated-window variant exercises actual capture and GPU codecs, with
+synthetic audio. It does not reproduce a particular app or remote GPU driver.
+
 The Windows suite needs an interactive desktop and validates capture plus native
 D3D presentation. These input scenarios use recording sinks, not real OS input.
 Optional `SCREENSHARE_UI_PREVIEWS` saves UI screenshots; use the offscreen suite

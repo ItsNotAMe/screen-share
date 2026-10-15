@@ -5,6 +5,64 @@
 
 # Project Memory
 
+## Version 1.0.11 release preparation - 2026-10-15
+
+Versioned notes and updater text prepare the shared source picker, selected-source
+preview, closed-window room continuity, preview image ownership correction and
+pending update-dialog layout improvements for 1.0.11. The owner explicitly requests
+merging into main before release. Build, test, package and sign from that clean
+merged commit, then publish through the maintained release scripts with the
+existing update key. The broader crash investigation remains inconclusive.
+
+## Follow-up crash audit - 2026-10-15
+
+The owner identified Miyomu as the app shared during the friend's steady-sharing
+crash. Reviewed capture/GPU ownership, encoder callbacks and fallback, audio
+producer/endpoint lifetimes, WebView2 audio helper selection/restarts, automatic
+peer recovery and room shutdown. No second confirmed product crash was found;
+do not present the previous preview ownership fix as proof of the friend's cause.
+
+Added an opt-in SCREENSHARE_SOURCE_SOAK_SECONDS interval to the existing room
+source-switch scenario (0-40 seconds). A 30-second native run with two viewers
+passed, kept hardware encoding active with zero software fallbacks, then closed
+and replaced the generated shared window without changing viewer connections.
+The 60-second four-viewer synthetic slow-consumer runner passed; the other three
+viewers continued near 30 FPS and the slow viewer recovered. Source PCM,
+application-audio-target and shared-audio-level checks also pass. These do not
+reproduce Miyomu on the friend's machine or establish long-term driver/memory
+stability. An initial native run exited successfully but its collector rejected
+multiple JSON progress lines; metrics now appear in one result object and the
+corrected native run passes. No production changes were added by this audit.
+
+## Shared source chooser and closed-window recovery - 2026-10-15
+
+Create room now reuses the host room's SourcePickerDialog with a larger panel,
+responsive preview cards, full-title tooltips and explicit confirm/cancel. The
+form retains the chosen source name and a bounded five-FPS live preview, paused
+while the chooser is open or the form is hidden. SourcePreviewLabel paints both
+create-room and host previews. Source thumbnails are captured only in the picker.
+
+A switchable capture source now releases a closed window on its capture worker
+and reports SourceUnavailable while waiting for a replacement. Capture delivery,
+room identity and existing viewer connections survive. There is no automatic
+fallback to a display. Direct non-switchable source closure stays terminal.
+The host shows Change source guidance and Details records the unavailable state.
+
+Queued preview images now explicitly own their pixels. QImage::scaled can retain
+external frame memory when input and output dimensions match; this was a possible
+steady-sharing host crash path. The ownership regression covers that exact-size
+case. The friend's reported 1.0.10 crash with two viewers was not reproduced and
+must not be claimed conclusively fixed without crash evidence.
+
+The full Release build and 39 CTest checks passed. Final room UI checks also pass
+with live selected-source preview and chooser thumbnails, inspected at several
+window sizes. NativeCaptureTests --live passes closed-window replacement. The
+focused native source-switch room test closes an actual generated window with two
+viewers, rejects a bad replacement and resumes both without changing connection
+generations. A wider native UI screenshot run stopped at an unrelated fullscreen
+toast visibility assertion; it is not claimed passing. No physical input/audio,
+remote-WAN crash reproduction, version bump or publication was performed.
+
 ## Remote 3D game input — 2026-10-10
 
 Grant preparation no longer activates the shared game; the input worker validates

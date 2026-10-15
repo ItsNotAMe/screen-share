@@ -1,5 +1,6 @@
 #pragma once
 #include "SourceCards.h"
+#include "CapturePreviewImage.h"
 #include "SessionPopup.h"
 #include "UiStyle.h"
 #include "capture/DesktopCapturer.h"
@@ -14,14 +15,18 @@
 #include <QHash>
 #include <functional>
 
-// Reuses the Create screen's source-card painting and responsive grid.
+// Shared source chooser for room creation and live source replacement.
 class SourcePickerDialog final : public SessionPopup {
 public:
     std::function<void(screenshare::media::CaptureSelection)> chosen;
-    SourcePickerDialog(screenshare::media::CaptureSelection current,bool enumerate,QWidget* parent)
-        :SessionPopup("Change source",parent),current_(current),enumerate_(enumerate) {
+    QString selectedName() const { return cards_->currentItem() ? cards_->currentItem()->text() : QString{}; }
+    SourcePickerDialog(screenshare::media::CaptureSelection current,bool enumerate,QWidget* parent,
+                       const QString& title="Change source",const QString& action="Share selected source")
+        :SessionPopup(title,parent),current_(current),enumerate_(enumerate) {
         setObjectName("SourcePickerDialog");
+        setPanelSize({780,620});
         auto* tabs=new QHBoxLayout;auto* group=new QButtonGroup(this);
+        group->setObjectName("SourceKinds");
         for(int index=0;index<2;++index) {
             auto* button=new QPushButton(index?"Window":"Display");button->setObjectName("SegmentButton");button->setCheckable(true);
             button->setIcon(uiIcon(index?"window":"display"));button->setChecked(index==int(current.kind==screenshare::media::CaptureKind::Window));
@@ -32,15 +37,18 @@ public:
         refresh_=new QPushButton;refresh_->setIcon(uiIcon("refresh"));refresh_->setAccessibleName("Refresh sources");refresh_->setToolTip("Refresh sources");refresh_->setFixedSize(36,36);heading->insertWidget(1,refresh_);body->addLayout(tabs);
         cards_=new SourceList;cards_->setObjectName("SourceCards");cards_->setItemDelegate(new SourceCardDelegate(cards_));cards_->setMouseTracking(true);
         cards_->setViewMode(QListView::IconMode);cards_->setResizeMode(QListView::Adjust);cards_->setMovement(QListView::Static);cards_->setUniformItemSizes(true);
-        cards_->setGridSize(QSize(184,128));cards_->setIconSize(QSize(144,80));cards_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);body->addWidget(cards_,1);
-        auto* actions=new QHBoxLayout;actions->addStretch();
-        share_=new QPushButton("Share selected source");share_->setObjectName("confirmSourceSelection");actions->addWidget(share_);body->addLayout(actions);
+        cards_->setAccessibleName("Available share sources");
+        cards_->setGridSize(QSize(320,200));cards_->setIconSize(QSize(320,180));cards_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);body->addWidget(cards_,1);
+        auto* actions=new QHBoxLayout;
+        auto* cancel=new QPushButton("Cancel");actions->addWidget(cancel);connect(cancel,&QPushButton::clicked,this,&QDialog::reject);actions->addStretch();
+        share_=new QPushButton(action);share_->setObjectName("confirmSourceSelection");actions->addWidget(share_);body->addLayout(actions);
         connect(cards_,&QListWidget::currentItemChanged,this,[this](auto* item){share_->setEnabled(item&&item->data(Qt::UserRole).isValid());});
         connect(share_,&QPushButton::clicked,this,[this]{
             auto* item=cards_->currentItem();if(!item||!item->data(Qt::UserRole).isValid())return;
             const auto selection=sources_.at(item->data(Qt::UserRole).toInt()).selection;
             if(chosen)chosen(selection);accept();
         });
+        connect(cards_,&QListWidget::itemDoubleClicked,share_,[this](auto*){if(share_->isEnabled())share_->click();});
         connect(refresh_,&QPushButton::clicked,this,[this]{Refresh();});Refresh();
     }
     ~SourcePickerDialog() override {if(worker_){worker_->requestInterruption();worker_->wait();delete worker_;}}
@@ -66,8 +74,9 @@ private:
     }
     void Refresh() {
         if(worker_)return;sources_.clear();previews_.clear();
+        cards_->setProperty("previewCaptureCount",0);cards_->setProperty("previewCaptureFinished",false);
         using namespace screenshare;
-        if(!enumerate_)sources_.push_back({"Current source",current_});
+        if(!enumerate_)sources_.push_back({current_.kind==media::CaptureKind::Window?"Current window":"Default display",current_});
         else try {
             for(const auto& display:DesktopCapturer::EnumerateDisplays())if(display.attachedToDesktop) {
                 media::CaptureSelection source;source.display=display.index;source.fps=current_.fps;
@@ -78,7 +87,7 @@ private:
                 sources_.push_back({QString::fromStdWString(window.title),source});
             }
         }catch(...){}
-        ShowCards();if(!enumerate_||sources_.empty())return;
+        ShowCards();if(!enumerate_||sources_.empty()){cards_->setProperty("previewCaptureFinished",true);return;}
         refresh_->setEnabled(false);const auto sources=sources_;
         worker_=QThread::create([this,sources]{
             for(int index=0;index<sources.size()&&!QThread::currentThread()->isInterruptionRequested();++index)try {
@@ -88,14 +97,15 @@ private:
                 DesktopCapturer capture;capture.Start(config);const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(1);
                 while(!QThread::currentThread()->isInterruptionRequested()&&std::chrono::steady_clock::now()<until) {
                     auto frame=capture.TryCaptureFrame(std::chrono::milliseconds(30));if(!frame||frame->pixels.empty())continue;
-                    auto image=QImage(reinterpret_cast<const uchar*>(frame->pixels.data()),frame->width,frame->height,frame->rowPitch,QImage::Format_RGB32).scaled(144,80,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+                    auto image=CapturePreviewImage(*frame,{320,180});
                     QMetaObject::invokeMethod(this,[this,index,image]{
                         QIcon icon;const auto pixels=QPixmap::fromImage(image);icon.addPixmap(pixels,QIcon::Normal);icon.addPixmap(pixels,QIcon::Selected);previews_.insert(index,icon);
+                        cards_->setProperty("previewCaptureCount",previews_.size());
                         for(int row=0;row<cards_->count();++row){auto* item=cards_->item(row);if(item->data(Qt::UserRole).isValid()&&item->data(Qt::UserRole).toInt()==index)item->setIcon(icon);}
                     },Qt::QueuedConnection);break;
                 }
             }catch(...){}
         });
-        connect(worker_,&QThread::finished,this,[this]{auto* worker=worker_;worker_=nullptr;worker->deleteLater();refresh_->setEnabled(true);});worker_->start();
+        connect(worker_,&QThread::finished,this,[this]{auto* worker=worker_;worker_=nullptr;worker->deleteLater();refresh_->setEnabled(true);cards_->setProperty("previewCaptureFinished",true);});worker_->start();
     }
 };

@@ -25,6 +25,8 @@
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
 #include <QtGui/QPixmap>
+#include <QtGui/QScreen>
+#include <QtGui/QResizeEvent>
 #include <QtSvg/QSvgRenderer>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
@@ -35,6 +37,7 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QProgressBar>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QScrollArea>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
@@ -117,8 +120,14 @@ public:
             widget->installEventFilter(this);
         }
     }
+    void setButtonsLayout(QBoxLayout* buttons) { buttons_ = buttons; }
 
 protected:
+    void resizeEvent(QResizeEvent* event) override
+    {
+        if (buttons_) buttons_->setDirection(width() < 520 ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
+        QDialog::resizeEvent(event);
+    }
     bool eventFilter(QObject* watched, QEvent* event) override
     {
         Q_UNUSED(watched);
@@ -144,6 +153,7 @@ protected:
 private:
     bool dragging_ = false;
     QPoint dragOffset_;
+    QBoxLayout* buttons_ = nullptr;
 };
 
 QString appVersion()
@@ -234,6 +244,7 @@ QLabel* updateLabel(const QString& text, const char* objectName)
     auto* label = new QLabel(text);
     label->setObjectName(objectName);
     label->setWordWrap(true);
+    label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     return label;
 }
 
@@ -386,6 +397,9 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
 
     auto* outerLayout = new QVBoxLayout(dialog);
     outerLayout->setContentsMargins(0, 0, 0, 0);
+    // The release-info viewport absorbs constrained height. Its long contents
+    // must not impose their full minimum height on the desktop dialog.
+    outerLayout->setSizeConstraint(QLayout::SetNoConstraint);
 
     auto* frame = new QFrame;
     frame->setObjectName("UpdateDialogFrame");
@@ -393,10 +407,11 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
 
     auto* layout = new QVBoxLayout(frame);
     layout->setContentsMargins(22, 18, 22, 22);
-    layout->setSpacing(16);
+    layout->setSpacing(14);
 
     auto* header = new QFrame;
     header->setObjectName("UpdateHeader");
+    header->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     auto* headerLayout = new QHBoxLayout(header);
     headerLayout->setContentsMargins(0, 0, 0, 0);
     headerLayout->setSpacing(16);
@@ -409,6 +424,7 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
     closeButton->setIcon(QIcon(updateIconPixmap(QStringLiteral("window-close"), "#cfd8d5", 22)));
     closeButton->setIconSize(QSize(22, 22));
     closeButton->setFlat(true);
+    closeButton->setAccessibleName(QStringLiteral("Close update dialog"));
 
     headerLayout->addWidget(downloadBadge, 0, Qt::AlignVCenter);
     headerLayout->addWidget(titleLabel, 1, Qt::AlignVCenter);
@@ -420,23 +436,44 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
     dialog->enableDrag(titleLabel);
     QObject::connect(closeButton, &QPushButton::clicked, dialog, &QDialog::close);
 
+    auto* bodyScroll = new QScrollArea;
+    bodyScroll->setObjectName("UpdateBodyScroll");
+    bodyScroll->setAccessibleName(QStringLiteral("Release information"));
+    bodyScroll->setFrameShape(QFrame::NoFrame);
+    bodyScroll->setWidgetResizable(true);
+    bodyScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    bodyScroll->setMinimumHeight(32);
+    auto* body = new QFrame;
+    body->setObjectName("UpdateBodyContent");
+    // Wrapped height comes from the layout's height-for-width calculation;
+    // its unconstrained size hint would add blank space below long lists.
+    body->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
+    auto* bodyLayout = new QVBoxLayout(body);
+    bodyLayout->setContentsMargins(0, 0, 8, 0);
+    bodyLayout->setSpacing(16);
+    bodyLayout->setSizeConstraint(QLayout::SetNoConstraint);
+    bodyScroll->setWidget(body);
+    layout->addWidget(bodyScroll, 1);
+
     auto* versionLabel = updateLabel(
         QStringLiteral("Version <span style=\"color:#28ded3; font-size:18pt; font-weight:800;\">%1</span> is ready to download.")
             .arg(update.version.toHtmlEscaped()),
         "UpdateVersion");
     versionLabel->setTextFormat(Qt::RichText);
-    layout->addWidget(versionLabel);
+    bodyLayout->addWidget(versionLabel);
 
     auto* notesFrame = new QFrame;
     notesFrame->setObjectName("UpdateNotesFrame");
+    notesFrame->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     auto* notesLayout = new QVBoxLayout(notesFrame);
-    notesLayout->setContentsMargins(18, 2, 18, 2);
-    notesLayout->setSpacing(0);
+    notesLayout->setContentsMargins(18, 14, 18, 14);
+    notesLayout->setSpacing(12);
 
     const QStringList notes = normalizedNotes(update.notes);
     for (int index = 0; index < notes.size(); ++index) {
         auto* row = new QFrame;
         row->setObjectName("UpdateNoteRow");
+        row->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
         auto* rowLayout = new QHBoxLayout(row);
         rowLayout->setContentsMargins(0, 0, 0, 0);
         rowLayout->setSpacing(16);
@@ -445,6 +482,8 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
         bullet->setObjectName("UpdateBullet");
         bullet->setFixedSize(8, 8);
         auto* noteLabel = updateLabel(notes[index], "UpdateNote");
+        noteLabel->setTextFormat(Qt::PlainText);
+        noteLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
         rowLayout->addWidget(bullet, 0, Qt::AlignVCenter);
         rowLayout->addWidget(noteLabel, 1);
         notesLayout->addWidget(row);
@@ -453,7 +492,7 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
             notesLayout->addWidget(updateSeparator("UpdateNoteDivider"));
         }
     }
-    layout->addWidget(notesFrame);
+    bodyLayout->addWidget(notesFrame);
 
     auto* securityRow = new QFrame;
     securityRow->setObjectName("UpdateSecurityRow");
@@ -462,9 +501,13 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
     securityLayout->setSpacing(14);
     securityLayout->addWidget(updateIconLabel(QStringLiteral("shield"), "#28ded3", 38, "UpdateSecurityIcon"), 0, Qt::AlignVCenter);
     securityLayout->addWidget(updateLabel(QStringLiteral("Package is verified before install"), "UpdateSecurity"), 1);
-    layout->addWidget(securityRow);
+    bodyLayout->addWidget(securityRow);
+    bodyLayout->addStretch();
 
     auto* statusLabel = updateLabel(QStringLiteral("Ready to download"), "UpdateStatus");
+    auto statusPolicy = statusLabel->sizePolicy();
+    statusPolicy.setRetainSizeWhenHidden(true);
+    statusLabel->setSizePolicy(statusPolicy);
     statusLabel->hide();
     layout->addWidget(statusLabel);
 
@@ -472,10 +515,14 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
     progress->setObjectName("UpdateProgress");
     progress->setRange(0, 100);
     progress->setValue(0);
+    auto progressPolicy = progress->sizePolicy();
+    progressPolicy.setRetainSizeWhenHidden(true);
+    progress->setSizePolicy(progressPolicy);
     progress->hide();
     layout->addWidget(progress);
 
     auto* buttons = new QHBoxLayout;
+    dialog->setButtonsLayout(buttons);
     buttons->setSpacing(18);
     auto* laterButton = new QPushButton(QStringLiteral("Later"));
     laterButton->setObjectName("UpdateSecondary");
@@ -494,7 +541,10 @@ void UpdateManager::showUpdateDialog(const UpdateInfo& update)
         downloadUpdate(update, progress, statusLabel, installButton, laterButton);
     });
 
-    dialog->setFixedSize(500, 480);
+    dialog->setSizeGripEnabled(true);
+    const auto available = dialog->screen()->availableGeometry().size() - QSize(32, 32);
+    dialog->setMinimumSize(QSize(360, 400).boundedTo(available));
+    dialog->resize(QSize(560, 600).boundedTo(available));
     dialog->show();
 }
 

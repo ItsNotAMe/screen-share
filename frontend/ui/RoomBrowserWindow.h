@@ -2,8 +2,6 @@
 #include "ui/RoomSessionWindow.h"
 #include "shared/RoomProfile.h"
 #include "room/qt/RoomDirectory.h"
-#include <QHash>
-#include <QIcon>
 class QLineEdit;
 class RoomDirectoryWidget;
 class QCheckBox;
@@ -13,8 +11,6 @@ class AppShellWindow;
 class QSpinBox;
 class QBoxLayout;
 class QVBoxLayout;
-class QListWidget;
-class QThread;
 
 class RoomBrowserWindow final : public QWidget {
 public:
@@ -47,8 +43,6 @@ private:
     void Launch(bool host);
     void Refresh(const screenshare::room::qt::RoomDirectory::Status&);
     void RefreshSources();
-    void RefreshSourceCards(bool selectFirst = false);
-    void LoadSourcePreviews();
     void PromptPassword();
     void SetError(const QString& message = {});
     QUrl origin_;
@@ -74,12 +68,6 @@ private:
     bool passwordRejected_ = false;
     QString joinFailure_;
     QVBoxLayout *detailsBody_, *joinBody_;
-    QListWidget* sourceCards_;
-    bool windowSources_ = false;
-    QThread* previewThread_ = nullptr;
-    uint64_t previewRevision_ = 0;
-    QHash<int, QIcon> sourcePreviews_;
-    bool previewsLoaded_ = false;
 };
 int RunRoomBrowserWindow(const QUrl& origin, bool normalHome = false,
                         std::function<void(AppShellWindow&)> initializeShell = {});
