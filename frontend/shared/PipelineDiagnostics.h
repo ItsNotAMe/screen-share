@@ -32,6 +32,7 @@ inline QJsonObject PipelineDiagnosticsJson(const screenshare::v2::StreamStatus& 
     case HostMediaState::Recovering: state = "recovering"; break; case HostMediaState::Stopping: state = "stopping"; break;
     case HostMediaState::Stopped: state = "stopped"; break; case HostMediaState::Failed: state = "failed"; break;
     case HostMediaState::Minimized: state = "minimized"; break; case HostMediaState::SourceClosed: state = "source-closed"; break;
+    case HostMediaState::SourceUnavailable: state = "source-unavailable"; break;
     }
     switch (stream.capture.failure) {
     case CaptureFailure::None: failure = "none"; break; case CaptureFailure::Source: failure = "source"; break;

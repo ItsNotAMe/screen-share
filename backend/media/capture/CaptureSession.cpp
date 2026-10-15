@@ -60,7 +60,13 @@ struct CaptureSession::Impl {
                     }
                     if (source->Closed()) { finalState = CaptureState::Closed; break; }
                     { std::lock_guard lock(mutex); status.source = source->Info(); }
-                    if (source->Minimized()) {
+                    if (source->Unavailable()) {
+                        deadline = std::chrono::steady_clock::now() + startupTimeout;
+                        awaitingFrame = true;
+                        skippedFrames = 0;
+                        std::lock_guard lock(mutex);
+                        status.state = CaptureState::Unavailable;
+                    } else if (source->Minimized()) {
                         // A selected minimized window is an intentional pause,
                         // including before its first frame. Resume gets a fresh
                         // startup deadline; do not deliver queued old pixels.

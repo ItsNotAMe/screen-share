@@ -337,7 +337,7 @@ public:
             if (captureStatus.state == HostMediaState::Failed || captureStatus.state == HostMediaState::Stopped)
                 throw std::runtime_error("Capture source stopped");
             if (!engine_) {
-                if (captureStatus.state == HostMediaState::Minimized) {
+                if (captureStatus.state == HostMediaState::Minimized || captureStatus.state == HostMediaState::SourceUnavailable) {
                     startupDeadline_ = std::chrono::steady_clock::now() + 20s;
                     return;
                 }

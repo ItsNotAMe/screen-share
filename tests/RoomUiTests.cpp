@@ -1,8 +1,10 @@
 #include "ui/RoomSessionWindow.h"
+#include "ui/SourcePickerDialog.h"
 #include "ui/RoomGamepadControl.h"
 #include "ui/SessionDetailsWidget.h"
 #include "ui/PeerDiagnosticsWidget.h"
 #include <QTabWidget>
+#include <QJsonArray>
 #include <QSlider>
 #include "RecordingGamepadSink.h"
 #include "RecordingDesktopInput.h"
@@ -281,8 +283,23 @@ void NativePresentationRecovery() {
     Check(gpu->readbackCount() == 0 && widget.presentationStats().maximumFrameLatency == 1);
 }
 #endif
-QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSize captureSize=QSize(320,180)) {
-    return [audio,captureSize](WindowsRoomRuntimeOptions windows) -> RoomRuntimeFactory {
+class ClosingCapture final : public ICaptureSource {
+    std::unique_ptr<ICaptureSource> source_;
+    std::shared_ptr<std::atomic_bool> closed_;
+public:
+    ClosingCapture(std::unique_ptr<ICaptureSource> source,std::shared_ptr<std::atomic_bool> closed)
+        : source_(std::move(source)),closed_(std::move(closed)) {}
+    void Start() override {source_->Start();}
+    std::optional<CaptureSample> Poll() override {
+        if(closed_ && closed_->load())throw std::runtime_error("Selected test window closed");
+        return source_->Poll();
+    }
+    bool Closed() const override {return closed_ && closed_->load();}
+    void Retire() noexcept override {source_->Retire();}
+    void Rebuild() override {source_->Rebuild();}
+};
+QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSize captureSize=QSize(320,180), std::shared_ptr<std::atomic_bool> closed={}) {
+    return [audio,captureSize,closed](WindowsRoomRuntimeOptions windows) -> RoomRuntimeFactory {
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         windows.capture.sourceType = screenshare::CaptureSourceType::Window;
         windows.capture.windowHandle = reinterpret_cast<uint64_t>(captureWindow);
@@ -291,7 +308,7 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSiz
         windows.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         return WindowsRoomRuntimeFactory(std::move(windows));
 #else
-        return [windows, audio,captureSize](auto identity, auto send) {
+        return [windows, audio,captureSize,closed](auto identity, auto send) {
             NativeRoomRuntimeOptions options; options.preferences = windows.preferences; options.frames = windows.frames;
             options.presentation = windows.presentation;
             options.inputSink = windows.inputSink;
@@ -312,10 +329,10 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSiz
             };
             options.capture = [captureSize] { return std::make_unique<SyntheticCaptureSource>(captureSize.width(), captureSize.height(), 30); };
             if(windows.inputTarget)options.capture=[target=windows.inputTarget] {return std::make_unique<MappedSyntheticCapture>(320,180,30,target);};
-            options.captureForSelection = [](CaptureSelection selection) -> CaptureSession::Factory {
-                return [selection]() -> std::unique_ptr<ICaptureSource> {
+            options.captureForSelection = [closed](CaptureSelection selection) -> CaptureSession::Factory {
+                return [selection,closed]() -> std::unique_ptr<ICaptureSource> {
                     if (selection.display == 63 || selection.window == 1) throw std::runtime_error("Injected capture startup failure");
-                    return std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps);
+                    return std::make_unique<ClosingCapture>(std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps),closed);
                 };
             };
             if(windows.inputTarget)options.captureForSelection=[target=windows.inputTarget](auto selection)->CaptureSession::Factory {
@@ -590,13 +607,27 @@ void NormalHomeScenario(const QUrl& origin) {
         auto* visibility = host.browser()->findChild<QWidget*>("RoomVisibility")->findChild<QButtonGroup*>();
         visibility->button(1)->click(); Check(!host.browser()->findChild<QCheckBox*>("publicRoom")->isChecked());
         visibility->button(0)->click();
-        auto* kinds = host.browser()->findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>();
-        host.browser()->findChild<QComboBox*>("captureSource")->addItem("Second display",QVariantMap{{"display",1}});
-        kinds->button(1)->click();
-        Check(host.browser()->findChild<QComboBox*>("captureSource")->currentIndex() == -1);
-        host.browser()->findChild<QPushButton*>("createV2Room")->click(); Check(!host.session());
-        kinds->button(0)->click(); Check(host.browser()->findChild<QComboBox*>("captureSource")->currentIndex() == 0);
-        Check(host.browser()->findChild<QListWidget*>("SourceCards")->currentItem());
+        auto* selectedPreview=host.browser()->findChild<QLabel*>("createSourcePreview");
+        Check(selectedPreview && selectedPreview->isVisible() && !selectedPreview->pixmap().isNull());
+        auto* sourceChoice = host.browser()->findChild<QPushButton*>("chooseCaptureSource");
+        sourceChoice->setFocus(); sourceChoice->click(); QCoreApplication::processEvents();
+        auto* picker = host.browser()->findChild<QDialog*>("SourcePickerDialog");
+        Check(picker && picker->isVisible() && !picker->isWindow());
+        auto* cards = picker->findChild<QListWidget*>("SourceCards");
+        Check(cards->height() > 140 && cards->currentItem());
+        const auto selectedBefore = host.browser()->findChild<QComboBox*>("captureSource")->currentData();
+        picker->findChild<QButtonGroup*>("SourceKinds")->button(1)->click();
+        Check(!picker->findChild<QPushButton*>("confirmSourceSelection")->isEnabled());
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(picker,&escape);
+        Check(!picker->isVisible() && host.browser()->findChild<QComboBox*>("captureSource")->currentData()==selectedBefore);
+        Check(host.window().focusWidget()==sourceChoice);
+        QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+        sourceChoice->setFocus(); sourceChoice->click(); QCoreApplication::processEvents();
+        picker=host.browser()->findChild<QDialog*>("SourcePickerDialog");
+        picker->findChild<QPushButton*>("confirmSourceSelection")->click();
+        Check(!picker->isVisible() && !host.browser()->findChild<QLabel*>("createSourceSummary")->text().isEmpty());
+        QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
         host.window().resize(size + QSize(20,20)); QCoreApplication::processEvents(); host.window().resize(size);
         Check(host.browser()->findChild<QLineEdit*>("roomName")->text() == "Friday games");
         host.window().findChild<QPushButton*>("TitleSettings")->click();
@@ -645,19 +676,18 @@ void NormalHomeScenario(const QUrl& origin) {
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         Check(host.browser()->isVisible() && host.browser()->findChild<QLineEdit*>("roomName")->text() == "Friday games");
         snapshot(QString("create-%1").arg(size.width()));
-        auto* sources = host.browser()->findChild<QListWidget*>("SourceCards");
-        Check(sources->count()==2);
-        const auto sourceGrid = sources->gridSize();
-        for (int frame=0; frame<10; ++frame) {
-            QCoreApplication::processEvents();
-            Check(sources->gridSize()==sourceGrid && sources->visualItemRect(sources->item(0)).top()==sources->visualItemRect(sources->item(1)).top());
-        }
-        sources->addItem(new QListWidgetItem(*sources->item(1)));
-        for (int frame=0; frame<10; ++frame) {
-            QCoreApplication::processEvents();
-            Check(sources->gridSize()==sourceGrid && sources->visualItemRect(sources->item(0)).top()==sources->visualItemRect(sources->item(1)).top());
-        }
-        delete sources->takeItem(2); QCoreApplication::processEvents(); Check(sources->gridSize()==sourceGrid);
+        sourceChoice->setFocus(); sourceChoice->click(); QCoreApplication::processEvents();
+        picker=host.browser()->findChild<QDialog*>("SourcePickerDialog");
+        auto* sources=picker->findChild<QListWidget*>("SourceCards");
+        // Check a larger source list, long titles, and stable wrapping while scrolling.
+        for(int index=0;index<9;++index) sources->addItem(new QListWidgetItem(*sources->item(0)));
+        sources->item(1)->setText(QString(160,'W'));
+        QCoreApplication::processEvents();
+        const auto sourceGrid=sources->gridSize();
+        for(int frame=0;frame<10;++frame){QCoreApplication::processEvents();Check(sources->gridSize()==sourceGrid);}
+        Check(sources->verticalScrollBar()->maximum()>0);
+        snapshot(QString("source-picker-%1").arg(size.width()));
+        picker->reject();
         auto* advanced = host.browser()->findChild<QPushButton*>("OptionsDisclosure");
         Check(advanced && advanced->height() >= 30);
         for (auto* label : advanced->findChildren<QLabel*>()) {
@@ -666,14 +696,13 @@ void NormalHomeScenario(const QUrl& origin) {
         auto* section = host.browser()->findChild<QScrollArea*>("StreamSectionScroll");
         const auto beforeOptions = section->geometry();
         const auto beforeViewport = section->viewport()->size();
-        const auto beforeSourceWidth = sources->width();
         const auto beforeResolutionSize = host.browser()->findChild<QComboBox*>("createResolution")->size();
         const int beforeScroll = section->verticalScrollBar()->value();
         advanced->click(); QCoreApplication::processEvents();
         auto* options = host.browser()->findChild<QWidget*>("AdvancedOptionsContent");
         Check(options && options->isVisible() && !options->isWindow());
         Check(section->geometry()==beforeOptions);
-        Check(section->viewport()->size()==beforeViewport && sources->width()==beforeSourceWidth);
+        Check(section->viewport()->size()==beforeViewport);
         Check(host.browser()->findChild<QComboBox*>("createResolution")->size()==beforeResolutionSize);
         Check(section->verticalScrollBar()->value()==beforeScroll);
         auto* resolution = host.browser()->findChild<QComboBox*>("createResolution");
@@ -1014,12 +1043,27 @@ void BrowserScenario(const QUrl& origin) {
         Check(pending.finished() && !pending.window().isVisible() && !pending.keepingScreenAwake());
     }
 }
-void SourceSwitchScenario(const std::string& origin) {
+void CapturePreviewOwnership() {
+    // The exact-size path used to queue a QImage backed by freed frame pixels.
+    for (const QSize size : {QSize(320,180),QSize(640,360),QSize(800,450)}) {
+        screenshare::CapturedFrame frame;frame.width=size.width();frame.height=size.height();frame.rowPitch=frame.width*4;
+        frame.pixels.assign(size_t(frame.rowPitch)*frame.height,std::byte{0x55});
+        auto image=CapturePreviewImage(frame,{640,360});
+        const auto expected=image.pixel(0,0);
+        std::fill(frame.pixels.begin(),frame.pixels.end(),std::byte{0x22});
+        Check(image.pixel(0,0)==expected);
+        frame.pixels.clear();frame.pixels.shrink_to_fit();
+        Check(image.copy().pixel(0,0)==expected);
+    }
+}
+QJsonArray SourceSwitchScenario(const std::string& origin) {
+    QJsonArray steadySamples;
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
     config.room.nickname = "Source host"; config.room.name = "Source switch";
     config.media.preferences.resolution = ResolutionMode::Native;
     auto hostAudio = std::make_shared<proof::AudioEvidence>(); hostAudio->captureUnavailable = true;
-    RoomApplication hostApp(config, Factory(hostAudio), true); hostApp.show();
+    auto closedSource=std::make_shared<std::atomic_bool>(false);
+    RoomApplication hostApp(config, Factory(hostAudio,QSize(320,180),closedSource), true); hostApp.show();
     auto& host = *hostApp.session();
     Wait([&] { return host.session().status().phase == RoomPhase::Active; });
     config.room.host = false; config.room.roomId = host.session().status().roomId;
@@ -1159,10 +1203,64 @@ void SourceSwitchScenario(const std::string& origin) {
         viewer.session().status().revision == viewerBefore.revision);
     host.session().playbackUpdated = [&](const auto& result) { error = result.error; };
     host.session().updatePlayback({}); Wait([&] { return !host.session().playbackPending(); }); Check(error == AudioUpdateError::Unsupported);
+    // Two existing viewers must survive source closure and receive a replacement
+    // without renegotiating or recreating their room connections.
+    auto secondAudio=std::make_shared<proof::AudioEvidence>();
+    RoomApplication secondViewer(config,Factory(secondAudio),true);secondViewer.show();
+    unsigned secondFrames=0;auto secondPresent=secondViewer.session()->session().frameReady;
+    secondViewer.session()->session().frameReady=[&](auto frame){++secondFrames;secondPresent(std::move(frame));};
+    Wait([&]{return host.session().status().activePeers==2 && secondFrames>=5;});
+    const int soakSeconds=qEnvironmentVariableIntValue("SCREENSHARE_SOURCE_SOAK_SECONDS");
+    Check(soakSeconds>=0 && soakSeconds<=40);
+    const auto soakStart=std::chrono::steady_clock::now();
+    auto checkpoint=soakStart;
+    auto previousFrames=frames,previousSecondFrames=secondFrames;
+    while(std::chrono::steady_clock::now()-soakStart<std::chrono::seconds(soakSeconds)) {
+        QCoreApplication::processEvents();std::this_thread::sleep_for(1ms);
+        const auto current=host.session().status();
+        Check(current.phase==RoomPhase::Active && current.activePeers==2 && !current.failedPeers);
+        if(std::chrono::steady_clock::now()-checkpoint>=5s) {
+            Check(frames>previousFrames && secondFrames>previousSecondFrames);
+            previousFrames=frames;previousSecondFrames=secondFrames;checkpoint=std::chrono::steady_clock::now();
+            steadySamples.append(QJsonObject{{"seconds",double(std::chrono::duration_cast<std::chrono::seconds>(checkpoint-soakStart).count())},
+                {"firstFrames",double(frames)},{"secondFrames",double(secondFrames)},
+                {"hardwareFrames",double(current.stream.codec.hardwareFrames)},
+                {"softwareFallbacks",double(current.stream.codec.softwareFallbacks)}});
+        }
+    }
+    const auto beforeClose=host.session().status();
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+    replacement.Close();
+#else
+    *closedSource=true;
+#endif
+    Wait([&]{return host.session().status().stream.capture.state==HostMediaState::SourceUnavailable;});
+    Check(host.session().status().phase==RoomPhase::Active && host.session().status().activePeers==2);
+    Wait([&]{return host.findChild<QLabel*>("SessionSourceSummary")->text().contains("Everyone stays");});
+    host.session().switchCapture({CaptureKind::Window,0,1,30});
+    Wait([&]{return !host.session().capturePending();});
+    Check(error==CaptureUpdateError::Failed && host.session().status().phase==RoomPhase::Active);
+    *closedSource=false;
+    const auto firstBefore=frames,secondBefore=secondFrames;
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+    host.session().switchCapture({CaptureKind::Window,0,reinterpret_cast<uint64_t>(captureWindow),30});
+#else
+    host.session().switchCapture({CaptureKind::Display,0,0,30});
+#endif
+    Wait([&]{return !host.session().capturePending() && frames>firstBefore+10 && secondFrames>secondBefore+10;});
+    const auto resumed=host.session().status();
+    Check(resumed.phase==RoomPhase::Active && resumed.roomId==beforeClose.roomId && resumed.peerId==beforeClose.peerId && resumed.activePeers==2);
+    Check(resumed.stream.capture.generation==beforeClose.stream.capture.generation);
+    for(const auto& peer:beforeClose.stream.connections) {
+        const auto found=std::find_if(resumed.stream.connections.begin(),resumed.stream.connections.end(),[&](const auto& value){return value.peerId==peer.peerId;});
+        Check(found!=resumed.stream.connections.end() && found->generation==peer.generation);
+    }
+    secondViewer.window().close();Wait([&]{return secondViewer.finished();});
     hostApp.window().close(); viewerApp.window().close();
     Wait([&] { return hostApp.finished() && viewerApp.finished() && !hostApp.window().isVisible() && !viewerApp.window().isVisible(); });
     Check(!host.session().running() && !viewer.session().running());
     Check(!hostApp.keepingScreenAwake() && !viewerApp.keepingScreenAwake());
+    return steadySamples;
 }
 void MutationAcknowledgementScenario(const std::string& origin) {
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
@@ -1645,7 +1743,8 @@ int main(int argc, char** argv) {
     if (winsock.error() || !webrtc::InitializeSSL()) return 1;
     int result = 0;
     try {
-        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution")));
+        CapturePreviewOwnership();
+        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
         WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
@@ -1653,6 +1752,11 @@ int main(int argc, char** argv) {
         proof::TestWindow capture; captureWindow = capture.handle();
 #endif
         if(argc==3 && std::string(argv[2])=="native-resolution") {NativeResolutionScenario(argv[1]);std::cout<<"{\"passed\":true,\"native_resolution\":true}\n";}
+        else if(argc==3 && std::string(argv[2])=="source-switch") {
+            const auto samples=SourceSwitchScenario(argv[1]);
+            const QJsonObject metrics{{"passed",true},{"source_close_two_viewers",true},{"preview_ownership",true},{"steadyShare",samples}};
+            std::cout<<QJsonDocument(metrics).toJson(QJsonDocument::Compact).constData()<<'\n';
+        }
         else if(argc==3 && std::string(argv[2])=="desktop-input") {
             MediaFailureCleanup(argv[1]);
             DesktopInputScenario(argv[1]);std::cout<<"{\"passed\":true,\"mapped_input\":true,\"physical_input\":false}\n";
@@ -2043,7 +2147,14 @@ int main(int argc, char** argv) {
             RoomApplication app(QUrl(QString::fromLocal8Bit(argv[1])), screenshare::media::WindowsRoomRuntimeFactory, true, {}, true, true);
             app.show(); auto& browser = *app.browser();
             app.home()->findChild<QPushButton*>("HomePrimary")->click();
-            auto* cards = browser.findChild<QListWidget*>("SourceCards");
+            auto* selectedPreview=browser.findChild<QLabel*>("createSourcePreview");
+            Wait([&]{return selectedPreview->property("previewReady").toBool();});
+            Check(!selectedPreview->pixmap().isNull());
+            if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty())
+                Check(browser.grab().save(QDir(output).filePath("selected-source-preview.png")));
+            browser.findChild<QPushButton*>("chooseCaptureSource")->click();
+            auto* picker=browser.findChild<QDialog*>("SourcePickerDialog");
+            auto* cards = picker->findChild<QListWidget*>("SourceCards");
             const auto placeholder = cards->item(0)->icon().pixmap(144,80).toImage();
             QShowEvent repeatedShow; QApplication::sendEvent(&browser,&repeatedShow);
             Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
@@ -2055,16 +2166,10 @@ int main(int argc, char** argv) {
             QSet<QRgb> thumbnailColors;
             for (int y=0;y<thumbnail.height();y+=2) for (int x=0;x<thumbnail.width();x+=2) thumbnailColors.insert(thumbnail.pixel(x,y));
             Check(thumbnailColors.size()>8); // This interactive proof expects a visible desktop, not a blank capture.
-            browser.findChild<QPushButton*>("roomBack")->click();
-            app.home()->findChild<QPushButton*>("HomePrimary")->click();
-            Wait([&] { return cards->property("previewCaptureFinished").toBool(); });
-            Check(cards->property("previewCaptureCount").toInt() > 0);
-            browser.findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>()->button(1)->click();
-            // Both categories were preloaded: switching must not start another pass.
+            picker->findChild<QButtonGroup*>("SourceKinds")->button(1)->click();
             Check(cards->property("previewCaptureFinished").toBool());
-            Check(cards->property("previewCaptureCount").toInt() > 0);
             const auto cachedWindow = cards->item(0)->icon().cacheKey();
-            auto* kinds = browser.findChild<QWidget*>("SourceKinds")->findChild<QButtonGroup*>();
+            auto* kinds = picker->findChild<QButtonGroup*>("SourceKinds");
             kinds->button(0)->click();
             const auto cachedDisplay = cards->item(0)->icon().cacheKey();
             for (int repeat = 0; repeat < 3; ++repeat) {

@@ -39,13 +39,14 @@ class SwitchableCaptureSource final : public ICaptureSource {
     std::shared_ptr<CaptureSwitchControl> control_;
     std::unique_ptr<ICaptureSource> current_, candidate_;
     std::unique_ptr<CaptureSwitchControl::Request> request_;
+    CaptureSourceInfo info_;
     std::chrono::steady_clock::time_point deadline_;
     void Finish(CaptureUpdateError error) { candidate_.reset(); control_->Complete(std::move(request_), error); }
 public:
     SwitchableCaptureSource(CaptureSession::Factory initial, std::shared_ptr<CaptureSwitchControl> control)
         : control_(std::move(control)), current_(initial()) { if (!current_) throw std::runtime_error("Missing initial capture source"); }
     ~SwitchableCaptureSource() override { control_->Close(); Finish(CaptureUpdateError::Cancelled); }
-    void Start() override { current_->Start(); }
+    void Start() override { current_->Start(); info_ = current_->Info(); }
     std::optional<CaptureSample> Poll() override {
         if (!request_) request_ = control_->Take();
         if (request_) {
@@ -61,18 +62,34 @@ public:
                 if (sample && !candidate_->Minimized()) {
                     if (!sample->resource) throw std::runtime_error("Missing replacement frame resource");
                     current_ = std::move(candidate_); // Normal retirement retains already-owned frames.
+                    info_ = current_->Info();
                     Finish(CaptureUpdateError::None);
                     return sample;
                 }
                 if (std::chrono::steady_clock::now() >= deadline_) Finish(CaptureUpdateError::Timeout);
             } catch (...) { Finish(CaptureUpdateError::Failed); }
         }
-        return current_->Poll();
+        if (!current_) return std::nullopt;
+        std::optional<CaptureSample> sample;
+        try { sample = current_->Poll(); }
+        catch (...) { if (!current_->Closed()) throw; }
+        if (current_->Closed()) {
+            // Release native capture and its input identity on the capture
+            // worker. Keep the switch control, distribution and peers alive.
+            current_.reset();
+            return std::nullopt;
+        }
+        return sample;
     }
-    bool Closed() const override { return current_->Closed(); }
-    bool Minimized() const override { return current_->Minimized(); }
-    CaptureSourceInfo Info() const override { return current_->Info(); }
-    void Retire() noexcept override { current_->Retire(); }
-    void Rebuild() override { current_->Rebuild(); }
+    bool Closed() const override { return false; }
+    bool Unavailable() const override { return !current_; }
+    bool Minimized() const override { return current_ && current_->Minimized(); }
+    CaptureSourceInfo Info() const override { return current_ ? current_->Info() : info_; }
+    void Retire() noexcept override { if (current_) current_->Retire(); }
+    void Rebuild() override {
+        if (!current_) return;
+        try { current_->Rebuild(); }
+        catch (...) { if (!current_->Closed()) throw; current_.reset(); }
+    }
 };
 }

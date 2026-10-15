@@ -596,6 +596,12 @@ QFrame#UpdateHeader {
     background: transparent;
     border: 0;
 }
+QScrollArea#UpdateBodyScroll,
+QFrame#UpdateBodyContent,
+QScrollArea#UpdateBodyScroll > QWidget > QWidget {
+    background: transparent;
+    border: 0;
+}
 QLabel#UpdateDownloadBadge {
     background: transparent;
     border: 3px solid #28ded3;
@@ -609,7 +615,6 @@ QFrame#UpdateNotesFrame {
 QFrame#UpdateNoteRow {
     background: transparent;
     border: 0;
-    min-height: 50px;
 }
 QFrame#UpdateSeparator,
 QFrame#UpdateNoteDivider {
@@ -711,8 +716,9 @@ QProgressBar#UpdateProgress {
     background: #101413;
     border: 1px solid #2f3a37;
     border-radius: 6px;
-    min-height: 12px;
-    max-height: 12px;
+    min-height: 24px;
+    color: #f4fbf9;
+    font-size: 9.5pt;
     text-align: center;
 }
 QProgressBar#UpdateProgress::chunk {
