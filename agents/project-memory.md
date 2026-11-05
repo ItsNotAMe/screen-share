@@ -5,6 +5,14 @@
 
 # Project Memory
 
+## Version 1.0.12 release preparation - 2026-11-06
+
+The owner requested publication of 1.0.12 after the nine separately committed
+audio, preview, moderation, video-state, placement and admission improvements.
+CMake version, versioned release notes and in-app update notes now describe this
+release. Use the maintained build/sign/verify/publish scripts and the existing
+update identity. Merge before the final build and publication from clean main.
+
 ## Inline viewer removal action - 2026-11-06
 
 Viewer removal is an icon-only user-minus SVG action beside mouse, keyboard and
