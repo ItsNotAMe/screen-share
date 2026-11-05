@@ -66,7 +66,10 @@ inline DiagnosticRecord TransportDiagnostics(const webrtc::RTCStatsReport& repor
         put("Packets", value->packets_received); put("Bytes", value->bytes_received);
         put("PacketsLost", value->packets_lost); put("JitterMs", value->jitter, 1000);
         put("JitterBufferSeconds", value->jitter_buffer_delay); put("JitterBufferEmitted", value->jitter_buffer_emitted_count);
+        put("JitterBufferTargetSeconds", value->jitter_buffer_target_delay);
+        put("JitterBufferMinimumSeconds", value->jitter_buffer_minimum_delay);
         put("ConcealedSamples", value->concealed_samples); put("Samples", value->total_samples_received);
+        put("InsertedSamples", value->inserted_samples_for_deceleration); put("RemovedSamples", value->removed_samples_for_acceleration);
         put("FramesReceived", value->frames_received); put("FramesDecoded", value->frames_decoded);
         put("KeyFramesDecoded", value->key_frames_decoded); put("FramesDropped", value->frames_dropped);
         put("Fps", value->frames_per_second); put("DecodeSeconds", value->total_decode_time);

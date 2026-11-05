@@ -7,6 +7,7 @@
 #include "media/ReceiverVideoStatus.h"
 #include "media/SenderVideoStatus.h"
 #include "media/SourceVideoStatus.h"
+#include "media/HostShareStatus.h"
 #include "media/PipelineStatus.h"
 #include "input/v2/InputService.h"
 #include <functional>
@@ -23,11 +24,12 @@ struct RoomOptions {
     int viewerLimit = 4;
 };
 enum class RoomPhase { Idle, Admitting, Connecting, Active, Reconnecting, Stopping, Stopped, Failed };
-enum class RoomError { None, Busy, Cancelled, Admission, Transport, Media, AdmissionDenied };
+enum class RoomError { None, Busy, Cancelled, Admission, Transport, Media, AdmissionDenied,
+                       RoomNotFound, RoomFull, RoomClosed, RateLimited, AdmissionUnconfirmed };
 struct RoomResult { RoomError error = RoomError::None; bool outcomeUnconfirmed = false; };
 struct RoomPolicy { std::string name; bool publicRoom = true; int viewerLimit = 4; };
 struct RoomMember { std::string peerId, nickname; bool host = false; };
-enum class RoomUpdateError { None, Invalid, Busy, Unavailable, Forbidden, Conflict, Rejected, Unconfirmed };
+enum class RoomUpdateError { None, Invalid, Busy, Unavailable, Forbidden, Conflict, Rejected, Unconfirmed, NotFound };
 struct RoomUpdateResult { RoomUpdateError error = RoomUpdateError::None; uint64_t currentRevision = 0; };
 enum class StreamUpdateError { None, Invalid, Busy, Unavailable, Unsupported, Rejected };
 struct StreamUpdateResult { StreamUpdateError error = StreamUpdateError::None; uint64_t revision = 0; };
@@ -60,6 +62,7 @@ struct StreamStatus {
     std::vector<media::PeerConnectionStatus> connections;
     media::DiagnosticHistorySnapshot mediaEvents;
     media::DiagnosticHistorySnapshot performance;
+    media::HostShareStatus remoteShare; // Viewer-only; absent for older hosts.
 };
 struct RoomStatus {
     RoomPhase phase = RoomPhase::Idle;
@@ -75,6 +78,7 @@ struct RoomStatus {
     media::AudioSelectionStatus audio;
     media::PlaybackStatus playback;
     bool host = false;
+    bool removedByHost = false; // Explicit authenticated room.closed reason; retained after Stop.
     media::DiagnosticHistorySnapshot sessionEvents;
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
@@ -128,8 +132,10 @@ public:
     // first frame; it is not a remote-display acknowledgement. Failure keeps the
     // previous source when it remains healthy. Stop cancels pending completion.
     std::future<media::CaptureUpdateResult> SwitchCaptureSource(media::CaptureSelection);
-    // Host capture only, one pending handover. Requires an active recording
-    // endpoint (normally at least one viewer). Success means first PCM received.
+    // Host capture only, one pending handover. With active recording, success
+    // means first PCM received. While inactive, success saves the selection for
+    // the next recording without opening a device; health remains Inactive until
+    // startup, which can still fail. Muting before the first viewer is supported.
     std::future<media::AudioUpdateResult> SwitchAudioSource(media::AudioSelection);
     // Viewer-local output settings; success means the endpoint accepted a block,
     // not physical playback. One pending command, cancelled by Stop.
@@ -139,13 +145,19 @@ public:
     // automatically retry Conflict or Unconfirmed (the server may have committed).
     std::future<RoomUpdateResult> UpdateNickname(std::string, uint64_t expectedRevision);
     std::future<RoomUpdateResult> UpdateRoomPolicy(RoomPolicy, uint64_t expectedRevision);
+    // Host-only removal of one current viewer, by authenticated peer identity.
+    // Shares the one-command mutation bound. Success is the server acknowledgement;
+    // pushed membership state drives media/input retirement. This is not a ban:
+    // the person may join again with a new membership. Never retry Unconfirmed.
+    std::future<RoomUpdateResult> RemoveViewer(std::string peerId);
     std::shared_future<void> Stop();
     RoomStatus Status() const;
     // Retainable, bounded input port; null before runtime creation. No per-event
     // futures/HTTP/status polling. Retained ports fail closed after session stop.
     std::shared_ptr<input::Port> Input() const;
 private:
-    std::future<RoomUpdateResult> SubmitUpdate(std::optional<std::string>, std::optional<RoomPolicy>, uint64_t);
+    std::future<RoomUpdateResult> SubmitUpdate(std::optional<std::string>, std::optional<RoomPolicy>, uint64_t,
+                                             std::optional<std::string> removePeer = {});
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

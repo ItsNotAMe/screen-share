@@ -2,6 +2,7 @@
 #include "media/webrtc/WindowsRoomRuntime.h"
 #include "media/ReceiverTelemetry.h"
 #include "media/ReceiverBufferInterval.h"
+#include "media/HostShareTelemetry.h"
 #include <QCoreApplication>
 #include <iostream>
 #include <limits>
@@ -12,8 +13,42 @@ int main(int argc, char** argv) {
     try {
         using namespace screenshare::media;
         using namespace std::chrono_literals;
-        auto require = [](bool value) { if (!value) throw std::runtime_error("Receiver telemetry protocol check failed"); };
+        auto require = [](bool value) { if (!value) throw std::runtime_error("Media telemetry protocol check failed"); };
         const auto now = ReceiverTelemetryInbox::Clock::now();
+        HostShareInbox hostShare;hostShare.Bind("media_1");
+        HostShareMessage share{"media_1",1,HostShareState::VideoPaused};
+        const auto shareWire=EncodeHostShare(share);
+        require(hostShare.Receive(shareWire,now) && hostShare.Read(now).state==HostShareState::VideoPaused);
+        require(!hostShare.Receive(shareWire,now+2s)); // Replays cannot renew a paused state.
+        require(!hostShare.Read(now+3s).state && hostShare.Read(now+3s).stale && hostShare.Read(now+3s).ageSeconds==3);
+        for(size_t length=0;length<shareWire.size();++length)require(!DecodeHostShare(std::span(shareWire).first(length)));
+        auto invalidShare=shareWire;invalidShare.push_back(0);require(!DecodeHostShare(invalidShare));
+        for(size_t index:{size_t(0),size_t(3),size_t(4),size_t(5)}) {
+            invalidShare=shareWire;invalidShare[index]=255;require(!DecodeHostShare(invalidShare));
+        }
+        invalidShare=shareWire;std::fill(invalidShare.begin()+6,invalidShare.begin()+14,0);require(!DecodeHostShare(invalidShare));
+        share.sequence=2;
+        invalidShare=EncodeHostShare(share);invalidShare[5]=255;
+        require(!hostShare.Receive(invalidShare,now+4s)); // Invalid messages cannot consume the valid sequence.
+        require(hostShare.Receive(EncodeHostShare(share),now+4s));
+        for(auto state:{HostShareState::Live,HostShareState::VideoPaused,HostShareState::SourceUnavailable,HostShareState::SourceMinimized,HostShareState::Recovering}) {
+            share.state=state;++share.sequence;
+            const auto decoded=DecodeHostShare(EncodeHostShare(share));
+            require(decoded && decoded->state==state && decoded->sequence==share.sequence && decoded->connection==share.connection);
+        }
+        hostShare.Bind("media_2");require(!hostShare.Read(now+5s).state && !hostShare.Read(now+5s).stale);
+        require(!hostShare.Receive(EncodeHostShare(share),now+5s)); // Old connection cannot overwrite the replacement.
+        share.connection="media_2";share.sequence=1;
+        require(hostShare.Receive(EncodeHostShare(share),now+5s));
+        require(!hostShare.Receive(EncodeHostShare(share),now+6s));
+        HostShareInbox bounded;bounded.Bind("media_2");
+        for(uint64_t sequence=1;sequence<=8;++sequence) {share.sequence=sequence;require(bounded.Receive(EncodeHostShare(share),now));}
+        share.sequence=9;require(!bounded.Receive(EncodeHostShare(share),now));
+        require(bounded.Receive(EncodeHostShare(share),now+1s));
+        share.connection=std::string(128,'x');require(EncodeHostShare(share).size()==142);
+        share.connection.push_back('x');require(EncodeHostShare(share).empty());
+        share.connection="media_2";share.sequence=0;require(EncodeHostShare(share).empty());
+        share.sequence=1;share.state=HostShareState(255);require(EncodeHostShare(share).empty());
         ReceiverBufferInterval buffering;
         require(!buffering.Sample("stream", 1, 100, now));
         require(buffering.Sample("stream", 4, 130, now + 1s) == 100);

@@ -5,6 +5,16 @@ join a room. No backend switch is needed. The default service is the isolated v2
 Worker with a ten-room cap; `--signal-server HTTPS_ORIGIN` selects another
 compatible deployment.
 
+Normal desktop launches remember the window's size, position and maximized state.
+Fullscreen viewing and minimization are temporary. Off-screen saved placement is
+adjusted for the available display using [Qt's geometry restoration](https://doc.qt.io/qt-6.10/restoring-geometry.html).
+Invalid layout settings fall back to the normal startup layout.
+
+Join errors explain whether a room is full, closed or missing, or requests were
+rate limited. Your invite stays in the form so you can correct it or retry.
+An unconfirmed outcome asks you to wait before trying again. Room creation
+distinguishes a full service from a room's viewer limit.
+
 ## Command line
 
 ```powershell
@@ -33,6 +43,19 @@ does not include sessions belonging to another app.
 App audio needs Windows build 20348 or later (including Windows 11). If capture
 fails, video continues with silence. Choose System audio to share all apps instead.
 
+Hosts can mute audio or choose a different audio source while a room is empty.
+Mute audio applies to current and future viewers; Share audio restores the last
+source. While muted, the host summary shows Audio muted. An idle source selection
+is saved without opening an audio device. Capture starts with that selection when
+a viewer connects; an unavailable source stays silent and reports the failure.
+
+With current clients at both ends, viewers see an explanation when the host
+pauses video, minimizes the shared window, loses the source or recovers capture.
+The old picture clears during these states. A resuming message remains until a
+new decoded frame arrives. Audio and room controls remain available.
+Held keys and buttons are released, and remote input pauses until fresh video
+arrives. Host permissions are kept. Click the video again to recapture Game mouse.
+
 Shared audio negotiates stereo between current versions. At 100% viewer volume,
 the app applies no playback attenuation. System capture from 5.1/7.1 outputs
 preserves front-channel levels, mixes center/surround at -3 dB and omits LFE.
@@ -52,6 +75,13 @@ Disconnect, source changes and stale input retain release safeguards. Keyboard
 control works for display and window sharing. Window mouse and keyboard input pauses
 while the shared window is not focused, releases held input, and resumes with the
 same permission when focus returns. See [controller support](controller-support.md).
+
+Hosts can choose the **Remove viewer** icon (a person with a minus) beside the
+mouse, keyboard and controller icons on a viewer's row, then confirm the name to
+disconnect that viewer's video, audio and remote control. Other viewers stay
+connected. Cancel keeps the viewer in the room. The removed viewer returns to
+Join with an explanation. Removal ends the current membership; it is not a ban,
+and the person can join again with the room link and any required password.
 
 For 3D games, update both computers, share the game window, and grant Mouse and
 Keyboard. Granting permission leaves the host's current window focused; the host

@@ -368,9 +368,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         audioState_->setText("Waiting for the new audio source…"); switchAudio_->setEnabled(false); session_.switchAudio(std::move(selection));
     });
     session_.audioUpdated = [this](const AudioUpdateResult& result) {
-        if (result.error == AudioUpdateError::None) audioState_->setText(session_.status().audio.selected.kind == AudioKind::None ?
-            "No audio is being shared." : "Sharing the selected audio source.");
-        else if (result.error == AudioUpdateError::Unavailable) audioState_->setText("Audio capture is not active. Connect a viewer first.");
+        if (result.error == AudioUpdateError::None) {
+            const auto audio = session_.status().audio;
+            audioState_->setText(audio.selected.kind == AudioKind::None ? "No audio is being shared." :
+                audio.health.state == AudioEndpointState::Inactive ? "Audio source selected. Capture starts when a viewer connects." :
+                "Sharing the selected audio source.");
+        }
+        else if (result.error == AudioUpdateError::Unavailable) audioState_->setText("Audio settings are unavailable. Wait for the room to reconnect and try again.");
         else if (result.error == AudioUpdateError::Cancelled) audioState_->setText("Audio change cancelled.");
         else audioState_->setText("Could not switch audio. The previous source is retained while available.");
     };
@@ -404,6 +408,21 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     layout->addWidget(gamepad_);
     gamepad_->SetVideo(video_);
     gamepad_->prepareGrant=[this](uint8_t caps){return session_.prepareInputGrant(caps);};
+    if(config.room.host) {
+        gamepad_->removeViewerRequested=[this](const QString& peer) { ConfirmViewerRemoval(peer); };
+        gamepad_->removingViewer=[this] { return QString::fromStdString(session_.removingViewer()); };
+        session_.viewerRemoved=[this](const auto& result) {
+            if(result.error==RoomUpdateError::None || result.error==RoomUpdateError::NotFound) {
+                Toast::show(window(),result.error==RoomUpdateError::None?"Viewer removed from the room.":"This viewer has already left the room.");
+                return;
+            }
+            error_->setText(result.error==RoomUpdateError::Unconfirmed?
+                "Viewer removal was not confirmed. Check the viewer list before trying again.":
+                result.error==RoomUpdateError::Forbidden?"Only the host can remove a viewer.":
+                "Could not remove the viewer. Wait for the room to reconnect or finish its current change, then try again.");
+            error_->show();
+        };
+    }
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { close(); stop_->setEnabled(false); apply_->setEnabled(false); });
     connect(apply_, &QPushButton::clicked, this, [this] {
@@ -450,12 +469,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
         const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
         const bool audioFailed = value.audio.health.state == AudioEndpointState::Failed;
-        audioHealth_->setText(audioFailed ? "Audio capture failed. Video continues without shared audio. Retry or select another source." :
+        audioHealth_->setText(value.audio.selected.kind == AudioKind::None ? "Audio is muted. New viewers will join without shared audio." :
+            audioFailed ? "Audio capture failed. Video continues without shared audio. Retry or select another source." :
             value.audio.health.state == AudioEndpointState::Running ? (value.audio.microphoneProcessing ?
                 "Microphone active: noise suppression and digital gain. Echo cancellation is unavailable." : "Audio capture active; speech processing bypassed.") :
             value.audio.health.state == AudioEndpointState::Silent ? "Audio capture disabled." : "Audio capture inactive.");
         switchAudio_->setText(audioFailed ? "Retry" : "Share");
-        switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
+        switchAudio_->setEnabled(audioEditable); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioKind_->setEnabled(audioEditable); audioDevice_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioProcess_->setEnabled(audioEditable && audioKind_->currentIndex() == 2);
         refreshCapture_->setEnabled(host && !session_.capturePending()); captureSource_->setEnabled(host && !session_.capturePending());
@@ -507,7 +527,11 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         }
     };
     if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::Nv12VideoFrame frame) {
-        video_->setVideoFrame(std::move(frame));
+        if(remoteVideoBlocked_)return;
+        if(!remoteVideoMessage_.isEmpty()) {
+            remoteVideoMessage_.clear();video_->setStatusText({});video_->setAccessibleDescription({});
+        }
+        if(video_->setVideoFrame(std::move(frame)))gamepad_->SetVideoAvailable(true);
     };
     if (!config.room.host && config.preview) {
         auto* diagnostics = new QLabel(this); diagnostics->setObjectName("viewerPresentationDiagnostics");
@@ -628,7 +652,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         auto* muteAudio=new QPushButton("Mute audio");muteAudio->setObjectName("muteSharedAudio");muteAudio->setIcon(uiIcon("volume"));sourceActions->addWidget(muteAudio);
         for(auto* button:{changeSource,pauseVideo,muteAudio}){button->setMinimumHeight(42);button->setIconSize(QSize(22,22));}
         auto previousAudio=std::make_shared<AudioSelection>(AudioSelection{AudioKind::SharedSource});
-        connect(muteAudio,&QPushButton::clicked,this,[this,previousAudio] {
+        connect(muteAudio,&QPushButton::clicked,this,[this,previousAudio,muteAudio] {
+            if(session_.audioPending() || session_.status().phase!=RoomPhase::Active)return;
+            muteAudio->setEnabled(false);
             const auto current=session_.status().audio.selected;
             if(current.kind==AudioKind::None)session_.switchAudio(*previousAudio);
             else {*previousAudio=current;AudioSelection muted;muted.kind=AudioKind::None;session_.switchAudio(muted);}
@@ -644,8 +670,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             pauseVideo->setEnabled(status.phase==RoomPhase::Active&&!pausePending);
             pauseVideo->setText(pausePending?"Applying…":status.stream.preferences.videoPaused?"Resume video":"Pause video");
             pauseVideo->setIcon(uiIcon(status.stream.preferences.videoPaused?"play":"pause"));
-            muteAudio->setEnabled(status.phase==RoomPhase::Active && status.activePeers>0 && !session_.audioPending());
-            muteAudio->setText(status.audio.selected.kind==AudioKind::None?"Share audio":"Mute audio");
+            const bool audioMuted=status.audio.selected.kind==AudioKind::None;
+            muteAudio->setEnabled(status.phase==RoomPhase::Active && !session_.audioPending());
+            muteAudio->setText(session_.audioPending()?"Applying…":audioMuted?"Share audio":"Mute audio");
+            muteAudio->setIcon(uiIcon(audioMuted?"mute":"volume"));
+            muteAudio->setAccessibleName(audioMuted?"Share audio":"Mute shared audio");
+            muteAudio->setToolTip(audioMuted?"Audio is muted. New viewers will join without shared audio. Click to share audio.":
+                "Mute shared audio for current and future viewers.");
             const auto& selected=status.capture.selected;
             if(!loopback && (!previewRevision_ || selected.kind!=previewSource_.kind || selected.display!=previewSource_.display || selected.window!=previewSource_.window)) {
                 previewSource_=selected;previewSourceSize_={};RefreshHostPreview();
@@ -657,6 +688,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             QSize resolution=previewSourceSize_;bool streamResolution=false;
             if(!status.stream.peers.empty()&&status.stream.peers.front().width>0){resolution=QSize(status.stream.peers.front().width,status.stream.peers.front().height);streamResolution=true;}
             sourceSummary->setText((resolution.isValid()?QString("%1 × %2  ·  ").arg(resolution.width()).arg(resolution.height()):QString("Resolution pending  ·  "))+sourceSummary->text());
+            if(audioMuted)sourceSummary->setText(sourceSummary->text()+"  ·  Audio muted");
             sourceSummary->setToolTip(streamResolution?"Observed stream resolution for the first viewer; per-viewer measurements are in Details.":"Captured source resolution; stream resolution appears when a viewer connects.");
             if (status.stream.capture.state == HostMediaState::SourceUnavailable) {
                 sourceTitle->setText("Shared window closed");
@@ -690,8 +722,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         controlsBody->addLayout(metrics);
         auto* connection=new QLabel(this);connection->setObjectName("SessionConnection");connection->hide();
         auto previous=session_.statusChanged;
-        session_.statusChanged=[previous,connection,rtt,bitrate](const auto& status){
+        session_.statusChanged=[this,previous,connection,rtt,bitrate](const auto& status){
             previous(status);connection->setText(Phase(status.phase));
+            UpdateViewerShareState(status);
             rtt->setText(status.stream.receiveRttMs?QString("%1 ms").arg(*status.stream.receiveRttMs,0,'f',0):QString(QChar(0x2014)));
             bitrate->setText(status.stream.receiveBps?QString("%1 Mbps").arg(*status.stream.receiveBps/1000000.0,0,'f',1):QString(QChar(0x2014)));
         };
@@ -836,10 +869,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         connect(audioSave,&QTimer::timeout,this,[this,audioSave]{
             if(closing_||session_.status().phase!=RoomPhase::Active)return;
             if(session_.audioPending()){audioSave->start();return;}
-            if(!session_.status().activePeers){audioState_->setText("Audio change pending until a viewer connects.");audioSave->start();return;}
             switchAudio_->click();
         });
         connect(switchAudio_,&QPushButton::clicked,audioSave,&QTimer::stop);switchAudio_->hide();
+        connect(findChild<QPushButton*>("muteSharedAudio"),&QPushButton::clicked,audioSave,&QTimer::stop);
     }
     auto* detailsPopup=new SessionPopup("Stream details",this);detailsPopup->setObjectName("SessionDetailsPopup");detailsPopup->setPanelSize({720,700});
     auto* detailsTabs=new QTabWidget;detailsTabs->setObjectName("SessionDetailsTabs");
@@ -925,10 +958,69 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         // Leave remains usable after failures; a normal remote room shutdown
         // follows the same cleanup/navigation path as a local Leave.
         stop_->setEnabled(!closing_);
-        if(closing_ || (!host && status.phase==RoomPhase::Stopped))
+        if(status.removedByHost) {
+            video_->clearFrame();video_->setStatusText("Removed from room");
+            error_->setText("The host removed you from the room.");error_->show();
+        }
+        if(closing_ || (!host && status.phase==RoomPhase::Stopped && !status.removedByHost))
             QTimer::singleShot(0,this,[this]{close();});
     };
     if (!session_.start(std::move(config))) { stop_->setEnabled(true); apply_->setEnabled(false); }
+}
+void RoomSessionWindow::UpdateViewerShareState(const RoomStatus& status) {
+    if(status.phase==RoomPhase::Stopping || status.phase==RoomPhase::Stopped || status.phase==RoomPhase::Failed)return;
+    QString message;
+    if(status.stream.remoteShare.state) switch(*status.stream.remoteShare.state) {
+    case HostShareState::VideoPaused: message="Host paused video\nAudio may continue.";break;
+    case HostShareState::SourceUnavailable: message="Waiting for the host\nto choose a share source.";break;
+    case HostShareState::SourceMinimized: message="Shared window is minimized\nWaiting for the host to restore it.";break;
+    case HostShareState::Recovering: message="Host is restoring video\nPlease wait…";break;
+    case HostShareState::Live: break;
+    }
+    if(!message.isEmpty()) {
+        remoteVideoBlocked_=true;
+        gamepad_->SetVideoAvailable(false);
+        if(remoteVideoMessage_!=message) {video_->clearFrame();video_->setStatusText(message);video_->setAccessibleDescription(message);}
+        remoteVideoMessage_=std::move(message);
+    } else if(remoteVideoBlocked_) {
+        remoteVideoBlocked_=false;
+        // A host's Live notice is intent, not proof that a fresh frame arrived.
+        // Keep the status surface until the next decoded frame is consumed.
+        remoteVideoMessage_=status.stream.remoteShare.state?"Resuming video…":"Waiting for video…";
+        video_->setStatusText(remoteVideoMessage_);video_->setAccessibleDescription(remoteVideoMessage_);
+    }
+}
+void RoomSessionWindow::ConfirmViewerRemoval(const QString& peerId) {
+    if(auto* existing=findChild<QDialog*>("RemoveViewerDialog")) { existing->raise(); return; }
+    const auto status=session_.status();
+    const auto peer=std::find_if(status.members.begin(),status.members.end(),[&](const auto& member) { return member.peerId==peerId.toStdString() && !member.host; });
+    if(!status.host || status.phase!=RoomPhase::Active || peer==status.members.end())return;
+    auto* dialog=new SessionPopup("Remove viewer",this); dialog->setObjectName("RemoveViewerDialog");
+    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setPanelSize({460,300});
+    auto* explanation=new QLabel;
+    explanation->setObjectName("removeViewerExplanation"); explanation->setTextFormat(Qt::PlainText); explanation->setWordWrap(true);
+    dialog->body->addWidget(explanation,1);
+    auto* actions=new QHBoxLayout;
+    auto* cancel=new QPushButton("Cancel");cancel->setObjectName("cancelViewerRemoval");cancel->setAutoDefault(false);
+    auto* remove=new QPushButton("Remove viewer");remove->setObjectName("confirmViewerRemoval");remove->setAutoDefault(false);
+    for(auto* button:{cancel,remove})button->setMinimumHeight(42);
+    actions->addWidget(cancel);actions->addStretch();actions->addWidget(remove);dialog->body->addLayout(actions);
+    connect(cancel,&QPushButton::clicked,dialog,&QDialog::reject);
+    connect(remove,&QPushButton::clicked,dialog,[this,dialog,peerId] {
+        if(session_.removeViewer(peerId.toStdString())) { error_->clear();error_->hide();dialog->accept(); }
+    });
+    auto refresh=[this,remove,explanation,peerId] {
+        const auto current=session_.status();
+        const auto target=std::find_if(current.members.begin(),current.members.end(),[&](const auto& member){return member.peerId==peerId.toStdString() && !member.host;});
+        const bool present=target!=current.members.end();
+        remove->setEnabled(current.phase==RoomPhase::Active && present && !session_.roomUpdatePending());
+        remove->setToolTip(session_.roomUpdatePending()?"Wait for the current room change to finish.":
+            current.phase!=RoomPhase::Active?"Wait for the room to reconnect.":QString{});
+        explanation->setText(present?QString("Remove “%1” from this room?\n\nTheir video, audio and remote control will stop. They can join again with the room link.").arg(QString::fromStdString(target->nickname)):
+            "This viewer has already left the room.");
+    };
+    auto* timer=new QTimer(dialog);timer->setInterval(100);connect(timer,&QTimer::timeout,dialog,refresh);timer->start();refresh();
+    dialog->open();cancel->setFocus(Qt::OtherFocusReason);
 }
 bool RoomSessionWindow::eventFilter(QObject* watched,QEvent* event) {
     auto* widget=qobject_cast<QWidget*>(watched);
@@ -977,20 +1069,20 @@ void RoomSessionWindow::RefreshHostPreview() {
     auto pending=std::make_shared<std::atomic_bool>(false);
     previewWorker_=QThread::create([this,source,revision,pending] {
         try {
-            screenshare::CaptureConfig capture;capture.targetFps=30;capture.allowDisplayFallback=false;
+            screenshare::CaptureConfig capture;ConfigureCapturePreview(capture,{640,360});capture.allowDisplayFallback=false;
             capture.backend=screenshare::CaptureBackend::WindowsGraphicsCapture;
             capture.sourceType=source.kind==CaptureKind::Window?screenshare::CaptureSourceType::Window:screenshare::CaptureSourceType::Display;
             capture.windowHandle=source.window;capture.displayIndex=source.display;
             screenshare::DesktopCapturer capturer;capturer.Start(capture);
             while(!QThread::currentThread()->isInterruptionRequested()) {
-                const auto nextFrame=std::chrono::steady_clock::now()+std::chrono::milliseconds(33);
+                const auto nextFrame=std::chrono::steady_clock::now()+CapturePreviewInterval;
                 auto frame=capturer.TryCaptureFrame(std::chrono::milliseconds(30));
                 if(frame&&!frame->pixels.empty()&&!pending->exchange(true)) {
                     auto image=CapturePreviewImage(*frame,{640,360});
                     const QSize sourceSize(frame->sourceWidth,frame->sourceHeight);
                     QMetaObject::invokeMethod(this,[this,image,sourceSize,revision,pending]{pending->store(false);if(revision==previewRevision_&&previewActive_){previewSourceSize_=sourceSize;hostPreview_->setPixmap(QPixmap::fromImage(image));}},Qt::QueuedConnection);
                 }
-                std::this_thread::sleep_until(nextFrame);
+                WaitForCapturePreview(nextFrame);
             }
         } catch(...) {}
     });

@@ -1,6 +1,7 @@
 #pragma once
 #include "PcmAudioEndpoint.h"
 #include "SilentPcmCapture.h"
+#include "AudioThreadTask.h"
 #include "media/AudioSelection.h"
 #include <condition_variable>
 #include <algorithm>
@@ -17,8 +18,9 @@ public:
     using Factory = std::function<std::unique_ptr<PcmCaptureEndpoint>()>;
     using MicrophoneProcessor = std::function<std::unique_ptr<PcmCaptureEndpoint>(std::unique_ptr<PcmCaptureEndpoint>)>;
     struct Request { Factory factory; AudioSelection selected; std::promise<AudioUpdateResult> reply; };
-    AudioSwitchControl(AudioSelection initial, Factory factory, MicrophoneProcessor microphoneProcessor = {})
-        : microphoneProcessor_(std::move(microphoneProcessor)) {
+    AudioSwitchControl(AudioSelection initial, Factory factory, MicrophoneProcessor microphoneProcessor = {},
+        std::shared_ptr<DiagnosticHistory> diagnostics = {})
+        : microphoneProcessor_(std::move(microphoneProcessor)), diagnostics_(std::move(diagnostics)) {
         ValidateAudioSelection(initial);
         factory_ = SelectFactory(initial, std::move(factory));
         status_ = {std::move(initial), 1, {}, false};
@@ -39,8 +41,21 @@ public:
         ValidateAudioSelection(selected);
         factory = SelectFactory(selected, std::move(factory));
         std::lock_guard lock(mutex_);
-        if (closed_ || !active_) return CaptureUpdateReady(AudioUpdateError::Unavailable);
+        if (closed_) return CaptureUpdateReady(AudioUpdateError::Unavailable);
         if (busy_) return CaptureUpdateReady(AudioUpdateError::Busy);
+        if (!active_) {
+            // No recording worker exists yet (or the last one has detached).
+            // Commit configuration only; Attach must see it before opening any
+            // endpoint for the next viewer. Never activate devices on this caller.
+            factory_ = std::move(factory);
+            status_.selected = std::move(selected);
+            ++status_.revision;
+            status_.health.state = AudioEndpointState::Inactive;
+            status_.microphoneProcessing = bool(microphoneProcessor_) && status_.selected.kind == AudioKind::Microphone;
+            std::promise<AudioUpdateResult> reply;
+            reply.set_value({AudioUpdateError::None, status_.revision});
+            return reply.get_future();
+        }
         queued_ = std::make_unique<Request>(Request{std::move(factory), std::move(selected), {}});
         busy_ = true; return queued_->reply.get_future();
     }
@@ -53,6 +68,7 @@ public:
         busy_ = false; request->reply.set_value({error, status_.revision});
     }
     AudioSelectionStatus Status() const { std::lock_guard lock(mutex_); return status_; }
+    const std::shared_ptr<DiagnosticHistory>& Diagnostics() const { return diagnostics_; }
 private:
     void SetReady() {
         status_.health.state = status_.selected.kind == AudioKind::None ? AudioEndpointState::Silent : AudioEndpointState::Running;
@@ -69,6 +85,7 @@ private:
     }
     mutable std::mutex mutex_;
     const MicrophoneProcessor microphoneProcessor_;
+    const std::shared_ptr<DiagnosticHistory> diagnostics_;
     Factory factory_;
     AudioSelectionStatus status_;
     std::unique_ptr<Request> queued_;
@@ -86,11 +103,13 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
         uint64_t dropped = 0, expired = 0;
         // Last member: joins before any state the worker uses is destroyed.
         std::jthread worker;
-        explicit Producer(AudioSwitchControl::Factory factory) : worker([this, factory = std::move(factory)](std::stop_token stop) {
+        explicit Producer(AudioSwitchControl::Factory factory, std::shared_ptr<DiagnosticHistory> diagnostics)
+            : worker([this, factory = std::move(factory), diagnostics = std::move(diagnostics)](std::stop_token stop) {
             try {
                 auto device = factory();
                 if (!device) throw std::runtime_error("Missing audio capture endpoint");
                 device->Start(stop);
+                AudioThreadTask scheduling(AudioWorker::DeviceCapture, diagnostics);
                 { std::lock_guard lock(mutex); started = true; } ready.notify_all();
                 PcmBlock block;
                 uint64_t overflow = 0;
@@ -142,7 +161,7 @@ public:
     void Start() override { Start({}); }
     void Start(std::stop_token stop) override {
         try {
-            current_ = std::make_unique<Producer>(control_->Attach()); current_->Start(stop); control_->Ready();
+            current_ = std::make_unique<Producer>(control_->Attach(), control_->Diagnostics()); current_->Start(stop); control_->Ready();
         } catch (...) {
             current_.reset();
             if (stop.stop_requested()) throw;
@@ -171,7 +190,7 @@ public:
             request_ = control_->Take();
             if (request_) {
                 deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-                try { candidate_ = std::make_unique<Producer>(request_->factory); }
+                try { candidate_ = std::make_unique<Producer>(request_->factory, control_->Diagnostics()); }
                 catch (...) { Finish(AudioUpdateError::Failed); }
             }
         }

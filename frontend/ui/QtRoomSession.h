@@ -27,7 +27,9 @@ public:
     bool playbackPending() const { return playbackUpdate_.valid(); }
     void updateNickname(std::string, uint64_t revision);
     void updatePolicy(screenshare::v2::RoomPolicy, uint64_t revision);
-    bool roomUpdatePending() const { return mutation_.valid(); }
+    bool removeViewer(std::string peerId);
+    const std::string& removingViewer() const { return removingPeer_; }
+    bool roomUpdatePending() const { return mutation_.valid() || removal_.valid(); }
     bool running() const { return bool(session_); }
     bool settingsPending() const { return pending_.has_value() || applying_.valid(); }
     screenshare::v2::RoomStatus status() const;
@@ -37,6 +39,7 @@ public:
     LatestRoomVideoFrame::Statistics frameStatistics() const { return frames_ ? frames_->statistics() : lastFrames_; }
     std::function<void(const screenshare::v2::StreamUpdateResult&)> settingsAccepted;
     std::function<void(const screenshare::v2::RoomUpdateResult&)> roomUpdated;
+    std::function<void(const screenshare::v2::RoomUpdateResult&)> viewerRemoved;
     std::function<void(const screenshare::media::CaptureUpdateResult&)> captureUpdated;
     std::function<void(const screenshare::media::AudioUpdateResult&)> audioUpdated;
     std::function<void(const screenshare::media::AudioUpdateResult&)> playbackUpdated;
@@ -54,6 +57,8 @@ private:
     std::future<screenshare::v2::RoomResult> admission_;
     std::future<screenshare::v2::StreamUpdateResult> applying_;
     std::future<screenshare::v2::RoomUpdateResult> mutation_;
+    std::future<screenshare::v2::RoomUpdateResult> removal_;
+    std::string removingPeer_;
     std::future<screenshare::media::CaptureUpdateResult> captureUpdate_;
     std::future<screenshare::media::AudioUpdateResult> audioUpdate_;
     std::future<screenshare::media::AudioUpdateResult> playbackUpdate_;

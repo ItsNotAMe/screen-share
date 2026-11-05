@@ -24,7 +24,10 @@ public:
     ~RoomGamepadControl() override;
     void Revoke(const QString& explanation = {});
     void SetVideo(VideoFrameWidget*);
+    void SetVideoAvailable(bool);
     std::function<bool(uint8_t)> prepareGrant;
+    std::function<void(const QString&)> removeViewerRequested;
+    std::function<QString()> removingViewer;
 protected:
     bool eventFilter(QObject*, QEvent*) override;
 private:
@@ -33,6 +36,7 @@ private:
     void RespondToRequest(const QString& peer, uint8_t capability, bool allow);
     void PauseInput();
     std::shared_ptr<std::atomic_bool> inputPaused_ = std::make_shared<std::atomic_bool>(false);
+    std::shared_ptr<std::atomic_bool> videoAvailable_ = std::make_shared<std::atomic_bool>(true);
     std::map<int, std::pair<screenshare::input::Event,uint64_t>> heldInput_;
     QVBoxLayout* peerRows_ = nullptr;
     QHash<QString,QWidget*> peerCards_;

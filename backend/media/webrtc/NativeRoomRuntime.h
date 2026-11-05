@@ -6,6 +6,7 @@
 #include "CaptureVideoSource.h"
 #include "media/audio/SwitchablePcmCapture.h"
 #include "media/audio/PlaybackControl.h"
+#include "PcmAudioDeviceModule.h"
 
 namespace screenshare::media {
 class CaptureSwitchControl;
@@ -34,6 +35,7 @@ struct NativeRoomRuntimeOptions {
     std::function<CodecPipelineStatus()> codecStatus;
     webrtc::PeerConnectionInterface::RTCConfiguration connection;
     std::shared_ptr<DiagnosticHistory> diagnostics;
+    std::shared_ptr<PcmAudioDiagnostics> audioDiagnostics;
 };
 std::unique_ptr<v2::RoomRuntime> CreateNativeRoomRuntime(
     v2::RoomIdentity, v2::RoomSend, NativeRoomRuntimeOptions);

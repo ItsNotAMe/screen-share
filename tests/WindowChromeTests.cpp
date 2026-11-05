@@ -1,4 +1,5 @@
 #include "ui/AppShellWindow.h"
+#include "WindowPlacementChecks.h"
 #include <QApplication>
 #include <QPushButton>
 #include <QElapsedTimer>
@@ -14,7 +15,9 @@ void Pump() {
 }
 int main(int argc,char** argv) {
     QApplication application(argc,argv);
+    application.setQuitOnLastWindowClosed(false);
     try {
+        WindowPlacementChecks();
         AppShellWindow window;window.resize(850,550);
         window.setAttribute(Qt::WA_ShowWithoutActivating);window.show();Pump();
         const auto hwnd=reinterpret_cast<HWND>(window.winId());

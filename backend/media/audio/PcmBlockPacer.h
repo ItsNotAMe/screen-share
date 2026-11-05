@@ -21,7 +21,11 @@ public:
                                     std::chrono::nanoseconds(std::chrono::milliseconds(10))));
         }
         if (stop.stop_requested()) return false;
-        next_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
+        // Preserve phase across ordinary wake-up overshoot; adding that
+        // overshoot to every block slowly starves a 48kHz media clock.
+        next_ += std::chrono::milliseconds(10);
+        const auto now = std::chrono::steady_clock::now();
+        if (next_ <= now) next_ = now + std::chrono::milliseconds(10);
         return true;
     }
 };

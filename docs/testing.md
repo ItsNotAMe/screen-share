@@ -11,9 +11,64 @@ active, readiness after leaving, the new-room-before-click race, and closing
 the update UI during a transfer. `room-v2-qt-ui` checks the shell's session
 guard with the real room application lifecycle.
 
+`WindowPlacementChecks.h` runs in both the room UI suite and the native
+`WindowChromeTests` executable. It reopens normal/maximized layouts, closes from
+fullscreen and minimized states, preserves the first-close snapshot during a
+simulated asynchronous drain, rejects invalid/oversized settings and relocates
+synthetic off-screen placement. Normal Home also reopens its actual profile to
+verify startup persistence. Every check uses a temporary INI file.
+Native chrome/placement checks pass at `QT_SCALE_FACTOR=1` and `1.5` with
+`QT_QPA_PLATFORM=windows`. They use their own windows and inject no desktop input;
+off-screen geometry simulates a missing monitor, without physically unplugging one.
+
 Build tests with the same native toolchain as the application; see [build](build.md).
+
+Room UI admission feedback uses a local HTTP fixture to cover full, closed,
+missing and rate-limited rooms, plus an ambiguous server failure. It checks typed
+session errors, preserved invites, retry availability, no password prompt for
+these failures, and no media runtime startup. A standalone host checks service
+capacity guidance. Run it alone with `RoomUiTests.exe http://127.0.0.1:1
+admission-feedback` and `QT_QPA_PLATFORM=offscreen`; no external service is used.
+
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
+
+`room-status-cadence` uses the local Worker and an instrumented four-viewer
+runtime to require about ten diagnostic snapshots per second while media/control
+advance independently. Room UI checks also cover access-badge/icon changes,
+keyboard focus retention, no-match search recovery and stale directory rows.
+Room UI audio checks select a source and mute before the first viewer, require
+received silence with no host capture endpoint opened, then restore the exact
+source on unmute. An outstanding automatic source edit cannot override Mute.
+`native-pcm-audio` also covers inactive selection, recording restart, deferred
+startup failure without fallback, and rejecting commands after close.
+`room-v2-viewer-removal` removes one of two identically named viewers, checks
+controller release and rejected stale input, and requires continued media and
+the same connection generation for the other viewer. It covers cancellation,
+inline icon-only actions fitting their row at compact/normal window sizes,
+focus return, departure during confirmation, joining with a new membership, and
+the removed viewer's explanation. API checks reject viewer-initiated removal,
+host self-removal, invalid/missing targets and overlapping mutations.
+Run this scenario alone with `node signaling-worker/tests/run-native-service.mjs
+build/release/RoomUiTests.exe build/viewer-removal-evidence media viewer-removal`
+and `QT_QPA_PLATFORM=offscreen`.
+It uses its own local service so the larger UI run does not exhaust the
+production admission rate budget within one minute.
+
+Viewer share-state checks use the production telemetry channel to verify host
+pause/resume while audio continues, two-viewer source closure/replacement and
+minimize/restore. A Live notice with the UI frame consumer temporarily delayed
+must keep the resuming message until a decoded frame arrives. The protocol checks
+in `native-room-runtime-link` cover all states, malformed/truncated packets,
+connection binding, replay/reordering, receipt expiry and bounded acceptance.
+The recording-controller scenario checks neutral input while video is paused
+and resumption with the same permission. The recording desktop UI scenario also
+holds a mouse button and key across host pause, requiring releases and retaining
+the grant before video resumes. These checks inject no physical input.
+
+`NativeCaptureTests --preview` is an explicit active-desktop check: it captures
+only its generated window in landscape, portrait and small sizes, checks fitted
+preview geometry and reports BGRA readback bytes before/after GPU scaling.
 
 Input service regressions cover accumulating requests, denial preserving existing
 grants/held input, requests arriving during grant application and cancellation.
@@ -142,6 +197,25 @@ edge. Qt widget grabs do not include the native D3D video plane: use actual fram
 presentation counters and native rendering checks, not a black grab, as evidence.
 
 Audio cadence and retained-frame resize regressions run without physical input:
+
+`av-sync-recovery` runs the production room runtime and encrypted H264/Opus over
+loopback with a synthetic output device that stalls repeatedly, then resumes at
+device speed. It compares received audio/video NTP timing before and after each
+stall, requires continued video delivery, and checks timely recovery. It uses no
+physical audio devices. `native-pcm-audio` independently checks that callback work
+and wake-up overshoot do not accumulate in the output clock, and that missed
+slots do not replay bursts.
+These fixtures establish recovery from local playout stalls, not every WAN or
+driver failure and not audible fidelity on another PC.
+
+`NativePcmAudioTests --scheduling` is an explicit silent contention check. It
+pins synthetic playback and a 750ms higher-priority competitor to one allowed
+CPU, leaving the other CPUs available, and requires audio gaps below its 50ms
+output reserve. It pins playback after MMCSS registration and checks affinity
+so task-policy migration cannot make the comparison pass. It needs two allowed
+CPUs and an available Windows multimedia scheduler. Routine CTest does not
+create this deliberate CPU load. The A/V recovery test also inspects a live
+blocked-write phase and retained timing events before and after recovery.
 
 The PCM audio test checks ordered blocks delivered in 50ms bursts, with no gaps
 after startup, and unity-level stereo content in 5.1/7.1 layouts with overload

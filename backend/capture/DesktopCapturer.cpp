@@ -1789,6 +1789,12 @@ ID3D11Texture2D* DesktopCapturer::ScaleFrameIfNeeded(ID3D11Texture2D* sourceText
     lastColorConversionMode_ = 0;
     int outputWidth = config_.targetWidth > 0 ? config_.targetWidth : static_cast<int>(sourceDesc.Width);
     int outputHeight = config_.targetHeight > 0 ? config_.targetHeight : static_cast<int>(sourceDesc.Height);
+    if (config_.fitWithinTarget && config_.targetWidth > 0 && config_.targetHeight > 0) {
+        const double scale = std::min({1.0, double(config_.targetWidth) / sourceDesc.Width,
+            double(config_.targetHeight) / sourceDesc.Height});
+        outputWidth = std::max(1, int(sourceDesc.Width * scale));
+        outputHeight = std::max(1, int(sourceDesc.Height * scale));
+    }
     if (config_.includeNv12) {
         outputWidth = PositiveEvenDimension(outputWidth);
         outputHeight = PositiveEvenDimension(outputHeight);

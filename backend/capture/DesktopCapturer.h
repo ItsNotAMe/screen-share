@@ -71,6 +71,9 @@ struct CaptureConfig {
     uint64_t windowHandle = 0;
     int targetWidth = 0;
     int targetHeight = 0;
+    // Treat both target dimensions as upper bounds, preserving aspect ratio
+    // without upscaling. Used for small BGRA previews before GPU readback.
+    bool fitWithinTarget = false;
     int targetFps = 60;
     CaptureBackend backend = CaptureBackend::WindowsGraphicsCapture;
     bool allowDisplayFallback = false;

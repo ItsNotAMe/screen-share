@@ -60,6 +60,11 @@ inline QJsonObject RoomDiagnosticReport(const screenshare::v2::RoomStatus& statu
     return {{"schema", 1}, {"backend", "v2"}, {"reportId", QUuid::createUuid().toString(QUuid::WithoutBraces)},
         {"createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
         {"appVersion", RoomReportBuildVersion()}, {"phase", int(status.phase)}, {"error", int(status.error)},
+        {"removedByHost", status.removedByHost},
+        {"remoteShare", QJsonObject{{"state", status.stream.remoteShare.state?
+            QJsonValue(screenshare::media::HostShareStateName(*status.stream.remoteShare.state)):QJsonValue(QJsonValue::Null)},
+            {"stale", status.stream.remoteShare.stale},
+            {"ageSeconds", status.stream.remoteShare.ageSeconds?QJsonValue(qint64(*status.stream.remoteShare.ageSeconds)):QJsonValue(QJsonValue::Null)}}},
         {"activePeers", qint64(status.activePeers)}, {"failedPeers", qint64(status.failedPeers)},
         {"pendingPeers", qint64(status.pendingPeers)}, {"connections", connections},
         {"diagnosticsSchema", 2}, {"role", status.host ? "host" : "viewer"},

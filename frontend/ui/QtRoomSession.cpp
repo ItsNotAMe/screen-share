@@ -1,4 +1,5 @@
 #include "ui/QtRoomSession.h"
+#include "shared/RoomEntryError.h"
 #include "input/v2/GamepadSink.h"
 using namespace screenshare::v2;
 using namespace std::chrono_literals;
@@ -66,10 +67,14 @@ void QtRoomSession::updatePlayback(screenshare::media::PlaybackSelection selecti
     if (session_ && !stopping_.valid() && !playbackUpdate_.valid()) playbackUpdate_ = session_->UpdatePlayback(std::move(selection));
 }
 void QtRoomSession::updateNickname(std::string nickname, uint64_t revision) {
-    if (session_ && !stopping_.valid() && !mutation_.valid()) mutation_ = session_->UpdateNickname(std::move(nickname), revision);
+    if (session_ && !stopping_.valid() && !roomUpdatePending()) mutation_ = session_->UpdateNickname(std::move(nickname), revision);
 }
 void QtRoomSession::updatePolicy(RoomPolicy policy, uint64_t revision) {
-    if (session_ && !stopping_.valid() && !mutation_.valid()) mutation_ = session_->UpdateRoomPolicy(std::move(policy), revision);
+    if (session_ && !stopping_.valid() && !roomUpdatePending()) mutation_ = session_->UpdateRoomPolicy(std::move(policy), revision);
+}
+bool QtRoomSession::removeViewer(std::string peerId) {
+    if (!session_ || stopping_.valid() || roomUpdatePending()) return false;
+    removal_ = session_->RemoveViewer(peerId); removingPeer_ = std::move(peerId); return true;
 }
 void QtRoomSession::tick() {
     if (!session_) return;
@@ -77,12 +82,13 @@ void QtRoomSession::tick() {
     if (admission_.valid() && admission_.wait_for(0ms) == std::future_status::ready) {
         const auto result = admission_.get();
         if (result.error != RoomError::None && (result.error != RoomError::Cancelled || result.outcomeUnconfirmed)) {
-            if (error) error(result.outcomeUnconfirmed ? QStringLiteral("Admission ended before the server outcome could be confirmed.") :
-                             QStringLiteral("Could not enter the room. Check the service, room and password."));
+            if (error) error(RoomEntryError(result.outcomeUnconfirmed ? RoomError::AdmissionUnconfirmed : result.error, config_.room.host));
         }
     }
     if (config_.duration.count() && now - started_ >= config_.duration) stop();
-    const auto current = session_->Status();
+    const bool publishStatus = now >= nextStatus_;
+    if (publishStatus) last_ = session_->Status();
+    const auto& current = last_;
     if (playbackUpdate_.valid() && playbackUpdate_.wait_for(0ms) == std::future_status::ready) {
         const auto result = playbackUpdate_.get(); if (playbackUpdated) playbackUpdated(result);
     }
@@ -95,6 +101,10 @@ void QtRoomSession::tick() {
     if (mutation_.valid() && mutation_.wait_for(0ms) == std::future_status::ready) {
         const auto result = mutation_.get();
         if (roomUpdated) roomUpdated(result);
+    }
+    if (removal_.valid() && removal_.wait_for(0ms) == std::future_status::ready) {
+        const auto result = removal_.get(); removingPeer_.clear();
+        if (viewerRemoved) viewerRemoved(result);
     }
     if (current.phase == RoomPhase::Failed || current.phase == RoomPhase::Stopped) stop();
     if (applying_.valid() && applying_.wait_for(0ms) == std::future_status::ready) {
@@ -121,8 +131,8 @@ void QtRoomSession::tick() {
         }
         if (frameReady) if (auto frame = frames_->Take()) frameReady(std::move(*frame));
     }
-    if (now >= nextStatus_) {
-        last_ = current; nextStatus_ = now + 100ms;
+    if (publishStatus) {
+        nextStatus_ = now + 100ms;
         if (statusChanged) statusChanged(current);
     }
     if (stopping_.valid() && stopping_.wait_for(0ms) == std::future_status::ready) {
@@ -134,9 +144,13 @@ void QtRoomSession::tick() {
             const auto result = mutation_.get();
             if (roomUpdated) roomUpdated(result);
         }
+        if (removal_.valid()) {
+            const auto result = removal_.get(); removingPeer_.clear();
+            if (viewerRemoved) viewerRemoved(result);
+        }
         if (admission_.valid()) {
             const auto result = admission_.get();
-            if (result.outcomeUnconfirmed && error) error(QStringLiteral("Admission ended before the server outcome could be confirmed."));
+            if (result.outcomeUnconfirmed && error) error(RoomEntryError(RoomError::AdmissionUnconfirmed, config_.room.host));
         }
         applying_ = {}; pending_.reset(); submitted_.reset();
         lastFrames_ = frames_->statistics(); session_.reset(); frames_.reset(); timer_.stop();

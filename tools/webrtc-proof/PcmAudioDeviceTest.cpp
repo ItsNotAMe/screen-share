@@ -3,6 +3,7 @@
 #include "SyntheticAudio.h"
 #include "AudioProcessingTest.h"
 #include <condition_variable>
+#include <bit>
 #include <iostream>
 #include <stdexcept>
 
@@ -48,7 +49,6 @@ void Switches() {
             ++processors; if (failProcessor) throw std::runtime_error("Injected processor startup failure");
             return ProcessMicrophone(std::move(endpoint));
         });
-    Require(control->Submit({}, good).get().error == AudioUpdateError::Unavailable, "Inactive switch accepted");
     auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     PcmBlock block; std::stop_source stop;
     std::this_thread::sleep_for(100ms); capture->Read(block, stop.get_token());
@@ -102,6 +102,56 @@ void Switches() {
     const auto cancelStart = std::chrono::steady_clock::now(); capture.reset();
     Require(starting.get().error == AudioUpdateError::Cancelled && std::chrono::steady_clock::now() - cancelStart < 300ms && ownership->live == 0,
         "In-flight activation did not cancel promptly");
+}
+void InactiveAudioSelection() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    auto original = std::make_shared<Ownership>();
+    auto replacement = std::make_shared<Ownership>();
+    AudioSwitchControl::Factory oldSource = [original] { return std::make_unique<OwnedCapture>(original, false); };
+    AudioSwitchControl::Factory newSource = [replacement] { return std::make_unique<OwnedCapture>(replacement, false); };
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, oldSource);
+    auto muted = control->Submit({AudioKind::None}, {});
+    Require(muted.wait_for(0ms) == std::future_status::ready && muted.get().error == AudioUpdateError::None,
+        "Cannot mute before the first viewer joins");
+    Require(control->Status().selected.kind == AudioKind::None && control->Status().revision == 2 &&
+        control->Status().health.state == AudioEndpointState::Inactive && original->created == 0,
+        "Idle selection opened an endpoint or claimed active capture");
+    auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    PcmBlock block;
+    for (int i = 0; i < 5; ++i) {
+        Require(capture->Read(block, {}) && std::all_of(block.begin(), block.end(), [](auto sample) { return sample == 0; }),
+            "Pre-muted recording exposed audio");
+    }
+    Require(original->created == 0 && control->Status().health.state == AudioEndpointState::Silent,
+        "Muted recording opened the previous source");
+    capture.reset();
+    // The latest selection also applies when recording restarts after a departure.
+    const AudioSelection selected{AudioKind::System, L"new-output"};
+    auto selectedResult = control->Submit(selected, newSource).get();
+    Require(selectedResult.error == AudioUpdateError::None && selectedResult.revision == 3 &&
+        control->Status().selected == selected && control->Status().health.state == AudioEndpointState::Inactive && replacement->created == 0,
+        "Idle replacement did not retain configuration without opening a device");
+    capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    bool audible = false;
+    for (int i = 0; i < 5; ++i) {
+        Require(capture->Read(block, {}), "Replacement recording stopped");
+        audible |= std::any_of(block.begin(), block.end(), [](auto sample) { return sample != 0; });
+    }
+    Require(audible && original->created == 0 && replacement->created == 1, "Restart used the previous audio source");
+    capture.reset();
+    // A deferred endpoint failure stays silent and never falls back to an old source.
+    replacement->unavailable = true;
+    Require(control->Submit(selected, newSource).get().error == AudioUpdateError::None, "Idle retry rejected");
+    capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    Require(capture->Read(block, {}) && block == PcmBlock{} && control->Status().health.state == AudioEndpointState::Failed && original->created == 0,
+        "Unavailable deferred source fell back or concealed its failure");
+    capture.reset();
+    control->Close();
+    Require(control->Submit({AudioKind::None}, {}).get().error == AudioUpdateError::Unavailable,
+        "Stopped room accepted an idle mute");
+    Require(original->live == 0 && replacement->live == 0 && !replacement->wrongThread,
+        "Idle audio selection leaked endpoint ownership");
 }
 // A device that produces just after the old 10ms timeout used to cause one
 // silence block plus one immediate captured block per read interval.
@@ -377,6 +427,91 @@ public:
     uint64_t position_ = 0;
     bool silentOutput = false;
 };
+void OutputClockCadence() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    PcmBlockPacer pacer; pacer.Start();
+    screenshare::ShortWait work;
+    const auto start = std::chrono::steady_clock::now();
+    for (unsigned i = 0; i < 100; ++i) {
+        Require(pacer.Wait({}), "Output clock stopped");
+        work.Wait(2ms); // Callback/mixing work belongs inside the 10ms period.
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    std::cout << "Output clock elapsed ms: " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << '\n';
+    Require(elapsed >= 990ms && elapsed < 1120ms, "Output clock accumulated per-block work and wake-up overshoot");
+    std::this_thread::sleep_for(50ms);
+    pacer.Wait({});
+    const auto resumed = std::chrono::steady_clock::now(); pacer.Wait({});
+    Require(std::chrono::steady_clock::now() - resumed >= 8ms, "Output clock replayed missed slots");
+    std::stop_source stop; stop.request_stop();
+    Require(!pacer.Wait(stop.get_token()), "Output clock ignored cancellation");
+}
+// Opt-in scheduling experiment. Saturate one allowed CPU briefly; leave every
+// other CPU available and never open a physical audio endpoint.
+void SchedulingUnderLoad() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    DWORD_PTR allowed = 0, system = 0;
+    Require(GetProcessAffinityMask(GetCurrentProcess(), &allowed, &system) && std::popcount(uint64_t(allowed)) >= 2,
+        "Scheduling proof needs at least two allowed CPUs");
+    const auto cpu = DWORD_PTR(std::bit_floor(uint64_t(allowed)));
+    auto wrongCpu = std::make_shared<std::atomic<bool>>(false);
+    class Output final : public PcmPlayoutEndpoint {
+        DWORD_PTR cpu_;
+        std::shared_ptr<std::atomic<bool>> wrongCpu_;
+        bool pinned_ = false;
+        PcmBlockPacer pacer_;
+    public:
+        Output(DWORD_PTR cpu, std::shared_ptr<std::atomic<bool>> wrongCpu) : cpu_(cpu), wrongCpu_(std::move(wrongCpu)) {}
+        void Start() override {
+            Require(SetThreadAffinityMask(GetCurrentThread(), cpu_) != 0, "Output affinity failed");
+            pacer_.Start();
+        }
+        void Write(const PcmBlock&, std::stop_token stop) override {
+            // MMCSS applies its task's affinity during registration, which runs
+            // after endpoint startup. Pin the experiment after that policy.
+            if (!pinned_) {
+                Require(SetThreadAffinityMask(GetCurrentThread(), cpu_) != 0, "Post-registration output affinity failed");
+                pinned_ = true;
+            }
+            if (!(cpu_ & (DWORD_PTR(1) << GetCurrentProcessorNumber()))) *wrongCpu_ = true;
+            pacer_.Wait(stop);
+        }
+        uint32_t DelayMs() const override { return 0; }
+        uint32_t BufferFrames() const override { return 2400; }
+    };
+    auto diagnostics = std::make_shared<PcmAudioDiagnostics>();
+    PcmEndpointFactories endpoints; endpoints.playout = [cpu, wrongCpu] { return std::make_unique<Output>(cpu, wrongCpu); };
+    auto adm = CreatePcmAudioDeviceModule(std::move(endpoints), diagnostics);
+    Transport transport;
+    struct Cleanup { webrtc::AudioDeviceModule& adm; ~Cleanup() { adm.Terminate(); } } cleanup{*adm};
+    Require(adm->Init() == 0 && adm->RegisterAudioCallback(&transport) == 0 && adm->InitPlayout() == 0 &&
+        adm->StartPlayout() == 0, "Scheduling output startup failed");
+    transport.Wait([&] { return transport.played >= 10; });
+    std::atomic<bool> loaded{false};
+    std::jthread competitor([&](std::stop_token stop) {
+        if (!SetThreadAffinityMask(GetCurrentThread(), cpu) || !SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST)) return;
+        loaded = true;
+        const auto end = std::chrono::steady_clock::now() + 750ms;
+        uint64_t work = 0;
+        while (!stop.stop_requested() && std::chrono::steady_clock::now() < end) {
+            for (unsigned i = 0; i < 10000; ++i) work = work * 1664525 + i + 1013904223;
+            std::atomic_signal_fence(std::memory_order_seq_cst);
+        }
+        if (work == 123) std::cerr << work;
+    });
+    competitor.join();
+    Require(loaded, "Scheduling competitor did not start");
+    Require(!*wrongCpu, "Audio escaped the contended CPU");
+    const auto played = transport.played.load(); transport.Wait([&] { return transport.played >= played + 5; });
+    adm->Terminate();
+    std::cout << "Single-CPU contention: maximum playback callback gap ms=" << diagnostics->maxPlayoutGapMs
+        << " scheduling=" << diagnostics->playoutScheduling << '\n';
+    Require(diagnostics->playoutScheduling == 1, "MMCSS unavailable in the scheduling proof");
+    Require(diagnostics->maxPlayoutGapMs < 50, "CPU contention starved the 10ms audio worker beyond the 50ms output reserve");
+    Require(diagnostics->playoutErrors == 0 && !transport.invalid, "Scheduling test failed audio transport");
+}
 void NativeCaptureSelections() {
     // Actual capture endpoints, discarded in-memory callbacks only. No render
     // endpoint starts, and no microphone/system content is written to disk.
@@ -473,8 +608,9 @@ void Run(bool wasapi) {
 int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
+        if (argc == 2 && std::string(argv[1]) == "--scheduling") { SchedulingUnderLoad(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
-        BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
+        InactiveAudioSelection(); OutputClockCadence(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

@@ -2,6 +2,7 @@
 #include "ui/SessionPopup.h"
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
+#include "shared/RoomEntryError.h"
 #include "ui/UiStyle.h"
 #include "ui/SourcePickerDialog.h"
 #include "ui/SourcePreviewLabel.h"
@@ -65,7 +66,7 @@ class SelectedSourcePreview final : public SourcePreviewLabel {
         auto pending=std::make_shared<std::atomic_bool>(false);
         worker_=QThread::create([this,source,revision,pending] {
             try {
-                CaptureConfig config;config.targetFps=5;config.allowDisplayFallback=false;
+                CaptureConfig config;ConfigureCapturePreview(config,{640,360});config.allowDisplayFallback=false;
                 config.backend=CaptureBackend::WindowsGraphicsCapture;
                 config.sourceType=source.contains("window")?CaptureSourceType::Window:CaptureSourceType::Display;
                 config.windowHandle=source.value("window").toULongLong();config.displayIndex=source.value("display").toInt();
@@ -80,7 +81,7 @@ class SelectedSourcePreview final : public SourcePreviewLabel {
                             setPixmap(QPixmap::fromImage(image));setProperty("previewReady",true);
                         },Qt::QueuedConnection);
                     }
-                    QThread::msleep(200);
+                    WaitForCapturePreview(std::chrono::steady_clock::now()+CapturePreviewInterval);
                 }
             }catch(...){}
             if(!QThread::currentThread()->isInterruptionRequested())QMetaObject::invokeMethod(this,[this,revision] {
@@ -549,6 +550,10 @@ void RoomBrowserWindow::Launch(bool host) {
             auto update = active_->session().statusChanged;
             active_->session().statusChanged = [this, update, suppliedPassword = !password_->text().isEmpty(), admitted = false](const auto& status) mutable {
                 if (update) update(status);
+                if(!closing_ && active_ && status.removedByHost && status.phase==v2::RoomPhase::Stopped && joinFailure_.isEmpty()) {
+                    joinFailure_="The host removed you from the room.";
+                    QTimer::singleShot(0,this,[this]{if(active_)active_->close();});
+                }
                 if(!closing_ && active_ && !admitted && (status.phase==v2::RoomPhase::Connecting || status.phase==v2::RoomPhase::Active)) {
                     // Admission opens the viewer once. Later status updates must not
                     // navigate away from profile or application settings.
@@ -556,7 +561,7 @@ void RoomBrowserWindow::Launch(bool host) {
                     if(presentPage)presentPage(active_.get());else {active_->show();hide();}
                 }
                 if(!closing_ && active_ && !admitted && status.phase==v2::RoomPhase::Failed && status.error!=v2::RoomError::AdmissionDenied) {
-                    joinFailure_="Could not join the room. Check the room link and try again.";
+                    joinFailure_=RoomEntryError(status.error);
                     QTimer::singleShot(0,this,[this]{if(active_)active_->close();});
                 }
                 if (!passwordRetry_ && status.phase == v2::RoomPhase::Failed && status.error == v2::RoomError::AdmissionDenied) {

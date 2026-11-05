@@ -1,9 +1,49 @@
 # Measured backend comparison
 
-These are local measurements from September 2026, not universal performance or
-Internet-latency guarantees. Hardware/software, one/four viewers and run order
-were controlled. Retain the modular backend; outstanding qualification is listed
+These are local measurements, not universal performance or
+Internet-latency guarantees. Backend comparisons controlled hardware/software,
+viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
+
+## UI and preview follow-up (2026-11-05)
+
+A local four-viewer status fixture counted 66 diagnostic snapshots in one second
+before cadence separation and ten afterward; runtime/control advances stayed at
+about 65–67 per second in both runs. The requested five-millisecond media/control tick is unchanged.
+The GUI also copies its snapshot only at its existing 100ms status publication
+cadence, while frame handoff continues independently. This measures avoided
+snapshot work, not a whole-application CPU or latency improvement.
+
+Small source previews now fit on the GPU before BGRA readback, preserving aspect
+ratio and avoiding capture upscaling. Generated-window WGC measurements:
+
+| Source | Preview | Readback bytes before / after |
+| --- | --- | --- |
+| 1266 × 713 | 639 × 360 | 3,650,560 / 921,600 |
+| 386 × 793 | 175 × 360 | 1,319,552 / 276,480 |
+| 286 × 193 | 286 × 193 | 222,336 / 222,336 |
+
+The host monitoring preview is limited to five updates per second, matching the
+creation preview rather than separately copying about 30 full-resolution frames
+per second. Source-picker thumbnails use a 320 × 180 bound. Stream capture and
+viewer video retain their configured rate and dimensions. These checks do not
+establish a particular game's CPU/GPU savings or WAN performance.
+
+## Audio-worker scheduling follow-up (2026-11-05)
+
+The custom PCM workers did not use the MMCSS scheduling employed by the pinned
+WebRTC Windows audio device. A silent, synthetic playback worker under a 750ms
+higher-priority task on the same CPU had a maximum callback gap of 229ms before
+the fix and 10ms after registering the audio worker with MMCSS. The test pins
+the worker after multimedia task registration and checks that it stays on the
+contended CPU. The output reserve is only 50ms, so the previous gap is enough
+to underrun it even when the network is healthy.
+
+Playout, the capture feeder and device capture producers now register the
+thread-scoped Pro Audio task and revert registration on their owner thread.
+Unavailable registration is diagnostic and nonfatal. This demonstrates and
+addresses CPU-contention starvation; it does not prove what caused an earlier
+remote session's first stall or eliminate kernel/driver stalls.
 
 ## Latest scorecard — congestion-window follow-up
 

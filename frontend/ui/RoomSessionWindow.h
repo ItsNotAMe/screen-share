@@ -90,5 +90,9 @@ private:
     QWidget* settingsDrawer_ = nullptr;
     QWidget* sharedAudioSettings_ = nullptr;
     void RefreshHostPreview();
+    void ConfirmViewerRemoval(const QString& peerId);
+    void UpdateViewerShareState(const screenshare::v2::RoomStatus&);
+    bool remoteVideoBlocked_ = false;
+    QString remoteVideoMessage_;
 };
 int RunRoomSessionWindow(const QString& configurationPath);

@@ -2,6 +2,47 @@
 
 ## Current UI Direction
 
+- Join failures preserve the invite and explain full/closed/missing rooms, rate
+  limits and uncertain outcomes using the shared RoomEntryError guidance.
+  Host creation uses service-capacity guidance for the full response. Keep
+  password prompts exclusive to validated authorization failures.
+
+- Normal startup remembers windowed size/position and maximized state. Cache
+  placement in memory while moving; freeze/save on the first Close before room
+  drain changes geometry. Fullscreen and minimization stay temporary. Decode Qt
+  saved geometry on an unshown helper, then use the existing native maximize
+  path after first show; direct hidden maximized restore breaks the custom chrome.
+  Keep diagnostic launches and test profiles independent of user settings.
+
+- Viewers clear stale pictures for fresh host notices of paused video, minimized
+  or unavailable sources, and capture recovery. Keep Resuming video until an
+  actual decoded frame reaches the UI. Notices use the existing video status
+  surface and accessible description. Clear held input before clearing mapping;
+  gate remote input until fresh video while preserving grants and focus policy.
+  Game mouse must be captured again after the video returns.
+
+- Hosts can remove a viewer from that viewer's row after a named confirmation.
+  Keep removal icon-only, using user-minus beside the three input icons on one
+  line. Elide long names, retaining their full text in tooltips and accessibility.
+  Reuse SessionPopup, focus Cancel and preserve identity/focus during room pushes.
+  Removal targets peer ID, not nickname; handle departure while confirmation is
+  open. Other viewers stay connected. Removed viewers return to Join with an
+  explanation. Removal ends a membership and does not ban future admissions.
+
+- Host Mute audio and source-picker audio changes work before a viewer arrives.
+  Show Audio muted in the summary and synchronize the speaker icon. Share audio
+  restores the exact prior selection. An explicit mute cancels pending automatic
+  source edits; an idle audio choice saves configuration without opening devices.
+
+- Local create/host monitoring previews run at five FPS and fit on the GPU before
+  BGRA readback (640 × 360; chooser thumbnails 320 × 180). Preserve source aspect
+  ratio and original size metadata. Preview waits must honor worker interruption.
+- Home and Join preserve room rows/focus during directory pushes. Access changes
+  update both the icon and badge styling; no-match search shows a Clear search
+  action and differs from a genuinely empty directory.
+- Heavy room diagnostic snapshots and GUI status copies run at 100ms cadence;
+  frame handoff and media/control retirement keep their independent short tick.
+
 - Create room retains a selected-source live preview and opens the same enlarged
   SourcePickerDialog used by the host room. Keep explicit confirmation/cancel,
   current selection on cancellation, full-title tooltips and keyboard focus return.

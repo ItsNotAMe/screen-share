@@ -5,6 +5,232 @@
 
 # Project Memory
 
+## Version 1.0.12 release preparation - 2026-11-06
+
+The owner requested publication of 1.0.12 after the nine separately committed
+audio, preview, moderation, video-state, placement and admission improvements.
+CMake version, versioned release notes and in-app update notes now describe this
+release. Use the maintained build/sign/verify/publish scripts and the existing
+update identity. Merge before the final build and publication from clean main.
+
+## Inline viewer removal action - 2026-11-06
+
+Viewer removal is an icon-only user-minus SVG action beside mouse, keyboard and
+controller controls. All four use the same 32px bounds and stay on one line.
+The narrow sidebar required smaller buttons/tighter gaps to keep removal inside
+the actual scroll viewport. Long nicknames elide, with full plain-text identity
+in accessibility and an escaped tooltip. Pending removal stays icon-only and
+disabled; the existing named confirmation and membership behavior are retained.
+
+The full Release build, room UI, viewer-removal and UI self-test checks passed.
+Row regressions verify every action stays within the scroll viewport, shares a
+baseline and keeps its accessible name at compact/normal sizes. Both rendered
+layouts were inspected; the portable archive matches the rebuilt CLI/UI binaries.
+No physical input operation, version bump or publication was performed.
+
+## Actionable room admission feedback - 2026-11-06
+
+RoomSession preserves validated full, closed, not-found, rate-limited and
+unconfirmed admission reasons as appended RoomError values. The Join form and
+standalone sessions share RoomEntryError guidance. Hosting distinguishes service
+capacity from a room's viewer limit. Invites remain editable after cleanup;
+password retry remains specific to AdmissionDenied, with no automatic admissions.
+
+The Release build and focused local HTTP fixture passed. The fixture checks all
+five viewer failures, retry availability, preserved invites, no spurious password
+prompt or media startup, and host capacity guidance. Compact/normal Join renders
+were inspected. Seven relevant CTest checks passed in the final parallel run;
+viewer removal timed out during controller resume, then passed in isolation.
+That scenario also passed in the earlier three-test run. No physical device
+operation, version bump or publication was performed.
+
+## Window layout persistence - 2026-11-06
+
+Normal Home startup opts into AppShellWindow placement persistence. Size, position
+and maximized state use a bounded Qt geometry blob in ScreenShare/MainWindow.ini;
+explicit profile/test paths use a separate .window.ini companion. Diagnostic
+launches stay independent, and loopback tests without an explicit profile never
+touch the user's settings. Move/resize/state events update memory only. The first
+Close freezes/saves layout before async room drain; unshown startup never writes.
+Fullscreen/minimized states retain the preceding windowed snapshot.
+
+Do not restore a maximized blob directly onto the custom native chrome or call
+Qt showMaximized for its startup restore. Native tests exposed a tiny normal
+restore rectangle and fullscreen misclassification. Decode/clamp on an unshown
+Qt helper, apply its normal screen/geometry, then use the existing title-bar
+maximize path after first show. Native HWND checks retain a Qt fallback for the
+offscreen backend. No manual geometry-blob parsing or native-coordinate storage.
+
+The full Release build and five relevant UI/update/mutation checks passed.
+WindowPlacementChecks runs with both Qt offscreen and native Windows; actual
+title-bar maximize/restore and hit tests pass at 100% and 150%. Coverage includes
+fullscreen from normal/maximized, minimized close, corruption, missing-monitor
+simulation, deferred close and normal-app restart. The Home render was inspected;
+the portable archive matches both rebuilt executables. No physical monitor
+hot-unplug, version bump or publication was performed.
+
+## Viewer notices for paused/unavailable video - 2026-11-05
+
+Hosts publish video intent/capture condition through the existing bidirectional
+telemetry channel. SHS v1 carries only connection ID, sequence and an enum: Live,
+VideoPaused, SourceUnavailable, SourceMinimized or Recovering. Publication keeps
+the latest state, bounds sends to four/second and heartbeats once/second. The
+viewer inbox checks size/version/state, connection and increasing sequence,
+bounds acceptance and withdraws observations after three seconds. Old hosts have
+no observation; old viewers ignore these packets. No Worker change is needed.
+
+Viewer status surfaces clear the old picture for non-live states. A Live notice
+keeps Resuming video until a decoded frame reaches the UI. This is host intent,
+not proof of remote presentation. Reports include remoteShare state/staleness/
+receipt age. Before clearing a frame, RoomGamepadControl releases held input
+under its old mapping and neutralizes controller polling through an independent
+video-availability gate. Grants and the existing focus policy are preserved;
+fresh accepted video lifts that gate, while Game mouse needs recapture.
+
+The Release build and all 42 CTest checks passed. After the final input-gating
+refinement, six relevant UI/input/report/runtime checks and the recording desktop
+UI scenario passed again. Coverage includes pause with continued audio, delayed
+UI consumption after Live, two-viewer close/replace/minimize/restore, protocol
+replay/binding/expiry/bounds, neutral controller/resume under the same permission,
+and mouse/key releases without revoking grants. Rendered paused/minimized/missing
+source states were inspected at compact and normal sizes. The portable archive
+matches both rebuilt executables. No physical input/listening/WAN qualification,
+version bump or publication was performed.
+
+The formerly combined UI run hit admission error 9 (RateLimited) at its last
+source scenario. Viewer removal now has its own registered local-service test,
+room-v2-viewer-removal, so admission counts do not depend on the minute boundary.
+Production limits remain unchanged.
+
+## Host viewer removal - 2026-11-05
+
+Host viewer rows expose Remove viewer with the existing in-page confirmation
+popup. Confirmation names the current member, uses plain text for nicknames,
+focuses Cancel and handles departure while open. Removal uses the existing
+peer.disconnect service command and authenticated peer ID, never the nickname.
+No Worker deployment or protocol change is needed. It ends a membership, not a
+ban; joining again creates a new peer identity.
+
+RoomSession::RemoveViewer shares the bounded room-mutation lane, rejects viewers,
+host self-removal and invalid/missing targets, and retains acknowledgement timeout
+and no-retry semantics. Qt routes removal completion separately from profile/room
+edits. Authoritative membership retirement releases input and media. The explicit
+server kicked reason survives Stop as removedByHost and appears in reports.
+Normal viewers return to Join with an explanation; standalone session windows
+clear the video and retain the explanation until dismissed.
+
+The Release build and all 41 CTest checks passed. A focused two-viewer test covers
+duplicate nicknames, cancel/focus, recording controller release, rejected stale
+input, unchanged surviving connection generation and continued video, departure
+during confirmation, fresh admission and the browser explanation. Compact/normal
+popup and return-page renders were inspected. The portable archive matches both
+rebuilt executables. No physical controller/audio operation, remote-WAN check,
+version bump or publication was performed.
+
+## Host audio privacy before viewer arrival - 2026-11-05
+
+Hosts can now mute or choose audio while the room is empty. AudioSwitchControl
+commits inactive configuration under its attachment lock without constructing an
+endpoint; the next recording uses it from startup. Active handovers retain their
+first-PCM acknowledgement, bounded queue and cancellation behavior. Deferred
+device failure stays silent and reports Failed, without reopening an old source.
+
+The dashboard enables Mute before arrival, shows Audio muted and a matching icon,
+and restores the exact prior source on Share audio. Explicit mute cancels a pending
+automatic source edit so it cannot unexpectedly restore audio. The source picker
+also saves audio choices without waiting for a viewer.
+
+New PCM and UI regressions failed against the old behavior. The final offscreen
+room UI run passed: first-viewer video continues with zero audible blocks and no
+host capture endpoint opened, then unmute restores the selected process source.
+The full Release build and the other 40 registered CTest checks passed. Muted
+dashboard renders were inspected at compact and normal sizes. An additional
+Windows UI run stopped earlier at the native-presentation startup assertion
+(occluded surface, zero presented frames); it did not reach the audio scenario.
+No physical audio listening, version bump or publication was performed.
+
+## Initial audio-stall investigation - 2026-11-05
+
+The custom ADM and capture producers used ordinary std::jthread scheduling,
+omitting the MMCSS policy in the pinned WebRTC Windows audio device. Under a
+750ms higher-priority task on the same CPU, synthetic playout's maximum callback
+gap was 229ms. Registering thread-scoped Pro Audio/critical MMCSS reduced it to
+10ms in the corrected test, which pins after registration and verifies affinity.
+The first post-fix experiment lacked that affinity check; use only the corrected
+comparison. This reproduces an initiating stall mechanism, not proof of the
+specific remote report's trigger.
+
+ADM capture/playout and device-capture producers now own their registration on
+their audio threads and revert on exit. Registration failure remains nonfatal
+and visible in reports. New phase/age and lock/callback/write maxima distinguish
+in-progress device waits from callback stalls; completed slow operations emit
+bounded, rate-limited audio-playout-stall events. The real loopback recovery test
+checks the live blocked-write phase and retained event timing, then stopped state.
+Audio-worker history writes use a nonblocking try-lock so report collection
+cannot stall those workers; lifetime timing counters remain available if an
+optional event is dropped.
+
+The full Release build and all 41 CTest checks passed. After the final nonblocking
+history refinement, the build and PCM/audio-sync/report checks passed again;
+the corrected same-CPU scheduling experiment again measured a 10ms maximum gap.
+Silent native WASAPI lifecycle checks also passed (50ms buffer, 10ms engine
+period). No audible fidelity or original remote trigger is established.
+`build/ScreenShare-audio-scheduling-preview.zip` matches both rebuilt executables;
+SHA-256 is 8432b81e49e990cb76e5adfce1e2e0182d572e125ec79d28b8265dd8069c71eb.
+This remains an unpublished 1.0.11 test build, including the prior recovery/UI
+work; no release or version bump was performed.
+
+## Performance and room-list review - 2026-11-05
+
+Separate heavy diagnostic snapshots and GUI status copies from the short media/
+control tick. The local four-viewer fixture counted 66 snapshots/second before
+and ten after, with control advances unchanged. Command completions and final
+stop snapshots still publish immediately. This is avoided work, not a measured
+whole-application CPU or WAN latency win.
+
+Create/host previews now fit within 640x360 on the GPU before BGRA readback;
+source-picker thumbnails fit within 320x180. Host monitoring drops from about
+30 FPS to five FPS. Preview pacing checks interruption rather than blocking
+shutdown for an entire 200ms wait. Generated-window WGC checks preserve landscape,
+portrait and small-window geometry: 1266x713 copied 3,650,560 bytes originally and
+921,600 after fitting. Stream dimensions/rate remain independent.
+
+Home/Join update access-badge styling and icons together while retaining row
+identity/focus. Search distinguishes no matches from an empty, loading or stale
+directory, offers Clear search and returns focus to the search input. UI
+regressions cover these transitions and preserve disabled stale-room actions.
+The Release build and all 41 CTest checks passed. After the final loading-state
+and outlined Clear search refinements, the room UI, updater deferral and UI smoke
+checks passed again. Native generated-window preview capture passed separately;
+rendered Home search states were inspected. The portable archive matches both
+rebuilt executables. This remains an unpublished test build with no version bump.
+
+## Audio lag recovery investigation - 2026-11-05
+
+Paired 1.0.11 reports showed low RTT, effectively no packet loss, fast hardware
+codecs and bounded presentation handoff, but interval video buffering reached
+about 1.5 seconds and audio buffering about 0.5 seconds. They do not contain PCM
+worker timing, so the initiating stall cannot be identified conclusively.
+The older static-sound reports contain no audio-device failure and cannot
+establish signal fidelity or a distinct static-noise cause.
+
+Real production room loopback with a stalled synthetic output reproduced sound
+remaining roughly 600ms behind video after a 600ms stall. Bound NetEq to ten
+packets and enable its fast acceleration. Let NetEq manage recovery: burst
+draining missed callbacks distorted its jitter estimate and was discarded.
+Preserve PCM pacer phase so wake-up overshoot and callback work do not accumulate
+on the silent capture/discard clocks. Keep no-replay and cancellation behavior.
+Reports now retain PCM block/drop/delay/callback-gap counters and transport
+jitter-buffer target/minimum and inserted/removed audio sample counters.
+The new silent room regression covers repeated 400/600/1200ms output stalls in
+both presets; it does not qualify remote device drivers or every WAN condition.
+The full Release build succeeded. All 40 registered checks pass after correcting
+the new cadence fixture to use the high-resolution timer for its simulated work
+and rerunning native-pcm-audio; ordinary Windows sleep rounded its 2ms wait up.
+Stereo levels, room media/reconnect/UI and sync recovery passed in the full run.
+The generated portable ZIP matches the rebuilt executables. No version bump or
+publication was performed.
+
 ## Version 1.0.11 release preparation - 2026-10-15
 
 Versioned notes and updater text prepare the shared source picker, selected-source

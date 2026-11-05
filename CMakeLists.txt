@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Prepare the pinned toolchain before project() checks compiler availability.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/PrepareNativeBuild.cmake")
 
-project(ScreenShareNative VERSION 1.0.11 LANGUAGES CXX)
+project(ScreenShareNative VERSION 1.0.12 LANGUAGES CXX)
 
 # C++/WinRT factory-cache clearing uses a 128-bit interlocked operation on x64.
 set_property(SOURCE backend/capture/DesktopCapturer.cpp APPEND PROPERTY COMPILE_OPTIONS
@@ -279,6 +279,8 @@ if(MSVC)
             add_test(NAME room-peer-isolation COMMAND RoomPeerIsolationTests)
             set_tests_properties(room-peer-isolation PROPERTIES TIMEOUT 90)
             add_executable(RoomPeerDepartureTests tests/RoomPeerDepartureTests.cpp)
+            add_executable(RoomStatusCadenceTests tests/RoomStatusCadenceTests.cpp)
+            target_link_libraries(RoomStatusCadenceTests PRIVATE ScreenShareRoomSession)
             target_link_libraries(RoomPeerDepartureTests PRIVATE ScreenShareRoomSession)
             add_test(NAME room-peer-departure COMMAND RoomPeerDepartureTests)
             set_tests_properties(room-peer-departure PROPERTIES TIMEOUT 15)
@@ -294,6 +296,10 @@ if(MSVC)
             target_link_libraries(SharedAudioLevelTests PRIVATE ScreenShareCore ScreenShareRoomSession)
             add_test(NAME shared-audio-level COMMAND SharedAudioLevelTests)
             set_tests_properties(shared-audio-level PROPERTIES TIMEOUT 30)
+            add_executable(AvSyncRecoveryTests tests/AvSyncRecoveryTests.cpp)
+            target_link_libraries(AvSyncRecoveryTests PRIVATE ScreenShareCore ScreenShareRoomSession)
+            add_test(NAME av-sync-recovery COMMAND AvSyncRecoveryTests)
+            set_tests_properties(av-sync-recovery PROPERTIES TIMEOUT 60)
             add_executable(NativeCaptureTests tools/webrtc-proof/CaptureBackendTest.cpp)
             target_link_libraries(NativeCaptureTests PRIVATE ScreenShareCore ScreenShareMediaAdapters)
             add_executable(RoomInputTests tools/webrtc-proof/PublicRoomSessionProof.cpp)
@@ -321,6 +327,7 @@ if(MSVC)
         if(TARGET RoomInputTests)
             add_dependencies(RoomInputTests RoomSocketTests) # Deploy the same Qt networking DLLs.
             add_dependencies(RoomPeerDepartureTests RoomSocketTests)
+            add_dependencies(RoomStatusCadenceTests RoomSocketTests)
             add_dependencies(RoomLifecycleStress RoomSocketTests)
             add_dependencies(BackendComparison RoomSocketTests)
         endif()
@@ -331,6 +338,10 @@ if(MSVC)
         find_program(SCREENSHARE_NODE_EXECUTABLE node)
         if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/node_modules/miniflare/package.json")
             if(TARGET RoomInputTests)
+                add_test(NAME room-status-cadence COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                    "$<TARGET_FILE:RoomStatusCadenceTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-status-cadence-evidence")
+                set_tests_properties(room-status-cadence PROPERTIES TIMEOUT 30)
                 add_test(NAME room-v2-input-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                     "$<TARGET_FILE:RoomInputTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-input-evidence" media)
@@ -699,6 +710,12 @@ if(SCREENSHARE_BUILD_QT_UI)
                         "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                         "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-ui-evidence" media)
                     set_tests_properties(room-v2-qt-ui PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+                    # Keep moderation admissions in a fresh local service so the
+                    # combined UI flow does not depend on a rate-limit minute boundary.
+                    add_test(NAME room-v2-viewer-removal COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                        "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-removal-evidence" media viewer-removal)
+                    set_tests_properties(room-v2-viewer-removal PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
                     add_test(NAME room-v2-mutation-ack-recovery COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
                         "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                         "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-mutation-evidence" media mutation-ack-delay)

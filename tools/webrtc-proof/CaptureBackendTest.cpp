@@ -255,11 +255,43 @@ void SourceSwitches() {
     Require(!target->Read().generation, "Switched capture retained its input target after stop");
     std::cout << "Six generated-window source switches kept frames and input geometry flowing\n";
 }
+void PreviewReadback() {
+    WindowsMediaRuntime runtime;
+    Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
+    proof::TestWindow window;
+    CaptureConfig config; config.sourceType = CaptureSourceType::Window;
+    config.windowHandle = reinterpret_cast<uint64_t>(window.handle());
+    for (const auto size : {SIZE{1280,720}, SIZE{400,800}, SIZE{300,200}}) {
+        window.Invoke([&] { SetWindowPos(window.handle(), nullptr, 0, 0, size.cx, size.cy, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE); });
+        DesktopCapturer capture;
+        config.targetWidth = config.targetHeight = 0; config.fitWithinTarget = false;
+        capture.Start(config);
+        std::optional<CapturedFrame> original;
+        Wait([&] { original = capture.TryCaptureFrame(std::chrono::milliseconds(30)); return original && !original->pixels.empty(); });
+        const auto originalBytes = original->pixels.size(); capture.Stop();
+        config.targetWidth = 640; config.targetHeight = 360; config.fitWithinTarget = true;
+        capture.Start(config);
+        std::optional<CapturedFrame> preview;
+        Wait([&] { preview = capture.TryCaptureFrame(std::chrono::milliseconds(30)); return preview && !preview->pixels.empty(); });
+        Require(preview->width <= 640 && preview->height <= 360 && preview->width <= preview->sourceWidth && preview->height <= preview->sourceHeight,
+            "Preview exceeded its bounds or upscaled a small source");
+        Require(preview->sourceWidth == original->sourceWidth && preview->sourceHeight == original->sourceHeight,
+            "Preview discarded original source geometry");
+        Require(std::abs(int64_t(preview->width) * preview->sourceHeight - int64_t(preview->height) * preview->sourceWidth) <=
+            preview->sourceWidth + preview->sourceHeight, "Preview stretched its source");
+        Require(preview->pixels.size() <= originalBytes && preview->pixels.size() == size_t(preview->rowPitch) * preview->height,
+            "Preview readback retained native-resolution pixels");
+        std::cout << "Preview " << preview->sourceWidth << 'x' << preview->sourceHeight << " -> " << preview->width << 'x' << preview->height
+            << "; readback bytes " << originalBytes << " -> " << preview->pixels.size() << '\n';
+        capture.Stop();
+    }
+}
 int main(int argc, char** argv) try {
     Policy(); CursorPixels();
     if (argc > 1 && std::string_view(argv[1]) == "--live") WindowLifecycle();
     if (argc > 1 && std::string_view(argv[1]) == "--display") DisplayRebuild();
     if (argc > 1 && std::string_view(argv[1]) == "--cadence") StaticCadence();
     if (argc > 1 && std::string_view(argv[1]) == "--switch") SourceSwitches();
+    if (argc > 1 && std::string_view(argv[1]) == "--preview") PreviewReadback();
     std::cout << "Capture backend checks passed\n"; return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

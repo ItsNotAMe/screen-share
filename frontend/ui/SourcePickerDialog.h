@@ -91,7 +91,7 @@ private:
         refresh_->setEnabled(false);const auto sources=sources_;
         worker_=QThread::create([this,sources]{
             for(int index=0;index<sources.size()&&!QThread::currentThread()->isInterruptionRequested();++index)try {
-                const auto source=sources[index].selection;CaptureConfig config;config.targetFps=15;config.allowDisplayFallback=false;
+                const auto source=sources[index].selection;CaptureConfig config;ConfigureCapturePreview(config,{320,180});config.allowDisplayFallback=false;
                 config.sourceType=source.kind==media::CaptureKind::Window?CaptureSourceType::Window:CaptureSourceType::Display;
                 config.windowHandle=source.window;config.displayIndex=source.display;config.backend=CaptureBackend::WindowsGraphicsCapture;
                 DesktopCapturer capture;capture.Start(config);const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(1);

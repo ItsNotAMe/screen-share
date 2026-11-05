@@ -7,6 +7,7 @@
 #include <QtCore/QEvent>
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>
+#include <QtCore/QSettings>
 #include <QtCore/QRectF>
 #include <QtGui/QIcon>
 #include <QtGui/QCloseEvent>
@@ -14,6 +15,7 @@
 #include <QtGui/QPixmap>
 #include <QMouseEvent>
 #include <QWindow>
+#include <QTimer>
 #include <QtMath>
 #include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QFrame>
@@ -121,6 +123,7 @@ AppShellWindow::AppShellWindow(QWidget* parent) : QWidget(parent)
 
 AppShellWindow::~AppShellWindow()
 {
+    saveWindowPlacement();
 #ifdef _WIN32
     unregisterPanicHotkey();
 #endif
@@ -140,8 +143,49 @@ void AppShellWindow::setCloseHandler(std::function<bool()> handler)
     closeHandler_ = std::move(handler);
 }
 
+void AppShellWindow::enableWindowPlacementPersistence(const QString& settingsFile)
+{
+    if (placementSettings_) return;
+    placementSettings_ = settingsFile.isEmpty()
+        ? std::make_unique<QSettings>(QSettings::IniFormat, QSettings::UserScope, "ScreenShare", "MainWindow")
+        : std::make_unique<QSettings>(settingsFile, QSettings::IniFormat);
+    const auto bytes = placementSettings_->value("geometry/v1").toByteArray();
+    // Qt's versioned geometry format restores the monitor/normal geometry and
+    // relocates an off-screen window into an available screen's working area.
+    if (!bytes.isEmpty() && bytes.size() <= 4096) {
+        // Decode/clamp on an unshown helper. Restoring a maximized blob directly
+        // onto the custom Windows chrome leaves its native normal size stale.
+        QWidget restored; restored.setWindowFlags(windowFlags());
+        if (restored.restoreGeometry(bytes) && restored.normalGeometry().isValid()) {
+            setScreen(restored.screen());
+            setGeometry(restored.normalGeometry());
+            maximizeOnFirstShow_ = restored.isMaximized();
+        }
+    }
+    // Fullscreen/minimized state is intentionally never applied to this window.
+}
+
+void AppShellWindow::captureWindowPlacement()
+{
+    if (!placementSettings_ || placementSaved_ || !isVisible() || isFullScreen() || isMinimized()) return;
+    windowedPlacement_ = saveGeometry();
+}
+
+void AppShellWindow::saveWindowPlacement()
+{
+    if (!placementSettings_ || placementSaved_ || !placementShown_) return;
+    captureWindowPlacement();
+    placementSaved_ = true;
+    if (windowedPlacement_.isEmpty()) return;
+    placementSettings_->setValue("geometry/v1", windowedPlacement_);
+    placementSettings_->sync(); // Settings errors do not prevent closing.
+}
+
 void AppShellWindow::closeEvent(QCloseEvent* event)
 {
+    // Freeze the user's layout on their first Close, before asynchronous room
+    // drain can exit fullscreen or change the shell's page/minimum dimensions.
+    saveWindowPlacement();
     if (closeHandler_ && !closeHandler_()) event->ignore();
     else QWidget::closeEvent(event);
 }
@@ -256,7 +300,7 @@ void AppShellWindow::toggleMaximized()
 #ifdef _WIN32
     applyNativeWindowStyle();
     HWND hwnd = reinterpret_cast<HWND>(winId());
-    if (hwnd != nullptr) {
+    if (hwnd != nullptr && IsWindow(hwnd)) {
         ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
         updateChromeState();
         return;
@@ -300,7 +344,7 @@ bool AppShellWindow::isNativeMaximized() const
 {
 #ifdef _WIN32
     const HWND hwnd = reinterpret_cast<HWND>(const_cast<AppShellWindow*>(this)->winId());
-    return hwnd != nullptr && IsZoomed(hwnd) != FALSE;
+    return hwnd != nullptr && IsWindow(hwnd) ? IsZoomed(hwnd) != FALSE : isMaximized();
 #else
     return isMaximized();
 #endif
@@ -328,10 +372,20 @@ void AppShellWindow::showEvent(QShowEvent* event)
     registerPanicHotkey();
 #endif
     updateChromeState();
+    placementShown_ = true;
+    captureWindowPlacement();
+    if (maximizeOnFirstShow_) {
+        maximizeOnFirstShow_ = false;
+        QTimer::singleShot(0, this, [this] {
+            if (isVisible() && !placementSaved_ && !isNativeMaximized()) toggleMaximized();
+        });
+    }
 }
 
 bool AppShellWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == this && (event->type() == QEvent::Move || event->type() == QEvent::Resize ||
+                           event->type() == QEvent::WindowStateChange)) captureWindowPlacement();
     if (event->type() == QEvent::MouseButtonPress) {
         auto* target = qobject_cast<QWidget*>(watched);
         if (target && target->window() == this) {

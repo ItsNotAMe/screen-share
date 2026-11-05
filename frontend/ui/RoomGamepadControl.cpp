@@ -207,7 +207,7 @@ void RoomGamepadControl::SetVideo(VideoFrameWidget* video) {
             }
             return;
         }
-        if(!port || !armed_ || inputPaused_->load() || requestedPeer_.empty())return;
+        if(!port || !armed_ || inputPaused_->load() || !videoAvailable_->load() || requestedPeer_.empty())return;
         uint64_t permission=0;
         for(const auto& state:port->Read())if(state.peer==requestedPeer_)permission=state.permission;
         if(!port->SubmitIfCurrent(requestedPeer_,permission,*event)){Revoke();return;}
@@ -228,6 +228,16 @@ void RoomGamepadControl::RespondToRequest(const QString& peer, uint8_t capabilit
             else actionError_.clear();
         }
         break;
+    }
+    Tick();
+}
+void RoomGamepadControl::SetVideoAvailable(bool available) {
+    if(host_ || videoAvailable_->exchange(available)==available)return;
+    if(!available) {
+        // Release under the original frame mapping before the video is cleared.
+        // Availability is independent of focus; keep the existing focus policy
+        // so a focused viewer can resume with the same grant after fresh video.
+        const bool paused=inputPaused_->load();PauseInput();inputPaused_->store(paused);
     }
     Tick();
 }
@@ -300,21 +310,23 @@ void RoomGamepadControl::Tick() {
     const auto port = port_(); const auto states = port ? port->Read() : std::vector<input::Status>{};
     const auto room = room_(); const auto selected = peers_->currentData().toString();
     if(host_) {
+        const auto removing = removingViewer ? removingViewer() : QString{};
         QStringList present;
         for(const auto& member:room.members) if(!member.host) {
             const auto id=QString::fromStdString(member.peerId);present<<id;
             if(!peerCards_.contains(id)) {
                 auto* card=new QWidget;card->setObjectName("HostViewerRow");
                 auto* body=new QVBoxLayout(card);body->setContentsMargins(0,8,0,12);
-                auto* identity=new QHBoxLayout;auto* avatar=new QLabel;avatar->setObjectName("PeerAvatar");avatar->setAlignment(Qt::AlignCenter);avatar->setFixedSize(40,40);identity->addWidget(avatar);
+                auto* identity=new QHBoxLayout;identity->setSpacing(4);auto* avatar=new QLabel;avatar->setObjectName("PeerAvatar");avatar->setAlignment(Qt::AlignCenter);avatar->setFixedSize(40,40);identity->addWidget(avatar);
                 auto* text=new QVBoxLayout; text->setSpacing(2);
-                auto* name=new QLabel;name->setObjectName("PeerName");name->setTextFormat(Qt::PlainText);name->setWordWrap(true);text->addWidget(name);
+                auto* name=new QLabel;name->setObjectName("PeerName");name->setTextFormat(Qt::PlainText);
+                name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);text->addWidget(name);
                 auto* status=new QLabel;status->setObjectName("PeerControlState");status->setWordWrap(true);text->addWidget(status);identity->addLayout(text,1);body->addLayout(identity);
                 auto* buttons=new QHBoxLayout;buttons->setSpacing(4);identity->addLayout(buttons);
                 for(const auto& entry: {std::pair{"mouse",input::Mouse},std::pair{"keyboard",input::Keyboard},std::pair{"gamepad",input::Gamepad}}) {
                     auto* button=new QPushButton;button->setObjectName("PeerCapability");button->setCheckable(true);
                     button->setProperty("capability",int(entry.second));button->setProperty("peerId",id);
-                    button->setIcon(uiIcon(entry.first));button->setIconSize(QSize(18,18));button->setFixedSize(36,36);buttons->addWidget(button);
+                    button->setIcon(uiIcon(entry.first));button->setIconSize(QSize(18,18));button->setFixedSize(32,32);buttons->addWidget(button);
                     connect(button,&QPushButton::clicked,this,[this,id,button,cap=uint8_t(entry.second)] {
                         auto port=port_();if(!port)return;
                         for(const auto& state:port->Read()) if(state.peer==id.toStdString()) {
@@ -338,11 +350,21 @@ void RoomGamepadControl::Tick() {
                         Tick();
                     });
                 }
+                auto* remove = new QPushButton; remove->setObjectName("removeRoomViewer");
+                remove->setProperty("peerId",id); remove->setIcon(uiIcon("user-minus"));
+                remove->setIconSize(QSize(18,18));remove->setFixedSize(32,32);buttons->addWidget(remove);
+                connect(remove,&QPushButton::clicked,this,[this,id] { if(removeViewerRequested)removeViewerRequested(id); });
                 peerRows_->addWidget(card);peerCards_.insert(id,card);
             }
             auto* card=peerCards_.value(id);const auto name=QString::fromStdString(member.nickname);
-            card->findChild<QLabel*>("PeerName")->setText(name);
+            auto* nameLabel=card->findChild<QLabel*>("PeerName");
+            nameLabel->setText(nameLabel->fontMetrics().elidedText(name,Qt::ElideRight,nameLabel->width()));
+            nameLabel->setToolTip(QString("<qt>%1</qt>").arg(name.toHtmlEscaped()));nameLabel->setAccessibleName(name);
             card->findChild<QLabel*>("PeerAvatar")->setText(name.left(1).toUpper());
+            auto* remove = card->findChild<QPushButton*>("removeRoomViewer");
+            remove->setEnabled(bool(removeViewerRequested) && room.phase==v2::RoomPhase::Active && removing.isEmpty());
+            remove->setAccessibleName(QString(removing==id?"Removing %1 from the room":"Remove %1 from the room").arg(name));
+            remove->setToolTip(removing==id?"Removing viewer…":"Remove viewer. Disconnect video, audio and remote control. A confirmation follows.");
             auto state=std::find_if(states.begin(),states.end(),[&](const auto& s){return s.peer==member.peerId;});
             const bool ready=state!=states.end()&&state->ready;
             const auto connection=std::find_if(room.stream.connections.begin(),room.stream.connections.end(),
@@ -364,7 +386,7 @@ void RoomGamepadControl::Tick() {
                     button->setProperty("pendingRequest",waiting);button->setProperty("requestPulse",false);
                     button->style()->unpolish(button);button->style()->polish(button);button->update();
                 }
-                button->setChecked(on);button->setEnabled(ready&&!state->grantPending&&!state->revokePending);
+                button->setChecked(on);button->setEnabled(ready&&!state->grantPending&&!state->revokePending && removing!=id);
                 const auto control=cap==input::Mouse?"mouse":cap==input::Keyboard?"keyboard":"controller";
                 const auto label=waiting?QString("%1 requested %2. Click to allow or deny %2.").arg(name,control):
                     QString("%1 %2 %3 %4").arg(on?"Revoke":"Grant",control,on?"from":"to",name);
@@ -417,9 +439,9 @@ void RoomGamepadControl::Tick() {
         if(granted && (!armed_ || requestedPeer_!=peer)){granted=0;}
         if (poller_ && poller_->permission() != permission) poller_.reset();
         if ((granted & input::Gamepad) && !poller_) {
-            poller_ = std::make_unique<input::GamepadPoller>(port, peer, [read = read_, selected=selectedDevice_, paused=inputPaused_]() -> std::optional<input::Event> {
+            poller_ = std::make_unique<input::GamepadPoller>(port, peer, [read = read_, selected=selectedDevice_, paused=inputPaused_, video=videoAvailable_]() -> std::optional<input::Event> {
                 input::Event event;event.kind=input::Kind::Pad;
-                if(paused->load())return event;
+                if(paused->load() || !video->load())return event;
                 const auto device=selected->load();
                 const auto value=device&&!device->empty()?read(*device):std::optional<RemoteGamepadState>{};
                 if(!value)return event; // Keep permission, release held state, and wait for a device.
@@ -429,7 +451,7 @@ void RoomGamepadControl::Tick() {
             });
         }
         if (!granted && poller_) Revoke("Controller input stopped. Check the selected device and request fresh permission.");
-        capturingDesktop_=!inputPaused_->load() && bool(granted&(input::Mouse|input::Keyboard));
+        capturingDesktop_=!inputPaused_->load() && videoAvailable_->load() && bool(granted&(input::Mouse|input::Keyboard));
         if(video_)video_->setControlCapture(capturingDesktop_,granted&input::Mouse,granted&input::Keyboard);
     }
     if(action_)action_->setEnabled(room.phase == v2::RoomPhase::Active && caps && consent_->isChecked() && !peer.empty());

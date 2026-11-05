@@ -4,8 +4,8 @@
 
 namespace screenshare::media {
 // Device-free source for an audio track that can resume without renegotiation.
-// Pace each block from the actual wake time: a delayed worker never catches up
-// by emitting a burst of old silence. Cancellation also interrupts the wait.
+// Preserve the 10ms phase across normal wake jitter. Missed slots never replay
+// a burst of old silence. Cancellation also interrupts the wait.
 class SilentPcmCapture final : public PcmCaptureEndpoint {
     PcmBlockPacer pacer_;
 public:

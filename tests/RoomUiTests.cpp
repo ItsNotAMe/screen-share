@@ -8,6 +8,7 @@
 #include <QSlider>
 #include "RecordingGamepadSink.h"
 #include "RecordingDesktopInput.h"
+#include "WindowPlacementChecks.h"
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QWheelEvent>
@@ -21,6 +22,8 @@
 #include <QScreen>
 #include "shared/RoomLaunch.h"
 #include <QNetworkAccessManager>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QStackedWidget>
 #include "ui/VideoFrameWidget.h"
 #include "media/webrtc/NativeRoomRuntime.h"
@@ -79,10 +82,11 @@ template<class F> void Wait(F condition, std::source_location where = std::sourc
         QCoreApplication::processEvents(); std::this_thread::sleep_for(1ms);
     }
 }
-void RespondToInputRequest(RoomSessionWindow& host, uint8_t capability, bool allow=true) {
+void RespondToInputRequest(RoomSessionWindow& host, uint8_t capability, bool allow=true, const std::string& peer={}) {
     QPushButton* control=nullptr;
     Wait([&] {
-        for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))if(button->property("capability").toUInt()==capability)
+        for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))if(button->property("capability").toUInt()==capability &&
+            (peer.empty() || button->property("peerId").toString().toStdString()==peer))
             control=button;
         return control && control->isEnabled() && control->property("pendingRequest").toBool();
     });
@@ -286,20 +290,23 @@ void NativePresentationRecovery() {
 class ClosingCapture final : public ICaptureSource {
     std::unique_ptr<ICaptureSource> source_;
     std::shared_ptr<std::atomic_bool> closed_;
+    std::shared_ptr<std::atomic_bool> minimized_;
 public:
-    ClosingCapture(std::unique_ptr<ICaptureSource> source,std::shared_ptr<std::atomic_bool> closed)
-        : source_(std::move(source)),closed_(std::move(closed)) {}
+    ClosingCapture(std::unique_ptr<ICaptureSource> source,std::shared_ptr<std::atomic_bool> closed,std::shared_ptr<std::atomic_bool> minimized={})
+        : source_(std::move(source)),closed_(std::move(closed)),minimized_(std::move(minimized)) {}
     void Start() override {source_->Start();}
     std::optional<CaptureSample> Poll() override {
         if(closed_ && closed_->load())throw std::runtime_error("Selected test window closed");
+        if(Minimized())return {};
         return source_->Poll();
     }
     bool Closed() const override {return closed_ && closed_->load();}
+    bool Minimized() const override {return minimized_ && minimized_->load();}
     void Retire() noexcept override {source_->Retire();}
     void Rebuild() override {source_->Rebuild();}
 };
-QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSize captureSize=QSize(320,180), std::shared_ptr<std::atomic_bool> closed={}) {
-    return [audio,captureSize,closed](WindowsRoomRuntimeOptions windows) -> RoomRuntimeFactory {
+QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSize captureSize=QSize(320,180), std::shared_ptr<std::atomic_bool> closed={}, std::shared_ptr<std::atomic_bool> minimized={}) {
+    return [audio,captureSize,closed,minimized](WindowsRoomRuntimeOptions windows) -> RoomRuntimeFactory {
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         windows.capture.sourceType = screenshare::CaptureSourceType::Window;
         windows.capture.windowHandle = reinterpret_cast<uint64_t>(captureWindow);
@@ -308,7 +315,7 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSiz
         windows.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         return WindowsRoomRuntimeFactory(std::move(windows));
 #else
-        return [windows, audio,captureSize,closed](auto identity, auto send) {
+        return [windows, audio,captureSize,closed,minimized](auto identity, auto send) {
             NativeRoomRuntimeOptions options; options.preferences = windows.preferences; options.frames = windows.frames;
             options.presentation = windows.presentation;
             options.inputSink = windows.inputSink;
@@ -329,10 +336,10 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSiz
             };
             options.capture = [captureSize] { return std::make_unique<SyntheticCaptureSource>(captureSize.width(), captureSize.height(), 30); };
             if(windows.inputTarget)options.capture=[target=windows.inputTarget] {return std::make_unique<MappedSyntheticCapture>(320,180,30,target);};
-            options.captureForSelection = [closed](CaptureSelection selection) -> CaptureSession::Factory {
-                return [selection,closed]() -> std::unique_ptr<ICaptureSource> {
+            options.captureForSelection = [closed,minimized](CaptureSelection selection) -> CaptureSession::Factory {
+                return [selection,closed,minimized]() -> std::unique_ptr<ICaptureSource> {
                     if (selection.display == 63 || selection.window == 1) throw std::runtime_error("Injected capture startup failure");
-                    return std::make_unique<ClosingCapture>(std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps),closed);
+                    return std::make_unique<ClosingCapture>(std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps),closed,minimized);
                 };
             };
             if(windows.inputTarget)options.captureForSelection=[target=windows.inputTarget](auto selection)->CaptureSession::Factory {
@@ -357,6 +364,38 @@ public:
     bool Receive(const std::string&, RoomPeerSignal) override { return true; }
     std::shared_future<void> BeginStop() override { stopping_ = true; return barrier_; }
 };
+void DirectoryStateScenario() {
+    RoomDirectoryWidget directory({}, {});
+    directory.setStyleSheet(uiStyleSheet()); directory.resize(900, 420); directory.show();
+    directory.findChild<QLineEdit*>("roomSearch")->setText("not present");
+    Check(directory.findChild<QLabel*>("HomeEmptyState")->text().contains("Connecting"));
+    directory.findChild<QLineEdit*>("roomSearch")->clear();
+    HomeActiveRoom room{"room-one", "Game night", 2, false, 0, true, "Alex"};
+    directory.setPushedRooms({room});
+    auto* row = directory.findChild<QFrame*>("HomeRoomRow"); Check(row);
+    auto* join = row->findChild<QPushButton*>("HomeTinyButton");
+    directory.activateWindow(); join->setFocus(); Wait([&] { return join->hasFocus(); });
+    const auto publicIcon = row->findChild<QLabel*>("HomeRoomAccessIcon")->pixmap().toImage();
+    room.passwordProtected = true; directory.setPushedRooms({room});
+    Check(directory.findChild<QFrame*>("HomeRoomRow") == row && join->hasFocus());
+    Check(row->findChild<QLabel*>("HomeLockedStatus") && !row->findChild<QLabel*>("HomePublicStatus"));
+    Check(row->findChild<QLabel*>("HomeRoomAccessIcon")->pixmap().toImage() != publicIcon);
+    room.passwordProtected = false; directory.setPushedRooms({room});
+    Check(row->findChild<QLabel*>("HomePublicStatus") && !row->findChild<QLabel*>("HomeLockedStatus"));
+    auto* search = directory.findChild<QLineEdit*>("roomSearch"); search->setText("not present");
+    auto* empty = directory.findChild<QLabel*>("HomeEmptyState");
+    Check(row->isHidden() && empty && empty->isVisible() && empty->text() == "No matching rooms");
+    auto* clear = directory.findChild<QPushButton*>("clearRoomSearch"); Check(clear && clear->isVisible());
+    if (const auto output = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !output.isEmpty()) {
+        QDir().mkpath(output); QCoreApplication::processEvents();
+        Check(directory.grab().save(QDir(output).filePath("directory-no-matches.png")));
+    }
+    clear->click(); Check(search->text().isEmpty() && !row->isHidden() && search->hasFocus());
+    directory.setPushedRooms({}, "Connecting…"); Check(row->findChild<QPushButton*>("HomeTinyButton")->isEnabled() == false);
+    directory.setPushedRooms({room}); Check(join->isEnabled());
+    directory.setPushedRooms({});
+    Check(empty->isVisible() && empty->text() == "No open rooms" && clear->isHidden());
+}
 void MediaFailureCleanup(const std::string& origin) {
     using Directory = screenshare::room::qt::RoomDirectory;
     Directory directory(true);
@@ -405,13 +444,22 @@ void MutationLifecycle(const std::string& origin) {
     RoomSession session([barrier](auto, auto) { return std::make_unique<PausedRuntime>(barrier); }, true);
     RoomOptions options; options.origin = origin; options.host = true; options.nickname = "Lifecycle"; options.name = "Mutation lifecycle";
     auto start = session.Start(options); Wait([&] { return start.wait_for(0ms) == std::future_status::ready; }); Check(start.get().error == RoomError::None);
+    RoomSession guest([](auto, auto) { return std::make_unique<PausedRuntime>(std::make_shared<MutationBarrier>()); }, true);
+    auto guestOptions=options;guestOptions.host=false;guestOptions.roomId=session.Status().roomId;guestOptions.nickname="Guest";
+    auto joined=guest.Start(guestOptions);Wait([&]{return joined.wait_for(0ms)==std::future_status::ready;});Check(joined.get().error==RoomError::None);
+    Wait([&]{return session.Status().members.size()==2;});
+    Check(guest.RemoveViewer(session.Status().peerId).get().error==RoomUpdateError::Forbidden);
+    Check(session.RemoveViewer(session.Status().peerId).get().error==RoomUpdateError::Forbidden);
+    Check(session.RemoveViewer("unknown-viewer").get().error==RoomUpdateError::NotFound);
+    Check(session.RemoveViewer("bad peer id").get().error==RoomUpdateError::Invalid);
+    Check(session.RemoveViewer(std::string(129,'x')).get().error==RoomUpdateError::Invalid);
     const auto revision = session.Status().revision;
     Check(session.UpdateNickname("Invalid revision", UINT64_MAX).get().error == RoomUpdateError::Invalid);
     Check(session.UpdateNickname(std::string(1, char(0xff)), revision).get().error == RoomUpdateError::Invalid);
     barrier->pause = true;
     try {
         Wait([&] { return barrier->entered.load(); });
-        auto pending = session.UpdateNickname("Pending", revision);
+        auto pending = session.RemoveViewer(guest.Status().peerId);
         auto pendingSource = session.SwitchCaptureSource({});
         auto pendingAudio = session.SwitchAudioSource({});
         auto pendingPlayback = session.UpdatePlayback({});
@@ -419,8 +467,10 @@ void MutationLifecycle(const std::string& origin) {
         Check(session.SwitchAudioSource({}).get().error == AudioUpdateError::Busy);
         Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Busy);
         Check(session.UpdateNickname("Overflow", revision).get().error == RoomUpdateError::Busy);
+        Check(session.RemoveViewer(guest.Status().peerId).get().error == RoomUpdateError::Busy);
         auto stopping = session.Stop();
         Check(session.UpdateNickname("Stopped", revision).get().error == RoomUpdateError::Unavailable);
+        Check(session.RemoveViewer(guest.Status().peerId).get().error == RoomUpdateError::Unavailable);
         barrier->release.set_value();
         Wait([&] { return stopping.wait_for(0ms) == std::future_status::ready; }); stopping.get();
         Check(pending.get().error == RoomUpdateError::Unconfirmed);
@@ -431,6 +481,133 @@ void MutationLifecycle(const std::string& origin) {
         Check(session.SwitchAudioSource({}).get().error == AudioUpdateError::Unavailable);
         Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Unavailable);
     } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
+}
+void ViewerRemovalScenario(const std::string& origin) {
+    auto sink=std::make_shared<RecordingGamepadSink>();
+    RoomSessionConfig config;config.room.origin=origin;config.room.host=true;
+    config.room.nickname="Host";config.room.name="Viewer removal";config.media.inputSink=sink;
+    RoomSessionWindow host(config,Factory(std::make_shared<proof::AudioEvidence>()),true);host.show();
+    Wait([&]{return host.session().status().phase==RoomPhase::Active;});
+    const auto roomId=host.session().status().roomId;
+    config.room.host=false;config.room.roomId=roomId;config.room.nickname="Same viewer <one & two>";config.media.inputSink.reset();
+    const auto devices=[] {return std::vector<screenshare::ViewerGamepadDevice>{{"test-pad","Recording controller"}};};
+    const auto read=[](std::string_view) -> std::optional<screenshare::RemoteGamepadState> { screenshare::RemoteGamepadState value;value.buttons=1;return value; };
+    RoomSessionWindow target(config,Factory(std::make_shared<proof::AudioEvidence>()),true,nullptr,devices,read);target.show();
+    RoomSessionWindow survivor(config,Factory(std::make_shared<proof::AudioEvidence>()),true);survivor.show();
+    unsigned targetFrames=0,survivorFrames=0;
+    auto showTarget=target.session().frameReady,showSurvivor=survivor.session().frameReady;
+    target.session().frameReady=[&](auto frame){++targetFrames;if(showTarget)showTarget(std::move(frame));};
+    survivor.session().frameReady=[&](auto frame){++survivorFrames;if(showSurvivor)showSurvivor(std::move(frame));};
+    Wait([&]{return targetFrames>=10 && survivorFrames>=10 && host.session().status().members.size()==3;});
+    const auto targetId=target.session().status().peerId,survivorId=survivor.session().status().peerId;
+    Check(targetId!=survivorId && target.session().status().roomId==roomId);
+    Check(target.findChildren<QPushButton*>("removeRoomViewer").empty());
+    auto buttonFor=[&](const std::string& peer) -> QPushButton* {
+        for(auto* button:host.findChildren<QPushButton*>("removeRoomViewer"))if(button->property("peerId").toString().toStdString()==peer)return button;
+        return nullptr;
+    };
+    Wait([&]{return buttonFor(targetId) && buttonFor(targetId)->isEnabled() && buttonFor(survivorId);});
+    auto* targetButton=buttonFor(targetId);
+    for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+        host.resize(size);QCoreApplication::processEvents();
+        auto* row=targetButton->parentWidget();
+        auto* caption=row->findChild<QLabel*>("PeerName");
+        Wait([&]{return !caption->text().isEmpty() && caption->fontMetrics().horizontalAdvance(caption->text())<=caption->width();});
+        Check(caption->accessibleName()==QString::fromStdString(config.room.nickname));
+        auto* viewport=host.findChild<QScrollArea*>("SessionControlsScroll")->viewport();
+        const auto removeRect=QRect(targetButton->mapTo(row,QPoint()),targetButton->size());
+        Check(targetButton->text().isEmpty() && !targetButton->icon().isNull() && row->rect().contains(removeRect));
+        Check(viewport->rect().contains(QRect(targetButton->mapTo(viewport,QPoint()),targetButton->size())));
+        Check(targetButton->accessibleName().contains(QString::fromStdString(config.room.nickname)));
+        for(auto* control:row->findChildren<QPushButton*>("PeerCapability")) {
+            const auto controlRect=QRect(control->mapTo(row,QPoint()),control->size());
+            Check(row->rect().contains(controlRect) && controlRect.center().y()==removeRect.center().y());
+            Check(viewport->rect().contains(QRect(control->mapTo(viewport,QPoint()),control->size())));
+            Check(controlRect.right()<removeRect.left());
+        }
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);Check(host.grab().save(QDir(output).filePath(QString("viewer-actions-inline-%1.png").arg(size.width()))));
+        }
+    }
+    host.activateWindow();Wait([&]{return QApplication::activeWindow()==&host;});targetButton->setFocus();targetButton->click();
+    auto* dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
+    auto* explanation=dialog->findChild<QLabel*>("removeViewerExplanation");
+    Check(explanation->textFormat()==Qt::PlainText && explanation->text().contains(QString::fromStdString(config.room.nickname)) && explanation->text().contains("join again"));
+    auto* cancel=dialog->findChild<QPushButton*>("cancelViewerRemoval");Check(cancel->hasFocus());cancel->click();
+    Check(!dialog->isVisible() && targetButton->hasFocus());
+    QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+    Check(host.session().status().members.size()==3 && !host.session().roomUpdatePending());
+    // Grant real transported control to a recording sink; removal must retire it.
+    auto* request=target.findChild<QToolButton*>("selectControllerInput");Wait([&]{return request->isEnabled();});request->click();
+    RespondToInputRequest(host,screenshare::input::Gamepad,true,targetId);
+    target.activateWindow();Wait([&]{return sink->buttons==1;});
+    const auto grantedBeforePause=target.session().input()->Read();Check(grantedBeforePause.size()==1);
+    auto pausedPreferences=host.session().status().stream.preferences;pausedPreferences.videoPaused=true;host.session().apply(pausedPreferences);
+    Wait([&]{return target.session().status().stream.remoteShare.state==HostShareState::VideoPaused && sink->buttons==0;});
+    const auto duringPause=target.session().input()->Read();
+    Check(duringPause.size()==1 && duringPause.front().permission==grantedBeforePause.front().permission &&
+        duringPause.front().granted==screenshare::input::Gamepad);
+    pausedPreferences.videoPaused=false;host.session().apply(pausedPreferences);
+    Wait([&]{return target.session().status().stream.remoteShare.state==HostShareState::Live && sink->buttons==1 &&
+        target.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
+    const auto retainedInput=target.session().input();
+    std::string hostId;for(const auto& member:target.session().status().members)if(member.host)hostId=member.peerId;
+    uint64_t permission=0;for(const auto& state:retainedInput->Read())if(state.peer==hostId)permission=state.permission;
+    Check(permission!=0);
+    const auto releaseCount=sink->released.load();
+    auto generationFor=[&](const std::string& peer) {
+        for(const auto& connection:host.session().status().stream.connections)if(connection.peerId==peer && !connection.retained)return connection.generation;
+        return uint64_t(0);
+    };
+    const auto survivorGeneration=generationFor(survivorId);Check(survivorGeneration!=0);
+    host.activateWindow();targetButton->setFocus();targetButton->click();
+    dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        QDir().mkpath(output);
+        for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+            host.resize(size);QCoreApplication::processEvents();
+            Check(host.grab().save(QDir(output).filePath(QString("remove-viewer-confirm-%1.png").arg(size.width()))));
+        }
+    }
+    dialog->findChild<QPushButton*>("confirmViewerRemoval")->click();
+    Check(host.session().roomUpdatePending() && host.session().removingViewer()==targetId);
+    Check(!host.session().removeViewer(survivorId)); // A double action cannot queue another removal.
+    Wait([&]{return !host.session().roomUpdatePending() && !target.session().running() && host.session().status().members.size()==2;});
+    Check(target.session().status().removedByHost && target.isVisible() && target.findChild<QLabel*>("roomError")->text().contains("host removed"));
+    Wait([&]{return !buttonFor(targetId) && sink->released>releaseCount && sink->buttons==0;});
+    for(const auto& state:host.session().input()->Read())Check(state.peer!=targetId);
+    screenshare::input::Event stale;stale.kind=screenshare::input::Kind::Pad;stale.buttons=1;
+    Check(!retainedInput->SubmitIfCurrent(hostId,permission,stale));
+    const auto stoppedFrames=targetFrames,remainingFrames=survivorFrames;
+    Wait([&]{return survivorFrames>=remainingFrames+10;});
+    Check(targetFrames==stoppedFrames && host.session().status().phase==RoomPhase::Active && generationFor(survivorId)==survivorGeneration);
+    QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+    // A fresh membership is permitted: removal is explicitly not a room ban.
+    QTemporaryDir profile;Check(profile.isValid());const auto profilePath=profile.filePath("viewer.ini");
+    {RoomProfile saved(profilePath);Check(saved.saveNickname(QString::fromStdString(config.room.nickname)));}
+    RoomBrowserWindow browser(QUrl(QString::fromStdString(origin)),Factory(std::make_shared<proof::AudioEvidence>()),true,profilePath,false);
+    browser.OpenJoin(QString::fromStdString(roomId));browser.show();browser.findChild<QPushButton*>("joinV2Room")->click();
+    Wait([&]{return browser.activeSession() && browser.activeSession()->session().status().activePeers==1 && host.session().status().members.size()==3;});
+    const auto newPeer=browser.activeSession()->session().status().peerId;Check(newPeer!=targetId);
+    Wait([&]{return buttonFor(newPeer) && buttonFor(newPeer)->isEnabled();});buttonFor(newPeer)->click();
+    dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
+    browser.activeSession()->close();
+    Wait([&]{return !browser.activeSession() && host.session().status().members.size()==2;});
+    Wait([&]{return !dialog->findChild<QPushButton*>("confirmViewerRemoval")->isEnabled();});
+    Check(dialog->findChild<QLabel*>("removeViewerExplanation")->text().contains("already left"));
+    dialog->reject();QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+    browser.OpenJoin(QString::fromStdString(roomId));browser.show();browser.findChild<QPushButton*>("joinV2Room")->click();
+    Wait([&]{return browser.activeSession() && browser.activeSession()->session().status().activePeers==1 && host.session().status().members.size()==3;});
+    const auto finalPeer=browser.activeSession()->session().status().peerId;
+    Wait([&]{return buttonFor(finalPeer) && buttonFor(finalPeer)->isEnabled();});buttonFor(finalPeer)->click();
+    dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
+    dialog->findChild<QPushButton*>("confirmViewerRemoval")->click();
+    Wait([&]{return !browser.activeSession() && browser.isVisible() && host.session().status().members.size()==2;});
+    Check(browser.findChild<QLabel*>("browserError")->text()=="The host removed you from the room.");
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty())
+        Check(browser.grab().save(QDir(output).filePath("removed-viewer-return.png")));
+    browser.close();target.close();survivor.close();host.close();
+    Wait([&]{return !survivor.session().running() && !host.session().running();});
 }
 void ProfileSettingsScenario() {
     {
@@ -755,6 +932,7 @@ void NormalHomeScenario(const QUrl& origin) {
     Check(title && title->text() == "<b>Normal home</b>" && title->textFormat() == Qt::PlainText);
     auto* search = viewer.home()->findChild<QLineEdit*>("roomSearch");
     search->setText("no matching title"); Check(selectedRow()->isHidden());
+    if (!previews.isEmpty()) { QCoreApplication::processEvents(); Check(viewer.window().grab().save(QDir(previews).filePath("room-search-empty.png"))); }
     search->clear(); Check(!selectedRow()->isHidden());
     const auto* stableRow = selectedRow();
     viewer.home()->setPushedRooms({{QString::fromStdString(host.session()->session().status().roomId), "<b>Normal home</b>", 0, true, 0, true}});
@@ -771,9 +949,86 @@ void NormalHomeScenario(const QUrl& origin) {
     host.session()->findChild<QPushButton*>("stopRoom")->click();
     Wait([&] { return !host.session() && host.home()->isVisible() && !viewer.session() && viewer.home()->isVisible(); });
     Check(!viewer.keepingScreenAwake());
+    const auto windowControls=host.window().findChildren<QPushButton*>("WindowControlButton");
+    Check(windowControls.size()==2);windowControls[1]->click();
+    Wait([&]{return host.window().isMaximized();});
     host.window().close(); viewer.window().close();
     Wait([&] { return host.finished() && viewer.finished(); });
     Check(!host.browser()->directory().running() && !viewer.browser()->directory().running());
+    // Exercise the normal application's opt-in and profile-isolated storage,
+    // independently of the low-level shell placement cases.
+    RoomApplication reopened(origin,Factory(audio),true,hostFile,false,true);reopened.show();
+    Wait([&]{return reopened.window().isMaximized();});Check(!reopened.window().isFullScreen());
+    reopened.window().close();Wait([&]{return reopened.finished();});
+}
+void AdmissionFeedbackScenario() {
+    QTcpServer service;Check(service.listen(QHostAddress::LocalHost,0));
+    int responseStatus=409,admissions=0,runtimeStarts=0;
+    QByteArray responseCode="full";
+    QObject::connect(&service,&QTcpServer::newConnection,&service,[&] {
+        auto* peer=service.nextPendingConnection();
+        QObject::connect(peer,&QTcpSocket::disconnected,peer,&QObject::deleteLater);
+        auto buffer=std::make_shared<QByteArray>();auto handled=std::make_shared<bool>(false);
+        QObject::connect(peer,&QTcpSocket::readyRead,&service,[&,peer,buffer,handled] {
+            *buffer+=peer->readAll();if(*handled)return;
+            const auto end=buffer->indexOf("\r\n\r\n");if(end<0)return;
+            qint64 length=0;
+            for(const auto& line:buffer->left(end).split('\n'))
+                if(line.toLower().startsWith("content-length:"))length=line.mid(15).trimmed().toLongLong();
+            Check(length>=0 && length<16384);if(buffer->size()<end+4+length)return;
+            *handled=true;
+            const bool admission=buffer->startsWith("POST ");if(admission)++admissions;
+            const auto body=QByteArray("{\"v\":2,\"error\":\"")+(admission?responseCode:QByteArray("not_found"))+"\"}";
+            peer->write("HTTP/1.1 "+QByteArray::number(admission?responseStatus:404)+" Result\r\nContent-Type: application/json\r\nContent-Length: "+
+                QByteArray::number(body.size())+"\r\nConnection: close\r\n\r\n"+body);peer->disconnectFromHost();
+        });
+    });
+    QTemporaryDir profile;Check(profile.isValid());const auto profilePath=profile.filePath("feedback.ini");
+    {RoomProfile saved(profilePath);Check(saved.saveNickname("Feedback viewer"));}
+    QtRoomSession::Factory factory=[&](auto) -> RoomRuntimeFactory {
+        return [&](auto,auto) -> std::unique_ptr<RoomRuntime> {++runtimeStarts;throw std::runtime_error("Rejected admission started media");};
+    };
+    RoomBrowserWindow browser(QUrl("http://127.0.0.1:"+QString::number(service.serverPort())),factory,true,profilePath,false);
+    const auto invite=MakeRoomLink("feedback-room");browser.OpenJoin(invite);browser.resize(740,600);browser.show();
+    struct Failure {int status;const char* code;RoomError error;const char* message;};
+    const Failure failures[]{
+        {409,"full",RoomError::RoomFull,"This room is full. Wait for a viewer to leave or ask the host to increase the viewer limit."},
+        {409,"closed",RoomError::RoomClosed,"This room is closed. Ask the host to start a new room."},
+        {404,"not_found",RoomError::RoomNotFound,"This room could not be found. Ask the host for a current invite."},
+        {429,"rate_limited",RoomError::RateLimited,"Too many room requests. Wait a moment before trying again."},
+        {500,"full",RoomError::AdmissionUnconfirmed,"Could not confirm whether you entered the room. Wait a moment before trying again."},
+    };
+    for(const auto& failure:failures) {
+        responseStatus=failure.status;responseCode=failure.code;
+        const auto requestsBefore=admissions;auto observed=RoomError::None;
+        auto* join=browser.findChild<QPushButton*>("joinV2Room");join->click();Check(browser.activeSession());
+        auto update=browser.activeSession()->session().statusChanged;
+        browser.activeSession()->session().statusChanged=[&,update](const auto& status) {
+            if(status.phase==RoomPhase::Failed)observed=status.error;if(update)update(status);
+        };
+        auto* error=browser.findChild<QLabel*>("browserError");
+        Wait([&]{return !browser.activeSession() && error->text()==failure.message;});
+        Check(observed==failure.error && browser.isVisible() && error->isVisible() && join->isEnabled());
+        Check(browser.findChild<QLineEdit*>("joinRoomId")->text()==invite && !browser.findChild<QDialog*>("RoomPasswordDialog"));
+        Check(admissions==requestsBefore+1 && runtimeStarts==0);
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty() && failure.error==RoomError::RoomFull) {
+            QDir().mkpath(output);
+            for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                browser.resize(size);QCoreApplication::processEvents();
+                Check(browser.grab().save(QDir(output).filePath(QString("join-room-full-%1.png").arg(size.width()))));
+            }
+        }
+    }
+    bool closed=false;browser.closed=[&]{closed=true;};browser.close();Wait([&]{return closed;});
+    // The same service code means capacity exhaustion when creating a room.
+    // Standalone sessions must explain that without suggesting viewer removal.
+    responseStatus=409;responseCode="full";QString hostError;
+    QtRoomSession host(nullptr,factory,true);host.error=[&](const auto& text){hostError=text;};
+    RoomSessionConfig config;config.room.host=true;config.room.nickname="Host";config.room.name="Capacity check";
+    config.room.origin="http://127.0.0.1:"+std::to_string(service.serverPort());
+    Check(host.start(config));Wait([&]{return !host.running();});
+    Check(host.status().error==RoomError::RoomFull && runtimeStarts==0 &&
+        hostError=="The room service has reached its room limit. Wait for a room to close, then try again.");
 }
 void BrowserScenario(const QUrl& origin) {
     ProfileSettingsScenario();
@@ -1063,9 +1318,20 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
     config.media.preferences.resolution = ResolutionMode::Native;
     auto hostAudio = std::make_shared<proof::AudioEvidence>(); hostAudio->captureUnavailable = true;
     auto closedSource=std::make_shared<std::atomic_bool>(false);
-    RoomApplication hostApp(config, Factory(hostAudio,QSize(320,180),closedSource), true); hostApp.show();
+    auto minimizedSource=std::make_shared<std::atomic_bool>(false);
+    RoomApplication hostApp(config, Factory(hostAudio,QSize(320,180),closedSource,minimizedSource), true); hostApp.show();
     auto& host = *hostApp.session();
-    Wait([&] { return host.session().status().phase == RoomPhase::Active; });
+    try { Wait([&] { return host.session().status().phase == RoomPhase::Active; }); }
+    catch (...) {
+        const auto status=host.session().status();
+        std::cerr<<"Source test startup: phase="<<int(status.phase)<<" error="<<int(status.error)<<'\n';
+        if(status.sessionEvents.records)for(const auto& event:*status.sessionEvents.records) {
+            for(const auto& [key,value]:event.labels)std::cerr<<key<<'='<<value<<' ';
+            for(const auto& [key,value]:event.numbers)std::cerr<<key<<'='<<value<<' ';
+            std::cerr<<'\n';
+        }
+        throw;
+    }
     config.room.host = false; config.room.roomId = host.session().status().roomId;
     auto audio = std::make_shared<proof::AudioEvidence>();
     RoomApplication viewerApp(config, Factory(audio), true); viewerApp.show();
@@ -1236,6 +1502,12 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
 #endif
     Wait([&]{return host.session().status().stream.capture.state==HostMediaState::SourceUnavailable;});
     Check(host.session().status().phase==RoomPhase::Active && host.session().status().activePeers==2);
+    Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::SourceUnavailable &&
+        secondViewer.session()->session().status().stream.remoteShare.state==HostShareState::SourceUnavailable;});
+    Wait([&]{return viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().contains("choose a share source") &&
+        secondViewer.session()->findChild<QWidget*>("roomVideo")->accessibleDescription().contains("choose a share source");});
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty())
+        Check(viewer.grab().save(QDir(output).filePath("viewer-source-unavailable.png")));
     Wait([&]{return host.findChild<QLabel*>("SessionSourceSummary")->text().contains("Everyone stays");});
     host.session().switchCapture({CaptureKind::Window,0,1,30});
     Wait([&]{return !host.session().capturePending();});
@@ -1248,6 +1520,9 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
     host.session().switchCapture({CaptureKind::Display,0,0,30});
 #endif
     Wait([&]{return !host.session().capturePending() && frames>firstBefore+10 && secondFrames>secondBefore+10;});
+    Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::Live &&
+        viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty() &&
+        secondViewer.session()->findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
     const auto resumed=host.session().status();
     Check(resumed.phase==RoomPhase::Active && resumed.roomId==beforeClose.roomId && resumed.peerId==beforeClose.peerId && resumed.activePeers==2);
     Check(resumed.stream.capture.generation==beforeClose.stream.capture.generation);
@@ -1255,6 +1530,26 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
         const auto found=std::find_if(resumed.stream.connections.begin(),resumed.stream.connections.end(),[&](const auto& value){return value.peerId==peer.peerId;});
         Check(found!=resumed.stream.connections.end() && found->generation==peer.generation);
     }
+    // The same status path must distinguish a temporary minimized-window pause.
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+    ShowWindow(captureWindow,SW_MINIMIZE);
+#else
+    *minimizedSource=true;
+#endif
+    Wait([&]{return host.session().status().stream.capture.state==HostMediaState::Minimized &&
+        viewer.session().status().stream.remoteShare.state==HostShareState::SourceMinimized &&
+        secondViewer.session()->session().status().stream.remoteShare.state==HostShareState::SourceMinimized;});
+    Wait([&]{return viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().contains("minimized");});
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty())
+        Check(viewer.grab().save(QDir(output).filePath("viewer-source-minimized.png")));
+    const auto beforeRestore=frames;
+#ifdef SCREENSHARE_WINDOWS_UI_PROOF
+    ShowWindow(captureWindow,SW_RESTORE);
+#else
+    *minimizedSource=false;
+#endif
+    Wait([&]{return frames>beforeRestore+10 && viewer.session().status().stream.remoteShare.state==HostShareState::Live &&
+        viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
     secondViewer.window().close();Wait([&]{return secondViewer.finished();});
     hostApp.window().close(); viewerApp.window().close();
     Wait([&] { return hostApp.finished() && viewerApp.finished() && !hostApp.window().isVisible() && !viewerApp.window().isVisible(); });
@@ -1627,6 +1922,25 @@ void DesktopInputScenario(const std::string& origin) {
     QMouseEvent outsideUp(QEvent::MouseButtonRelease,QPointF(-10,-10),QPointF(-10,-10),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(video,&outsideUp);
     Wait([&]{return evidence->buttonUps>outsideUps;});
     for(const auto& state:viewer.session().input()->Read())Check(state.granted==caps);
+    // A host video pause releases held controls before clearing their mapping,
+    // without revoking the host's grant. Resume waits for fresh video.
+    const auto pauseButtonUps=evidence->buttonUps.load();
+    const auto pausePermission=viewer.session().input()->Read().front().permission;
+    QMouseEvent pauseHeld(QEvent::MouseButtonPress,inside,inside,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(video,&pauseHeld);
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    const auto pauseKeyUps=evidence->keyUps.load();
+    QKeyEvent pauseHeldKey(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,0x1e,0x41,0);QApplication::sendEvent(video,&pauseHeldKey);
+#endif
+    auto videoPreferences=host.session().status().stream.preferences;videoPreferences.videoPaused=true;host.session().apply(videoPreferences);
+    Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::VideoPaused && !video->hasMouseTracking() && evidence->buttonUps>pauseButtonUps;});
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    Wait([&]{return evidence->keyUps>pauseKeyUps;});
+#endif
+    for(const auto& state:viewer.session().input()->Read())Check(state.granted==caps && state.permission==pausePermission);
+    videoPreferences.videoPaused=false;host.session().apply(videoPreferences);
+    Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::Live && video->accessibleDescription().isEmpty();});
+    QEvent afterVideoResume(QEvent::WindowActivate);QApplication::sendEvent(&viewer,&afterVideoResume);
+    Wait([&]{return video->hasMouseTracking();});
     const auto buttonUps=evidence->buttonUps.load();
     const QPointF center(video->width()/2.0,video->height()/2.0);
     QMouseEvent hold(QEvent::MouseButtonPress,center,center,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(video,&hold);
@@ -1744,14 +2058,18 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         CapturePreviewOwnership();
-        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
+        WindowPlacementChecks();
+        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
+        if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback"))AdmissionFeedbackScenario();
         WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         NativePresentationRecovery();
         proof::TestWindow capture; captureWindow = capture.handle();
 #endif
-        if(argc==3 && std::string(argv[2])=="native-resolution") {NativeResolutionScenario(argv[1]);std::cout<<"{\"passed\":true,\"native_resolution\":true}\n";}
+        if(argc==3 && std::string(argv[2])=="admission-feedback") {std::cout<<"{\"passed\":true,\"admission_feedback\":true}\n";}
+        else if(argc==3 && std::string(argv[2])=="viewer-removal") {ViewerRemovalScenario(argv[1]);MutationLifecycle(argv[1]);std::cout<<"{\"passed\":true,\"viewer_removal\":true,\"input_retired\":true,\"other_viewer_continues\":true}\n";}
+        else if(argc==3 && std::string(argv[2])=="native-resolution") {NativeResolutionScenario(argv[1]);std::cout<<"{\"passed\":true,\"native_resolution\":true}\n";}
         else if(argc==3 && std::string(argv[2])=="source-switch") {
             const auto samples=SourceSwitchScenario(argv[1]);
             const QJsonObject metrics{{"passed",true},{"source_close_two_viewers",true},{"preview_ownership",true},{"steadyShare",samples}};
@@ -1776,12 +2094,41 @@ int main(int argc, char** argv) {
         config.media.preferences.width = 320; config.media.preferences.height = 180; config.media.preferences.fps = 30;
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
-        DetailsSnapshotScenario();
+        DirectoryStateScenario(); DetailsSnapshotScenario();
         auto* reveal=host.findChild<QPushButton*>("showRoomReport");
         Check(reveal && reveal->isEnabled() && reveal->text()=="Open log folder");
         Check(reveal->property("logFolder").toString()==reports.path() && !QFileInfo::exists(config.reportFile));
         Wait([&] { return host.session().status().phase == RoomPhase::Active; });
         Check(!host.session().start(config));
+        // Audio source changes in the picker apply even while the room is empty.
+        host.findChild<QPushButton*>("sessionChangeSource")->click();
+        auto* idlePicker = host.findChild<QDialog*>("SourcePickerDialog"); Check(idlePicker && idlePicker->isVisible());
+        auto* idleAudioKind = host.findChild<QComboBox*>("liveAudioKind");
+        idleAudioKind->setCurrentIndex(int(AudioKind::Process));
+        host.findChild<QSpinBox*>("liveAudioProcess")->setValue(42);
+        QMetaObject::invokeMethod(idleAudioKind,"activated",Q_ARG(int,int(AudioKind::Process)));
+        Wait([&] { const auto audio=host.session().status().audio;
+            return !host.session().audioPending() && audio.selected.kind==AudioKind::Process && audio.selected.processId==42; });
+        Check(hostAudio->captureStarts==0 && host.session().status().audio.health.state==AudioEndpointState::Inactive);
+        // A pending automatic source edit must not undo an explicit Mute click.
+        idleAudioKind->setCurrentIndex(int(AudioKind::System));
+        QMetaObject::invokeMethod(idleAudioKind,"activated",Q_ARG(int,int(AudioKind::System)));
+        idlePicker->reject();
+        QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+        // Prepare privacy before admission of the first viewer, while no capture
+        // endpoint exists. Muting must not need a viewer to activate recording.
+        auto* emptyRoomMute = host.findChild<QPushButton*>("muteSharedAudio");
+        Wait([&] { return emptyRoomMute->isEnabled(); }); emptyRoomMute->click();
+        Wait([&] { return !host.session().audioPending() && host.session().status().audio.selected.kind == AudioKind::None; });
+        Check(hostAudio->captureStarts == 0 && hostAudio->liveCaptures == 0);
+        Wait([&] { return emptyRoomMute->text()=="Share audio" && host.findChild<QLabel*>("SessionSourceSummary")->text().contains("Audio muted"); });
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);
+            for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                host.resize(size);QCoreApplication::processEvents();
+                Check(host.grab().save(QDir(output).filePath(QString("host-muted-before-join-%1.png").arg(size.width()))));
+            }
+        }
         host.findChild<QPushButton*>("saveRoomReport")->click();
         { QFile saved(config.reportFile); Check(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll();
           Check(!bytes.contains("UiHost") && !bytes.contains("UI media"));
@@ -1810,7 +2157,11 @@ int main(int argc, char** argv) {
             if (frame.width == 320) ++original; else if (frame.width == 160) ++changed; else Check(false);
             present(std::move(frame));
         };
+        Wait([&] { return original >= 20 && viewerAudio->quietStreak >= 20; });
+        Check(viewerAudio->audibleBlocks == 0 && hostAudio->captureStarts == 0 && hostAudio->liveCaptures == 0);
+        Wait([&] { return emptyRoomMute->isEnabled(); }); emptyRoomMute->click();
         Wait([&] { return original >= 20 && viewerAudio->audibleBlocks >= 20; });
+        Check(host.session().status().audio.selected.kind==AudioKind::Process && host.session().status().audio.selected.processId==42);
         Wait([&]{return host.findChild<QLabel*>("SessionViewerCount")->text()=="1 viewer"&&host.findChild<QLabel*>("SessionSourceSummary")->text().contains("320 × 180");});
         Check(host.findChild<QLabel*>("SessionElapsed")->text().startsWith("Elapsed"));
         Wait([&] { return host.findChild<QLabel*>("roomMembers")->text().contains(QString::fromStdString(viewer.session().status().peerId)); });
@@ -1818,12 +2169,29 @@ int main(int argc, char** argv) {
         auto* pauseVideo=host.findChild<QPushButton*>("pauseSharedVideo");
         Wait([&]{return pauseVideo->isEnabled();});pauseVideo->click();
         Wait([&]{const auto s=host.session().status();return s.stream.preferences.videoPaused&&s.stream.peers.front().appliedVideoBitrateBps==0;});
+        Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::VideoPaused &&
+            viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().contains("Host paused video");});
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                viewer.resize(size);QCoreApplication::processEvents();
+                Check(viewer.grab().save(QDir(output).filePath(QString("viewer-host-paused-%1.png").arg(size.width()))));
+            }
+        }
         const auto pauseDrain=std::chrono::steady_clock::now()+400ms;Wait([&]{return std::chrono::steady_clock::now()>pauseDrain;});
         const auto pausedVideoCount=original;const auto audioWhilePaused=viewerAudio->audibleBlocks.load();
         const auto pauseCheck=std::chrono::steady_clock::now()+300ms;Wait([&]{return std::chrono::steady_clock::now()>pauseCheck;});
         Check(original<=pausedVideoCount+1&&viewerAudio->audibleBlocks>audioWhilePaused);
+        // A Live notice alone must not redisplay the old picture. Delay only
+        // the UI consumer while the real peer continues decoding after resume.
+        auto consumeAfterResume=viewer.session().frameReady;
+        viewer.session().frameReady=[](auto) {};
         Wait([&]{return pauseVideo->isEnabled();});pauseVideo->click();
+        Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::Live &&
+            viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().contains("Resuming video");});
+        viewer.session().frameReady=std::move(consumeAfterResume);
         Wait([&]{return !host.session().status().stream.preferences.videoPaused&&original>pausedVideoCount+10;});
+        Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::Live &&
+            viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
         host.findChild<QPushButton*>("sessionChangeSource")->click();
         auto* sourcePicker=host.findChild<QDialog*>("SourcePickerDialog");Check(sourcePicker&&sourcePicker->isVisible());
         Check(!sourcePicker->isWindow()&&host.rect().contains(sourcePicker->geometry()));

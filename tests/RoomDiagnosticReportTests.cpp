@@ -44,12 +44,15 @@ int main(int argc, char** argv) {
 
         DiagnosticHistory history(4); history.Event("start");
         const auto pinned = history.Read();
-        for (int i = 0; i < 10; ++i) history.Event("sample", i);
+        for (int i = 0; i < 10; ++i) {
+            if (i % 2) history.Event("sample", i);
+            else Check(history.TryEvent("sample", i));
+        }
         Check(pinned.records->size() == 1 && pinned.records->at(0).labels.at("event") == "start");
         Check(history.Read().records->size() == 4 && history.Read().omitted == 7);
         Check(history.Read().records->front().labels.at("event") == "start");
         DiagnosticHistory failures(4, false);
-        failures.Event("decoder-frame-failed", E_FAIL);
+        Check(failures.TryEvent("decoder-frame-failed", E_FAIL));
         for (int i = 0; i < 10; ++i) failures.Event("sample", i);
         Check(failures.Read().records->front().labels.at("event") == "sample");
         Check(failures.Read().firstFailure && failures.Read().firstFailure->labels.at("event") == "decoder-frame-failed");
@@ -100,6 +103,13 @@ int main(int argc, char** argv) {
         screenshare::input::Status input; input.peer = peer.peerId; input.reason = screenshare::input::Reason::Backpressure;
         input.transportBlocked = true; input.reliableQueued = 2;
         auto report = RoomDiagnosticReport(status, {input});
+        Check(report["remoteShare"].toObject()["state"].isNull() && !report["remoteShare"].toObject()["stale"].toBool());
+        auto paused=status;paused.stream.remoteShare={HostShareState::VideoPaused,false,1};
+        const auto pausedShare=RoomDiagnosticReport(paused)["remoteShare"].toObject();
+        Check(pausedShare["state"]=="video_paused" && pausedShare["ageSeconds"]==1 && !pausedShare["stale"].toBool());
+        paused.stream.remoteShare={std::nullopt,true,3};
+        const auto expiredShare=RoomDiagnosticReport(paused)["remoteShare"].toObject();
+        Check(expiredShare["state"].isNull() && expiredShare["stale"].toBool() && expiredShare["ageSeconds"]==3);
         Check(!report["appVersion"].toString().isEmpty());
         const auto bytes = QJsonDocument(report).toJson();
         Check(!bytes.contains("secret") && !bytes.contains("123456"));

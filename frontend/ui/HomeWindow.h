@@ -65,6 +65,8 @@ private:
     std::function<void(const QString&)> join_;
     QVBoxLayout* roomListLayout_ = nullptr;
     QLabel* roomStatusLabel_ = nullptr;
+    QWidget* emptyState_ = nullptr;
+    QPushButton* clearSearch_ = nullptr;
     QPushButton* refreshRoomsButton_ = nullptr;
     QLabel* directoryStatus_ = nullptr;
     QLineEdit* search_ = nullptr;
