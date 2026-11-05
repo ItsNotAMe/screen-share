@@ -6,6 +6,8 @@
 
 RoomApplication::RoomApplication(QUrl origin, QtRoomSession::Factory factory,
     bool loopback, QString profileFile, bool enumerateSources, bool normalHome) : origin_(origin) {
+    const bool rememberPlacement = normalHome && (!loopback || !profileFile.isEmpty());
+    const auto placementFile = profileFile.isEmpty() ? QString{} : profileFile + ".window.ini";
     Initialize();
     browser_ = std::make_unique<RoomBrowserWindow>(std::move(origin), std::move(factory),
         loopback, std::move(profileFile), enumerateSources);
@@ -44,6 +46,7 @@ RoomApplication::RoomApplication(QUrl origin, QtRoomSession::Factory factory,
         };
         ShowHome();
     } else Present(browser_.get());
+    if (rememberPlacement) shell_.enableWindowPlacementPersistence(placementFile);
 }
 
 void RoomApplication::ShowHome() {

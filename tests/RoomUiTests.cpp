@@ -8,6 +8,7 @@
 #include <QSlider>
 #include "RecordingGamepadSink.h"
 #include "RecordingDesktopInput.h"
+#include "WindowPlacementChecks.h"
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QWheelEvent>
@@ -892,9 +893,17 @@ void NormalHomeScenario(const QUrl& origin) {
     host.session()->findChild<QPushButton*>("stopRoom")->click();
     Wait([&] { return !host.session() && host.home()->isVisible() && !viewer.session() && viewer.home()->isVisible(); });
     Check(!viewer.keepingScreenAwake());
+    const auto windowControls=host.window().findChildren<QPushButton*>("WindowControlButton");
+    Check(windowControls.size()==2);windowControls[1]->click();
+    Wait([&]{return host.window().isMaximized();});
     host.window().close(); viewer.window().close();
     Wait([&] { return host.finished() && viewer.finished(); });
     Check(!host.browser()->directory().running() && !viewer.browser()->directory().running());
+    // Exercise the normal application's opt-in and profile-isolated storage,
+    // independently of the low-level shell placement cases.
+    RoomApplication reopened(origin,Factory(audio),true,hostFile,false,true);reopened.show();
+    Wait([&]{return reopened.window().isMaximized();});Check(!reopened.window().isFullScreen());
+    reopened.window().close();Wait([&]{return reopened.finished();});
 }
 void BrowserScenario(const QUrl& origin) {
     ProfileSettingsScenario();
@@ -1924,6 +1933,7 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         CapturePreviewOwnership();
+        WindowPlacementChecks();
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
         WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF

@@ -2,6 +2,13 @@
 
 ## Current UI Direction
 
+- Normal startup remembers windowed size/position and maximized state. Cache
+  placement in memory while moving; freeze/save on the first Close before room
+  drain changes geometry. Fullscreen and minimization stay temporary. Decode Qt
+  saved geometry on an unshown helper, then use the existing native maximize
+  path after first show; direct hidden maximized restore breaks the custom chrome.
+  Keep diagnostic launches and test profiles independent of user settings.
+
 - Viewers clear stale pictures for fresh host notices of paused video, minimized
   or unavailable sources, and capture recovery. Keep Resuming video until an
   actual decoded frame reaches the UI. Notices use the existing video status

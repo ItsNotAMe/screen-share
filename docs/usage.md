@@ -5,6 +5,11 @@ join a room. No backend switch is needed. The default service is the isolated v2
 Worker with a ten-room cap; `--signal-server HTTPS_ORIGIN` selects another
 compatible deployment.
 
+Normal desktop launches remember the window's size, position and maximized state.
+Fullscreen viewing and minimization are temporary. Off-screen saved placement is
+adjusted for the available display using [Qt's geometry restoration](https://doc.qt.io/qt-6.10/restoring-geometry.html).
+Invalid layout settings fall back to the normal startup layout.
+
 ## Command line
 
 ```powershell

@@ -5,6 +5,31 @@
 
 # Project Memory
 
+## Window layout persistence - 2026-11-06
+
+Normal Home startup opts into AppShellWindow placement persistence. Size, position
+and maximized state use a bounded Qt geometry blob in ScreenShare/MainWindow.ini;
+explicit profile/test paths use a separate .window.ini companion. Diagnostic
+launches stay independent, and loopback tests without an explicit profile never
+touch the user's settings. Move/resize/state events update memory only. The first
+Close freezes/saves layout before async room drain; unshown startup never writes.
+Fullscreen/minimized states retain the preceding windowed snapshot.
+
+Do not restore a maximized blob directly onto the custom native chrome or call
+Qt showMaximized for its startup restore. Native tests exposed a tiny normal
+restore rectangle and fullscreen misclassification. Decode/clamp on an unshown
+Qt helper, apply its normal screen/geometry, then use the existing title-bar
+maximize path after first show. Native HWND checks retain a Qt fallback for the
+offscreen backend. No manual geometry-blob parsing or native-coordinate storage.
+
+The full Release build and five relevant UI/update/mutation checks passed.
+WindowPlacementChecks runs with both Qt offscreen and native Windows; actual
+title-bar maximize/restore and hit tests pass at 100% and 150%. Coverage includes
+fullscreen from normal/maximized, minimized close, corruption, missing-monitor
+simulation, deferred close and normal-app restart. The Home render was inspected;
+the portable archive matches both rebuilt executables. No physical monitor
+hot-unplug, version bump or publication was performed.
+
 ## Viewer notices for paused/unavailable video - 2026-11-05
 
 Hosts publish video intent/capture condition through the existing bidirectional

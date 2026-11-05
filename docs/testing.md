@@ -11,6 +11,16 @@ active, readiness after leaving, the new-room-before-click race, and closing
 the update UI during a transfer. `room-v2-qt-ui` checks the shell's session
 guard with the real room application lifecycle.
 
+`WindowPlacementChecks.h` runs in both the room UI suite and the native
+`WindowChromeTests` executable. It reopens normal/maximized layouts, closes from
+fullscreen and minimized states, preserves the first-close snapshot during a
+simulated asynchronous drain, rejects invalid/oversized settings and relocates
+synthetic off-screen placement. Normal Home also reopens its actual profile to
+verify startup persistence. Every check uses a temporary INI file.
+Native chrome/placement checks pass at `QT_SCALE_FACTOR=1` and `1.5` with
+`QT_QPA_PLATFORM=windows`. They use their own windows and inject no desktop input;
+off-screen geometry simulates a missing monitor, without physically unplugging one.
+
 Build tests with the same native toolchain as the application; see [build](build.md).
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.

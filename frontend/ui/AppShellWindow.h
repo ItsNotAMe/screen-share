@@ -1,14 +1,17 @@
 #pragma once
 
 #include <QtCore/QString>
+#include <QtCore/QByteArray>
 #include <QtWidgets/QWidget>
 
 #include <functional>
+#include <memory>
 
 class QPushButton;
 class QFrame;
 class QStackedWidget;
 class QShowEvent;
+class QSettings;
 
 class AppShellWindow final : public QWidget {
 public:
@@ -29,6 +32,9 @@ public:
     void setPanicHotkeyHandler(std::function<void()> handler);
     // Returning false defers window closure while the page drains its workers.
     void setCloseHandler(std::function<bool()> handler);
+    // Normal application startup opts in; diagnostics/tests stay independent.
+    // An explicit INI path isolates a profile or test from the user's defaults.
+    void enableWindowPlacementPersistence(const QString& settingsFile = {});
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -46,6 +52,8 @@ private:
     void updateChromeState();
     bool isTitleControl(const QWidget* widget) const;
     bool isNativeMaximized() const;
+    void captureWindowPlacement();
+    void saveWindowPlacement();
 #ifdef _WIN32
     void applyNativeWindowStyle();
     bool handleMinMaxInfo(void* message, qintptr* result);
@@ -61,6 +69,10 @@ private:
     bool initialFocusSet_ = false;
     std::function<void()> panicHotkeyHandler_;
     std::function<bool()> closeHandler_;
+    std::unique_ptr<QSettings> placementSettings_;
+    QByteArray windowedPlacement_;
+    bool placementShown_ = false, placementSaved_ = false;
+    bool maximizeOnFirstShow_ = false;
 #ifdef _WIN32
     bool panicHotkeyRegistered_ = false;
 #endif
