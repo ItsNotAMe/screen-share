@@ -1782,6 +1782,35 @@ int main(int argc, char** argv) {
         Check(reveal->property("logFolder").toString()==reports.path() && !QFileInfo::exists(config.reportFile));
         Wait([&] { return host.session().status().phase == RoomPhase::Active; });
         Check(!host.session().start(config));
+        // Audio source changes in the picker apply even while the room is empty.
+        host.findChild<QPushButton*>("sessionChangeSource")->click();
+        auto* idlePicker = host.findChild<QDialog*>("SourcePickerDialog"); Check(idlePicker && idlePicker->isVisible());
+        auto* idleAudioKind = host.findChild<QComboBox*>("liveAudioKind");
+        idleAudioKind->setCurrentIndex(int(AudioKind::Process));
+        host.findChild<QSpinBox*>("liveAudioProcess")->setValue(42);
+        QMetaObject::invokeMethod(idleAudioKind,"activated",Q_ARG(int,int(AudioKind::Process)));
+        Wait([&] { const auto audio=host.session().status().audio;
+            return !host.session().audioPending() && audio.selected.kind==AudioKind::Process && audio.selected.processId==42; });
+        Check(hostAudio->captureStarts==0 && host.session().status().audio.health.state==AudioEndpointState::Inactive);
+        // A pending automatic source edit must not undo an explicit Mute click.
+        idleAudioKind->setCurrentIndex(int(AudioKind::System));
+        QMetaObject::invokeMethod(idleAudioKind,"activated",Q_ARG(int,int(AudioKind::System)));
+        idlePicker->reject();
+        QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+        // Prepare privacy before admission of the first viewer, while no capture
+        // endpoint exists. Muting must not need a viewer to activate recording.
+        auto* emptyRoomMute = host.findChild<QPushButton*>("muteSharedAudio");
+        Wait([&] { return emptyRoomMute->isEnabled(); }); emptyRoomMute->click();
+        Wait([&] { return !host.session().audioPending() && host.session().status().audio.selected.kind == AudioKind::None; });
+        Check(hostAudio->captureStarts == 0 && hostAudio->liveCaptures == 0);
+        Wait([&] { return emptyRoomMute->text()=="Share audio" && host.findChild<QLabel*>("SessionSourceSummary")->text().contains("Audio muted"); });
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);
+            for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                host.resize(size);QCoreApplication::processEvents();
+                Check(host.grab().save(QDir(output).filePath(QString("host-muted-before-join-%1.png").arg(size.width()))));
+            }
+        }
         host.findChild<QPushButton*>("saveRoomReport")->click();
         { QFile saved(config.reportFile); Check(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll();
           Check(!bytes.contains("UiHost") && !bytes.contains("UI media"));
@@ -1810,7 +1839,11 @@ int main(int argc, char** argv) {
             if (frame.width == 320) ++original; else if (frame.width == 160) ++changed; else Check(false);
             present(std::move(frame));
         };
+        Wait([&] { return original >= 20 && viewerAudio->quietStreak >= 20; });
+        Check(viewerAudio->audibleBlocks == 0 && hostAudio->captureStarts == 0 && hostAudio->liveCaptures == 0);
+        Wait([&] { return emptyRoomMute->isEnabled(); }); emptyRoomMute->click();
         Wait([&] { return original >= 20 && viewerAudio->audibleBlocks >= 20; });
+        Check(host.session().status().audio.selected.kind==AudioKind::Process && host.session().status().audio.selected.processId==42);
         Wait([&]{return host.findChild<QLabel*>("SessionViewerCount")->text()=="1 viewer"&&host.findChild<QLabel*>("SessionSourceSummary")->text().contains("320 × 180");});
         Check(host.findChild<QLabel*>("SessionElapsed")->text().startsWith("Elapsed"));
         Wait([&] { return host.findChild<QLabel*>("roomMembers")->text().contains(QString::fromStdString(viewer.session().status().peerId)); });

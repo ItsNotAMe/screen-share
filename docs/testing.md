@@ -15,6 +15,11 @@ Build tests with the same native toolchain as the application; see [build](build
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 
+Room UI audio checks select a source and mute before the first viewer, require
+received silence with no host capture endpoint opened, then restore the exact
+source on unmute. An outstanding automatic source edit cannot override Mute.
+`native-pcm-audio` also covers inactive selection, recording restart, deferred
+startup failure without fallback, and rejecting commands after close.
 Input service regressions cover accumulating requests, denial preserving existing
 grants/held input, requests arriving during grant application and cancellation.
 `desktop-input` uses generated HWNDs to check keyboard grants with mismatched or

@@ -368,9 +368,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         audioState_->setText("Waiting for the new audio source…"); switchAudio_->setEnabled(false); session_.switchAudio(std::move(selection));
     });
     session_.audioUpdated = [this](const AudioUpdateResult& result) {
-        if (result.error == AudioUpdateError::None) audioState_->setText(session_.status().audio.selected.kind == AudioKind::None ?
-            "No audio is being shared." : "Sharing the selected audio source.");
-        else if (result.error == AudioUpdateError::Unavailable) audioState_->setText("Audio capture is not active. Connect a viewer first.");
+        if (result.error == AudioUpdateError::None) {
+            const auto audio = session_.status().audio;
+            audioState_->setText(audio.selected.kind == AudioKind::None ? "No audio is being shared." :
+                audio.health.state == AudioEndpointState::Inactive ? "Audio source selected. Capture starts when a viewer connects." :
+                "Sharing the selected audio source.");
+        }
+        else if (result.error == AudioUpdateError::Unavailable) audioState_->setText("Audio settings are unavailable. Wait for the room to reconnect and try again.");
         else if (result.error == AudioUpdateError::Cancelled) audioState_->setText("Audio change cancelled.");
         else audioState_->setText("Could not switch audio. The previous source is retained while available.");
     };
@@ -450,12 +454,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
         const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
         const bool audioFailed = value.audio.health.state == AudioEndpointState::Failed;
-        audioHealth_->setText(audioFailed ? "Audio capture failed. Video continues without shared audio. Retry or select another source." :
+        audioHealth_->setText(value.audio.selected.kind == AudioKind::None ? "Audio is muted. New viewers will join without shared audio." :
+            audioFailed ? "Audio capture failed. Video continues without shared audio. Retry or select another source." :
             value.audio.health.state == AudioEndpointState::Running ? (value.audio.microphoneProcessing ?
                 "Microphone active: noise suppression and digital gain. Echo cancellation is unavailable." : "Audio capture active; speech processing bypassed.") :
             value.audio.health.state == AudioEndpointState::Silent ? "Audio capture disabled." : "Audio capture inactive.");
         switchAudio_->setText(audioFailed ? "Retry" : "Share");
-        switchAudio_->setEnabled(audioEditable && value.activePeers > 0); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
+        switchAudio_->setEnabled(audioEditable); refreshAudio_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioKind_->setEnabled(audioEditable); audioDevice_->setEnabled(audioEditable && audioKind_->currentIndex() < 2);
         audioProcess_->setEnabled(audioEditable && audioKind_->currentIndex() == 2);
         refreshCapture_->setEnabled(host && !session_.capturePending()); captureSource_->setEnabled(host && !session_.capturePending());
@@ -628,7 +633,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         auto* muteAudio=new QPushButton("Mute audio");muteAudio->setObjectName("muteSharedAudio");muteAudio->setIcon(uiIcon("volume"));sourceActions->addWidget(muteAudio);
         for(auto* button:{changeSource,pauseVideo,muteAudio}){button->setMinimumHeight(42);button->setIconSize(QSize(22,22));}
         auto previousAudio=std::make_shared<AudioSelection>(AudioSelection{AudioKind::SharedSource});
-        connect(muteAudio,&QPushButton::clicked,this,[this,previousAudio] {
+        connect(muteAudio,&QPushButton::clicked,this,[this,previousAudio,muteAudio] {
+            if(session_.audioPending() || session_.status().phase!=RoomPhase::Active)return;
+            muteAudio->setEnabled(false);
             const auto current=session_.status().audio.selected;
             if(current.kind==AudioKind::None)session_.switchAudio(*previousAudio);
             else {*previousAudio=current;AudioSelection muted;muted.kind=AudioKind::None;session_.switchAudio(muted);}
@@ -644,8 +651,13 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             pauseVideo->setEnabled(status.phase==RoomPhase::Active&&!pausePending);
             pauseVideo->setText(pausePending?"Applying…":status.stream.preferences.videoPaused?"Resume video":"Pause video");
             pauseVideo->setIcon(uiIcon(status.stream.preferences.videoPaused?"play":"pause"));
-            muteAudio->setEnabled(status.phase==RoomPhase::Active && status.activePeers>0 && !session_.audioPending());
-            muteAudio->setText(status.audio.selected.kind==AudioKind::None?"Share audio":"Mute audio");
+            const bool audioMuted=status.audio.selected.kind==AudioKind::None;
+            muteAudio->setEnabled(status.phase==RoomPhase::Active && !session_.audioPending());
+            muteAudio->setText(session_.audioPending()?"Applying…":audioMuted?"Share audio":"Mute audio");
+            muteAudio->setIcon(uiIcon(audioMuted?"mute":"volume"));
+            muteAudio->setAccessibleName(audioMuted?"Share audio":"Mute shared audio");
+            muteAudio->setToolTip(audioMuted?"Audio is muted. New viewers will join without shared audio. Click to share audio.":
+                "Mute shared audio for current and future viewers.");
             const auto& selected=status.capture.selected;
             if(!loopback && (!previewRevision_ || selected.kind!=previewSource_.kind || selected.display!=previewSource_.display || selected.window!=previewSource_.window)) {
                 previewSource_=selected;previewSourceSize_={};RefreshHostPreview();
@@ -657,6 +669,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             QSize resolution=previewSourceSize_;bool streamResolution=false;
             if(!status.stream.peers.empty()&&status.stream.peers.front().width>0){resolution=QSize(status.stream.peers.front().width,status.stream.peers.front().height);streamResolution=true;}
             sourceSummary->setText((resolution.isValid()?QString("%1 × %2  ·  ").arg(resolution.width()).arg(resolution.height()):QString("Resolution pending  ·  "))+sourceSummary->text());
+            if(audioMuted)sourceSummary->setText(sourceSummary->text()+"  ·  Audio muted");
             sourceSummary->setToolTip(streamResolution?"Observed stream resolution for the first viewer; per-viewer measurements are in Details.":"Captured source resolution; stream resolution appears when a viewer connects.");
             if (status.stream.capture.state == HostMediaState::SourceUnavailable) {
                 sourceTitle->setText("Shared window closed");
@@ -836,10 +849,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         connect(audioSave,&QTimer::timeout,this,[this,audioSave]{
             if(closing_||session_.status().phase!=RoomPhase::Active)return;
             if(session_.audioPending()){audioSave->start();return;}
-            if(!session_.status().activePeers){audioState_->setText("Audio change pending until a viewer connects.");audioSave->start();return;}
             switchAudio_->click();
         });
         connect(switchAudio_,&QPushButton::clicked,audioSave,&QTimer::stop);switchAudio_->hide();
+        connect(findChild<QPushButton*>("muteSharedAudio"),&QPushButton::clicked,audioSave,&QTimer::stop);
     }
     auto* detailsPopup=new SessionPopup("Stream details",this);detailsPopup->setObjectName("SessionDetailsPopup");detailsPopup->setPanelSize({720,700});
     auto* detailsTabs=new QTabWidget;detailsTabs->setObjectName("SessionDetailsTabs");

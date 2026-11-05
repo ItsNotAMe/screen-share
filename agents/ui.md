@@ -2,6 +2,11 @@
 
 ## Current UI Direction
 
+- Host Mute audio and source-picker audio changes work before a viewer arrives.
+  Show Audio muted in the summary and synchronize the speaker icon. Share audio
+  restores the exact prior selection. An explicit mute cancels pending automatic
+  source edits; an idle audio choice saves configuration without opening devices.
+
 - Create room retains a selected-source live preview and opens the same enlarged
   SourcePickerDialog used by the host room. Keep explicit confirmation/cancel,
   current selection on cancellation, full-title tooltips and keyboard focus return.

@@ -48,7 +48,6 @@ void Switches() {
             ++processors; if (failProcessor) throw std::runtime_error("Injected processor startup failure");
             return ProcessMicrophone(std::move(endpoint));
         });
-    Require(control->Submit({}, good).get().error == AudioUpdateError::Unavailable, "Inactive switch accepted");
     auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     PcmBlock block; std::stop_source stop;
     std::this_thread::sleep_for(100ms); capture->Read(block, stop.get_token());
@@ -102,6 +101,56 @@ void Switches() {
     const auto cancelStart = std::chrono::steady_clock::now(); capture.reset();
     Require(starting.get().error == AudioUpdateError::Cancelled && std::chrono::steady_clock::now() - cancelStart < 300ms && ownership->live == 0,
         "In-flight activation did not cancel promptly");
+}
+void InactiveAudioSelection() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    auto original = std::make_shared<Ownership>();
+    auto replacement = std::make_shared<Ownership>();
+    AudioSwitchControl::Factory oldSource = [original] { return std::make_unique<OwnedCapture>(original, false); };
+    AudioSwitchControl::Factory newSource = [replacement] { return std::make_unique<OwnedCapture>(replacement, false); };
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, oldSource);
+    auto muted = control->Submit({AudioKind::None}, {});
+    Require(muted.wait_for(0ms) == std::future_status::ready && muted.get().error == AudioUpdateError::None,
+        "Cannot mute before the first viewer joins");
+    Require(control->Status().selected.kind == AudioKind::None && control->Status().revision == 2 &&
+        control->Status().health.state == AudioEndpointState::Inactive && original->created == 0,
+        "Idle selection opened an endpoint or claimed active capture");
+    auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    PcmBlock block;
+    for (int i = 0; i < 5; ++i) {
+        Require(capture->Read(block, {}) && std::all_of(block.begin(), block.end(), [](auto sample) { return sample == 0; }),
+            "Pre-muted recording exposed audio");
+    }
+    Require(original->created == 0 && control->Status().health.state == AudioEndpointState::Silent,
+        "Muted recording opened the previous source");
+    capture.reset();
+    // The latest selection also applies when recording restarts after a departure.
+    const AudioSelection selected{AudioKind::System, L"new-output"};
+    auto selectedResult = control->Submit(selected, newSource).get();
+    Require(selectedResult.error == AudioUpdateError::None && selectedResult.revision == 3 &&
+        control->Status().selected == selected && control->Status().health.state == AudioEndpointState::Inactive && replacement->created == 0,
+        "Idle replacement did not retain configuration without opening a device");
+    capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    bool audible = false;
+    for (int i = 0; i < 5; ++i) {
+        Require(capture->Read(block, {}), "Replacement recording stopped");
+        audible |= std::any_of(block.begin(), block.end(), [](auto sample) { return sample != 0; });
+    }
+    Require(audible && original->created == 0 && replacement->created == 1, "Restart used the previous audio source");
+    capture.reset();
+    // A deferred endpoint failure stays silent and never falls back to an old source.
+    replacement->unavailable = true;
+    Require(control->Submit(selected, newSource).get().error == AudioUpdateError::None, "Idle retry rejected");
+    capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    Require(capture->Read(block, {}) && block == PcmBlock{} && control->Status().health.state == AudioEndpointState::Failed && original->created == 0,
+        "Unavailable deferred source fell back or concealed its failure");
+    capture.reset();
+    control->Close();
+    Require(control->Submit({AudioKind::None}, {}).get().error == AudioUpdateError::Unavailable,
+        "Stopped room accepted an idle mute");
+    Require(original->live == 0 && replacement->live == 0 && !replacement->wrongThread,
+        "Idle audio selection leaked endpoint ownership");
 }
 // A device that produces just after the old 10ms timeout used to cause one
 // silence block plus one immediate captured block per read interval.
@@ -474,7 +523,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
-        BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
+        InactiveAudioSelection(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

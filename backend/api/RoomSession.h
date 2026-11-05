@@ -128,8 +128,10 @@ public:
     // first frame; it is not a remote-display acknowledgement. Failure keeps the
     // previous source when it remains healthy. Stop cancels pending completion.
     std::future<media::CaptureUpdateResult> SwitchCaptureSource(media::CaptureSelection);
-    // Host capture only, one pending handover. Requires an active recording
-    // endpoint (normally at least one viewer). Success means first PCM received.
+    // Host capture only, one pending handover. With active recording, success
+    // means first PCM received. While inactive, success saves the selection for
+    // the next recording without opening a device; health remains Inactive until
+    // startup, which can still fail. Muting before the first viewer is supported.
     std::future<media::AudioUpdateResult> SwitchAudioSource(media::AudioSelection);
     // Viewer-local output settings; success means the endpoint accepted a block,
     // not physical playback. One pending command, cancelled by Stop.

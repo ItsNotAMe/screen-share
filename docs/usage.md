@@ -33,6 +33,12 @@ does not include sessions belonging to another app.
 App audio needs Windows build 20348 or later (including Windows 11). If capture
 fails, video continues with silence. Choose System audio to share all apps instead.
 
+Hosts can mute audio or choose a different audio source while a room is empty.
+Mute audio applies to current and future viewers; Share audio restores the last
+source. While muted, the host summary shows Audio muted. An idle source selection
+is saved without opening an audio device. Capture starts with that selection when
+a viewer connects; an unavailable source stays silent and reports the failure.
+
 Shared audio negotiates stereo between current versions. At 100% viewer volume,
 the app applies no playback attenuation. System capture from 5.1/7.1 outputs
 preserves front-channel levels, mixes center/surround at -3 dB and omits LFE.

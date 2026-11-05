@@ -39,8 +39,21 @@ public:
         ValidateAudioSelection(selected);
         factory = SelectFactory(selected, std::move(factory));
         std::lock_guard lock(mutex_);
-        if (closed_ || !active_) return CaptureUpdateReady(AudioUpdateError::Unavailable);
+        if (closed_) return CaptureUpdateReady(AudioUpdateError::Unavailable);
         if (busy_) return CaptureUpdateReady(AudioUpdateError::Busy);
+        if (!active_) {
+            // No recording worker exists yet (or the last one has detached).
+            // Commit configuration only; Attach must see it before opening any
+            // endpoint for the next viewer. Never activate devices on this caller.
+            factory_ = std::move(factory);
+            status_.selected = std::move(selected);
+            ++status_.revision;
+            status_.health.state = AudioEndpointState::Inactive;
+            status_.microphoneProcessing = bool(microphoneProcessor_) && status_.selected.kind == AudioKind::Microphone;
+            std::promise<AudioUpdateResult> reply;
+            reply.set_value({AudioUpdateError::None, status_.revision});
+            return reply.get_future();
+        }
         queued_ = std::make_unique<Request>(Request{std::move(factory), std::move(selected), {}});
         busy_ = true; return queued_->reply.get_future();
     }

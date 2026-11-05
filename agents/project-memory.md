@@ -5,6 +5,28 @@
 
 # Project Memory
 
+## Host audio privacy before viewer arrival - 2026-11-05
+
+Hosts can now mute or choose audio while the room is empty. AudioSwitchControl
+commits inactive configuration under its attachment lock without constructing an
+endpoint; the next recording uses it from startup. Active handovers retain their
+first-PCM acknowledgement, bounded queue and cancellation behavior. Deferred
+device failure stays silent and reports Failed, without reopening an old source.
+
+The dashboard enables Mute before arrival, shows Audio muted and a matching icon,
+and restores the exact prior source on Share audio. Explicit mute cancels a pending
+automatic source edit so it cannot unexpectedly restore audio. The source picker
+also saves audio choices without waiting for a viewer.
+
+New PCM and UI regressions failed against the old behavior. The final offscreen
+room UI run passed: first-viewer video continues with zero audible blocks and no
+host capture endpoint opened, then unmute restores the selected process source.
+The full Release build and the other 40 registered CTest checks passed. Muted
+dashboard renders were inspected at compact and normal sizes. An additional
+Windows UI run stopped earlier at the native-presentation startup assertion
+(occluded surface, zero presented frames); it did not reach the audio scenario.
+No physical audio listening, version bump or publication was performed.
+
 ## Version 1.0.11 release preparation - 2026-10-15
 
 Versioned notes and updater text prepare the shared source picker, selected-source
