@@ -5,6 +5,22 @@
 
 # Project Memory
 
+## Actionable room admission feedback - 2026-11-06
+
+RoomSession preserves validated full, closed, not-found, rate-limited and
+unconfirmed admission reasons as appended RoomError values. The Join form and
+standalone sessions share RoomEntryError guidance. Hosting distinguishes service
+capacity from a room's viewer limit. Invites remain editable after cleanup;
+password retry remains specific to AdmissionDenied, with no automatic admissions.
+
+The Release build and focused local HTTP fixture passed. The fixture checks all
+five viewer failures, retry availability, preserved invites, no spurious password
+prompt or media startup, and host capacity guidance. Compact/normal Join renders
+were inspected. Seven relevant CTest checks passed in the final parallel run;
+viewer removal timed out during controller resume, then passed in isolation.
+That scenario also passed in the earlier three-test run. No physical device
+operation, version bump or publication was performed.
+
 ## Window layout persistence - 2026-11-06
 
 Normal Home startup opts into AppShellWindow placement persistence. Size, position

@@ -22,6 +22,14 @@ Native chrome/placement checks pass at `QT_SCALE_FACTOR=1` and `1.5` with
 off-screen geometry simulates a missing monitor, without physically unplugging one.
 
 Build tests with the same native toolchain as the application; see [build](build.md).
+
+Room UI admission feedback uses a local HTTP fixture to cover full, closed,
+missing and rate-limited rooms, plus an ambiguous server failure. It checks typed
+session errors, preserved invites, retry availability, no password prompt for
+these failures, and no media runtime startup. A standalone host checks service
+capacity guidance. Run it alone with `RoomUiTests.exe http://127.0.0.1:1
+admission-feedback` and `QT_QPA_PLATFORM=offscreen`; no external service is used.
+
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 

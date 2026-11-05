@@ -1,4 +1,5 @@
 #include "ui/QtRoomSession.h"
+#include "shared/RoomEntryError.h"
 #include "input/v2/GamepadSink.h"
 using namespace screenshare::v2;
 using namespace std::chrono_literals;
@@ -81,8 +82,7 @@ void QtRoomSession::tick() {
     if (admission_.valid() && admission_.wait_for(0ms) == std::future_status::ready) {
         const auto result = admission_.get();
         if (result.error != RoomError::None && (result.error != RoomError::Cancelled || result.outcomeUnconfirmed)) {
-            if (error) error(result.outcomeUnconfirmed ? QStringLiteral("Admission ended before the server outcome could be confirmed.") :
-                             QStringLiteral("Could not enter the room. Check the service, room and password."));
+            if (error) error(RoomEntryError(result.outcomeUnconfirmed ? RoomError::AdmissionUnconfirmed : result.error, config_.room.host));
         }
     }
     if (config_.duration.count() && now - started_ >= config_.duration) stop();
@@ -150,7 +150,7 @@ void QtRoomSession::tick() {
         }
         if (admission_.valid()) {
             const auto result = admission_.get();
-            if (result.outcomeUnconfirmed && error) error(QStringLiteral("Admission ended before the server outcome could be confirmed."));
+            if (result.outcomeUnconfirmed && error) error(RoomEntryError(RoomError::AdmissionUnconfirmed, config_.room.host));
         }
         applying_ = {}; pending_.reset(); submitted_.reset();
         lastFrames_ = frames_->statistics(); session_.reset(); frames_.reset(); timer_.stop();

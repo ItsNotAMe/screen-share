@@ -247,7 +247,16 @@ struct RoomSession::Impl {
                 auto result = admission.get();
                 events.Event("room-admission", int(result.error), result.outcomeUnconfirmed);
                 if (result.error != RoomAdmission::Error::None || !result.membership) {
-                    const auto error = result.error == RoomAdmission::Error::Forbidden ? RoomError::AdmissionDenied : RoomError::Admission;
+                    auto error = RoomError::Admission;
+                    switch (result.error) {
+                    case RoomAdmission::Error::Forbidden: error = RoomError::AdmissionDenied; break;
+                    case RoomAdmission::Error::NotFound: error = RoomError::RoomNotFound; break;
+                    case RoomAdmission::Error::Full: error = RoomError::RoomFull; break;
+                    case RoomAdmission::Error::Closed: error = RoomError::RoomClosed; break;
+                    case RoomAdmission::Error::RateLimited: error = RoomError::RateLimited; break;
+                    case RoomAdmission::Error::Unconfirmed: error = RoomError::AdmissionUnconfirmed; break;
+                    default: break;
+                    }
                     Reply(error, result.outcomeUnconfirmed); BeginStop(error); return;
                 }
                 membership = std::move(*result.membership);

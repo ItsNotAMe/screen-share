@@ -2,6 +2,7 @@
 #include "ui/SessionPopup.h"
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
+#include "shared/RoomEntryError.h"
 #include "ui/UiStyle.h"
 #include "ui/SourcePickerDialog.h"
 #include "ui/SourcePreviewLabel.h"
@@ -560,7 +561,7 @@ void RoomBrowserWindow::Launch(bool host) {
                     if(presentPage)presentPage(active_.get());else {active_->show();hide();}
                 }
                 if(!closing_ && active_ && !admitted && status.phase==v2::RoomPhase::Failed && status.error!=v2::RoomError::AdmissionDenied) {
-                    joinFailure_="Could not join the room. Check the room link and try again.";
+                    joinFailure_=RoomEntryError(status.error);
                     QTimer::singleShot(0,this,[this]{if(active_)active_->close();});
                 }
                 if (!passwordRetry_ && status.phase == v2::RoomPhase::Failed && status.error == v2::RoomError::AdmissionDenied) {

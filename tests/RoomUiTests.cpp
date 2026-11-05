@@ -22,6 +22,8 @@
 #include <QScreen>
 #include "shared/RoomLaunch.h"
 #include <QNetworkAccessManager>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QStackedWidget>
 #include "ui/VideoFrameWidget.h"
 #include "media/webrtc/NativeRoomRuntime.h"
@@ -937,6 +939,75 @@ void NormalHomeScenario(const QUrl& origin) {
     RoomApplication reopened(origin,Factory(audio),true,hostFile,false,true);reopened.show();
     Wait([&]{return reopened.window().isMaximized();});Check(!reopened.window().isFullScreen());
     reopened.window().close();Wait([&]{return reopened.finished();});
+}
+void AdmissionFeedbackScenario() {
+    QTcpServer service;Check(service.listen(QHostAddress::LocalHost,0));
+    int responseStatus=409,admissions=0,runtimeStarts=0;
+    QByteArray responseCode="full";
+    QObject::connect(&service,&QTcpServer::newConnection,&service,[&] {
+        auto* peer=service.nextPendingConnection();
+        QObject::connect(peer,&QTcpSocket::disconnected,peer,&QObject::deleteLater);
+        auto buffer=std::make_shared<QByteArray>();auto handled=std::make_shared<bool>(false);
+        QObject::connect(peer,&QTcpSocket::readyRead,&service,[&,peer,buffer,handled] {
+            *buffer+=peer->readAll();if(*handled)return;
+            const auto end=buffer->indexOf("\r\n\r\n");if(end<0)return;
+            qint64 length=0;
+            for(const auto& line:buffer->left(end).split('\n'))
+                if(line.toLower().startsWith("content-length:"))length=line.mid(15).trimmed().toLongLong();
+            Check(length>=0 && length<16384);if(buffer->size()<end+4+length)return;
+            *handled=true;
+            const bool admission=buffer->startsWith("POST ");if(admission)++admissions;
+            const auto body=QByteArray("{\"v\":2,\"error\":\"")+(admission?responseCode:QByteArray("not_found"))+"\"}";
+            peer->write("HTTP/1.1 "+QByteArray::number(admission?responseStatus:404)+" Result\r\nContent-Type: application/json\r\nContent-Length: "+
+                QByteArray::number(body.size())+"\r\nConnection: close\r\n\r\n"+body);peer->disconnectFromHost();
+        });
+    });
+    QTemporaryDir profile;Check(profile.isValid());const auto profilePath=profile.filePath("feedback.ini");
+    {RoomProfile saved(profilePath);Check(saved.saveNickname("Feedback viewer"));}
+    QtRoomSession::Factory factory=[&](auto) -> RoomRuntimeFactory {
+        return [&](auto,auto) -> std::unique_ptr<RoomRuntime> {++runtimeStarts;throw std::runtime_error("Rejected admission started media");};
+    };
+    RoomBrowserWindow browser(QUrl("http://127.0.0.1:"+QString::number(service.serverPort())),factory,true,profilePath,false);
+    const auto invite=MakeRoomLink("feedback-room");browser.OpenJoin(invite);browser.resize(740,600);browser.show();
+    struct Failure {int status;const char* code;RoomError error;const char* message;};
+    const Failure failures[]{
+        {409,"full",RoomError::RoomFull,"This room is full. Wait for a viewer to leave or ask the host to increase the viewer limit."},
+        {409,"closed",RoomError::RoomClosed,"This room is closed. Ask the host to start a new room."},
+        {404,"not_found",RoomError::RoomNotFound,"This room could not be found. Ask the host for a current invite."},
+        {429,"rate_limited",RoomError::RateLimited,"Too many room requests. Wait a moment before trying again."},
+        {500,"full",RoomError::AdmissionUnconfirmed,"Could not confirm whether you entered the room. Wait a moment before trying again."},
+    };
+    for(const auto& failure:failures) {
+        responseStatus=failure.status;responseCode=failure.code;
+        const auto requestsBefore=admissions;auto observed=RoomError::None;
+        auto* join=browser.findChild<QPushButton*>("joinV2Room");join->click();Check(browser.activeSession());
+        auto update=browser.activeSession()->session().statusChanged;
+        browser.activeSession()->session().statusChanged=[&,update](const auto& status) {
+            if(status.phase==RoomPhase::Failed)observed=status.error;if(update)update(status);
+        };
+        auto* error=browser.findChild<QLabel*>("browserError");
+        Wait([&]{return !browser.activeSession() && error->text()==failure.message;});
+        Check(observed==failure.error && browser.isVisible() && error->isVisible() && join->isEnabled());
+        Check(browser.findChild<QLineEdit*>("joinRoomId")->text()==invite && !browser.findChild<QDialog*>("RoomPasswordDialog"));
+        Check(admissions==requestsBefore+1 && runtimeStarts==0);
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty() && failure.error==RoomError::RoomFull) {
+            QDir().mkpath(output);
+            for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                browser.resize(size);QCoreApplication::processEvents();
+                Check(browser.grab().save(QDir(output).filePath(QString("join-room-full-%1.png").arg(size.width()))));
+            }
+        }
+    }
+    bool closed=false;browser.closed=[&]{closed=true;};browser.close();Wait([&]{return closed;});
+    // The same service code means capacity exhaustion when creating a room.
+    // Standalone sessions must explain that without suggesting viewer removal.
+    responseStatus=409;responseCode="full";QString hostError;
+    QtRoomSession host(nullptr,factory,true);host.error=[&](const auto& text){hostError=text;};
+    RoomSessionConfig config;config.room.host=true;config.room.nickname="Host";config.room.name="Capacity check";
+    config.room.origin="http://127.0.0.1:"+std::to_string(service.serverPort());
+    Check(host.start(config));Wait([&]{return !host.running();});
+    Check(host.status().error==RoomError::RoomFull && runtimeStarts==0 &&
+        hostError=="The room service has reached its room limit. Wait for a room to close, then try again.");
 }
 void BrowserScenario(const QUrl& origin) {
     ProfileSettingsScenario();
@@ -1967,14 +2038,16 @@ int main(int argc, char** argv) {
     try {
         CapturePreviewOwnership();
         WindowPlacementChecks();
-        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
+        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
+        if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback"))AdmissionFeedbackScenario();
         WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         NativePresentationRecovery();
         proof::TestWindow capture; captureWindow = capture.handle();
 #endif
-        if(argc==3 && std::string(argv[2])=="viewer-removal") {ViewerRemovalScenario(argv[1]);MutationLifecycle(argv[1]);std::cout<<"{\"passed\":true,\"viewer_removal\":true,\"input_retired\":true,\"other_viewer_continues\":true}\n";}
+        if(argc==3 && std::string(argv[2])=="admission-feedback") {std::cout<<"{\"passed\":true,\"admission_feedback\":true}\n";}
+        else if(argc==3 && std::string(argv[2])=="viewer-removal") {ViewerRemovalScenario(argv[1]);MutationLifecycle(argv[1]);std::cout<<"{\"passed\":true,\"viewer_removal\":true,\"input_retired\":true,\"other_viewer_continues\":true}\n";}
         else if(argc==3 && std::string(argv[2])=="native-resolution") {NativeResolutionScenario(argv[1]);std::cout<<"{\"passed\":true,\"native_resolution\":true}\n";}
         else if(argc==3 && std::string(argv[2])=="source-switch") {
             const auto samples=SourceSwitchScenario(argv[1]);

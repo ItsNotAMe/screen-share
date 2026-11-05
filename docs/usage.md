@@ -10,6 +10,11 @@ Fullscreen viewing and minimization are temporary. Off-screen saved placement is
 adjusted for the available display using [Qt's geometry restoration](https://doc.qt.io/qt-6.10/restoring-geometry.html).
 Invalid layout settings fall back to the normal startup layout.
 
+Join errors explain whether a room is full, closed or missing, or requests were
+rate limited. Your invite stays in the form so you can correct it or retry.
+An unconfirmed outcome asks you to wait before trying again. Room creation
+distinguishes a full service from a room's viewer limit.
+
 ## Command line
 
 ```powershell
