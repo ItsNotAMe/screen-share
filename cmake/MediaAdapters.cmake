@@ -14,5 +14,5 @@ if(NOT TARGET ScreenShareMediaAdapters)
     target_compile_features(ScreenShareMediaAdapters PUBLIC cxx_std_20)
     target_compile_options(ScreenShareMediaAdapters PRIVATE /EHsc /GR)
     target_link_libraries(ScreenShareMediaAdapters PUBLIC ScreenShare::WebRTC
-        d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging)
+        d3d11 d3dcompiler dxgi dxguid mf mfplat mfuuid wmcodecdspuuid ole32 user32 windowsapp CoreMessaging avrt)
 endif()

@@ -312,6 +312,14 @@ public:
                 sample.numbers["audioCaptureDelayMs"] = pcm->estimatedCaptureDelayMs.load();
                 sample.numbers["audioPlayoutDelayMs"] = pcm->playoutDelayMs.load();
                 sample.numbers["audioMaxPlayoutGapMs"] = double(pcm->maxPlayoutGapMs.load());
+                sample.numbers["audioCaptureScheduling"] = pcm->captureScheduling.load();
+                sample.numbers["audioPlayoutScheduling"] = pcm->playoutScheduling.load();
+                sample.numbers["audioMaxPlayoutLockWaitUs"] = double(pcm->maxPlayoutLockWaitUs.load());
+                sample.numbers["audioMaxPlayoutCallbackUs"] = double(pcm->maxPlayoutCallbackUs.load());
+                sample.numbers["audioMaxPlayoutWriteUs"] = double(pcm->maxPlayoutWriteUs.load());
+                const auto timing = pcm->playoutTiming.Read();
+                sample.numbers["audioPlayoutStage"] = int(timing.stage);
+                sample.numbers["audioPlayoutStageAgeMs"] = double(timing.ageUs) / 1000;
                 sample.numbers["audioTransportCaptureErrors"] = pcm->captureErrors.load();
                 sample.numbers["audioTransportPlayoutErrors"] = pcm->playoutErrors.load();
             }

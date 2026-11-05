@@ -1,4 +1,5 @@
 #include "media/webrtc/PcmAudioDeviceModule.h"
+#include "media/audio/AudioThreadTask.h"
 #include "api/make_ref_counted.h"
 #include <algorithm>
 #include <cstring>
@@ -9,6 +10,10 @@
 namespace screenshare::media {
 namespace {
 template<class T> int32_t Out(T* target, T value) { if (!target) return -1; *target = value; return 0; }
+uint64_t TrackMaximum(std::atomic<uint64_t>& value, std::chrono::steady_clock::duration duration) {
+    const auto us = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+    value = std::max(value.load(), us); return us;
+}
 class PcmAdm : public webrtc::AudioDeviceModule {
 public:
     PcmAdm(PcmEndpointFactories endpoints, std::shared_ptr<PcmAudioDiagnostics> diagnostics)
@@ -53,6 +58,8 @@ public:
                 auto device = endpoints_.capture();
                 if (!device) throw std::runtime_error("Missing PCM capture endpoint");
                 device->Start(stop);
+                AudioThreadTask scheduling(AudioWorker::Capture, diagnostics_->events);
+                diagnostics_->captureScheduling = scheduling.active() ? 1 : 2;
                 recording_ = true; announced = true; ready.set_value(true);
                 PcmBlock block;
                 while (!stop.stop_requested() && device->Read(block, stop)) {
@@ -87,10 +94,13 @@ public:
                 auto device = endpoints_.playout();
                 if (!device) throw std::runtime_error("Missing PCM playout endpoint");
                 device->Start();
+                AudioThreadTask scheduling(AudioWorker::Playout, diagnostics_->events);
+                diagnostics_->playoutScheduling = scheduling.active() ? 1 : 2;
                 diagnostics_->playoutBufferFrames = device->BufferFrames();
                 diagnostics_->playoutEnginePeriodUs = device->EnginePeriodUs();
                 playing_ = true; announced = true; ready.set_value(true);
                 auto lastPull = std::chrono::steady_clock::now();
+                auto nextStallEvent = std::chrono::steady_clock::time_point{};
                 while (!stop.stop_requested()) {
                     PcmBlock block{};
                     const size_t channels = playStereo_ ? 2 : 1;
@@ -99,11 +109,18 @@ public:
                     const auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPull).count();
                     diagnostics_->maxPlayoutGapMs = std::max(diagnostics_->maxPlayoutGapMs.load(), uint64_t(gap));
                     lastPull = now;
+                    std::chrono::steady_clock::time_point callbackStarted, callbackFinished;
+                    diagnostics_->playoutTiming.Enter(AudioPlayoutStage::CallbackLock);
                     {
                         std::lock_guard lock(callbackMutex_);
+                        callbackStarted = std::chrono::steady_clock::now();
+                        diagnostics_->playoutTiming.Enter(AudioPlayoutStage::Callback);
                         if (callback_ && callback_->NeedMorePlayData(480, channels * 2, channels, 48000, block.data(), samples, &elapsed, &ntp) != 0)
                             throw std::runtime_error("Audio playout transport failed");
+                        callbackFinished = std::chrono::steady_clock::now();
                     }
+                    const auto lockWaitUs = TrackMaximum(diagnostics_->maxPlayoutLockWaitUs, callbackStarted - now);
+                    const auto callbackUs = TrackMaximum(diagnostics_->maxPlayoutCallbackUs, callbackFinished - callbackStarted);
                     diagnostics_->lastPlayoutNtpMs = ntp;
                     // Pinned AudioTransportImpl reports interleaved sample count,
                     // whereas its request count is frames per channel.
@@ -113,13 +130,26 @@ public:
                     const auto gain = playMuted_ ? 0u : volume_.load();
                     for (auto& sample : block) sample = int16_t(int(sample) * int(gain) / 255);
                     if (stop.stop_requested()) break;
+                    const auto writeStarted = std::chrono::steady_clock::now();
+                    diagnostics_->playoutTiming.Enter(AudioPlayoutStage::DeviceWrite);
                     device->Write(block, stop);
+                    const auto writeFinished = std::chrono::steady_clock::now();
+                    const auto writeUs = TrackMaximum(diagnostics_->maxPlayoutWriteUs, writeFinished - writeStarted);
+                    diagnostics_->playoutTiming.Enter(AudioPlayoutStage::BetweenBlocks);
+                    if (diagnostics_->events && writeFinished >= nextStallEvent &&
+                        (gap >= 40 || lockWaitUs >= 40000 || callbackUs >= 40000 || writeUs >= 40000)) {
+                        nextStallEvent = writeFinished + std::chrono::seconds(1);
+                        try { diagnostics_->events->TryAdd({0, {{"gapMs", double(gap)}, {"lockWaitUs", double(lockWaitUs)},
+                            {"callbackUs", double(callbackUs)}, {"writeUs", double(writeUs)}}, {{"event", "audio-playout-stall"}}}); }
+                        catch (...) {} // Keep playback alive if optional diagnostics fail.
+                    }
                     diagnostics_->playoutBufferFrames = device->BufferFrames();
                     diagnostics_->playoutEnginePeriodUs = device->EnginePeriodUs();
                     diagnostics_->playoutDelayMs = device->DelayMs();
                     ++diagnostics_->playedBlocks;
                 }
             } catch (...) { ++diagnostics_->playoutErrors; if (!announced) ready.set_value(false); }
+            diagnostics_->playoutTiming.Enter(AudioPlayoutStage::Stopped);
             playing_ = false;
         });
         return started.get() ? 0 : -1;

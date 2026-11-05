@@ -33,15 +33,15 @@ public:
     uint64_t elapsedMs() const { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started_).count(); }
     void Add(DiagnosticRecord value) {
         std::lock_guard lock(mutex_);
-        value.atMs = elapsedMs();
-        if (!firstFailure_) for (const auto& [key, label] : value.labels) {
-            if ((key == "state" && label == "failed") || (key == "event" &&
-                (label.find("failed") != std::string::npos || label.find("failure") != std::string::npos || label.find("-error") != std::string::npos))) {
-                firstFailure_ = std::make_shared<const DiagnosticRecord>(value); break;
-            }
-        }
-        if (records_.size() == limit_) { records_.erase(records_.begin() + retainFirst_); ++omitted_; }
-        records_.push_back(std::move(value)); cached_.reset();
+        AddLocked(std::move(value));
+    }
+    bool TryAdd(DiagnosticRecord value) {
+        std::unique_lock lock(mutex_, std::try_to_lock);
+        if (!lock.owns_lock()) return false;
+        AddLocked(std::move(value)); return true;
+    }
+    bool TryEvent(const char* operation, int64_t code = 0, int64_t detail = 0) {
+        return TryAdd({0, {{"code", double(code)}, {"detail", double(detail)}}, {{"event", operation}}});
     }
     void Event(const char* operation, int64_t code = 0, int64_t detail = 0) {
         Add({0, {{"code", double(code)}, {"detail", double(detail)}}, {{"event", operation}}});
@@ -52,6 +52,17 @@ public:
         return {cached_, omitted_, startedUtcMs_, elapsedMs(), firstFailure_};
     }
 private:
+    void AddLocked(DiagnosticRecord value) {
+        value.atMs = elapsedMs();
+        if (!firstFailure_) for (const auto& [key, label] : value.labels) {
+            if ((key == "state" && label == "failed") || (key == "event" &&
+                (label.find("failed") != std::string::npos || label.find("failure") != std::string::npos || label.find("-error") != std::string::npos))) {
+                firstFailure_ = std::make_shared<const DiagnosticRecord>(value); break;
+            }
+        }
+        if (records_.size() == limit_) { records_.erase(records_.begin() + retainFirst_); ++omitted_; }
+        records_.push_back(std::move(value)); cached_.reset();
+    }
     const Clock::time_point started_ = Clock::now();
     const uint64_t startedUtcMs_ = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     const size_t limit_;

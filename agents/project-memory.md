@@ -110,6 +110,37 @@ Windows UI run stopped earlier at the native-presentation startup assertion
 (occluded surface, zero presented frames); it did not reach the audio scenario.
 No physical audio listening, version bump or publication was performed.
 
+## Initial audio-stall investigation - 2026-11-05
+
+The custom ADM and capture producers used ordinary std::jthread scheduling,
+omitting the MMCSS policy in the pinned WebRTC Windows audio device. Under a
+750ms higher-priority task on the same CPU, synthetic playout's maximum callback
+gap was 229ms. Registering thread-scoped Pro Audio/critical MMCSS reduced it to
+10ms in the corrected test, which pins after registration and verifies affinity.
+The first post-fix experiment lacked that affinity check; use only the corrected
+comparison. This reproduces an initiating stall mechanism, not proof of the
+specific remote report's trigger.
+
+ADM capture/playout and device-capture producers now own their registration on
+their audio threads and revert on exit. Registration failure remains nonfatal
+and visible in reports. New phase/age and lock/callback/write maxima distinguish
+in-progress device waits from callback stalls; completed slow operations emit
+bounded, rate-limited audio-playout-stall events. The real loopback recovery test
+checks the live blocked-write phase and retained event timing, then stopped state.
+Audio-worker history writes use a nonblocking try-lock so report collection
+cannot stall those workers; lifetime timing counters remain available if an
+optional event is dropped.
+
+The full Release build and all 41 CTest checks passed. After the final nonblocking
+history refinement, the build and PCM/audio-sync/report checks passed again;
+the corrected same-CPU scheduling experiment again measured a 10ms maximum gap.
+Silent native WASAPI lifecycle checks also passed (50ms buffer, 10ms engine
+period). No audible fidelity or original remote trigger is established.
+`build/ScreenShare-audio-scheduling-preview.zip` matches both rebuilt executables;
+SHA-256 is 8432b81e49e990cb76e5adfce1e2e0182d572e125ec79d28b8265dd8069c71eb.
+This remains an unpublished 1.0.11 test build, including the prior recovery/UI
+work; no release or version bump was performed.
+
 ## Performance and room-list review - 2026-11-05
 
 Separate heavy diagnostic snapshots and GUI status copies from the short media/

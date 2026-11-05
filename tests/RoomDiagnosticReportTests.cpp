@@ -44,12 +44,15 @@ int main(int argc, char** argv) {
 
         DiagnosticHistory history(4); history.Event("start");
         const auto pinned = history.Read();
-        for (int i = 0; i < 10; ++i) history.Event("sample", i);
+        for (int i = 0; i < 10; ++i) {
+            if (i % 2) history.Event("sample", i);
+            else Check(history.TryEvent("sample", i));
+        }
         Check(pinned.records->size() == 1 && pinned.records->at(0).labels.at("event") == "start");
         Check(history.Read().records->size() == 4 && history.Read().omitted == 7);
         Check(history.Read().records->front().labels.at("event") == "start");
         DiagnosticHistory failures(4, false);
-        failures.Event("decoder-frame-failed", E_FAIL);
+        Check(failures.TryEvent("decoder-frame-failed", E_FAIL));
         for (int i = 0; i < 10; ++i) failures.Event("sample", i);
         Check(failures.Read().records->front().labels.at("event") == "sample");
         Check(failures.Read().firstFailure && failures.Read().firstFailure->labels.at("event") == "decoder-frame-failed");

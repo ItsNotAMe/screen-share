@@ -199,6 +199,15 @@ slots do not replay bursts.
 These fixtures establish recovery from local playout stalls, not every WAN or
 driver failure and not audible fidelity on another PC.
 
+`NativePcmAudioTests --scheduling` is an explicit silent contention check. It
+pins synthetic playback and a 750ms higher-priority competitor to one allowed
+CPU, leaving the other CPUs available, and requires audio gaps below its 50ms
+output reserve. It pins playback after MMCSS registration and checks affinity
+so task-policy migration cannot make the comparison pass. It needs two allowed
+CPUs and an available Windows multimedia scheduler. Routine CTest does not
+create this deliberate CPU load. The A/V recovery test also inspects a live
+blocked-write phase and retained timing events before and after recovery.
+
 The PCM audio test checks ordered blocks delivered in 50ms bursts, with no gaps
 after startup, and unity-level stereo content in 5.1/7.1 layouts with overload
 protection. `SharedAudioLevelTests` sends synthetic audio through the shipping

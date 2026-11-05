@@ -45,6 +45,7 @@ int main(int argc, char** argv) {
         auto output = std::make_shared<OutputState>();
         auto video = std::make_shared<Video>();
         auto hostEvidence = std::make_shared<Evidence>(), viewerEvidence = std::make_shared<Evidence>();
+        viewerEvidence->audioDiagnostics->events = std::make_shared<DiagnosticHistory>();
         StreamPreferences preferences;
         preferences.preset = StreamPreset::Quality;
         preferences.resolution = ResolutionMode::Fixed;
@@ -112,6 +113,10 @@ int main(int argc, char** argv) {
                 for (const auto stall : {600u, 400u, 1200u}) {
                     const auto count = output->stalls.load();
                     output->stallMs = stall;
+                    wait([&] {
+                        const auto timing = viewerEvidence->audioDiagnostics->playoutTiming.Read();
+                        return timing.stage == AudioPlayoutStage::DeviceWrite && timing.ageUs >= 100000;
+                    });
                     wait([&] { return output->stalls > count; });
                     const auto deadline = std::chrono::steady_clock::now() + 2500ms;
                     const auto frames = video->frames.load();
@@ -140,9 +145,15 @@ int main(int argc, char** argv) {
                     Check(std::abs(after - baseline) <= 120 && std::abs(after) <= 150);
                     Check(video->frames >= frames + 25);
                     Check(host->FailedPeers().empty() && viewer->FailedPeers().empty());
+                    Check(viewerEvidence->audioDiagnostics->maxPlayoutWriteUs >= uint64_t(stall) * 1000);
                 }
             }
+            const auto events = viewerEvidence->audioDiagnostics->events->Read().records;
+            Check(std::any_of(events->begin(), events->end(), [](const auto& event) {
+                return event.labels.at("event") == "audio-playout-stall" && event.numbers.at("writeUs") >= 400000;
+            }));
             stop();
+            Check(viewerEvidence->audioDiagnostics->playoutTiming.Read().stage == AudioPlayoutStage::Stopped);
         } catch (...) { stop(); throw; }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL();

@@ -62,6 +62,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         NativeRoomRuntimeOptions native;
         native.diagnostics = state->diagnostics;
         native.audioDiagnostics = std::make_shared<PcmAudioDiagnostics>();
+        native.audioDiagnostics->events = native.diagnostics;
         native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,
             options.capture.displayIndex, options.capture.windowHandle, options.capture.targetFps};
         if (identity.host) native.captureSwitch = std::make_shared<CaptureSwitchControl>(native.initialCapture);
@@ -108,7 +109,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
             };
             const auto initialFactory = initial.kind == AudioKind::SharedSource && !options.audioEndpoints ?
                 native.audioForSelection(initial) : endpoints.capture;
-            native.audioSwitch = std::make_shared<AudioSwitchControl>(initial, initialFactory, ProcessMicrophone);
+            native.audioSwitch = std::make_shared<AudioSwitchControl>(initial, initialFactory, ProcessMicrophone, native.diagnostics);
             state->audioControl = native.audioSwitch;
             endpoints.capture = [control = native.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
         }

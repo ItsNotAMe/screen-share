@@ -3,6 +3,7 @@
 #include "SyntheticAudio.h"
 #include "AudioProcessingTest.h"
 #include <condition_variable>
+#include <bit>
 #include <iostream>
 #include <stdexcept>
 
@@ -446,6 +447,71 @@ void OutputClockCadence() {
     std::stop_source stop; stop.request_stop();
     Require(!pacer.Wait(stop.get_token()), "Output clock ignored cancellation");
 }
+// Opt-in scheduling experiment. Saturate one allowed CPU briefly; leave every
+// other CPU available and never open a physical audio endpoint.
+void SchedulingUnderLoad() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    DWORD_PTR allowed = 0, system = 0;
+    Require(GetProcessAffinityMask(GetCurrentProcess(), &allowed, &system) && std::popcount(uint64_t(allowed)) >= 2,
+        "Scheduling proof needs at least two allowed CPUs");
+    const auto cpu = DWORD_PTR(std::bit_floor(uint64_t(allowed)));
+    auto wrongCpu = std::make_shared<std::atomic<bool>>(false);
+    class Output final : public PcmPlayoutEndpoint {
+        DWORD_PTR cpu_;
+        std::shared_ptr<std::atomic<bool>> wrongCpu_;
+        bool pinned_ = false;
+        PcmBlockPacer pacer_;
+    public:
+        Output(DWORD_PTR cpu, std::shared_ptr<std::atomic<bool>> wrongCpu) : cpu_(cpu), wrongCpu_(std::move(wrongCpu)) {}
+        void Start() override {
+            Require(SetThreadAffinityMask(GetCurrentThread(), cpu_) != 0, "Output affinity failed");
+            pacer_.Start();
+        }
+        void Write(const PcmBlock&, std::stop_token stop) override {
+            // MMCSS applies its task's affinity during registration, which runs
+            // after endpoint startup. Pin the experiment after that policy.
+            if (!pinned_) {
+                Require(SetThreadAffinityMask(GetCurrentThread(), cpu_) != 0, "Post-registration output affinity failed");
+                pinned_ = true;
+            }
+            if (!(cpu_ & (DWORD_PTR(1) << GetCurrentProcessorNumber()))) *wrongCpu_ = true;
+            pacer_.Wait(stop);
+        }
+        uint32_t DelayMs() const override { return 0; }
+        uint32_t BufferFrames() const override { return 2400; }
+    };
+    auto diagnostics = std::make_shared<PcmAudioDiagnostics>();
+    PcmEndpointFactories endpoints; endpoints.playout = [cpu, wrongCpu] { return std::make_unique<Output>(cpu, wrongCpu); };
+    auto adm = CreatePcmAudioDeviceModule(std::move(endpoints), diagnostics);
+    Transport transport;
+    struct Cleanup { webrtc::AudioDeviceModule& adm; ~Cleanup() { adm.Terminate(); } } cleanup{*adm};
+    Require(adm->Init() == 0 && adm->RegisterAudioCallback(&transport) == 0 && adm->InitPlayout() == 0 &&
+        adm->StartPlayout() == 0, "Scheduling output startup failed");
+    transport.Wait([&] { return transport.played >= 10; });
+    std::atomic<bool> loaded{false};
+    std::jthread competitor([&](std::stop_token stop) {
+        if (!SetThreadAffinityMask(GetCurrentThread(), cpu) || !SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST)) return;
+        loaded = true;
+        const auto end = std::chrono::steady_clock::now() + 750ms;
+        uint64_t work = 0;
+        while (!stop.stop_requested() && std::chrono::steady_clock::now() < end) {
+            for (unsigned i = 0; i < 10000; ++i) work = work * 1664525 + i + 1013904223;
+            std::atomic_signal_fence(std::memory_order_seq_cst);
+        }
+        if (work == 123) std::cerr << work;
+    });
+    competitor.join();
+    Require(loaded, "Scheduling competitor did not start");
+    Require(!*wrongCpu, "Audio escaped the contended CPU");
+    const auto played = transport.played.load(); transport.Wait([&] { return transport.played >= played + 5; });
+    adm->Terminate();
+    std::cout << "Single-CPU contention: maximum playback callback gap ms=" << diagnostics->maxPlayoutGapMs
+        << " scheduling=" << diagnostics->playoutScheduling << '\n';
+    Require(diagnostics->playoutScheduling == 1, "MMCSS unavailable in the scheduling proof");
+    Require(diagnostics->maxPlayoutGapMs < 50, "CPU contention starved the 10ms audio worker beyond the 50ms output reserve");
+    Require(diagnostics->playoutErrors == 0 && !transport.invalid, "Scheduling test failed audio transport");
+}
 void NativeCaptureSelections() {
     // Actual capture endpoints, discarded in-memory callbacks only. No render
     // endpoint starts, and no microphone/system content is written to disk.
@@ -542,6 +608,7 @@ void Run(bool wasapi) {
 int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
+        if (argc == 2 && std::string(argv[1]) == "--scheduling") { SchedulingUnderLoad(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
         InactiveAudioSelection(); OutputClockCadence(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
     }

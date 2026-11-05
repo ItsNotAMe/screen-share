@@ -29,6 +29,22 @@ per second. Source-picker thumbnails use a 320 × 180 bound. Stream capture and
 viewer video retain their configured rate and dimensions. These checks do not
 establish a particular game's CPU/GPU savings or WAN performance.
 
+## Audio-worker scheduling follow-up (2026-11-05)
+
+The custom PCM workers did not use the MMCSS scheduling employed by the pinned
+WebRTC Windows audio device. A silent, synthetic playback worker under a 750ms
+higher-priority task on the same CPU had a maximum callback gap of 229ms before
+the fix and 10ms after registering the audio worker with MMCSS. The test pins
+the worker after multimedia task registration and checks that it stays on the
+contended CPU. The output reserve is only 50ms, so the previous gap is enough
+to underrun it even when the network is healthy.
+
+Playout, the capture feeder and device capture producers now register the
+thread-scoped Pro Audio task and revert registration on their owner thread.
+Unavailable registration is diagnostic and nonfatal. This demonstrates and
+addresses CPU-contention starvation; it does not prove what caused an earlier
+remote session's first stall or eliminate kernel/driver stalls.
+
 ## Latest scorecard — congestion-window follow-up
 
 All 16 uninstrumented 1080p60/12 Mbps controls pass again after reducing v2's
