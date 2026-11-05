@@ -5,6 +5,21 @@
 
 # Project Memory
 
+## Inline viewer removal action - 2026-11-06
+
+Viewer removal is an icon-only user-minus SVG action beside mouse, keyboard and
+controller controls. All four use the same 32px bounds and stay on one line.
+The narrow sidebar required smaller buttons/tighter gaps to keep removal inside
+the actual scroll viewport. Long nicknames elide, with full plain-text identity
+in accessibility and an escaped tooltip. Pending removal stays icon-only and
+disabled; the existing named confirmation and membership behavior are retained.
+
+The full Release build, room UI, viewer-removal and UI self-test checks passed.
+Row regressions verify every action stays within the scroll viewport, shares a
+baseline and keeps its accessible name at compact/normal sizes. Both rendered
+layouts were inspected; the portable archive matches the rebuilt CLI/UI binaries.
+No physical input operation, version bump or publication was performed.
+
 ## Actionable room admission feedback - 2026-11-06
 
 RoomSession preserves validated full, closed, not-found, rate-limited and

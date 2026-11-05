@@ -508,6 +508,27 @@ void ViewerRemovalScenario(const std::string& origin) {
     };
     Wait([&]{return buttonFor(targetId) && buttonFor(targetId)->isEnabled() && buttonFor(survivorId);});
     auto* targetButton=buttonFor(targetId);
+    for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+        host.resize(size);QCoreApplication::processEvents();
+        auto* row=targetButton->parentWidget();
+        auto* caption=row->findChild<QLabel*>("PeerName");
+        Wait([&]{return !caption->text().isEmpty() && caption->fontMetrics().horizontalAdvance(caption->text())<=caption->width();});
+        Check(caption->accessibleName()==QString::fromStdString(config.room.nickname));
+        auto* viewport=host.findChild<QScrollArea*>("SessionControlsScroll")->viewport();
+        const auto removeRect=QRect(targetButton->mapTo(row,QPoint()),targetButton->size());
+        Check(targetButton->text().isEmpty() && !targetButton->icon().isNull() && row->rect().contains(removeRect));
+        Check(viewport->rect().contains(QRect(targetButton->mapTo(viewport,QPoint()),targetButton->size())));
+        Check(targetButton->accessibleName().contains(QString::fromStdString(config.room.nickname)));
+        for(auto* control:row->findChildren<QPushButton*>("PeerCapability")) {
+            const auto controlRect=QRect(control->mapTo(row,QPoint()),control->size());
+            Check(row->rect().contains(controlRect) && controlRect.center().y()==removeRect.center().y());
+            Check(viewport->rect().contains(QRect(control->mapTo(viewport,QPoint()),control->size())));
+            Check(controlRect.right()<removeRect.left());
+        }
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);Check(host.grab().save(QDir(output).filePath(QString("viewer-actions-inline-%1.png").arg(size.width()))));
+        }
+    }
     host.activateWindow();Wait([&]{return QApplication::activeWindow()==&host;});targetButton->setFocus();targetButton->click();
     auto* dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
     auto* explanation=dialog->findChild<QLabel*>("removeViewerExplanation");

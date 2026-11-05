@@ -22,6 +22,8 @@
   Game mouse must be captured again after the video returns.
 
 - Hosts can remove a viewer from that viewer's row after a named confirmation.
+  Keep removal icon-only, using user-minus beside the three input icons on one
+  line. Elide long names, retaining their full text in tooltips and accessibility.
   Reuse SessionPopup, focus Cancel and preserve identity/focus during room pushes.
   Removal targets peer ID, not nickname; handle departure while confirmation is
   open. Other viewers stay connected. Removed viewers return to Join with an

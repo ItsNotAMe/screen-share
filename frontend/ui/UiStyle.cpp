@@ -278,7 +278,8 @@ QPushButton#createV2Room:hover, QPushButton#joinV2Room:hover, QPushButton#joinWi
 QPushButton#acceptPeerRequest:pressed, QPushButton#controllerAction:pressed, QPushButton#applyStream:pressed, QPushButton#confirmSourceSelection:pressed,
 QPushButton#createV2Room:pressed, QPushButton#joinV2Room:pressed, QPushButton#joinWithPassword:pressed { background: #0d5149; color: #ffffff; }
 QPushButton#controllerAction:disabled { background: #263c35; color: #a3b5af; }
-QPushButton#PeerCapability { padding: 4px; border-radius: 7px; }
+QPushButton#PeerCapability, QPushButton#removeRoomViewer { padding: 4px; border-radius: 7px; }
+QPushButton#removeRoomViewer:hover { background: #442b2b; border-color: #9f5b5b; }
 QPushButton#PeerCapability:checked { background: #194b43; border: 1px solid #38d8c8; }
 QPushButton#PeerCapability:hover { background: #263c34; }
 QPushButton#PeerCapability[pendingRequest="true"] { background: #40351f; border-color: #d6ad59; }

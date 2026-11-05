@@ -76,7 +76,8 @@ control works for display and window sharing. Window mouse and keyboard input pa
 while the shared window is not focused, releases held input, and resumes with the
 same permission when focus returns. See [controller support](controller-support.md).
 
-Hosts can choose **Remove viewer…** on a viewer's row, then confirm the name to
+Hosts can choose the **Remove viewer** icon (a person with a minus) beside the
+mouse, keyboard and controller icons on a viewer's row, then confirm the name to
 disconnect that viewer's video, audio and remote control. Other viewers stay
 connected. Cancel keeps the viewer in the room. The removed viewer returns to
 Join with an explanation. Removal ends the current membership; it is not a ban,

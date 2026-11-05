@@ -45,6 +45,7 @@ startup failure without fallback, and rejecting commands after close.
 `room-v2-viewer-removal` removes one of two identically named viewers, checks
 controller release and rejected stale input, and requires continued media and
 the same connection generation for the other viewer. It covers cancellation,
+inline icon-only actions fitting their row at compact/normal window sizes,
 focus return, departure during confirmation, joining with a new membership, and
 the removed viewer's explanation. API checks reject viewer-initiated removal,
 host self-removal, invalid/missing targets and overlapping mutations.
