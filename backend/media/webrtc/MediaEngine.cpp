@@ -54,6 +54,12 @@ webrtc::scoped_refptr<webrtc::PeerConnectionInterface> MediaEngine::CreatePeer(
     CheckThread();
     config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
     config.bundle_policy = webrtc::PeerConnectionInterface::kBundlePolicyMaxBundle;
+    // The default 200-packet NetEq queue can retain seconds of audio after an
+    // output/network stall. Bound it to ten packets (200ms with our 20ms Opus),
+    // and let NetEq flush/accelerate old audio using its own timestamp state.
+    // Pulling missed callbacks in a burst would distort its jitter estimator.
+    config.audio_jitter_buffer_fast_accelerate = true;
+    config.audio_jitter_buffer_max_packets = 10;
     auto result = factory_->CreatePeerConnectionOrError(config, webrtc::PeerConnectionDependencies(&observer));
     if (!result.ok()) throw std::runtime_error(result.error().message());
     auto peer = result.MoveValue();

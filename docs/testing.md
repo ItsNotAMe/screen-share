@@ -181,6 +181,16 @@ presentation counters and native rendering checks, not a black grab, as evidence
 
 Audio cadence and retained-frame resize regressions run without physical input:
 
+`av-sync-recovery` runs the production room runtime and encrypted H264/Opus over
+loopback with a synthetic output device that stalls repeatedly, then resumes at
+device speed. It compares received audio/video NTP timing before and after each
+stall, requires continued video delivery, and checks timely recovery. It uses no
+physical audio devices. `native-pcm-audio` independently checks that callback work
+and wake-up overshoot do not accumulate in the output clock, and that missed
+slots do not replay bursts.
+These fixtures establish recovery from local playout stalls, not every WAN or
+driver failure and not audible fidelity on another PC.
+
 The PCM audio test checks ordered blocks delivered in 50ms bursts, with no gaps
 after startup, and unity-level stereo content in 5.1/7.1 layouts with overload
 protection. `SharedAudioLevelTests` sends synthetic audio through the shipping

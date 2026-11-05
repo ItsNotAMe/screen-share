@@ -90,15 +90,21 @@ public:
                 diagnostics_->playoutBufferFrames = device->BufferFrames();
                 diagnostics_->playoutEnginePeriodUs = device->EnginePeriodUs();
                 playing_ = true; announced = true; ready.set_value(true);
+                auto lastPull = std::chrono::steady_clock::now();
                 while (!stop.stop_requested()) {
                     PcmBlock block{};
                     const size_t channels = playStereo_ ? 2 : 1;
                     size_t samples = 0; int64_t elapsed = -1, ntp = -1;
+                    const auto now = std::chrono::steady_clock::now();
+                    const auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPull).count();
+                    diagnostics_->maxPlayoutGapMs = std::max(diagnostics_->maxPlayoutGapMs.load(), uint64_t(gap));
+                    lastPull = now;
                     {
                         std::lock_guard lock(callbackMutex_);
                         if (callback_ && callback_->NeedMorePlayData(480, channels * 2, channels, 48000, block.data(), samples, &elapsed, &ntp) != 0)
                             throw std::runtime_error("Audio playout transport failed");
                     }
+                    diagnostics_->lastPlayoutNtpMs = ntp;
                     // Pinned AudioTransportImpl reports interleaved sample count,
                     // whereas its request count is frames per channel.
                     if (samples > 480 * channels || samples % channels) throw std::runtime_error("Audio transport returned invalid sample count");

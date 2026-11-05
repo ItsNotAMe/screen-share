@@ -1,5 +1,25 @@
 # A/V Sync Notes
 
+## Current WebRTC rooms
+
+The shipping room receiver uses WebRTC A/V synchronization. Audio NetEq now has
+a ten-packet limit (200ms at the negotiated 20ms Opus cadence) and fast
+acceleration. The former upstream 200-packet reserve could retain seconds of
+audio after an output stall, leaving sound behind and allowing synchronization
+to add video delay. Keep recovery inside NetEq: manually replaying missed pulls
+in a burst also advances its tick-based jitter estimator and can inflate its
+target delay. Device-free PCM pacing preserves the 10ms phase across ordinary
+overshoot/work, skips missed slots and remains cancellable.
+
+`av-sync-recovery` uses the production runtime, real H264/Opus loopback transport
+and stalled synthetic output in Quality and Gaming. It checks received media
+NTP timing after repeated 400/600/1200ms stalls and continued video delivery.
+This reproduces a recovery failure, not the original cause of a remote machine's
+stall. Report PCM callback gaps, capture drops and audio/video jitter-buffer
+target/minimum delays distinguish scheduling trouble from packet jitter.
+
+## Historical UDP receiver
+
 Default receiver behavior auto-enables A/V sync for `--preview --audio-playback`. `--no-av-sync` keeps raw timing for diagnostics. Explicit `--av-sync` remains accepted.
 
 Key idea: audio and video are already multiplexed through the same UDP sender/socket. Sync problems mostly come from receiver-side pipeline latency and independent playout clocks, not separate network paths.

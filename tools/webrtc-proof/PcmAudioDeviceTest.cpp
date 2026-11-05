@@ -426,6 +426,26 @@ public:
     uint64_t position_ = 0;
     bool silentOutput = false;
 };
+void OutputClockCadence() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    PcmBlockPacer pacer; pacer.Start();
+    screenshare::ShortWait work;
+    const auto start = std::chrono::steady_clock::now();
+    for (unsigned i = 0; i < 100; ++i) {
+        Require(pacer.Wait({}), "Output clock stopped");
+        work.Wait(2ms); // Callback/mixing work belongs inside the 10ms period.
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    std::cout << "Output clock elapsed ms: " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << '\n';
+    Require(elapsed >= 990ms && elapsed < 1120ms, "Output clock accumulated per-block work and wake-up overshoot");
+    std::this_thread::sleep_for(50ms);
+    pacer.Wait({});
+    const auto resumed = std::chrono::steady_clock::now(); pacer.Wait({});
+    Require(std::chrono::steady_clock::now() - resumed >= 8ms, "Output clock replayed missed slots");
+    std::stop_source stop; stop.request_stop();
+    Require(!pacer.Wait(stop.get_token()), "Output clock ignored cancellation");
+}
 void NativeCaptureSelections() {
     // Actual capture endpoints, discarded in-memory callbacks only. No render
     // endpoint starts, and no microphone/system content is written to disk.
@@ -523,7 +543,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
-        InactiveAudioSelection(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
+        InactiveAudioSelection(); OutputClockCadence(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

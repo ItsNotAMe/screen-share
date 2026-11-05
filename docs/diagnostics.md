@@ -31,6 +31,10 @@ acknowledgement. `removedByHost` retains an explicit removal reason after shutdo
   applied bitrate, receiver observations and presentation counters.
 - Process CPU, private/working-set memory, handle count and maximum runtime tick
   gap per sampling interval; renderer failures, recoveries and presentation time.
+- Native PCM capture/playout block counts, capture drops, reported device delays
+  and the largest gap between playout callbacks over the module's lifetime.
+  Transport histories also retain jitter-buffer target/minimum delay and audio
+  samples inserted/removed by the transport's time stretching, when available.
 
 Event histories retain startup events and the latest events (128 records by
 default), plus a sticky first failure. One-second measurement histories retain
@@ -40,6 +44,12 @@ and event sequences as well as wall time. Up to 63 retired peer snapshots surviv
 removal. Export size is capped at 32 MiB and failed writes preserve the old file.
 Immutable cached histories avoid rebuilding large report objects on every tick;
 the CLI serializes the complete report only when saving it.
+
+For lag, compare differences between adjacent samples. Jitter-buffer seconds are
+cumulative: divide the difference by the corresponding emitted-count difference
+to get that interval's mean delay (audio uses samples; video uses frames). Compare
+this with packet jitter/loss, runtime tick gaps and PCM callback gaps. A large
+video buffering delay with little network jitter does not establish a slow link.
 
 Reports use explicit field allowlists. They omit SDP, ICE credentials, raw
 candidate addresses, server URLs, device instance IDs, nicknames and room IDs.

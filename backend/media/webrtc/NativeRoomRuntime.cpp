@@ -305,6 +305,16 @@ public:
             const auto audio = AudioSelection(); const auto playback = Playback();
             sample.numbers["audioCaptureFailures"] = double(audio.health.failures);
             sample.numbers["audioPlaybackFailures"] = double(playback.health.failures);
+            if (const auto& pcm = options_.audioDiagnostics) {
+                sample.numbers["audioCapturedBlocks"] = double(pcm->capturedBlocks.load());
+                sample.numbers["audioPlayedBlocks"] = double(pcm->playedBlocks.load());
+                sample.numbers["audioDroppedCaptureFrames"] = double(pcm->droppedCaptureFrames.load());
+                sample.numbers["audioCaptureDelayMs"] = pcm->estimatedCaptureDelayMs.load();
+                sample.numbers["audioPlayoutDelayMs"] = pcm->playoutDelayMs.load();
+                sample.numbers["audioMaxPlayoutGapMs"] = double(pcm->maxPlayoutGapMs.load());
+                sample.numbers["audioTransportCaptureErrors"] = pcm->captureErrors.load();
+                sample.numbers["audioTransportPlayoutErrors"] = pcm->playoutErrors.load();
+            }
             if (options_.presentation) if (const auto presentation = options_.presentation->Read()) {
                 sample.numbers["presented"] = double(presentation->presented);
                 sample.numbers["presentationDropped"] = double(presentation->dropped);

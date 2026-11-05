@@ -57,11 +57,12 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::shared_ptr<proof::CaptureLifetime> capture = std::make_shared<proof::CaptureLifetime>();
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     std::optional<PcmEndpointFactories> audioEndpoints;
+    std::shared_ptr<PcmAudioDiagnostics> audioDiagnostics = std::make_shared<PcmAudioDiagnostics>();
     MediaEngine::PacketFactory packetFactory;
     MediaEngine::EventLogFactory eventLogFactory;
     CaptureSession::Factory captureFactory;
     std::optional<StreamPreferences> preferences;
-    bool fastAudioExperiment = false; // Proof-only; production defaults are untouched.
+    bool fastAudioExperiment = false; // Retained proof/report flag; the engine now enables fast recovery by default.
     bool localizedInputResponse = false;
     void OnFrame(const webrtc::VideoFrame& frame) override {
         auto pixels = frame.video_frame_buffer()->ToI420();
@@ -98,6 +99,7 @@ public:
         native_ = WindowsRoomRuntimeFactory(std::move(windows))(identity, std::move(send));
 #else
         NativeRoomRuntimeOptions options;
+        options.audioDiagnostics = evidence_->audioDiagnostics;
         options.inputSink = evidence_->input;
         auto endpoints = evidence_->audioEndpoints.value_or(proof::SyntheticAudio(evidence_->audio));
         if (identity.host) {
@@ -109,9 +111,9 @@ public:
             endpoints.playout = [control = options.playback] { return std::make_unique<ControlledPcmPlayout>(control); };
             options.playbackForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         }
-        options.engine = [endpoints, packetFactory = evidence_->packetFactory, eventLogFactory = evidence_->eventLogFactory] {
+        options.engine = [endpoints, diagnostics = evidence_->audioDiagnostics, packetFactory = evidence_->packetFactory, eventLogFactory = evidence_->eventLogFactory] {
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
-                std::make_shared<PcmAudioDiagnostics>()), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>(), packetFactory, eventLogFactory);
+                diagnostics), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>(), packetFactory, eventLogFactory);
         };
         options.capture = [lifetime = evidence_->capture] { return std::make_unique<proof::ObservedCaptureSource>(lifetime); };
         if (evidence_->captureFactory) options.capture = evidence_->captureFactory;

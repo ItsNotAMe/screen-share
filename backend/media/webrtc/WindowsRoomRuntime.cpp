@@ -61,6 +61,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
             options.inputSink || options.enableDesktopInput ? std::make_shared<input::DesktopTargetState>() : nullptr;
         NativeRoomRuntimeOptions native;
         native.diagnostics = state->diagnostics;
+        native.audioDiagnostics = std::make_shared<PcmAudioDiagnostics>();
         native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,
             options.capture.displayIndex, options.capture.windowHandle, options.capture.targetFps};
         if (identity.host) native.captureSwitch = std::make_shared<CaptureSwitchControl>(native.initialCapture);
@@ -124,12 +125,12 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
         native.engine = [endpoints = std::move(endpoints), state, preferHardware = options.preferHardwareEncoding,
                          hardwareDecode = options.preferHardwareDecoding,
                          encoderDecorator = options.encoderDecorator, decoderDecorator = options.decoderDecorator,
-                         packetFactory = options.packetFactory, diagnostics = native.diagnostics] {
+                         packetFactory = options.packetFactory, diagnostics = native.diagnostics, audioDiagnostics = native.audioDiagnostics] {
             std::unique_ptr<webrtc::VideoEncoderFactory> encoder = std::make_unique<MfVideoEncoderFactory>(preferHardware ? state->Get() : nullptr, diagnostics);
             std::unique_ptr<webrtc::VideoDecoderFactory> decoder = std::make_unique<MfVideoDecoderFactory>(hardwareDecode, MfVideoDecoderFactory::DeviceFactory{}, diagnostics);
             if (encoderDecorator) encoder = encoderDecorator(std::move(encoder));
             if (decoderDecorator) decoder = decoderDecorator(std::move(decoder));
-            return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, std::make_shared<PcmAudioDiagnostics>()),
+            return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints, audioDiagnostics),
                 std::move(encoder), std::move(decoder), packetFactory);
         };
         native.engineReady = [state] { return bool(state->Get()); };

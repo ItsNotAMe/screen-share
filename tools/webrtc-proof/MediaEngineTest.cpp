@@ -57,6 +57,9 @@ int main() {
                     config.type = webrtc::PeerConnectionInterface::kRelay;
                     peer.connection = engine.CreatePeer(peer, config);
                     Require(peer.connection->GetConfiguration().type == config.type, "ICE policy was lost");
+                    Require(peer.connection->GetConfiguration().audio_jitter_buffer_max_packets == 10 &&
+                        peer.connection->GetConfiguration().audio_jitter_buffer_fast_accelerate,
+                        "Audio recovery policy was lost");
                     auto audio = engine.CreateAudioTrack();
                     rejected = false;
                     try { engine.AttachHostMedia(*peer.connection, nullptr, audio); }

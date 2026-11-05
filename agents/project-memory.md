@@ -110,6 +110,32 @@ Windows UI run stopped earlier at the native-presentation startup assertion
 (occluded surface, zero presented frames); it did not reach the audio scenario.
 No physical audio listening, version bump or publication was performed.
 
+## Audio lag recovery investigation - 2026-11-05
+
+Paired 1.0.11 reports showed low RTT, effectively no packet loss, fast hardware
+codecs and bounded presentation handoff, but interval video buffering reached
+about 1.5 seconds and audio buffering about 0.5 seconds. They do not contain PCM
+worker timing, so the initiating stall cannot be identified conclusively.
+The older static-sound reports contain no audio-device failure and cannot
+establish signal fidelity or a distinct static-noise cause.
+
+Real production room loopback with a stalled synthetic output reproduced sound
+remaining roughly 600ms behind video after a 600ms stall. Bound NetEq to ten
+packets and enable its fast acceleration. Let NetEq manage recovery: burst
+draining missed callbacks distorted its jitter estimate and was discarded.
+Preserve PCM pacer phase so wake-up overshoot and callback work do not accumulate
+on the silent capture/discard clocks. Keep no-replay and cancellation behavior.
+Reports now retain PCM block/drop/delay/callback-gap counters and transport
+jitter-buffer target/minimum and inserted/removed audio sample counters.
+The new silent room regression covers repeated 400/600/1200ms output stalls in
+both presets; it does not qualify remote device drivers or every WAN condition.
+The full Release build succeeded. All 40 registered checks pass after correcting
+the new cadence fixture to use the high-resolution timer for its simulated work
+and rerunning native-pcm-audio; ordinary Windows sleep rounded its 2ms wait up.
+Stereo levels, room media/reconnect/UI and sync recovery passed in the full run.
+The generated portable ZIP matches the rebuilt executables. No version bump or
+publication was performed.
+
 ## Version 1.0.11 release preparation - 2026-10-15
 
 Versioned notes and updater text prepare the shared source picker, selected-source
