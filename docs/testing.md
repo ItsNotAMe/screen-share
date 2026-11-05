@@ -20,6 +20,18 @@ received silence with no host capture endpoint opened, then restore the exact
 source on unmute. An outstanding automatic source edit cannot override Mute.
 `native-pcm-audio` also covers inactive selection, recording restart, deferred
 startup failure without fallback, and rejecting commands after close.
+`room-v2-viewer-removal` removes one of two identically named viewers, checks
+controller release and rejected stale input, and requires continued media and
+the same connection generation for the other viewer. It covers cancellation,
+focus return, departure during confirmation, joining with a new membership, and
+the removed viewer's explanation. API checks reject viewer-initiated removal,
+host self-removal, invalid/missing targets and overlapping mutations.
+Run this scenario alone with `node signaling-worker/tests/run-native-service.mjs
+build/release/RoomUiTests.exe build/viewer-removal-evidence media viewer-removal`
+and `QT_QPA_PLATFORM=offscreen`.
+It uses its own local service so the larger UI run does not exhaust the
+production admission rate budget within one minute.
+
 Input service regressions cover accumulating requests, denial preserving existing
 grants/held input, requests arriving during grant application and cancellation.
 `desktop-input` uses generated HWNDs to check keyboard grants with mismatched or

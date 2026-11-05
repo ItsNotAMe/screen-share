@@ -6,6 +6,8 @@ Both endpoints should use the same test build. Reports identify the executable
 by SHA-256, not only the displayed version. A peer's `correlation` matches the
 other endpoint's `selfCorrelation` within the same room without exporting IDs.
 
+`removedByHost` retains an explicit removal reason after shutdown.
+
 `schema` remains 1; `diagnosticsSchema: 2` adds:
 
 - OS/kernel/architecture, Qt build/runtime, executable fingerprint, GPU PCI

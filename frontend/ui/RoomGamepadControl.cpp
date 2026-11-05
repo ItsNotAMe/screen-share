@@ -300,6 +300,7 @@ void RoomGamepadControl::Tick() {
     const auto port = port_(); const auto states = port ? port->Read() : std::vector<input::Status>{};
     const auto room = room_(); const auto selected = peers_->currentData().toString();
     if(host_) {
+        const auto removing = removingViewer ? removingViewer() : QString{};
         QStringList present;
         for(const auto& member:room.members) if(!member.host) {
             const auto id=QString::fromStdString(member.peerId);present<<id;
@@ -338,11 +339,20 @@ void RoomGamepadControl::Tick() {
                         Tick();
                     });
                 }
+                auto* remove = new QPushButton("Remove viewer…"); remove->setObjectName("removeRoomViewer");
+                remove->setProperty("peerId",id); remove->setIcon(uiIcon("remove")); remove->setMinimumHeight(32);
+                body->addWidget(remove,0,Qt::AlignRight);
+                connect(remove,&QPushButton::clicked,this,[this,id] { if(removeViewerRequested)removeViewerRequested(id); });
                 peerRows_->addWidget(card);peerCards_.insert(id,card);
             }
             auto* card=peerCards_.value(id);const auto name=QString::fromStdString(member.nickname);
             card->findChild<QLabel*>("PeerName")->setText(name);
             card->findChild<QLabel*>("PeerAvatar")->setText(name.left(1).toUpper());
+            auto* remove = card->findChild<QPushButton*>("removeRoomViewer");
+            remove->setEnabled(bool(removeViewerRequested) && room.phase==v2::RoomPhase::Active && removing.isEmpty());
+            remove->setText(removing==id?"Removing…":"Remove viewer…");
+            remove->setAccessibleName(QString("Remove %1 from the room").arg(name));
+            remove->setToolTip("Disconnect this viewer from video, audio and remote control. A confirmation follows.");
             auto state=std::find_if(states.begin(),states.end(),[&](const auto& s){return s.peer==member.peerId;});
             const bool ready=state!=states.end()&&state->ready;
             const auto connection=std::find_if(room.stream.connections.begin(),room.stream.connections.end(),
@@ -364,7 +374,7 @@ void RoomGamepadControl::Tick() {
                     button->setProperty("pendingRequest",waiting);button->setProperty("requestPulse",false);
                     button->style()->unpolish(button);button->style()->polish(button);button->update();
                 }
-                button->setChecked(on);button->setEnabled(ready&&!state->grantPending&&!state->revokePending);
+                button->setChecked(on);button->setEnabled(ready&&!state->grantPending&&!state->revokePending && removing!=id);
                 const auto control=cap==input::Mouse?"mouse":cap==input::Keyboard?"keyboard":"controller";
                 const auto label=waiting?QString("%1 requested %2. Click to allow or deny %2.").arg(name,control):
                     QString("%1 %2 %3 %4").arg(on?"Revoke":"Grant",control,on?"from":"to",name);

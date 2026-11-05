@@ -408,6 +408,21 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     layout->addWidget(gamepad_);
     gamepad_->SetVideo(video_);
     gamepad_->prepareGrant=[this](uint8_t caps){return session_.prepareInputGrant(caps);};
+    if(config.room.host) {
+        gamepad_->removeViewerRequested=[this](const QString& peer) { ConfirmViewerRemoval(peer); };
+        gamepad_->removingViewer=[this] { return QString::fromStdString(session_.removingViewer()); };
+        session_.viewerRemoved=[this](const auto& result) {
+            if(result.error==RoomUpdateError::None || result.error==RoomUpdateError::NotFound) {
+                Toast::show(window(),result.error==RoomUpdateError::None?"Viewer removed from the room.":"This viewer has already left the room.");
+                return;
+            }
+            error_->setText(result.error==RoomUpdateError::Unconfirmed?
+                "Viewer removal was not confirmed. Check the viewer list before trying again.":
+                result.error==RoomUpdateError::Forbidden?"Only the host can remove a viewer.":
+                "Could not remove the viewer. Wait for the room to reconnect or finish its current change, then try again.");
+            error_->show();
+        };
+    }
     stop_ = new QPushButton("Stop"); stop_->setObjectName("stopRoom"); layout->addWidget(stop_);
     connect(stop_, &QPushButton::clicked, this, [this] { close(); stop_->setEnabled(false); apply_->setEnabled(false); });
     connect(apply_, &QPushButton::clicked, this, [this] {
@@ -938,10 +953,46 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         // Leave remains usable after failures; a normal remote room shutdown
         // follows the same cleanup/navigation path as a local Leave.
         stop_->setEnabled(!closing_);
-        if(closing_ || (!host && status.phase==RoomPhase::Stopped))
+        if(status.removedByHost) {
+            video_->clearFrame();video_->setStatusText("Removed from room");
+            error_->setText("The host removed you from the room.");error_->show();
+        }
+        if(closing_ || (!host && status.phase==RoomPhase::Stopped && !status.removedByHost))
             QTimer::singleShot(0,this,[this]{close();});
     };
     if (!session_.start(std::move(config))) { stop_->setEnabled(true); apply_->setEnabled(false); }
+}
+void RoomSessionWindow::ConfirmViewerRemoval(const QString& peerId) {
+    if(auto* existing=findChild<QDialog*>("RemoveViewerDialog")) { existing->raise(); return; }
+    const auto status=session_.status();
+    const auto peer=std::find_if(status.members.begin(),status.members.end(),[&](const auto& member) { return member.peerId==peerId.toStdString() && !member.host; });
+    if(!status.host || status.phase!=RoomPhase::Active || peer==status.members.end())return;
+    auto* dialog=new SessionPopup("Remove viewer",this); dialog->setObjectName("RemoveViewerDialog");
+    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setPanelSize({460,300});
+    auto* explanation=new QLabel;
+    explanation->setObjectName("removeViewerExplanation"); explanation->setTextFormat(Qt::PlainText); explanation->setWordWrap(true);
+    dialog->body->addWidget(explanation,1);
+    auto* actions=new QHBoxLayout;
+    auto* cancel=new QPushButton("Cancel");cancel->setObjectName("cancelViewerRemoval");cancel->setAutoDefault(false);
+    auto* remove=new QPushButton("Remove viewer");remove->setObjectName("confirmViewerRemoval");remove->setAutoDefault(false);
+    for(auto* button:{cancel,remove})button->setMinimumHeight(42);
+    actions->addWidget(cancel);actions->addStretch();actions->addWidget(remove);dialog->body->addLayout(actions);
+    connect(cancel,&QPushButton::clicked,dialog,&QDialog::reject);
+    connect(remove,&QPushButton::clicked,dialog,[this,dialog,peerId] {
+        if(session_.removeViewer(peerId.toStdString())) { error_->clear();error_->hide();dialog->accept(); }
+    });
+    auto refresh=[this,remove,explanation,peerId] {
+        const auto current=session_.status();
+        const auto target=std::find_if(current.members.begin(),current.members.end(),[&](const auto& member){return member.peerId==peerId.toStdString() && !member.host;});
+        const bool present=target!=current.members.end();
+        remove->setEnabled(current.phase==RoomPhase::Active && present && !session_.roomUpdatePending());
+        remove->setToolTip(session_.roomUpdatePending()?"Wait for the current room change to finish.":
+            current.phase!=RoomPhase::Active?"Wait for the room to reconnect.":QString{});
+        explanation->setText(present?QString("Remove “%1” from this room?\n\nTheir video, audio and remote control will stop. They can join again with the room link.").arg(QString::fromStdString(target->nickname)):
+            "This viewer has already left the room.");
+    };
+    auto* timer=new QTimer(dialog);timer->setInterval(100);connect(timer,&QTimer::timeout,dialog,refresh);timer->start();refresh();
+    dialog->open();cancel->setFocus(Qt::OtherFocusReason);
 }
 bool RoomSessionWindow::eventFilter(QObject* watched,QEvent* event) {
     auto* widget=qobject_cast<QWidget*>(watched);

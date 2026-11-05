@@ -90,5 +90,6 @@ private:
     QWidget* settingsDrawer_ = nullptr;
     QWidget* sharedAudioSettings_ = nullptr;
     void RefreshHostPreview();
+    void ConfirmViewerRemoval(const QString& peerId);
 };
 int RunRoomSessionWindow(const QString& configurationPath);

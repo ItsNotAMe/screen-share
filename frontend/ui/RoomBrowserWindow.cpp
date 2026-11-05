@@ -549,6 +549,10 @@ void RoomBrowserWindow::Launch(bool host) {
             auto update = active_->session().statusChanged;
             active_->session().statusChanged = [this, update, suppliedPassword = !password_->text().isEmpty(), admitted = false](const auto& status) mutable {
                 if (update) update(status);
+                if(!closing_ && active_ && status.removedByHost && status.phase==v2::RoomPhase::Stopped && joinFailure_.isEmpty()) {
+                    joinFailure_="The host removed you from the room.";
+                    QTimer::singleShot(0,this,[this]{if(active_)active_->close();});
+                }
                 if(!closing_ && active_ && !admitted && (status.phase==v2::RoomPhase::Connecting || status.phase==v2::RoomPhase::Active)) {
                     // Admission opens the viewer once. Later status updates must not
                     // navigate away from profile or application settings.

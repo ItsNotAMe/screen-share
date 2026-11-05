@@ -27,7 +27,7 @@ enum class RoomError { None, Busy, Cancelled, Admission, Transport, Media, Admis
 struct RoomResult { RoomError error = RoomError::None; bool outcomeUnconfirmed = false; };
 struct RoomPolicy { std::string name; bool publicRoom = true; int viewerLimit = 4; };
 struct RoomMember { std::string peerId, nickname; bool host = false; };
-enum class RoomUpdateError { None, Invalid, Busy, Unavailable, Forbidden, Conflict, Rejected, Unconfirmed };
+enum class RoomUpdateError { None, Invalid, Busy, Unavailable, Forbidden, Conflict, Rejected, Unconfirmed, NotFound };
 struct RoomUpdateResult { RoomUpdateError error = RoomUpdateError::None; uint64_t currentRevision = 0; };
 enum class StreamUpdateError { None, Invalid, Busy, Unavailable, Unsupported, Rejected };
 struct StreamUpdateResult { StreamUpdateError error = StreamUpdateError::None; uint64_t revision = 0; };
@@ -75,6 +75,7 @@ struct RoomStatus {
     media::AudioSelectionStatus audio;
     media::PlaybackStatus playback;
     bool host = false;
+    bool removedByHost = false; // Explicit authenticated room.closed reason; retained after Stop.
     media::DiagnosticHistorySnapshot sessionEvents;
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
@@ -141,13 +142,19 @@ public:
     // automatically retry Conflict or Unconfirmed (the server may have committed).
     std::future<RoomUpdateResult> UpdateNickname(std::string, uint64_t expectedRevision);
     std::future<RoomUpdateResult> UpdateRoomPolicy(RoomPolicy, uint64_t expectedRevision);
+    // Host-only removal of one current viewer, by authenticated peer identity.
+    // Shares the one-command mutation bound. Success is the server acknowledgement;
+    // pushed membership state drives media/input retirement. This is not a ban:
+    // the person may join again with a new membership. Never retry Unconfirmed.
+    std::future<RoomUpdateResult> RemoveViewer(std::string peerId);
     std::shared_future<void> Stop();
     RoomStatus Status() const;
     // Retainable, bounded input port; null before runtime creation. No per-event
     // futures/HTTP/status polling. Retained ports fail closed after session stop.
     std::shared_ptr<input::Port> Input() const;
 private:
-    std::future<RoomUpdateResult> SubmitUpdate(std::optional<std::string>, std::optional<RoomPolicy>, uint64_t);
+    std::future<RoomUpdateResult> SubmitUpdate(std::optional<std::string>, std::optional<RoomPolicy>, uint64_t,
+                                             std::optional<std::string> removePeer = {});
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

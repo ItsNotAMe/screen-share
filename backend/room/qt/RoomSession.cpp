@@ -5,6 +5,7 @@
 #include "rtc_base/thread.h"
 #include "api/units/time_delta.h"
 #include <mutex>
+#include <algorithm>
 #include <deque>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -166,7 +167,8 @@ struct RoomSession::Impl {
                     result.error = RoomUpdateError::Conflict;
                     result.currentRevision = uint64_t(payload["currentRevision"].toDouble());
                 } else if (payload["status"] != "ok")
-                    result.error = payload["code"] == "forbidden" ? RoomUpdateError::Forbidden : RoomUpdateError::Rejected;
+                    result.error = payload["code"] == "forbidden" ? RoomUpdateError::Forbidden :
+                        payload["code"] == "not_found" ? RoomUpdateError::NotFound : RoomUpdateError::Rejected;
                 FinishMutation(result);
             }
             if (event.kind == RoomSocket::EventKind::Reconnecting || event.kind == RoomSocket::EventKind::Error || event.kind == RoomSocket::EventKind::Closed)
@@ -187,7 +189,10 @@ struct RoomSession::Impl {
                 }
                 else { terminal = true; Schedule(); }
             }
-            if (event.kind == RoomSocket::EventKind::Closed) { terminal = true; terminalError = RoomError::None; Schedule(); }
+            if (event.kind == RoomSocket::EventKind::Closed) {
+                { std::lock_guard lock(mutex); status.removedByHost = event.value["payload"].toObject()["reason"] == "kicked"; }
+                terminal = true; terminalError = RoomError::None; Schedule();
+            }
         }
         void Tick() {
             if (playbackReply && playbackUpdate.valid() && playbackUpdate.wait_for(0ms) == std::future_status::ready) {
@@ -405,17 +410,25 @@ std::future<media::AudioUpdateResult> RoomSession::UpdatePlayback(media::Playbac
     });
     return future;
 }
-std::future<RoomUpdateResult> RoomSession::SubmitUpdate(std::optional<std::string> nickname, std::optional<RoomPolicy> policy, uint64_t revision) {
+std::future<RoomUpdateResult> RoomSession::RemoveViewer(std::string peerId) {
+    return SubmitUpdate({}, {}, 0, std::move(peerId));
+}
+std::future<RoomUpdateResult> RoomSession::SubmitUpdate(std::optional<std::string> nickname, std::optional<RoomPolicy> policy, uint64_t revision,
+                                                     std::optional<std::string> removePeer) {
     auto reply = std::make_shared<std::promise<RoomUpdateResult>>(); auto future = reply->get_future();
     // Bound allocations and reject revisions before converting to JSON doubles.
-    if (revision > 9007199254740991ULL || (nickname && nickname->size() > 1024) || (policy && policy->name.size() > 1024)) {
+    if (revision > 9007199254740991ULL || (nickname && nickname->size() > 1024) || (policy && policy->name.size() > 1024) ||
+        (removePeer && removePeer->size() > 128)) {
         reply->set_value({RoomUpdateError::Invalid}); return future;
     }
     if ((nickname && QString::fromStdString(*nickname).toStdString() != *nickname) ||
-        (policy && QString::fromStdString(policy->name).toStdString() != policy->name)) {
+        (policy && QString::fromStdString(policy->name).toStdString() != policy->name) ||
+        (removePeer && QString::fromStdString(*removePeer).toStdString() != *removePeer)) {
         reply->set_value({RoomUpdateError::Invalid}); return future;
     }
-    QJsonObject payload{{"expectedRevision", double(revision)}};
+    QJsonObject payload;
+    if (removePeer) payload["peerId"] = QString::fromStdString(*removePeer);
+    else payload["expectedRevision"] = double(revision);
     if (nickname) payload["nickname"] = QString::fromStdString(*nickname);
     if (policy) {
         payload["name"] = QString::fromStdString(policy->name);
@@ -429,13 +442,19 @@ std::future<RoomUpdateResult> RoomSession::SubmitUpdate(std::optional<std::strin
     }
     bool host = false;
     for (const auto& member : state->status.members) if (member.peerId == state->status.peerId) host = member.host;
-    if (policy && !host) { reply->set_value({RoomUpdateError::Forbidden}); return future; }
+    if ((policy || removePeer) && !host) { reply->set_value({RoomUpdateError::Forbidden}); return future; }
     if (state->mutationQueued) { reply->set_value({RoomUpdateError::Busy}); return future; }
     const auto id = QString("mutation_%1").arg(++state->mutationSequence);
     const auto validation = room::wire::ValidateClientCommand(QJsonDocument(QJsonObject{
-        {"v", 2}, {"type", nickname ? "profile.update" : "room.update"}, {"roomId", QString::fromStdString(state->status.roomId)},
+        {"v", 2}, {"type", removePeer ? "peer.disconnect" : nickname ? "profile.update" : "room.update"}, {"roomId", QString::fromStdString(state->status.roomId)},
         {"requestId", id}, {"payload", payload}}).toJson(QJsonDocument::Compact));
     if (!validation.ok) { reply->set_value({RoomUpdateError::Invalid}); return future; }
+    if (removePeer) {
+        const auto target = std::find_if(state->status.members.begin(), state->status.members.end(),
+            [&](const auto& member) { return member.peerId == *removePeer; });
+        if (target == state->status.members.end()) { reply->set_value({RoomUpdateError::NotFound}); return future; }
+        if (target->host || *removePeer == state->status.peerId) { reply->set_value({RoomUpdateError::Forbidden}); return future; }
+    }
     state->mutationQueued = true;
     impl_->executor.Post([state, reply, id, bytes = QJsonDocument(validation.message).toJson(QJsonDocument::Compact)] {
         state->mutationReply = reply; state->mutationId = id;

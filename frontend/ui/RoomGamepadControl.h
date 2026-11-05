@@ -25,6 +25,8 @@ public:
     void Revoke(const QString& explanation = {});
     void SetVideo(VideoFrameWidget*);
     std::function<bool(uint8_t)> prepareGrant;
+    std::function<void(const QString&)> removeViewerRequested;
+    std::function<QString()> removingViewer;
 protected:
     bool eventFilter(QObject*, QEvent*) override;
 private:

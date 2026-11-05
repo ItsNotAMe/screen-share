@@ -245,7 +245,7 @@ QFrame#SettingsDivider { background: #293631; border: 0; }
 QPushButton#sessionStreamAdvanced { background: transparent; border: 0; text-align: left; padding: 0; color: #c5d1cb; }
 QPushButton#sessionStreamAdvanced:hover { background: #263d33; }
 QWidget#SessionAdvancedContent { background: transparent; }
-QDialog#RoomPasswordDialog, QDialog#SourcePickerDialog, QDialog#SessionDetailsPopup { background: rgba(0,0,0,150); color: #edf5f2; }
+QDialog#RoomPasswordDialog, QDialog#SourcePickerDialog, QDialog#SessionDetailsPopup, QDialog#RemoveViewerDialog { background: rgba(0,0,0,150); color: #edf5f2; }
 QWidget#SessionPopupPanel { background: #151d1b; border: 1px solid #35473f; border-radius: 10px; }
 QTabWidget#SessionDetailsTabs::pane { border: 0; border-top: 1px solid #293631; }
 QTabWidget#SessionDetailsTabs QTabBar::tab { background: transparent; color: #a3b5af; padding: 10px 18px; border-bottom: 2px solid transparent; }
@@ -268,9 +268,10 @@ QSlider#sessionVolume::handle:horizontal { background: #38d8c8; width: 14px; mar
 QWidget#SessionCard { background: #121a17; border: 1px solid #293631; border-radius: 8px; }
 QLabel#SessionSourceSummary { font-size: 10pt; color: #c5d1cb; }
 QLabel#roomPhase, QLabel#SessionConnection { color: #7bdbb8; }
-QPushButton#stopRoom { background: #a52b2b; color: #ffffff; border: 1px solid #c44747; padding: 10px 16px; }
-QPushButton#stopRoom:hover { background: #bf3535; }
-QPushButton#stopRoom:pressed { background: #872222; }
+QPushButton#stopRoom, QPushButton#confirmViewerRemoval { background: #a52b2b; color: #ffffff; border: 1px solid #c44747; padding: 10px 16px; }
+QPushButton#stopRoom:hover, QPushButton#confirmViewerRemoval:hover { background: #bf3535; }
+QPushButton#stopRoom:pressed, QPushButton#confirmViewerRemoval:pressed { background: #872222; }
+QPushButton#confirmViewerRemoval:disabled { background: #4a2524; color: #b49896; border-color: #68413e; }
 QPushButton#acceptPeerRequest, QPushButton#controllerAction, QPushButton#applyStream { background: #126c61; color: #ffffff; }
 QPushButton#acceptPeerRequest:hover, QPushButton#controllerAction:hover, QPushButton#applyStream:hover, QPushButton#confirmSourceSelection:hover,
 QPushButton#createV2Room:hover, QPushButton#joinV2Room:hover, QPushButton#joinWithPassword:hover { background: #177d70; color: #ffffff; }

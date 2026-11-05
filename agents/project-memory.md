@@ -5,6 +5,31 @@
 
 # Project Memory
 
+## Host viewer removal - 2026-11-05
+
+Host viewer rows expose Remove viewer with the existing in-page confirmation
+popup. Confirmation names the current member, uses plain text for nicknames,
+focuses Cancel and handles departure while open. Removal uses the existing
+peer.disconnect service command and authenticated peer ID, never the nickname.
+No Worker deployment or protocol change is needed. It ends a membership, not a
+ban; joining again creates a new peer identity.
+
+RoomSession::RemoveViewer shares the bounded room-mutation lane, rejects viewers,
+host self-removal and invalid/missing targets, and retains acknowledgement timeout
+and no-retry semantics. Qt routes removal completion separately from profile/room
+edits. Authoritative membership retirement releases input and media. The explicit
+server kicked reason survives Stop as removedByHost and appears in reports.
+Normal viewers return to Join with an explanation; standalone session windows
+clear the video and retain the explanation until dismissed.
+
+The Release build and all 41 CTest checks passed. A focused two-viewer test covers
+duplicate nicknames, cancel/focus, recording controller release, rejected stale
+input, unchanged surviving connection generation and continued video, departure
+during confirmation, fresh admission and the browser explanation. Compact/normal
+popup and return-page renders were inspected. The portable archive matches both
+rebuilt executables. No physical controller/audio operation, remote-WAN check,
+version bump or publication was performed.
+
 ## Host audio privacy before viewer arrival - 2026-11-05
 
 Hosts can now mute or choose audio while the room is empty. AudioSwitchControl

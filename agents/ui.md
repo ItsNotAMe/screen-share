@@ -2,6 +2,12 @@
 
 ## Current UI Direction
 
+- Hosts can remove a viewer from that viewer's row after a named confirmation.
+  Reuse SessionPopup, focus Cancel and preserve identity/focus during room pushes.
+  Removal targets peer ID, not nickname; handle departure while confirmation is
+  open. Other viewers stay connected. Removed viewers return to Join with an
+  explanation. Removal ends a membership and does not ban future admissions.
+
 - Host Mute audio and source-picker audio changes work before a viewer arrives.
   Show Audio muted in the summary and synchronize the speaker icon. Share audio
   restores the exact prior selection. An explicit mute cancels pending automatic

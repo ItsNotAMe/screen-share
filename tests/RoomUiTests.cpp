@@ -79,10 +79,11 @@ template<class F> void Wait(F condition, std::source_location where = std::sourc
         QCoreApplication::processEvents(); std::this_thread::sleep_for(1ms);
     }
 }
-void RespondToInputRequest(RoomSessionWindow& host, uint8_t capability, bool allow=true) {
+void RespondToInputRequest(RoomSessionWindow& host, uint8_t capability, bool allow=true, const std::string& peer={}) {
     QPushButton* control=nullptr;
     Wait([&] {
-        for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))if(button->property("capability").toUInt()==capability)
+        for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))if(button->property("capability").toUInt()==capability &&
+            (peer.empty() || button->property("peerId").toString().toStdString()==peer))
             control=button;
         return control && control->isEnabled() && control->property("pendingRequest").toBool();
     });
@@ -405,13 +406,22 @@ void MutationLifecycle(const std::string& origin) {
     RoomSession session([barrier](auto, auto) { return std::make_unique<PausedRuntime>(barrier); }, true);
     RoomOptions options; options.origin = origin; options.host = true; options.nickname = "Lifecycle"; options.name = "Mutation lifecycle";
     auto start = session.Start(options); Wait([&] { return start.wait_for(0ms) == std::future_status::ready; }); Check(start.get().error == RoomError::None);
+    RoomSession guest([](auto, auto) { return std::make_unique<PausedRuntime>(std::make_shared<MutationBarrier>()); }, true);
+    auto guestOptions=options;guestOptions.host=false;guestOptions.roomId=session.Status().roomId;guestOptions.nickname="Guest";
+    auto joined=guest.Start(guestOptions);Wait([&]{return joined.wait_for(0ms)==std::future_status::ready;});Check(joined.get().error==RoomError::None);
+    Wait([&]{return session.Status().members.size()==2;});
+    Check(guest.RemoveViewer(session.Status().peerId).get().error==RoomUpdateError::Forbidden);
+    Check(session.RemoveViewer(session.Status().peerId).get().error==RoomUpdateError::Forbidden);
+    Check(session.RemoveViewer("unknown-viewer").get().error==RoomUpdateError::NotFound);
+    Check(session.RemoveViewer("bad peer id").get().error==RoomUpdateError::Invalid);
+    Check(session.RemoveViewer(std::string(129,'x')).get().error==RoomUpdateError::Invalid);
     const auto revision = session.Status().revision;
     Check(session.UpdateNickname("Invalid revision", UINT64_MAX).get().error == RoomUpdateError::Invalid);
     Check(session.UpdateNickname(std::string(1, char(0xff)), revision).get().error == RoomUpdateError::Invalid);
     barrier->pause = true;
     try {
         Wait([&] { return barrier->entered.load(); });
-        auto pending = session.UpdateNickname("Pending", revision);
+        auto pending = session.RemoveViewer(guest.Status().peerId);
         auto pendingSource = session.SwitchCaptureSource({});
         auto pendingAudio = session.SwitchAudioSource({});
         auto pendingPlayback = session.UpdatePlayback({});
@@ -419,8 +429,10 @@ void MutationLifecycle(const std::string& origin) {
         Check(session.SwitchAudioSource({}).get().error == AudioUpdateError::Busy);
         Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Busy);
         Check(session.UpdateNickname("Overflow", revision).get().error == RoomUpdateError::Busy);
+        Check(session.RemoveViewer(guest.Status().peerId).get().error == RoomUpdateError::Busy);
         auto stopping = session.Stop();
         Check(session.UpdateNickname("Stopped", revision).get().error == RoomUpdateError::Unavailable);
+        Check(session.RemoveViewer(guest.Status().peerId).get().error == RoomUpdateError::Unavailable);
         barrier->release.set_value();
         Wait([&] { return stopping.wait_for(0ms) == std::future_status::ready; }); stopping.get();
         Check(pending.get().error == RoomUpdateError::Unconfirmed);
@@ -431,6 +443,103 @@ void MutationLifecycle(const std::string& origin) {
         Check(session.SwitchAudioSource({}).get().error == AudioUpdateError::Unavailable);
         Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Unavailable);
     } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
+}
+void ViewerRemovalScenario(const std::string& origin) {
+    auto sink=std::make_shared<RecordingGamepadSink>();
+    RoomSessionConfig config;config.room.origin=origin;config.room.host=true;
+    config.room.nickname="Host";config.room.name="Viewer removal";config.media.inputSink=sink;
+    RoomSessionWindow host(config,Factory(std::make_shared<proof::AudioEvidence>()),true);host.show();
+    Wait([&]{return host.session().status().phase==RoomPhase::Active;});
+    const auto roomId=host.session().status().roomId;
+    config.room.host=false;config.room.roomId=roomId;config.room.nickname="Same viewer <one & two>";config.media.inputSink.reset();
+    const auto devices=[] {return std::vector<screenshare::ViewerGamepadDevice>{{"test-pad","Recording controller"}};};
+    const auto read=[](std::string_view) -> std::optional<screenshare::RemoteGamepadState> { screenshare::RemoteGamepadState value;value.buttons=1;return value; };
+    RoomSessionWindow target(config,Factory(std::make_shared<proof::AudioEvidence>()),true,nullptr,devices,read);target.show();
+    RoomSessionWindow survivor(config,Factory(std::make_shared<proof::AudioEvidence>()),true);survivor.show();
+    unsigned targetFrames=0,survivorFrames=0;
+    auto showTarget=target.session().frameReady,showSurvivor=survivor.session().frameReady;
+    target.session().frameReady=[&](auto frame){++targetFrames;if(showTarget)showTarget(std::move(frame));};
+    survivor.session().frameReady=[&](auto frame){++survivorFrames;if(showSurvivor)showSurvivor(std::move(frame));};
+    Wait([&]{return targetFrames>=10 && survivorFrames>=10 && host.session().status().members.size()==3;});
+    const auto targetId=target.session().status().peerId,survivorId=survivor.session().status().peerId;
+    Check(targetId!=survivorId && target.session().status().roomId==roomId);
+    Check(target.findChildren<QPushButton*>("removeRoomViewer").empty());
+    auto buttonFor=[&](const std::string& peer) -> QPushButton* {
+        for(auto* button:host.findChildren<QPushButton*>("removeRoomViewer"))if(button->property("peerId").toString().toStdString()==peer)return button;
+        return nullptr;
+    };
+    Wait([&]{return buttonFor(targetId) && buttonFor(targetId)->isEnabled() && buttonFor(survivorId);});
+    auto* targetButton=buttonFor(targetId);
+    host.activateWindow();Wait([&]{return QApplication::activeWindow()==&host;});targetButton->setFocus();targetButton->click();
+    auto* dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
+    auto* explanation=dialog->findChild<QLabel*>("removeViewerExplanation");
+    Check(explanation->textFormat()==Qt::PlainText && explanation->text().contains(QString::fromStdString(config.room.nickname)) && explanation->text().contains("join again"));
+    auto* cancel=dialog->findChild<QPushButton*>("cancelViewerRemoval");Check(cancel->hasFocus());cancel->click();
+    Check(!dialog->isVisible() && targetButton->hasFocus());
+    QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+    Check(host.session().status().members.size()==3 && !host.session().roomUpdatePending());
+    // Grant real transported control to a recording sink; removal must retire it.
+    auto* request=target.findChild<QToolButton*>("selectControllerInput");Wait([&]{return request->isEnabled();});request->click();
+    RespondToInputRequest(host,screenshare::input::Gamepad,true,targetId);
+    target.activateWindow();Wait([&]{return sink->buttons==1;});
+    const auto retainedInput=target.session().input();
+    std::string hostId;for(const auto& member:target.session().status().members)if(member.host)hostId=member.peerId;
+    uint64_t permission=0;for(const auto& state:retainedInput->Read())if(state.peer==hostId)permission=state.permission;
+    Check(permission!=0);
+    const auto releaseCount=sink->released.load();
+    auto generationFor=[&](const std::string& peer) {
+        for(const auto& connection:host.session().status().stream.connections)if(connection.peerId==peer && !connection.retained)return connection.generation;
+        return uint64_t(0);
+    };
+    const auto survivorGeneration=generationFor(survivorId);Check(survivorGeneration!=0);
+    host.activateWindow();targetButton->setFocus();targetButton->click();
+    dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        QDir().mkpath(output);
+        for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+            host.resize(size);QCoreApplication::processEvents();
+            Check(host.grab().save(QDir(output).filePath(QString("remove-viewer-confirm-%1.png").arg(size.width()))));
+        }
+    }
+    dialog->findChild<QPushButton*>("confirmViewerRemoval")->click();
+    Check(host.session().roomUpdatePending() && host.session().removingViewer()==targetId);
+    Check(!host.session().removeViewer(survivorId)); // A double action cannot queue another removal.
+    Wait([&]{return !host.session().roomUpdatePending() && !target.session().running() && host.session().status().members.size()==2;});
+    Check(target.session().status().removedByHost && target.isVisible() && target.findChild<QLabel*>("roomError")->text().contains("host removed"));
+    Wait([&]{return !buttonFor(targetId) && sink->released>releaseCount && sink->buttons==0;});
+    for(const auto& state:host.session().input()->Read())Check(state.peer!=targetId);
+    screenshare::input::Event stale;stale.kind=screenshare::input::Kind::Pad;stale.buttons=1;
+    Check(!retainedInput->SubmitIfCurrent(hostId,permission,stale));
+    const auto stoppedFrames=targetFrames,remainingFrames=survivorFrames;
+    Wait([&]{return survivorFrames>=remainingFrames+10;});
+    Check(targetFrames==stoppedFrames && host.session().status().phase==RoomPhase::Active && generationFor(survivorId)==survivorGeneration);
+    QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+    // A fresh membership is permitted: removal is explicitly not a room ban.
+    QTemporaryDir profile;Check(profile.isValid());const auto profilePath=profile.filePath("viewer.ini");
+    {RoomProfile saved(profilePath);Check(saved.saveNickname(QString::fromStdString(config.room.nickname)));}
+    RoomBrowserWindow browser(QUrl(QString::fromStdString(origin)),Factory(std::make_shared<proof::AudioEvidence>()),true,profilePath,false);
+    browser.OpenJoin(QString::fromStdString(roomId));browser.show();browser.findChild<QPushButton*>("joinV2Room")->click();
+    Wait([&]{return browser.activeSession() && browser.activeSession()->session().status().activePeers==1 && host.session().status().members.size()==3;});
+    const auto newPeer=browser.activeSession()->session().status().peerId;Check(newPeer!=targetId);
+    Wait([&]{return buttonFor(newPeer) && buttonFor(newPeer)->isEnabled();});buttonFor(newPeer)->click();
+    dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
+    browser.activeSession()->close();
+    Wait([&]{return !browser.activeSession() && host.session().status().members.size()==2;});
+    Wait([&]{return !dialog->findChild<QPushButton*>("confirmViewerRemoval")->isEnabled();});
+    Check(dialog->findChild<QLabel*>("removeViewerExplanation")->text().contains("already left"));
+    dialog->reject();QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+    browser.OpenJoin(QString::fromStdString(roomId));browser.show();browser.findChild<QPushButton*>("joinV2Room")->click();
+    Wait([&]{return browser.activeSession() && browser.activeSession()->session().status().activePeers==1 && host.session().status().members.size()==3;});
+    const auto finalPeer=browser.activeSession()->session().status().peerId;
+    Wait([&]{return buttonFor(finalPeer) && buttonFor(finalPeer)->isEnabled();});buttonFor(finalPeer)->click();
+    dialog=host.findChild<QDialog*>("RemoveViewerDialog");Check(dialog && dialog->isVisible());
+    dialog->findChild<QPushButton*>("confirmViewerRemoval")->click();
+    Wait([&]{return !browser.activeSession() && browser.isVisible() && host.session().status().members.size()==2;});
+    Check(browser.findChild<QLabel*>("browserError")->text()=="The host removed you from the room.");
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty())
+        Check(browser.grab().save(QDir(output).filePath("removed-viewer-return.png")));
+    browser.close();target.close();survivor.close();host.close();
+    Wait([&]{return !survivor.session().running() && !host.session().running();});
 }
 void ProfileSettingsScenario() {
     {
@@ -1744,14 +1853,15 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         CapturePreviewOwnership();
-        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
+        Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
         WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         NativePresentationRecovery();
         proof::TestWindow capture; captureWindow = capture.handle();
 #endif
-        if(argc==3 && std::string(argv[2])=="native-resolution") {NativeResolutionScenario(argv[1]);std::cout<<"{\"passed\":true,\"native_resolution\":true}\n";}
+        if(argc==3 && std::string(argv[2])=="viewer-removal") {ViewerRemovalScenario(argv[1]);MutationLifecycle(argv[1]);std::cout<<"{\"passed\":true,\"viewer_removal\":true,\"input_retired\":true,\"other_viewer_continues\":true}\n";}
+        else if(argc==3 && std::string(argv[2])=="native-resolution") {NativeResolutionScenario(argv[1]);std::cout<<"{\"passed\":true,\"native_resolution\":true}\n";}
         else if(argc==3 && std::string(argv[2])=="source-switch") {
             const auto samples=SourceSwitchScenario(argv[1]);
             const QJsonObject metrics{{"passed",true},{"source_close_two_viewers",true},{"preview_ownership",true},{"steadyShare",samples}};

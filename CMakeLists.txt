@@ -699,6 +699,12 @@ if(SCREENSHARE_BUILD_QT_UI)
                         "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                         "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-ui-evidence" media)
                     set_tests_properties(room-v2-qt-ui PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+                    # Keep moderation admissions in a fresh local service so the
+                    # combined UI flow does not depend on a rate-limit minute boundary.
+                    add_test(NAME room-v2-viewer-removal COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                        "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-removal-evidence" media viewer-removal)
+                    set_tests_properties(room-v2-viewer-removal PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
                     add_test(NAME room-v2-mutation-ack-recovery COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
                         "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                         "$<TARGET_FILE:RoomUiTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-mutation-evidence" media mutation-ack-delay)

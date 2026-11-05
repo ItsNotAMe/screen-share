@@ -66,10 +66,14 @@ void QtRoomSession::updatePlayback(screenshare::media::PlaybackSelection selecti
     if (session_ && !stopping_.valid() && !playbackUpdate_.valid()) playbackUpdate_ = session_->UpdatePlayback(std::move(selection));
 }
 void QtRoomSession::updateNickname(std::string nickname, uint64_t revision) {
-    if (session_ && !stopping_.valid() && !mutation_.valid()) mutation_ = session_->UpdateNickname(std::move(nickname), revision);
+    if (session_ && !stopping_.valid() && !roomUpdatePending()) mutation_ = session_->UpdateNickname(std::move(nickname), revision);
 }
 void QtRoomSession::updatePolicy(RoomPolicy policy, uint64_t revision) {
-    if (session_ && !stopping_.valid() && !mutation_.valid()) mutation_ = session_->UpdateRoomPolicy(std::move(policy), revision);
+    if (session_ && !stopping_.valid() && !roomUpdatePending()) mutation_ = session_->UpdateRoomPolicy(std::move(policy), revision);
+}
+bool QtRoomSession::removeViewer(std::string peerId) {
+    if (!session_ || stopping_.valid() || roomUpdatePending()) return false;
+    removal_ = session_->RemoveViewer(peerId); removingPeer_ = std::move(peerId); return true;
 }
 void QtRoomSession::tick() {
     if (!session_) return;
@@ -95,6 +99,10 @@ void QtRoomSession::tick() {
     if (mutation_.valid() && mutation_.wait_for(0ms) == std::future_status::ready) {
         const auto result = mutation_.get();
         if (roomUpdated) roomUpdated(result);
+    }
+    if (removal_.valid() && removal_.wait_for(0ms) == std::future_status::ready) {
+        const auto result = removal_.get(); removingPeer_.clear();
+        if (viewerRemoved) viewerRemoved(result);
     }
     if (current.phase == RoomPhase::Failed || current.phase == RoomPhase::Stopped) stop();
     if (applying_.valid() && applying_.wait_for(0ms) == std::future_status::ready) {
@@ -133,6 +141,10 @@ void QtRoomSession::tick() {
         if (mutation_.valid()) {
             const auto result = mutation_.get();
             if (roomUpdated) roomUpdated(result);
+        }
+        if (removal_.valid()) {
+            const auto result = removal_.get(); removingPeer_.clear();
+            if (viewerRemoved) viewerRemoved(result);
         }
         if (admission_.valid()) {
             const auto result = admission_.get();
