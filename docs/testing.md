@@ -32,6 +32,17 @@ and `QT_QPA_PLATFORM=offscreen`.
 It uses its own local service so the larger UI run does not exhaust the
 production admission rate budget within one minute.
 
+Viewer share-state checks use the production telemetry channel to verify host
+pause/resume while audio continues, two-viewer source closure/replacement and
+minimize/restore. A Live notice with the UI frame consumer temporarily delayed
+must keep the resuming message until a decoded frame arrives. The protocol checks
+in `native-room-runtime-link` cover all states, malformed/truncated packets,
+connection binding, replay/reordering, receipt expiry and bounded acceptance.
+The recording-controller scenario checks neutral input while video is paused
+and resumption with the same permission. The recording desktop UI scenario also
+holds a mouse button and key across host pause, requiring releases and retaining
+the grant before video resumes. These checks inject no physical input.
+
 Input service regressions cover accumulating requests, denial preserving existing
 grants/held input, requests arriving during grant application and cancellation.
 `desktop-input` uses generated HWNDs to check keyboard grants with mismatched or

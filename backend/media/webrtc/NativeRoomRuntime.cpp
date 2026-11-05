@@ -253,6 +253,7 @@ public:
             for(const auto& [id,entry]:peers_) if(!entry->removing && !entry->retired) {
                 const auto sample=entry->sendRate->Read();
                 result.receiveBps=sample.receiveBps;result.receiveRttMs=sample.sender.rttMs;
+                result.remoteShare=entry->telemetry->RemoteShare();
                 break;
             }
             return result;
@@ -352,6 +353,10 @@ public:
         }
         owner_->Tick(PeerConnectionLifecycle::Clock::now());
         const auto delivery = identity_.host ? capture_.snapshot() : HostMediaSnapshot{};
+        const auto share = delivery.state==HostMediaState::SourceUnavailable || delivery.state==HostMediaState::SourceClosed ? HostShareState::SourceUnavailable :
+            delivery.state==HostMediaState::Minimized ? HostShareState::SourceMinimized :
+            delivery.state==HostMediaState::Recovering ? HostShareState::Recovering :
+            options_.preferences.videoPaused ? HostShareState::VideoPaused : HostShareState::Live;
         const size_t viewers = std::count_if(peers_.begin(), peers_.end(), [](const auto& item) {
             return !item.second->removing && !item.second->retired;
         });
@@ -366,7 +371,7 @@ public:
                 entry.statsConnection = entry.negotiation->connectionId();
                 entry.sendRate = std::make_shared<TransportSendRate>();
             }
-            if (!entry.removing) entry.telemetry->Advance(entry.negotiation->connectionId(), *entry.peer->connection, entry.negotiation->ready());
+            if (!entry.removing) entry.telemetry->Advance(entry.negotiation->connectionId(), *entry.peer->connection, entry.negotiation->ready(), share);
             auto status = owner_->snapshot(entry.generation);
             if (entry.input) entry.input->Advance(entry.negotiation->connectionId(),
                 !entry.removing && entry.negotiation->ready() && status && !status->peerClosed &&

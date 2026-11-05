@@ -2,6 +2,13 @@
 
 ## Current UI Direction
 
+- Viewers clear stale pictures for fresh host notices of paused video, minimized
+  or unavailable sources, and capture recovery. Keep Resuming video until an
+  actual decoded frame reaches the UI. Notices use the existing video status
+  surface and accessible description. Clear held input before clearing mapping;
+  gate remote input until fresh video while preserving grants and focus policy.
+  Game mouse must be captured again after the video returns.
+
 - Hosts can remove a viewer from that viewer's row after a named confirmation.
   Reuse SessionPopup, focus Cancel and preserve identity/focus during room pushes.
   Removal targets peer ID, not nickname; handle departure while confirmation is

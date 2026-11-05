@@ -207,7 +207,7 @@ void RoomGamepadControl::SetVideo(VideoFrameWidget* video) {
             }
             return;
         }
-        if(!port || !armed_ || inputPaused_->load() || requestedPeer_.empty())return;
+        if(!port || !armed_ || inputPaused_->load() || !videoAvailable_->load() || requestedPeer_.empty())return;
         uint64_t permission=0;
         for(const auto& state:port->Read())if(state.peer==requestedPeer_)permission=state.permission;
         if(!port->SubmitIfCurrent(requestedPeer_,permission,*event)){Revoke();return;}
@@ -228,6 +228,16 @@ void RoomGamepadControl::RespondToRequest(const QString& peer, uint8_t capabilit
             else actionError_.clear();
         }
         break;
+    }
+    Tick();
+}
+void RoomGamepadControl::SetVideoAvailable(bool available) {
+    if(host_ || videoAvailable_->exchange(available)==available)return;
+    if(!available) {
+        // Release under the original frame mapping before the video is cleared.
+        // Availability is independent of focus; keep the existing focus policy
+        // so a focused viewer can resume with the same grant after fresh video.
+        const bool paused=inputPaused_->load();PauseInput();inputPaused_->store(paused);
     }
     Tick();
 }
@@ -427,9 +437,9 @@ void RoomGamepadControl::Tick() {
         if(granted && (!armed_ || requestedPeer_!=peer)){granted=0;}
         if (poller_ && poller_->permission() != permission) poller_.reset();
         if ((granted & input::Gamepad) && !poller_) {
-            poller_ = std::make_unique<input::GamepadPoller>(port, peer, [read = read_, selected=selectedDevice_, paused=inputPaused_]() -> std::optional<input::Event> {
+            poller_ = std::make_unique<input::GamepadPoller>(port, peer, [read = read_, selected=selectedDevice_, paused=inputPaused_, video=videoAvailable_]() -> std::optional<input::Event> {
                 input::Event event;event.kind=input::Kind::Pad;
-                if(paused->load())return event;
+                if(paused->load() || !video->load())return event;
                 const auto device=selected->load();
                 const auto value=device&&!device->empty()?read(*device):std::optional<RemoteGamepadState>{};
                 if(!value)return event; // Keep permission, release held state, and wait for a device.
@@ -439,7 +449,7 @@ void RoomGamepadControl::Tick() {
             });
         }
         if (!granted && poller_) Revoke("Controller input stopped. Check the selected device and request fresh permission.");
-        capturingDesktop_=!inputPaused_->load() && bool(granted&(input::Mouse|input::Keyboard));
+        capturingDesktop_=!inputPaused_->load() && videoAvailable_->load() && bool(granted&(input::Mouse|input::Keyboard));
         if(video_)video_->setControlCapture(capturingDesktop_,granted&input::Mouse,granted&input::Keyboard);
     }
     if(action_)action_->setEnabled(room.phase == v2::RoomPhase::Active && caps && consent_->isChecked() && !peer.empty());

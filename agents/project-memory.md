@@ -5,6 +5,39 @@
 
 # Project Memory
 
+## Viewer notices for paused/unavailable video - 2026-11-05
+
+Hosts publish video intent/capture condition through the existing bidirectional
+telemetry channel. SHS v1 carries only connection ID, sequence and an enum: Live,
+VideoPaused, SourceUnavailable, SourceMinimized or Recovering. Publication keeps
+the latest state, bounds sends to four/second and heartbeats once/second. The
+viewer inbox checks size/version/state, connection and increasing sequence,
+bounds acceptance and withdraws observations after three seconds. Old hosts have
+no observation; old viewers ignore these packets. No Worker change is needed.
+
+Viewer status surfaces clear the old picture for non-live states. A Live notice
+keeps Resuming video until a decoded frame reaches the UI. This is host intent,
+not proof of remote presentation. Reports include remoteShare state/staleness/
+receipt age. Before clearing a frame, RoomGamepadControl releases held input
+under its old mapping and neutralizes controller polling through an independent
+video-availability gate. Grants and the existing focus policy are preserved;
+fresh accepted video lifts that gate, while Game mouse needs recapture.
+
+The Release build and all 42 CTest checks passed. After the final input-gating
+refinement, six relevant UI/input/report/runtime checks and the recording desktop
+UI scenario passed again. Coverage includes pause with continued audio, delayed
+UI consumption after Live, two-viewer close/replace/minimize/restore, protocol
+replay/binding/expiry/bounds, neutral controller/resume under the same permission,
+and mouse/key releases without revoking grants. Rendered paused/minimized/missing
+source states were inspected at compact and normal sizes. The portable archive
+matches both rebuilt executables. No physical input/listening/WAN qualification,
+version bump or publication was performed.
+
+The formerly combined UI run hit admission error 9 (RateLimited) at its last
+source scenario. Viewer removal now has its own registered local-service test,
+room-v2-viewer-removal, so admission counts do not depend on the minute boundary.
+Production limits remain unchanged.
+
 ## Host viewer removal - 2026-11-05
 
 Host viewer rows expose Remove viewer with the existing in-page confirmation

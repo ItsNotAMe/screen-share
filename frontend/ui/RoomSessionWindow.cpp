@@ -527,7 +527,11 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         }
     };
     if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::Nv12VideoFrame frame) {
-        video_->setVideoFrame(std::move(frame));
+        if(remoteVideoBlocked_)return;
+        if(!remoteVideoMessage_.isEmpty()) {
+            remoteVideoMessage_.clear();video_->setStatusText({});video_->setAccessibleDescription({});
+        }
+        if(video_->setVideoFrame(std::move(frame)))gamepad_->SetVideoAvailable(true);
     };
     if (!config.room.host && config.preview) {
         auto* diagnostics = new QLabel(this); diagnostics->setObjectName("viewerPresentationDiagnostics");
@@ -718,8 +722,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         controlsBody->addLayout(metrics);
         auto* connection=new QLabel(this);connection->setObjectName("SessionConnection");connection->hide();
         auto previous=session_.statusChanged;
-        session_.statusChanged=[previous,connection,rtt,bitrate](const auto& status){
+        session_.statusChanged=[this,previous,connection,rtt,bitrate](const auto& status){
             previous(status);connection->setText(Phase(status.phase));
+            UpdateViewerShareState(status);
             rtt->setText(status.stream.receiveRttMs?QString("%1 ms").arg(*status.stream.receiveRttMs,0,'f',0):QString(QChar(0x2014)));
             bitrate->setText(status.stream.receiveBps?QString("%1 Mbps").arg(*status.stream.receiveBps/1000000.0,0,'f',1):QString(QChar(0x2014)));
         };
@@ -961,6 +966,29 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             QTimer::singleShot(0,this,[this]{close();});
     };
     if (!session_.start(std::move(config))) { stop_->setEnabled(true); apply_->setEnabled(false); }
+}
+void RoomSessionWindow::UpdateViewerShareState(const RoomStatus& status) {
+    if(status.phase==RoomPhase::Stopping || status.phase==RoomPhase::Stopped || status.phase==RoomPhase::Failed)return;
+    QString message;
+    if(status.stream.remoteShare.state) switch(*status.stream.remoteShare.state) {
+    case HostShareState::VideoPaused: message="Host paused video\nAudio may continue.";break;
+    case HostShareState::SourceUnavailable: message="Waiting for the host\nto choose a share source.";break;
+    case HostShareState::SourceMinimized: message="Shared window is minimized\nWaiting for the host to restore it.";break;
+    case HostShareState::Recovering: message="Host is restoring video\nPlease wait…";break;
+    case HostShareState::Live: break;
+    }
+    if(!message.isEmpty()) {
+        remoteVideoBlocked_=true;
+        gamepad_->SetVideoAvailable(false);
+        if(remoteVideoMessage_!=message) {video_->clearFrame();video_->setStatusText(message);video_->setAccessibleDescription(message);}
+        remoteVideoMessage_=std::move(message);
+    } else if(remoteVideoBlocked_) {
+        remoteVideoBlocked_=false;
+        // A host's Live notice is intent, not proof that a fresh frame arrived.
+        // Keep the status surface until the next decoded frame is consumed.
+        remoteVideoMessage_=status.stream.remoteShare.state?"Resuming video…":"Waiting for video…";
+        video_->setStatusText(remoteVideoMessage_);video_->setAccessibleDescription(remoteVideoMessage_);
+    }
 }
 void RoomSessionWindow::ConfirmViewerRemoval(const QString& peerId) {
     if(auto* existing=findChild<QDialog*>("RemoveViewerDialog")) { existing->raise(); return; }

@@ -39,6 +39,13 @@ source. While muted, the host summary shows Audio muted. An idle source selectio
 is saved without opening an audio device. Capture starts with that selection when
 a viewer connects; an unavailable source stays silent and reports the failure.
 
+With current clients at both ends, viewers see an explanation when the host
+pauses video, minimizes the shared window, loses the source or recovers capture.
+The old picture clears during these states. A resuming message remains until a
+new decoded frame arrives. Audio and room controls remain available.
+Held keys and buttons are released, and remote input pauses until fresh video
+arrives. Host permissions are kept. Click the video again to recapture Game mouse.
+
 Shared audio negotiates stereo between current versions. At 100% viewer volume,
 the app applies no playback attenuation. System capture from 5.1/7.1 outputs
 preserves front-channel levels, mixes center/surround at -3 dB and omits LFE.

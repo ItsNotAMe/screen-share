@@ -100,6 +100,13 @@ int main(int argc, char** argv) {
         screenshare::input::Status input; input.peer = peer.peerId; input.reason = screenshare::input::Reason::Backpressure;
         input.transportBlocked = true; input.reliableQueued = 2;
         auto report = RoomDiagnosticReport(status, {input});
+        Check(report["remoteShare"].toObject()["state"].isNull() && !report["remoteShare"].toObject()["stale"].toBool());
+        auto paused=status;paused.stream.remoteShare={HostShareState::VideoPaused,false,1};
+        const auto pausedShare=RoomDiagnosticReport(paused)["remoteShare"].toObject();
+        Check(pausedShare["state"]=="video_paused" && pausedShare["ageSeconds"]==1 && !pausedShare["stale"].toBool());
+        paused.stream.remoteShare={std::nullopt,true,3};
+        const auto expiredShare=RoomDiagnosticReport(paused)["remoteShare"].toObject();
+        Check(expiredShare["state"].isNull() && expiredShare["stale"].toBool() && expiredShare["ageSeconds"]==3);
         Check(!report["appVersion"].toString().isEmpty());
         const auto bytes = QJsonDocument(report).toJson();
         Check(!bytes.contains("secret") && !bytes.contains("123456"));

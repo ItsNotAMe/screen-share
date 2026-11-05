@@ -1,5 +1,6 @@
 #pragma once
 #include "media/ReceiverTelemetry.h"
+#include "media/HostShareTelemetry.h"
 #include "media/ReceiverBufferInterval.h"
 #include "api/data_channel_interface.h"
 #include "api/make_ref_counted.h"
@@ -65,6 +66,10 @@ class ReceiverTelemetryChannel final : public webrtc::DataChannelObserver {
     std::string connection_;
     webrtc::scoped_refptr<webrtc::DataChannelInterface> channel_;
     ReceiverTelemetryInbox inbox_;
+    HostShareInbox hostShare_;
+    std::optional<HostShareState> lastShare_;
+    uint64_t shareSequence_ = 0;
+    std::chrono::steady_clock::time_point nextShare_{}, earliestShare_{};
     std::shared_ptr<ReceiverStatsMailbox> mailbox_ = std::make_shared<ReceiverStatsMailbox>();
     uint64_t sent_ = 0;
     std::shared_ptr<PresentationTelemetry> presentation_;
@@ -79,18 +84,33 @@ public:
     void OnStateChange() override {}
     void OnMessage(const webrtc::DataBuffer& buffer) override {
         if (host_ && buffer.binary) inbox_.Receive({buffer.data.cdata<uint8_t>(), buffer.data.size()});
+        else if (!host_ && buffer.binary) hostShare_.Receive({buffer.data.cdata<uint8_t>(), buffer.data.size()});
     }
     ReceiverVideoStatus Status() const { return inbox_.Read(); }
-    void Advance(const std::string& connection, webrtc::PeerConnectionInterface& peer, bool ready) {
+    HostShareStatus RemoteShare() const { return hostShare_.Read(); }
+    void Advance(const std::string& connection, webrtc::PeerConnectionInterface& peer, bool ready,
+                 HostShareState share = HostShareState::Live) {
         using namespace std::chrono_literals;
         if (connection != connection_) {
             connection_ = connection; inbox_.Bind(connection); sent_ = 0;
+            hostShare_.Bind(connection);lastShare_.reset();shareSequence_=0;nextShare_={};earliestShare_={};
             // A late callback from an earlier ICE negotiation cannot publish
             // into the new generation's mailbox or send under its identifier.
             mailbox_ = std::make_shared<ReceiverStatsMailbox>();
         }
-        if (host_ || !ready || connection.empty() || !channel_ || channel_->state() != webrtc::DataChannelInterface::kOpen) return;
+        if (!ready || connection.empty() || !channel_ || channel_->state() != webrtc::DataChannelInterface::kOpen) return;
         const auto now = std::chrono::steady_clock::now();
+        if (host_) {
+            // Latest state only, at most four sends/second and a one-second
+            // heartbeat. SCTP pressure never creates an application backlog.
+            if ((!lastShare_ || *lastShare_!=share || now>=nextShare_) && now>=earliestShare_ &&
+                channel_->buffered_amount()==0 && shareSequence_!=UINT64_MAX) {
+                const auto bytes=EncodeHostShare({connection_,++shareSequence_,share});
+                lastShare_=share;nextShare_=now+1s;earliestShare_=now+250ms;
+                channel_->Send(webrtc::DataBuffer(webrtc::CopyOnWriteBuffer(bytes.data(),bytes.size()),true));
+            }
+            return;
+        }
         bool request = false;
         std::optional<ReceiverVideoObservation> video;
         uint64_t serial;

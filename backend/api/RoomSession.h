@@ -7,6 +7,7 @@
 #include "media/ReceiverVideoStatus.h"
 #include "media/SenderVideoStatus.h"
 #include "media/SourceVideoStatus.h"
+#include "media/HostShareStatus.h"
 #include "media/PipelineStatus.h"
 #include "input/v2/InputService.h"
 #include <functional>
@@ -60,6 +61,7 @@ struct StreamStatus {
     std::vector<media::PeerConnectionStatus> connections;
     media::DiagnosticHistorySnapshot mediaEvents;
     media::DiagnosticHistorySnapshot performance;
+    media::HostShareStatus remoteShare; // Viewer-only; absent for older hosts.
 };
 struct RoomStatus {
     RoomPhase phase = RoomPhase::Idle;

@@ -6,7 +6,11 @@ Both endpoints should use the same test build. Reports identify the executable
 by SHA-256, not only the displayed version. A peer's `correlation` matches the
 other endpoint's `selfCorrelation` within the same room without exporting IDs.
 
-`removedByHost` retains an explicit removal reason after shutdown.
+`remoteShare` records a viewer's fresh host-advertised video/capture state and its
+local receipt age. After three seconds without a new valid message, `state` is
+null and `stale` is true. Older hosts leave it absent (`state: null`, `stale:
+false`). This describes host intent/capture condition, not a decode or display
+acknowledgement. `removedByHost` retains an explicit removal reason after shutdown.
 
 `schema` remains 1; `diagnosticsSchema: 2` adds:
 
