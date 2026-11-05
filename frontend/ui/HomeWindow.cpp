@@ -17,6 +17,7 @@
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QStyle>
 #include <QtCore/QSet>
 #include <QtWidgets/QVBoxLayout>
 
@@ -257,9 +258,17 @@ QWidget* RoomDirectoryWidget::buildRoomPanel()
     roomListLayout_ = new QVBoxLayout(roomList);
     roomListLayout_->setContentsMargins(0, 0, 0, 0);
     roomListLayout_->setSpacing(0);
+    emptyState_ = new QWidget;
+    auto* emptyLayout = new QVBoxLayout(emptyState_);
+    emptyLayout->addStretch();
     roomStatusLabel_ = label("Loading rooms...", "HomeEmptyState");
     roomStatusLabel_->setAlignment(Qt::AlignCenter);
-    roomListLayout_->addWidget(roomStatusLabel_, 1);
+    emptyLayout->addWidget(roomStatusLabel_);
+    clearSearch_ = actionButton("Clear search", "HomeGhost", "");
+    clearSearch_->setObjectName("clearRoomSearch"); clearSearch_->hide();
+    emptyLayout->addWidget(clearSearch_, 0, Qt::AlignHCenter); emptyLayout->addStretch();
+    connect(clearSearch_, &QPushButton::clicked, this, [this] { search_->clear(); search_->setFocus(); });
+    roomListLayout_->addWidget(emptyState_, 1); roomListLayout_->addStretch();
     auto* scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidget(roomList); listLayout->addWidget(scroll, 1); layout->addWidget(listFrame, 1);
 
@@ -277,10 +286,11 @@ QWidget* RoomDirectoryWidget::buildRoomRow(const HomeActiveRoom& room)
     auto* layout = new QHBoxLayout(row);
     layout->setContentsMargins(14, 12, 10, 12);
     layout->setSpacing(12);
-    layout->addWidget(iconLabel(
+    auto* accessIcon = iconLabel(
         room.passwordProtected ? "lock" : "room",
         28,
-        room.passwordProtected ? QStringLiteral("#ffd56a") : QStringLiteral("#62e8dc")));
+        room.passwordProtected ? QStringLiteral("#ffd56a") : QStringLiteral("#62e8dc"));
+    accessIcon->setObjectName("HomeRoomAccessIcon"); layout->addWidget(accessIcon);
 
     auto* text = new QVBoxLayout;
     text->setContentsMargins(0, 0, 0, 0);
@@ -317,9 +327,10 @@ void RoomDirectoryWidget::refreshRooms()
 
 void RoomDirectoryWidget::setPushedRooms(const QVector<HomeActiveRoom>& rooms, const QString& unavailable)
 {
-    if (unavailable.isEmpty() || !rooms.empty()) updateRooms(rooms);
     directoryStatus_->setText(unavailable);
     directoryStatus_->setVisible(!unavailable.isEmpty());
+    if (unavailable.isEmpty() || !rooms.empty()) updateRooms(rooms);
+    else filterRooms();
     if (!unavailable.isEmpty()) for (auto* button : findChildren<QPushButton*>("HomeTinyButton")) button->setEnabled(false);
     refreshRoomsButton_->setEnabled(true);
 }
@@ -335,18 +346,17 @@ void RoomDirectoryWidget::updateRooms(const QVector<HomeActiveRoom>& rooms)
     // Keep existing row widgets and their order so pushes preserve focus/scroll.
     for (int i = roomListLayout_->count()-1; i >= 0; --i) {
         auto* item = roomListLayout_->itemAt(i); auto* widget = item->widget();
-        if (!widget || !ids.contains(widget->property("roomId").toString())) {
+        if (widget && widget != emptyState_ && !ids.contains(widget->property("roomId").toString())) {
             delete roomListLayout_->takeAt(i); delete widget;
         }
     }
-    roomStatusLabel_ = nullptr;
     for (const HomeActiveRoom& room : rooms) {
         QWidget* row = nullptr;
         for (int i = 0; i < roomListLayout_->count(); ++i) {
             auto* candidate = roomListLayout_->itemAt(i)->widget();
             if (candidate && candidate->property("roomId").toString() == room.roomId) { row = candidate; break; }
         }
-        if (!row) { row = buildRoomRow(room); roomListLayout_->addWidget(row); }
+        if (!row) { row = buildRoomRow(room); roomListLayout_->insertWidget(roomListLayout_->indexOf(emptyState_), row); }
         row->setProperty("searchName", room.name);
         row->findChild<QLabel*>("HomeInfoPrimary")->setText(room.name);
         row->findChild<QLabel*>("HomeViewerCount")->setText(QString::number(room.peerCount));
@@ -357,15 +367,13 @@ void RoomDirectoryWidget::updateRooms(const QVector<HomeActiveRoom>& rooms)
         auto* badge = row->findChild<QLabel*>("HomeLockedStatus");
         if (!badge) badge = row->findChild<QLabel*>("HomePublicStatus");
         badge->setText(room.passwordProtected ? "Password required" : "Public");
-    }
-
-    if (rooms.isEmpty()) {
-        roomStatusLabel_ = label("No open rooms", "HomeEmptyState");
-        roomStatusLabel_->setAlignment(Qt::AlignCenter);
-        roomListLayout_->addWidget(roomStatusLabel_, 1);
-    } else {
-        roomStatusLabel_ = nullptr;
-        roomListLayout_->addStretch(1);
+        const auto badgeName = room.passwordProtected ? "HomeLockedStatus" : "HomePublicStatus";
+        if (badge->objectName() != badgeName) {
+            badge->setObjectName(badgeName); badge->style()->unpolish(badge); badge->style()->polish(badge);
+            row->findChild<QLabel*>("HomeRoomAccessIcon")->setPixmap(renderSvgResource(
+                QString(":/screenshare/ui/icons/%1.svg").arg(room.passwordProtected ? "lock" : "room"), QSize(28, 28),
+                room.passwordProtected ? QStringLiteral("#ffd56a") : QStringLiteral("#62e8dc")));
+        }
     }
 
     filterRooms();
@@ -373,8 +381,19 @@ void RoomDirectoryWidget::updateRooms(const QVector<HomeActiveRoom>& rooms)
 
 void RoomDirectoryWidget::filterRooms()
 {
-    for (auto* row : findChildren<QFrame*>("HomeRoomRow"))
-        row->setVisible(row->property("searchName").toString().contains(search_->text().trimmed(), Qt::CaseInsensitive));
+    const auto rows = findChildren<QFrame*>("HomeRoomRow");
+    int matches = 0;
+    for (auto* row : rows) {
+        const bool match = row->property("searchName").toString().contains(search_->text().trimmed(), Qt::CaseInsensitive);
+        row->setVisible(match); matches += match;
+    }
+    roomStatusLabel_->setText(rows.empty() ?
+        (directoryStatus_->text().isEmpty() ? QStringLiteral("No open rooms") : directoryStatus_->text()) :
+        QStringLiteral("No matching rooms"));
+    clearSearch_->setVisible(!rows.empty() && !matches);
+    emptyState_->setVisible(!matches);
+    roomListLayout_->setStretch(roomListLayout_->indexOf(emptyState_), matches ? 0 : 1);
+    roomListLayout_->setStretch(roomListLayout_->count() - 1, matches ? 1 : 0);
 }
 
 void RoomDirectoryWidget::showRoomStatus(const QString& message)
@@ -383,12 +402,8 @@ void RoomDirectoryWidget::showRoomStatus(const QString& message)
         return;
     }
 
-    while (QLayoutItem* item = roomListLayout_->takeAt(0)) {
-        delete item->widget();
-        delete item;
-    }
-
-    roomStatusLabel_ = label(message, "HomeEmptyState");
-    roomStatusLabel_->setAlignment(Qt::AlignCenter);
-    roomListLayout_->addWidget(roomStatusLabel_, 1);
+    for (auto* row : findChildren<QFrame*>("HomeRoomRow")) delete row;
+    roomStatusLabel_->setText(message); clearSearch_->hide(); emptyState_->show();
+    roomListLayout_->setStretch(roomListLayout_->indexOf(emptyState_), 1);
+    roomListLayout_->setStretch(roomListLayout_->count() - 1, 0);
 }

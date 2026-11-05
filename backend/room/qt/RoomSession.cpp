@@ -40,6 +40,7 @@ struct RoomSession::Impl {
         QString mutationId;
         std::shared_ptr<std::promise<RoomUpdateResult>> mutationReply;
         std::chrono::steady_clock::time_point mutationDeadline;
+        std::chrono::steady_clock::time_point nextStatusSnapshot{};
         std::promise<void> stoppedPromise;
         std::shared_future<void> stopped = stoppedPromise.get_future().share();
         std::shared_ptr<std::promise<RoomResult>> startReply;
@@ -125,17 +126,25 @@ struct RoomSession::Impl {
                 session->Advance();
             } catch (...) { events.Event("runtime-advance-failed"); terminal = true; terminalError = RoomError::Media; Schedule(); return; }
             const auto current = session->status();
-            const auto stream = runtime->StreamSettings();
+            const auto now = std::chrono::steady_clock::now();
+            // Media/control retirement still advances every tick. Building all
+            // peer diagnostics belongs at display cadence, not frame cadence.
+            if (now >= nextStatusSnapshot) {
+                auto stream = runtime->StreamSettings();
+                auto capture = runtime->CaptureSelection();
+                auto audio = runtime->AudioSelection();
+                auto playback = runtime->Playback();
+                auto input = runtime->Input();
+                std::lock_guard lock(mutex);
+                status.stream = std::move(stream); status.capture = std::move(capture);
+                status.audio = std::move(audio); status.playback = std::move(playback);
+                status.sessionEvents = events.Read(); inputPort = std::move(input);
+                nextStatusSnapshot = now + 100ms;
+            }
             {
                 std::lock_guard lock(mutex);
                 status.activePeers = current.activePeers; status.failedPeers = current.failedPeers;
                 status.pendingPeers = current.pendingPeers; status.generation = current.generation;
-                status.stream = stream;
-                status.sessionEvents = events.Read();
-                status.capture = runtime->CaptureSelection();
-                status.audio = runtime->AudioSelection();
-                status.playback = runtime->Playback();
-                inputPort = runtime->Input();
             }
             if (current.state == RoomMediaSession::State::Failed) { terminal = true; terminalError = RoomError::Media; Schedule(); }
         }

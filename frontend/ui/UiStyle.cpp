@@ -567,7 +567,8 @@ QPushButton#HomeGhost:hover {
     background: #232827;
     color: #edf5f2;
 }
-QPushButton#HomeTinyButton {
+QPushButton#HomeTinyButton,
+QPushButton#clearRoomSearch {
     background: transparent;
     color: #ffffff;
     border: 1px solid #3c615d;
@@ -575,10 +576,12 @@ QPushButton#HomeTinyButton {
     padding: 7px 10px;
     font-weight: 720;
 }
-QPushButton#HomeTinyButton:hover {
+QPushButton#HomeTinyButton:hover,
+QPushButton#clearRoomSearch:hover {
     background: #203331;
 }
-QPushButton#HomeTinyButton:disabled {
+QPushButton#HomeTinyButton:disabled,
+QPushButton#clearRoomSearch:disabled {
     color: #4f6865;
     border: 1px solid #2d3c3a;
 }

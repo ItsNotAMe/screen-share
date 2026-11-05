@@ -110,6 +110,31 @@ Windows UI run stopped earlier at the native-presentation startup assertion
 (occluded surface, zero presented frames); it did not reach the audio scenario.
 No physical audio listening, version bump or publication was performed.
 
+## Performance and room-list review - 2026-11-05
+
+Separate heavy diagnostic snapshots and GUI status copies from the short media/
+control tick. The local four-viewer fixture counted 66 snapshots/second before
+and ten after, with control advances unchanged. Command completions and final
+stop snapshots still publish immediately. This is avoided work, not a measured
+whole-application CPU or WAN latency win.
+
+Create/host previews now fit within 640x360 on the GPU before BGRA readback;
+source-picker thumbnails fit within 320x180. Host monitoring drops from about
+30 FPS to five FPS. Preview pacing checks interruption rather than blocking
+shutdown for an entire 200ms wait. Generated-window WGC checks preserve landscape,
+portrait and small-window geometry: 1266x713 copied 3,650,560 bytes originally and
+921,600 after fitting. Stream dimensions/rate remain independent.
+
+Home/Join update access-badge styling and icons together while retaining row
+identity/focus. Search distinguishes no matches from an empty, loading or stale
+directory, offers Clear search and returns focus to the search input. UI
+regressions cover these transitions and preserve disabled stale-room actions.
+The Release build and all 41 CTest checks passed. After the final loading-state
+and outlined Clear search refinements, the room UI, updater deferral and UI smoke
+checks passed again. Native generated-window preview capture passed separately;
+rendered Home search states were inspected. The portable archive matches both
+rebuilt executables. This remains an unpublished test build with no version bump.
+
 ## Audio lag recovery investigation - 2026-11-05
 
 Paired 1.0.11 reports showed low RTT, effectively no packet loss, fast hardware

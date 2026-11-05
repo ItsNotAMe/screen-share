@@ -86,7 +86,9 @@ void QtRoomSession::tick() {
         }
     }
     if (config_.duration.count() && now - started_ >= config_.duration) stop();
-    const auto current = session_->Status();
+    const bool publishStatus = now >= nextStatus_;
+    if (publishStatus) last_ = session_->Status();
+    const auto& current = last_;
     if (playbackUpdate_.valid() && playbackUpdate_.wait_for(0ms) == std::future_status::ready) {
         const auto result = playbackUpdate_.get(); if (playbackUpdated) playbackUpdated(result);
     }
@@ -129,8 +131,8 @@ void QtRoomSession::tick() {
         }
         if (frameReady) if (auto frame = frames_->Take()) frameReady(std::move(*frame));
     }
-    if (now >= nextStatus_) {
-        last_ = current; nextStatus_ = now + 100ms;
+    if (publishStatus) {
+        nextStatus_ = now + 100ms;
         if (statusChanged) statusChanged(current);
     }
     if (stopping_.valid() && stopping_.wait_for(0ms) == std::future_status::ready) {

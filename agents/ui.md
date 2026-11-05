@@ -27,6 +27,15 @@
   restores the exact prior selection. An explicit mute cancels pending automatic
   source edits; an idle audio choice saves configuration without opening devices.
 
+- Local create/host monitoring previews run at five FPS and fit on the GPU before
+  BGRA readback (640 × 360; chooser thumbnails 320 × 180). Preserve source aspect
+  ratio and original size metadata. Preview waits must honor worker interruption.
+- Home and Join preserve room rows/focus during directory pushes. Access changes
+  update both the icon and badge styling; no-match search shows a Clear search
+  action and differs from a genuinely empty directory.
+- Heavy room diagnostic snapshots and GUI status copies run at 100ms cadence;
+  frame handoff and media/control retirement keep their independent short tick.
+
 - Create room retains a selected-source live preview and opens the same enlarged
   SourcePickerDialog used by the host room. Keep explicit confirmation/cancel,
   current selection on cancellation, full-title tooltips and keyboard focus return.

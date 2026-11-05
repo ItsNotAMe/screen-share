@@ -279,6 +279,8 @@ if(MSVC)
             add_test(NAME room-peer-isolation COMMAND RoomPeerIsolationTests)
             set_tests_properties(room-peer-isolation PROPERTIES TIMEOUT 90)
             add_executable(RoomPeerDepartureTests tests/RoomPeerDepartureTests.cpp)
+            add_executable(RoomStatusCadenceTests tests/RoomStatusCadenceTests.cpp)
+            target_link_libraries(RoomStatusCadenceTests PRIVATE ScreenShareRoomSession)
             target_link_libraries(RoomPeerDepartureTests PRIVATE ScreenShareRoomSession)
             add_test(NAME room-peer-departure COMMAND RoomPeerDepartureTests)
             set_tests_properties(room-peer-departure PROPERTIES TIMEOUT 15)
@@ -325,6 +327,7 @@ if(MSVC)
         if(TARGET RoomInputTests)
             add_dependencies(RoomInputTests RoomSocketTests) # Deploy the same Qt networking DLLs.
             add_dependencies(RoomPeerDepartureTests RoomSocketTests)
+            add_dependencies(RoomStatusCadenceTests RoomSocketTests)
             add_dependencies(RoomLifecycleStress RoomSocketTests)
             add_dependencies(BackendComparison RoomSocketTests)
         endif()
@@ -335,6 +338,10 @@ if(MSVC)
         find_program(SCREENSHARE_NODE_EXECUTABLE node)
         if(SCREENSHARE_NODE_EXECUTABLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/node_modules/miniflare/package.json")
             if(TARGET RoomInputTests)
+                add_test(NAME room-status-cadence COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
+                    "$<TARGET_FILE:RoomStatusCadenceTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-status-cadence-evidence")
+                set_tests_properties(room-status-cadence PROPERTIES TIMEOUT 30)
                 add_test(NAME room-v2-input-media COMMAND "${SCREENSHARE_NODE_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/signaling-worker/tests/run-native-service.mjs"
                     "$<TARGET_FILE:RoomInputTests>" "${CMAKE_CURRENT_BINARY_DIR}/room-input-evidence" media)

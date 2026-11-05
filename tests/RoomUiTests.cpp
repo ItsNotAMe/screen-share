@@ -362,6 +362,38 @@ public:
     bool Receive(const std::string&, RoomPeerSignal) override { return true; }
     std::shared_future<void> BeginStop() override { stopping_ = true; return barrier_; }
 };
+void DirectoryStateScenario() {
+    RoomDirectoryWidget directory({}, {});
+    directory.setStyleSheet(uiStyleSheet()); directory.resize(900, 420); directory.show();
+    directory.findChild<QLineEdit*>("roomSearch")->setText("not present");
+    Check(directory.findChild<QLabel*>("HomeEmptyState")->text().contains("Connecting"));
+    directory.findChild<QLineEdit*>("roomSearch")->clear();
+    HomeActiveRoom room{"room-one", "Game night", 2, false, 0, true, "Alex"};
+    directory.setPushedRooms({room});
+    auto* row = directory.findChild<QFrame*>("HomeRoomRow"); Check(row);
+    auto* join = row->findChild<QPushButton*>("HomeTinyButton");
+    directory.activateWindow(); join->setFocus(); Wait([&] { return join->hasFocus(); });
+    const auto publicIcon = row->findChild<QLabel*>("HomeRoomAccessIcon")->pixmap().toImage();
+    room.passwordProtected = true; directory.setPushedRooms({room});
+    Check(directory.findChild<QFrame*>("HomeRoomRow") == row && join->hasFocus());
+    Check(row->findChild<QLabel*>("HomeLockedStatus") && !row->findChild<QLabel*>("HomePublicStatus"));
+    Check(row->findChild<QLabel*>("HomeRoomAccessIcon")->pixmap().toImage() != publicIcon);
+    room.passwordProtected = false; directory.setPushedRooms({room});
+    Check(row->findChild<QLabel*>("HomePublicStatus") && !row->findChild<QLabel*>("HomeLockedStatus"));
+    auto* search = directory.findChild<QLineEdit*>("roomSearch"); search->setText("not present");
+    auto* empty = directory.findChild<QLabel*>("HomeEmptyState");
+    Check(row->isHidden() && empty && empty->isVisible() && empty->text() == "No matching rooms");
+    auto* clear = directory.findChild<QPushButton*>("clearRoomSearch"); Check(clear && clear->isVisible());
+    if (const auto output = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !output.isEmpty()) {
+        QDir().mkpath(output); QCoreApplication::processEvents();
+        Check(directory.grab().save(QDir(output).filePath("directory-no-matches.png")));
+    }
+    clear->click(); Check(search->text().isEmpty() && !row->isHidden() && search->hasFocus());
+    directory.setPushedRooms({}, "Connecting…"); Check(row->findChild<QPushButton*>("HomeTinyButton")->isEnabled() == false);
+    directory.setPushedRooms({room}); Check(join->isEnabled());
+    directory.setPushedRooms({});
+    Check(empty->isVisible() && empty->text() == "No open rooms" && clear->isHidden());
+}
 void MediaFailureCleanup(const std::string& origin) {
     using Directory = screenshare::room::qt::RoomDirectory;
     Directory directory(true);
@@ -877,6 +909,7 @@ void NormalHomeScenario(const QUrl& origin) {
     Check(title && title->text() == "<b>Normal home</b>" && title->textFormat() == Qt::PlainText);
     auto* search = viewer.home()->findChild<QLineEdit*>("roomSearch");
     search->setText("no matching title"); Check(selectedRow()->isHidden());
+    if (!previews.isEmpty()) { QCoreApplication::processEvents(); Check(viewer.window().grab().save(QDir(previews).filePath("room-search-empty.png"))); }
     search->clear(); Check(!selectedRow()->isHidden());
     const auto* stableRow = selectedRow();
     viewer.home()->setPushedRooms({{QString::fromStdString(host.session()->session().status().roomId), "<b>Normal home</b>", 0, true, 0, true}});
@@ -1967,7 +2000,7 @@ int main(int argc, char** argv) {
         config.media.preferences.width = 320; config.media.preferences.height = 180; config.media.preferences.fps = 30;
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
-        DetailsSnapshotScenario();
+        DirectoryStateScenario(); DetailsSnapshotScenario();
         auto* reveal=host.findChild<QPushButton*>("showRoomReport");
         Check(reveal && reveal->isEnabled() && reveal->text()=="Open log folder");
         Check(reveal->property("logFolder").toString()==reports.path() && !QFileInfo::exists(config.reportFile));

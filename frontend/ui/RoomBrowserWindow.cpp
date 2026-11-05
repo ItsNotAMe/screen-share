@@ -65,7 +65,7 @@ class SelectedSourcePreview final : public SourcePreviewLabel {
         auto pending=std::make_shared<std::atomic_bool>(false);
         worker_=QThread::create([this,source,revision,pending] {
             try {
-                CaptureConfig config;config.targetFps=5;config.allowDisplayFallback=false;
+                CaptureConfig config;ConfigureCapturePreview(config,{640,360});config.allowDisplayFallback=false;
                 config.backend=CaptureBackend::WindowsGraphicsCapture;
                 config.sourceType=source.contains("window")?CaptureSourceType::Window:CaptureSourceType::Display;
                 config.windowHandle=source.value("window").toULongLong();config.displayIndex=source.value("display").toInt();
@@ -80,7 +80,7 @@ class SelectedSourcePreview final : public SourcePreviewLabel {
                             setPixmap(QPixmap::fromImage(image));setProperty("previewReady",true);
                         },Qt::QueuedConnection);
                     }
-                    QThread::msleep(200);
+                    WaitForCapturePreview(std::chrono::steady_clock::now()+CapturePreviewInterval);
                 }
             }catch(...){}
             if(!QThread::currentThread()->isInterruptionRequested())QMetaObject::invokeMethod(this,[this,revision] {

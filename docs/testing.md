@@ -25,6 +25,10 @@ Build tests with the same native toolchain as the application; see [build](build
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 
+`room-status-cadence` uses the local Worker and an instrumented four-viewer
+runtime to require about ten diagnostic snapshots per second while media/control
+advance independently. Room UI checks also cover access-badge/icon changes,
+keyboard focus retention, no-match search recovery and stale directory rows.
 Room UI audio checks select a source and mute before the first viewer, require
 received silence with no host capture endpoint opened, then restore the exact
 source on unmute. An outstanding automatic source edit cannot override Mute.
@@ -52,6 +56,10 @@ The recording-controller scenario checks neutral input while video is paused
 and resumption with the same permission. The recording desktop UI scenario also
 holds a mouse button and key across host pause, requiring releases and retaining
 the grant before video resumes. These checks inject no physical input.
+
+`NativeCaptureTests --preview` is an explicit active-desktop check: it captures
+only its generated window in landscape, portrait and small sizes, checks fitted
+preview geometry and reports BGRA readback bytes before/after GPU scaling.
 
 Input service regressions cover accumulating requests, denial preserving existing
 grants/held input, requests arriving during grant application and cancellation.
