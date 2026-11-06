@@ -538,7 +538,9 @@ void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
     QVector<HomeActiveRoom> rooms;
     for (const auto& room : state.rooms)
         rooms.push_back({room.id,room.name,room.viewers,room.password,0,
-            state.phase == RoomDirectory::Phase::Ready && room.status == "open", room.hostNickname});
+            state.phase == RoomDirectory::Phase::Ready && room.status == "open", room.hostNickname, room.limit,
+            room.status == "full" ? HomeActiveRoom::Availability::Full : room.status == "reconnecting" ?
+                HomeActiveRoom::Availability::Reconnecting : HomeActiveRoom::Availability::Open});
     QString message;
     switch (state.phase) {
     case RoomDirectory::Phase::Stopped: message = "Room list paused."; break;

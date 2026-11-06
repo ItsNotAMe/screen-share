@@ -27,6 +27,11 @@ Cancel preserves the invite so you can edit it or try again. Choosing Home also
 cancels the pending attempt and waits for cleanup before returning. The invite
 and other room actions stay locked until that attempt finishes.
 
+Home and Join show each room's viewer count and limit (for example, **2 / 4**).
+Full rooms show **Full**; a reconnecting host or unavailable directory shows
+**Wait…**. Hover over the disabled action for the reason. The action returns to
+**Join** automatically when the room list confirms that joining is available.
+
 ## Command line
 
 ```powershell

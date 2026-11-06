@@ -66,6 +66,12 @@ input, driver allocation and audible-output tests explicit.
 runtime to require about ten diagnostic snapshots per second while media/control
 advance independently. Room UI checks also cover access-badge/icon changes,
 keyboard focus retention, no-match search recovery and stale directory rows.
+Directory availability checks cover occupied/total capacity, full/reconnecting
+reasons, disabled actions, stale-list guidance and restoration after capacity or
+connection changes. Synthetic directory snapshots pass through both Home and
+Join adapters, with compact/normal renders and action bounds checked. They run
+in the default UI flow and focused `admission-feedback` mode; no network fault
+or host lease expiry is injected by these message-policy checks.
 Room UI audio checks select a source and mute before the first viewer, require
 received silence with no host capture endpoint opened, then restore the exact
 source on unmute. An outstanding automatic source edit cannot override Mute.

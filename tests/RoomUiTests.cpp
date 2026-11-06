@@ -366,15 +366,19 @@ public:
     std::shared_future<void> BeginStop() override { stopping_ = true; return barrier_; }
 };
 void DirectoryStateScenario() {
-    RoomDirectoryWidget directory({}, {});
+    int joins = 0;
+    RoomDirectoryWidget directory({}, [&](const QString& id) { Check(id == "room-one"); ++joins; });
     directory.setStyleSheet(uiStyleSheet()); directory.resize(900, 420); directory.show();
     directory.findChild<QLineEdit*>("roomSearch")->setText("not present");
     Check(directory.findChild<QLabel*>("HomeEmptyState")->text().contains("Connecting"));
     directory.findChild<QLineEdit*>("roomSearch")->clear();
-    HomeActiveRoom room{"room-one", "Game night", 2, false, 0, true, "Alex"};
+    HomeActiveRoom room{"room-one", "Game night", 2, false, 0, true, "Alex", 4};
     directory.setPushedRooms({room});
     auto* row = directory.findChild<QFrame*>("HomeRoomRow"); Check(row);
     auto* join = row->findChild<QPushButton*>("HomeTinyButton");
+    auto* viewers = row->findChild<QLabel*>("HomeViewerCount");
+    Check(viewers->text() == "2 / 4" && viewers->accessibleName().contains("2 of 4"));
+    join->click(); Check(joins == 1);
     directory.activateWindow(); join->setFocus(); Wait([&] { return join->hasFocus(); });
     const auto publicIcon = row->findChild<QLabel*>("HomeRoomAccessIcon")->pixmap().toImage();
     room.passwordProtected = true; directory.setPushedRooms({room});
@@ -392,10 +396,65 @@ void DirectoryStateScenario() {
         Check(directory.grab().save(QDir(output).filePath("directory-no-matches.png")));
     }
     clear->click(); Check(search->text().isEmpty() && !row->isHidden() && search->hasFocus());
-    directory.setPushedRooms({}, "Connecting…"); Check(row->findChild<QPushButton*>("HomeTinyButton")->isEnabled() == false);
-    directory.setPushedRooms({room}); Check(join->isEnabled());
+    QCoreApplication::processEvents(); const auto actionGeometry = join->geometry();
+    room.peerCount = 4; room.availability = HomeActiveRoom::Availability::Full;
+    directory.setPushedRooms({room});
+    Check(directory.findChild<QFrame*>("HomeRoomRow") == row && viewers->text() == "4 / 4");
+    Check(!join->isEnabled() && join->icon().isNull() && join->text() == "Full" && join->toolTip().contains("increase the limit"));
+    Check(join->accessibleDescription() == join->toolTip()); join->click(); Check(joins == 1);
+    room.availability = HomeActiveRoom::Availability::Reconnecting;
+    directory.setPushedRooms({room});
+    Check(!join->isEnabled() && join->text() == "Wait…" && join->toolTip().contains("host is reconnecting"));
+    directory.setPushedRooms({}, "Connecting…");
+    Check(!join->isEnabled() && join->text() == "Wait…" && join->toolTip() == "Connecting…");
+    room.availability = HomeActiveRoom::Availability::Full;
+    directory.setPushedRooms({room}); Check(!join->isEnabled() && join->text() == "Full");
+    room.availability = HomeActiveRoom::Availability::Open; room.viewerLimit = 6;
+    directory.setPushedRooms({room}); Check(join->isEnabled() && !join->icon().isNull() && join->text() == "Join" && viewers->text() == "4 / 6");
+    Check(!join->toolTip().contains("reconnecting") && !join->toolTip().contains("full"));
+    QCoreApplication::processEvents(); Check(join->geometry() == actionGeometry);
+    join->click(); Check(joins == 2);
+    room.viewerLimit = 0; directory.setPushedRooms({room}); Check(viewers->text() == "4");
     directory.setPushedRooms({});
     Check(empty->isVisible() && empty->text() == "No open rooms" && clear->isHidden());
+}
+void DirectoryAvailabilityScenario() {
+    using Directory = screenshare::room::qt::RoomDirectory;
+    QTemporaryDir settings;
+    RoomApplication application(QUrl("http://127.0.0.1:1"), {}, true, settings.filePath("profile.ini"), false, true);
+    application.show();
+    Directory::Status status; status.phase = Directory::Phase::Ready;
+    status.rooms = {{"open-room", "Game night", "open", 2, 4, false, "Alex"},
+        {"full-room", "Work together", "full", 4, 4, true, "Sam"},
+        {"reconnecting-room", "Movie night", "reconnecting", 1, 6, false, "Robin"}};
+    for (bool home : {true, false}) {
+        if (!home) application.home()->findChild<QPushButton*>("HomeSecondary")->click();
+        application.browser()->directory().Stop();
+        Wait([&] { return !application.browser()->directory().running(); });
+        application.browser()->directory().changed(status);
+        QWidget* page = home ? static_cast<QWidget*>(application.home()) : static_cast<QWidget*>(application.browser());
+        const auto rows = page->findChildren<QFrame*>("HomeRoomRow"); Check(rows.size() == 3);
+        for (int i = 0; i < 3; ++i) {
+            auto* action = rows[i]->findChild<QPushButton*>("HomeTinyButton");
+            Check(action->text() == (i == 0 ? "Join" : i == 1 ? "Full" : "Wait…"));
+            Check(action->isEnabled() == (i == 0));
+            Check(rows[i]->findChild<QLabel*>("HomeViewerCount")->text() == (i == 0 ? "2 / 4" : i == 1 ? "4 / 4" : "1 / 6"));
+        }
+        for (int width : {740, 1000}) {
+            application.window().resize(width, 820); QCoreApplication::processEvents();
+            for (auto* row : rows) {
+                auto* action = row->findChild<QPushButton*>("HomeTinyButton");
+                Check(row->rect().contains(QRect(action->mapTo(row, QPoint()), action->size())));
+                Check(action->fontMetrics().horizontalAdvance(action->text()) < action->width() - 16);
+            }
+            if (const auto output = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !output.isEmpty()) {
+                QDir().mkpath(output);
+                Check(application.window().grab().save(QDir(output).filePath(QString("directory-availability-%1-%2.png").arg(home ? "home" : "join").arg(width))));
+            }
+        }
+    }
+    application.window().close();
+    Wait([&] { return !application.window().isVisible(); });
 }
 void MediaFailureCleanup(const std::string& origin) {
     using Directory = screenshare::room::qt::RoomDirectory;
@@ -2258,7 +2317,7 @@ int main(int argc, char** argv) {
         RoomEndNoticePolicyChecks();
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
         if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback")) {
-            SourcePickerSearchScenario();AdmissionFeedbackScenario();
+            DirectoryStateScenario();DirectoryAvailabilityScenario();SourcePickerSearchScenario();AdmissionFeedbackScenario();
         }
         WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
@@ -2293,7 +2352,7 @@ int main(int argc, char** argv) {
         config.media.preferences.width = 320; config.media.preferences.height = 180; config.media.preferences.fps = 30;
         auto hostAudio = std::make_shared<proof::AudioEvidence>();
         RoomSessionWindow host(config, Factory(hostAudio), true); host.show();
-        DirectoryStateScenario(); DetailsSnapshotScenario();
+        DetailsSnapshotScenario();
         auto* reveal=host.findChild<QPushButton*>("showRoomReport");
         Check(reveal && reveal->isEnabled() && reveal->text()=="Open log folder");
         Check(reveal->property("logFolder").toString()==reports.path() && !QFileInfo::exists(config.reportFile));

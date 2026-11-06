@@ -584,7 +584,7 @@ QPushButton#clearRoomSearch:hover {
 }
 QPushButton#HomeTinyButton:disabled,
 QPushButton#clearRoomSearch:disabled {
-    color: #4f6865;
+    color: #a3b5af;
     border: 1px solid #2d3c3a;
 }
 QDialog#UpdateDialog {

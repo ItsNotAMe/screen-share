@@ -5,6 +5,23 @@
 
 # Project Memory
 
+## Room directory availability and capacity - 2026-11-06
+
+Home/Join now retain the directory's viewer limit and typed room availability.
+Rows show occupied/total places, Full for capacity, and Wait… for a reconnecting
+host or unavailable list. Disabled actions provide the specific reason in their
+tooltip/accessibility description, use readable muted text and omit the action
+icon. An authoritative available update restores Join and its icon in place.
+Existing rows and action geometry remain stable; legacy rows without a limit
+retain the count-only display.
+
+The full Release build, focused directory/admission fixture and three relevant
+UI/update checks passed. Coverage includes full/reconnecting/stale/restored
+states, capacity changes, blocked clicks, row identity and both Home/Join
+adapters. Compact/normal renders were inspected and the portable archive matches
+both rebuilt executables. Directory states are synthetic snapshots; no host
+lease expiry, WAN fault, version bump or publication occurred.
+
 ## Preserve actionable session failures - 2026-11-06
 
 RoomSessionWindow previously overwrote detailed admission guidance with a generic

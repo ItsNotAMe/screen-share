@@ -2,6 +2,12 @@
 
 ## Current UI Direction
 
+- Home/Join directory rows show occupied/total viewer places. Use readable Full
+  or Wait… labels without an action icon when joining is unavailable; provide
+  full/host-reconnecting/list-unavailable reasons in tooltips and accessibility.
+  Restore Join and its icon from the next authoritative available snapshot.
+  Preserve row identity and action geometry through these updates.
+
 - Create/live source pickers share title search. Filter cards in place without
   restarting previews, retain query through tabs/refresh and keep a valid visible
   selection. No-match/unavailable feedback is centered and sharing is disabled.
