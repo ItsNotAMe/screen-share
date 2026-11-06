@@ -1430,17 +1430,26 @@ void AdmissionFeedbackScenario() {
             status.audio.selected.kind=AudioKind::SharedSource;status.audio.health.state=AudioEndpointState::Failed;
             capacity.session().statusChanged(status);
             auto* health=capacity.findChild<QLabel*>("audioHealth");Check(health->text().contains("Retrying automatically"));
-            if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            const auto previews=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");
+            if(!previews.isEmpty()) {
                 capacity.findChild<QPushButton*>("sessionDetails")->click();
                 capacity.findChild<QTabWidget*>("SessionDetailsTabs")->setCurrentIndex(1);
-                for(const auto size:{QSize(740,600),QSize(1000,820)}) {
-                    capacity.resize(size);QCoreApplication::processEvents();
-                    for(auto* parent=health->parentWidget();parent;parent=parent->parentWidget())
-                        if(auto* scroll=qobject_cast<QScrollArea*>(parent))scroll->ensureWidgetVisible(health);
-                    QCoreApplication::processEvents();Check(health->isVisible());
-                    Check(capacity.grab().save(QDir(output).filePath(QString("host-shared-audio-retrying-%1.png").arg(size.width()))));
+            }
+            for(const auto kind:{AudioKind::SharedSource,AudioKind::System,AudioKind::Microphone}) {
+                status.audio.selected.kind=kind;capacity.session().statusChanged(status);
+                Check(health->text().contains("Retrying automatically"));
+                if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+                    for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                        capacity.resize(size);QCoreApplication::processEvents();
+                        for(auto* parent=health->parentWidget();parent;parent=parent->parentWidget())
+                            if(auto* scroll=qobject_cast<QScrollArea*>(parent))scroll->ensureWidgetVisible(health);
+                        QCoreApplication::processEvents();Check(health->isVisible());
+                        Check(capacity.grab().save(QDir(output).filePath(QString("host-%1-audio-retrying-%2.png").arg(AudioKindName(kind)).arg(size.width()))));
+                    }
                 }
             }
+            status.audio.selected={AudioKind::Process,{},123};capacity.session().statusChanged(status);
+            Check(!health->text().contains("Retrying automatically") && health->text().contains("Retry or select"));
         }
         capacity.close();
     }
@@ -1814,6 +1823,7 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
     QJsonArray steadySamples;
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
     config.room.nickname = "Source host"; config.room.name = "Source switch";
+    config.media.audio.source = screenshare::AudioCaptureSource::SystemOutput;
     config.media.preferences.resolution = ResolutionMode::Native;
     auto hostAudio = std::make_shared<proof::AudioEvidence>(); hostAudio->captureUnavailable = true;
     auto closedSource=std::make_shared<std::atomic_bool>(false);
@@ -1843,12 +1853,15 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
         host.findChild<QLabel*>("audioHealth")->text().contains("Audio capture failed"); });
     const auto silentFrames = frames;
     Wait([&] { return frames >= silentFrames + 10 && audio->quietStreak >= 10; });
-    Check(hostAudio->captureStarts == 1 && audio->audibleBlocks == 0 && host.session().status().audio.revision == 1);
+    Wait([&] { return hostAudio->captureStarts >= 2; });
+    Check(audio->audibleBlocks == 0 && host.session().status().audio.revision == 1 &&
+        host.findChild<QLabel*>("audioHealth")->text().contains("Retrying automatically"));
     hostAudio->captureUnavailable = false;
     auto* retryCaptureAudio = host.findChild<QPushButton*>("switchAudioSource");
-    Check(retryCaptureAudio->text() == "Retry"); retryCaptureAudio->click();
+    Check(retryCaptureAudio->text() == "Retry");
     Wait([&] { return host.session().status().audio.health.state == AudioEndpointState::Running && audio->audibleBlocks >= 10; });
-    Check(host.session().status().audio.health.failures == 1);
+    Check(host.session().status().audio.health.failures == 1 && host.session().status().audio.revision == 1 &&
+        host.session().status().audio.selected.kind == AudioKind::System && host.session().status().audio.selected.deviceId.empty());
     const auto roomBefore = host.session().status(); const auto widthBefore = lastWidth;
     auto* choices = host.findChild<QComboBox*>("liveCaptureSource");
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF

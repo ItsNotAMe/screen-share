@@ -18,8 +18,19 @@ authoritative on every read; no app-to-system fallback is allowed. A new target
 bypasses old backoff, and in-flight PCM spanning a target change is silenced.
 Capture-drop counts survive endpoint retirement. The outer switchable capture
 keeps its 10 ms output clock/silence while activation waits; Mute/Stop retire and
-cancel the old producer. Explicit microphone/system selections retain their
-existing manual retry behavior for activation/read failures.
+cancel the old producer.
+
+Explicit system/microphone capture now also recovers through SwitchablePcmCapture
+on its existing producer boundary, with 250 ms–5 s capped backoff. It reuses the
+committed factory/selection, preserving pinned device IDs and room/audio revision.
+A replacement is healthy only after its first PCM arrives; a recovery producer
+has a five-second first-PCM deadline. Factories, activation, processing and teardown
+stay on producer owners. Microphone processing is recreated for every open.
+Manual Retry/source selection/mute supersede automatic activation and backoff;
+Close/Stop prevent further attempts. Old producer queues are discarded and drop
+counts survive replacement. Shared-source mode keeps its inner validated-target
+policy; explicit process IDs retain manual retry rather than following PID reuse.
+Native calls that do not honor cancellation still cannot be preempted in-process.
 
 Viewer output now follows default-device notifications (render/console role)
 on the existing playout worker. Callbacks only advance an atomic revision;

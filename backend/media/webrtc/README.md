@@ -212,9 +212,17 @@ as specified by [Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/
 Unknown engine periods are reported as zero, not inferred from buffer capacity.
 Capture delay is an estimate, not a measured capture-to-speaker latency.
 
-Device failures stop that direction and increment diagnostics; they do not
-silently select another device. Microphone processing and device recovery policy
-remain session-integration work. System/process proof tracks disable AEC/AGC/NS.
+In session integration, SwitchablePcmCapture automatically retries committed
+System/Microphone factories after activation/read failure, with 250 ms–5 s capped
+backoff and paced silence on the existing 10 ms output timeline. Recovery opens
+on a producer owner, preserving explicit device IDs, settings revision and dropped
+frame totals. First PCM confirms recovery; a five-second first-PCM deadline
+retires stalled recovery producers that honor cancellation. Speech processing is
+recreated for each microphone open. Manual updates/mute supersede automatic work;
+Close/Stop prevent reopening. Shared-source mode retains its validated-target
+recovery, and explicit process IDs retain manual retry. No unrelated device/app
+fallback is introduced. Native driver calls still cannot be safely preempted.
+System/process proof tracks disable AEC/AGC/NS.
 Tests cover synthetic Opus with video, mono/stereo, capture mute, repeated stop,
 callback teardown and invalid device selection. `-AudioDevice` additionally
 plays a quiet tone and captures only the test process, tests physical lifecycle,

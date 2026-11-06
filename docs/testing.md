@@ -208,6 +208,19 @@ change and requires audio/video progress, one live capture, stable room/audio
 revision and no failure; a muted route change must not activate capture. These
 tests do not qualify physical device switching or driver activation failures.
 
+Automatic host System/Microphone recovery is covered in `native-pcm-audio` by
+`CaptureAudioRecoveryTest.h`: supplied time checks 250 ms–5 s capped retries,
+repeated startup/read failures, pinned selections, fresh PCM, unchanged settings
+revision, cumulative drops and microphone-processor recreation. It checks manual
+Retry during backoff, mute/source replacement during blocked activation, the
+five-second first-PCM deadline, Close/stop and owner-thread teardown. Explicit
+process IDs and shared-source mode cannot enter this second retry mechanism.
+The source-switch UI proof requires host capture to recover without clicking
+Retry while video continues, retaining the audio selection/revision. Host failure
+messages are rendered at compact/normal sizes for shared, system and microphone
+modes; explicit process mode keeps manual guidance. These use injected devices
+and synthetic media, without native capture, audible output or physical hot-plug.
+
 Automatic output recovery is covered in `native-pcm-audio` with an injected
 clock/device. It checks capped 250 ms–5 s backoff, repeat outages, fresh PCM after
 activation, mute/volume retention, unchanged settings revision, manual override,

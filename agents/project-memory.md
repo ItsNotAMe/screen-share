@@ -12,6 +12,40 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Recover host microphone/system capture automatically - 2026-11-07
+
+SwitchablePcmCapture previously stayed silent after a System/Microphone producer
+failed until a manual selection/retry. A regression against b41a474 reproduced
+the missing recovery. It now retries the committed factory with 250 ms–5 s
+capped backoff, preserving explicit device IDs and audio/room revision. Recovery
+starts asynchronously on a producer owner; paced 10 ms silence continues while
+activation waits. First PCM marks Running, and a five-second first-PCM deadline
+retires stalled producers that honor cancellation. Each microphone open recreates
+speech processing. Old PCM queues are discarded and drop counters survive.
+
+Manual Retry bypasses backoff; source changes/mute supersede in-flight automatic
+activation. Close/Stop prevent reopening. Shared-source mode retains its separate
+validated-target policy; explicit process IDs retain manual retry rather than
+following PID reuse. No default-device/app fallback is introduced. Native calls
+that ignore cancellation remain non-preemptible.
+
+The injected-clock/device suite covers repeated activation/read failures,
+capped delays, two capture kinds, pinned selections, unchanged revisions, fresh
+PCM, processor recreation, mute/change/manual-retry priority, first-PCM timeout,
+Close/stop and owner-thread cleanup. The source-switch public UI proof resumes
+default system capture without a Retry click while video continues, preserving
+selection/revision. The synthetic UI factory does not propagate initial native
+device IDs; pinned recovery is covered at the shared control/producer boundary.
+Host recovery messages were rendered/inspected at compact and normal sizes.
+No physical capture, audible output, hot-plug or driver-reset qualification.
+This is reliability work, with no compute-time/latency improvement claim.
+
+Release `all` build passed. All 46 application CTests passed sequentially
+(301.29 s), including the expanded native PCM suite (13.89 s), room media/input,
+CLI and UI. The focused source-switch public UI proof passed (14.02 s), and
+admission-feedback/recovery-message renders passed at compact/normal sizes.
+Packaged CLI/UI hashes match. No version bump or publication; unreleased.
+
 ## Renew presentation recovery after healthy playback - 2026-11-07
 
 Presentation previously allowed only three GPU rebuilds across a viewer's whole

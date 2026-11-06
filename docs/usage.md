@@ -88,9 +88,13 @@ Host system audio and microphone capture follow Windows' default device when
 no specific device is selected. Changing the default speakers or microphone
 reroutes capture during the room without rejoining or changing the audio
 selection. A specific device stays selected, and app capture stays with its
-selected process. If opening the replacement fails, shared-source mode retries
-automatically; explicit System audio or Microphone mode uses the existing retry
-action. Video continues during the interruption.
+selected process. System audio and Microphone automatically retry activation or
+capture failures with a delay capped at five seconds. A specific device remains
+pinned: capture resumes when that device becomes available, without selecting a
+different microphone or speakers. Video continues with silence during recovery.
+Retry starts another attempt immediately; muting or changing the audio source
+cancels recovery of the old source. Explicit app-process capture retains its
+manual retry action; shared-source mode uses its validated app/window recovery.
 
 Hosts can mute audio or choose a different audio source while a room is empty.
 Mute audio applies to current and future viewers; Share audio restores the last

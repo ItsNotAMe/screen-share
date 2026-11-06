@@ -4,6 +4,7 @@
 #include "SyntheticAudio.h"
 #include "AudioProcessingTest.h"
 #include "RoutedPcmCaptureTest.h"
+#include "CaptureAudioRecoveryTest.h"
 #include <condition_variable>
 #include <bit>
 #include <iostream>
@@ -727,6 +728,7 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
         if (argc == 2 && std::string(argv[1]) == "--scheduling") { SchedulingUnderLoad(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
+        capture_audio_recovery_test::Run();
         routed_capture_test::Run(); InactiveAudioSelection(); OutputClockCadence(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); AutomaticPlaybackRecovery(); Run(argc == 2); return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

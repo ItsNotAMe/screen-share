@@ -489,6 +489,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         audioHealth_->setText(value.audio.selected.kind == AudioKind::None ? "Audio is muted. New viewers will join without shared audio." :
             audioFailed ? (value.audio.selected.kind == AudioKind::SharedSource ?
                 "Shared-source audio is unavailable. Retrying automatically while video continues. You can select another source." :
+                value.audio.selected.kind == AudioKind::System || value.audio.selected.kind == AudioKind::Microphone ?
+                "Audio capture failed. Retrying automatically while video continues. You can retry now or select another source." :
                 "Audio capture failed. Video continues without shared audio. Retry or select another source.") :
             value.audio.health.state == AudioEndpointState::Running ? (value.audio.microphoneProcessing ?
                 "Microphone active: noise suppression and digital gain. Echo cancellation is unavailable." : "Audio capture active; speech processing bypassed.") :
