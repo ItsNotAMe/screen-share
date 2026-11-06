@@ -264,11 +264,15 @@ void OutputStorageReuse() {
                 frame.data.size()==size_t(frame.width)*frame.height*3/2 &&
                 std::abs(int(std::to_integer<uint8_t>(frame.data.front()))-dimensions.luma)<=4,
                 "Reused output lost visible pixels or geometry");
+            if(frame.width==1280)Require(frame.codedWidth==frame.width && frame.codedHeight==frame.height,
+                "720p fixture did not exercise uncropped copying");
+            if(frame.width==1920)Require(frame.codedHeight>frame.height,
+                "1080p fixture did not exercise direct visible cropping");
             const bool newSize=std::none_of(held.begin(),held.end(),[&](const auto& old){return old.width==frame.width && old.height==frame.height;});
             if(newSize){snapshots.push_back(frame.data);held.push_back(std::move(frame));}
         }
     };
-    for(int width:{320,640,1920,320}) {
+    for(int width:{320,640,1280,1920,320}) {
         const int height=width*9/16;
         const auto before=decoder.outputBufferAllocations();
         screenshare::H264StreamEncoder encoder;screenshare::H264StreamEncoderConfig config;config.width=width;config.height=height;
@@ -293,7 +297,7 @@ void OutputStorageReuse() {
     for(size_t i=0;i<held.size();++i)Require(held[i].data==snapshots[i],"Scratch reuse mutated published CPU pixels");
     decoder.Start();Require(!decoder.outputBufferAllocations() && !decoder.cachedOutputBytes(),"Restart retained old output storage");
     decoder.Stop();
-    std::cout<<"Software decoder output storage: bounded reuse, changing pixels, 1080 crop, resize, retained frames and stop/restart passed.\n";
+    std::cout<<"Software decoder output storage: bounded reuse, changing pixels, uncropped 720p, 1080 crop, resize, retained frames and stop/restart passed.\n";
 }
 void RepeatedRecovery() {
     // A valid encoded picture with an undersized declaration deterministically

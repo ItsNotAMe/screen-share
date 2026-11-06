@@ -5,6 +5,48 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Direct visible-frame copy in software decoding (2026-11-07)
+
+Cropped software output now copies visible Y/UV rows straight from the locked MF
+buffer into independently owned frame pixels. The former path allocated/copied
+the entire coded picture first, then allocated/copied its visible crop. For a
+1920×1088 coded picture cropped to 1920×1080, this removes an intermediate vector
+of about 3 MiB and its full-frame copy. The visible output allocation/copy remains;
+uncropped output and hardware texture ownership retain their paths. The buffer
+unlocks on crop validation or allocation failure as well as on success.
+
+Six alternating AB/BA pairs per configuration against `850fd02` gave these medians:
+
+| Concurrent software decoders | Elapsed ms for 960 pictures each, before → after | Process CPU ms per decoded picture, before → after |
+| --- | --- | --- |
+| 1 | 3411.35 → 2852.87 (−16.4%) | 5.713 → 5.469 (−4.3%) |
+| 4 | 4425.46 → 3708.36 (−16.2%) | 6.952 → 6.104 (−12.2%) |
+
+Every four-decoder pair improved both CPU (5.9–19.0%) and elapsed time
+(13.3–24.4%). Single-decoder elapsed reductions were 13.3–20.9%; CPU results
+were noisy, ranging from a 5.2% regression to a 32.6% reduction. Do not infer a
+uniform single-decoder CPU gain. All runs retained matching decoded byte counts,
+full-frame checksums, visible dimensions and timestamp order.
+
+The benchmark source and fixed 64-picture encoded 1080p fixture are identical in
+both executables. Each decoder runs on its own thread, warms for 64 pictures,
+then decodes 960 pictures without pacing. Timing covers decode, owned pixel
+copies/cropping, a full-frame checksum and drain. Process CPU includes all codec
+threads; fixture generation/loading, startup, warmup and teardown are excluded.
+No other builds/tests ran during the comparison. Both versions already reuse MF
+scratch buffers, whose allocation counter stays zero after warmup; that counter
+does not count the intermediate pixel vector removed here. This is a decoder
+workload measurement, excluding capture, networking, presentation and total
+application memory/CPU or end-to-end latency. It does not qualify hardware handle
+lifetime. [Raw runs, fixture/source identifiers and binary hashes](benchmarks/decoder-visible-copy-2026-11-07.json).
+
+Reproduce with the existing `DecoderComputeBenchmark` and
+`scripts/compare-decoder-compute.py` commands in the next section, using
+`--baseline-commit 850fd02` and the same fixture for both executables. The baseline
+is unmodified production decoder code; its allocation counters already existed.
+Regression checks include changing cropped/uncropped output, resize, retained
+immutable frames, Stop/restart and the generated-input GPU path.
+
 ## Reused software-decoder output storage (2026-11-06)
 
 The software decoder now reuses one caller-owned Media Foundation output buffer

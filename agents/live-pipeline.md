@@ -7,6 +7,18 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 direct decoder crop: cropped software output copies visible rows from
+the locked MF buffer directly into owned pixels, eliminating the full coded-frame
+temporary vector/copy. A guard unlocks on validation/allocation failure. Uncropped
+output and hardware textures retain their paths. Tests add uncropped 720p among
+cropped/resized/retained frames. Six matched AB/BA pairs against 850fd02 give
+four-decoder median CPU 6.952→6.104 ms/picture (−12.2%) and elapsed 4425→3708 ms
+(−16.2%), with every four-decoder pair improving. Single-decoder CPU is noisy;
+elapsed improves 16.4%. Full-frame checksums/byte counts match. See
+docs/performance.md and its tracked raw runs for scope: decode/copy/crop/checksum,
+not total app CPU, memory or end-to-end latency. Hardware handle lifetime remains
+unqualified.
+
 2026-11-07 presentation recovery: three rebuild attempts now renew after 30
 successfully presented incoming frames, replacing the session-lifetime cap.
 FramePresentationSession passes whether work contains incoming pixels; Update/

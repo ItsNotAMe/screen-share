@@ -12,6 +12,47 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Copy decoded visible pixels directly from MF - 2026-11-07
+
+Cropped CPU decoder output previously allocated/copied the whole coded frame,
+then allocated/copied its visible rows. H264StreamDecoder now copies the crop
+straight from the locked MF buffer into independently owned frame pixels,
+removing that temporary coded-frame vector/copy (about 3 MiB for 1920×1088).
+The visible output allocation remains. An unlock guard covers crop validation/
+allocation exceptions. Uncropped output and GPU texture ownership retain their
+paths. Existing crop geometry validation is reused against actual locked bytes.
+
+Matched 850fd02 versus updated Release executables use the identical benchmark
+and fixed 64-picture 1080p fixture, one worker per decoder, 64 warmup pictures
+then 960 measured pictures each. Six AB/BA pairs each for one/four decoders:
+four-decoder median process CPU 6.952→6.104 ms/picture (−12.2%), elapsed
+4425.46→3708.36 ms (−16.2%). Every four-decoder pair improves CPU (5.9–19.0%)
+and elapsed time (13.3–24.4%). Single-decoder elapsed improves 16.4%, but CPU is
+noisy: median −4.3%, paired range −5.2..32.6% reduction. Decoded byte counts and
+full-frame checksums match across all 24 runs. Source/fixture/benchmark/binary
+hashes are tracked in docs/benchmarks/decoder-visible-copy-2026-11-07.json.
+Both versions already reuse MF scratch buffers; their warmed allocation counter
+stays zero and does not count the removed pixel vector. Scope is decode, output
+copy/crop, full-frame checksum and drain, excluding startup/warmup/teardown,
+capture, transport and presentation. No total application CPU/memory or physical
+input-to-display latency claim; hardware handle lifetime remains unqualified.
+
+Real MF tests now also require uncropped 1280×720 among changing cropped/resized
+outputs, explicitly verify cropped 1080p geometry, and retain earlier frames
+across reuse, resize and Stop/restart. Generated GPU decoding, retained textures,
+pressure, retirement and software fallback passed with the production change;
+the later added geometry assertions also pass in the CPU lifecycle test.
+
+Release `all` build passed and packaged CLI/UI hashes match. The sequential
+full application run passed 45/46 checks (318.82 s): viewer-removal timed out
+at RoomUiTests.cpp:777 waiting for Live video, held controller input and a cleared
+video status after host unpause. This same intermittent pause/resume condition
+was recorded before this change. Its focused rerun passed (11.75 s). Do not
+claim a clean full-suite run or a fix for that timing/runtime issue. The decoder
+regressions, four-viewer media/input, UI and presentation checks passed.
+The final production source and benchmark binary still match recorded hashes.
+No version bump/publication; unreleased.
+
 ## Theme the white horizontal scrollbar - 2026-11-07
 
 Owner pointed out the white horizontal scrollbar/end buttons in Stream details.

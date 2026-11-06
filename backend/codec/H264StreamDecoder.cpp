@@ -514,26 +514,34 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             DWORD currentLength = 0;
             ThrowIfFailed(contiguousBuffer->GetCurrentLength(&currentLength), "IMFMediaBuffer::GetCurrentLength(decoder output)");
             frame.bytes = currentLength;
-            frame.data.resize(currentLength);
+            const bool cropped = frame.width != frame.codedWidth || frame.height != frame.codedHeight ||
+                outputVisibleLeft_ != 0 || outputVisibleTop_ != 0;
+            if (!cropped) frame.data.resize(currentLength);
 
             BYTE* source = nullptr;
             DWORD maxLength = 0;
             DWORD lockedCurrentLength = 0;
             ThrowIfFailed(contiguousBuffer->Lock(&source, &maxLength, &lockedCurrentLength), "IMFMediaBuffer::Lock(decoder output)");
-            std::memcpy(frame.data.data(), source, std::min(currentLength, lockedCurrentLength));
-            ThrowIfFailed(contiguousBuffer->Unlock(), "IMFMediaBuffer::Unlock(decoder output)");
-
-            if (frame.width != frame.codedWidth ||
-                frame.height != frame.codedHeight ||
-                outputVisibleLeft_ != 0 ||
-                outputVisibleTop_ != 0) {
+            // Cropping allocates/validates while the MF buffer is locked. Always
+            // unlock on failure, including allocation failure, before retirement.
+            struct UnlockOnFailure {
+                IMFMediaBuffer* buffer;
+                ~UnlockOnFailure() { if (buffer) static_cast<void>(buffer->Unlock()); }
+            } unlock{contiguousBuffer.Get()};
+            if (cropped) {
+                // Copy visible rows directly into independently owned output.
+                // A full coded-frame vector would add an allocation and copy
+                // before this crop (notably 1920x1088 -> 1920x1080).
                 frame.data = CopyVisibleNv12(
-                    frame.data,
+                    {reinterpret_cast<const std::byte*>(source), std::min(currentLength, lockedCurrentLength)},
                     frame.codedWidth,
                     frame.codedHeight,
                     VisibleFrameArea{outputVisibleLeft_, outputVisibleTop_, frame.width, frame.height});
                 frame.bytes = static_cast<uint32_t>(frame.data.size());
-            }
+            } else std::memcpy(frame.data.data(), source, std::min(currentLength, lockedCurrentLength));
+            const HRESULT unlocked = contiguousBuffer->Unlock();
+            unlock.buffer = nullptr;
+            ThrowIfFailed(unlocked, "IMFMediaBuffer::Unlock(decoder output)");
 
             frames.push_back(std::move(frame));
             break;

@@ -14,6 +14,11 @@ checks, package verification and signed updates. See [release instructions](../d
 
 Details and prior measured limits: [known limitations](../docs/known-limitations.md).
 
+- [ ] Investigate intermittent input resumption after host video pause/unpause.
+  The viewer-removal scenario sometimes waits indefinitely for Live video,
+  controller input and cleared presentation status; prior and current runs show
+  the timeout, while focused retries pass. Distinguish runtime state from fixture
+  timing; do not claim the issue fixed by decoder optimizations.
 - [ ] Obtain Authenticode signing for future application/Setup binaries.
 - [ ] Investigate hardware decoder Section-handle lifetime and hardware encoder
   output deadlines in code; preserve the software compatibility option and fallback.
