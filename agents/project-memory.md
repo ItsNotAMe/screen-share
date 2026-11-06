@@ -5,6 +5,20 @@
 
 # Project Memory
 
+## Responsive three-column source grid - 2026-11-06
+
+The source picker now uses up to three columns when cells can remain at least
+210 logical pixels wide, with two/one at narrower sizes. Normal picker geometry
+fits six choices fully in view. Thumbnail aspect fitting and full-title tooltips
+remain; scrollbar space is reserved using widget width to avoid wrap oscillation.
+Resize updates cell geometry without rebuilding cards or losing selection.
+
+The full Release build, focused source-grid fixture and three UI/update checks
+passed. Tests inspect actual card rectangles for normal three-column/six-visible
+and compact two-column layouts, selection identity and stable wrapping. Both
+rendered sizes were inspected; the portable archive matches the rebuilt CLI/UI
+executables. No version bump or publication was performed.
+
 ## Share-source title search - 2026-11-06
 
 Create/live source pickers share an initially focused search field. Filtering

@@ -45,7 +45,10 @@ protected:
         QListWidget::resizeEvent(event);
         // Reserve scrollbar width even while it is hidden. Using viewport width
         // here made wrapping add/remove the scrollbar and oscillate indefinitely.
-        const int cellWidth=qMax(120,(width()-24)/2);
+        constexpr int minimumCellWidth=210;
+        const int availableWidth=qMax(1,width()-24);
+        const int columns=qBound(1,availableWidth/minimumCellWidth,3);
+        const int cellWidth=qMax(120,availableWidth/columns);
         const QSize cell(cellWidth,qBound(128,(cellWidth-40)*9/16+60,220));
         if (gridSize() == cell) return;
         setGridSize(cell);

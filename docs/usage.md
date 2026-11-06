@@ -44,6 +44,8 @@ The source picker in Create room and Change source can search display/window
 titles. Search is case insensitive and stays in place when changing tabs or
 refreshing. Clear search restores the available sources. With no matches, sharing
 is disabled; Enter from search moves to the matching cards without sharing.
+The picker uses three columns at normal widths and two at compact widths so
+more choices fit while previews and titles remain readable.
 
 See [CLI configuration and options](cli.md) for complete schemas and ranges.
 Shared source audio is the default: window sharing captures the selected app's

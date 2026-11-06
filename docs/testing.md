@@ -49,6 +49,9 @@ across tabs/refresh, disabled sharing and Enter/focus behavior. The room UI also
 checks that the live host's search/audio/action controls fit the compact and
 normal popup layouts. Source-search checks run in the default room UI flow and
 the focused `admission-feedback` mode.
+Grid checks require three columns and six fully visible choices at normal size,
+two columns at compact size, preserved selection and stable wrapping while
+scrollbars appear or disappear.
 
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.

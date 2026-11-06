@@ -6,6 +6,9 @@
   restarting previews, retain query through tabs/refresh and keep a valid visible
   selection. No-match/unavailable feedback is centered and sharing is disabled.
   Focus search on open; Enter moves to matching cards without confirming a share.
+  Use up to three columns with readable cells (210px minimum), falling back to
+  two/one in compact containers. Base wrapping on widget width with scrollbar
+  space reserved, and retain selected-card identity during resize.
 
 - Pending Join shows neutral progress, disables the Join action and uses the
   Paste slot for Cancel. Preserve the invite and keep action/list geometry stable.

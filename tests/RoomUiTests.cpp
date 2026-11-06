@@ -1406,6 +1406,26 @@ void SourcePickerSearchScenario() {
         auto* editor=new QListWidgetItem(*original);editor->setText("Editor — Project Atlas");cards->addItem(editor);
         auto* notes=new QListWidgetItem(*original);notes->setText("Editor — Notes");cards->addItem(notes);
         auto* browser=new QListWidgetItem(*original);browser->setText("Browser — Team call");cards->addItem(browser);
+        auto* terminal=new QListWidgetItem(*original);terminal->setText("Terminal — Build");cards->addItem(terminal);
+        auto* meeting=new QListWidgetItem(*original);meeting->setText("Meeting — Planning");cards->addItem(meeting);
+        for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+            owner.resize(size);QCoreApplication::processEvents();const bool three=size.width()>=1000;
+            Wait([&]{
+                const auto first=cards->visualItemRect(original),third=cards->visualItemRect(notes);
+                return !first.isEmpty() && !third.isEmpty() && ((first.top()==third.top())==three);
+            });
+            const auto first=cards->visualItemRect(original),second=cards->visualItemRect(editor);
+            Check(first.top()==second.top() && first.right()<second.left() && cards->currentItem()==original);
+            if(three) {
+                Check(cards->visualItemRect(browser).top()>first.top());
+                Check(cards->viewport()->rect().contains(cards->visualItemRect(meeting)));
+            }
+            const auto grid=cards->gridSize();
+            for(int frame=0;frame<10;++frame){QCoreApplication::processEvents();Check(cards->gridSize()==grid);}
+            if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+                QDir().mkpath(output);Check(picker.grab().save(QDir(output).filePath(QString("source-grid-%1-%2.png").arg(window?"window":"display").arg(size.width()))));
+            }
+        }
         search->setText("  eDiToR  ");
         Check(original->isHidden() && browser->isHidden() && !editor->isHidden() && !notes->isHidden());
         Check(cards->currentItem()==editor && share->isEnabled() && search->hasFocus());
