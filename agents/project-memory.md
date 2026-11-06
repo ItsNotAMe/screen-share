@@ -5,6 +5,23 @@
 
 # Project Memory
 
+## Persistent remote-control pause guidance - 2026-11-06
+
+The viewer's existing Controls hint now reports actual forwarding pauses while
+permissions remain granted. Video unavailability takes priority and says to
+wait for video; a focus/mode pause explains clicking the video to resume. The
+normal Game mouse guidance returns when the gates reopen, and shortcut reminders
+remain in the same label. Input routing, focus policy and grant semantics are
+unchanged; the label is explicitly plain text.
+
+The full Release build, focused local-service desktop/controller scenarios and
+three relevant UI/update checks passed. Tests require pause/recovery text on
+focus and mode changes, held-state release, retained permissions, blocked input
+while paused and video-wait guidance until fresh video. Compact/normal paused
+renders were inspected and the portable archive matches both executables. All
+input sinks/devices were synthetic; no physical input, version bump or
+publication occurred.
+
 ## Room entry preflight and editable compact forms - 2026-11-06
 
 Create validates room names with the protocol's existing canonical-name rules

@@ -2113,10 +2113,11 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
     }
     if (!physicalReader) { buttons = 2; Wait([&] { return sink->buttons == 2; }); }
     QEvent inactive(QEvent::WindowDeactivate); QApplication::sendEvent(&viewer, &inactive);
-    Wait([&] { return sink->buttons == 0; });
+    auto* controllerHint=viewer.findChild<QLabel*>("gameMouseHint");
+    Wait([&] { return sink->buttons == 0 && controllerHint->text().startsWith("Remote control paused. Click the video"); });
     Check(viewerConsent->isChecked());
     QEvent activeAgain(QEvent::WindowActivate);QApplication::sendEvent(&viewer,&activeAgain);
-    Wait([&]{return sink->buttons==buttons.load();});
+    Wait([&]{return sink->buttons==buttons.load() && !controllerHint->text().contains("Remote control paused");});
     host.revokeControl(); Wait([&] { return sink->buttons == 0 && !viewerConsent->isChecked(); });
     authorize();
     CaptureSelection selection;
@@ -2267,10 +2268,12 @@ void DesktopInputScenario(const std::string& origin) {
     // the press must synchronously enable capture rather than need a second click.
     auto* gameMode=viewer.findChild<QCheckBox*>("gameMouseMode");Check(gameMode);
     gameMode->setChecked(true);Check(!video->hasMouseTracking());
+    Wait([&]{return viewer.findChild<QLabel*>("gameMouseHint")->text().startsWith("Remote control paused. Click the video");});
     QFocusEvent gameFocus(QEvent::FocusIn,Qt::MouseFocusReason);QApplication::sendEvent(video,&gameFocus);
     const auto captureBefore=evidence->applied.load();const QPointF gameCenter(video->width()/2.0,video->height()/2.0);
     QMouseEvent captureClick(QEvent::MouseButtonPress,gameCenter,gameCenter,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
     QApplication::sendEvent(video,&captureClick);Check(video->hasMouseTracking());
+    Check(!viewer.findChild<QLabel*>("gameMouseHint")->text().contains("Remote control paused"));
     Check(evidence->applied==captureBefore); // The capture click never fires in the game.
     gameMode->setChecked(false);
     QEvent gameResume(QEvent::WindowActivate);QApplication::sendEvent(&viewer,&gameResume);
@@ -2287,6 +2290,12 @@ void DesktopInputScenario(const std::string& origin) {
     Wait([&]{for(const auto& state:viewer.session().input()->Read())if(state.granted==screenshare::input::Mouse)return true;return false;});
     Check(viewer.findChild<QCheckBox*>("controllerConsent")->isChecked());
     QEvent hostFocused(QEvent::WindowDeactivate);QApplication::sendEvent(&viewer,&hostFocused);
+    auto* controlHint=viewer.findChild<QLabel*>("gameMouseHint");Check(controlHint && controlHint->isVisible());
+    Wait([&]{return controlHint->text().startsWith("Remote control paused. Click the video");});
+    Check(controlHint->text().contains("Ctrl+Alt+Shift+Q"));
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        QDir().mkpath(output);Check(viewer.grab().save(QDir(output).filePath("viewer-control-focus-paused.png")));
+    }
     // Leave mouse access idle while the host is focused, then add keyboard.
     const auto idleUntil=std::chrono::steady_clock::now()+2s;
     Wait([&]{return std::chrono::steady_clock::now()>=idleUntil;});
@@ -2298,7 +2307,7 @@ void DesktopInputScenario(const std::string& origin) {
     if(!clickedControl)clickedControl=viewer.findChild<QPushButton*>("openSessionSettings");
     clickedControl->setFocus();
     QEvent viewerFocused(QEvent::WindowActivate);QApplication::sendEvent(&viewer,&viewerFocused);
-    Wait([&]{return video->hasMouseTracking();});
+    Wait([&]{return video->hasMouseTracking() && !controlHint->text().contains("Remote control paused");});
     Check(QApplication::focusWidget()==clickedControl);
     const auto combinedUntil=std::chrono::steady_clock::now()+2s;
     Wait([&]{move(QPointF(video->width()/2.0,video->height()/2.0));return std::chrono::steady_clock::now()>=combinedUntil;});
@@ -2323,6 +2332,16 @@ void DesktopInputScenario(const std::string& origin) {
 #endif
     auto videoPreferences=host.session().status().stream.preferences;videoPreferences.videoPaused=true;host.session().apply(videoPreferences);
     Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::VideoPaused && !video->hasMouseTracking() && evidence->buttonUps>pauseButtonUps;});
+    auto* videoPauseHint=viewer.findChild<QLabel*>("gameMouseHint");
+    Wait([&]{return videoPauseHint->isVisible() && videoPauseHint->text().startsWith("Remote control paused until video resumes.");});
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        QDir().mkpath(output);const auto previousSize=viewer.size();
+        for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+            viewer.resize(size);QCoreApplication::processEvents();
+            Check(viewer.grab().save(QDir(output).filePath(QString("viewer-control-video-paused-%1.png").arg(size.width()))));
+        }
+        viewer.resize(previousSize);QCoreApplication::processEvents();
+    }
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
     Wait([&]{return evidence->keyUps>pauseKeyUps;});
 #endif
@@ -2330,7 +2349,7 @@ void DesktopInputScenario(const std::string& origin) {
     videoPreferences.videoPaused=false;host.session().apply(videoPreferences);
     Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::Live && video->accessibleDescription().isEmpty();});
     QEvent afterVideoResume(QEvent::WindowActivate);QApplication::sendEvent(&viewer,&afterVideoResume);
-    Wait([&]{return video->hasMouseTracking();});
+    Wait([&]{return video->hasMouseTracking() && !videoPauseHint->text().contains("Remote control paused");});
     const auto buttonUps=evidence->buttonUps.load();
     const QPointF center(video->width()/2.0,video->height()/2.0);
     QMouseEvent hold(QEvent::MouseButtonPress,center,center,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(video,&hold);
@@ -2339,7 +2358,8 @@ void DesktopInputScenario(const std::string& origin) {
     QKeyEvent holdKey(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,0x1e,0x41,0);QApplication::sendEvent(video,&holdKey);
 #endif
     QEvent inactive(QEvent::WindowDeactivate);QApplication::sendEvent(&viewer,&inactive);
-    Wait([&]{return !video->hasMouseTracking() && evidence->buttonUps>buttonUps;});
+    Wait([&]{return !video->hasMouseTracking() && evidence->buttonUps>buttonUps &&
+        videoPauseHint->text().startsWith("Remote control paused. Click the video");});
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
     Wait([&]{return evidence->keyUps>keyUps;});
 #endif

@@ -110,6 +110,12 @@ and `QT_QPA_PLATFORM=offscreen`.
 It uses its own local service so the larger UI run does not exhaust the
 production admission rate budget within one minute.
 
+Desktop/controller UI checks require persistent pause guidance on focus loss,
+mode changes and host video pause. Video-wait guidance has priority until fresh
+video arrives; focus/click recovery clears it without losing grants. Existing
+recording sinks still require held-state release and blocked input while paused.
+Compact/normal paused-control renders retain the shortcut reminders.
+
 Viewer share-state checks use the production telemetry channel to verify host
 pause/resume while audio continues, two-viewer source closure/replacement and
 minimize/restore. A Live notice with the UI frame consumer temporarily delayed

@@ -160,7 +160,7 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
         gameMouseMode_->setToolTip("For 3D camera control: click the video to lock the cursor. Ctrl+Alt+Shift+Q releases control. Escape goes to the game; Ctrl+Alt+Shift+F toggles fullscreen.");
         layout->insertWidget(layout->indexOf(selection)+1,gameMouseMode_);
         auto* gameHint=new QLabel(this);
-        gameHint->setObjectName("gameMouseHint");gameHint->setWordWrap(true);
+        gameHint->setObjectName("gameMouseHint");gameHint->setTextFormat(Qt::PlainText);gameHint->setWordWrap(true);
         layout->insertWidget(layout->indexOf(gameMouseMode_)+1,gameHint);
         connect(gameMouseMode_,&QCheckBox::toggled,this,[this](bool enabled){
             PauseInput();if(video_)video_->setGameMouseMode(enabled);
@@ -472,7 +472,9 @@ void RoomGamepadControl::Tick() {
             !(granted&input::Mouse)?QString("Game mouse: request mouse access, then click the video."):
             video_ && video_->gameMouseCaptured()?QString("Game mouse captured — cursor hidden and locked."):
             QString("Game mouse ready — click the video to hide and lock the cursor.");
-        findChild<QLabel*>("gameMouseHint")->setText(mouseState+"\nCtrl+Alt+Shift+F: toggle fullscreen\nCtrl+Alt+Shift+Q: release control\nWith keyboard access, Escape goes to the game.");
+        const auto controlHint=granted && !videoAvailable_->load()?QString("Remote control paused until video resumes."):
+            granted && inputPaused_->load()?QString("Remote control paused. Click the video to resume."):mouseState;
+        findChild<QLabel*>("gameMouseHint")->setText(controlHint+"\nCtrl+Alt+Shift+F: toggle fullscreen\nCtrl+Alt+Shift+Q: release control\nWith keyboard access, Escape goes to the game.");
         for(const auto& entry:{std::pair{"Mouse","mouse"},std::pair{"Keyboard","keyboard"},std::pair{"Controller","gamepad"}}) {
             auto* button=findChild<QToolButton*>(QString("select%1Input").arg(entry.first));
             const bool allowed=granted & button->property("capability").toUInt();

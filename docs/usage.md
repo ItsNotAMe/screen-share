@@ -85,6 +85,9 @@ The old picture clears during these states. A resuming message remains until a
 new decoded frame arrives. Audio and room controls remain available.
 Held keys and buttons are released, and remote input pauses until fresh video
 arrives. Host permissions are kept. Click the video again to recapture Game mouse.
+The Controls hint explains when remote control is waiting for video or paused
+after a focus/mode change. Click the video to resume a focus/mode pause; the
+video-wait hint clears after fresh video arrives. Shortcut reminders stay visible.
 
 Shared audio negotiates stereo between current versions. At 100% viewer volume,
 the app applies no playback attenuation. System capture from 5.1/7.1 outputs

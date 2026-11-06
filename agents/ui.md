@@ -56,6 +56,10 @@
   surface and accessible description. Clear held input before clearing mapping;
   gate remote input until fresh video while preserving grants and focus policy.
   Game mouse must be captured again after the video returns.
+  Use the existing Controls hint to explain paused remote input persistently:
+  wait for fresh video first, then offer click-video recovery for a focus/mode
+  pause. Keep shortcut reminders and use the actual forwarding gates/grants;
+  permission alone does not mean input is currently forwarding.
 
 - Hosts can remove a viewer from that viewer's row after a named confirmation.
   Keep removal icon-only, using user-minus beside the three input icons on one
