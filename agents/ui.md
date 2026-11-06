@@ -2,6 +2,12 @@
 
 ## Current UI Direction
 
+- Horizontal scrollbars and scroll-area corners use the shared dark theme
+  throughout the app, including the Stream details viewer table. Keep these
+  rules global instead of limiting them to QFileDialog. The existing 10 px
+  track, rounded thumb and hover treatment match vertical scrolling. Compact/
+  normal Stream details renders were inspected after the white scrollbar fix.
+
 - A temporary input-watchdog gap keeps grant icons checked. The host shows
   Input paused and explains that permission remains and fresh input resumes it.
   Renewal of the input epoch is automatic; it must not require another host

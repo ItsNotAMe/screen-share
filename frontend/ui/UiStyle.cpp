@@ -195,12 +195,12 @@ QFileDialog QToolButton:focus { border-color: #60786f; }
 QFileDialog QToolButton#backButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-left.svg); }
 QFileDialog QToolButton#forwardButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-right.svg); }
 QFileDialog QToolButton#toParentButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-up.svg); }
-QFileDialog QScrollBar:horizontal { background: #101815; height: 10px; margin: 0; border: 0; }
-QFileDialog QScrollBar::handle:horizontal { background: #40534a; border-radius: 5px; min-width: 24px; }
-QFileDialog QScrollBar::handle:horizontal:hover { background: #60786f; }
-QFileDialog QScrollBar::add-line:horizontal, QFileDialog QScrollBar::sub-line:horizontal { width: 0; border: 0; }
-QFileDialog QScrollBar::add-page:horizontal, QFileDialog QScrollBar::sub-page:horizontal { background: transparent; }
-QFileDialog QAbstractScrollArea::corner { background: #151d1b; }
+QScrollBar:horizontal { background: #101815; height: 10px; margin: 0; border: 0; }
+QScrollBar::handle:horizontal { background: #40534a; border-radius: 5px; min-width: 24px; }
+QScrollBar::handle:horizontal:hover { background: #60786f; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; border: 0; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+QAbstractScrollArea::corner { background: #151d1b; }
 QFileDialog QSplitter::handle { background: #0c1110; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
 QScrollBar:vertical { background: #101815; width: 10px; margin: 0; border: 0; }

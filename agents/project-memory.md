@@ -12,6 +12,22 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Theme the white horizontal scrollbar - 2026-11-07
+
+Owner pointed out the white horizontal scrollbar/end buttons in Stream details.
+Only QFileDialog had horizontal scrollbar rules; the viewer diagnostics table
+inherited Qt's light fallback while vertical scrolling already used the theme.
+Promoted the existing horizontal track/thumb/hover/end-button/page and scroll-area
+corner rules to the shared stylesheet, preserving their geometry and palette.
+This also covers horizontal scrolling elsewhere in the application.
+
+Compact/normal Stream details renders were inspected: the track, rounded thumb
+and corners are dark, with no white end buttons. The focused admission/report-
+export UI scenario passed after the change. Release `all`, all 46 sequential
+application CTests (301.29 s) and packaged CLI/UI hashes passed with both the audio
+recovery and theme changes. No image mockup or layout redesign was needed.
+Committed separately from audio recovery at the owner's request; unreleased.
+
 ## Recover host microphone/system capture automatically - 2026-11-07
 
 SwitchablePcmCapture previously stayed silent after a System/Microphone producer
