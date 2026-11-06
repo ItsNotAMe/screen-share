@@ -18,6 +18,9 @@ Join errors explain whether a room is full, closed or missing, or requests were
 rate limited. Your invite stays in the form so you can correct it or retry.
 An unconfirmed outcome asks you to wait before trying again. Room creation
 distinguishes a full service from a room's viewer limit.
+Session windows retain these specific failure explanations through status
+refreshes. If an active room loses its service connection or its audio/video
+fails, the message explains the failure and how the host or viewer can retry.
 
 While joining, the form shows progress and offers **Cancel** in place of Paste.
 Cancel preserves the invite so you can edit it or try again. Choosing Home also

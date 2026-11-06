@@ -24,6 +24,9 @@
   limits and uncertain outcomes using the shared RoomEntryError guidance.
   Host creation uses service-capacity guidance for the full response. Keep
   password prompts exclusive to validated authorization failures.
+  Session windows must also render the typed terminal cause on every failed
+  status push, using active-room recovery wording after admission. Avoid
+  replacing detailed guidance with a generic failure or keeping stale action errors.
 
 - Normal startup remembers windowed size/position and maximized state. Cache
   placement in memory while moving; freeze/save on the first Close before room

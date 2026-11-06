@@ -5,6 +5,22 @@
 
 # Project Memory
 
+## Preserve actionable session failures - 2026-11-06
+
+RoomSessionWindow previously overwrote detailed admission guidance with a generic
+failure on every failed status push. It now renders the typed cause through the
+shared error helpers. Once the room has been active, fatal media/transport errors
+describe that failure and give host Stop/start or viewer Leave/rejoin guidance.
+New terminal failures replace stale action errors rather than preserving them.
+
+An actual host-capacity window regression failed against the previous behavior.
+The final Release build, focused admission fixture and five relevant UI/mutation/
+report/update checks passed. Actual host/viewer windows retain capacity guidance
+through status refresh; synthetic active-room failure pushes cover recovery
+wording and stale-error replacement. Compact/normal failure renders were
+inspected and the portable archive matches both rebuilt executables. No physical
+device/WAN failure was injected, and no version bump or publication occurred.
+
 ## Responsive three-column source grid - 2026-11-06
 
 The source picker now uses up to three columns when cells can remain at least

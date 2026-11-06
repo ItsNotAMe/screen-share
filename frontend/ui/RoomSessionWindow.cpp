@@ -2,6 +2,7 @@
 #include "ui/RoomGamepadControl.h"
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
+#include "shared/RoomEntryError.h"
 #include "shared/RoomProfile.h"
 #include "ui/PeerDiagnosticsWidget.h"
 #include "ui/SessionDetailsWidget.h"
@@ -429,6 +430,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         error_->clear();streamSaveError_.clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
     });
     session_.statusChanged = [this, peerDiagnostics, sessionDetails, capacityWarning, host = config.room.host](const auto& value) {
+        if (value.phase == RoomPhase::Active) roomWasActive_ = true;
         sessionDetails->Update(value);
         phase_->setText(!host && value.phase == RoomPhase::Active && value.failedPeers ? "Connection failed — leave and rejoin" : Phase(value.phase));
         phase_->setToolTip(QString("%1 media peers, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
@@ -500,7 +502,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             const auto application = StreamApplicationJson(value.stream);
             settingsState_->setText(application["rejected"].toInt()?"Some viewers could not apply these settings. Review Details, then change the setting to retry.":application["pending"].toInt()?"Applying settings…":QString());
         }
-        if (value.phase == RoomPhase::Failed) error_->setText("The room session failed. Stop and start a new session to retry.");
+        if (value.phase == RoomPhase::Failed) error_->setText(RoomSessionError(value.error, host, roomWasActive_));
         error_->setVisible(!error_->text().isEmpty());
     };
     session_.settingsAccepted = [this](const auto& result) { if (result.error != StreamUpdateError::None) {streamSaveError_="These settings could not be applied. Change an option to retry.";settingsState_->setText(streamSaveError_);} };

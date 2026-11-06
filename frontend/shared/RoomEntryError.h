@@ -20,3 +20,14 @@ inline QString RoomEntryError(screenshare::v2::RoomError error, bool hosting = f
     default: return QStringLiteral("Could not enter the room. Check your connection and the room service, then try again.");
     }
 }
+
+inline QString RoomSessionError(screenshare::v2::RoomError error, bool hosting, bool wasActive) {
+    using screenshare::v2::RoomError;
+    if (wasActive && (error==RoomError::Media || error==RoomError::Transport)) {
+        const auto cause = error==RoomError::Media ? QStringLiteral("The room's audio or video failed.") :
+            QStringLiteral("The connection to the room service was lost.");
+        return cause + (hosting ? QStringLiteral(" Stop sharing and start a new room to retry.") :
+            QStringLiteral(" Leave and rejoin the room to retry."));
+    }
+    return RoomEntryError(error, hosting);
+}

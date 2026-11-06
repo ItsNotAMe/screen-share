@@ -73,6 +73,7 @@ private:
     uint64_t roomEditSequence_ = 0, roomSubmittedSequence_ = 0;
     bool autoRoomUpdate_ = false;
     QString streamSaveError_;
+    bool roomWasActive_ = false;
     bool closing_ = false, streamFullscreen_ = false, swallowEscapeRelease_ = false;
     bool swallowFullscreenRelease_ = false;
     QPushButton* fullscreenButton_ = nullptr;

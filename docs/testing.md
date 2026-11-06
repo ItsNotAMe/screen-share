@@ -36,6 +36,12 @@ A queued success status after cancellation cannot reopen the session. It also
 checks stable control/list geometry through pending/cancelled states and that
 cancelled requests start no media runtime.
 
+The admission fixture also opens actual host/viewer session windows and checks
+that capacity guidance survives terminal status refreshes. Synthetic active-room
+failure pushes check media/transport guidance, host/viewer recovery actions, and
+replacement of stale action errors. These message-policy checks do not inject a
+physical device or WAN failure.
+
 Room UI closure checks stop a real local-service host and require the viewer to
 return Home with a room-ended notice after cleanup. Voluntary Leave stays quiet
 and keeps the host active. Removal retains its separate explanation. Policy

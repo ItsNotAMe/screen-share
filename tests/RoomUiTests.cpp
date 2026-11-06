@@ -1113,6 +1113,34 @@ void AdmissionFeedbackScenario() {
     Check(host.start(config));Wait([&]{return !host.running();});
     Check(host.status().error==RoomError::RoomFull && runtimeStarts==0 &&
         hostError=="The room service has reached its room limit. Wait for a room to close, then try again.");
+    for(const bool hosting:{true,false}) {
+        config.room.host=hosting;config.room.roomId=hosting?"":"feedback-room";
+        RoomSessionWindow capacity(config,factory,true);capacity.show();
+        Wait([&]{return !capacity.session().running();});
+        auto* message=capacity.findChild<QLabel*>("roomError");
+        const auto expected=hosting?hostError:QString::fromUtf8(failures[0].message);
+        Check(message && message->isVisible() && message->text()==expected);
+        auto status=capacity.session().status();capacity.session().statusChanged(status);
+        Check(message->text()==expected); // Status refresh must retain the typed cause.
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);
+            for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                capacity.resize(size);QCoreApplication::processEvents();
+                Check(capacity.grab().save(QDir(output).filePath(QString("session-capacity-%1-%2.png").arg(hosting?"host":"viewer").arg(size.width()))));
+            }
+        }
+        // Exercise active-session failure pushes separately from admission. A
+        // prior action error must not hide a new terminal room failure.
+        status.phase=RoomPhase::Active;status.error=RoomError::None;capacity.session().statusChanged(status);
+        message->setText("Could not complete the previous room action.");
+        status.phase=RoomPhase::Failed;status.error=RoomError::Media;capacity.session().statusChanged(status);
+        const auto recovery=hosting?"Stop sharing and start a new room":"Leave and rejoin the room";
+        Check(message->text().contains("audio or video failed") && message->text().contains(recovery));
+        status.error=RoomError::Transport;capacity.session().statusChanged(status);
+        Check(message->text().contains("connection to the room service was lost") && message->text().contains(recovery));
+        Check(capacity.findChild<QPushButton*>("stopRoom")->isEnabled() && runtimeStarts==0);
+        capacity.close();
+    }
 }
 void BrowserScenario(const QUrl& origin) {
     ProfileSettingsScenario();
