@@ -125,6 +125,14 @@ eight changing NV12 buffers with unequal padded plane strides. All 32 outputs
 are decoded to validate luma/chroma, dimensions, timestamps and input mapping;
 instrumented buffers must receive no ToI420 calls. Existing cases also cover
 rate changes, zero-rate suspension, keyframes, coalescing and repeated release.
+The completed-stall regression delays software input mapping for 550 ms three
+times through the real MF encoder. Late pictures must be dropped without codec
+reinitialization or terminal failure. Fresh input must resume automatically with
+its original RTP/NTP and input mapping; a new real decoder must decode each
+recovery keyframe independently. Pending input still coalesces to the latest
+frame, with exact drop accounting. Release during a fourth stall suppresses old
+callbacks, and a new configuration starts cleanly. This injects mapping delay;
+it does not reproduce a physical GPU hang or preempt a stuck native call.
 The direct-plane entry point rejects truncated planes, invalid strides and
 dimensions, and use before startup/after Stop; rejected inputs must not consume
 the first frame's timestamp. Minimal final rows need no trailing padding.

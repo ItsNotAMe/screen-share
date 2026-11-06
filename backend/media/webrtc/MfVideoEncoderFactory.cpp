@@ -21,6 +21,7 @@
 namespace screenshare::media {
 namespace {
 struct RetiredVideoFrame {};
+struct LateEncodedFrame { int64_t elapsedMilliseconds; };
 class MfVideoEncoder final : public webrtc::VideoEncoder {
 public:
     explicit MfVideoEncoder(std::shared_ptr<MfHardwareSession> hardware, int level, std::shared_ptr<DiagnosticHistory> diagnostics)
@@ -263,8 +264,9 @@ private:
                 pixels->StrideY(), pixels->StrideUV()});
         } else packets = encoder_->EncodeFrame(RawFrame(frame));
         if (packets.size() != 1) throw std::runtime_error("MF software retained output");
-        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(500))
-            throw std::runtime_error("MF software encode exceeded 500 ms");
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > std::chrono::milliseconds(500))
+            throw LateEncodedFrame{std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()};
         return std::move(packets.front());
     }
     void CancelPending() {
@@ -337,6 +339,20 @@ private:
                 info.codecType = webrtc::kVideoCodecH264;
                 info.codecSpecific.H264.packetization_mode = webrtc::H264PacketizationMode::NonInterleaved;
                 if (callback_) callback_->OnEncodedImage(image, &info);
+            } catch (const LateEncodedFrame& late) {
+                // The transform produced valid output; temporary scheduling or
+                // readback delay must not poison future encoding. Drop stale
+                // output and replace its missing reference chain with an IDR.
+                bool current;
+                {
+                    std::lock_guard lock(mutex_);
+                    current = generation == generation_;
+                    if (current) keyframe_ = true;
+                }
+                if (current) {
+                    if (diagnostics_) diagnostics_->Event("encoder-late-frame-dropped", late.elapsedMilliseconds);
+                    if (callback_) callback_->OnFrameDropped(frame->rtp_timestamp(), 0, true);
+                }
             } catch (const RetiredVideoFrame&) {
                 // Keep the encoder alive for fresh input from capture recovery.
                 // Its first output must replace the receiver's old references.

@@ -23,6 +23,8 @@
 #include <atomic>
 #include <algorithm>
 #include <cstring>
+#include <future>
+#include <thread>
 
 namespace {
 void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -330,6 +332,124 @@ void UnavailableFrameRate() {
     }
     std::cout << "MF encoder: missing/nonfinite/extreme FPS targets preserve bitrate resume.\n";
 }
+
+// Model a completed software-input/readback stall without physical capture or
+// a transform test hook. The real encoder's elapsed-work limit includes mapping.
+class StalledInput : public webrtc::VideoFrameBuffer {
+public:
+    explicit StalledInput(std::shared_ptr<std::promise<void>> entered) : entered_(std::move(entered)), pixels_(webrtc::I420Buffer::Create(640, 360)) {
+        pixels_->InitializeData();
+    }
+    Type type() const override { return Type::kNative; }
+    int width() const override { return 640; }
+    int height() const override { return 360; }
+    webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override {
+        entered_->set_value();
+        std::this_thread::sleep_for(std::chrono::milliseconds(550));
+        return pixels_;
+    }
+private:
+    std::shared_ptr<std::promise<void>> entered_;
+    webrtc::scoped_refptr<webrtc::I420Buffer> pixels_;
+};
+
+void CompletedStallRecovery() {
+    using namespace screenshare::media;
+    auto diagnostics = std::make_shared<DiagnosticHistory>();
+    MfVideoEncoderFactory factory({}, diagnostics);
+    auto encoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    Sink sink;
+    struct Cleanup { webrtc::VideoEncoder& encoder; ~Cleanup() { encoder.Release(); } } cleanup{*encoder};
+    webrtc::VideoCodec codec;
+    codec.codecType = webrtc::kVideoCodecH264;
+    codec.width = 640; codec.height = 360; codec.maxFramerate = 30; codec.startBitrate = 1000;
+    Require(encoder->InitEncode(&codec, {webrtc::VideoEncoder::Capabilities(false), 2, 1200}) == 0,
+        "Completed-stall initialization failed");
+    encoder->RegisterEncodeCompleteCallback(&sink);
+    Require(encoder->Encode(Frame(1), nullptr) == 0, "Initial stall fixture frame rejected");
+    sink.Wait(1);
+
+    auto stall = [&](uint32_t timestamp, std::shared_ptr<std::promise<void>> entered) {
+        auto frame = Frame(timestamp);
+        frame.set_video_frame_buffer(webrtc::make_ref_counted<StalledInput>(entered));
+        Require(encoder->Encode(frame, nullptr) == 0, "Stalled input rejected");
+    };
+    for (unsigned gap = 0; gap < 3; ++gap) {
+        auto entered = std::make_shared<std::promise<void>>();
+        auto started = entered->get_future();
+        const uint32_t lateTimestamp = 100 + gap * 100;
+        stall(lateTimestamp, entered);
+        Require(started.wait_for(std::chrono::seconds(5)) == std::future_status::ready, "Input stall never started");
+
+        const uint32_t freshTimestamp = lateTimestamp + 10;
+        if (!gap) {
+            // Same rates/FPS: a worker barrier, not an encoder restart. A fresh
+            // Encode call must be accepted after the late picture completed.
+            Rate(*encoder, 1000000);
+        } else {
+            for (unsigned i = 1; i < 10; ++i)
+                Require(encoder->Encode(Frame(lateTimestamp + i), nullptr) == 0, "Pending stall input rejected");
+        }
+        auto fresh = Frame(freshTimestamp);
+        fresh.set_video_frame_buffer(WithMapping(fresh.video_frame_buffer(),
+            {freshTimestamp, 640, 360, 0, 0, 640, 360}, StreamPreset::Gaming));
+        Require(encoder->Encode(fresh, nullptr) == 0, "Completed software stall poisoned subsequent encoding");
+        sink.Wait(gap + 2);
+        Rate(*encoder, 1000000);
+        const auto& image = sink.images.back();
+        Require(sink.images.size() == gap + 2 && image.RtpTimestamp() == freshTimestamp && image.NtpTimeMs() == 123456 &&
+            image._frameType == webrtc::VideoFrameType::kVideoFrameKey &&
+            screenshare::input::ReadMappingSei({image.data(), image.size()}).generation == freshTimestamp,
+            "Stall recovery replayed old output or lost fresh IDR/timing/mapping");
+        // A new decoder must reconstruct the recovery picture without the
+        // dropped picture's reference chain, including parameter sets.
+        screenshare::H264StreamDecoder decoder;
+        decoder.Start(4096, 4096);
+        screenshare::EncodedPacket packet;
+        packet.timestamp100ns = freshTimestamp * 100000;
+        packet.duration100ns = 333333;
+        packet.bytes.resize(image.size());
+        std::memcpy(packet.bytes.data(), image.data(), image.size());
+        const auto decoded = decoder.DecodePacket(packet);
+        Require(decoded.size() == 1 && decoded.front().width == 640 && decoded.front().height == 360,
+            "Fresh recovery keyframe depended on dropped output");
+    }
+    Require(sink.dropped == 21, "Late or replaced input was not accounted for exactly once");
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto started = entered->get_future();
+    stall(900, entered);
+    Require(started.wait_for(std::chrono::seconds(5)) == std::future_status::ready, "Release fixture did not enter stall");
+    encoder->Release();
+    Require(sink.images.size() == 4 && sink.dropped == 21,
+        "Cancelled late output emitted a callback or changed drop accounting");
+    Require(encoder->Encode(Frame(901), nullptr) == WEBRTC_VIDEO_CODEC_UNINITIALIZED,
+        "Cancelled late output revived a released encoder");
+    Require(encoder->InitEncode(&codec, {webrtc::VideoEncoder::Capabilities(false), 2, 1200}) == 0,
+        "Encoder could not restart after cancelling late output");
+    encoder->RegisterEncodeCompleteCallback(&sink);
+    Require(encoder->Encode(Frame(902), nullptr) == 0, "Restarted input rejected after cancellation");
+    sink.Wait(5);
+    Rate(*encoder, 1000000);
+    Require(sink.images.size() == 5 && sink.images.back().RtpTimestamp() == 902 &&
+        sink.images.back()._frameType == webrtc::VideoFrameType::kVideoFrameKey,
+        "New configuration emitted stale output or lost its initial IDR");
+
+    unsigned lateEvents = 0, starts = 0;
+    for (const auto& record : *diagnostics->Read().records) {
+        const auto event = record.labels.find("event");
+        if (event == record.labels.end()) continue;
+        Require(event->second != "encoder-terminal-failure" && event->second != "encoder-frame-failed",
+            "Completed stall recorded a fatal encoder failure");
+        if (event->second == "encoder-late-frame-dropped") {
+            ++lateEvents;
+            Require(record.numbers.at("code") >= 500, "Late-output diagnostics lost elapsed work time");
+        }
+        if (event->second == "encoder-software-ready") ++starts;
+    }
+    Require(lateEvents == 3 && starts == 2, "Late-output diagnostics missing or stall recovery rebuilt the codec");
+    std::cout << "Completed software stalls: three late drops, fresh independent IDRs, bounded pending replacement and cancellation/restart passed.\n";
+}
 }
 int main(int argc, char** argv) {
     try {
@@ -348,7 +468,7 @@ int main(int argc, char** argv) {
         }
         Require(!gpuInput || hardware, "--gpu-input requires --hardware");
         Require(!gpuReadback || !hardware,"--gpu-readback requires software encoding");
-        if (!hardware) { Nv12PlaneValidation();DirectNv12Input();if(gpuReadback)DirectNv12Input(true);UnavailableFrameRate(); }
+        if (!hardware) { Nv12PlaneValidation();DirectNv12Input();if(gpuReadback)DirectNv12Input(true);UnavailableFrameRate();CompletedStallRecovery(); }
         StableFrameRate(hardware);
         proof::LifecycleSample(0, 0);
         for (int cycle = 1; cycle <= cycles; ++cycle) {

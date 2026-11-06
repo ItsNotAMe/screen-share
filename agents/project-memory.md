@@ -12,6 +12,35 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Keep software video alive after a completed encode stall - 2026-11-07
+
+The software encoder treated a successful encode taking over 500 ms as a fatal
+error, setting failed_ and rejecting subsequent input until reinitialization.
+A real MF regression with a 550 ms input-mapping delay reproduced this against
+7b561f5: "Completed software stall poisoned subsequent encoding".
+
+Late completed output now has a separate nonfatal drop path. Keep the live
+transform/latest pending input, force the next fresh picture to an IDR (the
+receiver never saw the dropped reference), and record encoder-late-frame-dropped
+with elapsed work milliseconds. Generation cancellation suppresses the late
+callback/event. Actual software codec errors retain terminal behavior and
+hardware's missing-output deadline still quarantines/falls back as before.
+
+The regression exercises three completed stalls, including latest-only queued
+input, exact drop accounting, fresh RTP/NTP/mapping and independent decoding of
+each recovered IDR with a new MF decoder. Codec-ready events prove no implicit
+restart during recovery. A fourth stall is cancelled by Release; old callbacks
+stay suppressed and a new configuration produces a clean initial keyframe.
+Generated GPU-readback software encoding also passes. This injects input mapping
+delay, not a physical game/driver hang, and cannot preempt stuck native calls.
+This is a reliability change, with no CPU/latency improvement claim.
+
+Release `all` build passed. All 46 CTests passed sequentially (299.58 s),
+including the extended encoder regression, multi-viewer media, input and UI.
+`EncoderAdapterTests --gpu-readback` passed separately with the final test source;
+packaged CLI/UI hashes match. No physical input or virtual-controller allocation.
+No version bump or publication; this fix is unreleased.
+
 ## Reuse software decoder output storage - 2026-11-06
 
 H264StreamDecoder previously allocated a large caller-owned MF output buffer on

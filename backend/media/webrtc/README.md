@@ -23,8 +23,13 @@ back into codec lifecycle operations.
 SetRates applies the assigned bitrate directly. Zero suspends even when its FPS
 field is also zero. FPS changes restart the transform and force a keyframe;
 bitrate-only updates do not restart it. Software input must yield exactly one
-encoded packet. Software errors or a completed encode call exceeding 500 ms mark
-the encoder failed. Hardware uses explicit readiness/submission and nonblocking
+encoded packet. A completed software encode exceeding 500 ms drops that late
+output and forces the next fresh picture to be a keyframe, retaining the live
+transform and latest pending input. The dropped picture's reference chain must
+never be used by a receiver. Diagnostics record `encoder-late-frame-dropped`
+with elapsed work milliseconds; cancelled configurations emit no late callback.
+Actual software codec errors still mark the encoder failed.
+Hardware uses explicit readiness/submission and nonblocking
 MF event polling, with a 500 ms deadline and generation cancellation. The old
 hardware queue and multi-second drain loops are not used. Polling waits at most
 one millisecond between checks on the encoder worker, never on signaling/network

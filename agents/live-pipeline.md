@@ -7,6 +7,17 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 completed software-encode stalls: producing one valid packet after
+more than 500 ms no longer marks that encoder failed. Drop late output, preserve
+the live transform/latest pending frame and force the next fresh picture to an
+IDR so it cannot depend on the missing reference. Cancellation suppresses late
+callbacks and diagnostics. Actual codec errors and asynchronous hardware timeout
+fallback retain their behavior. A real MF regression with three 550 ms input
+mapping delays requires fresh independent-decodable keyframes, original timing/
+mapping, exact pending replacement counts and no hidden transform restarts.
+Release during a fourth stall and reinitialization are covered. This does not
+preempt stuck COM/driver calls or qualify the physical game-lag report.
+
 2026-11-06 software decoder storage: H264StreamDecoder keeps one caller-owned
 CPU output buffer, resetting its length and creating fresh sample metadata on
 each poll. Output vectors remain independent; stream change invalidates storage,
