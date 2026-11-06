@@ -616,6 +616,22 @@ void MutationLifecycle(const std::string& origin) {
         Check(session.SwitchCaptureSource({}).get().error == CaptureUpdateError::Unavailable);
     } catch (...) { if (barrier->ready.wait_for(0ms) != std::future_status::ready) barrier->release.set_value(); throw; }
 }
+class RecordingInputPresentation final:public FramePresentationBackend {
+public:
+    bool Present(HWND,uint32_t,uint32_t,bool,bool,const screenshare::Nv12D3D11Presenter::FrameView& frame,screenshare::Nv12D3D11Presenter::ScaleMode) override {return frame.width>0 && (frame.texture || frame.dataSize>0);}
+    void Reset() noexcept override {}
+    void Update(HWND,uint32_t,uint32_t,bool,bool,screenshare::Nv12D3D11Presenter::ScaleMode) override {}
+    uint32_t MaximumFrameLatency() const noexcept override {return 1;}
+};
+FramePresentationFactory InputProofPresentation() {
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    // Offscreen Qt HWNDs can be unavailable to DXGI. Input proofs still require
+    // successful presentation; native rendering has separate Windows coverage.
+    return [] {return std::make_unique<RecordingInputPresentation>();};
+#else
+    return {};
+#endif
+}
 void ViewerRemovalScenario(const std::string& origin) {
     auto sink=std::make_shared<RecordingGamepadSink>();
     RoomSessionConfig config;config.room.origin=origin;config.room.host=true;
@@ -626,7 +642,7 @@ void ViewerRemovalScenario(const std::string& origin) {
     config.room.host=false;config.room.roomId=roomId;config.room.nickname="Same viewer <one & two>";config.media.inputSink.reset();
     const auto devices=[] {return std::vector<screenshare::ViewerGamepadDevice>{{"test-pad","Recording controller"}};};
     const auto read=[](std::string_view) -> std::optional<screenshare::RemoteGamepadState> { screenshare::RemoteGamepadState value;value.buttons=1;return value; };
-    RoomSessionWindow target(config,Factory(std::make_shared<proof::AudioEvidence>()),true,nullptr,devices,read);target.show();
+    RoomSessionWindow target(config,Factory(std::make_shared<proof::AudioEvidence>()),true,nullptr,devices,read,InputProofPresentation());target.show();
     RoomSessionWindow survivor(config,Factory(std::make_shared<proof::AudioEvidence>()),true);survivor.show();
     unsigned targetFrames=0,survivorFrames=0;
     auto showTarget=target.session().frameReady,showSurvivor=survivor.session().frameReady;
@@ -676,6 +692,13 @@ void ViewerRemovalScenario(const std::string& origin) {
     RespondToInputRequest(host,screenshare::input::Gamepad,true,targetId);
     target.activateWindow();Wait([&]{return sink->buttons==1;});
     const auto grantedBeforePause=target.session().input()->Read();Check(grantedBeforePause.size()==1);
+    auto resumeVideo=target.session().frameReady;target.session().frameReady=[](auto) {};
+    Wait([&]{return sink->buttons==0 && target.findChild<QWidget*>("roomVideo")->accessibleDescription().contains("Video interrupted");});
+    const auto duringStall=target.session().input()->Read();
+    Check(duringStall.size()==1 && duringStall.front().permission==grantedBeforePause.front().permission &&
+        duringStall.front().granted==screenshare::input::Gamepad && target.session().status().phase==RoomPhase::Active);
+    target.session().frameReady=std::move(resumeVideo);
+    Wait([&]{return sink->buttons==1 && target.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
     auto pausedPreferences=host.session().status().stream.preferences;pausedPreferences.videoPaused=true;host.session().apply(pausedPreferences);
     Wait([&]{return target.session().status().stream.remoteShare.state==HostShareState::VideoPaused && sink->buttons==0;});
     const auto duringPause=target.session().input()->Read();
@@ -1741,7 +1764,7 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
     }
     config.room.host = false; config.room.roomId = host.session().status().roomId;
     auto audio = std::make_shared<proof::AudioEvidence>();
-    RoomApplication viewerApp(config, Factory(audio), true); viewerApp.show();
+    RoomApplication viewerApp(config, Factory(audio), true,InputProofPresentation()); viewerApp.show();
     auto& viewer = *viewerApp.session();
     unsigned frames = 0, lastWidth = 0; auto present = viewer.session().frameReady;
     viewer.session().frameReady = [&](auto frame) { ++frames; lastWidth = frame.width; present(std::move(frame)); };
@@ -1896,7 +1919,7 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
     // Two existing viewers must survive source closure and receive a replacement
     // without renegotiating or recreating their room connections.
     auto secondAudio=std::make_shared<proof::AudioEvidence>();
-    RoomApplication secondViewer(config,Factory(secondAudio),true);secondViewer.show();
+    RoomApplication secondViewer(config,Factory(secondAudio),true,InputProofPresentation());secondViewer.show();
     unsigned secondFrames=0;auto secondPresent=secondViewer.session()->session().frameReady;
     secondViewer.session()->session().frameReady=[&](auto frame){++secondFrames;secondPresent(std::move(frame));};
     Wait([&]{return host.session().status().activePeers==2 && secondFrames>=5;});
@@ -2038,7 +2061,7 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
             Check(device == devices.front().id); if (!plugged) return {};
             if (physicalReader) return screenshare::ViewerGamepad::ReadState(device);
             screenshare::RemoteGamepadState state; state.buttons = buttons.load(); return state;
-        });
+        },InputProofPresentation());
     viewer.setAttribute(Qt::WA_ShowWithoutActivating); viewer.show();
     Wait([&] { return viewer.session().status().activePeers == 1 && viewer.session().input(); });
     auto* controllerChoice=viewer.findChild<QComboBox*>("controllerDevice");
@@ -2176,13 +2199,6 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
     viewer.session().stop(); host.session().stop();
     Wait([&] { return !viewer.session().running() && !host.session().running(); });
 }
-class RecordingInputPresentation final:public FramePresentationBackend {
-public:
-    bool Present(HWND,uint32_t,uint32_t,bool,bool,const screenshare::Nv12D3D11Presenter::FrameView& frame,screenshare::Nv12D3D11Presenter::ScaleMode) override {return frame.width>0 && (frame.texture || frame.dataSize>0);}
-    void Reset() noexcept override {}
-    void Update(HWND,uint32_t,uint32_t,bool,bool,screenshare::Nv12D3D11Presenter::ScaleMode) override {}
-    uint32_t MaximumFrameLatency() const noexcept override {return 1;}
-};
 void DesktopInputScenario(const std::string& origin) {
     auto target=std::make_shared<screenshare::input::DesktopTargetState>();
     auto evidence=std::make_shared<DesktopInputEvidence>();
@@ -2195,10 +2211,7 @@ void DesktopInputScenario(const std::string& origin) {
     Wait([&]{return host.session().status().phase==RoomPhase::Active;});
     config.room.host=false;config.room.roomId=host.session().status().roomId;config.room.nickname="Input viewer";
     config.media.inputSink.reset();
-    FramePresentationFactory presentation;
-#ifndef SCREENSHARE_WINDOWS_UI_PROOF
-    presentation=[] {return std::make_unique<RecordingInputPresentation>();};
-#endif
+    auto presentation=InputProofPresentation();
     RoomSessionWindow viewer(config,Factory(std::make_shared<proof::AudioEvidence>()),true,nullptr,
         [] {return std::vector<screenshare::ViewerGamepadDevice>{};},[](auto)->std::optional<screenshare::RemoteGamepadState>{return {};},presentation);
     viewer.setAttribute(Qt::WA_ShowWithoutActivating);viewer.show();
@@ -2384,6 +2397,38 @@ void DesktopInputScenario(const std::string& origin) {
     Wait([&]{return viewer.session().status().stream.remoteShare.state==HostShareState::Live && video->accessibleDescription().isEmpty();});
     QEvent afterVideoResume(QEvent::WindowActivate);QApplication::sendEvent(&viewer,&afterVideoResume);
     Wait([&]{return video->hasMouseTracking() && !videoPauseHint->text().contains("Remote control paused");});
+    // Freeze only the UI consumer while transport/decoding remain healthy.
+    // A live room must not permit blind input over the stale displayed frame.
+    const auto stalledButtonUps=evidence->buttonUps.load();
+    QMouseEvent staleHeld(QEvent::MouseButtonPress,inside,inside,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(video,&staleHeld);
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    const auto stalledKeyUps=evidence->keyUps.load();
+    QKeyEvent staleKey(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,0x1e,0x41,0);QApplication::sendEvent(video,&staleKey);
+#endif
+    auto consumeAfterStall=viewer.session().frameReady;
+    viewer.session().frameReady=[](auto) {};
+    Wait([&]{return video->accessibleDescription().contains("Video interrupted") && !video->hasMouseTracking() && evidence->buttonUps>stalledButtonUps;});
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    Wait([&]{return evidence->keyUps>stalledKeyUps;});
+#endif
+    for(const auto& state:viewer.session().input()->Read())Check(state.granted==caps && state.permission==pausePermission);
+    Check(viewer.session().status().phase==RoomPhase::Active && host.session().status().activePeers==1);
+    const auto inputWhileStalled=evidence->applied.load();move(inside);
+    QMouseEvent staleClick(QEvent::MouseButtonPress,inside,inside,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(video,&staleClick);
+    const auto stalledUntil=std::chrono::steady_clock::now()+150ms;Wait([&]{return std::chrono::steady_clock::now()>stalledUntil;});
+    Check(evidence->applied==inputWhileStalled && !video->hasMouseTracking());
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        QDir().mkpath(output);const auto previousSize=viewer.size();
+        for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+            viewer.resize(size);QCoreApplication::processEvents();
+            Check(viewer.grab().save(QDir(output).filePath(QString("viewer-video-interrupted-%1.png").arg(size.width()))));
+            Check(!video->hasMouseTracking());
+        }
+        viewer.resize(previousSize);QCoreApplication::processEvents();
+    }
+    viewer.session().frameReady=std::move(consumeAfterStall);
+    Wait([&]{return video->accessibleDescription().isEmpty() && video->hasMouseTracking();});
+    for(const auto& state:viewer.session().input()->Read())Check(state.granted==caps && state.permission==pausePermission);
     const auto buttonUps=evidence->buttonUps.load();
     const QPointF center(video->width()/2.0,video->height()/2.0);
     QMouseEvent hold(QEvent::MouseButtonPress,center,center,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(video,&hold);
@@ -2594,7 +2639,8 @@ int main(int argc, char** argv) {
         Check(!host.findChild<QLabel*>("roomReportResult")->property("reportError").toBool() && QFileInfo::exists(config.reportFile));
         config.room.host = false; config.room.roomId = host.session().status().roomId; config.room.nickname = "UiHost";
         auto viewerAudio = std::make_shared<proof::AudioEvidence>();
-        RoomSessionWindow viewer(config, Factory(viewerAudio), true); viewer.show();
+        RoomSessionWindow viewer(config, Factory(viewerAudio), true,nullptr,
+            screenshare::ViewerGamepad::ConnectedDevices,screenshare::ViewerGamepad::ReadState,InputProofPresentation()); viewer.show();
         Check(viewer.findChild<QPushButton*>("showRoomReport")->isEnabled());
         unsigned original = 0, changed = 0;
         auto present = viewer.session().frameReady;

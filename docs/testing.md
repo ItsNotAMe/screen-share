@@ -82,6 +82,18 @@ scrollbars appear or disappear.
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 
+`video-frame-input` checks the two-second presentation freshness boundary with
+supplied timestamps, verifies that resize/redraw and skipped presents cannot
+refresh old video, and holds a render across Clear to reject late input mapping
+and freshness updates. The desktop-input UI scenario suppresses only the video
+consumer while real transport/decoding continue, checks held mouse/key release,
+blocked input, retained permissions and automatic recovery, and can save compact
+and normal interrupted-video renders. The viewer-removal scenario additionally
+checks controller neutralization and recovery under its existing grant during
+that consumer stall. Synthetic input UI proofs inject a successful presenter:
+offscreen Qt HWNDs can be unavailable to DXGI. Explicit Windows UI proofs retain
+the native renderer. These injections do not reproduce a particular WAN outage.
+
 `stream-settings-and-adaptation` checks independent viewer preferences and frame
 mapping using CPU buffers. Run `StreamSettingsTests.exe --gpu` explicitly for
 generated-texture GPU coverage, without desktop capture or audible output. Its

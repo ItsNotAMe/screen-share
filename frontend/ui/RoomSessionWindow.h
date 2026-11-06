@@ -94,7 +94,9 @@ private:
     void RefreshHostPreview();
     void ConfirmViewerRemoval(const QString& peerId);
     void UpdateViewerShareState(const screenshare::v2::RoomStatus&);
+    void UpdateViewerVideoFreshness(const screenshare::v2::RoomStatus&);
     bool remoteVideoBlocked_ = false;
+    bool remoteVideoWasFresh_ = false, remoteVideoStalled_ = false;
     QString remoteVideoMessage_;
 };
 int RunRoomSessionWindow(const QString& configurationPath);

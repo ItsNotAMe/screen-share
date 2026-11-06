@@ -26,6 +26,7 @@ struct RendererEvidence {
     std::atomic<unsigned> calls{0}, resets{0};
     std::atomic_bool destroyed{false}, wrongThread{false};
     std::atomic_bool block{false}, entered{false};
+    std::atomic_bool blockReset{false}, resetEntered{false};
     std::thread::id owner;
 };
 class TestRenderer final : public FramePresentationBackend {
@@ -45,7 +46,13 @@ public:
         return state_->outcome == screenshare::PresentationOutcome::Presented;
     }
     void Update(HWND, uint32_t, uint32_t, bool, bool, screenshare::Nv12D3D11Presenter::ScaleMode) override { CheckThread(); }
-    void Reset() noexcept override { CheckThread(); ++state_->resets; }
+    void Reset() noexcept override {
+        CheckThread(); ++state_->resets;
+        if(state_->blockReset) {
+            state_->resetEntered=true;
+            while(state_->blockReset)std::this_thread::sleep_for(1ms);
+        }
+    }
     uint32_t MaximumFrameLatency() const noexcept override { return 1; }
     screenshare::PresentationOutcome LastOutcome() const noexcept override { return state_->outcome; }
 };
@@ -181,6 +188,12 @@ void PresentationRecoveryScenario() {
         Require(widget.presentationStats().inputMapping.generation==1);
         using enum screenshare::PresentationOutcome;
         widget.showVideoSurface();QApplication::processEvents();
+        const auto received=widget.presentationStats().frameReceivedAt;Require(received.has_value());
+        Require(widget.hasFreshFrame(*received+VideoFrameWidget::FreshFrameTimeout-1ms));
+        Require(!widget.hasFreshFrame(*received+VideoFrameWidget::FreshFrameTimeout));
+        widget.resize(638,478);QApplication::processEvents();
+        Await([&]{return widget.presentationStats().inputViewportWidth==638;});
+        Require(widget.presentationStats().frameReceivedAt==received); // Redraw is not a new frame.
         unsigned downs=0,ups=0;
         widget.setControlCapture(true,true,true);
         widget.setRemoteInputHandler([&](const auto& value){
@@ -210,9 +223,11 @@ void PresentationRecoveryScenario() {
         widget.setRemoteInputHandler({});
         const auto busyBefore=widget.presentationStats().renderer.busyDrops;
         for (const auto outcome : {Busy, Occluded, Minimized, Unavailable, Unknown}) {
+            const auto priorFrame=widget.presentationStats().frameReceivedAt;
             state->outcome = outcome; send();
             Require(widget.presentationStats().renderer.outcome == outcome);
             Require(widget.presentationStats().inputMapping.Valid()==(outcome==Busy));
+            Require(widget.presentationStats().frameReceivedAt==priorFrame);
         }
         const auto drops = widget.presentationStats().renderer;
         Require(drops.busyDrops == busyBefore+1 && drops.occludedDrops == 1 && drops.minimizedDrops == 1 && drops.unavailableDrops == 1);
@@ -278,6 +293,28 @@ void PresentationRecoveryScenario() {
     }
     Require(state->destroyed && !state->wrongThread);
 }
+void ClearedPresentationCannotResumeInput() {
+    auto state=std::make_shared<RendererEvidence>();
+    VideoFrameWidget widget(nullptr,[state]{return std::make_unique<TestRenderer>(state);});
+    struct Unblock {
+        std::shared_ptr<RendererEvidence> state;
+        ~Unblock(){state->block=false;state->blockReset=false;}
+    } unblock{state};
+    widget.show();widget.showVideoSurface();QApplication::processEvents();
+    state->block=true;
+    screenshare::Nv12VideoFrame frame;frame.width=frame.height=2;frame.nv12.resize(6);
+    frame.inputMapping={1,2,2,0,0,2,2};
+    Require(widget.presentVideoFrameAsync(std::move(frame)));
+    Await([&]{return state->entered.load();});
+    Require(!widget.hasFreshFrame() && !widget.presentationStats().frameReceivedAt);
+    state->blockReset=true;widget.clearFrame();state->block=false;
+    // Hold the queued Clear inside the backend. The preceding blocked present
+    // has completed, but its late result must already have been rejected.
+    Await([&]{return state->resetEntered.load();});
+    const auto afterClear=widget.presentationStats();
+    state->blockReset=false;
+    Require(!afterClear.frameReceivedAt && !afterClear.inputMapping.Valid());
+}
 }
 
 namespace {
@@ -296,7 +333,7 @@ int main(int argc, char** argv)
 {
     QApplication application(argc, argv);
     try {
-        GameMappingScenario();PresentationRecoveryScenario();
+        GameMappingScenario();PresentationRecoveryScenario();ClearedPresentationCannotResumeInput();
         if(argc==2 && std::string(argv[1])=="--game-mouse")NativeGameCaptureScenario();
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

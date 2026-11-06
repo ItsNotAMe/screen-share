@@ -547,9 +547,6 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     };
     if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::Nv12VideoFrame frame) {
         if(remoteVideoBlocked_)return;
-        if(!remoteVideoMessage_.isEmpty()) {
-            remoteVideoMessage_.clear();video_->setStatusText({});video_->setAccessibleDescription({});
-        }
         if(video_->setVideoFrame(std::move(frame)))gamepad_->SetVideoAvailable(true);
     };
     if (!config.room.host && config.preview) {
@@ -744,6 +741,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         session_.statusChanged=[this,previous,connection,rtt,bitrate](const auto& status){
             previous(status);connection->setText(Phase(status.phase));
             UpdateViewerShareState(status);
+            UpdateViewerVideoFreshness(status);
             rtt->setText(status.stream.receiveRttMs?QString("%1 ms").arg(*status.stream.receiveRttMs,0,'f',0):QString(QChar(0x2014)));
             bitrate->setText(status.stream.receiveBps?QString("%1 Mbps").arg(*status.stream.receiveBps/1000000.0,0,'f',1):QString(QChar(0x2014)));
         };
@@ -998,6 +996,7 @@ void RoomSessionWindow::UpdateViewerShareState(const RoomStatus& status) {
     }
     if(!message.isEmpty()) {
         remoteVideoBlocked_=true;
+        remoteVideoWasFresh_=false;remoteVideoStalled_=false;
         gamepad_->SetVideoAvailable(false);
         if(remoteVideoMessage_!=message) {video_->clearFrame();video_->setStatusText(message);video_->setAccessibleDescription(message);}
         remoteVideoMessage_=std::move(message);
@@ -1006,6 +1005,24 @@ void RoomSessionWindow::UpdateViewerShareState(const RoomStatus& status) {
         // A host's Live notice is intent, not proof that a fresh frame arrived.
         // Keep the status surface until the next decoded frame is consumed.
         remoteVideoMessage_=status.stream.remoteShare.state?"Resuming video…":"Waiting for video…";
+        video_->setStatusText(remoteVideoMessage_);video_->setAccessibleDescription(remoteVideoMessage_);
+    }
+}
+void RoomSessionWindow::UpdateViewerVideoFreshness(const RoomStatus& status) {
+    if(status.phase!=RoomPhase::Active || remoteVideoBlocked_)return;
+    const auto now=std::chrono::steady_clock::now();
+    const auto presentation=video_->presentationStats();
+    if(video_->hasFreshFrame(now)) {
+        remoteVideoWasFresh_=true;remoteVideoStalled_=false;
+        if(!remoteVideoMessage_.isEmpty()) {
+            remoteVideoMessage_.clear();video_->setStatusText({});video_->setAccessibleDescription({});
+        }
+    } else if(remoteVideoWasFresh_ && !remoteVideoStalled_ && !presentation.terminal && presentation.frameReceivedAt &&
+        now-*presentation.frameReceivedAt>=VideoFrameWidget::FreshFrameTimeout) {
+        remoteVideoStalled_=true;
+        gamepad_->SetVideoAvailable(false);
+        video_->clearFrame();
+        remoteVideoMessage_="Video interrupted\nWaiting for new frames. Audio may continue.";
         video_->setStatusText(remoteVideoMessage_);video_->setAccessibleDescription(remoteVideoMessage_);
     }
 }

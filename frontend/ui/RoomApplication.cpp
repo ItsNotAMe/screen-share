@@ -67,9 +67,10 @@ void RoomApplication::OpenRoom(bool host, const QString& roomId) {
     Present(browser_.get());
 }
 
-RoomApplication::RoomApplication(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback) {
+RoomApplication::RoomApplication(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback, FramePresentationFactory presentation) {
     Initialize();
-    session_ = std::make_unique<RoomSessionWindow>(std::move(config), std::move(factory), loopback);
+    session_ = std::make_unique<RoomSessionWindow>(std::move(config), std::move(factory), loopback, nullptr,
+        screenshare::ViewerGamepad::ConnectedDevices, screenshare::ViewerGamepad::ReadState, std::move(presentation));
     session_->closed = [this] { Finish(); };
     Present(session_.get());
 }

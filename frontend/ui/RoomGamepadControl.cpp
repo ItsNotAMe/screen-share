@@ -232,13 +232,8 @@ void RoomGamepadControl::RespondToRequest(const QString& peer, uint8_t capabilit
     Tick();
 }
 void RoomGamepadControl::SetVideoAvailable(bool available) {
-    if(host_ || videoAvailable_->exchange(available)==available)return;
-    if(!available) {
-        // Release under the original frame mapping before the video is cleared.
-        // Availability is independent of focus; keep the existing focus policy
-        // so a focused viewer can resume with the same grant after fresh video.
-        const bool paused=inputPaused_->load();PauseInput();inputPaused_->store(paused);
-    }
+    if(host_ || videoAllowed_==available)return;
+    videoAllowed_=available;
     Tick();
 }
 void RoomGamepadControl::Revoke(const QString& explanation) {
@@ -307,6 +302,14 @@ bool RoomGamepadControl::eventFilter(QObject* watched, QEvent* event) {
     return QWidget::eventFilter(watched, event);
 }
 void RoomGamepadControl::Tick() {
+    if(!host_) {
+        const bool available=videoAllowed_ && video_ && video_->hasFreshFrame();
+        if(videoAvailable_->exchange(available) && !available) {
+            // Release held input before its old mapping is cleared. Preserve
+            // focus/consent so fresh presentation can resume the same grant.
+            const bool paused=inputPaused_->load();PauseInput();inputPaused_->store(paused);
+        }
+    }
     const auto port = port_(); const auto states = port ? port->Read() : std::vector<input::Status>{};
     const auto room = room_(); const auto selected = peers_->currentData().toString();
     if(host_) {

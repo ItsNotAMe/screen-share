@@ -2,6 +2,14 @@
 
 ## Current UI Direction
 
+- Desktop remote input requires a frame actually presented within two seconds.
+  A connected room or accepted decode handoff is insufficient. On a stall, keep
+  grants/consent, release held input and show Video interrupted in the established
+  blank video status surface. Resume only after fresh presentation; Game mouse
+  remains unlocked until another click. Host pause/source guidance takes priority.
+  Redraws retain the original frame arrival time, and Clear invalidates in-flight
+  presentation completions before they can restore mapping/freshness.
+
 - Shared-source capture failures explain automatic retry while video continues.
   Other audio modes retain their manual retry guidance. Keep the selected app
   authoritative and allow source changes/mute during recovery.

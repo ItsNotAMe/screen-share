@@ -13,7 +13,7 @@ public:
         bool diagnosticLoopback = false, QString profileFile = {}, bool enumerateSources = true, bool normalHome = false);
     RoomApplication(RoomSessionConfig,
         QtRoomSession::Factory = screenshare::media::WindowsRoomRuntimeFactory,
-        bool diagnosticLoopback = false);
+        bool diagnosticLoopback = false, FramePresentationFactory = {});
     ~RoomApplication() override;
     void show();
     AppShellWindow& window() { return shell_; }

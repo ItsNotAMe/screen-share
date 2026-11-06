@@ -7,6 +7,7 @@
 #include <QtWidgets/QWidget>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -32,6 +33,8 @@ public:
         FramePresentationSession::Statistics renderer;
         screenshare::input::FrameMapping inputMapping;
         uint32_t inputViewportWidth = 0, inputViewportHeight = 0;
+        // Arrival time of the latest presented frame, never a resize/redraw.
+        std::optional<std::chrono::steady_clock::time_point> frameReceivedAt;
     };
 
     explicit VideoFrameWidget(QWidget* parent = nullptr, FramePresentationFactory factory = {});
@@ -47,6 +50,8 @@ public:
     void setLowLatency(bool enabled);
     [[nodiscard]] std::uint64_t presentedFrameCount() const;
     [[nodiscard]] PresentationStats presentationStats() const;
+    static constexpr auto FreshFrameTimeout = std::chrono::seconds(2);
+    [[nodiscard]] bool hasFreshFrame(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) const;
     void clearFrame();
     [[nodiscard]] screenshare::input::FrameMapping presentedInputMapping() const;
 

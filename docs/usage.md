@@ -87,12 +87,20 @@ a viewer connects; an unavailable source stays silent and reports the failure.
 With current clients at both ends, viewers see an explanation when the host
 pauses video, minimizes the shared window, loses the source or recovers capture.
 The old picture clears during these states. A resuming message remains until a
-new decoded frame arrives. Audio and room controls remain available.
+new frame is presented. Audio and room controls remain available.
 Held keys and buttons are released, and remote input pauses until fresh video
 arrives. Host permissions are kept. Click the video again to recapture Game mouse.
 The Controls hint explains when remote control is waiting for video or paused
 after a focus/mode change. Click the video to resume a focus/mode pause; the
 video-wait hint clears after fresh video arrives. Shortcut reminders stay visible.
+
+The desktop viewer also pauses remote control after two seconds without a fresh
+presented frame, even while the room remains connected. Held mouse buttons and
+keys are released, the controller sends neutral input, and the video area shows
+**Video interrupted**. Mouse/keyboard/controller permissions remain granted.
+Fresh presentation restores availability without rejoining; Game mouse needs a
+new click to capture again. Audio and room controls can continue during the gap.
+Queued/decoded frames and redraws of an old picture do not count as fresh video.
 
 Viewer playback follows Windows' default output when **Default** is selected,
 including switching to a new default headset or speakers during a room. If the

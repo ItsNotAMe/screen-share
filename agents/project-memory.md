@@ -10,6 +10,35 @@ and measured performance improvements ahead of small UI/copy polish during
 open-ended continuation work. Deliver one meaningful improvement at a time and
 commit each separately. Address related UI defects when they block that feature.
 
+## Pause desktop remote control when video stalls - 2026-11-06
+
+The desktop viewer now requires a frame actually presented within two seconds
+before forwarding remote input. Decode/enqueue acceptance alone cannot enable
+control. Presentation retains each frame's arrival time across redraws; skipped
+presents do not refresh it. Clear immediately invalidates mapping/freshness and
+advances a generation so an in-flight old render cannot restore them afterward.
+The input gate starts closed, releases held mouse/keyboard input and sends neutral
+controller state on a stall, retaining consent and the host's permission. Fresh
+presentation restores availability under the existing focus policy; Game mouse
+requires another click. The blank video surface says Video interrupted. Explicit
+host pause/source notices take priority. This changes the Qt desktop flow, not
+the CLI's input policy.
+
+The new desktop-input scenario failed before implementation, with a live room
+and decoding but a frozen UI consumer. It now checks held releases, blocked clicks,
+retained permission/revision and recovery. Controller neutralization/recovery
+also passes, and unit proofs cover the freshness boundary, redraw/skip behavior
+and a render completing after Clear. Offscreen controller fixtures exposed zero
+successful native presents despite hundreds of enqueues: input/media UI proofs
+now inject the existing recording presenter, including through RoomApplication's
+config constructor. Explicit Windows UI proofs retain native presentation. This
+does not qualify every real renderer or reproduce a specific WAN failure.
+
+The full Release build and all 43 CTests passed (143.17 s). Focused desktop-input,
+controller, viewer-removal and source-switch scenarios passed; compact/normal
+interruption renders were inspected and packaged CLI/UI hashes match. All input
+sinks were synthetic. No version bump or publication occurred.
+
 ## Shared video scaling for matching viewers - 2026-11-06
 
 Immutable D3dVideoFrameBuffer inputs now cache at most four successful scaled
