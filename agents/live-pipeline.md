@@ -7,6 +7,16 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 capture recovery: the three-rebuild allowance renews after 30
+consecutive valid owned capture samples. Device loss, GPU frame skips,
+minimization and source unavailability interrupt the healthy streak. Pending
+rebuilds, empty polls and elapsed time cannot earn credit. Retirement, cumulative
+generations, 250 ms cancellable backoff and terminal reconstruction/unstable-
+capture handling remain. A new real-owner synthetic regression fails with the
+old lifetime budget on the fourth loss and passes five healthy-separated losses;
+exact 29/30-frame and interrupted/pending/terminal boundaries are application
+checks. No physical driver-loss or capture handle-lifetime qualification.
+
 2026-11-07 direct decoder crop: cropped software output copies visible rows from
 the locked MF buffer directly into owned pixels, eliminating the full coded-frame
 temporary vector/copy. A guard unlocks on validation/allocation failure. Uncropped

@@ -245,7 +245,17 @@ faults do not qualify physical driver removal or native calls that never return.
 
 Device recovery boundary: capture must call MfHardwareSession::RetireDevice before DesktopCapturer::RebuildWindowDevice and before publishing new-device frames. The rebuild retains the original WGC item/closure subscription, supports only owned window capture, and stops on reconstruction failure. Encoders permanently reject old-device native frames without readback and request an IDR from fresh software input. Device retirement is shared across viewers and also detected via GetDeviceRemovedReason. This is an explicit primitive, not automatic session recovery. A coordinator must own replacement-device generations, invalidate all affected sessions, bound retries and suppress old-generation callbacks. Real device removal remains untested.
 
-Automatic recovery proof: CaptureRecovery provides three rebuilds with 250 ms nonblocking backoff and terminal exhaustion. LiveCaptureSource catches typed device loss, retires its current owner, rebuilds the original WGC source, then publishes with a fresh owner/generation. D3dVideoDevice retirement rejects cached CPU pixels too, and encoder retirement checks now apply across replacement generations. Production callback-generation barriers are still pending. Run CaptureRecoveryTest --live in a desktop session; it injects loss without resetting the physical driver.
+Automatic capture recovery: CaptureSession catches typed device loss and repeated
+GPU-frame deadline misses, retires the current owner and rebuilds the source with
+a fresh generation. CaptureRecovery allows three rebuilds with 250 ms nonblocking
+backoff; 30 consecutive valid capture samples renew that allowance. Skipped
+frames and minimized/unavailable sources interrupt the healthy streak. Failed
+reconstruction and exhausted unstable recovery remain terminal for that source.
+D3dVideoDevice retirement rejects cached CPU pixels too, and encoders reject
+old-device input across replacement generations. CaptureSession joins its owner
+and callbacks before destruction. Run CaptureRecoveryTest --live in a desktop
+session to check five healthy-separated injected losses; it does not reset the
+physical driver.
 
 The shipping switchable capture container can abandon a failed native source
 after acquisition/rebuild failure, first-frame timeout or exhausted recovery.

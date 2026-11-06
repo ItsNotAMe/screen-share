@@ -14,6 +14,10 @@ checks, package verification and signed updates. See [release instructions](../d
 
 Details and prior measured limits: [known limitations](../docs/known-limitations.md).
 
+- [ ] Fix missing-frame timeout after restoring an already-running minimized
+  source. CaptureSession refreshes its deadline during minimization but leaves
+  awaitingFrame false after earlier healthy output, so a silent restore can wait
+  indefinitely instead of reporting source failure.
 - [ ] Obtain Authenticode signing for future application/Setup binaries.
 - [ ] Investigate hardware decoder Section-handle lifetime and hardware encoder
   output deadlines in code; preserve the software compatibility option and fallback.

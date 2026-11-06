@@ -41,6 +41,7 @@ struct CaptureSession::Impl {
                         std::optional<CaptureSample> sample;
                         try { sample = source->Poll(); }
                         catch (const CaptureFrameSkipped&) {
+                            recovery.Interrupted();
                             // One late GPU frame must not tear down the room. If
                             // acquisition keeps stalling, use the same bounded,
                             // cancellable recovery as device loss.
@@ -62,12 +63,14 @@ struct CaptureSession::Impl {
                         if (source->Closed()) { finalState = CaptureState::Closed; break; }
                         { std::lock_guard lock(mutex); status.source = source->Info(); }
                         if (source->Unavailable()) {
+                            recovery.Interrupted();
                             deadline = std::chrono::steady_clock::now() + startupTimeout;
                             awaitingFrame = true;
                             skippedFrames = 0;
                             std::lock_guard lock(mutex);
                             status.state = CaptureState::Unavailable;
                         } else if (source->Minimized()) {
+                            recovery.Interrupted();
                             // A selected minimized window is an intentional pause,
                             // including before its first frame. Resume gets a fresh
                             // startup deadline; do not deliver queued old pixels.
@@ -77,6 +80,7 @@ struct CaptureSession::Impl {
                         } else if (sample) {
                             skippedFrames = 0;
                             if (!sample->resource) throw std::runtime_error("Missing captured resource");
+                            recovery.FrameCaptured();
                             awaitingFrame = false;
                             bool send;
                             {

@@ -1,5 +1,6 @@
 #include "media/capture/SwitchableCaptureSource.h"
 #include "media/capture/SyntheticCaptureSource.h"
+#include "media/capture/CaptureRecovery.h"
 #include <atomic>
 #include <iostream>
 #include <thread>
@@ -51,6 +52,54 @@ public:
     }
 };
 auto Factory(std::shared_ptr<State> state) { return [state] { return std::make_unique<Source>(state); }; }
+void RecoveryBudgetBoundaries() {
+    for (const unsigned healthyFrames : {29u, 30u}) {
+        CaptureRecovery policy;
+        auto now = CaptureRecovery::Clock::time_point{};
+        unsigned retired = 0, rebuilt = 0;
+        for (unsigned loss = 0; loss < 5; ++loss) {
+            now += 1h; // Time alone must not renew a capture budget.
+            bool exhausted = false;
+            try { policy.Lost([&] { ++retired; }, now); }
+            catch (const std::runtime_error&) { exhausted = true; }
+            if (healthyFrames == 29 && loss == 3) {
+                Check(exhausted && retired == 4 && rebuilt == 3, "Short recoveries renewed the capture budget");
+                // Healthy callbacks cannot resurrect a terminal device.
+                for (unsigned frame = 0; frame < 100; ++frame) policy.FrameCaptured();
+                bool resumed = false;
+                try { policy.Poll([] {}, now); resumed = true; } catch (const std::runtime_error&) {}
+                Check(!resumed, "Terminal capture resumed after health callbacks");
+                break;
+            }
+            Check(!exhausted, "Healthy capture could not renew its recovery budget");
+            // Pending recovery cannot earn credit or skip the existing backoff.
+            for (unsigned frame = 0; frame < 100; ++frame) policy.FrameCaptured();
+            Check(!policy.Poll([&] { ++rebuilt; }, now + 249ms), "Capture backoff was skipped");
+            now += 250ms;
+            Check(policy.Poll([&] { ++rebuilt; }, now) && policy.generation() == loss + 2,
+                "Capture rebuild lost its generation");
+            for (unsigned frame = 0; frame < healthyFrames; ++frame) policy.FrameCaptured();
+        }
+        if (healthyFrames == 30) Check(retired == 5 && rebuilt == 5, "Renewed capture recovery lost an attempt");
+    }
+    CaptureRecovery interrupted;
+    auto now = CaptureRecovery::Clock::time_point{};
+    for (unsigned loss = 0; loss < 3; ++loss) {
+        interrupted.Lost([] {}, now); now += 250ms;
+        Check(interrupted.Poll([] {}, now), "Interrupted recovery did not rebuild");
+        for (unsigned frame = 0; frame < 29; ++frame) interrupted.FrameCaptured();
+        interrupted.Interrupted(); // A skipped frame or explicit capture pause.
+        interrupted.FrameCaptured();
+    }
+    bool exhausted = false;
+    try { interrupted.Lost([] {}, now); } catch (const std::runtime_error&) { exhausted = true; }
+    Check(exhausted, "Interrupted captures accumulated healthy-frame credit");
+    const auto terminalGeneration = interrupted.generation();
+    interrupted.AwaitReplacement();
+    interrupted.Lost([] {}, now); now += 250ms;
+    Check(interrupted.Poll([] {}, now) && interrupted.generation() == terminalGeneration + 2,
+        "Explicit source replacement did not reset terminal capture recovery");
+}
 void Unavailable(CaptureSession& capture, CaptureFailure failure) {
     Wait([&] {
         const auto status = capture.status();
@@ -117,6 +166,25 @@ void RecoveryFailure(bool exhausted) {
     Wait([&] { return capture.status().generation > generation && capture.status().state == CaptureState::Running; });
     capture.Stop(); Check(!state->live && !state->wrongThread, "Recovered capture leaked or changed owner");
 }
+void HealthyRecoveries() {
+    auto state = std::make_shared<State>();
+    CaptureSession capture(8, Factory(state), [](auto) {});
+    capture.EnableDelivery();
+    Wait([&] { return capture.status().delivered >= 35; });
+    for (uint64_t generation = 2; generation <= 6; ++generation) {
+        state->fault = Fault::Lost;
+        Wait([&] {
+            const auto status = capture.status();
+            Check(status.state != CaptureState::Failed, "Healthy capture exhausted its lifetime recovery budget");
+            return status.state == CaptureState::Running && status.generation == generation;
+        });
+        const auto recovered = capture.status().delivered;
+        Wait([&] { return capture.status().delivered >= recovered + 30; });
+    }
+    capture.Stop(); capture.Stop();
+    Check(state->rebuilt == 5 && state->retired == 5 && state->starts == 1 && !state->live && !state->wrongThread,
+        "Healthy capture recovery lost its owner or restarted the session");
+}
 void PendingReplacement() {
     auto old = std::make_shared<State>(), next = std::make_shared<State>(); next->silent = true;
     auto control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
@@ -155,7 +223,7 @@ void FailureBoundaries() {
     Check(!state->live && !state->wrongThread, "Failure boundary cleanup escaped its owner");
 }
 int main() try {
-    ReadFailure(); RecoveryFailure(false); RecoveryFailure(true); PendingReplacement(); FailureBoundaries();
-    std::cout << "Replaceable capture: read/rebuild failure, exhausted recovery, replacement, cancellation and failure boundaries passed.\n";
+    RecoveryBudgetBoundaries(); HealthyRecoveries(); ReadFailure(); RecoveryFailure(false); RecoveryFailure(true); PendingReplacement(); FailureBoundaries();
+    std::cout << "Replaceable capture: renewed/bounded recovery, read/rebuild failure, replacement, cancellation and failure boundaries passed.\n";
     return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

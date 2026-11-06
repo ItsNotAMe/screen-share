@@ -12,6 +12,49 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Renew capture recovery after healthy output - 2026-11-07
+
+CaptureRecovery previously spent its three rebuild attempts across the entire
+capture session. A fourth device loss stopped an ordinary source or abandoned a
+replaceable one even after healthy video between every outage. The capture owner
+now renews that budget after 30 consecutive valid owned capture samples. Pending
+rebuilds, empty polls, elapsed time and minimized/unavailable sources earn no
+credit. Skipped GPU frames, minimization, unavailability and each loss clear the
+healthy streak. Frame validation precedes credit; delivery need not be enabled
+for capture itself to establish health. No new worker, timer or retained frames.
+
+The three-attempt limit still bounds unstable capture, retirement still happens
+on the terminal loss, failed reconstruction stays terminal, and the existing
+250 ms cancellable backoff remains. Generations remain cumulative across renewed
+budgets. Only explicit replacement resets a terminal source's recovery policy.
+
+The new real CaptureSession/synthetic-source regression failed against the old
+code on the fourth loss ("Healthy capture exhausted its lifetime recovery budget")
+and now recovers five losses separated by healthy capture on the same owner.
+Application tests additionally cover exact 29/30-frame boundaries, no pending/
+time-only credit, interrupted streaks, terminal non-resurrection, replacement
+and the existing rapid-loss/rebuild/consumer/startup failure boundaries. The
+headless capture ownership proof passed 100 stop/restart cycles, including Stop
+during backoff. The optional native capture proof now expects five healthy-
+separated recoveries; it was compiled and its headless policy mode passed, but
+its live Windows capture mode was not run. These injected faults do not qualify
+physical driver loss, WGC cleanup or the reported laptop's handle growth.
+
+Release `all` build and packaged CLI/UI binary hash checks passed. The final
+sequential application suite passed all 46 checks (310.20 s), including the new
+capture regression, four-viewer media/input, reconnects and UI scenarios.
+No version bump or publication; unreleased.
+
+Owner correctly noted this repeats the earlier decoder/presentation budget
+pattern. Capture's history confirms it was a separate missed path, not a
+regression of those commits. Related limits were checked together: decoder and
+presentation already renew after healthy output; ICE uses a rolling one-minute
+budget; viewer settings reset attempts per revision; audio uses capped retry
+delays rather than a lifetime attempt cap. Hardware encoder quarantine remains
+intentionally latched for the session after a backend fault. Check related paths
+together when changing recovery policy rather than presenting each occurrence
+of the same pattern as an unrelated discovery.
+
 ## Recover transient viewer settings rejection - 2026-11-07
 
 NativeRoomRuntime previously marked a settings revision attempted before asking
