@@ -79,6 +79,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
     // Destroy the registry before native entries it references.
     std::unique_ptr<HostPeerRegistry> owner_;
     bool stopping_ = false, stopped_ = false;
+    bool captureInputUnavailable_ = false;
     std::chrono::steady_clock::time_point startupDeadline_ = std::chrono::steady_clock::now() + 20s;
     std::promise<void> stoppedPromise_;
     std::shared_future<void> stoppedFuture_ = stoppedPromise_.get_future().share();
@@ -214,7 +215,7 @@ public:
             auto factory = options_.captureForSelection(selection);
             // Revoke every grant. The Windows sink additionally requires fresh
             // captured geometry and pauses window input while unfocused.
-            input_->Configure(7, 0);
+            input_->Configure(captureInputUnavailable_ ? 0 : 7, 0);
             return captureSwitch_->Submit(selection, std::move(factory));
         }
         catch (...) { return CaptureUpdateReady(CaptureUpdateError::Invalid); }
@@ -371,6 +372,12 @@ public:
         }
         owner_->Tick(PeerConnectionLifecycle::Clock::now());
         const auto delivery = identity_.host ? capture_.snapshot() : HostMediaSnapshot{};
+        if (identity_.host && captureInputUnavailable_ != (delivery.state == HostMediaState::SourceUnavailable)) {
+            captureInputUnavailable_ = delivery.state == HostMediaState::SourceUnavailable;
+            // No held input or new grants may survive an unavailable source.
+            // Restore availability only after capture resumes, with fresh grants.
+            input_->Configure(captureInputUnavailable_ ? 0 : 7, 0);
+        }
         const auto share = delivery.state==HostMediaState::SourceUnavailable || delivery.state==HostMediaState::SourceClosed ? HostShareState::SourceUnavailable :
             delivery.state==HostMediaState::Minimized ? HostShareState::SourceMinimized :
             delivery.state==HostMediaState::Recovering ? HostShareState::Recovering :

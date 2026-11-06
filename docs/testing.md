@@ -23,11 +23,30 @@ off-screen geometry simulates a missing monitor, without physically unplugging o
 
 Build tests with the same native toolchain as the application; see [build](build.md).
 
+`capture-source-failure` injects acquisition failure, failed rebuild, exhausted
+three-rebuild recovery and first-frame timeout into a replaceable capture source.
+It requires source retirement/destruction on its owner, persistent failure reason,
+no automatic reactivation or stale delivery, failed replacement handling,
+successful replacement with monotonic sequence/generation, a new bounded recovery
+budget and cancellation of pending replacement on Stop. Ordinary sources, initial
+Start failures and consumer errors retain terminal behavior.
+An in-progress replacement must survive failure of the original source and
+commit when its first frame arrives.
+The four-viewer `room-v2-input-media` proof requires continued audio, released held
+input, rejected grants during the outage, unchanged room/peer identities and
+connection generations, then resumed video after explicit source replacement.
+The focused UI `source-switch` scenario checks two viewers, cleared failure
+messages on recovery, available Change source and disabled grant actions during
+failure. Set `SCREENSHARE_UI_PREVIEWS` to save host/viewer and compact host renders.
+These use injected capture failures, without resetting a physical graphics driver.
+
 `decoder-adapter-lifecycle` runs real MF software decoding and injected
 unavailable-GPU startup fallback. A valid encoded picture with an undersized
 dimension declaration triggers deterministic output-validation failure. Five
-outages separated by 30 valid output frames must recover without reconfiguration;
-29 frames between failures must still exhaust the three-restart limit. Checks
+outages separated by at least 30 valid output frames must recover without
+reconfiguration; short bursts between failures must still exhaust the three-
+restart limit. The recovery proof counts actual output and tolerates bounded
+buffered delivery, discarding outstanding RTP expectations on failure. Checks
 retain the 250 ms backoff and keyframe requirement, RTP/NTP association, immediate
 output, visible cropping, dynamic resize and repeated release/configure cycles.
 `DecoderAdapterTests --gpu` additionally exercises generated-input hardware

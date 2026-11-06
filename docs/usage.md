@@ -61,6 +61,12 @@ is disabled; Enter from search moves to the matching cards without sharing.
 The picker uses three columns at normal widths and two at compact widths so
 more choices fit while previews and titles remain readable.
 
+If capture fails or its recovery cannot complete, the room and audio connections
+stay open. The host sees **Capture unavailable** and can use **Change source** to
+resume sharing. Viewers see that the host needs to choose a source. Held input
+is released, and new control grants wait until capture resumes. Grant controls
+again after choosing the replacement; everyone keeps the same room connection.
+
 See [CLI configuration and options](cli.md) for complete schemas and ranges.
 Shared source audio is the default: window sharing captures the selected app's
 audio and its child processes; display sharing captures system audio. It follows

@@ -63,6 +63,7 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     MediaEngine::PacketFactory packetFactory;
     MediaEngine::EventLogFactory eventLogFactory;
     CaptureSession::Factory captureFactory;
+    bool switchableCapture = false;
     std::optional<StreamPreferences> preferences;
     bool fastAudioExperiment = false; // Retained proof/report flag; the engine now enables fast recovery by default.
     bool localizedInputResponse = false;
@@ -131,6 +132,9 @@ public:
         };
         options.capture = [lifetime = evidence_->capture] { return std::make_unique<proof::ObservedCaptureSource>(lifetime); };
         if (evidence_->captureFactory) options.capture = evidence_->captureFactory;
+        if (evidence_->switchableCapture) options.captureForSelection = [lifetime = evidence_->capture](auto) -> CaptureSession::Factory {
+            return [lifetime] { return std::make_unique<proof::ObservedCaptureSource>(lifetime); };
+        };
         options.deliver = [evidence = evidence_](auto& source, const auto& sample) {
             if (evidence->failDelivery.exchange(false)) throw std::runtime_error("Injected viewer delivery failure");
             if (evidence->input->pressed) {
@@ -165,6 +169,8 @@ public:
     std::vector<std::string> FailedPeers() const override { return native_->FailedPeers(); }
     StreamUpdateResult UpdateStreamPreferences(const StreamPreferences& preferences) override { return native_->UpdateStreamPreferences(preferences); }
     StreamStatus StreamSettings() const override { return native_->StreamSettings(); }
+    std::future<CaptureUpdateResult> SwitchCaptureSource(screenshare::media::CaptureSelection selection) override { return native_->SwitchCaptureSource(selection); }
+    CaptureSelectionStatus CaptureSelection() const override { return native_->CaptureSelection(); }
     std::future<AudioUpdateResult> SwitchAudioSource(screenshare::media::AudioSelection selection) override { return native_->SwitchAudioSource(std::move(selection)); }
     AudioSelectionStatus AudioSelection() const override { return native_->AudioSelection(); }
     std::future<AudioUpdateResult> UpdatePlayback(screenshare::media::PlaybackSelection selection) override { return native_->UpdatePlayback(std::move(selection)); }

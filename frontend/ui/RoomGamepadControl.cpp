@@ -312,6 +312,7 @@ void RoomGamepadControl::Tick() {
     }
     const auto port = port_(); const auto states = port ? port->Read() : std::vector<input::Status>{};
     const auto room = room_(); const auto selected = peers_->currentData().toString();
+    const bool sourceAvailable = room.stream.capture.state != media::HostMediaState::SourceUnavailable;
     if(host_) {
         const auto removing = removingViewer ? removingViewer() : QString{};
         QStringList present;
@@ -381,7 +382,8 @@ void RoomGamepadControl::Tick() {
                 state->reason==input::Reason::Ownership?"Selected input is already in use":"Watching");
             QStringList requestedNames;
             if(ready)for(const auto& entry:{std::pair{input::Mouse,"mouse"},std::pair{input::Keyboard,"keyboard"},std::pair{input::Gamepad,"controller"}})if(state->requested&entry.first)requestedNames<<entry.second;
-            if(!requestedNames.empty())card->findChild<QLabel*>("PeerControlState")->setText("Requests " + requestedNames.join(", "));
+            if(ready && !sourceAvailable)card->findChild<QLabel*>("PeerControlState")->setText("No source");
+            else if(!requestedNames.empty())card->findChild<QLabel*>("PeerControlState")->setText("Requests " + requestedNames.join(", "));
             for(auto* button:card->findChildren<QPushButton*>("PeerCapability")) {
                 const auto cap=button->property("capability").toUInt();const bool on=ready&&(state->granted&cap);
                 const bool waiting=ready&&(state->requested&cap);
@@ -389,13 +391,14 @@ void RoomGamepadControl::Tick() {
                     button->setProperty("pendingRequest",waiting);button->setProperty("requestPulse",false);
                     button->style()->unpolish(button);button->style()->polish(button);button->update();
                 }
-                button->setChecked(on);button->setEnabled(ready&&!state->grantPending&&!state->revokePending && removing!=id);
+                button->setChecked(on);button->setEnabled(ready&&sourceAvailable&&!state->grantPending&&!state->revokePending && removing!=id);
                 const auto control=cap==input::Mouse?"mouse":cap==input::Keyboard?"keyboard":"controller";
                 const auto label=waiting?QString("%1 requested %2. Click to allow or deny %2.").arg(name,control):
                     QString("%1 %2 %3 %4").arg(on?"Revoke":"Grant",control,on?"from":"to",name);
                 const auto focusHint=room.capture.selected.kind==media::CaptureKind::Window && (cap&(input::Mouse|input::Keyboard))?
                     QString(" Input pauses while the shared window is not focused."):QString{};
-                button->setToolTip(label+focusHint);button->setAccessibleName(label+focusHint);
+                const auto availabilityHint=sourceAvailable?QString{}:QString(" Choose a share source before granting control.");
+                button->setToolTip(label+focusHint+availabilityHint);button->setAccessibleName(label+focusHint+availabilityHint);
             }
         }
         for(const auto& id:peerCards_.keys())if(!present.contains(id))delete peerCards_.take(id);
@@ -457,7 +460,7 @@ void RoomGamepadControl::Tick() {
         capturingDesktop_=!inputPaused_->load() && videoAvailable_->load() && bool(granted&(input::Mouse|input::Keyboard));
         if(video_)video_->setControlCapture(capturingDesktop_,granted&input::Mouse,granted&input::Keyboard);
     }
-    if(action_)action_->setEnabled(room.phase == v2::RoomPhase::Active && caps && consent_->isChecked() && !peer.empty());
+    if(action_)action_->setEnabled(room.phase == v2::RoomPhase::Active && sourceAvailable && caps && consent_->isChecked() && !peer.empty());
     status_->setText(!actionError_.isEmpty()?actionError_:pending ? "Starting selected input…" : granted ? (host_?"Control active":"Host granted control") :
         reason == input::Reason::Backend ? "Input unavailable. Check the shared source, foreground window, or controller driver and slots." :
         reason == input::Reason::Ownership ? "Selected input is already in use." :

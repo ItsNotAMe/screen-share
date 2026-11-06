@@ -32,6 +32,12 @@ public:
         return true;
     }
     uint64_t generation() const noexcept { return generation_; }
+    // The failed native source has been abandoned. Wait for an explicit source
+    // selection; this never reactivates the failed device or retries it forever.
+    void AwaitReplacement() noexcept {
+        attempts_ = 0; pending_ = terminal_ = false; readyAt_ = {};
+        ++generation_;
+    }
 private:
     Clock::time_point readyAt_{};
     unsigned attempts_ = 0;

@@ -12,6 +12,56 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Keep rooms open after capture source failure - 2026-11-06
+
+A failed acquisition/rebuild or exhausted capture recovery previously terminated
+the room for all viewers. CaptureSession now lets a switchable source abandon
+its failed native state and enter SourceUnavailable while preserving the source
+selection mailbox and capture distribution. The failure reason remains visible
+until fresh output; abandonment advances the source generation and clears the
+recovery budget for the next explicit selection. It never automatically opens
+a replacement. An already pending replacement survives failure of the old source.
+Native release/destruction stays on the capture owner. Initial Start failures,
+unwrapped sources and consumer errors retain terminal behavior.
+
+NativeRoomRuntime releases held input and disables new grants while capture is
+unavailable; grant availability resumes with fresh capture and no implicit
+regrant. The host sees Capture unavailable plus Change source guidance, with
+disabled grant icons and explanations; normal closed-window copy remains.
+Viewers use the existing source-unavailable feedback, and audio connections stay
+open. This follows the existing UI/UX skill patterns without an image mockup.
+Compact host layouts stack capture actions and leave secondary measurements in
+Details so Change source remains readable; compact and normal renders were
+inspected with the injected failure active.
+
+The new regression failed against the previous capture loop and covers read/
+rebuild failure, exhausted recovery, first-frame timeout, bounded recovery after
+replacement, monotonic identities, failed/pending replacements, cancellation and
+failure boundaries. The four-viewer production-room proof injects read failure,
+requires continued audio and held-input release, then explicit source replacement
+with unchanged room/peer/connection identities. Two-viewer UI coverage exercises
+failure/replacement and grant controls. No physical graphics reset, driver hang
+or reported deferred WGC cleanup behavior is qualified by these injected faults.
+The first full run had a viewer-removal pause/resume timeout; its focused rerun
+and next full run passed. No fix for that intermittent behavior is claimed by
+this source feature. The next run exposed a PCM/status-observation race in the
+public output-recovery proof: audible blocks could precede the cached Running
+status. That proof now waits for both observations before checking recovery.
+Another run exposed the decoder recovery proof's immediate-output assumption;
+it now counts actual valid output with bounded pending associations and checks
+short-burst exhaustion instead of depending on exact input/output simultaneity.
+A presentation backoff test also failed its wall-clock call-count assertion in
+one parallel run; it had passed earlier runs. These intermittent checks are
+recorded separately from the consistently passing capture-failure scenarios.
+
+Release `all` build passed; packaged CLI/UI hashes match. All 46 CTests were
+exercised, but the parallel full runs were not uniformly clean. After the proof
+corrections, the final sequential decoder/capture/four-viewer/presentation checks
+all passed (40.51 s), and the focused two-viewer source-switch UI passed with
+normal/compact renders inspected. Do not report a clean full-suite run or a fix
+for the intermittent viewer pause/presentation timing behavior. No version bump,
+publication or performance claim.
+
 ## Renew decoder recovery after sustained valid output - 2026-11-06
 
 The MF decoder previously exhausted its three software-rebuild attempts across

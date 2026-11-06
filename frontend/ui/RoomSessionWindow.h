@@ -83,6 +83,9 @@ private:
     bool applyingProfileNickname_ = false;
     void applyProfileNickname(QString, uint64_t);
     QBoxLayout* sessionColumns_ = nullptr;
+    QBoxLayout* hostSourceActions_ = nullptr;
+    QWidget* hostRttMetric_ = nullptr;
+    QWidget* hostFpsMetric_ = nullptr;
     QLabel* hostPreview_ = nullptr;
     QSize previewSourceSize_;
     QThread* previewWorker_ = nullptr;

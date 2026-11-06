@@ -222,3 +222,13 @@ Receiver presentation recovery uses `PresentationRecovery.h`: typed DXGI errors,
 Device recovery boundary: capture must call MfHardwareSession::RetireDevice before DesktopCapturer::RebuildWindowDevice and before publishing new-device frames. The rebuild retains the original WGC item/closure subscription, supports only owned window capture, and stops on reconstruction failure. Encoders permanently reject old-device native frames without readback and request an IDR from fresh software input. Device retirement is shared across viewers and also detected via GetDeviceRemovedReason. This is an explicit primitive, not automatic session recovery. A coordinator must own replacement-device generations, invalidate all affected sessions, bound retries and suppress old-generation callbacks. Real device removal remains untested.
 
 Automatic recovery proof: CaptureRecovery provides three rebuilds with 250 ms nonblocking backoff and terminal exhaustion. LiveCaptureSource catches typed device loss, retires its current owner, rebuilds the original WGC source, then publishes with a fresh owner/generation. D3dVideoDevice retirement rejects cached CPU pixels too, and encoder retirement checks now apply across replacement generations. Production callback-generation barriers are still pending. Run CaptureRecoveryTest --live in a desktop session; it injects loss without resetting the physical driver.
+
+The shipping switchable capture container can abandon a failed native source
+after acquisition/rebuild failure, first-frame timeout or exhausted recovery.
+CaptureSession preserves the room/distribution and the capture-selection mailbox
+in SourceUnavailable, with its failure reason retained. The host chooses the next
+source explicitly. Retirement/destruction stay on the capture owner; abandonment
+advances source generation and gives the next selected source a fresh recovery
+budget. Fresh output clears the failure. Consumer errors, initial Start failures
+and ordinary sources without a replacement mailbox remain terminal. The runtime
+releases held input and blocks new grants while no source is available.

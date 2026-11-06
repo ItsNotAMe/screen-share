@@ -41,6 +41,10 @@ public:
     virtual CaptureSourceInfo Info() const { return {}; }
     virtual void Retire() noexcept = 0;
     virtual void Rebuild() = 0;
+    // A replaceable source may release failed native state and wait for a new
+    // explicit selection. Called on the capture owner, never for consumer errors.
+    // False retains terminal failure behavior for ordinary capture sources.
+    virtual bool AbandonFailedSource() noexcept { return false; }
 };
 // One instance is one session generation. Factory, source calls and destruction
 // run on its worker. Callbacks must be short and may RequestStop, but must not

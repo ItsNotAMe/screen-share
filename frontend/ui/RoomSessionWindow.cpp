@@ -650,6 +650,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         });previewActivity->start();
         auto* sourceSummary=new QLabel; sourceSummary->setObjectName("SessionSourceSummary"); sourceSummary->setWordWrap(true); primary->addWidget(sourceSummary);
         auto* sourceActions=new QHBoxLayout;primary->addLayout(sourceActions);
+        hostSourceActions_=sourceActions;
         auto* changeSource=new QPushButton("Change source"); changeSource->setObjectName("sessionChangeSource"); changeSource->setIcon(uiIcon("display")); sourceActions->addWidget(changeSource);
         connect(changeSource,&QPushButton::clicked,this,[this,loopback]{
             if(auto* existing=findChild<QDialog*>("SourcePickerDialog")){existing->raise();return;}
@@ -676,9 +677,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             else {*previousAudio=current;AudioSelection muted;muted.kind=AudioKind::None;session_.switchAudio(muted);}
         });
         auto* healthRow=new QHBoxLayout;healthRow->setSpacing(8);primary->addLayout(healthRow);
-        auto metric=[healthRow](const QString& title){auto* column=new QVBoxLayout;auto* caption=new QLabel(title);caption->setObjectName("MetricCaption");column->addWidget(caption);auto* value=new QLabel("—");value->setObjectName("MetricValue");column->addWidget(value);healthRow->addLayout(column,1);return value;};
+        auto metric=[healthRow](const QString& title){auto* group=new QWidget;auto* column=new QVBoxLayout(group);column->setContentsMargins(0,0,0,0);auto* caption=new QLabel(title);caption->setObjectName("MetricCaption");column->addWidget(caption);auto* value=new QLabel("—");value->setObjectName("MetricValue");column->addWidget(value);healthRow->addWidget(group,1);return value;};
         auto* health=metric("Stream health");health->setObjectName("SessionHealth");
         auto* bitrate=metric("Actual bitrate");auto* rtt=metric("Network RTT");auto* sentFps=metric("Encoded FPS");healthRow->addWidget(detailsButton);
+        hostRttMetric_=rtt->parentWidget();hostFpsMetric_=sentFps->parentWidget();
         auto previous=session_.statusChanged;
         session_.statusChanged=[this,previous,sourceTitle,sourceSummary,health,bitrate,rtt,sentFps,controlsTitle,muteAudio,pauseVideo,loopback](const auto& status) {
             previous(status);
@@ -707,9 +709,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             if(audioMuted)sourceSummary->setText(sourceSummary->text()+"  ·  Audio muted");
             sourceSummary->setToolTip(streamResolution?"Observed stream resolution for the first viewer; per-viewer measurements are in Details.":"Captured source resolution; stream resolution appears when a viewer connects.");
             if (status.stream.capture.state == HostMediaState::SourceUnavailable) {
-                sourceTitle->setText("Shared window closed");
+                const auto message = status.stream.capture.failure == CaptureFailure::None ? "Shared window closed" : "Capture unavailable";
+                sourceTitle->setText(message);
                 sourceSummary->setText("Choose Change source to resume sharing. Everyone stays in the room.");
-                hostPreview_->setText("Shared window closed");
+                hostPreview_->setText(message);
             }
             controlsTitle->setText(QString("Viewers · %1").arg(status.activePeers));
             uint64_t upload=0; bool sampled=false;
@@ -1086,6 +1089,13 @@ bool RoomSessionWindow::eventFilter(QObject* watched,QEvent* event) {
 }
 void RoomSessionWindow::resizeEvent(QResizeEvent* event) {
     if(sessionColumns_)sessionColumns_->setDirection(event->size().width()<720?QBoxLayout::TopToBottom:QBoxLayout::LeftToRight);
+    // Preserve the recovery action's complete label in a narrow host column.
+    // Secondary measurements remain available in Details at compact widths.
+    if(hostSourceActions_) {
+        const bool compact=event->size().width()<900;
+        hostSourceActions_->setDirection(compact?QBoxLayout::TopToBottom:QBoxLayout::LeftToRight);
+        hostRttMetric_->setVisible(!compact);hostFpsMetric_->setVisible(!compact);
+    }
     if(settingsDrawer_)QTimer::singleShot(0,this,[this]{settingsDrawer_->setGeometry(settingsDrawer_->parentWidget()->rect());});
     QWidget::resizeEvent(event);
 }

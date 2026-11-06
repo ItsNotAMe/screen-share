@@ -28,75 +28,90 @@ struct CaptureSession::Impl {
             uint64_t sequence = 0;
             unsigned skippedFrames = 0;
             while (!stop.stop_requested()) {
-                failure = CaptureFailure::Recovery;
-                const bool ready = recovery.Poll([&] {
-                    source->Rebuild();
-                    skippedFrames = 0;
-                    awaitingFrame = true;
-                    deadline = std::chrono::steady_clock::now() + startupTimeout;
-                });
-                if (ready) {
-                    failure = CaptureFailure::Source;
-                    std::optional<CaptureSample> sample;
-                    try { sample = source->Poll(); }
-                    catch (const CaptureFrameSkipped&) {
-                        // One late GPU frame must not tear down the room. If
-                        // acquisition keeps stalling, use the same bounded,
-                        // cancellable recovery as device loss.
-                        if (++skippedFrames >= 3) {
+                try {
+                    failure = CaptureFailure::Recovery;
+                    const bool ready = recovery.Poll([&] {
+                        source->Rebuild();
+                        skippedFrames = 0;
+                        awaitingFrame = true;
+                        deadline = std::chrono::steady_clock::now() + startupTimeout;
+                    });
+                    if (ready) {
+                        failure = CaptureFailure::Source;
+                        std::optional<CaptureSample> sample;
+                        try { sample = source->Poll(); }
+                        catch (const CaptureFrameSkipped&) {
+                            // One late GPU frame must not tear down the room. If
+                            // acquisition keeps stalling, use the same bounded,
+                            // cancellable recovery as device loss.
+                            if (++skippedFrames >= 3) {
+                                failure = CaptureFailure::Recovery;
+                                recovery.Lost([&] { source->Retire(); });
+                                std::lock_guard lock(mutex);
+                                status.state = CaptureState::Recovering;
+                            } else if (!stop.stop_requested()) idle.Wait();
+                            continue;
+                        }
+                        catch (const CaptureLost&) {
                             failure = CaptureFailure::Recovery;
                             recovery.Lost([&] { source->Retire(); });
                             std::lock_guard lock(mutex);
                             status.state = CaptureState::Recovering;
-                        } else if (!stop.stop_requested()) idle.Wait();
-                        continue;
-                    }
-                    catch (const CaptureLost&) {
-                        failure = CaptureFailure::Recovery;
-                        recovery.Lost([&] { source->Retire(); });
-                        std::lock_guard lock(mutex);
-                        status.state = CaptureState::Recovering;
-                        continue;
-                    }
-                    if (source->Closed()) { finalState = CaptureState::Closed; break; }
-                    { std::lock_guard lock(mutex); status.source = source->Info(); }
-                    if (source->Unavailable()) {
-                        deadline = std::chrono::steady_clock::now() + startupTimeout;
-                        awaitingFrame = true;
-                        skippedFrames = 0;
-                        std::lock_guard lock(mutex);
-                        status.state = CaptureState::Unavailable;
-                    } else if (source->Minimized()) {
-                        // A selected minimized window is an intentional pause,
-                        // including before its first frame. Resume gets a fresh
-                        // startup deadline; do not deliver queued old pixels.
-                        deadline = std::chrono::steady_clock::now() + startupTimeout;
-                        std::lock_guard lock(mutex);
-                        status.state = CaptureState::Minimized;
-                    } else if (sample) {
-                        skippedFrames = 0;
-                        if (!sample->resource) throw std::runtime_error("Missing captured resource");
-                        awaitingFrame = false;
-                        bool send;
-                        {
-                            std::lock_guard lock(mutex);
-                            status.state = CaptureState::Running;
-                            status.generation = recovery.generation();
-                            sample->session = status.session;
-                            send = enabled;
+                            continue;
                         }
-                        sample->generation = recovery.generation();
-                        sample->sequence = ++sequence;
-                        if (send && !stop.stop_requested()) {
-                            failure = CaptureFailure::Consumer;
-                            deliver(std::move(*sample));
+                        if (source->Closed()) { finalState = CaptureState::Closed; break; }
+                        { std::lock_guard lock(mutex); status.source = source->Info(); }
+                        if (source->Unavailable()) {
+                            deadline = std::chrono::steady_clock::now() + startupTimeout;
+                            awaitingFrame = true;
+                            skippedFrames = 0;
                             std::lock_guard lock(mutex);
-                            ++status.delivered;
+                            status.state = CaptureState::Unavailable;
+                        } else if (source->Minimized()) {
+                            // A selected minimized window is an intentional pause,
+                            // including before its first frame. Resume gets a fresh
+                            // startup deadline; do not deliver queued old pixels.
+                            deadline = std::chrono::steady_clock::now() + startupTimeout;
+                            std::lock_guard lock(mutex);
+                            status.state = CaptureState::Minimized;
+                        } else if (sample) {
+                            skippedFrames = 0;
+                            if (!sample->resource) throw std::runtime_error("Missing captured resource");
+                            awaitingFrame = false;
+                            bool send;
+                            {
+                                std::lock_guard lock(mutex);
+                                status.state = CaptureState::Running;
+                                status.failure = CaptureFailure::None;
+                                status.generation = recovery.generation();
+                                sample->session = status.session;
+                                send = enabled;
+                            }
+                            sample->generation = recovery.generation();
+                            sample->sequence = ++sequence;
+                            if (send && !stop.stop_requested()) {
+                                failure = CaptureFailure::Consumer;
+                                deliver(std::move(*sample));
+                                std::lock_guard lock(mutex);
+                                ++status.delivered;
+                            }
+                        } else if (awaitingFrame && std::chrono::steady_clock::now() >= deadline) {
+                            failure = CaptureFailure::StartupTimeout;
+                            throw std::runtime_error("Capture startup frame timed out");
                         }
-                    } else if (awaitingFrame && std::chrono::steady_clock::now() >= deadline) {
-                        failure = CaptureFailure::StartupTimeout;
-                        throw std::runtime_error("Capture startup frame timed out");
                     }
+                } catch (...) {
+                    // The switchable container may discard failed native state
+                    // while keeping its mailbox, subscriptions and room alive.
+                    // A replacement is explicit; do not restart a broken source
+                    // indefinitely or turn a consumer fault into a source pause.
+                    if (failure == CaptureFailure::Consumer || !source->AbandonFailedSource()) throw;
+                    recovery.AwaitReplacement();
+                    awaitingFrame = true; skippedFrames = 0;
+                    std::lock_guard lock(mutex);
+                    status.state = CaptureState::Unavailable;
+                    status.failure = failure;
+                    status.generation = recovery.generation();
                 }
                 // Bounded idle/backoff; cancellation is checked on the next
                 // iteration. Do not let occlusion expand this to a frame-long

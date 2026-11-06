@@ -298,12 +298,14 @@ class ClosingCapture final : public ICaptureSource {
     std::unique_ptr<ICaptureSource> source_;
     std::shared_ptr<std::atomic_bool> closed_;
     std::shared_ptr<std::atomic_bool> minimized_;
+    std::shared_ptr<std::atomic_bool> failed_;
 public:
-    ClosingCapture(std::unique_ptr<ICaptureSource> source,std::shared_ptr<std::atomic_bool> closed,std::shared_ptr<std::atomic_bool> minimized={})
-        : source_(std::move(source)),closed_(std::move(closed)),minimized_(std::move(minimized)) {}
+    ClosingCapture(std::unique_ptr<ICaptureSource> source,std::shared_ptr<std::atomic_bool> closed,std::shared_ptr<std::atomic_bool> minimized={},std::shared_ptr<std::atomic_bool> failed={})
+        : source_(std::move(source)),closed_(std::move(closed)),minimized_(std::move(minimized)),failed_(std::move(failed)) {}
     void Start() override {source_->Start();}
     std::optional<CaptureSample> Poll() override {
         if(closed_ && closed_->load())throw std::runtime_error("Selected test window closed");
+        if(failed_ && failed_->load())throw std::runtime_error("Injected source read failure");
         if(Minimized())return {};
         return source_->Poll();
     }
@@ -312,8 +314,8 @@ public:
     void Retire() noexcept override {source_->Retire();}
     void Rebuild() override {source_->Rebuild();}
 };
-QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSize captureSize=QSize(320,180), std::shared_ptr<std::atomic_bool> closed={}, std::shared_ptr<std::atomic_bool> minimized={}) {
-    return [audio,captureSize,closed,minimized](WindowsRoomRuntimeOptions windows) -> RoomRuntimeFactory {
+QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSize captureSize=QSize(320,180), std::shared_ptr<std::atomic_bool> closed={}, std::shared_ptr<std::atomic_bool> minimized={}, std::shared_ptr<std::atomic_bool> failed={}) {
+    return [audio,captureSize,closed,minimized,failed](WindowsRoomRuntimeOptions windows) -> RoomRuntimeFactory {
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         windows.capture.sourceType = screenshare::CaptureSourceType::Window;
         windows.capture.windowHandle = reinterpret_cast<uint64_t>(captureWindow);
@@ -322,7 +324,7 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSiz
         windows.playbackForSelection = [audio](auto selection) { return proof::SyntheticPlayback(selection, audio); };
         return WindowsRoomRuntimeFactory(std::move(windows));
 #else
-        return [windows, audio,captureSize,closed,minimized](auto identity, auto send) {
+        return [windows, audio,captureSize,closed,minimized,failed](auto identity, auto send) {
             NativeRoomRuntimeOptions options; options.preferences = windows.preferences; options.frames = windows.frames;
             options.presentation = windows.presentation;
             options.inputSink = windows.inputSink;
@@ -343,10 +345,10 @@ QtRoomSession::Factory Factory(std::shared_ptr<proof::AudioEvidence> audio, QSiz
             };
             options.capture = [captureSize] { return std::make_unique<SyntheticCaptureSource>(captureSize.width(), captureSize.height(), 30); };
             if(windows.inputTarget)options.capture=[target=windows.inputTarget] {return std::make_unique<MappedSyntheticCapture>(320,180,30,target);};
-            options.captureForSelection = [closed,minimized](CaptureSelection selection) -> CaptureSession::Factory {
-                return [selection,closed,minimized]() -> std::unique_ptr<ICaptureSource> {
+            options.captureForSelection = [closed,minimized,failed](CaptureSelection selection) -> CaptureSession::Factory {
+                return [selection,closed,minimized,failed]() -> std::unique_ptr<ICaptureSource> {
                     if (selection.display == 63 || selection.window == 1) throw std::runtime_error("Injected capture startup failure");
-                    return std::make_unique<ClosingCapture>(std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps),closed,minimized);
+                    return std::make_unique<ClosingCapture>(std::make_unique<SyntheticCaptureSource>(640, 360, selection.fps),closed,minimized,failed);
                 };
             };
             if(windows.inputTarget)options.captureForSelection=[target=windows.inputTarget](auto selection)->CaptureSession::Factory {
@@ -1749,7 +1751,8 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
     auto hostAudio = std::make_shared<proof::AudioEvidence>(); hostAudio->captureUnavailable = true;
     auto closedSource=std::make_shared<std::atomic_bool>(false);
     auto minimizedSource=std::make_shared<std::atomic_bool>(false);
-    RoomApplication hostApp(config, Factory(hostAudio,QSize(320,180),closedSource,minimizedSource), true); hostApp.show();
+    auto failedSource=std::make_shared<std::atomic_bool>(false);
+    RoomApplication hostApp(config, Factory(hostAudio,QSize(320,180),closedSource,minimizedSource,failedSource), true); hostApp.show();
     auto& host = *hostApp.session();
     try { Wait([&] { return host.session().status().phase == RoomPhase::Active; }); }
     catch (...) {
@@ -1997,6 +2000,37 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
 #endif
     Wait([&]{return frames>beforeRestore+10 && viewer.session().status().stream.remoteShare.state==HostShareState::Live &&
         viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
+#ifndef SCREENSHARE_WINDOWS_UI_PROOF
+    const auto beforeFailure=host.session().status();
+    *failedSource=true;
+    Wait([&]{return host.session().status().stream.capture.state==HostMediaState::SourceUnavailable &&
+        host.session().status().stream.capture.failure==CaptureFailure::Source &&
+        host.findChild<QLabel*>("HostSourcePreview")->text()=="Capture unavailable" &&
+        viewer.session().status().stream.remoteShare.state==HostShareState::SourceUnavailable &&
+        secondViewer.session()->session().status().stream.remoteShare.state==HostShareState::SourceUnavailable;});
+    Check(host.findChild<QPushButton*>("sessionChangeSource")->isEnabled() && host.session().status().activePeers==2);
+    Wait([&]{for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))if(button->isEnabled())return false;return true;});
+    const auto playingDuringFailure=audio->audibleBlocks.load();
+    Wait([&]{return audio->audibleBlocks>playingDuringFailure+10;});
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        Check(host.grab().save(QDir(output).filePath("host-capture-unavailable.png")));
+        Check(viewer.grab().save(QDir(output).filePath("viewer-capture-unavailable.png")));
+        const auto original=hostApp.window().size();hostApp.window().resize(740,650);QCoreApplication::processEvents();
+        Check(host.findChild<QPushButton*>("sessionChangeSource")->isVisible());
+        Check(host.grab().save(QDir(output).filePath("host-capture-unavailable-compact.png")));
+        hostApp.window().resize(original);QCoreApplication::processEvents();
+    }
+    *failedSource=false;
+    const auto failedFrames=frames,secondFailedFrames=secondFrames;
+    host.session().switchCapture({CaptureKind::Display,0,0,30});
+    Wait([&]{return !host.session().capturePending() && frames>failedFrames+10 && secondFrames>secondFailedFrames+10 &&
+        host.session().status().stream.capture.failure==CaptureFailure::None &&
+        viewer.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
+    const auto afterFailure=host.session().status();
+    Check(afterFailure.phase==RoomPhase::Active && afterFailure.roomId==beforeFailure.roomId && afterFailure.peerId==beforeFailure.peerId &&
+        afterFailure.activePeers==2 && afterFailure.capture.revision==beforeFailure.capture.revision+1);
+    Wait([&]{for(auto* button:host.findChildren<QPushButton*>("PeerCapability"))if(!button->isEnabled())return false;return true;});
+#endif
     secondViewer.window().close();Wait([&]{return secondViewer.finished();});
     hostApp.window().close(); viewerApp.window().close();
     Wait([&] { return hostApp.finished() && viewerApp.finished() && !hostApp.window().isVisible() && !viewerApp.window().isVisible(); });

@@ -5,6 +5,7 @@
 namespace proof {
 struct CaptureLifetime {
     std::atomic<unsigned> sources{0}, resources{0}, peakResources{0};
+    std::atomic<bool> failRead{false};
 };
 // Test-only accounting around the real portable capture contract. The aliasing
 // owner preserves the original resource type/data and follows every shared copy.
@@ -16,6 +17,7 @@ public:
     ~ObservedCaptureSource() override { --lifetime_->sources; }
     void Start() override { source_.Start(); }
     std::optional<screenshare::media::CaptureSample> Poll() override {
+        if (lifetime_->failRead.exchange(false)) throw std::runtime_error("Injected capture acquisition failure");
         auto sample = source_.Poll();
         if (sample) {
             auto original = std::move(sample->resource);

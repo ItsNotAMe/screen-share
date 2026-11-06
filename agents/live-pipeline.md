@@ -7,6 +7,20 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-06 capture failure isolation: a switchable source may abandon failed
+native state on its capture owner and wait for an explicit replacement while
+the room/distribution/peers stay alive. Read errors, rebuild failure, exhausted
+recovery and first-frame timeout preserve their failure reason in SourceUnavailable.
+Abandonment advances the source generation and clears the retry policy only for
+the next explicit source; it never reopens the failed device. Fresh output clears
+the failure. Consumer failures, ordinary unwrapped sources and initial Start
+failure remain terminal. Runtime disables grants/releases held input on entering
+SourceUnavailable and restores grant availability after capture resumes, without
+implicit regrant. Host copy distinguishes capture failure from window closure.
+Injected four-viewer media and two-viewer UI tests require audio continuity,
+explicit video replacement and unchanged room/connection identity. Physical
+driver removal/hang and deferred native cleanup remain unqualified.
+
 2026-11-06 decoder recovery: the three-software-rebuild budget now renews after
 30 validated output frames instead of exhausting across the entire configuration.
 Failures reset the healthy count; accepted input without output cannot renew it.
