@@ -40,7 +40,15 @@ messages on recovery, available Change source and disabled grant actions during
 failure. Set `SCREENSHARE_UI_PREVIEWS` to save host/viewer and compact host renders.
 These use injected capture failures, without resetting a physical graphics driver.
 
-`decoder-adapter-lifecycle` runs real MF software decoding and injected
+`decoder-adapter-lifecycle` first checks caller-owned output-buffer reuse with
+changing pixels across 320×180, 640×360, 1920×1080 and back to 320×180. It requires
+bounded allocations per format, visible cropping and timestamp association,
+unchanged retained frames after later decoding/Stop, released scratch storage
+on Stop and an empty cache/counter on restart.
+`DecoderComputeBenchmark` is an explicit performance tool, outside CTest; see
+[the matched decoder comparison](performance.md#reused-software-decoder-output-storage-2026-11-06).
+
+`decoder-adapter-lifecycle` also runs real MF software decoding and injected
 unavailable-GPU startup fallback. A valid encoded picture with an undersized
 dimension declaration triggers deterministic output-validation failure. Five
 outages separated by at least 30 valid output frames must recover without

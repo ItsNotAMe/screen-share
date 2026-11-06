@@ -5,6 +5,61 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Reused software-decoder output storage (2026-11-06)
+
+The software decoder now reuses one caller-owned Media Foundation output buffer
+instead of allocating another large NV12 buffer on every output poll, including
+polls that need more input. Samples remain fresh on each poll, and decoded frames
+still own independent pixel vectors. A format change discards the buffer; Stop
+releases it. The hardware decoder's supplied samples keep their existing path.
+The caller-allocation branch follows the transform's output-stream flags and
+buffer-size requirement described by Microsoft's
+[ProcessOutput contract](https://learn.microsoft.com/en-us/windows/win32/api/mftransform/nf-mftransform-imftransform-processoutput).
+
+Six alternating-order pairs per configuration, using the same pre-encoded
+1920×1080 fixture, gave these medians:
+
+| Concurrent decoders | Elapsed ms for 960 frames each, before → after | CPU ms per decoded frame, before → after | Measured large output-buffer allocations, before → after |
+| --- | --- | --- | --- |
+| 1 | 3595.84 → 3363.89 (−6.5%) | 5.916 → 5.420 (−8.4%) | 1921 → 0 |
+| 4 | 5162.26 → 4623.26 (−10.4%) | 7.731 → 7.153 (−7.5%) | 7684 → 0 |
+
+Every elapsed pair improved: 3.9–11.3% with one decoder and 5.3–15.2% with four.
+CPU measurements varied: paired reductions ranged from −5.4% to 17.2% and
+−1.3% to 11.2%, respectively. The median CPU improvements do not establish a
+uniform CPU reduction. All runs retained matching decoded byte counts and
+full-frame checksums, dimensions and timestamp order.
+
+The baseline is `ff38fa3` with an allocation counter and the identical benchmark
+source added. Both executables use the same Release toolchain and one fixed
+64-picture fixture. Each decoder has its own thread and warms up for 64 pictures;
+timing then covers 960 pictures, drain, owned output copies/cropping and a full-
+frame checksum. Process CPU includes all decoder worker threads. Fixture generation,
+loading, decoder startup, warmup and teardown are excluded. The four-decoder case
+models simultaneous software receive workloads, not four host encoders. Capture,
+networking and presentation are excluded; these are not total application CPU
+or end-to-end latency measurements. No other builds/tests ran during the comparison.
+
+Reuse retains one scratch buffer per running software decoder (about 3 MiB for
+coded 1920×1088), bounded by the existing 128 MiB output limit. The two initial
+allocations per decoder happen before measurement as the stream type settles.
+Published-frame copies and codec-internal allocations remain. Regression checks
+cover changing pixels, retained frames, 1080 cropping, resize in both directions
+and Stop/restart cleanup. This does not qualify hardware decoder handle lifetime.
+[Raw runs, source identifiers and binary hashes](benchmarks/decoder-compute-2026-11-06.json).
+
+Build `DecoderComputeBenchmark`. Generate the fixture once with
+`DecoderComputeBenchmark.exe --generate build/decoder-input.bin`, then run
+`DecoderComputeBenchmark.exe build/decoder-input.bin 4 960`. For a comparison,
+compile the identical benchmark against each revision with the allocation counter
+available, save the baseline decoder sources, and run
+`python scripts/compare-decoder-compute.py --before BEFORE.exe --after AFTER.exe
+--fixture build/decoder-input.bin --before-source BASELINE_SOURCE_DIRECTORY
+--baseline-commit BASELINE_REVISION --output build/decoder-results.json
+--samples 6 --frames 960`.
+The runner alternates order, saves each run, rejects differing byte counts or
+checksums, and records fixture, benchmark, decoder-source and executable hashes.
+
 ## Matched encoder timing and direct plane input (2026-11-06)
 
 The earlier NV12 change (`2c2a5fa` → `05582cc`) reduced elapsed encoding time

@@ -222,6 +222,7 @@ H264StreamDecoder::~H264StreamDecoder()
 void H264StreamDecoder::Start(int maxWidth, int maxHeight, ID3D11Device* device)
 {
     Stop();
+    outputBufferAllocations_ = 0;
     if (maxWidth <= 0 || maxHeight <= 0 || maxWidth > 16384 || maxHeight > 16384) {
         throw std::invalid_argument("Invalid H264 decoder dimension limit");
     }
@@ -320,6 +321,7 @@ void H264StreamDecoder::Stop()
 {
     transform_.Reset();
     manager_.Reset(); device_.Reset();
+    outputStorage_.Reset(); outputStorageBytes_ = 0;
     outputWidth_ = 0;
     outputHeight_ = 0;
     outputVisibleLeft_ = 0;
@@ -406,7 +408,16 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             Microsoft::WRL::ComPtr<IMFMediaBuffer> outputBuffer;
             Microsoft::WRL::ComPtr<IMFSample> outputSample;
             if (!(streamInfo.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES)) {
-                ThrowIfFailed(MFCreateMemoryBuffer(outputBufferBytes, &outputBuffer), "MFCreateMemoryBuffer(decoder output)");
+                if (!outputStorage_ || outputStorageBytes_ < outputBufferBytes) {
+                    Microsoft::WRL::ComPtr<IMFMediaBuffer> storage;
+                    ThrowIfFailed(MFCreateMemoryBuffer(outputBufferBytes, &storage), "MFCreateMemoryBuffer(decoder output)");
+                    outputStorage_ = std::move(storage); outputStorageBytes_ = outputBufferBytes;
+                    ++outputBufferAllocations_;
+                }
+                outputBuffer = outputStorage_;
+                ThrowIfFailed(outputBuffer->SetCurrentLength(0), "Reset decoder output length");
+                // Keep sample metadata fresh even while its large storage is
+                // reused. Returned CPU frames own copies before the next poll.
                 ThrowIfFailed(MFCreateSample(&outputSample), "MFCreateSample(decoder output)");
                 ThrowIfFailed(outputSample->AddBuffer(outputBuffer.Get()), "IMFSample::AddBuffer(decoder output)");
             }
@@ -427,6 +438,7 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
                 return frames;
             }
             if (outputResult == MF_E_TRANSFORM_STREAM_CHANGE) {
+                outputStorage_.Reset(); outputStorageBytes_ = 0;
                 outputTypeConfigured_ = false;
                 outputWidth_ = 0;
                 outputHeight_ = 0;

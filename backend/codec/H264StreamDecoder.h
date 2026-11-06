@@ -41,6 +41,8 @@ public:
 
     [[nodiscard]] bool isRunning() const noexcept { return transform_ != nullptr; }
     [[nodiscard]] bool lowLatencyEnabled() const noexcept { return lowLatencyEnabled_; }
+    [[nodiscard]] uint64_t outputBufferAllocations() const noexcept { return outputBufferAllocations_; }
+    [[nodiscard]] DWORD cachedOutputBytes() const noexcept { return outputStorageBytes_; }
 
 private:
     bool TryConfigureOutputType();
@@ -49,6 +51,10 @@ private:
     Microsoft::WRL::ComPtr<IMFTransform> transform_;
     Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> manager_;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
+    // One caller-allocated CPU output buffer, reused only after copying owned
+    // output pixels. MF-provided GPU samples retain their original allocation.
+    Microsoft::WRL::ComPtr<IMFMediaBuffer> outputStorage_;
+    DWORD outputStorageBytes_ = 0;
     DWORD inputStreamId_ = 0;
     DWORD outputStreamId_ = 0;
     int outputWidth_ = 0;
@@ -58,6 +64,7 @@ private:
     int outputVisibleWidth_ = 0;
     int outputVisibleHeight_ = 0;
     DWORD outputBufferBytes_ = 0;
+    uint64_t outputBufferAllocations_ = 0;
     bool outputTypeConfigured_ = false;
     bool comInitialized_ = false;
     bool mfStarted_ = false;

@@ -7,6 +7,18 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-06 software decoder storage: H264StreamDecoder keeps one caller-owned
+CPU output buffer, resetting its length and creating fresh sample metadata on
+each poll. Output vectors remain independent; stream change invalidates storage,
+growth stays within the existing 128 MiB limit, and Stop frees it. MFT-provided
+GPU samples retain their path. Real software tests retain frames across changing
+pixels, 1080 crop, resize and Stop/restart. Six matched AB/BA pairs reduce elapsed
+decode workload time by 6.5% (one decoder) and 10.4% (four); CPU medians improve
+8.4%/7.5% but paired ranges include regressions. Warmed large-buffer allocations
+fall from 1921/7684 to zero for 960 pictures per decoder. See docs/performance.md
+for raw evidence, scope and retained scratch-memory tradeoff. No full-session
+latency, total application CPU or hardware handle-lifetime claim.
+
 2026-11-06 controller lag: a 300 ms input gap now neutralizes through Sink::Pause
 without dropping granted capabilities or native controller allocation. The host
 rotates the permission epoch with the existing Permission message, clears pre-gap

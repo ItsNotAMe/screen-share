@@ -1,5 +1,6 @@
 #include "media/webrtc/MfVideoDecoderFactory.h"
 #include "codec/H264StreamEncoder.h"
+#include "codec/H264StreamDecoder.h"
 #include "api/environment/environment_factory.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "media/webrtc/D3dVideoFrameBuffer.h"
@@ -10,6 +11,8 @@
 #include <thread>
 #include <deque>
 #include <map>
+#include <algorithm>
+#include <cstddef>
 
 namespace {
 void Require(bool value, const char* message) {
@@ -246,6 +249,52 @@ void ResizeWithoutReconfigure(bool gpu = false) {
         Require(sink.firstRetained->pixels().size() == 320 * 180 * 3 / 2, "Old GPU frame did not survive resize");
     }
 }
+void OutputStorageReuse() {
+    screenshare::H264StreamDecoder decoder;decoder.Start(4096,4096);
+    struct Expected {int width,height,luma;};
+    std::vector<Expected> expected;
+    std::vector<screenshare::DecodedFrameInfo> held;
+    std::vector<std::vector<std::byte>> snapshots;
+    unsigned delivered=0,phase=0;
+    auto consume=[&](auto frames) {
+        for(auto& frame:frames) {
+            Require(frame.timestamp100ns==int64_t(delivered+1)*100000 && delivered<expected.size(), "Reused output lost timestamp association");
+            const auto dimensions=expected[delivered++];
+            Require(frame.width==dimensions.width && frame.height==dimensions.height && !frame.texture &&
+                frame.data.size()==size_t(frame.width)*frame.height*3/2 &&
+                std::abs(int(std::to_integer<uint8_t>(frame.data.front()))-dimensions.luma)<=4,
+                "Reused output lost visible pixels or geometry");
+            const bool newSize=std::none_of(held.begin(),held.end(),[&](const auto& old){return old.width==frame.width && old.height==frame.height;});
+            if(newSize){snapshots.push_back(frame.data);held.push_back(std::move(frame));}
+        }
+    };
+    for(int width:{320,640,1920,320}) {
+        const int height=width*9/16;
+        const auto before=decoder.outputBufferAllocations();
+        screenshare::H264StreamEncoder encoder;screenshare::H264StreamEncoderConfig config;config.width=width;config.height=height;
+        encoder.Start(config);
+        screenshare::CapturedFrame input;input.width=input.sourceWidth=width;input.height=input.sourceHeight=height;
+        input.nv12Pixels.assign(size_t(width)*height*3/2,std::byte{128});
+        for(unsigned i=0;i<12;++i) {
+            const int luma=80+int(phase)*20+int(i);
+            std::fill_n(input.nv12Pixels.begin(),size_t(width)*height,std::byte(luma));
+            auto packets=encoder.EncodeFrame(input);Require(packets.size()==1,"Output storage fixture lost an input picture");
+            auto& packet=packets.front();expected.push_back({width,height,luma});
+            packet.timestamp100ns=int64_t(expected.size())*100000;packet.duration100ns=100000;
+            consume(decoder.DecodePacket(packet));
+        }
+        const auto allocations=decoder.outputBufferAllocations()-before;
+        Require(allocations>0 && allocations<=2 && decoder.cachedOutputBytes()>=size_t(width)*height*3/2 &&
+            decoder.cachedOutputBytes()<=128*1048576u,"Output storage was not bounded/reused across output polls");
+        ++phase;
+    }
+    consume(decoder.Drain());Require(delivered==expected.size(),"Reused output retained or lost pictures");
+    decoder.Stop();Require(!decoder.cachedOutputBytes(),"Stop retained decoder scratch storage");
+    for(size_t i=0;i<held.size();++i)Require(held[i].data==snapshots[i],"Scratch reuse mutated published CPU pixels");
+    decoder.Start();Require(!decoder.outputBufferAllocations() && !decoder.cachedOutputBytes(),"Restart retained old output storage");
+    decoder.Stop();
+    std::cout<<"Software decoder output storage: bounded reuse, changing pixels, 1080 crop, resize, retained frames and stop/restart passed.\n";
+}
 void RepeatedRecovery() {
     // A valid encoded picture with an undersized declaration deterministically
     // fails output validation, without relying on malformed-input driver behavior.
@@ -312,6 +361,6 @@ void RepeatedRecovery() {
     std::cout << "Five isolated decoder outages recovered; unstable output retains the three-restart limit, keyframe gate and backoff.\n";
 }
 int main(int argc, char** argv) {
-    try { RepeatedRecovery(); ResizeWithoutReconfigure(); Run(false); Run(true, true); if (argc > 1 && std::string(argv[1]) == "--gpu") { ResizeWithoutReconfigure(true); Run(true); Recovery(); } return 0; }
+    try { OutputStorageReuse(); RepeatedRecovery(); ResizeWithoutReconfigure(); Run(false); Run(true, true); if (argc > 1 && std::string(argv[1]) == "--gpu") { ResizeWithoutReconfigure(true); Run(true); Recovery(); } return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

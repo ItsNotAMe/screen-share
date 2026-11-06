@@ -12,6 +12,41 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Reuse software decoder output storage - 2026-11-06
+
+H264StreamDecoder previously allocated a large caller-owned MF output buffer on
+every ProcessOutput poll, including NEED_MORE_INPUT. It now retains one buffer
+per decoder, resets its length and creates a fresh sample on each poll. Published
+CPU pixels still own copies, format changes discard scratch storage, Stop frees
+it and Start resets allocation counters. Existing size limits stay authoritative;
+MFT-supplied hardware samples retain their path. The retained scratch buffer is
+about 3 MiB per idle running 1080p software decoder, at most 128 MiB.
+
+An identical generated 64-picture 1080p fixture and benchmark were compared with
+instrumented ff38fa3 in six alternating AB/BA pairs for one and four independent
+decoder threads: 64 warmup pictures, then 960 measured pictures per decoder.
+Median elapsed time improves 3595.84→3363.89 ms (6.5%) and 5162.26→4623.26 ms
+(10.4%). CPU ms per decoded frame improves 5.916→5.420 (8.4%) and 7.731→7.153
+(7.5%), but paired CPU ranges include regressions: −5.4..17.2% and −1.3..11.2%.
+Every elapsed pair improves. Measured large-buffer allocations fall 1921/7684→0;
+two allocations per decoder occur during warmup. Decoded byte counts and full-
+frame checksums match. Raw runs/source/binary/fixture hashes are tracked in
+docs/benchmarks/decoder-compute-2026-11-06.json; scope is in docs/performance.md.
+This measures decode, owned output copies/crop and checksum, excluding startup,
+warmup, teardown, capture, networking and presentation. No total application CPU,
+input-to-display latency or hardware handle-lifetime claim.
+
+Real software regression checks changing pixels across 320×180→640×360→1080p→
+320×180, bounded allocations, timestamp association, retained immutable frames
+and Stop/restart cleanup. The explicit generated-GPU variant also passes hardware
+resize, retention, pressure and software fallback. No physical desktop capture,
+input injection or virtual-controller allocation is used.
+
+Release `all` build passed. All 46 CTests passed sequentially (299.93 s);
+`DecoderAdapterTests --gpu` passed separately. Packaged CLI/UI hashes match.
+The measured decoder sources, benchmark source and executable still match the
+recorded hashes. No version bump or publication; this improvement is unreleased.
+
 ## Preserve control grants through temporary lag - 2026-11-06
 
 Owner report: released v1.0.12 revoked controller permission when the captured
