@@ -40,6 +40,9 @@ protected:
     void hideEvent(QHideEvent*) override;
     void closeEvent(QCloseEvent*) override;
 private:
+    enum class JoinState { Idle, Joining, Cancelling, ReturningHome };
+    void SetJoinState(JoinState);
+    void CancelJoin(bool returnHome = false);
     void Launch(bool host);
     void Refresh(const screenshare::room::qt::RoomDirectory::Status&);
     void RefreshSources();
@@ -67,6 +70,7 @@ private:
     bool passwordRetry_ = false;
     bool passwordRejected_ = false;
     QString joinFailure_;
+    JoinState joinState_ = JoinState::Idle;
     QVBoxLayout *detailsBody_, *joinBody_;
 };
 int RunRoomBrowserWindow(const QUrl& origin, bool normalHome = false,

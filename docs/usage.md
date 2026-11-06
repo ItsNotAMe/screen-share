@@ -19,6 +19,11 @@ rate limited. Your invite stays in the form so you can correct it or retry.
 An unconfirmed outcome asks you to wait before trying again. Room creation
 distinguishes a full service from a room's viewer limit.
 
+While joining, the form shows progress and offers **Cancel** in place of Paste.
+Cancel preserves the invite so you can edit it or try again. Choosing Home also
+cancels the pending attempt and waits for cleanup before returning. The invite
+and other room actions stay locked until that attempt finishes.
+
 ## Command line
 
 ```powershell

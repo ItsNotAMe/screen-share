@@ -2,6 +2,11 @@
 
 ## Current UI Direction
 
+- Pending Join shows neutral progress, disables the Join action and uses the
+  Paste slot for Cancel. Preserve the invite and keep action/list geometry stable.
+  Home cancels and waits for cleanup before navigating; ignore late success or
+  password failures after cancellation. Measure action states after style polish.
+
 - Explain authoritative remote room closure with the existing toast after
   session cleanup and return Home/Join. Distinguish host departure, expiry and
   service shutdown; keep local Leave/host Stop quiet and removal's persistent

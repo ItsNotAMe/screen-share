@@ -5,6 +5,25 @@
 
 # Project Memory
 
+## Cancellable room joining - 2026-11-06
+
+Join now shows neutral progress, disables the primary action and reuses Paste
+for Cancel. The invite stays read-only/copyable while pending; directory actions
+cannot replace the in-flight target. Cancellation preserves the invite and waits
+for the existing asynchronous session drain. Home cancels first and navigates
+only after cleanup, avoiding a hidden join that later reopens the session.
+Explicit joining/cancelling/returning-home states reject queued success and
+password-error handling after cancellation. No automatic retry is introduced.
+
+Action widths are measured after stylesheet parenting/polish, and feedback space
+is reserved so pending/idle transitions do not move the invite or directory.
+The full Release build, focused stalled-admission fixture and five relevant UI/
+mutation/update checks passed. Coverage includes repeated actions, target lock,
+cancel/Home drain, a queued success, preserved invites, no media startup, stable
+geometry and recovery from admission failures. Compact/normal renders were
+inspected; the portable archive matches both rebuilt executables. No physical
+input, version bump or publication was performed.
+
 ## Room closure feedback - 2026-11-06
 
 Authenticated room.closed reasons survive Stop as a typed optional closeReason;

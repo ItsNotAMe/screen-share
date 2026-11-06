@@ -998,6 +998,7 @@ void RoomEndNoticePolicyChecks() {
 void AdmissionFeedbackScenario() {
     QTcpServer service;Check(service.listen(QHostAddress::LocalHost,0));
     int responseStatus=409,admissions=0,runtimeStarts=0;
+    bool holdAdmissions=false;
     QByteArray responseCode="full";
     QObject::connect(&service,&QTcpServer::newConnection,&service,[&] {
         auto* peer=service.nextPendingConnection();
@@ -1012,6 +1013,7 @@ void AdmissionFeedbackScenario() {
             Check(length>=0 && length<16384);if(buffer->size()<end+4+length)return;
             *handled=true;
             const bool admission=buffer->startsWith("POST ");if(admission)++admissions;
+            if(admission && holdAdmissions)return;
             const auto body=QByteArray("{\"v\":2,\"error\":\"")+(admission?responseCode:QByteArray("not_found"))+"\"}";
             peer->write("HTTP/1.1 "+QByteArray::number(admission?responseStatus:404)+" Result\r\nContent-Type: application/json\r\nContent-Length: "+
                 QByteArray::number(body.size())+"\r\nConnection: close\r\n\r\n"+body);peer->disconnectFromHost();
@@ -1023,7 +1025,55 @@ void AdmissionFeedbackScenario() {
         return [&](auto,auto) -> std::unique_ptr<RoomRuntime> {++runtimeStarts;throw std::runtime_error("Rejected admission started media");};
     };
     RoomBrowserWindow browser(QUrl("http://127.0.0.1:"+QString::number(service.serverPort())),factory,true,profilePath,false);
+    unsigned returnedHome=0;
+    browser.ShowBackButton();browser.back=[&]{Check(!browser.activeSession());++returnedHome;};
     const auto invite=MakeRoomLink("feedback-room");browser.OpenJoin(invite);browser.resize(740,600);browser.show();
+    auto* inviteField=browser.findChild<QLineEdit*>("joinRoomId");
+    auto* joinButton=browser.findChild<QPushButton*>("joinV2Room");
+    auto* cancelJoin=browser.findChild<QPushButton*>("pasteRoomLink");
+    auto* rooms=browser.findChild<QWidget*>("publicRooms");
+    auto geometry=[&]{return std::array{inviteField->geometry(),joinButton->geometry(),cancelJoin->geometry(),rooms->geometry()};};
+    for(const bool home:{false,true}) {
+        holdAdmissions=true;QCoreApplication::processEvents();const auto before=geometry();
+        const auto beforeRequests=admissions;
+        const auto beforeHome=returnedHome;
+        joinButton->click();Check(browser.activeSession());
+        Wait([&]{return admissions==beforeRequests+1;});
+        Check(inviteField->isReadOnly() && !rooms->isEnabled() && !joinButton->isEnabled());
+        Check(joinButton->text()=="Joining…" && cancelJoin->text()=="Cancel" && cancelJoin->isEnabled());
+        Check(cancelJoin->accessibleName()=="Cancel joining room");
+        Check(browser.findChild<QLabel*>("browserError")->text()=="Joining room…");
+        if(geometry()!=before) {
+            const auto after=geometry();
+            for(size_t i=0;i<before.size();++i)std::cerr<<"Join layout "<<i<<": "<<before[i].x()<<','<<before[i].y()<<','<<before[i].width()<<','<<before[i].height()
+                <<" -> "<<after[i].x()<<','<<after[i].y()<<','<<after[i].width()<<','<<after[i].height()<<'\n';
+            Check(false);
+        }
+        auto* pending=browser.activeSession();
+        joinButton->click();browser.JoinListedRoom("another-room");
+        Check(browser.activeSession()==pending && inviteField->text()==invite && admissions==beforeRequests+1);
+        if(!home)if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);const auto previousSize=browser.size();
+            for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                browser.resize(size);QCoreApplication::processEvents();
+                Check(browser.grab().save(QDir(output).filePath(QString("join-in-progress-%1.png").arg(size.width()))));
+            }
+            browser.resize(previousSize);QCoreApplication::processEvents();
+        }
+        auto delayedStatus=pending->session().statusChanged;
+        if(home)browser.findChild<QPushButton*>("roomBack")->click();else cancelJoin->click();
+        Check(returnedHome==beforeHome && !joinButton->isEnabled() && !cancelJoin->isEnabled());
+        // An already queued success notification cannot reopen a cancelled join.
+        auto late=pending->session().status();late.phase=RoomPhase::Connecting;delayedStatus(late);
+        Check(browser.isVisible() && !pending->isVisible());
+        cancelJoin->click(); // A repeated cancel cannot queue more work.
+        Wait([&]{return !browser.activeSession();});
+        Check(returnedHome==beforeHome+unsigned(home) && inviteField->text()==invite && !inviteField->isReadOnly());
+        Check(joinButton->isEnabled() && joinButton->text()=="Join room" && rooms->isEnabled() && cancelJoin->text()=="Paste");
+        Check(browser.findChild<QLabel*>("browserError")->text().isEmpty() && !browser.findChild<QDialog*>("RoomPasswordDialog"));
+        Check(geometry()==before && runtimeStarts==0 && admissions==beforeRequests+1);
+    }
+    holdAdmissions=false;
     struct Failure {int status;const char* code;RoomError error;const char* message;};
     const Failure failures[]{
         {409,"full",RoomError::RoomFull,"This room is full. Wait for a viewer to leave or ask the host to increase the viewer limit."},

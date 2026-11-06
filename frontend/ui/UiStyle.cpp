@@ -316,6 +316,7 @@ QPushButton#roomBack { background: transparent; border: 0; padding: 6px 10px; co
 QPushButton#roomBack:hover { background: #20312c; }
 QLabel#FormHint { color: #a3b5af; }
 QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
+QLabel#browserError[joinPending="true"] { color: #a3b5af; }
 QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }
 QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#joinWithPassword {
     background: #126c61; color: #ffffff; font-weight: 650; min-height: 24px;
