@@ -5,6 +5,26 @@
 
 # Project Memory
 
+## Share-source title search - 2026-11-06
+
+Create/live source pickers share an initially focused search field. Filtering
+updates existing cards case-insensitively without restarting thumbnail capture;
+visible selection stays stable and the draft source is retained through refresh.
+Queries survive tab/refresh changes. An explicit tinted Clear search action
+restores sources. The list centers no-match versus unavailable feedback and
+provides an accessible description. Share rejects hidden/invalid selections and
+has a disabled visual state. Enter from search moves to matching cards without
+sharing or dismissing the picker; normal confirmation/focus return remains.
+
+The full Release build and focused synthetic-source checks passed. Five relevant
+UI/mutation/update checks passed overall; a parallel controller-resume timeout in
+viewer removal passed on the isolated rerun. Final room UI/removal checks passed
+sequentially. Coverage includes title/selection identity, icon updates, no matches,
+tab/refresh retention, clear/Enter behavior and popup control bounds at compact/
+normal sizes with live audio controls. Matched/empty/create/live renders were
+inspected; the portable archive matches both rebuilt executables. Source-search
+fixtures enumerate no desktop sources. No version bump or publication occurred.
+
 ## Cancellable room joining - 2026-11-06
 
 Join now shows neutral progress, disables the primary action and reuses Paste

@@ -40,6 +40,11 @@ playback device, mute/volume and preview. `--seconds N` bounds a CLI session;
 Ctrl+C requests orderly shutdown. Configuration-file automation remains available
 as `ScreenShare --room-v2 CONFIG.json`.
 
+The source picker in Create room and Change source can search display/window
+titles. Search is case insensitive and stays in place when changing tabs or
+refreshing. Clear search restores the available sources. With no matches, sharing
+is disabled; Enter from search moves to the matching cards without sharing.
+
 See [CLI configuration and options](cli.md) for complete schemas and ranges.
 Shared source audio is the default: window sharing captures the selected app's
 audio and its child processes; display sharing captures system audio. It follows

@@ -42,6 +42,14 @@ and keeps the host active. Removal retains its separate explanation. Policy
 checks cover expiry/service-closure notices and quiet host/local exits; report
 checks cover every bounded closure reason and the absent-reason case.
 
+Source-picker checks use synthetic titles and diagnostic selections without
+desktop enumeration. They cover filtering, selected-card identity, thumbnail
+updates, no-match versus unavailable states, explicit Clear search, query retention
+across tabs/refresh, disabled sharing and Enter/focus behavior. The room UI also
+checks that the live host's search/audio/action controls fit the compact and
+normal popup layouts. Source-search checks run in the default room UI flow and
+the focused `admission-feedback` mode.
+
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 

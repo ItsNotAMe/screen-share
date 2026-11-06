@@ -1387,6 +1387,65 @@ void BrowserScenario(const QUrl& origin) {
         Check(pending.finished() && !pending.window().isVisible() && !pending.keepingScreenAwake());
     }
 }
+void SourcePickerSearchScenario() {
+    QWidget owner;owner.setStyleSheet(uiStyleSheet());owner.resize(1000,820);
+    auto* layout=new QVBoxLayout(&owner);auto* opener=new QPushButton("Choose source");layout->addWidget(opener);
+    owner.show();owner.activateWindow();opener->setFocus();Wait([&]{return opener->hasFocus();});
+    for(const bool window:{false,true}) {
+        CaptureSelection current;current.kind=window?CaptureKind::Window:CaptureKind::Display;
+        current.window=window?42:0;current.fps=30;
+        SourcePickerDialog picker(current,false,&owner);
+        unsigned selections=0;CaptureSelection selected;
+        picker.chosen=[&](const auto& value){++selections;selected=value;};picker.open();
+        auto* search=picker.findChild<QLineEdit*>("sourceSearch");
+        auto* cards=picker.findChild<QListWidget*>("SourceCards");
+        auto* share=picker.findChild<QPushButton*>("confirmSourceSelection");
+        Check(search && search->hasFocus() && cards->count()==1);
+        auto* original=cards->item(0);
+        // Synthetic titles reuse the real diagnostic selection; no desktop enumeration.
+        auto* editor=new QListWidgetItem(*original);editor->setText("Editor — Project Atlas");cards->addItem(editor);
+        auto* notes=new QListWidgetItem(*original);notes->setText("Editor — Notes");cards->addItem(notes);
+        auto* browser=new QListWidgetItem(*original);browser->setText("Browser — Team call");cards->addItem(browser);
+        search->setText("  eDiToR  ");
+        Check(original->isHidden() && browser->isHidden() && !editor->isHidden() && !notes->isHidden());
+        Check(cards->currentItem()==editor && share->isEnabled() && search->hasFocus());
+        cards->setCurrentItem(notes);search->setText("editor");Check(cards->currentItem()==notes);
+        // Thumbnail updates must not clear filtering, selection or keyboard focus.
+        editor->setIcon(uiIcon("window"));Check(cards->currentItem()==notes && search->hasFocus());
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);
+            for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                owner.resize(size);QCoreApplication::processEvents();
+                Check(picker.grab().save(QDir(output).filePath(QString("source-search-matches-%1-%2.png").arg(window?"window":"display").arg(size.width()))));
+            }
+        }
+        search->setText("not an open source");
+        Check(!share->isEnabled() && !cards->currentItem() && picker.selectedName().isEmpty());
+        Check(cards->accessibleDescription()==(window?"No matching windows":"No matching displays"));
+        share->click();Check(selections==0 && picker.isVisible());
+        QKeyEvent enterEmpty(QEvent::KeyPress,Qt::Key_Return,Qt::NoModifier);QApplication::sendEvent(search,&enterEmpty);
+        Check(selections==0 && picker.isVisible() && search->hasFocus());
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty())
+            Check(picker.grab().save(QDir(output).filePath(QString("source-search-empty-%1.png").arg(window?"window":"display"))));
+        auto* clear=picker.findChild<QAction*>("clearSourceSearch");Check(clear && clear->isVisible());clear->trigger();
+        Check(search->text().isEmpty() && !clear->isVisible() && search->hasFocus());
+        Check(!original->isHidden() && !browser->isHidden() && share->isEnabled());
+        search->setText(window?"current":"default");
+        const auto query=search->text();
+        picker.findChild<QPushButton*>("refreshShareSources")->click();
+        Check(search->text()==query && cards->count()==1 && share->isEnabled());
+        picker.findChild<QButtonGroup*>("SourceKinds")->button(window?0:1)->click();
+        Check(search->text()==query && !share->isEnabled() && cards->accessibleDescription().startsWith("No available"));
+        picker.findChild<QButtonGroup*>("SourceKinds")->button(window?1:0)->click();
+        Check(search->text()==query && share->isEnabled());
+        QKeyEvent enter(QEvent::KeyPress,Qt::Key_Return,Qt::NoModifier);QApplication::sendEvent(search,&enter);
+        Check(cards->hasFocus() && picker.isVisible() && selections==0);
+        share->click();Check(selections==1 && !picker.isVisible());
+        Check(selected.kind==current.kind && selected.window==current.window && selected.display==current.display && selected.fps==30);
+        Check(opener->hasFocus());
+    }
+    owner.close();
+}
 void CapturePreviewOwnership() {
     // The exact-size path used to queue a QImage backed by freed frame pixels.
     for (const QSize size : {QSize(320,180),QSize(640,360),QSize(800,450)}) {
@@ -2150,7 +2209,9 @@ int main(int argc, char** argv) {
         WindowPlacementChecks();
         RoomEndNoticePolicyChecks();
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
-        if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback"))AdmissionFeedbackScenario();
+        if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback")) {
+            SourcePickerSearchScenario();AdmissionFeedbackScenario();
+        }
         WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
@@ -2302,9 +2363,18 @@ int main(int argc, char** argv) {
         sourceAudio->setCurrentIndex(0);QMetaObject::invokeMethod(sourceAudio,"activated",Q_ARG(int,0));
         Wait([&]{return !host.session().audioPending()&&host.session().status().audio.selected.kind==AudioKind::System;});
         Check(sourcePicker->findChild<QListWidget*>("SourceCards")->count()>0);
-        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
-            QDir().mkpath(output);Check(host.grab().save(QDir(output).filePath("source-picker.png")));
+        const auto previousPickerSize=host.size();
+        for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+            host.resize(size);QCoreApplication::processEvents();
+            auto* panel=sourcePicker->findChild<QWidget*>("SessionPopupPanel");Check(panel);
+            for(auto* control:sourcePicker->findChildren<QWidget*>())
+                if(control->isVisibleTo(sourcePicker) && (qobject_cast<QPushButton*>(control) || qobject_cast<QLineEdit*>(control) || qobject_cast<QComboBox*>(control)))
+                    Check(panel->rect().contains(QRect(control->mapTo(panel,QPoint()),control->size())));
+            if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+                QDir().mkpath(output);Check(host.grab().save(QDir(output).filePath(QString("source-picker-%1.png").arg(size.width()))));
+            }
         }
+        host.resize(previousPickerSize);QCoreApplication::processEvents();
         sourcePicker->findChild<QPushButton*>("confirmSourceSelection")->click();
         Wait([&]{return !host.session().capturePending();});
         if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {

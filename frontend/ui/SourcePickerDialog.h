@@ -10,6 +10,8 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QAction>
 #include <QThread>
 #include <QImage>
 #include <QHash>
@@ -20,6 +22,7 @@ class SourcePickerDialog final : public SessionPopup {
 public:
     std::function<void(screenshare::media::CaptureSelection)> chosen;
     QString selectedName() const { return cards_->currentItem() ? cards_->currentItem()->text() : QString{}; }
+    void open() override { SessionPopup::open();search_->setFocus(); }
     SourcePickerDialog(screenshare::media::CaptureSelection current,bool enumerate,QWidget* parent,
                        const QString& title="Change source",const QString& action="Share selected source")
         :SessionPopup(title,parent),current_(current),enumerate_(enumerate) {
@@ -34,7 +37,13 @@ public:
         }
         windows_=current.kind==screenshare::media::CaptureKind::Window;
         connect(group,&QButtonGroup::idClicked,this,[this](int index){windows_=index==1;ShowCards();});
-        refresh_=new QPushButton;refresh_->setIcon(uiIcon("refresh"));refresh_->setAccessibleName("Refresh sources");refresh_->setToolTip("Refresh sources");refresh_->setFixedSize(36,36);heading->insertWidget(1,refresh_);body->addLayout(tabs);
+        refresh_=new QPushButton;refresh_->setObjectName("refreshShareSources");refresh_->setIcon(uiIcon("refresh"));refresh_->setAccessibleName("Refresh sources");refresh_->setToolTip("Refresh sources");refresh_->setFixedSize(36,36);heading->insertWidget(1,refresh_);body->addLayout(tabs);
+        search_=new QLineEdit;search_->setObjectName("sourceSearch");search_->setAccessibleName("Search share sources");
+        search_->setMaxLength(256);search_->addAction(uiIcon("search"),QLineEdit::LeadingPosition);
+        clearSearch_=search_->addAction(uiIcon("window-close"),QLineEdit::TrailingPosition);
+        clearSearch_->setObjectName("clearSourceSearch");clearSearch_->setText("Clear search");clearSearch_->setToolTip("Clear search");clearSearch_->setVisible(false);
+        connect(clearSearch_,&QAction::triggered,this,[this]{search_->clear();search_->setFocus();});
+        search_->installEventFilter(this);body->addWidget(search_);
         cards_=new SourceList;cards_->setObjectName("SourceCards");cards_->setItemDelegate(new SourceCardDelegate(cards_));cards_->setMouseTracking(true);
         cards_->setViewMode(QListView::IconMode);cards_->setResizeMode(QListView::Adjust);cards_->setMovement(QListView::Static);cards_->setUniformItemSizes(true);
         cards_->setAccessibleName("Available share sources");
@@ -42,9 +51,13 @@ public:
         auto* actions=new QHBoxLayout;
         auto* cancel=new QPushButton("Cancel");actions->addWidget(cancel);connect(cancel,&QPushButton::clicked,this,&QDialog::reject);actions->addStretch();
         share_=new QPushButton(action);share_->setObjectName("confirmSourceSelection");actions->addWidget(share_);body->addLayout(actions);
-        connect(cards_,&QListWidget::currentItemChanged,this,[this](auto* item){share_->setEnabled(item&&item->data(Qt::UserRole).isValid());});
+        connect(search_,&QLineEdit::textChanged,this,[this]{FilterCards();});
+        connect(cards_,&QListWidget::currentItemChanged,this,[this](auto* item){
+            share_->setEnabled(CanShare(item));
+            if(CanShare(item))current_=sources_.at(item->data(Qt::UserRole).toInt()).selection;
+        });
         connect(share_,&QPushButton::clicked,this,[this]{
-            auto* item=cards_->currentItem();if(!item||!item->data(Qt::UserRole).isValid())return;
+            auto* item=cards_->currentItem();if(!CanShare(item))return;
             const auto selection=sources_.at(item->data(Qt::UserRole).toInt()).selection;
             if(chosen)chosen(selection);accept();
         });
@@ -53,6 +66,16 @@ public:
     }
     ~SourcePickerDialog() override {if(worker_){worker_->requestInterruption();worker_->wait();delete worker_;}}
 protected:
+    bool eventFilter(QObject* object,QEvent* event) override {
+        if(object==search_ && (event->type()==QEvent::ShortcutOverride || event->type()==QEvent::KeyPress)) {
+            const auto key=static_cast<QKeyEvent*>(event)->key();
+            if(key==Qt::Key_Return || key==Qt::Key_Enter) {
+                if(event->type()==QEvent::KeyPress && CanShare(cards_->currentItem()))cards_->setFocus(Qt::TabFocusReason);
+                event->accept();return true;
+            }
+        }
+        return SessionPopup::eventFilter(object,event);
+    }
     void done(int result) override {if(worker_)worker_->requestInterruption();SessionPopup::done(result);}
 private:
     struct Source {QString name;screenshare::media::CaptureSelection selection;};
@@ -60,17 +83,42 @@ private:
     QHash<int,QIcon> previews_;
     screenshare::media::CaptureSelection current_;
     bool enumerate_,windows_=false;
+    QLineEdit* search_=nullptr;
+    QAction* clearSearch_;
     SourceList* cards_;QPushButton *refresh_,*share_;QThread* worker_=nullptr;
+    bool CanShare(const QListWidgetItem* item) const {
+        bool valid=false;const int index=item?item->data(Qt::UserRole).toInt(&valid):-1;
+        return valid && index>=0 && index<sources_.size() && !item->isHidden();
+    }
+    bool IsCurrent(const screenshare::media::CaptureSelection& source) const {
+        return source.kind==current_.kind && source.display==current_.display && source.window==current_.window;
+    }
+    void FilterCards() {
+        const auto query=search_->text().trimmed();
+        clearSearch_->setVisible(!search_->text().isEmpty());
+        QListWidgetItem *first=nullptr,*preferred=nullptr;int available=0;
+        for(int row=0;row<cards_->count();++row) {
+            auto* item=cards_->item(row);++available;
+            const bool match=item->text().contains(query,Qt::CaseInsensitive);
+            item->setHidden(!match);if(match && !first)first=item;
+            if(!preferred && CanShare(item) && IsCurrent(sources_.at(item->data(Qt::UserRole).toInt()).selection))preferred=item;
+        }
+        if(!cards_->currentItem() || cards_->currentItem()->isHidden())cards_->setCurrentItem(preferred?preferred:first);
+        if(!first)cards_->setCurrentItem(nullptr);
+        cards_->setEmptyMessage(first?QString{}:available?(windows_?"No matching windows":"No matching displays"):
+            (windows_?"No available windows":"No available displays"));
+        share_->setEnabled(CanShare(cards_->currentItem()));
+    }
     void ShowCards() {
         cards_->clear();share_->setEnabled(false);
+        search_->setPlaceholderText(windows_?"Search windows":"Search displays");
         for(int index=0;index<sources_.size();++index) {
             const auto& source=sources_[index];if((source.selection.kind==screenshare::media::CaptureKind::Window)!=windows_)continue;
             auto* item=new QListWidgetItem(previews_.value(index,uiIcon(windows_?"window":"display")),source.name,cards_);
             item->setData(Qt::UserRole,index);item->setToolTip(source.name);item->setData(Qt::AccessibleTextRole,source.name);item->setSizeHint(cards_->gridSize());
-            if(source.selection.kind==current_.kind&&source.selection.display==current_.display&&source.selection.window==current_.window)cards_->setCurrentItem(item);
+            if(IsCurrent(source.selection))cards_->setCurrentItem(item);
         }
-        if(!cards_->currentItem()&&cards_->count())cards_->setCurrentRow(0);
-        if(!cards_->count()){auto* item=new QListWidgetItem(windows_?"No available windows":"No available displays",cards_);item->setFlags(Qt::NoItemFlags);}
+        FilterCards();
     }
     void Refresh() {
         if(worker_)return;sources_.clear();previews_.clear();

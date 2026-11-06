@@ -30,7 +30,17 @@ public:
 class SourceList final : public QListWidget {
 public:
     using QListWidget::QListWidget;
+    void setEmptyMessage(const QString& message) {
+        emptyMessage_=message;setAccessibleDescription(message);viewport()->update();
+    }
 protected:
+    void paintEvent(QPaintEvent* event) override {
+        QListWidget::paintEvent(event);
+        if(!emptyMessage_.isEmpty()) {
+            QPainter painter(viewport());painter.setPen(QColor("#a3b5af"));
+            painter.drawText(viewport()->rect().adjusted(16,16,-16,-16),Qt::AlignCenter|Qt::TextWordWrap,emptyMessage_);
+        }
+    }
     void resizeEvent(QResizeEvent* event) override {
         QListWidget::resizeEvent(event);
         // Reserve scrollbar width even while it is hidden. Using viewport width
@@ -41,5 +51,7 @@ protected:
         setGridSize(cell);
         for (int row=0; row<count(); ++row) item(row)->setSizeHint(cell);
     }
+private:
+    QString emptyMessage_;
 };
 

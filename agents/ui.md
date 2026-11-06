@@ -2,6 +2,11 @@
 
 ## Current UI Direction
 
+- Create/live source pickers share title search. Filter cards in place without
+  restarting previews, retain query through tabs/refresh and keep a valid visible
+  selection. No-match/unavailable feedback is centered and sharing is disabled.
+  Focus search on open; Enter moves to matching cards without confirming a share.
+
 - Pending Join shows neutral progress, disables the Join action and uses the
   Paste slot for Cancel. Preserve the invite and keep action/list geometry stable.
   Home cancels and waits for cleanup before navigating; ignore late success or
