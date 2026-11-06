@@ -2,6 +2,10 @@
 
 ## Current UI Direction
 
+- Shared-source capture failures explain automatic retry while video continues.
+  Other audio modes retain their manual retry guidance. Keep the selected app
+  authoritative and allow source changes/mute during recovery.
+
 - Viewer output failures recover automatically with capped retries while video
   continues. Explain automatic retry in playback settings and keep manual Retry
   and device selection usable. Restore Retry with QFormLayout::setRowVisible,

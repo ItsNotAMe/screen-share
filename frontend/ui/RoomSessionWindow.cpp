@@ -487,7 +487,9 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
         const bool audioFailed = value.audio.health.state == AudioEndpointState::Failed;
         audioHealth_->setText(value.audio.selected.kind == AudioKind::None ? "Audio is muted. New viewers will join without shared audio." :
-            audioFailed ? "Audio capture failed. Video continues without shared audio. Retry or select another source." :
+            audioFailed ? (value.audio.selected.kind == AudioKind::SharedSource ?
+                "Shared-source audio is unavailable. Retrying automatically while video continues. You can select another source." :
+                "Audio capture failed. Video continues without shared audio. Retry or select another source.") :
             value.audio.health.state == AudioEndpointState::Running ? (value.audio.microphoneProcessing ?
                 "Microphone active: noise suppression and digital gain. Echo cancellation is unavailable." : "Audio capture active; speech processing bypassed.") :
             value.audio.health.state == AudioEndpointState::Silent ? "Audio capture disabled." : "Audio capture inactive.");

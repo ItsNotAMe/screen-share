@@ -15,6 +15,7 @@
 #include "media/webrtc/MfVideoDecoderFactory.h"
 #include "media/webrtc/PcmAudioDeviceModule.h"
 #include "SyntheticAudio.h"
+#include "media/audio/SourcePcmCapture.h"
 #include "ObservedCaptureSource.h"
 #include "api/make_ref_counted.h"
 #include "rtc_base/ssl_adapter.h"
@@ -35,6 +36,7 @@ void Check(bool ok, std::source_location location = std::source_location::curren
 HWND captureWindow = nullptr;
 #endif
 struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
+    bool sharedSourceAudio = false;
     class InputSink final : public screenshare::input::Sink {
     public:
         std::atomic<unsigned> applied{0}, releases{0};
@@ -103,9 +105,21 @@ public:
         options.inputSink = evidence_->input;
         auto endpoints = evidence_->audioEndpoints.value_or(proof::SyntheticAudio(evidence_->audio));
         if (identity.host) {
-            options.audioSwitch = std::make_shared<AudioSwitchControl>(screenshare::media::AudioSelection{}, endpoints.capture, ProcessMicrophone);
+            auto health = std::make_shared<std::weak_ptr<AudioSwitchControl>>();
+            AudioSwitchControl::Factory sharedSource = [audio = evidence_->audio, health] {
+                return std::make_unique<SourcePcmCapture>([] { return screenshare::media::AudioSelection{AudioKind::Process, {}, 11}; },
+                    [audio](screenshare::media::AudioSelection selection) -> std::unique_ptr<PcmCaptureEndpoint> {
+                        Check(selection.kind == AudioKind::Process && selection.processId == 11);
+                        return std::make_unique<proof::ToneCapture>(false, audio);
+                    }, [health](bool ready) { if (auto control = health->lock()) { if (ready) control->Ready(); else control->Failed(); } });
+            };
+            options.audioSwitch = std::make_shared<AudioSwitchControl>(evidence_->sharedSourceAudio ? screenshare::media::AudioSelection{AudioKind::SharedSource} : screenshare::media::AudioSelection{},
+                evidence_->sharedSourceAudio ? sharedSource : endpoints.capture, ProcessMicrophone);
+            *health = options.audioSwitch;
             endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
-            options.audioForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
+            options.audioForSelection = [audio = evidence_->audio, sharedSource](auto selection) {
+                return selection.kind == AudioKind::SharedSource ? sharedSource : proof::SyntheticAudioSelectionWithEvidence(selection, audio);
+            };
         } else {
             options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{}, endpoints.playout);
             endpoints.playout = [control = options.playback] { return std::make_unique<ControlledPcmPlayout>(control); };

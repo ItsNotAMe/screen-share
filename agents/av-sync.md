@@ -2,6 +2,16 @@
 
 ## Current WebRTC rooms
 
+Shared-source capture now retries failed native capture endpoints on its existing
+producer worker, with 250 ms–5 s capped backoff. The selected resolver remains
+authoritative on every read; no app-to-system fallback is allowed. A new target
+bypasses old backoff, and in-flight PCM spanning a target change is silenced.
+Capture-drop counts survive endpoint retirement. The outer switchable capture
+keeps its 10 ms output clock/silence while activation waits; Mute/Stop retire and
+cancel the old producer. Explicit microphone/system selections retain their
+existing manual retry behavior. Healthy default-device switching on the host
+is not added by this recovery change.
+
 Viewer output now follows default-device notifications (render/console role)
 on the existing playout worker. Callbacks only advance an atomic revision;
 registration is retained until unregister, and activation races are not lost.

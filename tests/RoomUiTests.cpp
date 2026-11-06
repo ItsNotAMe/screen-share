@@ -1333,6 +1333,23 @@ void AdmissionFeedbackScenario() {
         status.error=RoomError::Transport;capacity.session().statusChanged(status);
         Check(message->text().contains("connection to the room service was lost") && message->text().contains(recovery));
         Check(capacity.findChild<QPushButton*>("stopRoom")->isEnabled() && runtimeStarts==0);
+        if(hosting) {
+            status.phase=RoomPhase::Active;status.error=RoomError::None;
+            status.audio.selected.kind=AudioKind::SharedSource;status.audio.health.state=AudioEndpointState::Failed;
+            capacity.session().statusChanged(status);
+            auto* health=capacity.findChild<QLabel*>("audioHealth");Check(health->text().contains("Retrying automatically"));
+            if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+                capacity.findChild<QPushButton*>("sessionDetails")->click();
+                capacity.findChild<QTabWidget*>("SessionDetailsTabs")->setCurrentIndex(1);
+                for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+                    capacity.resize(size);QCoreApplication::processEvents();
+                    for(auto* parent=health->parentWidget();parent;parent=parent->parentWidget())
+                        if(auto* scroll=qobject_cast<QScrollArea*>(parent))scroll->ensureWidgetVisible(health);
+                    QCoreApplication::processEvents();Check(health->isVisible());
+                    Check(capacity.grab().save(QDir(output).filePath(QString("host-shared-audio-retrying-%1.png").arg(size.width()))));
+                }
+            }
+        }
         capacity.close();
     }
 }

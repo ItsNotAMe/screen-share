@@ -10,6 +10,27 @@ and measured performance improvements ahead of small UI/copy polish during
 open-ended continuation work. Deliver one meaningful improvement at a time and
 commit each separately. Address related UI defects when they block that feature.
 
+## Automatic shared-source audio recovery - 2026-11-06
+
+Shared-source audio now retries temporary endpoint startup/read failures on its
+existing capture worker, using exponential backoff from 250 ms to five seconds.
+The selected source remains authoritative: unavailable apps produce silence,
+process failures never fall back to system audio, and a changed target bypasses
+old backoff. Reads spanning source changes discard old PCM. Drop counters retain
+retired endpoints' totals. Video and the outer 10 ms audio clock continue during
+recovery; mute/stop cancel the old producer. The UI explains automatic retry.
+Explicit microphone/system/process modes retain manual retry, and healthy host
+default-output changes are outside this change.
+
+The final full Release build and all 42 CTests passed. Fake-clock tests cover
+capped retries, same-target recovery, fresh PCM, source isolation, cumulative
+drops and cancellation during activation. The four-viewer public-session proof
+uses the real shared-source wrapper with synthetic endpoints; audio recovers
+without a command or changed room/audio revision, and muting during a second
+outage leaves no capture endpoint or further retries. Compact/normal recovery
+guidance renders were inspected and packaged CLI/UI hashes match. Native driver
+failure/recovery remains unverified. No version bump or publication occurred.
+
 ## Automatic viewer audio continuity - 2026-11-06
 
 Viewer default output now follows render/console endpoint notifications using a

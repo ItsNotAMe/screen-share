@@ -70,6 +70,11 @@ For apps that render sound in helpers (including Miyomu's WebView2 player),
 shared source audio follows the app's render sessions and targets their smallest
 common process subtree. It refreshes as playback starts or helpers restart and
 does not include sessions belonging to another app.
+Shared-source capture retries temporary startup/read failures automatically,
+with delays capped at five seconds. Video continues during recovery. An
+unavailable app stays silent; recovery never substitutes unrelated system audio.
+Changing the selected source bypasses the previous source's retry delay, and
+muting or stopping ends recovery for the old source.
 App audio needs Windows build 20348 or later (including Windows 11). If capture
 fails, video continues with silence. Choose System audio to share all apps instead.
 

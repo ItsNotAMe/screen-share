@@ -82,6 +82,15 @@ scrollbars appear or disappear.
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 
+`source-pcm-capture` uses an injected clock to check shared-source recovery with
+250 ms–5 s capped backoff, same-target reactivation, immediate source changes,
+fresh PCM, cumulative drop counters and cancellation during startup. Invalid
+targets remain silent and process failures never fall back to system capture.
+The four-viewer public-session proof uses the real shared-source wrapper around
+synthetic endpoints: capture resumes without a source-change command, audio/
+room revisions remain stable, and muting during a second outage leaves no live
+capture endpoint or later retry. Native driver failure/recovery is not injected.
+
 Automatic output recovery is covered in `native-pcm-audio` with an injected
 clock/device. It checks capped 250 ms–5 s backoff, repeat outages, fresh PCM after
 activation, mute/volume retention, unchanged settings revision, manual override,

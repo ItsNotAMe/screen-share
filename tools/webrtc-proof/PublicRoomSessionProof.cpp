@@ -24,6 +24,9 @@ int main(int argc, char** argv) {
         captureWindow = window.handle();
 #endif
         auto hostEvidence = std::make_shared<Evidence>();
+#ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
+        hostEvidence->sharedSourceAudio = true;
+#endif
         auto factory = [](auto evidence) { return [evidence](auto identity, auto send) { return std::make_unique<Runtime>(identity, std::move(send), evidence); }; };
         RoomOptions hostOptions; hostOptions.origin = argv[1]; hostOptions.host = true; hostOptions.nickname = "FacadeHost"; hostOptions.name = "Facade media";
         RoomSession host(factory(hostEvidence), diagnosticPlaintext);
@@ -115,13 +118,19 @@ int main(int argc, char** argv) {
         std::array<unsigned, 4> silentFrames;
         for (size_t i = 0; i < evidence.size(); ++i) silentFrames[i] = evidence[i]->frames;
         Wait([&] { for (size_t i = 0; i < evidence.size(); ++i) if (evidence[i]->frames < silentFrames[i] + 10) return false; return true; });
-        Check(hostEvidence->audio->captureStarts == 1 && host.Status().audio.revision == beforeAudioFailure.audio.revision);
+        Check(host.Status().audio.revision == beforeAudioFailure.audio.revision);
+        const auto startsBeforeCaptureRecovery = hostEvidence->audio->captureStarts.load();
         hostEvidence->audio->captureUnavailable = false;
         std::array<uint64_t, 4> quietAudio;
         for (size_t i = 0; i < evidence.size(); ++i) quietAudio[i] = evidence[i]->audio->audibleBlocks;
-        auto recoveredCapture = host.SwitchAudioSource({}); Check(Get(recoveredCapture).error == AudioUpdateError::None);
+        if (!hostEvidence->sharedSourceAudio) {
+            auto recoveredCapture = host.SwitchAudioSource({}); Check(Get(recoveredCapture).error == AudioUpdateError::None);
+        }
         Wait([&] { for (size_t i = 0; i < evidence.size(); ++i) if (evidence[i]->audio->audibleBlocks < quietAudio[i] + 10) return false; return true; });
-        Check(hostEvidence->audio->captureStarts == 2 && host.Status().audio.health.failures == 1 && host.Status().revision == beforeAudioFailure.revision);
+        Check(hostEvidence->audio->captureStarts > startsBeforeCaptureRecovery && host.Status().audio.health.failures == 1 &&
+            host.Status().revision == beforeAudioFailure.revision && host.Status().activePeers == 4 &&
+            host.Status().audio.selected.kind == (hostEvidence->sharedSourceAudio ? AudioKind::SharedSource : AudioKind::System));
+        if (hostEvidence->sharedSourceAudio) Check(host.Status().audio.revision == beforeAudioFailure.audio.revision);
         const auto beforeOutputFailure = viewers[0]->Status();
         const auto outputStartsBeforeFailure = evidence[0]->audio->outputStarts.load();
         evidence[0]->audio->outputUnavailable = true;
@@ -139,8 +148,14 @@ int main(int argc, char** argv) {
             viewers[0]->Status().playback.revision == beforeOutputFailure.playback.revision &&
             viewers[0]->Status().peerId == beforeOutputFailure.peerId && viewers[0]->Status().roomId == beforeOutputFailure.roomId);
         const auto beforeAudioSwitch = host.Status();
+        if (hostEvidence->sharedSourceAudio) {
+            hostEvidence->audio->captureUnavailable = true;
+            Wait([&] { return host.Status().audio.health.state == AudioEndpointState::Failed; });
+        }
         auto audioSwitch = host.SwitchAudioSource({AudioKind::None});
         Check(Get(audioSwitch).error == AudioUpdateError::None);
+        const auto mutedCaptureStarts = hostEvidence->audio->captureStarts.load();
+        hostEvidence->audio->captureUnavailable = false;
         // Observe real decoded silence instead of assuming a fixed jitter/codec
         // drain time. This is a correctness deadline, not a gaming latency gate.
         const auto quietDeadline = std::chrono::steady_clock::now() + 3s;
@@ -151,6 +166,7 @@ int main(int argc, char** argv) {
         std::array<unsigned, 4> playingFrames;
         for (size_t i = 0; i < 4; ++i) { quietBlocks[i] = evidence[i]->audio->audibleBlocks; playingFrames[i] = evidence[i]->frames; }
         std::this_thread::sleep_for(300ms);
+        Check(hostEvidence->audio->liveCaptures == 0 && hostEvidence->audio->captureStarts == mutedCaptureStarts);
         for (size_t i = 0; i < 4; ++i) {
             if (evidence[i]->audio->audibleBlocks != quietBlocks[i] || evidence[i]->frames <= playingFrames[i])
                 std::cerr << "Audio switch viewer " << i << " nonzero blocks " << quietBlocks[i] << '/' << evidence[i]->audio->audibleBlocks
