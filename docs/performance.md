@@ -5,6 +5,50 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Matched encoder timing and direct plane input (2026-11-06)
+
+The earlier NV12 change (`2c2a5fa` → `05582cc`) reduced elapsed encoding time
+for CPU-backed input by 8–12% in four alternating-order pairs. GPU-backed input
+showed no clear elapsed improvement, and process CPU measurements were noisy.
+Removing conversion calls alone did not establish a general CPU reduction.
+
+The next change removes the temporary per-frame NV12 vector and packing copy.
+Software NV12 planes now copy directly into an owned Media Foundation sample;
+padded strides and minimal last rows are supported. The source remains owned
+through that synchronous copy. I420 and hardware submission retain their paths.
+
+Six alternating-order pairs against `05582cc`, 480 measured input frames per
+run after 30 warmup frames, gave these medians:
+
+| Input | Encoders | Elapsed ms per input batch, before → after | CPU ms per encoded frame, before → after |
+| --- | --- | --- | --- |
+| CPU NV12 | 1 | 2.642 → 2.174 | 12.207 → 13.460 |
+| CPU NV12 | 4 | 8.934 → 8.139 | 17.000 → 15.584 |
+| GPU NV12 | 1 | 3.205 → 2.782 | 14.062 → 12.939 |
+| GPU NV12 | 4 | 8.486 → 7.571 | 16.553 → 16.036 |
+
+Elapsed reductions range from 8.9% to 17.7%; the four-encoder GPU case improves
+10.8%, with all six pairs faster. CPU readings are mixed, including a higher
+single-encoder CPU-backed median, and every case's paired CPU range includes a
+regression. CPU savings remain inconclusive. Encoded byte counts and 64-bit
+output hashes match across every paired case.
+
+This is one 16-logical-processor Windows machine, generated changing 1920×1080
+NV12, software H.264 at 60 FPS / 12 Mbps settings, unpaced with at most one frame
+in flight per encoder. Process CPU includes user/kernel time on all threads;
+elapsed time includes preparation, encoding, callbacks and output hashing.
+Startup, input generation, capture, network, decoding and presentation are
+excluded. These are encoder-workload timings; the full-session scorecard is
+unchanged. [Raw runs, binary hashes and source identifiers](benchmarks/encoder-compute-2026-11-06.json).
+
+Build `EncoderComputeBenchmark` and run `EncoderComputeBenchmark.exe cpu 4 480`
+or `gpu 4 480`. For comparison, compile the identical benchmark source against
+each revision in isolated builds with the same pinned SDK and Release options,
+then run `scripts/compare-encoder-compute.py --before BEFORE.exe --after AFTER.exe
+--output build/encoder-compute/results.json --samples 6 --frames 480`. The runner
+alternates order, saves every run, rejects differing outputs and reports CPU
+variability. It does not modify the source trees or change machine scheduling.
+
 ## Direct NV12 software encoding (2026-11-06)
 
 The Media Foundation adapter now packs NV12 input directly instead of converting
@@ -20,9 +64,9 @@ chroma, dimensions, timestamps and frame mapping. The explicit GPU variant uses
 eight shared GPU frames for the same 32 outputs: eight readbacks, zero I420
 conversions. It also checks CPU preview pixels and both mapping request orders.
 
-These are conversion/readback counts, not a measured total CPU, memory or latency
-percentage. Per-viewer NV12 packing and Media Foundation's input copy remain;
-this is not zero-copy encoding. The full-session scorecard below is unchanged.
+These are conversion/readback counts; matched encoder timings appear above.
+The following direct-plane change removes temporary per-viewer packing. Media
+Foundation's owned input copy remains. The full-session scorecard is unchanged.
 
 ## Shared scaling across viewers (2026-11-06)
 

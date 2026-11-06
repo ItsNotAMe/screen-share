@@ -7,6 +7,17 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-06 direct NV12 planes: the software adapter now calls EncodeNv12 with
+bounded plane views, copying directly into the owned MF input sample. The
+temporary per-frame packing vector is gone. Input geometry/strides/minimal last
+rows are validated before consuming frame state; I420/hardware paths remain.
+Matched 1080p software-encoder timing against 05582cc (six AB/BA pairs, 480
+measured frames after 30 warmup frames) reduces elapsed time 8.9–17.7%, including
+four-GPU-input encoders 8.486→7.571 ms/input batch (10.8%). CPU-time results are
+mixed/noisy and do not establish general CPU savings. Outputs retain matching
+byte counts/hashes. See docs/performance.md and its tracked raw evidence. Timing
+excludes capture/network/decode/presentation; no full-session scorecard was rerun.
+
 2026-11-06 NV12 software input: MfVideoEncoder consumes CPU NV12 and shared GPU
 NV12 readback without the former NV12-to-I420-to-NV12 round trip. Readback uses
 the first requested format; I420-only callers retain direct conversion and do

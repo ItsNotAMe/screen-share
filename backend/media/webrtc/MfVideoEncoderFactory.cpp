@@ -235,9 +235,10 @@ private:
     EncodedPacket EncodePacket(const webrtc::VideoFrame& frame, bool keyframe, uint64_t generation) {
         const auto start = std::chrono::steady_clock::now();
         if (Cancelled(generation)) throw HardwareFrameCancelled();
-        auto raw = RawFrame(frame);
+        if (IsRetiredFrame(frame)) throw RetiredVideoFrame{};
         if (keyframe && !encoder_->RequestKeyframe()) throw std::runtime_error("MF keyframe request rejected");
         if (hardwareActive_) {
+            auto raw = RawFrame(frame);
             const auto before = std::chrono::steady_clock::now();
             auto packet = HardwarePacket(raw, generation);
             ++hardware_->hardwareFrames;
@@ -246,7 +247,21 @@ private:
             while (previous < age && !hardware_->maxFrameMicroseconds.compare_exchange_weak(previous, age)) {}
             return packet;
         }
-        auto packets = encoder_->EncodeFrame(raw);
+        auto input = Unwrap(frame.video_frame_buffer());
+        if (auto* native = dynamic_cast<D3dVideoFrameBuffer*>(input.get())) {
+            input = native->ToNv12();
+            if (!input) throw std::runtime_error("NV12 frame unavailable");
+        }
+        std::vector<EncodedPacket> packets;
+        if (input->type() == webrtc::VideoFrameBuffer::Type::kNV12) {
+            const auto* pixels = input->GetNV12();
+            if (pixels->StrideY() < config_.width || pixels->StrideUV() < config_.width)
+                throw std::runtime_error("NV12 input stride is too small");
+            packets = encoder_->EncodeNv12({config_.width, config_.height,
+                {pixels->DataY(), size_t(pixels->StrideY()) * (config_.height - 1) + config_.width},
+                {pixels->DataUV(), size_t(pixels->StrideUV()) * (config_.height / 2 - 1) + config_.width},
+                pixels->StrideY(), pixels->StrideUV()});
+        } else packets = encoder_->EncodeFrame(RawFrame(frame));
         if (packets.size() != 1) throw std::runtime_error("MF software retained output");
         if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(500))
             throw std::runtime_error("MF software encode exceeded 500 ms");

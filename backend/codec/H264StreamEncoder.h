@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <span>
 #include <vector>
 
 #include <mfidl.h>
@@ -48,6 +49,14 @@ struct H264StreamEncoderConfig {
     Microsoft::WRL::ComPtr<ID3D11Device> d3dDevice;
 };
 
+// Borrowed, potentially padded planes. EncodeNv12 copies them into an owned MF
+// sample before returning; the caller retains the source for the call only.
+struct Nv12FrameView {
+    int width = 0, height = 0;
+    std::span<const uint8_t> y, uv;
+    int strideY = 0, strideUv = 0;
+};
+
 class H264StreamEncoder {
 public:
     H264StreamEncoder();
@@ -58,6 +67,7 @@ public:
 
     void Start(const H264StreamEncoderConfig& config);
     std::vector<EncodedPacket> EncodeFrame(const CapturedFrame& frame);
+    std::vector<EncodedPacket> EncodeNv12(const Nv12FrameView& frame);
     std::vector<EncodedPacket> Drain();
     bool TryUpdateBitrate(uint32_t bitrate);
     bool RequestKeyframe();
@@ -76,6 +86,7 @@ public:
     [[nodiscard]] uint64_t droppedInputFrames() const noexcept { return 0; }
 
 private:
+    std::vector<EncodedPacket> EncodeSoftwareSample(IMFSample* sample);
     std::vector<EncodedPacket> ReadAvailablePackets();
     std::vector<EncodedPacket> ReadSyncAvailablePackets();
     std::vector<EncodedPacket> ReadAsyncAvailablePackets();

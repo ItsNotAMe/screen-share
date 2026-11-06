@@ -52,6 +52,9 @@ under a mutex, avoiding a redundant I420 round trip. Explicit I420 callers retai
 direct conversion if they request first; requesting a second format derives it
 from cached CPU pixels without another readback. Only requested formats are
 retained. Readback count/time and I420 conversion count are exposed for evidence.
+Software NV12 input copies its planes directly into an owned MF sample, without
+a temporary CapturedFrame pixel vector. The borrowed plane view is consumed
+synchronously; padding is checked and MF retains independently owned bytes.
 MF's internal device-manager operations use D3D multithread protection. D3D COM
 references can be released on another thread after the owner is joined.
 

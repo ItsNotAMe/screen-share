@@ -72,6 +72,33 @@ public:
     const uint8_t* DataUV() const override { return pixels_->DataUV(); }
     webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override { ++conversions_; return pixels_->ToI420(); }
 };
+void Nv12PlaneValidation() {
+    screenshare::H264StreamEncoder encoder;
+    bool unavailable=false;try{encoder.EncodeNv12({});}catch(const std::logic_error&){unavailable=true;}
+    Require(unavailable,"NV12 planes accepted before encoder startup");
+    screenshare::H264StreamEncoderConfig config;config.width=640;config.height=360;encoder.Start(config);
+    // Last rows have no trailing padding. Only visible bytes are required.
+    std::vector<uint8_t> y(672*359+640,80),uv(704*179+640,128);
+    const screenshare::Nv12FrameView valid{640,360,y,uv,672,704};
+    for(int failure=0;failure<7;++failure) {
+        auto bad=valid;
+        if(failure==0)bad.y=bad.y.first(bad.y.size()-1);
+        if(failure==1)bad.uv=bad.uv.first(bad.uv.size()-1);
+        if(failure==2)bad.strideY=-1;
+        if(failure==3)bad.strideUv=638;
+        if(failure==4)bad.width=638;
+        if(failure==5)bad.height=359;
+        if(failure==6)bad.y={};
+        bool rejected=false;try{encoder.EncodeNv12(bad);}catch(const std::invalid_argument&){rejected=true;}
+        Require(rejected,"Malformed NV12 planes were accepted");
+    }
+    auto packets=encoder.EncodeNv12(valid);
+    Require(packets.size()==1 && packets.front().timestamp100ns==0 && packets.front().isKeyframe,
+        "NV12 validation consumed frame state or minimal padded planes failed");
+    encoder.Stop();unavailable=false;
+    try{encoder.EncodeNv12(valid);}catch(const std::logic_error&){unavailable=true;}
+    Require(unavailable,"NV12 planes accepted after Stop");
+}
 void DirectNv12Input(bool gpuInput=false) {
     using namespace screenshare::media;
     MfVideoEncoderFactory factory;
@@ -321,7 +348,7 @@ int main(int argc, char** argv) {
         }
         Require(!gpuInput || hardware, "--gpu-input requires --hardware");
         Require(!gpuReadback || !hardware,"--gpu-readback requires software encoding");
-        if (!hardware) { DirectNv12Input();if(gpuReadback)DirectNv12Input(true);UnavailableFrameRate(); }
+        if (!hardware) { Nv12PlaneValidation();DirectNv12Input();if(gpuReadback)DirectNv12Input(true);UnavailableFrameRate(); }
         StableFrameRate(hardware);
         proof::LifecycleSample(0, 0);
         for (int cycle = 1; cycle <= cycles; ++cycle) {

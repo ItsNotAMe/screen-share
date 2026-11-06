@@ -87,11 +87,20 @@ eight changing NV12 buffers with unequal padded plane strides. All 32 outputs
 are decoded to validate luma/chroma, dimensions, timestamps and input mapping;
 instrumented buffers must receive no ToI420 calls. Existing cases also cover
 rate changes, zero-rate suspension, keyframes, coalescing and repeated release.
+The direct-plane entry point rejects truncated planes, invalid strides and
+dimensions, and use before startup/after Stop; rejected inputs must not consume
+the first frame's timestamp. Minimal final rows need no trailing padding.
 Run `EncoderAdapterTests.exe --gpu-readback` explicitly for generated GPU input:
 four encoders share one readback per source frame without I420 conversion. It
 checks CPU preview materialization, both CPU format request orders, cached
 ownership and rejection of new mappings after device retirement. No desktop
 capture, physical input or audible output is used by this test.
+
+`EncoderComputeBenchmark` is an explicit timing tool, excluded from CTest. It
+warms codecs before measuring aggregate process CPU and elapsed workload time,
+checks exact delivered-frame counts and no drops, forces fresh GPU readback
+wrappers per input frame, and hashes encoded output. See [performance](performance.md)
+for the paired-run command, results and limitations.
 
 `video-frame-input` checks the two-second presentation freshness boundary with
 supplied timestamps, verifies that resize/redraw and skipped presents cannot

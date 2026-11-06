@@ -715,10 +715,46 @@ std::vector<EncodedPacket> H264StreamEncoder::EncodeFrame(const CapturedFrame& f
         return packets;
     }
 
-    const HRESULT inputResult = transform_->ProcessInput(inputStreamId_, sample.Get(), 0);
+    return EncodeSoftwareSample(sample.Get());
+}
+
+std::vector<EncodedPacket> H264StreamEncoder::EncodeNv12(const Nv12FrameView& frame)
+{
+    if (!transform_ || backend_ != H264StreamEncoderBackend::Software || config_.externalHardwareScheduling)
+        throw std::logic_error("Direct NV12 planes require a running software encoder");
+    if (frame.width != config_.width || frame.height != config_.height || frame.width <= 0 || frame.height <= 0 ||
+        frame.width % 2 || frame.height % 2 || frame.strideY < frame.width || frame.strideUv < frame.width ||
+        !frame.y.data() || !frame.uv.data()) throw std::invalid_argument("Invalid NV12 plane geometry");
+    const auto requiredY = uint64_t(frame.height - 1) * frame.strideY + frame.width;
+    const auto requiredUv = uint64_t(frame.height / 2 - 1) * frame.strideUv + frame.width;
+    const auto bytes = uint64_t(frame.width) * frame.height * 3 / 2;
+    if (frame.y.size() < requiredY || frame.uv.size() < requiredUv || bytes > std::numeric_limits<DWORD>::max())
+        throw std::invalid_argument("NV12 planes are too small");
+    Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
+    ThrowIfFailed(MFCreateMemoryBuffer(DWORD(bytes), &buffer), "MFCreateMemoryBuffer(NV12 planes)");
+    BYTE* destination = nullptr; DWORD maximum = 0, current = 0;
+    ThrowIfFailed(buffer->Lock(&destination, &maximum, &current), "IMFMediaBuffer::Lock(NV12 planes)");
+    auto copyPlane = [width = frame.width](BYTE* target, std::span<const uint8_t> source, int stride, int rows) {
+        if (stride == width) std::memcpy(target, source.data(), size_t(width) * rows);
+        else for (int y = 0; y < rows; ++y) std::memcpy(target + size_t(y) * width, source.data() + size_t(y) * stride, width);
+    };
+    copyPlane(destination, frame.y, frame.strideY, frame.height);
+    copyPlane(destination + size_t(frame.width) * frame.height, frame.uv, frame.strideUv, frame.height / 2);
+    ThrowIfFailed(buffer->Unlock(), "IMFMediaBuffer::Unlock(NV12 planes)");
+    ThrowIfFailed(buffer->SetCurrentLength(DWORD(bytes)), "IMFMediaBuffer::SetCurrentLength(NV12 planes)");
+    const int64_t sampleTime = frameIndex_ * frameDuration100ns_;
+    senderQpcBySampleTime_[sampleTime] = QueryPerformanceCounter100ns();
+    auto sample = CreateInputSampleFromBuffer(buffer.Get(), sampleTime, frameDuration100ns_);
+    lastInputMode_ = H264StreamEncoderInputMode::Memory;
+    return EncodeSoftwareSample(sample.Get());
+}
+
+std::vector<EncodedPacket> H264StreamEncoder::EncodeSoftwareSample(IMFSample* sample)
+{
+    const HRESULT inputResult = transform_->ProcessInput(inputStreamId_, sample, 0);
     if (inputResult == MF_E_NOTACCEPTING) {
         auto packets = ReadAvailablePackets();
-        ThrowIfFailed(transform_->ProcessInput(inputStreamId_, sample.Get(), 0), "IMFTransform::ProcessInput");
+        ThrowIfFailed(transform_->ProcessInput(inputStreamId_, sample, 0), "IMFTransform::ProcessInput");
         ++frameIndex_;
         auto extraPackets = ReadAvailablePackets();
         packets.insert(

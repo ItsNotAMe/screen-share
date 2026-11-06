@@ -9,6 +9,41 @@ Owner direction (2026-11-06): prioritize substantial core features, reliability
 and measured performance improvements ahead of small UI/copy polish during
 open-ended continuation work. Deliver one meaningful improvement at a time and
 commit each separately. Address related UI defects when they block that feature.
+The owner also requested actual compute-time measurements for optimizations;
+distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
+
+## Direct MF sample input and paired encoder timing - 2026-11-06
+
+Software NV12 now copies plane views directly into an owned MF input sample,
+removing the temporary per-frame CapturedFrame vector and packing copy. The new
+EncodeNv12 API validates dimensions, strides and minimal plane spans before
+consuming frame state. Views are consumed synchronously and MF owns independent
+bytes afterward. I420/hardware routes retain their existing behavior; synchronous
+software submission is shared with the original EncodeFrame path.
+
+The requested timing audit found the preceding NV12 change (2c2a5fa→05582cc)
+reduced CPU-backed elapsed encode time 8–12% across four AB/BA pairs, with no
+clear GPU-backed elapsed gain. CPU time was noisy. The new direct-plane change
+was compared against 05582cc across six AB/BA pairs, 480 measured frames after
+30 warmup frames, using generated changing 1080p NV12 at 60 FPS/12 Mbps settings.
+Elapsed encoder-workload time fell 8.9–17.7%; four GPU-input software encoders
+fell 8.486→7.571 ms/input batch (10.8%), all six pairs faster. CPU readings are
+mixed: four-GPU-input median 16.553→16.036 CPU ms/encoded frame, while one CPU-
+input encoder's median increased. Every paired CPU range includes a regression;
+do not claim general CPU savings. Output byte counts and 64-bit hashes match.
+These unpaced encoder measurements exclude capture/network/decode/presentation.
+
+EncoderComputeBenchmark and compare-encoder-compute.py retain the reproducible
+workload/alternating-run method. The earlier source was built in an isolated Git
+archive snapshot with the same SDK/Release settings; active source was preserved.
+Raw runs, binary hashes and source identities are tracked under docs/benchmarks;
+docs/performance.md contains the full table and limitations. No machine-wide
+scheduling changes or physical input/audio/capture were used.
+
+The final Release build and all 44 CTests passed (141.86 s), including new plane
+boundary/rejection/start/stop checks and valid minimal final rows. Explicit GPU
+NV12 encoder checks passed, packaged executable hashes match, and measured source
+hashes still match the final implementation. No version bump or publication.
 
 ## Direct NV12 software encoding and readback - 2026-11-06
 
