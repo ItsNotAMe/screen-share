@@ -12,6 +12,30 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Follow default host audio routing - 2026-11-06
+
+Default System audio and Microphone capture now register Windows console-role
+default-device notifications before endpoint resolution/activation. Render and
+capture flow filtering share the existing playback notification implementation.
+Callbacks only increment an atomic revision; RoutedPcmCapture retires/reopens
+native endpoints on the existing capture worker, discards old native pending or
+in-flight PCM and primes replacement capture with paced silence. Changes during
+reads/startup are detected, coalesced notifications avoid duplicate activations,
+and cancellation prevents further opens/adoption. Drop counts accumulate across
+endpoint retirement. Explicit device IDs and process capture remain pinned.
+
+This follows healthy default-route changes without changing room/audio settings
+revisions. Replacement failures retain the existing policy: shared-source mode
+retries with capped backoff, explicit System/Microphone failures use manual
+retry. It does not add a separate worker, retry loop or replay queue. Mute/Stop
+retires the producer. Injected tests cover route races, fresh PCM, cumulative
+drops, cancellation, callback roles/flows and factory classification; the four-
+viewer proof requires continued audio/video and stable room/audio state across
+a capture route change. Physical device hot-plug/driver behavior is unqualified.
+
+Release `all` build and all 44 CTests passed (141.15 s). The packaged CLI/UI
+executable hashes match the build. No version bump or publication.
+
 ## Direct MF sample input and paired encoder timing - 2026-11-06
 
 Software NV12 now copies plane views directly into an owned MF input sample,

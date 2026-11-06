@@ -19,6 +19,8 @@ public:
     virtual bool Read(PcmBlock&, std::stop_token) = 0;
     virtual uint32_t DelayMs() const = 0;
     virtual uint64_t DroppedFrames() const { return 0; }
+    // Default endpoint routing changed. Only its capture worker may reopen it.
+    virtual bool DeviceChanged() const { return false; }
 };
 class PcmPlayoutEndpoint {
 public:

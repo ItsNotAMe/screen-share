@@ -2,6 +2,16 @@
 
 ## Current WebRTC rooms
 
+Default host system-loopback and microphone capture now follow Windows console
+role routing notifications (render and capture flow respectively). Registration
+precedes default resolution so activation races are detected. Callbacks only
+advance an atomic revision; the existing producer worker retires the old native
+endpoint, discards its pending/in-flight PCM, opens the new default and primes
+with paced silence. Room/audio settings revisions remain unchanged. Explicit
+device IDs stay pinned; process capture remains isolated. Mute/Stop cancels
+the producer, including replacement activation. Failed replacement activation
+uses the existing failure policy below, rather than a second retry mechanism.
+
 Shared-source capture now retries failed native capture endpoints on its existing
 producer worker, with 250 ms–5 s capped backoff. The selected resolver remains
 authoritative on every read; no app-to-system fallback is allowed. A new target
@@ -9,8 +19,7 @@ bypasses old backoff, and in-flight PCM spanning a target change is silenced.
 Capture-drop counts survive endpoint retirement. The outer switchable capture
 keeps its 10 ms output clock/silence while activation waits; Mute/Stop retire and
 cancel the old producer. Explicit microphone/system selections retain their
-existing manual retry behavior. Healthy default-device switching on the host
-is not added by this recovery change.
+existing manual retry behavior for activation/read failures.
 
 Viewer output now follows default-device notifications (render/console role)
 on the existing playout worker. Callbacks only advance an atomic revision;
@@ -23,6 +32,7 @@ Paced discard continues during outages; do not add a replay queue or pause video
 
 Windows ownership/callback rules follow [stream-routing guidance](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing-implementation-considerations)
 and [IMMNotificationClient restrictions](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient).
+Default route flow/role filtering follows [OnDefaultDeviceChanged](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immnotificationclient-ondefaultdevicechanged).
 The injected PCM/UI proofs do not qualify physical hot-plug or every driver.
 
 The shipping room receiver uses WebRTC A/V synchronization. Audio NetEq now has

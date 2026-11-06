@@ -1,7 +1,8 @@
 #include "media/audio/WasapiPcmEndpoint.h"
 #include "SilentPcmCapture.h"
 #include "StereoDownmix.h"
-#include "DefaultPlaybackDeviceNotification.h"
+#include "DefaultAudioDeviceNotification.h"
+#include "RoutedPcmCapture.h"
 #include <algorithm>
 #include <cstring>
 #include <deque>
@@ -13,8 +14,22 @@ void Check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("WASAPI PCM op
 class Capture final : public PcmCaptureEndpoint {
 public:
     explicit Capture(AudioCaptureConfig config) : config_(std::move(config)) {}
+    ~Capture() override { Reset(); }
     void Start() override { Start({}); }
     void Start(std::stop_token stop) override {
+        Reset(); dropped_ = 0;
+        if (stop.stop_requested()) throw std::runtime_error("Capture startup cancelled");
+        if (config_.deviceId.empty() && (config_.source == AudioCaptureSource::SystemOutput || config_.source == AudioCaptureSource::Microphone)) {
+            Check(CoInitializeEx(nullptr, COINIT_MULTITHREADED)); com_ = true;
+            Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator_)));
+            notifications_ = Microsoft::WRL::Make<DefaultAudioDeviceNotification>(
+                config_.source == AudioCaptureSource::Microphone ? eCapture : eRender);
+            if (!notifications_) throw std::runtime_error("Capture notification allocation failed");
+            Check(enumerator_->RegisterEndpointNotificationCallback(notifications_.Get()));
+            notificationsRegistered_ = true;
+            // Snapshot before default resolution/activation, including startup races.
+            routeRevision_ = notifications_->revision();
+        }
         config_.pcm48kStereo = false;
         config_.pcm48kNativeChannels = true;
         // Capacity, not a forced capture delay. Match the legacy reserve so a
@@ -28,6 +43,7 @@ public:
     bool Read(PcmBlock& output, std::stop_token stop) override {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
         while (pending_.size() < output.size() && !stop.stop_requested()) {
+            if (DeviceChanged()) throw std::runtime_error("Default audio capture changed");
             auto packet = capture_.CapturePacket(std::chrono::milliseconds(10));
             if (!packet) {
                 // Packet/event timing is not the audio sample clock. A single
@@ -62,12 +78,25 @@ public:
     // Ring capacity is spare space, not queued audio latency.
     uint32_t DelayMs() const override { return uint32_t(pending_.size() / 2) / 48; }
     uint64_t DroppedFrames() const override { return dropped_; }
+    bool DeviceChanged() const override { return notifications_ && notifications_->revision() != routeRevision_; }
 private:
+    void Reset() {
+        if (notificationsRegistered_) enumerator_->UnregisterEndpointNotificationCallback(notifications_.Get());
+        notificationsRegistered_ = false;
+        notifications_.Reset(); enumerator_.Reset();
+        capture_.Stop();
+        if (com_) { CoUninitialize(); com_ = false; }
+        pending_.clear(); downmix_.reset();
+    }
     AudioCaptureConfig config_;
     WasapiCapture capture_;
     std::deque<int16_t> pending_;
     uint64_t dropped_ = 0;
     std::optional<StereoDownmix> downmix_;
+    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator_;
+    Microsoft::WRL::ComPtr<DefaultAudioDeviceNotification> notifications_;
+    bool notificationsRegistered_ = false, com_ = false;
+    uint64_t routeRevision_ = 0;
 };
 
 class Playout final : public PcmPlayoutEndpoint {
@@ -85,7 +114,7 @@ public:
         Check(CoInitializeEx(nullptr, COINIT_MULTITHREADED)); com_ = true;
         Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator_)));
         if (deviceId_.empty()) {
-            notifications_ = Microsoft::WRL::Make<DefaultPlaybackDeviceNotification>();
+            notifications_ = Microsoft::WRL::Make<DefaultAudioDeviceNotification>();
             if (!notifications_) throw std::runtime_error("Audio notification allocation failed");
             Check(enumerator_->RegisterEndpointNotificationCallback(notifications_.Get()));
             notificationsRegistered_ = true;
@@ -152,7 +181,7 @@ public:
 private:
     std::wstring deviceId_;
     Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator_;
-    Microsoft::WRL::ComPtr<DefaultPlaybackDeviceNotification> notifications_;
+    Microsoft::WRL::ComPtr<DefaultAudioDeviceNotification> notifications_;
     bool notificationsRegistered_ = false;
     uint64_t routeRevision_ = 0;
     Microsoft::WRL::ComPtr<IAudioClient> client_;
@@ -168,6 +197,8 @@ PcmEndpointFactories WasapiPcmEndpoints(AudioCaptureConfig capture, std::wstring
                 if (!capture.deviceId.empty() || capture.processId) throw std::invalid_argument("No shared audio cannot select a device or process");
                 return std::make_unique<SilentPcmCapture>();
             }
+            if (capture.deviceId.empty() && (capture.source == AudioCaptureSource::SystemOutput || capture.source == AudioCaptureSource::Microphone))
+                return std::make_unique<RoutedPcmCapture>([capture] { return std::make_unique<Capture>(capture); });
             return std::make_unique<Capture>(capture);
         },
         [playbackDeviceId] { return std::make_unique<Playout>(playbackDeviceId); }};

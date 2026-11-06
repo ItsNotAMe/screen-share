@@ -78,6 +78,14 @@ muting or stopping ends recovery for the old source.
 App audio needs Windows build 20348 or later (including Windows 11). If capture
 fails, video continues with silence. Choose System audio to share all apps instead.
 
+Host system audio and microphone capture follow Windows' default device when
+no specific device is selected. Changing the default speakers or microphone
+reroutes capture during the room without rejoining or changing the audio
+selection. A specific device stays selected, and app capture stays with its
+selected process. If opening the replacement fails, shared-source mode retries
+automatically; explicit System audio or Microphone mode uses the existing retry
+action. Video continues during the interruption.
+
 Hosts can mute audio or choose a different audio source while a room is empty.
 Mute audio applies to current and future viewers; Share audio restores the last
 source. While muted, the host summary shows Audio muted. An idle source selection

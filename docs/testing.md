@@ -136,6 +136,18 @@ synthetic endpoints: capture resumes without a source-change command, audio/
 room revisions remain stable, and muting during a second outage leaves no live
 capture endpoint or later retry. Native driver failure/recovery is not injected.
 
+Default host capture routing is covered in `native-pcm-audio` with injected
+endpoint notifications. Tests exercise changes before/during reads and
+activation, coalesced events, silence before fresh PCM, cumulative drops,
+unrelated failures, cancellation, and the existing shared-source retry policy.
+Callback checks filter render/capture flows and communications roles. Factory
+checks verify that default system/microphone capture follows routing while
+explicit device IDs and process capture remain isolated, without opening native
+devices. The four-viewer public-session proof injects a live default capture
+change and requires audio/video progress, one live capture, stable room/audio
+revision and no failure; a muted route change must not activate capture. These
+tests do not qualify physical device switching or driver activation failures.
+
 Automatic output recovery is covered in `native-pcm-audio` with an injected
 clock/device. It checks capped 250 ms–5 s backoff, repeat outages, fresh PCM after
 activation, mute/volume retention, unchanged settings revision, manual override,

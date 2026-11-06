@@ -108,6 +108,30 @@ int main(int argc, char** argv) {
         Check(routed.roomId == beforeRoute.roomId && routed.peerId == beforeRoute.peerId &&
             routed.playback.revision == beforeRoute.playback.revision && routed.playback.health.failures == 0 &&
             host.Status().activePeers == 4);
+        // Route a live default host capture while all four viewers keep media.
+        const auto savedAudio = host.Status().audio.selected;
+        if (savedAudio.kind != AudioKind::System || !savedAudio.deviceId.empty()) {
+            auto useDefault = host.SwitchAudioSource({}); Check(Get(useDefault).error == AudioUpdateError::None);
+        }
+        const auto beforeCaptureRoute = host.Status();
+        const auto captureRouteStarts = hostEvidence->audio->captureStarts.load();
+        std::array<unsigned,4> captureRouteFrames;
+        std::array<uint64_t,4> captureRouteAudio;
+        for(size_t i=0;i<4;++i){captureRouteFrames[i]=evidence[i]->frames;captureRouteAudio[i]=evidence[i]->audio->audibleBlocks;}
+        ++hostEvidence->audio->captureRoute;
+        Wait([&]{
+            if(hostEvidence->audio->captureStarts<=captureRouteStarts)return false;
+            for(size_t i=0;i<4;++i)if(evidence[i]->frames<captureRouteFrames[i]+5 || evidence[i]->audio->audibleBlocks<captureRouteAudio[i]+5)return false;
+            return true;
+        });
+        const auto afterCaptureRoute=host.Status();
+        Check(afterCaptureRoute.audio.revision==beforeCaptureRoute.audio.revision &&
+            afterCaptureRoute.audio.health.failures==beforeCaptureRoute.audio.health.failures &&
+            afterCaptureRoute.audio.health.state==AudioEndpointState::Running && afterCaptureRoute.roomId==beforeCaptureRoute.roomId &&
+            afterCaptureRoute.activePeers==4 && hostEvidence->audio->liveCaptures==1);
+        if (savedAudio.kind != AudioKind::System || !savedAudio.deviceId.empty()) {
+            auto restoreAudio = host.SwitchAudioSource(savedAudio); Check(Get(restoreAudio).error == AudioUpdateError::None);
+        }
         const auto beforeAudioFailure = host.Status();
         hostEvidence->audio->captureUnavailable = true;
         Wait([&] {
@@ -165,6 +189,7 @@ int main(int argc, char** argv) {
         std::array<uint64_t, 4> quietBlocks;
         std::array<unsigned, 4> playingFrames;
         for (size_t i = 0; i < 4; ++i) { quietBlocks[i] = evidence[i]->audio->audibleBlocks; playingFrames[i] = evidence[i]->frames; }
+        ++hostEvidence->audio->captureRoute; // A muted default source must not reopen.
         std::this_thread::sleep_for(300ms);
         Check(hostEvidence->audio->liveCaptures == 0 && hostEvidence->audio->captureStarts == mutedCaptureStarts);
         for (size_t i = 0; i < 4; ++i) {
