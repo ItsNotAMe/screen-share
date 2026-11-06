@@ -2,6 +2,11 @@
 
 ## Current UI Direction
 
+- Explain authoritative remote room closure with the existing toast after
+  session cleanup and return Home/Join. Distinguish host departure, expiry and
+  service shutdown; keep local Leave/host Stop quiet and removal's persistent
+  explanation separate. Never infer remote closure from Stopped alone.
+
 - Join failures preserve the invite and explain full/closed/missing rooms, rate
   limits and uncertain outcomes using the shared RoomEntryError guidance.
   Host creation uses service-capacity guidance for the full response. Keep

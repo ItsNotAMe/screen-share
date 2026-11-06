@@ -24,7 +24,7 @@ public:
     // Without a presenter the standalone embedding contract remains available.
     std::function<void(QWidget*)> presentPage;
     std::function<void()> back;
-    std::function<void()> returnFromSession;
+    std::function<void(const QString& notice)> returnFromSession;
     std::function<void(const screenshare::room::qt::RoomDirectory::Status&)> directoryChanged;
     void OpenCreate();
     void OpenJoin(const QString& roomId = {});

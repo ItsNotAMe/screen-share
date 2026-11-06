@@ -5,6 +5,23 @@
 
 # Project Memory
 
+## Room closure feedback - 2026-11-06
+
+Authenticated room.closed reasons survive Stop as a typed optional closeReason;
+reports serialize the bounded protocol vocabulary, with null for local exits.
+The existing removedByHost flag remains compatible. After a viewer session
+finishes cleanup, normal Home and standalone Join show a shared toast explaining
+host departure, expiry or service shutdown. Local Leave and host Stop remain
+quiet; removal retains its existing persistent Join explanation.
+
+The full Release build and seven relevant room/UI/report/protocol/update checks
+passed. A real local-service host Stop checks the retained reason, return Home,
+released keep-awake state and visible notice. Voluntary viewer Leave keeps the
+host active and creates no toast. Removal and all report reason values are
+covered; expiry/service message policy is tested without waiting for real leases.
+The rendered notice was inspected and the portable archive matches both rebuilt
+executables. No physical input, version bump or publication was performed.
+
 ## Version 1.0.12 release preparation - 2026-11-06
 
 The owner requested publication of 1.0.12 after the nine separately committed

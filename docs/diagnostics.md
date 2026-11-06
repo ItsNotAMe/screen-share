@@ -12,6 +12,11 @@ null and `stale` is true. Older hosts leave it absent (`state: null`, `stale:
 false`). This describes host intent/capture condition, not a decode or display
 acknowledgement. `removedByHost` retains an explicit removal reason after shutdown.
 
+`closeReason` retains the authenticated room-closure reason after shutdown:
+`host_left`, `host_expired`, `kicked` or `server_shutdown`. It is null when no
+closure was received, including an ordinary local Leave. Do not infer a remote
+closure from a stopped session or a transport error alone.
+
 `schema` remains 1; `diagnosticsSchema: 2` adds:
 
 - OS/kernel/architecture, Qt build/runtime, executable fingerprint, GPU PCI

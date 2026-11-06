@@ -30,6 +30,12 @@ these failures, and no media runtime startup. A standalone host checks service
 capacity guidance. Run it alone with `RoomUiTests.exe http://127.0.0.1:1
 admission-feedback` and `QT_QPA_PLATFORM=offscreen`; no external service is used.
 
+Room UI closure checks stop a real local-service host and require the viewer to
+return Home with a room-ended notice after cleanup. Voluntary Leave stays quiet
+and keeps the host active. Removal retains its separate explanation. Policy
+checks cover expiry/service-closure notices and quiet host/local exits; report
+checks cover every bounded closure reason and the absent-reason case.
+
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 

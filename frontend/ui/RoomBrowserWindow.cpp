@@ -3,6 +3,8 @@
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
 #include "shared/RoomEntryError.h"
+#include "shared/RoomEndNotice.h"
+#include "ui/Toast.h"
 #include "ui/UiStyle.h"
 #include "ui/SourcePickerDialog.h"
 #include "ui/SourcePreviewLabel.h"
@@ -572,6 +574,7 @@ void RoomBrowserWindow::Launch(bool host) {
             };
         }
         active_->closed = [this] { QTimer::singleShot(0, this, [this] {
+            const auto notice = active_ ? RoomEndNotice(active_->session().status()) : QString{};
             active_.reset();
             if (passwordRetry_ && !closing_) {
                 passwordRetry_ = false;
@@ -580,9 +583,11 @@ void RoomBrowserWindow::Launch(bool host) {
             }
             if(!joinFailure_.isEmpty()&&!closing_) {if(presentPage)presentPage(this);else show();SetError(joinFailure_);joinFailure_.clear();return;}
             if (closing_) close();
-            else if (returnFromSession) returnFromSession();
-            else if (presentPage) presentPage(this);
-            else show();
+            else if (returnFromSession) returnFromSession(notice);
+            else {
+                if (presentPage) presentPage(this); else show();
+                if (!notice.isEmpty()) Toast::show(window(), notice, 6500);
+            }
         }); };
         password_->clear();
         if(host) {

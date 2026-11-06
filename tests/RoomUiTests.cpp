@@ -21,6 +21,7 @@
 #include "ui/Toast.h"
 #include <QScreen>
 #include "shared/RoomLaunch.h"
+#include "shared/RoomEndNotice.h"
 #include <QNetworkAccessManager>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -573,7 +574,8 @@ void ViewerRemovalScenario(const std::string& origin) {
     Check(host.session().roomUpdatePending() && host.session().removingViewer()==targetId);
     Check(!host.session().removeViewer(survivorId)); // A double action cannot queue another removal.
     Wait([&]{return !host.session().roomUpdatePending() && !target.session().running() && host.session().status().members.size()==2;});
-    Check(target.session().status().removedByHost && target.isVisible() && target.findChild<QLabel*>("roomError")->text().contains("host removed"));
+    Check(target.session().status().removedByHost && target.session().status().closeReason==RoomCloseReason::RemovedByHost &&
+        target.isVisible() && target.findChild<QLabel*>("roomError")->text().contains("host removed"));
     Wait([&]{return !buttonFor(targetId) && sink->released>releaseCount && sink->buttons==0;});
     for(const auto& state:host.session().input()->Read())Check(state.peer!=targetId);
     screenshare::input::Event stale;stale.kind=screenshare::input::Kind::Pad;stale.buttons=1;
@@ -946,9 +948,29 @@ void NormalHomeScenario(const QUrl& origin) {
     passwordPrompt->findChild<QPushButton*>("joinWithPassword")->click();
     Wait([&] { return viewer.session() && viewer.session()->session().status().phase == RoomPhase::Active; });
     Wait([&] { return viewer.session()->session().frameStatistics().received >= 3; });
+    std::optional<RoomCloseReason> observedClosure;
+    auto observeEnd=viewer.session()->session().statusChanged;
+    viewer.session()->session().statusChanged=[&,observeEnd](const auto& status) {
+        if(status.closeReason)observedClosure=status.closeReason;
+        if(observeEnd)observeEnd(status);
+    };
     host.session()->findChild<QPushButton*>("stopRoom")->click();
     Wait([&] { return !host.session() && host.home()->isVisible() && !viewer.session() && viewer.home()->isVisible(); });
     Check(!viewer.keepingScreenAwake());
+    Check(observedClosure==RoomCloseReason::HostLeft);
+    QWidget* endToast=nullptr;
+    Wait([&] {
+        for(auto* toast:viewer.window().findChildren<QWidget*>("Toast"))
+            if(auto* text=toast->findChild<QLabel*>("ToastText");text && text->text()=="The host ended the room." && toast->isVisible()) {
+                endToast=toast;return true;
+            }
+        return false;
+    });
+    Check(viewer.window().findChild<QStackedWidget*>("AppPageStack")->currentWidget()==viewer.home());
+    if(!previews.isEmpty()) {
+        Wait([&]{return endToast->windowOpacity()>=0.99;});
+        Check(endToast->grab().save(QDir(previews).filePath("room-ended-notice.png")));
+    }
     const auto windowControls=host.window().findChildren<QPushButton*>("WindowControlButton");
     Check(windowControls.size()==2);windowControls[1]->click();
     Wait([&]{return host.window().isMaximized();});
@@ -960,6 +982,18 @@ void NormalHomeScenario(const QUrl& origin) {
     RoomApplication reopened(origin,Factory(audio),true,hostFile,false,true);reopened.show();
     Wait([&]{return reopened.window().isMaximized();});Check(!reopened.window().isFullScreen());
     reopened.window().close();Wait([&]{return reopened.finished();});
+}
+void RoomEndNoticePolicyChecks() {
+    RoomStatus ended;
+    Check(RoomEndNotice(ended).isEmpty()); // A local Leave has no room.closed reason.
+    ended.closeReason=RoomCloseReason::HostExpired;
+    Check(RoomEndNotice(ended).contains("expired"));
+    ended.closeReason=RoomCloseReason::ServerShutdown;
+    Check(RoomEndNotice(ended).contains("room service"));
+    ended.closeReason=RoomCloseReason::RemovedByHost;
+    Check(RoomEndNotice(ended).isEmpty()); // Keep the persistent removal explanation.
+    ended.closeReason=RoomCloseReason::HostLeft;ended.host=true;
+    Check(RoomEndNotice(ended).isEmpty()); // A host's own Stop stays quiet.
 }
 void AdmissionFeedbackScenario() {
     QTcpServer service;Check(service.listen(QHostAddress::LocalHost,0));
@@ -1256,7 +1290,12 @@ void BrowserScenario(const QUrl& origin) {
         QSettings saved(path, QSettings::IniFormat);
         for (const auto& key : saved.allKeys()) Check(key == "nickname" || key == "stream/v1" || key == "playback/v1" || key == "decoder/v1");
     }
-    host.activeSession()->close(); viewer.activeSession()->close();
+    for(auto* toast:viewer.window()->findChildren<QWidget*>("Toast"))toast->close();
+    viewer.activeSession()->close();
+    Wait([&]{return !viewer.activeSession() && viewer.directory().status().phase==Directory::Phase::Ready;});
+    Check(host.activeSession() && host.activeSession()->session().status().phase==RoomPhase::Active);
+    for(auto* toast:viewer.window()->findChildren<QWidget*>("Toast"))Check(!toast->isVisible());
+    host.activeSession()->close();
     Wait([&] { return !host.activeSession() && !viewer.activeSession() && viewer.directory().status().phase == Directory::Phase::Ready; });
     // Rapid visibility changes during an outstanding stop reopen just one current subscription.
     viewer.hide(); viewer.show(); viewer.hide(); viewer.show();
@@ -2059,6 +2098,7 @@ int main(int argc, char** argv) {
     try {
         CapturePreviewOwnership();
         WindowPlacementChecks();
+        RoomEndNoticePolicyChecks();
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
         if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback"))AdmissionFeedbackScenario();
         WindowKeyboardControlScenario();
