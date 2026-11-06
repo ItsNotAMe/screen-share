@@ -5,6 +5,25 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Direct NV12 software encoding (2026-11-06)
+
+The Media Foundation adapter now packs NV12 input directly instead of converting
+it to I420 and immediately converting it back to NV12. GPU readback can retain
+NV12 for software encoders and CPU preview materialization. I420-only callers
+keep their direct readback conversion; a second CPU format is allocated only if
+explicitly requested, using already-owned pixels without another GPU readback.
+
+The new encoder test submits eight changing, padded NV12 frames to four real
+software encoders and decodes all 32 outputs. The old adapter called ToI420 32
+times; the updated adapter calls it zero times while preserving decoded luma,
+chroma, dimensions, timestamps and frame mapping. The explicit GPU variant uses
+eight shared GPU frames for the same 32 outputs: eight readbacks, zero I420
+conversions. It also checks CPU preview pixels and both mapping request orders.
+
+These are conversion/readback counts, not a measured total CPU, memory or latency
+percentage. Per-viewer NV12 packing and Media Foundation's input copy remain;
+this is not zero-copy encoding. The full-session scorecard below is unchanged.
+
 ## Shared scaling across viewers (2026-11-06)
 
 Matching viewers now reuse an immutable frame's GPU-scaled pixels and lazy CPU

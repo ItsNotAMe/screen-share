@@ -4,6 +4,10 @@
 #include "media/webrtc/MappedVideoBuffer.h"
 #include "api/environment/environment_factory.h"
 #include "api/video/i420_buffer.h"
+#include "api/video/nv12_buffer.h"
+#include "codec/H264StreamDecoder.h"
+#include "codec/InputMappingSei.h"
+#include "../../frontend/shared/LatestRoomVideoFrame.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "common_video/h264/h264_common.h"
 #include "common_video/h264/pps_parser.h"
@@ -15,6 +19,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <vector>
+#include <array>
+#include <atomic>
+#include <algorithm>
+#include <cstring>
 
 namespace {
 void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -49,6 +57,108 @@ void Rate(webrtc::VideoEncoder& encoder, uint32_t bitrate) {
     allocation.SetBitrate(0, 0, bitrate);
     // Exercise an FPS-driven transform restart as well as bitrate assignment.
     encoder.SetRates({allocation, bitrate ? 30.0 : 0.0});
+}
+class CountedNv12 : public webrtc::NV12BufferInterface {
+    webrtc::scoped_refptr<webrtc::NV12Buffer> pixels_;
+    std::atomic<unsigned>& conversions_;
+public:
+    CountedNv12(webrtc::scoped_refptr<webrtc::NV12Buffer> pixels, std::atomic<unsigned>& conversions)
+        : pixels_(std::move(pixels)), conversions_(conversions) {}
+    int width() const override { return pixels_->width(); }
+    int height() const override { return pixels_->height(); }
+    int StrideY() const override { return pixels_->StrideY(); }
+    int StrideUV() const override { return pixels_->StrideUV(); }
+    const uint8_t* DataY() const override { return pixels_->DataY(); }
+    const uint8_t* DataUV() const override { return pixels_->DataUV(); }
+    webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override { ++conversions_; return pixels_->ToI420(); }
+};
+void DirectNv12Input(bool gpuInput=false) {
+    using namespace screenshare::media;
+    MfVideoEncoderFactory factory;
+    std::array<Sink,4> sinks;
+    std::atomic<unsigned> conversions{0};
+    auto gpu=gpuInput?std::make_shared<D3dVideoDevice>():nullptr;
+    // Callback owners and counters outlive every encoder, including exceptions.
+    std::array<std::unique_ptr<webrtc::VideoEncoder>,4> encoders;
+    std::array<screenshare::H264StreamDecoder,4> decoders;
+    webrtc::VideoCodec codec;codec.codecType=webrtc::kVideoCodecH264;
+    codec.width=640;codec.height=360;codec.maxFramerate=30;codec.startBitrate=1000;
+    for(size_t i=0;i<encoders.size();++i) {
+        encoders[i]=factory.Create(webrtc::CreateEnvironment(),factory.GetSupportedFormats().front());
+        Require(encoders[i]->InitEncode(&codec,{webrtc::VideoEncoder::Capabilities(false),2,1200})==0,"NV12 encoder startup failed");
+        encoders[i]->RegisterEncodeCompleteCallback(&sinks[i]);decoders[i].Start(4096,4096);
+    }
+    for(unsigned index=0;index<8;++index) {
+        // Unequal padded plane strides catch accidental tight-packing assumptions.
+        auto pixels=webrtc::NV12Buffer::Create(640,360,672,704);
+        for(int y=0;y<360;++y) {
+            std::fill_n(pixels->MutableDataY()+y*pixels->StrideY(),pixels->StrideY(),uint8_t(255));
+            std::fill_n(pixels->MutableDataY()+y*pixels->StrideY(),320,uint8_t(70+index*3));
+            std::fill_n(pixels->MutableDataY()+y*pixels->StrideY()+320,320,uint8_t(130+index*3));
+        }
+        for(int y=0;y<180;++y) {
+            auto* row=pixels->MutableDataUV()+y*pixels->StrideUV();std::fill_n(row,pixels->StrideUV(),uint8_t(255));
+            for(int x=0;x<640;x+=2){row[x]=uint8_t(90+index);row[x+1]=uint8_t(170-index);}
+        }
+        auto counted=webrtc::make_ref_counted<CountedNv12>(pixels,conversions);
+        webrtc::scoped_refptr<webrtc::VideoFrameBuffer> input=counted;
+        if(gpu) {
+            std::vector<uint8_t> packed(640*360*3/2);
+            for(int y=0;y<360;++y)std::copy_n(pixels->DataY()+y*pixels->StrideY(),640,packed.data()+y*640);
+            for(int y=0;y<180;++y)std::copy_n(pixels->DataUV()+y*pixels->StrideUV(),640,packed.data()+640*360+y*640);
+            input=gpu->UploadNv12(640,360,packed);
+        }
+        for(size_t i=0;i<encoders.size();++i) {
+            auto buffer=WithMapping(input,{17,640,360,0,0,640,360},i%2?StreamPreset::Quality:StreamPreset::Gaming);
+            auto frame=webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer).set_rtp_timestamp(index+1)
+                .set_timestamp_us(int64_t(index+1)*33333).set_ntp_time_ms(123456).build();
+            Require(encoders[i]->Encode(frame,nullptr)==0,"NV12 input rejected");
+        }
+        for(size_t i=0;i<encoders.size();++i) {
+            sinks[i].Wait(index+1);Rate(*encoders[i],1000000); // Owner-worker barrier.
+            const auto& image=sinks[i].images.back();
+            Require(image.RtpTimestamp()==index+1 && image.NtpTimeMs()==123456,"NV12 timestamps lost");
+            Require(screenshare::input::ReadMappingSei({image.data(),image.size()}).generation==17,"NV12 frame mapping lost");
+            screenshare::EncodedPacket packet;packet.timestamp100ns=(index+1)*333333;
+            packet.duration100ns=333333;packet.bytes.resize(image.size());std::memcpy(packet.bytes.data(),image.data(),image.size());
+            auto decoded=decoders[i].DecodePacket(packet);
+            Require(decoded.size()==1 && decoded.front().width==640 && decoded.front().height==360,"NV12 decode delayed or resized");
+            const auto* bytes=reinterpret_cast<const uint8_t*>(decoded.front().data.data());
+            Require(decoded.front().data.size()==640*360*3/2 && std::abs(int(bytes[100*640+100])-int(70+index*3))<=4 &&
+                std::abs(int(bytes[100*640+500])-int(130+index*3))<=4 &&
+                std::abs(int(bytes[640*360+50*640+100])-int(90+index))<=4 &&
+                std::abs(int(bytes[640*360+50*640+101])-int(170-index))<=4,"NV12 stride, chroma or frame freshness changed");
+        }
+    }
+    std::cout<<"Four software encoders, 32 "<<(gpu?"GPU":"CPU")<<" NV12 frames: ToI420 calls="
+        <<(gpu?gpu->i420ConversionCount():conversions.load())<<'\n';
+    Require(conversions==0,"Software encoding performed an unnecessary NV12/I420 round trip");
+    if(gpu) {
+        Require(gpu->readbackCount()==8 && gpu->i420ConversionCount()==0,"Shared GPU input repeated readback or converted through I420");
+        std::vector<uint8_t> probePixels(640*360*3/2,128);std::fill_n(probePixels.begin(),640*360,uint8_t(91));
+        auto probe=gpu->UploadNv12(640,360,probePixels);
+        std::array requested{webrtc::VideoFrameBuffer::Type::kNV12};
+        auto mapped=probe->GetMappedFrameBuffer(requested);
+        Require(mapped && mapped->type()==webrtc::VideoFrameBuffer::Type::kNV12 && mapped->GetNV12()->DataY()[0]==91,
+            "GPU NV12 mapping unavailable or changed pixels");
+        LatestRoomVideoFrame latest;latest.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(probe).build());
+        auto retained=latest.Take();latest.Stop();
+        Require(retained && retained->pixels().size()==probePixels.size() && retained->pixels()[0]==91 &&
+            gpu->readbackCount()==9 && gpu->i420ConversionCount()==0,"Preview CPU pixels performed a redundant conversion/readback");
+        std::array planarFirst{webrtc::VideoFrameBuffer::Type::kI420,webrtc::VideoFrameBuffer::Type::kNV12};
+        auto planar=probe->GetMappedFrameBuffer(planarFirst);
+        Require(planar && planar->type()==webrtc::VideoFrameBuffer::Type::kI420 && probe->ToI420().get()==planar.get() &&
+            probe->ToNv12().get()==mapped.get() && gpu->readbackCount()==9 && gpu->i420ConversionCount()==1,
+            "Explicit I420 mapping lost format preference or cache ownership");
+        auto planarProbe=gpu->UploadNv12(640,360,probePixels);
+        auto firstPlanar=planarProbe->ToI420();auto secondNv12=planarProbe->ToNv12();
+        Require(firstPlanar && secondNv12 && secondNv12->DataY()[0]==91 && secondNv12->DataUV()[0]==128 &&
+            planarProbe->ToI420().get()==firstPlanar.get() && gpu->readbackCount()==10 && gpu->i420ConversionCount()==2,
+            "I420-first mapping repeated GPU readback or changed pixels");
+        gpu->Retire();
+        Require(!probe->ToNv12() && !probe->ToI420() && !probe->GetMappedFrameBuffer(requested) &&
+            mapped->GetNV12()->DataY()[0]==91,"Retired GPU mapping reopened or invalidated owned CPU pixels");
+    }
 }
 void Run(bool useHardware, bool gpuInput) {
     auto hardware = useHardware ? std::make_shared<screenshare::media::MfHardwareSession>(
@@ -196,20 +306,22 @@ void UnavailableFrameRate() {
 }
 int main(int argc, char** argv) {
     try {
-        bool hardware = false, gpuInput = false;
+        bool hardware = false, gpuInput = false, gpuReadback = false;
         int cycles = 1;
         for (int i = 1; i < argc; ++i) {
             const std::string option = argv[i];
             if (option == "--hardware") hardware = true;
             else if (option == "--gpu-input") gpuInput = true;
+            else if (option == "--gpu-readback") gpuReadback = true;
             else if (option == "--cycles" && i + 1 < argc) {
                 const std::string count = argv[++i]; size_t consumed = 0;
                 cycles = std::stoi(count, &consumed);
                 Require(consumed == count.size() && cycles >= 1 && cycles <= 100, "Invalid cycle count");
-            } else throw std::runtime_error("Usage: MfEncoderAdapterTest [--hardware [--gpu-input]] [--cycles 1..100]");
+            } else throw std::runtime_error("Usage: MfEncoderAdapterTest [--gpu-readback | --hardware [--gpu-input]] [--cycles 1..100]");
         }
         Require(!gpuInput || hardware, "--gpu-input requires --hardware");
-        if (!hardware) UnavailableFrameRate();
+        Require(!gpuReadback || !hardware,"--gpu-readback requires software encoding");
+        if (!hardware) { DirectNv12Input();if(gpuReadback)DirectNv12Input(true);UnavailableFrameRate(); }
         StableFrameRate(hardware);
         proof::LifecycleSample(0, 0);
         for (int cycle = 1; cycle <= cycles; ++cycle) {

@@ -37,12 +37,13 @@ public:
     uint64_t readbackCount() const noexcept { return readbackCount_; }
     uint64_t readbackMicroseconds() const noexcept { return readbackMicroseconds_; }
     uint64_t readbackStagingAllocations() const noexcept { return readbackStagingAllocations_; }
+    uint64_t i420ConversionCount() const noexcept { return i420ConversionCount_; }
     uint64_t scalingFailures() const noexcept { return scalingFailures_; }
     uint64_t scalingCount() const noexcept { return scalingCount_; }
     unsigned maximumPendingScales() const noexcept { return maximumPendingScales_; }
 private:
     friend class D3dVideoFrameBuffer;
-    webrtc::scoped_refptr<webrtc::I420BufferInterface> Readback(ID3D11Texture2D*, int, int);
+    webrtc::scoped_refptr<webrtc::VideoFrameBuffer> Readback(ID3D11Texture2D*, int, int, bool nv12);
     webrtc::scoped_refptr<D3dVideoFrameBuffer> Scale(ID3D11Texture2D*, int, int, int, int, int, int);
     std::unique_ptr<webrtc::Thread> owner_;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
@@ -52,6 +53,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> readbackStaging_;
     std::atomic<uint64_t> readbackStagingAllocations_{0};
     std::atomic<uint64_t> readbackCount_{0}, readbackMicroseconds_{0};
+    std::atomic<uint64_t> i420ConversionCount_{0};
     std::atomic<bool> retired_{false};
     std::unique_ptr<D3dNv12Scaler> scaler_;
     std::atomic<uint64_t> scalingFailures_{0};
@@ -66,6 +68,9 @@ public:
     int width() const override { return width_; }
     int height() const override { return height_; }
     webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override;
+    // Shared immutable CPU readback in the texture's original format. I420 is
+    // generated separately only when a caller actually requests it.
+    webrtc::scoped_refptr<webrtc::NV12BufferInterface> ToNv12();
     webrtc::scoped_refptr<webrtc::VideoFrameBuffer> GetMappedFrameBuffer(std::span<Type>) override;
     CapturedFrame RetainedNv12() const;
     // Null means GPU scaling is unavailable; the caller may use ToI420().
@@ -78,6 +83,7 @@ private:
     int width_, height_;
     std::mutex mutex_;
     webrtc::scoped_refptr<webrtc::I420BufferInterface> cached_;
+    webrtc::scoped_refptr<webrtc::NV12BufferInterface> nv12_;
     struct ScaledFrame {
         std::array<int, 6> geometry;
         webrtc::scoped_refptr<D3dVideoFrameBuffer> buffer;

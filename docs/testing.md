@@ -82,6 +82,17 @@ scrollbars appear or disappear.
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 
+`encoder-adapter-lifecycle` includes four simultaneous software encoders fed
+eight changing NV12 buffers with unequal padded plane strides. All 32 outputs
+are decoded to validate luma/chroma, dimensions, timestamps and input mapping;
+instrumented buffers must receive no ToI420 calls. Existing cases also cover
+rate changes, zero-rate suspension, keyframes, coalescing and repeated release.
+Run `EncoderAdapterTests.exe --gpu-readback` explicitly for generated GPU input:
+four encoders share one readback per source frame without I420 conversion. It
+checks CPU preview materialization, both CPU format request orders, cached
+ownership and rejection of new mappings after device retirement. No desktop
+capture, physical input or audible output is used by this test.
+
 `video-frame-input` checks the two-second presentation freshness boundary with
 supplied timestamps, verifies that resize/redraw and skipped presents cannot
 refresh old video, and holds a render across Clear to reject late input mapping

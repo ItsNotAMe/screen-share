@@ -10,6 +10,35 @@ and measured performance improvements ahead of small UI/copy polish during
 open-ended continuation work. Deliver one meaningful improvement at a time and
 commit each separately. Address related UI defects when they block that feature.
 
+## Direct NV12 software encoding and readback - 2026-11-06
+
+The MF adapter now packs CPU NV12 directly, including shared GPU NV12 readback,
+instead of converting to I420 and back to NV12 for each software encoder. Native
+same-device hardware submission is unchanged. GPU readback allocates the first
+requested CPU format only; I420-first callers retain their original direct
+conversion path. A second requested format derives from owned CPU pixels without
+another GPU readback. Mapping follows requested format order, stays under the
+frame mutex and rejects retired devices even when cached. Explicit GPU preview
+CPU materialization also uses NV12 directly. Per-viewer packing/MF sample copies
+remain; no total CPU/memory/latency percentage or zero-copy claim is established.
+
+The new four-encoder test failed before implementation with 32 ToI420 calls for
+eight changing padded NV12 frames delivered to four real software encoders.
+Afterward it reports zero calls, while decoding all 32 outputs validates luma,
+chroma, dimensions, timestamps and input mapping. The generated GPU variant
+encodes the same number of frames with eight shared readbacks and zero I420
+conversions. Additional probes cover preview pixels, both format request orders,
+cache ownership and retirement. The existing encoder lifecycle proof now runs
+in application CTest as encoder-adapter-lifecycle (44 tests total).
+
+The final full Release build and all 44 CTests passed (139.44 s). Explicit
+EncoderAdapterTests --gpu-readback and StreamSettingsTests --gpu runs passed;
+the latter preserves the earlier 96-to-24 shared-scaling/readback result. The
+portable archive matches both executables. Tests use generated pixels and silent
+synthetic endpoints, not physical input/audio or desktop capture. Full-session
+resource benchmarks and broader hardware qualification were not rerun. No
+version bump or publication occurred.
+
 ## Pause desktop remote control when video stalls - 2026-11-06
 
 The desktop viewer now requires a frame actually presented within two seconds

@@ -1,8 +1,8 @@
 # Media Foundation / WebRTC integration
 
 These are private integration headers, not portable session APIs. The independent
-`tools/webrtc-proof` project builds them against the pinned artifact. Normal UI/CLI
-sessions have not switched to this path.
+`tools/webrtc-proof` project and normal UI/CLI rooms build them against the
+pinned artifact. NativeRoomRuntime owns the room integration.
 
 `MfVideoEncoderFactory` exposes H.264 High level 4.2, packetization mode 1,
 up to 1920×1080 / 60 FPS. Supplying an `MfHardwareSession` enables hardware
@@ -47,8 +47,11 @@ and broader soak/performance evidence remain unfinished.
 `D3dVideoFrameBuffer` retains an independently allocated NV12 texture and its
 device owner. Published textures are never overwritten; the encoder holds them
 through output/cancellation. Same-device hardware submission does not read back
-pixels. Software or cross-device fallback maps on the owner, converts to I420
-and caches the result under a mutex. Readback count/time are exposed for evidence.
+pixels. Software or cross-device fallback maps NV12 on the owner and caches it
+under a mutex, avoiding a redundant I420 round trip. Explicit I420 callers retain
+direct conversion if they request first; requesting a second format derives it
+from cached CPU pixels without another readback. Only requested formats are
+retained. Readback count/time and I420 conversion count are exposed for evidence.
 MF's internal device-manager operations use D3D multithread protection. D3D COM
 references can be released on another thread after the owner is joined.
 

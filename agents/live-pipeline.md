@@ -7,6 +7,17 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-06 NV12 software input: MfVideoEncoder consumes CPU NV12 and shared GPU
+NV12 readback without the former NV12-to-I420-to-NV12 round trip. Readback uses
+the first requested format; I420-only callers retain direct conversion and do
+not eagerly retain a second buffer. Requesting both formats derives the second
+from owned CPU pixels without another GPU readback. Device retirement rejects
+new maps, including cached ones. CPU preview materialization uses NV12 too.
+The real four-software-encoder test decodes 32 padded/changing NV12 inputs with
+zero ToI420 calls (32 before); generated GPU input uses eight shared readbacks
+and zero I420 conversions. NV12 packing/MF input copies remain; this is operation
+count evidence, not a new total CPU/memory/latency scorecard.
+
 2026-11-06 shared scaling: D3dVideoFrameBuffer retains at most four successful
 scaled outputs keyed by all six canvas/image geometry values, under its existing
 mutex. Shared capture resources let matching viewer tracks reuse immutable GPU

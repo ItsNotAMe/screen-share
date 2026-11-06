@@ -10,6 +10,7 @@
 #include "rtc_base/thread.h"
 #include "rtc_base/logging.h"
 #include "libyuv/convert_from.h"
+#include "libyuv/planar_functions.h"
 
 #include <algorithm>
 #include <chrono>
@@ -207,16 +208,28 @@ private:
                 if (raw.d3dDevice.Get() == config_.d3dDevice.Get()) return raw;
             }
         }
-        auto pixels = frame.video_frame_buffer()->ToI420();
-        if (!pixels) throw std::runtime_error("I420 frame unavailable");
+        auto input = Unwrap(frame.video_frame_buffer());
+        if (auto* native = dynamic_cast<D3dVideoFrameBuffer*>(input.get())) {
+            input = native->ToNv12();
+            if (!input) throw std::runtime_error("NV12 frame unavailable");
+        }
         CapturedFrame raw;
         raw.width = raw.sourceWidth = config_.width;
         raw.height = raw.sourceHeight = config_.height;
         raw.nv12Pixels.resize(size_t(raw.width) * raw.height * 3 / 2);
         auto* y = reinterpret_cast<uint8_t*>(raw.nv12Pixels.data());
-        if (libyuv::I420ToNV12(pixels->DataY(), pixels->StrideY(), pixels->DataU(), pixels->StrideU(),
-            pixels->DataV(), pixels->StrideV(), y, raw.width, y + raw.width * raw.height,
-            raw.width, raw.width, raw.height) != 0) throw std::runtime_error("NV12 conversion failed");
+        if (input->type() == webrtc::VideoFrameBuffer::Type::kNV12) {
+            const auto* pixels = input->GetNV12();
+            if (libyuv::NV12Copy(pixels->DataY(), pixels->StrideY(), pixels->DataUV(), pixels->StrideUV(),
+                y, raw.width, y + raw.width * raw.height, raw.width, raw.width, raw.height) != 0)
+                throw std::runtime_error("NV12 packing failed");
+        } else {
+            auto pixels = input->ToI420();
+            if (!pixels) throw std::runtime_error("I420 frame unavailable");
+            if (libyuv::I420ToNV12(pixels->DataY(), pixels->StrideY(), pixels->DataU(), pixels->StrideU(),
+                pixels->DataV(), pixels->StrideV(), y, raw.width, y + raw.width * raw.height,
+                raw.width, raw.width, raw.height) != 0) throw std::runtime_error("NV12 conversion failed");
+        }
         return raw;
     }
     EncodedPacket EncodePacket(const webrtc::VideoFrame& frame, bool keyframe, uint64_t generation) {
