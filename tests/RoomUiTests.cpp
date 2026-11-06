@@ -143,7 +143,9 @@ void WindowKeyboardControlScenario() {
     });
     Check(keyboard->toolTip().contains("not focused"));
     Check(host->Grant("viewer",Mouse));
-    Wait([&]{pump();return viewer.Read().front().granted==Mouse;});
+    // The permission acknowledgement can precede the UI's pending-state tick.
+    // Wait until the button can accept a click, as a user must do.
+    Wait([&]{pump();return viewer.Read().front().granted==Mouse && keyboard->isEnabled();});
     keyboard->click(); // Add keyboard to working mouse control at window startup.
     Wait([&]{pump();return viewer.Read().front().granted==(Mouse|Keyboard) && keyboard->isChecked();});
     Event key;key.kind=Kind::Key;key.key=65;key.down=true;key.sourceGeneration=target->Read().generation;
@@ -1129,6 +1131,7 @@ void RoomEndNoticePolicyChecks() {
 void AdmissionFeedbackScenario() {
     QTcpServer service;Check(service.listen(QHostAddress::LocalHost,0));
     int responseStatus=409,admissions=0,runtimeStarts=0;
+    QJsonObject lastAdmission;
     bool holdAdmissions=false;
     QByteArray responseCode="full";
     QObject::connect(&service,&QTcpServer::newConnection,&service,[&] {
@@ -1143,7 +1146,8 @@ void AdmissionFeedbackScenario() {
                 if(line.toLower().startsWith("content-length:"))length=line.mid(15).trimmed().toLongLong();
             Check(length>=0 && length<16384);if(buffer->size()<end+4+length)return;
             *handled=true;
-            const bool admission=buffer->startsWith("POST ");if(admission)++admissions;
+            const bool admission=buffer->startsWith("POST ");
+            if(admission){++admissions;lastAdmission=QJsonDocument::fromJson(buffer->mid(end+4,length)).object();}
             if(admission && holdAdmissions)return;
             const auto body=QByteArray("{\"v\":2,\"error\":\"")+(admission?responseCode:QByteArray("not_found"))+"\"}";
             peer->write("HTTP/1.1 "+QByteArray::number(admission?responseStatus:404)+" Result\r\nContent-Type: application/json\r\nContent-Length: "+
@@ -1234,6 +1238,65 @@ void AdmissionFeedbackScenario() {
             }
         }
     }
+    browser.OpenCreate();browser.activateWindow();
+    auto* roomName=browser.findChild<QLineEdit*>("roomName");
+    auto* roomPassword=browser.findChild<QLineEdit*>("roomPassword");
+    auto* create=browser.findChild<QPushButton*>("createV2Room");
+    const auto beforeValidation=admissions;
+    for(const auto& invalid:QStringList{"   ",QString(65,'x'),QString("Room")+QChar(0x202e)}) {
+        roomName->setText(invalid);create->click();QCoreApplication::processEvents();
+        Check(!browser.activeSession() && roomName->text()==invalid && roomName->hasFocus());
+        Check(browser.findChild<QLabel*>("browserError")->text().contains("1–64") && admissions==beforeValidation);
+    }
+    roomName->setText(QString(64,QChar(0x00e9))); // 64 Unicode characters, not 64 UTF-8 bytes.
+    const QStringList invalidPasswords{QString(129,'x'),QString(65,QChar(0x00e9)),QString("secret")+QChar(0x7f)};
+    for(const auto& invalid:invalidPasswords) {
+        roomPassword->setText(invalid);create->click();QCoreApplication::processEvents();
+        Check(!browser.activeSession() && roomPassword->text()==invalid && roomPassword->hasFocus() && admissions==beforeValidation);
+        Check(!browser.findChild<QLabel*>("browserError")->text().isEmpty());
+    }
+    for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+        browser.resize(size);QCoreApplication::processEvents();
+        auto* viewport=browser.findChild<QScrollArea*>("RoomBrowserScroll")->viewport();
+        auto* card=roomPassword->parentWidget()->parentWidget();
+        Wait([&]{return roomName->height()>=roomName->sizeHint().height() && roomPassword->height()>=roomPassword->sizeHint().height() &&
+            card->rect().contains(QRect(roomPassword->mapTo(card,QPoint()),roomPassword->size())) &&
+            viewport->rect().contains(QRect(roomPassword->mapTo(viewport,QPoint()),roomPassword->size()));});
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            Check(browser.grab().save(QDir(output).filePath(QString("create-invalid-password-%1.png").arg(size.width()))));
+        }
+    }
+    const auto boundaryPassword=QString(64,QChar(0x00e9));roomPassword->setText(boundaryPassword);responseStatus=409;responseCode="full";
+    create->click();Check(browser.activeSession());
+    Wait([&]{return !browser.activeSession()->session().running();});
+    Check(admissions==beforeValidation+1 && lastAdmission["password"].toString()==boundaryPassword);
+    Check(lastAdmission["policy"].toObject()["name"].toString()==roomName->text() && runtimeStarts==0);
+    browser.activeSession()->close();Wait([&]{return !browser.activeSession();});
+    browser.OpenJoin(invite);responseStatus=403;responseCode="forbidden";joinButton->click();
+    Wait([&]{return !browser.activeSession() && browser.findChild<QDialog*>("RoomPasswordDialog");});
+    auto* passwordDialog=browser.findChild<QDialog*>("RoomPasswordDialog");
+    auto* passwordEntry=passwordDialog->findChild<QLineEdit*>("joinPassword");
+    auto* submitPassword=passwordDialog->findChild<QPushButton*>("joinWithPassword");
+    const auto beforePasswordValidation=admissions;
+    for(const auto& invalid:invalidPasswords) {
+        passwordEntry->setText(invalid);submitPassword->click();QCoreApplication::processEvents();
+        Check(passwordDialog->isVisible() && !browser.activeSession() && passwordEntry->hasFocus());
+        Check(passwordEntry->text()==invalid && admissions==beforePasswordValidation && inviteField->text()==invite);
+        Check(!passwordDialog->findChild<QLabel*>("joinPasswordFeedback")->text().isEmpty());
+    }
+    passwordEntry->setText(QString(65,QChar(0x00e9)));submitPassword->click();
+    if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+        for(const auto size:{QSize(740,600),QSize(1000,820)}) {
+            browser.resize(size);QCoreApplication::processEvents();
+            auto* message=passwordDialog->findChild<QLabel*>("joinPasswordFeedback");
+            Check(passwordDialog->rect().contains(QRect(message->mapTo(passwordDialog,QPoint()),message->size())));
+            Check(browser.grab().save(QDir(output).filePath(QString("join-invalid-password-%1.png").arg(size.width()))));
+        }
+    }
+    responseStatus=409;responseCode="full";
+    const auto acceptedPassword=QString(64,QChar(0x00e9));passwordEntry->setText(acceptedPassword);submitPassword->click();
+    Wait([&]{return !browser.activeSession() && browser.findChild<QLabel*>("browserError")->text().startsWith("This room is full");});
+    Check(admissions==beforePasswordValidation+1 && lastAdmission["password"].toString()==acceptedPassword && runtimeStarts==0);
     bool closed=false;browser.closed=[&]{closed=true;};browser.close();Wait([&]{return closed;});
     // The same service code means capacity exhaustion when creating a room.
     // Standalone sessions must explain that without suggesting viewer removal.

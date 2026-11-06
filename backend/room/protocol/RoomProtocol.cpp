@@ -57,6 +57,13 @@ QString Name(QJsonValue v, int points = 32, int bytes = 128) {
     return s;
 }
 }
+QString NormalizeRoomName(const QString& value) { return Name(value, 64, 256); }
+bool ValidRoomPassword(const QString& value) {
+    const auto bytes = value.toUtf8();
+    if (bytes.size() > 128 || QString::fromUtf8(bytes) != value) return false;
+    for (auto c : bytes) if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) return false;
+    return true;
+}
 static Validation ParseEnvelope(const QByteArray& bytes, qsizetype limit) {
     auto fail = [](const char* error) { return Validation{false, QString::fromLatin1(error), {}}; };
     if (bytes.size() > limit) return fail("too_large");

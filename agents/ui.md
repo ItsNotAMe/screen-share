@@ -34,6 +34,15 @@
   status push, using active-room recovery wording after admission. Avoid
   replacing detailed guidance with a generic failure or keeping stale action errors.
 
+- Validate Create room names and passwords before allocating a session, using
+  the protocol's normalization and admission's shared password validator. Keep
+  the draft and focus the invalid field. Validate Join passwords inside the
+  existing popup so users can correct them without losing the invite or another
+  admission attempt. Unicode character limits and UTF-8 password limits differ;
+  explain long passwords without silently trimming or truncating them.
+  Preserve form-field minimum sizes through both the details layout and the
+  responsive columns; at compact heights, scroll instead of overlapping cards.
+
 - Normal startup remembers windowed size/position and maximized state. Cache
   placement in memory while moving; freeze/save on the first Close before room
   drain changes geometry. Fullscreen and minimization stay temporary. Decode Qt

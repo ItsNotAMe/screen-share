@@ -46,6 +46,16 @@ A queued success status after cancellation cannot reopen the session. It also
 checks stable control/list geometry through pending/cancelled states and that
 cancelled requests start no media runtime.
 
+Form preflight checks reject blank/overlong/direction-control room names and
+overlong or control-character passwords without starting a session or sending
+an admission request. They retain drafts and focus the offending field. Valid
+64-character Unicode names and 128-byte non-English passwords reach the local
+HTTP fixture unchanged. Join password correction stays in the existing popup;
+compact/normal feedback renders are captured. Backend admission and UI password
+checks share the same validator; wire normalization remains authoritative.
+Create resize checks require full-height fields inside both their card and the
+visible scroll viewport, so sibling cards cannot cover the focused password.
+
 The admission fixture also opens actual host/viewer session windows and checks
 that capacity guidance survives terminal status refreshes. Synthetic active-room
 failure pushes check media/transport guidance, host/viewer recovery actions, and

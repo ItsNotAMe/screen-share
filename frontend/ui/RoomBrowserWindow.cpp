@@ -4,6 +4,7 @@
 #include "shared/RoomLink.h"
 #include "shared/RoomEntryError.h"
 #include "shared/RoomEndNotice.h"
+#include "room/protocol/RoomProtocol.h"
 #include "ui/Toast.h"
 #include "ui/UiStyle.h"
 #include "ui/SourcePickerDialog.h"
@@ -126,6 +127,12 @@ QIcon entryIcon(const QString& name, const QByteArray& color = "#b7c8c0") {
 QLabel* fieldLabel(const QString& text) {
     auto* label = new QLabel(text); label->setObjectName("OptionLabel"); return label;
 }
+QString passwordError(const QString& value) {
+    if (screenshare::room::wire::ValidRoomPassword(value)) return {};
+    return value.toUtf8().size() > 128 ?
+        QStringLiteral("This password is too long. Try a shorter password; some letters and symbols take more space.") :
+        QStringLiteral("Remove unsupported or control characters from the password.");
+}
 QWidget* optionField(const QString& text, QWidget* control) {
     auto* field = new QWidget;
     auto* layout = new QVBoxLayout(field); layout->setContentsMargins(0,0,0,0); layout->setSpacing(6);
@@ -186,8 +193,10 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* content = new QWidget; auto* body = new QVBoxLayout(content); body->setContentsMargins(0,0,0,0); body->setSpacing(UiSpacing::SectionGap);
     scroll->setWidget(content); layout->addWidget(scroll, 1);
     createPanel_ = new QWidget; createColumns_ = new QBoxLayout(QBoxLayout::TopToBottom, createPanel_);
+    createColumns_->setSizeConstraint(QLayout::SetMinimumSize);
     createColumns_->setContentsMargins(0,0,0,0); createColumns_->setSpacing(UiSpacing::SectionGap);
     auto* details = new QWidget; details->setObjectName("FormCard"); detailsBody_ = new QVBoxLayout(details); createColumns_->addWidget(details, 1);
+    detailsBody_->setSizeConstraint(QLayout::SetMinimumSize);
     detailsBody_->setContentsMargins(UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset); detailsBody_->setSpacing(UiSpacing::SectionGap);
     auto* detailsHeading = new QLabel("Room details"); detailsHeading->setObjectName("SectionHeading"); detailsBody_->addWidget(detailsHeading);
     name_ = new QLineEdit("My room"); name_->setObjectName("roomName"); name_->setMaxLength(256); detailsBody_->addWidget(optionField("Room name", name_));
@@ -461,11 +470,15 @@ void RoomBrowserWindow::JoinListedRoom(const QString& id) {
 void RoomBrowserWindow::PromptPassword() {
     if(findChild<QDialog*>("RoomPasswordDialog"))return;
     if(presentPage)presentPage(this);else show();
-    auto* dialog=new SessionPopup("Room password",this);dialog->setObjectName("RoomPasswordDialog");dialog->setAttribute(Qt::WA_DeleteOnClose);dialog->setPanelSize(QSize(440,260));
+    auto* dialog=new SessionPopup("Room password",this);dialog->setObjectName("RoomPasswordDialog");dialog->setAttribute(Qt::WA_DeleteOnClose);dialog->setPanelSize(QSize(480,300));
     connect(dialog,&QDialog::finished,dialog,&QObject::deleteLater);
     auto* body=dialog->body;
-    auto* title=new QLabel(passwordRejected_?"Incorrect password. Try again.":"Enter room password");body->addWidget(title);
-    auto* field = new QLineEdit; field->setObjectName("joinPassword"); field->setEchoMode(QLineEdit::Password); field->setMaxLength(128);
+    auto* title=new QLabel(passwordRejected_?"Incorrect password. Try again.":"Enter room password");
+    title->setObjectName("joinPasswordFeedback");title->setTextFormat(Qt::PlainText);title->setWordWrap(true);
+    title->setMinimumHeight(title->fontMetrics().lineSpacing()*2);body->addWidget(title);
+    auto* field = new QLineEdit; field->setObjectName("joinPassword"); field->setEchoMode(QLineEdit::Password); field->setMaxLength(256);
+    // Keep over-limit pastes invalid instead of silently turning them into a
+    // different, admissible 128-byte password before validation.
     field->setPlaceholderText("Password"); passwordEye(field); body->addWidget(field);
     auto* actions = new QHBoxLayout; actions->addStretch();
     auto* cancel = new QPushButton("Cancel"); cancel->setObjectName("cancelRoomPassword");
@@ -473,8 +486,10 @@ void RoomBrowserWindow::PromptPassword() {
     for (auto* button : {cancel, join}) { button->setFixedSize(110,42); actions->addWidget(button); }
     body->addLayout(actions);
     connect(cancel, &QPushButton::clicked, dialog, &QDialog::reject);
-    connect(join, &QPushButton::clicked, dialog, [this, dialog, field] {
+    connect(join, &QPushButton::clicked, dialog, [this, dialog, field, title] {
         if (field->text().isEmpty()) { field->setFocus(); return; }
+        const auto message=passwordError(field->text());
+        if (!message.isEmpty()) { title->setText(message);field->setFocus();return; }
         password_->setText(field->text()); field->clear(); dialog->accept(); Launch(false);
     });
     dialog->open(); field->setFocus();
@@ -554,13 +569,20 @@ void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
 void RoomBrowserWindow::Launch(bool host) {
     if (active_ || closing_) return;
     if (host && source_->currentIndex() < 0) { SetError("Choose an available capture source before sharing."); return; }
+    QString roomName;
+    if (host) {
+        roomName=screenshare::room::wire::NormalizeRoomName(name_->text());
+        if (roomName.isEmpty()) { SetError("Use a room name with 1–64 characters and no control or direction-changing characters.");name_->setFocus();return; }
+    }
+    const auto invalidPassword=passwordError(password_->text());
+    if (!invalidPassword.isEmpty()) { SetError(invalidPassword);password_->setFocus();return; }
     const auto nickname = RoomProfile::normalizeNickname(profile_.nickname());
     const auto roomId = ParseRoomReference(roomId_->text().trimmed());
     if (!nickname || (!host && !roomId)) { SetError("Enter a valid room ID or room link."); return; }
     if(!host && password_->text().isEmpty()) {
         for(const auto& room:directory_.status().rooms)if(room.id==*roomId && room.password){passwordRejected_=false;PromptPassword();return;}
     }
-    QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", name_->text()},
+    QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", host ? roomName : name_->text()},
         {"roomId", host ? QString{} : *roomId}, {"password", password_->text()}, {"public", public_->isChecked()}, {"viewerLimit", viewerLimit_->value()},
         {"capture", QJsonObject::fromVariantMap(source_->currentData().toMap())},
         {"audio", QJsonObject{{"source", audio_->currentIndex() == 0 ? "shared" : audio_->currentIndex() == 1 ? "microphone" : audio_->currentIndex() == 2 ? "none" : "system"}}}};

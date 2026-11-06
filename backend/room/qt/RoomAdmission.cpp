@@ -49,9 +49,7 @@ std::future<RoomAdmission::Result> RoomAdmission::Start(Request request) {
         !url.hasQuery() && !url.hasFragment() && (url.path().isEmpty() || url.path() == "/") &&
         (url.scheme() == "https" || (allowPlainLoopback_ && loopback && url.scheme() == "http")) &&
         (request.create ? request.roomId.isEmpty() : Id(request.roomId));
-    const auto password = request.password.toUtf8();
-    valid = valid && password.size() <= 128 && QString::fromUtf8(password) == request.password;
-    for (auto c : password) valid = valid && static_cast<unsigned char>(c) >= 0x20 && c != 0x7f;
+    valid = valid && wire::ValidRoomPassword(request.password);
     // Reuse exactly the socket protocol's canonical name and policy validation.
     auto profile = wire::ValidateClientCommand(Bytes({{"v", 2}, {"type", "profile.update"},
         {"roomId", "admission"}, {"requestId", "admission"},

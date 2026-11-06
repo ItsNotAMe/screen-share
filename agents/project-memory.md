@@ -5,6 +5,31 @@
 
 # Project Memory
 
+## Room entry preflight and editable compact forms - 2026-11-06
+
+Create validates room names with the protocol's existing canonical-name rules
+before allocating a session. UI/admission share the extracted password rule
+(128 UTF-8 bytes, valid Unicode, no ASCII control characters). Invalid drafts
+remain editable and focus moves to the field. Join validates inside its existing
+password popup, with room for wrapped feedback. Its input cap now exceeds the
+admission limit so a long ASCII paste is rejected rather than silently becoming
+a different, admissible password. Valid passwords are never trimmed.
+
+Compact renders exposed squeezed/overlapping Create fields. Minimum-size layout
+constraints on both details and responsive columns propagate content height to
+the scroll area. Tests wait for full-height password/name fields and require
+the password to fit its own card and the viewport at compact/normal sizes.
+
+The full Release build, focused local HTTP fixture and five relevant UI/
+admission/protocol/update checks passed. Coverage rejects invalid drafts without
+sessions/HTTP admissions, accepts boundary Unicode names/passwords, and retries
+inside the Join popup. Rendered feedback was inspected and both packaged
+executables match. One earlier broad run exposed a keyboard proof clicking while
+the button was still disabled after permission acknowledgement; the proof now
+waits for UI readiness before clicking. Final parallel checks pass. This does
+not address the previously recorded viewer-removal resume timeout. No physical
+input, version bump or publication occurred.
+
 ## Fallback file-picker contrast correction - 2026-11-06
 
 The owner identified the unreadable white file panes in the Save As screenshot.

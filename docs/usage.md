@@ -27,6 +27,12 @@ Cancel preserves the invite so you can edit it or try again. Choosing Home also
 cancels the pending attempt and waits for cleanup before returning. The invite
 and other room actions stay locked until that attempt finishes.
 
+Create checks the room name and password before starting a session, keeps invalid
+input for editing and focuses the field that needs attention. Room names allow
+1–64 Unicode characters after normalization and trimming. Long passwords may
+need fewer non-English letters or symbols to fit the service limit. The Join
+password dialog explains invalid input in place without restarting the attempt.
+
 Home and Join show each room's viewer count and limit (for example, **2 / 4**).
 Full rooms show **Full**; a reconnecting host or unavailable directory shows
 **Wait…**. Hover over the disabled action for the reason. The action returns to
