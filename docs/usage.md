@@ -89,6 +89,13 @@ The Controls hint explains when remote control is waiting for video or paused
 after a focus/mode change. Click the video to resume a focus/mode pause; the
 video-wait hint clears after fresh video arrives. Shortcut reminders stay visible.
 
+Viewer playback follows Windows' default output when **Default** is selected,
+including switching to a new default headset or speakers during a room. If the
+output is temporarily unavailable, playback retries automatically while video
+and the room continue. Volume and mute are preserved. An explicitly selected
+device stays selected and is retried without substituting another output. You
+can still choose a different device or use **Retry playback** immediately.
+
 Shared audio negotiates stereo between current versions. At 100% viewer volume,
 the app applies no playback attenuation. System capture from 5.1/7.1 outputs
 preserves front-channel levels, mixes center/surround at -3 dB and omits LFE.

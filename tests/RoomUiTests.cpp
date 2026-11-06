@@ -1848,13 +1848,30 @@ QJsonArray SourceSwitchScenario(const std::string& origin) {
         viewer.findChild<QLabel*>("playbackHealth")->text().contains("Audio output failed"); });
     const auto failureFrames = frames; const auto startsBeforeRetry = audio->outputStarts.load();
     Wait([&] { return frames >= failureFrames + 10; });
-    Check(audio->outputStarts == startsBeforeRetry && viewer.session().status().playback.revision == playbackRevision);
+    Check(viewer.session().status().playback.revision == playbackRevision &&
+        viewer.findChild<QLabel*>("playbackHealth")->text().contains("Retrying automatically"));
+    {
+        viewer.findChild<QPushButton*>("openSessionSettings")->click();
+        const auto settled=std::chrono::steady_clock::now()+250ms;Wait([&]{return std::chrono::steady_clock::now()>=settled;});
+        Check(viewer.findChild<QLabel*>("playbackHealth")->isVisible());
+        for(auto* field:{static_cast<QWidget*>(output),static_cast<QWidget*>(volume),static_cast<QWidget*>(mute),static_cast<QWidget*>(applyPlayback)}) {
+            Check(field->isVisible() && field->height()>=field->sizeHint().height());
+            Check(field->parentWidget()->rect().contains(field->geometry()));
+            if(field!=applyPlayback)Check(!field->geometry().intersects(applyPlayback->geometry()));
+        }
+        if(const auto previews=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!previews.isEmpty()) {
+            QDir().mkpath(previews);Check(viewer.grab().save(QDir(previews).filePath("viewer-output-retrying.png")));
+        }
+    }
     audio->outputUnavailable = false; const auto recoveredAudio = audio->audibleBlocks.load();
-    Wait([&] { return applyPlayback->isEnabled(); }); Check(applyPlayback->text() == "Retry playback"); applyPlayback->click();
+    // No Retry click or room restart: the selected output must recover itself.
     Wait([&] { return !viewer.session().playbackPending() && audio->audibleBlocks >= recoveredAudio + 10 &&
         viewer.session().status().playback.health.state == AudioEndpointState::Running; });
-    Check(audio->outputStarts == startsBeforeRetry + 1 && viewer.session().status().playback.health.failures == 1 &&
+    Check(audio->outputStarts > startsBeforeRetry && viewer.session().status().playback.health.failures == 1 &&
+        viewer.session().status().playback.revision == playbackRevision &&
         viewer.session().status().playback.selected.deviceId == L"replacement");
+    Wait([&]{return applyPlayback->isHidden() && output->isVisible();});
+    viewer.findChild<QPushButton*>("sessionSettingsBack")->click();
     Check(viewer.session().status().roomId == viewerBefore.roomId && viewer.session().status().peerId == viewerBefore.peerId &&
         viewer.session().status().revision == viewerBefore.revision);
     host.session().playbackUpdated = [&](const auto& result) { error = result.error; };

@@ -2,6 +2,19 @@
 
 ## Current WebRTC rooms
 
+Viewer output now follows default-device notifications (render/console role)
+on the existing playout worker. Callbacks only advance an atomic revision;
+registration is retained until unregister, and activation races are not lost.
+Explicit devices do not follow defaults. Output failures use 250 ms exponential
+backoff capped at five seconds, with manual updates taking priority and no
+reopen after Close. Recovery preserves settings/revision, primes with silence
+instead of the in-flight pre-activation block, and then resumes live pulls.
+Paced discard continues during outages; do not add a replay queue or pause video.
+
+Windows ownership/callback rules follow [stream-routing guidance](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing-implementation-considerations)
+and [IMMNotificationClient restrictions](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient).
+The injected PCM/UI proofs do not qualify physical hot-plug or every driver.
+
 The shipping room receiver uses WebRTC A/V synchronization. Audio NetEq now has
 a ten-packet limit (200ms at the negotiated 20ms Opus cadence) and fast
 acceleration. The former upstream 200-packet reserve could retain seconds of

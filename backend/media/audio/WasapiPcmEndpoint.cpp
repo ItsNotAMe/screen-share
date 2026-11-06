@@ -1,6 +1,7 @@
 #include "media/audio/WasapiPcmEndpoint.h"
 #include "SilentPcmCapture.h"
 #include "StereoDownmix.h"
+#include "DefaultPlaybackDeviceNotification.h"
 #include <algorithm>
 #include <cstring>
 #include <deque>
@@ -73,6 +74,8 @@ class Playout final : public PcmPlayoutEndpoint {
 public:
     explicit Playout(std::wstring device) : deviceId_(std::move(device)) {}
     ~Playout() override {
+        if (notificationsRegistered_) enumerator_->UnregisterEndpointNotificationCallback(notifications_.Get());
+        notifications_.Reset(); enumerator_.Reset();
         if (client_) client_->Stop();
         render_.Reset(); client_.Reset();
         if (event_) CloseHandle(event_);
@@ -80,11 +83,19 @@ public:
     }
     void Start() override {
         Check(CoInitializeEx(nullptr, COINIT_MULTITHREADED)); com_ = true;
-        Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;
-        Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator)));
+        Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator_)));
+        if (deviceId_.empty()) {
+            notifications_ = Microsoft::WRL::Make<DefaultPlaybackDeviceNotification>();
+            if (!notifications_) throw std::runtime_error("Audio notification allocation failed");
+            Check(enumerator_->RegisterEndpointNotificationCallback(notifications_.Get()));
+            notificationsRegistered_ = true;
+            // Snapshot before resolving/opening so a change during activation
+            // is noticed on the first write instead of being swallowed.
+            routeRevision_ = notifications_->revision();
+        }
         Microsoft::WRL::ComPtr<IMMDevice> device;
-        if (deviceId_.empty()) Check(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device));
-        else Check(enumerator->GetDevice(deviceId_.c_str(), &device));
+        if (deviceId_.empty()) Check(enumerator_->GetDefaultAudioEndpoint(eRender, eConsole, &device));
+        else Check(enumerator_->GetDevice(deviceId_.c_str(), &device));
         Check(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client_.GetAddressOf())));
         WAVEFORMATEX format{};
         format.wFormatTag = WAVE_FORMAT_PCM; format.nChannels = 2; format.nSamplesPerSec = 48000;
@@ -115,6 +126,9 @@ public:
     void Write(const PcmBlock& block, std::stop_token stop) override {
         uint32_t offset = 0;
         while (offset < 480 && !stop.stop_requested()) {
+            // A route change during a blocked write must also release its owner.
+            // Throw rather than returning unpaced silence to a raw ADM caller.
+            if (DeviceChanged()) throw std::runtime_error("Default audio output changed");
             UINT32 padding;
             Check(client_->GetCurrentPadding(&padding));
             delayMs_ = padding / 48;
@@ -134,8 +148,13 @@ public:
     uint32_t DelayMs() const override { return delayMs_; }
     uint32_t BufferFrames() const override { return bufferFrames_; }
     uint32_t EnginePeriodUs() const override { return enginePeriodUs_; }
+    bool DeviceChanged() const override { return notifications_ && notifications_->revision() != routeRevision_; }
 private:
     std::wstring deviceId_;
+    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator_;
+    Microsoft::WRL::ComPtr<DefaultPlaybackDeviceNotification> notifications_;
+    bool notificationsRegistered_ = false;
+    uint64_t routeRevision_ = 0;
     Microsoft::WRL::ComPtr<IAudioClient> client_;
     Microsoft::WRL::ComPtr<IAudioRenderClient> render_;
     HANDLE event_ = nullptr;

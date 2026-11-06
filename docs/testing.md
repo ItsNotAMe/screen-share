@@ -82,6 +82,22 @@ scrollbars appear or disappear.
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 
+Automatic output recovery is covered in `native-pcm-audio` with an injected
+clock/device. It checks capped 250 ms–5 s backoff, repeat outages, fresh PCM after
+activation, mute/volume retention, unchanged settings revision, manual override,
+pinned-device isolation, failed first writes and Close/cancellation races.
+Default-output callback tests filter capture/communications roles, retain
+loss/arrival notifications and exercise activation races and event coalescing.
+The local-service source-switch UI scenario requires audio to resume without a
+Retry click while video and room identity continue. These are injected endpoint
+and notification tests; they do not qualify physical headset unplug/replug or
+all audio drivers.
+The four-viewer public-session proof reroutes one default output and requires
+continued media for that viewer and the others, with stable room identity and
+playback revision. The UI also keeps output/volume/mute controls reachable during
+failure: Retry must occupy its form row instead of overlaying other fields, and
+its row disappears after automatic recovery.
+
 `room-status-cadence` uses the local Worker and an instrumented four-viewer
 runtime to require about ten diagnostic snapshots per second while media/control
 advance independently. Room UI checks also cover access-badge/icon changes,

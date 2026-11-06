@@ -2,6 +2,12 @@
 
 ## Current UI Direction
 
+- Viewer output failures recover automatically with capped retries while video
+  continues. Explain automatic retry in playback settings and keep manual Retry
+  and device selection usable. Restore Retry with QFormLayout::setRowVisible,
+  matching its initial row hide; showing only the button leaves its old default
+  geometry over the other controls. Check full bounds and non-overlap on failure.
+
 - Home/Join directory rows show occupied/total viewer places. Use readable Full
   or Wait… labels without an action icon when joining is unavailable; provide
   full/host-reconnecting/list-unavailable reasons in tooltips and accessibility.

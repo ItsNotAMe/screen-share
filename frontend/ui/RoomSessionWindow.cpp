@@ -444,7 +444,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     connect(apply_, &QPushButton::clicked, this, [this] {
         error_->clear();streamSaveError_.clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
     });
-    session_.statusChanged = [this, peerDiagnostics, sessionDetails, capacityWarning, host = config.room.host](const auto& value) {
+    session_.statusChanged = [this, peerDiagnostics, sessionDetails, capacityWarning, playbackForm, host = config.room.host](const auto& value) {
         if (value.phase == RoomPhase::Active) roomWasActive_ = true;
         sessionDetails->Update(value);
         phase_->setText(!host && value.phase == RoomPhase::Active && value.failedPeers ? "Connection failed — leave and rejoin" : Phase(value.phase));
@@ -477,10 +477,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         apply_->setEnabled(host && value.phase == RoomPhase::Active);
         const bool playbackEditable = !host && value.phase == RoomPhase::Active && !session_.playbackPending();
         const bool playbackFailed = value.playback.health.state == AudioEndpointState::Failed;
-        playbackHealth_->setText(playbackFailed ? "Audio output failed. Video continues. Retry playback or select another output." :
+        playbackHealth_->setText(playbackFailed ? "Audio output failed. Retrying automatically while video continues. You can retry now or select another output." :
             value.playback.health.state == AudioEndpointState::Running ? "Audio output active." : "Audio output inactive.");
         applyPlayback_->setText(playbackFailed ? "Retry playback" : "Apply playback settings");
-        applyPlayback_->setVisible(playbackFailed);
+        if (playbackForm->isRowVisible(applyPlayback_) != playbackFailed) playbackForm->setRowVisible(applyPlayback_, playbackFailed);
         applyPlayback_->setEnabled(playbackEditable); refreshPlayback_->setEnabled(playbackEditable);
         playbackDevice_->setEnabled(playbackEditable); playbackVolume_->setEnabled(playbackEditable); playbackMuted_->setEnabled(playbackEditable);
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());

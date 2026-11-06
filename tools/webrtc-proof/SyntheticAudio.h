@@ -16,6 +16,7 @@ struct AudioEvidence {
     std::atomic<bool> captureUnavailable{false}, outputUnavailable{false};
     std::atomic<unsigned> captureStarts{0}, outputStarts{0};
     std::atomic<unsigned> liveCaptures{0}, liveOutputs{0};
+    std::atomic<uint64_t> outputRoute{0};
 };
 class ToneCapture final : public screenshare::media::PcmCaptureEndpoint {
 public:
@@ -46,7 +47,8 @@ private:
 };
 class MeasuredPlayout final : public screenshare::media::PcmPlayoutEndpoint {
 public:
-    explicit MeasuredPlayout(std::shared_ptr<AudioEvidence> evidence) : evidence_(std::move(evidence)) { ++evidence_->liveOutputs; }
+    explicit MeasuredPlayout(std::shared_ptr<AudioEvidence> evidence, bool followDefault = true)
+        : evidence_(std::move(evidence)), followDefault_(followDefault), route_(evidence_->outputRoute.load()) { ++evidence_->liveOutputs; }
     ~MeasuredPlayout() override { --evidence_->liveOutputs; }
     void Start() override {
         ++evidence_->outputStarts;
@@ -63,8 +65,11 @@ public:
     }
     uint32_t DelayMs() const override { return 0; }
     uint32_t BufferFrames() const override { return 480; }
+    bool DeviceChanged() const override { return followDefault_ && evidence_->outputRoute.load() != route_; }
 private:
     std::shared_ptr<AudioEvidence> evidence_;
+    bool followDefault_;
+    uint64_t route_;
     std::chrono::steady_clock::time_point next_;
 };
 inline screenshare::media::PcmEndpointFactories SyntheticAudio(std::shared_ptr<AudioEvidence> evidence) {
@@ -83,7 +88,7 @@ inline screenshare::media::AudioSwitchControl::Factory SyntheticAudioSelection(s
 inline screenshare::media::PlaybackControl::Factory SyntheticPlayback(screenshare::media::PlaybackSelection selection, std::shared_ptr<AudioEvidence> evidence) {
     return [selection, evidence]() -> std::unique_ptr<screenshare::media::PcmPlayoutEndpoint> {
         if (selection.deviceId == L"invalid") throw std::runtime_error("Injected playback startup failure");
-        return std::make_unique<MeasuredPlayout>(evidence);
+        return std::make_unique<MeasuredPlayout>(evidence, selection.deviceId.empty());
     };
 }
 }

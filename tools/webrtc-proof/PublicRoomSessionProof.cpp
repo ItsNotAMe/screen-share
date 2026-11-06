@@ -93,6 +93,18 @@ int main(int argc, char** argv) {
         Wait([&] { return granted(viewers[0]->Input(), hostId) == capability; });
         host.Input()->Revoke();
         Wait([&] { return !granted(viewers[0]->Input(), hostId); });
+        const auto beforeRoute = viewers[0]->Status();
+        const auto routeStarts = evidence[0]->audio->outputStarts.load();
+        const auto routeFrames = evidence[0]->frames.load();
+        const auto routeAudio = evidence[0]->audio->audibleBlocks.load();
+        const auto otherRouteAudio = evidence[1]->audio->audibleBlocks.load();
+        ++evidence[0]->audio->outputRoute;
+        Wait([&] { return evidence[0]->audio->outputStarts > routeStarts && evidence[0]->frames >= routeFrames + 5 &&
+            evidence[0]->audio->audibleBlocks >= routeAudio + 5 && evidence[1]->audio->audibleBlocks >= otherRouteAudio + 5; });
+        const auto routed = viewers[0]->Status();
+        Check(routed.roomId == beforeRoute.roomId && routed.peerId == beforeRoute.peerId &&
+            routed.playback.revision == beforeRoute.playback.revision && routed.playback.health.failures == 0 &&
+            host.Status().activePeers == 4);
         const auto beforeAudioFailure = host.Status();
         hostEvidence->audio->captureUnavailable = true;
         Wait([&] {
@@ -110,17 +122,22 @@ int main(int argc, char** argv) {
         auto recoveredCapture = host.SwitchAudioSource({}); Check(Get(recoveredCapture).error == AudioUpdateError::None);
         Wait([&] { for (size_t i = 0; i < evidence.size(); ++i) if (evidence[i]->audio->audibleBlocks < quietAudio[i] + 10) return false; return true; });
         Check(hostEvidence->audio->captureStarts == 2 && host.Status().audio.health.failures == 1 && host.Status().revision == beforeAudioFailure.revision);
+        const auto beforeOutputFailure = viewers[0]->Status();
+        const auto outputStartsBeforeFailure = evidence[0]->audio->outputStarts.load();
         evidence[0]->audio->outputUnavailable = true;
         Wait([&] { return viewers[0]->Status().playback.health.state == AudioEndpointState::Failed; });
         const auto failedOutputFrames = evidence[0]->frames.load();
         const auto healthyAudio = evidence[1]->audio->audibleBlocks.load();
         Wait([&] { return evidence[0]->frames >= failedOutputFrames + 10 && evidence[1]->audio->audibleBlocks >= healthyAudio + 10; });
-        Check(evidence[0]->audio->outputStarts == 1 && host.Status().activePeers == 4);
+        Check(host.Status().activePeers == 4 && viewers[0]->Status().playback.revision == beforeOutputFailure.playback.revision);
         evidence[0]->audio->outputUnavailable = false;
         const auto outputBeforeRetry = evidence[0]->audio->audibleBlocks.load();
-        auto recoveredOutput = viewers[0]->UpdatePlayback({}); Check(Get(recoveredOutput).error == AudioUpdateError::None);
+        // The existing room/output selection must recover without a command.
         Wait([&] { return evidence[0]->audio->audibleBlocks >= outputBeforeRetry + 10; });
-        Check(evidence[0]->audio->outputStarts == 2 && viewers[0]->Status().playback.health.failures == 1);
+        Check(evidence[0]->audio->outputStarts > outputStartsBeforeFailure && viewers[0]->Status().playback.health.failures == 1 &&
+            viewers[0]->Status().playback.health.state == AudioEndpointState::Running &&
+            viewers[0]->Status().playback.revision == beforeOutputFailure.playback.revision &&
+            viewers[0]->Status().peerId == beforeOutputFailure.peerId && viewers[0]->Status().roomId == beforeOutputFailure.roomId);
         const auto beforeAudioSwitch = host.Status();
         auto audioSwitch = host.SwitchAudioSource({AudioKind::None});
         Check(Get(audioSwitch).error == AudioUpdateError::None);

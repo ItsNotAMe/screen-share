@@ -1,5 +1,6 @@
 #include "media/webrtc/PcmAudioDeviceModule.h"
 #include "media/audio/WasapiPcmEndpoint.h"
+#include "media/audio/DefaultPlaybackDeviceNotification.h"
 #include "SyntheticAudio.h"
 #include "AudioProcessingTest.h"
 #include <condition_variable>
@@ -267,17 +268,24 @@ void NoSharedAudio() {
     Require(!endpoint->Read(block, stopped.get_token()), "Silent endpoint ignored cancellation");
     Require(std::all_of(block.begin(), block.end(), [](auto sample) { return sample == 0; }), "Production selector did not silence capture");
 }
-struct PlaybackEvidence { std::atomic<int> sample{0}, live{0}, created{0}; std::atomic<bool> wrongThread{false}, entered{false}, unavailable{false}; };
+struct PlaybackEvidence { std::atomic<int> sample{0}, live{0}, created{0}; std::atomic<bool> wrongThread{false}, entered{false}, unavailable{false}, rerouteOnWrite{false}; };
 class Output final : public screenshare::media::PcmPlayoutEndpoint {
     std::shared_ptr<PlaybackEvidence> evidence_;
     std::thread::id owner_ = std::this_thread::get_id();
     bool fail_, block_, failWrite_;
+    std::shared_ptr<std::atomic<uint64_t>> route_;
+    uint64_t openedRoute_ = 0;
 public:
-    Output(std::shared_ptr<PlaybackEvidence> evidence, bool fail = false, bool block = false, bool failWrite = false)
-        : evidence_(std::move(evidence)), fail_(fail), block_(block), failWrite_(failWrite) { ++evidence_->live; ++evidence_->created; }
+    Output(std::shared_ptr<PlaybackEvidence> evidence, bool fail = false, bool block = false, bool failWrite = false,
+        std::shared_ptr<std::atomic<uint64_t>> route = {})
+        : evidence_(std::move(evidence)), fail_(fail), block_(block), failWrite_(failWrite), route_(std::move(route)) {
+        if (route_) openedRoute_ = route_->load();
+        ++evidence_->live; ++evidence_->created;
+    }
     ~Output() override { if (owner_ != std::this_thread::get_id()) evidence_->wrongThread = true; --evidence_->live; }
     void Start() override { if (fail_ || evidence_->unavailable) throw std::runtime_error("Injected output startup failure"); }
     void Write(const screenshare::media::PcmBlock& block, std::stop_token stop) override {
+        if (route_ && evidence_->rerouteOnWrite.exchange(false)) { ++*route_; throw std::runtime_error("Route changed during write"); }
         if (failWrite_ || evidence_->unavailable) throw std::runtime_error("Injected output write failure");
         if (block_) {
             evidence_->entered = true; std::mutex mutex; std::condition_variable_any wake; std::unique_lock lock(mutex);
@@ -288,7 +296,113 @@ public:
     uint32_t DelayMs() const override { return 7; }
     uint32_t BufferFrames() const override { return 480; }
     uint32_t EnginePeriodUs() const override { return 10000; }
+    bool DeviceChanged() const override { return route_ && route_->load() != openedRoute_; }
 };
+void AutomaticPlaybackRecovery() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    auto notifications = Microsoft::WRL::Make<DefaultPlaybackDeviceNotification>();
+    Require(bool(notifications), "Notification allocation failed");
+    notifications->OnDefaultDeviceChanged(eCapture, eConsole, L"microphone");
+    notifications->OnDefaultDeviceChanged(eRender, eCommunications, L"communications");
+    notifications->OnDeviceStateChanged(L"device", DEVICE_STATE_DISABLED);
+    Require(notifications->revision() == 0, "Unrelated role/device event changed playback routing");
+    notifications->OnDefaultDeviceChanged(eRender, eConsole, nullptr);
+    notifications->OnDefaultDeviceChanged(eRender, eConsole, L"new-output");
+    Require(notifications->revision() == 2, "Default output loss/arrival was ignored");
+
+    auto now = std::chrono::steady_clock::time_point{};
+    auto evidence = std::make_shared<PlaybackEvidence>(); evidence->unavailable = true;
+    PlaybackControl::Factory factory = [evidence] { return std::make_unique<Output>(evidence); };
+    auto control = std::make_shared<PlaybackControl>(PlaybackSelection{L"pinned",25,true}, factory);
+    {
+        ControlledPcmPlayout output(control, [&] { return now; }); output.Start();
+        PcmBlock block; block.fill(2000);
+        Require(evidence->created == 1 && evidence->live == 0, "Unavailable output retained resources");
+        for (auto delay : {250ms,500ms,1000ms,2000ms,4000ms,5000ms,5000ms}) {
+            const auto attempts = evidence->created.load();
+            now += delay - 1ms; output.Write(block, {});
+            Require(evidence->created == attempts, "Output retry spun before its backoff");
+            now += 1ms; output.Write(block, {});
+            Require(evidence->created == attempts + 1 && evidence->live == 0, "Output backoff did not retry/release failed endpoint");
+        }
+        Require(control->Status().revision == 1 && control->Status().health.failures == 1,
+            "Automatic retries changed preferences or multiplied one outage");
+        evidence->unavailable = false; now += 5000ms; output.Write(block, {});
+        Require(evidence->sample == 0 && evidence->live == 1 && control->Status().health.state == AudioEndpointState::Running,
+            "Automatic output recovery failed or replayed transition audio");
+        output.Write(block, {}); Require(evidence->sample == 0, "Recovery lost mute");
+        auto unmute = control->Submit({L"pinned",40,false}, factory); output.Write(block, {});
+        Require(unmute.get().error == AudioUpdateError::None && evidence->sample == 800, "Recovery lost volume/control usability");
+        evidence->unavailable = true; output.Write(block, {});
+        evidence->unavailable = false; now += 250ms; output.Write(block, {});
+        block.fill(4000); output.Write(block, {});
+        Require(evidence->sample == 1600 && control->Status().revision == 2 && control->Status().selected.deviceId == L"pinned" &&
+            control->Status().health.failures == 2, "A second outage lost settings, target or retry reset");
+        evidence->unavailable = true; output.Write(block, {}); const auto attempts = evidence->created.load();
+        control->Close(); now += 30s; output.Write(block, {});
+        std::stop_source stop; stop.request_stop(); output.Write(block, stop.get_token());
+        Require(evidence->created == attempts && control->Status().health.state == AudioEndpointState::Inactive,
+            "Closed/cancelled playback reopened an endpoint");
+    }
+    Require(evidence->live == 0 && !evidence->wrongThread, "Automatic recovery leaked/crossed endpoint ownership");
+
+    evidence = std::make_shared<PlaybackEvidence>(); evidence->unavailable = true;
+    bool closeDuringRecovery = false;
+    PlaybackControl::Factory closingFactory = [&] {
+        if (closeDuringRecovery) control->Close();
+        return std::make_unique<Output>(evidence);
+    };
+    control = std::make_shared<PlaybackControl>(PlaybackSelection{}, closingFactory);
+    {
+        ControlledPcmPlayout output(control, [&] { return now; }); output.Start();
+        closeDuringRecovery = true; evidence->unavailable = false; evidence->sample = -1; now += 250ms;
+        output.Write(PcmBlock{}, {});
+        Require(evidence->live == 0 && evidence->sample == -1 && control->Status().health.state == AudioEndpointState::Inactive,
+            "Close during activation installed/wrote a recovered endpoint");
+    }
+
+    auto route = std::make_shared<std::atomic<uint64_t>>(0);
+    evidence = std::make_shared<PlaybackEvidence>();
+    bool changeDuringStart = true, failFirstWrite = false;
+    PlaybackControl::Factory routed = [&] {
+        auto endpoint = std::make_unique<Output>(evidence, false, false, failFirstWrite, route);
+        if (changeDuringStart) { ++*route; changeDuringStart = false; }
+        return endpoint;
+    };
+    control = std::make_shared<PlaybackControl>(PlaybackSelection{}, routed);
+    {
+        ControlledPcmPlayout output(control, [&] { return now; }); output.Start(); PcmBlock block; block.fill(3000);
+        output.Write(block, {});
+        Require(evidence->created == 2 && evidence->live == 1 && evidence->sample == 0,
+            "Default route change during startup was lost");
+        *route += 3; output.Write(block, {});
+        Require(evidence->created == 3 && control->Status().revision == 1 && control->Status().health.failures == 0,
+            "Default-route notifications were not coalesced or changed preferences");
+        output.Write(block, {}); Require(evidence->sample == 3000, "New route did not receive fresh audio");
+        evidence->rerouteOnWrite = true; output.Write(block, {}); output.Write(block, {});
+        Require(evidence->created == 4 && control->Status().health.failures == 0 && evidence->sample == 0,
+            "Route notification during a write was treated as a device failure");
+        failFirstWrite = true; ++*route; output.Write(block, {});
+        Require(control->Status().health.state == AudioEndpointState::Failed && evidence->live == 0,
+            "Failed route activation write was accepted");
+        failFirstWrite = false;
+        auto pinned = std::make_shared<PlaybackEvidence>();
+        PlaybackControl::Factory pinnedFactory = [pinned] { return std::make_unique<Output>(pinned); };
+        const auto oldAttempts = evidence->created.load();
+        auto manual = control->Submit({L"manual-output",50,false}, pinnedFactory); output.Write(block, {});
+        Require(manual.get().error == AudioUpdateError::None && pinned->sample == 1500,
+            "Manual device selection did not override recovery immediately");
+        ++*route; output.Write(block, {});
+        Require(evidence->created == oldAttempts && pinned->created == 1, "Default changes overrode a pinned device");
+        pinned->unavailable = true; output.Write(block, {});
+        pinned->unavailable = false; now += 250ms; output.Write(block, {}); output.Write(block, {});
+        Require(pinned->created == 2 && pinned->sample == 1500 && evidence->created == oldAttempts &&
+            control->Status().selected.deviceId == L"manual-output", "Recovery fell back from the selected device");
+    }
+    Require(evidence->live == 0 && !evidence->wrongThread, "Routed output leaked ownership");
+    std::cout << "Automatic playback: capped backoff, routing races, fresh PCM, mute/volume, manual override and cancellation passed\n";
+}
 void Playback() {
     using namespace screenshare::media;
     auto evidence = std::make_shared<PlaybackEvidence>();
@@ -373,7 +487,9 @@ void AudioRecovery() {
     PlaybackControl::Factory outputFactory = [evidence] { return std::make_unique<Output>(evidence); };
     auto playback = std::make_shared<PlaybackControl>(PlaybackSelection{}, outputFactory);
     {
-        ControlledPcmPlayout output(playback); output.Start(); block.fill(2000);
+        // Keep this manual-retry proof independent of wall-clock load; automatic
+        // backoff and recovery are exercised with an advanced clock separately.
+        ControlledPcmPlayout output(playback, [] { return std::chrono::steady_clock::time_point{}; }); output.Start(); block.fill(2000);
         Require(playback->Status().health.state == AudioEndpointState::Failed && evidence->live == 0, "Initial output failure killed recovery or retained device");
         for (int i = 0; i < 10; ++i) output.Write(block, {});
         Require(evidence->created == 1 && evidence->sample == 0 && output.BufferFrames() == 0, "Discard path retried, played or buffered failed output");
@@ -610,7 +726,7 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
         if (argc == 2 && std::string(argv[1]) == "--scheduling") { SchedulingUnderLoad(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
-        InactiveAudioSelection(); OutputClockCadence(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); Run(argc == 2); return 0;
+        InactiveAudioSelection(); OutputClockCadence(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); AutomaticPlaybackRecovery(); Run(argc == 2); return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

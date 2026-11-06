@@ -5,6 +5,38 @@
 
 # Project Memory
 
+Owner direction (2026-11-06): prioritize substantial core features, reliability
+and measured performance improvements ahead of small UI/copy polish during
+open-ended continuation work. Deliver one meaningful improvement at a time and
+commit each separately. Address related UI defects when they block that feature.
+
+## Automatic viewer audio continuity - 2026-11-06
+
+Viewer default output now follows render/console endpoint notifications using a
+nonblocking atomic callback. The playout owner retains registration until
+unregister and catches changes during activation or a blocked write. Explicit
+device selections remain pinned. Controlled output retries failures with 250 ms
+exponential backoff capped at five seconds, keeping decoded audio paced/discarded
+instead of queued during outages. Recovery validates with silence then resumes
+fresh PCM, retaining volume, mute, selection and settings revision. Manual
+updates take priority and Close/cancellation prevent further activation.
+
+Playback settings explain automatic retry. Outage rendering exposed an existing
+Retry button using its default 640x480 geometry over other fields: its row was
+hidden with QFormLayout but restored through QWidget only. Status now restores
+the row consistently, with visibility changes guarded to avoid layout churn.
+Output/volume/mute remain reachable and Retry disappears after recovery.
+
+The final full Release build and all 42 CTests passed (139.63 s). Deterministic
+PCM proofs cover capped backoff, repeated failure, startup/write notification
+races, coalescing, mute/gain, manual override, pinned output and Close/stop races.
+The four-viewer public API proof reroutes and recovers one viewer while others
+continue, without changing room identity or playback revision. Older manual-only
+retry expectations were updated. A focused source-switch UI run passed with the
+outage drawer rendered and inspected; packaged CLI/UI hashes match executables.
+Notifications/devices were injected: physical headset hot-plug and all-driver
+qualification remain unverified. No version bump or publication occurred.
+
 ## Persistent remote-control pause guidance - 2026-11-06
 
 The viewer's existing Controls hint now reports actual forwarding pauses while
