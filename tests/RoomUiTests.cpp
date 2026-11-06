@@ -15,6 +15,8 @@
 #include "shared/RoomLink.h"
 #include "shared/StreamPreferencesJson.h"
 #include "shared/RoomStreamDiagnostics.h"
+#include "shared/RoomDiagnosticReport.h"
+#include "shared/PresentationDiagnostics.h"
 #include <QClipboard>
 #include "ui/RoomBrowserWindow.h"
 #include "ui/RoomApplication.h"
@@ -768,14 +770,50 @@ void ViewerRemovalScenario(const std::string& origin) {
         duringStall.front().granted==screenshare::input::Gamepad && target.session().status().phase==RoomPhase::Active);
     target.session().frameReady=std::move(resumeVideo);
     Wait([&]{return sink->buttons==1 && target.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
-    auto pausedPreferences=host.session().status().stream.preferences;pausedPreferences.videoPaused=true;host.session().apply(pausedPreferences);
-    Wait([&]{return target.session().status().stream.remoteShare.state==HostShareState::VideoPaused && sink->buttons==0;});
-    const auto duringPause=target.session().input()->Read();
-    Check(duringPause.size()==1 && duringPause.front().permission==grantedBeforePause.front().permission &&
-        duringPause.front().granted==screenshare::input::Gamepad);
-    pausedPreferences.videoPaused=false;host.session().apply(pausedPreferences);
-    Wait([&]{return target.session().status().stream.remoteShare.state==HostShareState::Live && sink->buttons==1 &&
-        target.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
+    const int pauseCycles=std::clamp(qEnvironmentVariableIntValue("SCREENSHARE_PAUSE_CYCLES"),3,30);
+    for(int cycle=0;cycle<pauseCycles;++cycle) {
+        auto pausedPreferences=host.session().status().stream.preferences;pausedPreferences.videoPaused=true;host.session().apply(pausedPreferences);
+        Wait([&]{return target.session().status().stream.remoteShare.state==HostShareState::VideoPaused && sink->buttons==0;});
+        const auto duringPause=target.session().input()->Read();
+        Check(duringPause.size()==1 && duringPause.front().permission==grantedBeforePause.front().permission &&
+            duringPause.front().granted==screenshare::input::Gamepad);
+        const auto holdUntil=std::chrono::steady_clock::now()+std::chrono::milliseconds(std::clamp(qEnvironmentVariableIntValue("SCREENSHARE_PAUSE_HOLD_MS"),0,5000));
+        Wait([&]{return std::chrono::steady_clock::now()>=holdUntil;});
+        // Exercise resumption while another window owns focus, too. The
+        // fixture's several windows do not guarantee activation across pause.
+        // Fresh video must not bypass the real application's focus protection.
+        if(cycle%2) {
+            survivor.activateWindow();
+            Wait([&]{return QApplication::activeWindow()==&survivor && sink->buttons==0;});
+        }
+        pausedPreferences.videoPaused=false;host.session().apply(pausedPreferences);
+        try {
+            Wait([&]{return target.session().status().stream.remoteShare.state==HostShareState::Live &&
+                target.findChild<QWidget*>("roomVideo")->accessibleDescription().isEmpty();});
+            const auto afterResume=target.session().input()->Read();
+            Check(afterResume.size()==1 && afterResume.front().permission==grantedBeforePause.front().permission &&
+                afterResume.front().granted==screenshare::input::Gamepad);
+            if(QApplication::activeWindow()!=&target) {
+                Check(sink->buttons==0);
+                target.activateWindow();
+                Wait([&]{return QApplication::activeWindow()==&target;});
+            }
+            Wait([&]{return sink->buttons==1;});
+        } catch (...) {
+            auto* video=static_cast<VideoFrameWidget*>(target.findChild<QWidget*>("roomVideo"));
+            const auto frames=target.session().frameStatistics();const auto presented=video->presentationStats();
+            const QJsonObject evidence{{"cycle",cycle},{"activeTarget",QApplication::activeWindow()==&target},
+                {"sinkButtons",int(sink->buttons.load())},{"targetFrames",int(targetFrames)},
+                {"received",qint64(frames.received)},{"delivered",qint64(frames.delivered)},
+                {"presented",qint64(presented.presentedFrames)},{"fresh",video->hasFreshFrame()},
+                {"videoStatus",video->accessibleDescription()},{"renderer",PresentationDiagnosticsJson(presented.renderer)},
+                {"inputHint",target.findChild<QLabel*>("gameMouseHint")->text()},
+                {"host",RoomDiagnosticReport(host.session().status(),host.session().input()->Read())},
+                {"viewer",RoomDiagnosticReport(target.session().status(),target.session().input()->Read())}};
+            std::cerr<<"PAUSE_RESUME "<<QJsonDocument(evidence).toJson(QJsonDocument::Compact).constData()<<'\n';
+            throw;
+        }
+    }
     const auto retainedInput=target.session().input();
     std::string hostId;for(const auto& member:target.session().status().members)if(member.host)hostId=member.peerId;
     uint64_t permission=0;for(const auto& state:retainedInput->Read())if(state.peer==hostId)permission=state.permission;

@@ -406,30 +406,33 @@ public:
                 std::none_of(delivery.viewers.begin(), delivery.viewers.end(), [&](const auto& viewer) {
                     return viewer.viewer == entry.generation && viewer.connectionGeneration == entry.generation;
                 })) failed_.insert(it->first);
-            if (!entry.removing && identity_.host && entry.negotiation->ready() && entry.attemptedRevision != settingsRevision_) {
-                entry.attemptedRevision = settingsRevision_;
-                entry.settingsError = entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, settingsRevision_,
-                    AllocateViewerVideo(options_.preferences, allocatedViewers_));
-                if (entry.settingsError == SettingsApplyError::None) {
-                    // RTP limits alone leave GoogCC's probing maximum at its
-                    // 5 Mbps fallback. Match the connection budget to this
-                    // viewer's video allowance plus the reserved audio budget.
-                    // Never reset its start estimate or impose a bitrate floor.
-                    webrtc::BitrateSettings transport;
-                    transport.max_bitrate_bps = entry.settings.appliedVideoBitrateBps() + kViewerAudioAllowanceBps;
-                    if (!entry.peer->connection->SetBitrate(transport).ok()) {
-                        // RTP/source settings have committed: do not continue
-                        // with a partially applied transport contract.
-                        entry.settingsError = SettingsApplyError::SenderRejected;
-                        failed_.insert(it->first);
+            if (!entry.removing && !failed_.contains(it->first) && identity_.host && entry.negotiation->ready()) {
+                if (const auto applied = entry.settings.Update(*entry.sender, *entry.source, options_.preferences, settingsRevision_, now,
+                        AllocateViewerVideo(options_.preferences, allocatedViewers_))) {
+                    entry.attemptedRevision = settingsRevision_;
+                    entry.settingsError = *applied;
+                    if (entry.settingsError == SettingsApplyError::None) {
+                        // RTP limits alone leave GoogCC's probing maximum at its
+                        // 5 Mbps fallback. Match the connection budget to this
+                        // viewer's video allowance plus the reserved audio budget.
+                        // Never reset its start estimate or impose a bitrate floor.
+                        webrtc::BitrateSettings transport;
+                        transport.max_bitrate_bps = entry.settings.appliedVideoBitrateBps() + kViewerAudioAllowanceBps;
+                        if (!entry.peer->connection->SetBitrate(transport).ok()) {
+                            // RTP/source settings have committed: do not continue
+                            // with a partially applied transport contract.
+                            entry.settingsError = SettingsApplyError::SenderRejected;
+                            failed_.insert(it->first);
+                        }
                     }
+                    entry.settingsRejected = entry.settingsError != SettingsApplyError::None && !entry.settings.pending();
+                    // An RTP update rejection preserves the previously working sender.
+                    // Only exhaust the initial contract after bounded recovery.
+                    if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
                 }
-                entry.settingsRejected = entry.settingsError != SettingsApplyError::None;
-                // An RTP update rejection preserves the previously working sender.
-                // An initial rejection cannot satisfy the initial stream contract.
-                if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
             }
-            entry.deliverFrames->store(identity_.host && !entry.removing && !failed_.contains(it->first) &&
+            // Stop new capture delivery on pause even if RTP rejected the update.
+            entry.deliverFrames->store(identity_.host && !options_.preferences.videoPaused && !entry.removing && !failed_.contains(it->first) &&
                 entry.negotiation->ready() && status && !status->peerClosed &&
                 status->state == PeerLifecycleState::Connected && entry.settings.revision() != 0 &&
                 entry.settings.appliedVideoBitrateBps() > 0, std::memory_order_relaxed);

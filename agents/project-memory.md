@@ -12,6 +12,51 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Recover transient viewer settings rejection - 2026-11-07
+
+NativeRoomRuntime previously marked a settings revision attempted before asking
+WebRTC to accept it and never retried a rejection. A rejected resume could leave
+the previously applied paused sender/source indefinitely. ViewerStreamSettings
+now polls per-peer recovery on existing coordinator ticks: up to three attempts,
+250 ms apart, refreshing RTP parameters each time. New revisions bypass backoff;
+success and terminal errors stop polling work. No new threads or queued updates.
+An initial sender rejection retains the peer only during this bounded recovery;
+permanent initial failure still retires it. A partially committed transport-cap
+failure remains terminal. Existing working settings survive permanent rejection.
+Capture delivery also gates directly on requested video pause, even if the RTP
+pause update is rejected. This stops new capture submissions, not already queued
+network packets. Pending retries remain pending in stream status until exhausted.
+
+Deterministic fake-sender/real-source tests cover transient resume rejection,
+fresh parameter reads, retry timing and bounds, another independent viewer,
+immediate superseding pause, permanent rejection, structural/validation/stale
+errors and recovery during initial settings. The UI removal scenario now repeats
+three pause/resume cycles by default (3..30 via SCREENSHARE_PAUSE_CYCLES), can
+hold each pause up to 5 s via SCREENSHARE_PAUSE_HOLD_MS, and prints redacted
+runtime/input plus renderer/freshness/focus evidence if resume times out.
+
+Forty-eight baseline cycles (including twelve held 1.5 s) and twelve updated
+short-pause cycles passed. The first full suite then reproduced the timeout
+(45/46 passed, 319.33 s). Its new failure evidence records fresh presented video,
+Live telemetry, an empty video status, both host settings applied, the controller
+grant retained, and an inactive target with the explicit click-to-resume hint.
+The fixture was waiting for held input without restoring focus; the application's
+focus protection correctly kept input neutral. The test now waits for fresh video
+separately, checks that permission survived, confirms neutral input while inactive
+and reactivates the target before expecting controller output. Alternate cycles
+deliberately focus the survivor to exercise this protection deterministically.
+Application focus protection is unchanged. This diagnoses the captured fixture
+failure; it does not establish the state of older failures without diagnostics.
+The injected rejection regression independently establishes the recovery gap
+fixed in production. No physical input, native-window presentation or actual
+network error-frequency claim.
+
+With the focus-aware fixture, twelve cycles held paused for 1.5 s passed
+(34.74 s), including deliberate focus changes and restoration of the same grant.
+Release `all` build and CLI/UI packaged-binary hash checks passed. No version
+bump or publication; unreleased. The final sequential full suite passed all
+46 checks (301.57 s), including the focus-aware viewer-removal scenario.
+
 ## Copy decoded visible pixels directly from MF - 2026-11-07
 
 Cropped CPU decoder output previously allocated/copied the whole coded frame,

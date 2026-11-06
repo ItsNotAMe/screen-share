@@ -1,6 +1,7 @@
 #pragma once
 #include "CaptureVideoSource.h"
 #include "api/rtp_sender_interface.h"
+#include <chrono>
 
 namespace screenshare::media {
 // Coordinator thread only; one instance per viewer generation. Revision success
@@ -8,6 +9,27 @@ namespace screenshare::media {
 // separately identify the revision observed while processing frames.
 class ViewerStreamSettings final {
 public:
+    using Clock = std::chrono::steady_clock;
+    // Poll on the coordinator tick. Refresh RTP parameters on each attempt;
+    // a newer request supersedes any backoff immediately. Three attempts cap
+    // recovery work and keep permanent rejection visible to the caller.
+    std::optional<SettingsApplyError> Update(webrtc::RtpSenderInterface& sender, CaptureVideoSource& source,
+        const StreamPreferences& preferences, uint64_t revision, Clock::time_point now,
+        std::optional<int> videoAllowance = {}) {
+        if (revision != attemptedRevision_ || attempts_ == 0) {
+            attemptedRevision_ = revision;
+            attempts_ = 0;
+            pending_ = true;
+            retryAt_ = now;
+        }
+        if (!pending_ || now < retryAt_) return {};
+        const auto error = Apply(sender, source, preferences, revision, videoAllowance);
+        ++attempts_;
+        pending_ = error == SettingsApplyError::SenderRejected && attempts_ < 3;
+        retryAt_ = now + std::chrono::milliseconds(250);
+        return error;
+    }
+    bool pending() const noexcept { return pending_; }
     SettingsApplyError Apply(webrtc::RtpSenderInterface& sender, CaptureVideoSource& source,
                              const StreamPreferences& preferences, uint64_t revision, std::optional<int> videoAllowance = {}) {
         StreamLimits limits{};
@@ -47,6 +69,10 @@ public:
     int appliedVideoBitrateBps() const noexcept { return appliedVideoBitrateBps_; }
     const std::optional<StreamPreferences>& preferences() const noexcept { return preferences_; }
 private:
+    uint64_t attemptedRevision_ = 0;
+    unsigned attempts_ = 0;
+    bool pending_ = false;
+    Clock::time_point retryAt_{};
     uint64_t revision_ = 0;
     int appliedVideoBitrateBps_ = 0;
     std::optional<StreamPreferences> preferences_;
