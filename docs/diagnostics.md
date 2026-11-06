@@ -6,6 +6,14 @@ Both endpoints should use the same test build. Reports identify the executable
 by SHA-256, not only the displayed version. A peer's `correlation` matches the
 other endpoint's `selfCorrelation` within the same room without exporting IDs.
 
+In **Details**, choose **Save report** and select a destination in the Save As
+dialog. The suggested JSON filename includes the host/viewer role and UTC time;
+exports start in Documents unless a diagnostic report path was configured. The
+last selected destination is remembered for that session, and replacing a file
+requires confirmation. Cancel keeps the previous result. Media continues while
+the dialog is open; closing the session dismisses it without saving. **Open log
+folder** continues to open the application's log location independently.
+
 `remoteShare` records a viewer's fresh host-advertised video/capture state and its
 local receipt age. After three seconds without a new valid message, `state` is
 null and `stale` is true. Older hosts leave it absent (`state: null`, `stale:

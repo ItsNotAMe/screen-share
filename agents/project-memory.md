@@ -5,6 +5,26 @@
 
 # Project Memory
 
+## Diagnostic report Save As - 2026-11-06
+
+Details now opens an asynchronous platform Save As dialog instead of writing
+directly to a preset location. Default JSON suggestions use role/UTC time in
+Documents; an explicit diagnostic path remains the initial suggestion. Each
+session remembers its selected destination, keeps overwrite confirmation and
+disables duplicate exports while the picker is open. Cancellation preserves
+feedback, and session Close rejects open pickers before draining. Reports are
+snapshotted on selection using the existing redaction/atomic writer. Open log
+folder remains independent; ended-session copy no longer promises exports there.
+
+The full Release build, focused host/viewer export fixture and four relevant
+UI/report/update checks passed. Tests cover suggestions/configured paths, chosen
+locations, JSON suffix, cancel/reopen, duplicate actions, dismissal on Close and
+a selected-path write-failure race with retry. Real local-service video frames
+continue while the picker is open. Compact/normal result renders and the Qt
+fallback picker were inspected; the portable archive matches both executables.
+Automation forces nonnative dialogs and does not verify Windows native picker
+interaction. No version bump or publication occurred.
+
 ## Room directory availability and capacity - 2026-11-06
 
 Home/Join now retain the directory's viewer limit and typed room availability.

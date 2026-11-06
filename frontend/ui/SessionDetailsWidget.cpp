@@ -167,7 +167,7 @@ void SessionDetailsWidget::Refresh() {
     else if(host_ && !peer)notice=peer_ && peer_->count()?"Waiting for measurements from this viewer.":"A viewer's measurements will appear here after they connect.";
     else if(host_ && peer->transportSampleStale)notice="Connection measurements are stale. Waiting for a fresh sample.";
     else notice=host_?"Live measurements for the selected viewer.":"Live measurements from this computer.";
-    if(status_.phase==RoomPhase::Stopped)notice="The session has ended. Saved reports remain available in the log folder.";
+    if(status_.phase==RoomPhase::Stopped)notice="The session has ended. You can still save a diagnostic report.";
     else if(status_.phase==RoomPhase::Stopping)notice="Ending the session. The log folder remains available.";
     note_->setText(notice);
     QString video=active?"Waiting for video":"Inactive";

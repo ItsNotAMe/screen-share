@@ -51,6 +51,7 @@
 #include <QAbstractItemView>
 #include <QScrollBar>
 #include <QDialog>
+#include <QFileDialog>
 #include <QAction>
 #include <QMenu>
 #include <QScrollArea>
@@ -365,6 +366,61 @@ public:
     bool Receive(const std::string&, RoomPeerSignal) override { return true; }
     std::shared_future<void> BeginStop() override { stopping_ = true; return barrier_; }
 };
+QFileDialog* OpenReportExport(RoomSessionWindow& window) {
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    auto* save = window.findChild<QPushButton*>("saveRoomReport"); Check(save && save->isEnabled());
+    save->click();
+    auto* dialog = window.findChild<QFileDialog*>("saveRoomReportDialog");
+    Check(dialog && dialog->isVisible() && dialog->acceptMode() == QFileDialog::AcceptSave);
+    Check(!save->isEnabled() && dialog->defaultSuffix() == "json" && !dialog->testOption(QFileDialog::DontConfirmOverwrite));
+    save->click(); Check(window.findChildren<QFileDialog*>("saveRoomReportDialog").size() == 1);
+    return dialog;
+}
+void AcceptReportExport(RoomSessionWindow& window, const QString& path) {
+    auto* dialog = OpenReportExport(window);
+    dialog->selectFile(path); Check(QMetaObject::invokeMethod(dialog, "accept"));
+    Wait([&] { return window.findChild<QPushButton*>("saveRoomReport")->isEnabled(); });
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+}
+void ReportExportScenario() {
+    QTemporaryDir output; Check(output.isValid());
+    for (bool hosting : {true, false}) {
+        RoomSessionConfig config; config.room.origin = "http://127.0.0.1:1"; config.room.host = hosting;
+        config.room.roomId = "test-room"; config.room.nickname = "Private nickname";
+        if (hosting) config.reportFile = output.filePath("host.json");
+        RoomSessionWindow window(config, {}, true); window.show();
+        window.findChild<QPushButton*>("sessionDetails")->click();
+        auto* feedback = window.findChild<QLabel*>("roomReportResult"); const auto initial = feedback->text();
+        auto* dialog = OpenReportExport(window);
+        const auto suggested = dialog->selectedFiles().value(0);
+        Check(hosting ? suggested == config.reportFile : QFileInfo(suggested).fileName().startsWith("screenshare-viewer-"));
+        Check(suggested.endsWith(".json"));
+        if (const auto previews = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !previews.isEmpty()) {
+            QDir().mkpath(previews); QCoreApplication::processEvents();
+            Check(dialog->grab().save(QDir(previews).filePath(QString("report-save-dialog-%1.png").arg(hosting ? "host" : "viewer"))));
+        }
+        dialog->selectFile(output.filePath("cancelled.json")); dialog->reject();
+        Check(feedback->text() == initial && !QFileInfo::exists(config.reportFile) && !QFileInfo::exists(output.filePath("cancelled.json")));
+        const auto destination = output.filePath(hosting ? "chosen-host" : "chosen-viewer");
+        AcceptReportExport(window, destination);
+        QFile saved(destination + ".json"); Check(saved.open(QIODevice::ReadOnly));
+        const auto bytes = saved.readAll(); Check(QJsonDocument::fromJson(bytes).isObject() && !bytes.contains("Private nickname"));
+        Check(!QFileInfo::exists(config.reportFile) && feedback->text().startsWith("Saved diagnostic report:"));
+        const auto previousResult = feedback->text(), previousPath = feedback->toolTip();
+        dialog = OpenReportExport(window); Check(dialog->selectedFiles().value(0) == destination + ".json");
+        dialog->reject(); Check(feedback->text() == previousResult && feedback->toolTip() == previousPath);
+        for (const auto size : {QSize(740,600), QSize(1000,820)}) {
+            window.resize(size); QCoreApplication::processEvents(); Check(feedback->isVisible());
+            if (const auto previews = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !previews.isEmpty()) {
+                QDir().mkpath(previews);
+                Check(window.grab().save(QDir(previews).filePath(QString("report-export-%1-%2.png").arg(hosting ? "host" : "viewer").arg(size.width()))));
+            }
+        }
+        QPointer<QFileDialog> pending = OpenReportExport(window);
+        window.close(); Wait([&] { return !window.isVisible() && !window.session().running(); });
+        Check((!pending || !pending->isVisible()) && feedback->text() == previousResult);
+    }
+}
 void DirectoryStateScenario() {
     int joins = 0;
     RoomDirectoryWidget directory({}, [&](const QString& id) { Check(id == "room-one"); ++joins; });
@@ -2299,6 +2355,7 @@ void NativeResolutionScenario(const std::string& origin) {
 }
 int main(int argc, char** argv) {
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString&) {});
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs); // Deterministic file-picker interaction in UI proofs.
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
     QApplication::setStyle("Fusion");
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
@@ -2317,7 +2374,7 @@ int main(int argc, char** argv) {
         RoomEndNoticePolicyChecks();
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
         if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback")) {
-            DirectoryStateScenario();DirectoryAvailabilityScenario();SourcePickerSearchScenario();AdmissionFeedbackScenario();
+            DirectoryStateScenario();DirectoryAvailabilityScenario();ReportExportScenario();SourcePickerSearchScenario();AdmissionFeedbackScenario();
         }
         WindowKeyboardControlScenario();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
@@ -2387,17 +2444,20 @@ int main(int argc, char** argv) {
                 Check(host.grab().save(QDir(output).filePath(QString("host-muted-before-join-%1.png").arg(size.width()))));
             }
         }
-        host.findChild<QPushButton*>("saveRoomReport")->click();
+        AcceptReportExport(host, config.reportFile);
         { QFile saved(config.reportFile); Check(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll();
           Check(!bytes.contains("UiHost") && !bytes.contains("UI media"));
           Check(host.findChild<QLabel*>("roomReportResult")->text().startsWith("Saved diagnostic report:"));
           Check(reveal->isEnabled()&&QFileInfo::exists(reveal->property("reportPath").toString())); }
         Check(QFile::remove(config.reportFile) && reveal->isEnabled());
         // A failed save must not gate access to the log directory.
-        Check(QDir().mkpath(config.reportFile));host.findChild<QPushButton*>("saveRoomReport")->click();
+        Check(QDir().mkpath(config.reportFile));
+        auto* failedExport = OpenReportExport(host);
+        // The destination can become unusable after a file picker validates it.
+        failedExport->fileSelected(config.reportFile); failedExport->reject();
         Check(host.findChild<QLabel*>("roomReportResult")->text().startsWith("Could not save") && reveal->isEnabled());
         Check(QDir().rmdir(config.reportFile));
-        host.findChild<QPushButton*>("saveRoomReport")->click();
+        AcceptReportExport(host, config.reportFile);
         Check(!host.findChild<QLabel*>("roomReportResult")->property("reportError").toBool() && QFileInfo::exists(config.reportFile));
         config.room.host = false; config.room.roomId = host.session().status().roomId; config.room.nickname = "UiHost";
         auto viewerAudio = std::make_shared<proof::AudioEvidence>();
@@ -2416,6 +2476,10 @@ int main(int argc, char** argv) {
             present(std::move(frame));
         };
         Wait([&] { return original >= 20 && viewerAudio->quietStreak >= 20; });
+        auto* viewerExport = OpenReportExport(viewer);
+        const auto framesDuringExport = original;
+        Wait([&] { return original >= framesDuringExport + 10; }); // The picker must not stop media/event processing.
+        viewerExport->reject();
         Check(viewerAudio->audibleBlocks == 0 && hostAudio->captureStarts == 0 && hostAudio->liveCaptures == 0);
         Wait([&] { return emptyRoomMute->isEnabled(); }); emptyRoomMute->click();
         Wait([&] { return original >= 20 && viewerAudio->audibleBlocks >= 20; });

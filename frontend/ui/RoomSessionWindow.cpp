@@ -26,6 +26,9 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QFile>
+#include <QFileDialog>
+#include <QDateTime>
+#include <QStandardPaths>
 #include <QFormLayout>
 #include <QJsonDocument>
 #include <QLabel>
@@ -200,27 +203,39 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         const bool opened=OpenUiLogFolder(folder,QDesktopServices::openUrl);
         reportFeedback(opened?"Opened the log folder.":"Could not open the log folder. Check its location and folder permissions.",!opened);
     });
-    connect(exportReport, &QPushButton::clicked, this, [this, reportResult, reportFeedback, showReport, configured = config.reportFile] {
-        const auto file = configured.isEmpty() ? "room-v2-" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".json" : configured;
-        const auto path = ResolveUiReportPath(file);
-        const auto input = session_.input();
-        auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
-        report["decodedFrameHandoff"] = FrameQueueDiagnostics(session_.frameStatistics());
-        const auto presentation = video_->presentationStats();
-        auto renderer = PresentationDiagnosticsJson(presentation.renderer);
-        renderer["presented"] = qint64(presentation.presentedFrames);
-        renderer["dropped"] = qint64(presentation.droppedFrames);
-        renderer["queued"] = int(presentation.queuedFrames);
-        renderer["averagePresentMs"] = presentation.averagePresentMs;
-        renderer["maxPresentMs"] = presentation.maxPresentMs;
-        renderer["errors"] = qint64(presentation.presentErrors);
-        renderer["recoveries"] = qint64(presentation.recoveries);
-        renderer["terminal"] = presentation.terminal;
-        report["presentation"] = renderer;
-        const bool saved=WriteRoomDiagnosticReport(path, report);
-        reportFeedback(saved ? "Saved diagnostic report: " + QFileInfo(path).fileName() : "Could not save diagnostic report. Check the destination is writable.",!saved);
-        reportResult->setToolTip(QDir::toNativeSeparators(path));
-        showReport->setProperty("reportPath",saved?path:QString());
+    const auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    reportExportPath_ = config.reportFile.isEmpty() ? QDir(documents.isEmpty() ? DefaultUiReportsDirectory() : documents).filePath(
+        QString("screenshare-%1-%2.json").arg(config.room.host ? "host" : "viewer", QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss'Z'"))) :
+        ResolveUiReportPath(config.reportFile);
+    connect(exportReport, &QPushButton::clicked, this, [this, exportReport, reportResult, reportFeedback, showReport] {
+        auto* dialog = new QFileDialog(this, "Save diagnostic report", reportExportPath_);
+        dialog->setObjectName("saveRoomReportDialog"); dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setAcceptMode(QFileDialog::AcceptSave); dialog->setFileMode(QFileDialog::AnyFile);
+        dialog->setNameFilter("JSON reports (*.json)"); dialog->setDefaultSuffix("json");
+        exportReport->setEnabled(false);
+        connect(dialog, &QDialog::finished, exportReport, [exportReport] { exportReport->setEnabled(true); });
+        connect(dialog, &QFileDialog::fileSelected, this, [this, reportResult, reportFeedback, showReport](const QString& path) {
+            reportExportPath_ = path;
+            const auto input = session_.input();
+            auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
+            report["decodedFrameHandoff"] = FrameQueueDiagnostics(session_.frameStatistics());
+            const auto presentation = video_->presentationStats();
+            auto renderer = PresentationDiagnosticsJson(presentation.renderer);
+            renderer["presented"] = qint64(presentation.presentedFrames);
+            renderer["dropped"] = qint64(presentation.droppedFrames);
+            renderer["queued"] = int(presentation.queuedFrames);
+            renderer["averagePresentMs"] = presentation.averagePresentMs;
+            renderer["maxPresentMs"] = presentation.maxPresentMs;
+            renderer["errors"] = qint64(presentation.presentErrors);
+            renderer["recoveries"] = qint64(presentation.recoveries);
+            renderer["terminal"] = presentation.terminal;
+            report["presentation"] = renderer;
+            const bool saved=WriteRoomDiagnosticReport(path, report);
+            reportFeedback(saved ? "Saved diagnostic report: " + QFileInfo(path).fileName() : "Could not save diagnostic report. Check the destination is writable.",!saved);
+            reportResult->setToolTip(QDir::toNativeSeparators(path));
+            showReport->setProperty("reportPath",saved?path:QString());
+        });
+        dialog->open();
     });
     auto* roomForm = new QFormLayout;
     roomForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -1120,6 +1135,7 @@ StreamPreferences RoomSessionWindow::ReadPreferences() const {
     return p;
 }
 void RoomSessionWindow::closeEvent(QCloseEvent* event) {
+    for (auto* dialog : findChildren<QFileDialog*>("saveRoomReportDialog")) dialog->reject();
     if(exitFullscreen_)exitFullscreen_();
     if (session_.running()) { closing_ = true; session_.stop(); event->ignore(); }
     else { event->accept(); if (closed) closed(); }

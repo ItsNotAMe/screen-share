@@ -23,6 +23,14 @@ off-screen geometry simulates a missing monitor, without physically unplugging o
 
 Build tests with the same native toolchain as the application; see [build](build.md).
 
+Report export checks use Qt's nonnative file picker for deterministic automation.
+They cover configured/suggested filenames, a chosen destination, JSON suffix,
+cancellation, remembered paths, duplicate actions and session-close dismissal
+for both roles. The main room UI flow requires video frames to continue while
+the picker is open. An injected selected-path race covers write failure and
+retry; redaction and independent log-folder access remain checked. Native
+Windows picker interactions are not exercised by the offscreen proof.
+
 Room UI admission feedback uses a local HTTP fixture to cover full, closed,
 missing and rate-limited rooms, plus an ambiguous server failure. It checks typed
 session errors, preserved invites, retry availability, no password prompt for
