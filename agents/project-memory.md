@@ -12,6 +12,42 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Renew presentation recovery after healthy playback - 2026-11-07
+
+Presentation previously allowed only three GPU rebuilds across a viewer's whole
+session. A fourth isolated device fault stayed terminal even after healthy video
+between outages. A deterministic regression reproduced this against 82b2fc4.
+Thirty successfully presented incoming frames now renew the attempt budget.
+FramePresentationSession identifies fresh-frame work explicitly; Update/redraw
+success and busy/occluded/minimized/unavailable frames cannot earn health credit.
+Any recoverable device fault clears that health count. The existing 250 ms
+drop-only backoff, failed-frame discard, supported DXGI errors, nonrecoverable
+error handling and terminal exhaustion remain. Diagnostic recoveries stay
+cumulative; only Clear resets that total and can revive terminal presentation.
+
+Supplied-time policy checks recover five isolated outages, then require three
+29-frame recoveries to exhaust on the fourth unstable fault. Redraws/skips cannot
+cross the boundary, and elapsed time alone cannot revive terminal presentation.
+The shared UI/CLI session checks redraw/skip isolation. The actual widget worker
+with an injected renderer recovers five outages with 30 accepted incoming frames
+each, cumulative counters, correct ownership and the one-frame queue setting.
+
+The native Windows UI test was extended with four healthy-separated losses and
+real GPU resource recreation. Two local attempts could not reach the existing
+first-frame assertion: DXGI reported occlusion, zero accepted frames, no renderer
+errors and roughly 925 occluded drops. A test-window visibility experiment did
+not help and was removed. These runs did not reach the new native assertions;
+they do not qualify GPU recovery or physical driver loss. The independent policy,
+shared-session and offscreen-widget checks pass. No physical input/virtual-pad
+allocation or graphics driver reset. This is reliability work, not a CPU or
+end-to-end latency claim.
+
+Release `all` build passed. All 46 application CTests passed sequentially
+(306.68 s), including the expanded policy/shared-session/widget checks (6.89 s),
+CLI, four-viewer media/input and room UI. Packaged CLI/UI hashes match.
+Native GPU recovery remains unqualified for the occlusion reason above.
+No version bump or publication; this improvement is unreleased.
+
 ## Keep software video alive after a completed encode stall - 2026-11-07
 
 The software encoder treated a successful encode taking over 500 ms as a fatal

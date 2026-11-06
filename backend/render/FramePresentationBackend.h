@@ -67,7 +67,8 @@ private:
                     ++statistics_.errors; statistics_.lastError = E_FAIL;
                     statistics_.outcome = screenshare::PresentationOutcome::Failed; throw;
                 }
-            }, [&] { if (backend_) backend_->Reset(); });
+            }, [&] { if (backend_) backend_->Reset(); },
+                screenshare::media::PresentationRecovery::Clock::now(), frame);
             if (frame) {
                 using enum screenshare::PresentationOutcome;
                 if (!invoked) { statistics_.outcome = Backoff; ++statistics_.backoffDrops; }

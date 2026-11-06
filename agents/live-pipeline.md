@@ -7,6 +7,17 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 presentation recovery: three rebuild attempts now renew after 30
+successfully presented incoming frames, replacing the session-lifetime cap.
+FramePresentationSession passes whether work contains incoming pixels; Update/
+redraw success and skipped output cannot earn health credit. A device fault
+clears the healthy count. Recovery totals stay cumulative until Clear, while
+four rapid/short-recovery faults remain terminal with the existing 250 ms
+drop-only backoff. Five isolated outages and exact 29/30-frame boundaries are
+checked with supplied time; the shared session checks redraw/skip isolation.
+The native Windows UI proof also covers four healthy-separated injected losses
+with actual GPU resources. Physical driver loss/hangs remain unqualified.
+
 2026-11-07 completed software-encode stalls: producing one valid packet after
 more than 500 ms no longer marks that encoder failed. Drop late output, preserve
 the live transform/latest pending frame and force the next fresh picture to an

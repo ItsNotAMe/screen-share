@@ -222,7 +222,18 @@ and sends process-loopback audio through Opus alongside H.264. The received audi
 is measured without physical replay to avoid feedback. Physical playout is
 tested separately; other capture devices/modes and full A/V timing remain unverified.
 
-Receiver presentation recovery uses `PresentationRecovery.h`: typed DXGI errors, owner-thread resource release, 250 ms drop-only backoff and at most three rebuilds per presenter lifetime. A fourth error is terminal. No failed frame is retained. Initial attachment and explicit Clear failures still propagate; session startup/shutdown must handle them. Capture/encoder recovery remains pending. Policy tests run by default; `PresentationRecoveryTest --gpu` requires a desktop session and tests injected loss with real resource recreation, not actual driver removal.
+Receiver presentation recovery uses `PresentationRecovery.h`: typed DXGI errors,
+owner-thread resource release, 250 ms drop-only backoff and three rebuilds before
+30 successfully presented incoming frames renew the budget. Redraws and skipped
+presents cannot renew it; a fourth unstable error or a nonrecoverable error is
+terminal. Recovery totals remain cumulative until explicit Clear. No failed frame
+is retained. Initial attachment and explicit Clear failures still propagate;
+session startup/shutdown must handle them. Application `video-frame-input` checks
+healthy renewal, exact 29/30-frame boundaries, skipped output, redraw isolation
+and terminal behavior. The native Windows UI proof additionally injects four
+healthy-separated losses with real GPU resource recreation and no readback.
+`PresentationRecoveryTest --gpu` also requires a desktop session. These injected
+faults do not qualify physical driver removal or native calls that never return.
 
 Device recovery boundary: capture must call MfHardwareSession::RetireDevice before DesktopCapturer::RebuildWindowDevice and before publishing new-device frames. The rebuild retains the original WGC item/closure subscription, supports only owned window capture, and stops on reconstruction failure. Encoders permanently reject old-device native frames without readback and request an IDR from fresh software input. Device retirement is shared across viewers and also detected via GetDeviceRemovedReason. This is an explicit primitive, not automatic session recovery. A coordinator must own replacement-device generations, invalidate all affected sessions, bound retries and suppress old-generation callbacks. Real device removal remains untested.
 

@@ -269,6 +269,20 @@ void NativePresentationRecovery() {
     const auto presented = widget.presentedFrameCount();
     Wait([&] { send(); return widget.presentedFrameCount() >= presented + 3; });
     Check(widget.presentationStats().recoveries == 0);
+    // Four isolated losses must recover in one widget/session once actual fresh
+    // GPU presents demonstrate healthy playback. Keep totals for diagnostics.
+    for (unsigned outage = 1; outage <= 4; ++outage) {
+        const auto healthyGoal = widget.presentedFrameCount() + 30;
+        Wait([&] { send(); return widget.presentedFrameCount() >= healthyGoal; });
+        *fail = true;
+        Wait([&] { send(); return widget.presentationStats().recoveries == outage; });
+        const auto recoveredGoal = widget.presentedFrameCount() + 3;
+        Wait([&] { send(); return widget.presentedFrameCount() >= recoveredGoal; });
+        Check(!widget.presentationStats().terminal && widget.presentationStats().maximumFrameLatency == 1);
+    }
+    Check(widget.presentationStats().presentErrors == 8);
+    widget.clearFrame(); Wait([&] { return !widget.presentationStats().terminal; });
+    Wait([&] { send(); return widget.presentationStats().recoveries == 0 && widget.presentationStats().maximumFrameLatency == 1; });
     // The presenter sees a native child surface, while only its parent shell is
     // minimized. Drops must avoid GPU work/recovery and restore on a fresh frame.
     const auto errors = widget.presentationStats().presentErrors;

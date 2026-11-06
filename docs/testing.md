@@ -148,6 +148,20 @@ checks exact delivered-frame counts and no drops, forces fresh GPU readback
 wrappers per input frame, and hashes encoded output. See [performance](performance.md)
 for the paired-run command, results and limitations.
 
+`video-frame-input` also checks five isolated renderer outages separated by 30
+successful incoming presents. Recovery totals remain cumulative. Twenty-nine
+valid frames between losses still exhaust the three-rebuild budget; old-frame
+redraws, busy/occluded/minimized/unavailable output and backoff cannot renew it.
+Terminal failure stays terminal until Clear, and nonrecoverable errors retain
+their behavior. Supplied time keeps the policy boundary deterministic; the shared
+UI/CLI session separately checks redraw isolation with an injected backend.
+The actual widget worker also recovers five healthy-separated outages with an
+injected renderer, preserving cumulative totals and the one-frame queue setting.
+`RoomUiWindowsTests` additionally runs four healthy-separated injected losses
+through the actual native presentation worker and GPU resource recreation,
+retaining the one-frame queue and zero readback. It injects an HRESULT after GPU
+work, without resetting the physical graphics driver.
+
 `video-frame-input` checks the two-second presentation freshness boundary with
 supplied timestamps, verifies that resize/redraw and skipped presents cannot
 refresh old video, and holds a render across Clear to reject late input mapping
