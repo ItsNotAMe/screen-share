@@ -23,6 +23,17 @@ off-screen geometry simulates a missing monitor, without physically unplugging o
 
 Build tests with the same native toolchain as the application; see [build](build.md).
 
+`decoder-adapter-lifecycle` runs real MF software decoding and injected
+unavailable-GPU startup fallback. A valid encoded picture with an undersized
+dimension declaration triggers deterministic output-validation failure. Five
+outages separated by 30 valid output frames must recover without reconfiguration;
+29 frames between failures must still exhaust the three-restart limit. Checks
+retain the 250 ms backoff and keyframe requirement, RTP/NTP association, immediate
+output, visible cropping, dynamic resize and repeated release/configure cycles.
+`DecoderAdapterTests --gpu` additionally exercises generated-input hardware
+retirement, software fallback, malformed-input exhaustion and retained textures.
+Neither mode captures the desktop or qualifies the reported laptop driver issue.
+
 Report export checks use Qt's nonnative file picker for deterministic automation.
 They cover configured/suggested filenames, a chosen destination, JSON suffix,
 cancellation, remembered paths, duplicate actions and session-close dismissal

@@ -106,14 +106,21 @@ so the allocation bound is distinct from the negotiated visible-frame bound.
 
 Unique MF sample IDs associate delayed output with the original RTP/NTP values,
 including RTP wraparound. Errors clear associations, quarantine hardware and
-require a keyframe after 250 ms, with at most three software rebuild attempts per
-configuration. Release discards delayed output; it never emits callbacks
-from a retired stream. The short High-profile lifecycle test observes one delayed
-decoded frame per cycle, discarded on release. This must be included in future
-pipeline latency measurements.
+require a keyframe after 250 ms, with at most three software rebuild attempts
+before sustained healthy decoding. Thirty validated output frames renew that
+budget, so isolated failures cannot exhaust recovery over a long room. Accepted
+input without output does not renew it; hardware quarantine is never reset by
+healthy software output. Consumer retention drops count as valid decoding.
+Release discards delayed output; it never emits callbacks from a retired stream.
+The low-latency lifecycle checks require each complete picture to produce output
+without waiting for a subsequent input picture.
 
 `MfDecoderAdapterTest --gpu` exercises texture ownership, aperture/planes, startup
 fallback, pressure, retired-device recovery and exhausted malformed-input retries.
+The application build also provides `DecoderAdapterTests`; its ordinary CTest
+checks repeated software recovery, restart exhaustion, resize, CPU output and
+injected unavailable-GPU startup fallback. Its `--gpu` option runs the same
+generated-input hardware checks, without capturing the desktop.
 The actual v2 UI/CLI scenarios require native frames and hardware telemetry while
 resizing. See [runtime ownership](../../../docs/architecture.md); physical latency and field acceptance stay open.
 

@@ -246,7 +246,67 @@ void ResizeWithoutReconfigure(bool gpu = false) {
         Require(sink.firstRetained->pixels().size() == 320 * 180 * 3 / 2, "Old GPU frame did not survive resize");
     }
 }
+void RepeatedRecovery() {
+    // A valid encoded picture with an undersized declaration deterministically
+    // fails output validation, without relying on malformed-input driver behavior.
+    screenshare::H264StreamEncoder encoder;
+    screenshare::H264StreamEncoderConfig config; config.width = 320; config.height = 180;
+    encoder.Start(config);
+    screenshare::CapturedFrame frame; frame.width = frame.sourceWidth = 320; frame.height = frame.sourceHeight = 180;
+    frame.nv12Pixels.assign(320 * 180 * 3 / 2, std::byte{128});
+    std::fill_n(frame.nv12Pixels.begin(), 320 * 180, std::byte{80});
+    auto packets = encoder.EncodeFrame(frame);
+    Require(packets.size() == 1 && packets.front().isKeyframe, "Recovery fixture requires one complete keyframe");
+    webrtc::EncodedImage key;
+    key.SetEncodedData(webrtc::EncodedImageBuffer::Create(
+        reinterpret_cast<const uint8_t*>(packets.front().bytes.data()), packets.front().bytes.size()));
+    key.ntp_time_ms_ = 123456; key._frameType = webrtc::VideoFrameType::kVideoFrameKey;
+    key._encodedWidth = 320; key._encodedHeight = 180;
+    auto bad = key; bad._encodedWidth = bad._encodedHeight = 16;
+    auto delta = key; delta._frameType = webrtc::VideoFrameType::kVideoFrameDelta;
+    screenshare::media::MfVideoDecoderFactory factory;
+    auto decoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    webrtc::VideoDecoder::Settings settings; settings.set_codec_type(webrtc::kVideoCodecH264);
+    settings.set_max_render_resolution({320, 180});
+    Sink sink; sink.width = 320; sink.height = 180;
+    unsigned sequence = 0;
+    auto good = [&] {
+        auto image = key; image.SetRtpTimestamp(++sequence * 3000);
+        sink.expected.push_back(image.RtpTimestamp());
+        const auto before = sink.count;
+        Require(decoder->Decode(image, 0) == WEBRTC_VIDEO_CODEC_OK, "Stable video exhausted lifetime decoder recovery budget");
+        Require(sink.expected.empty() && sink.count == before + 1, "Recovered decoder did not deliver fresh video");
+    };
+    auto fail = [&] {
+        const auto before = sink.count;
+        Require(decoder->Decode(bad, 0) == WEBRTC_VIDEO_CODEC_ERROR, "Invalid output declaration did not trigger recovery");
+        Require(sink.count == before, "Failed decode published output");
+        Require(decoder->Decode(delta, 0) == WEBRTC_VIDEO_CODEC_ERROR, "Recovery accepted a delta frame");
+        Require(decoder->Decode(key, 0) == WEBRTC_VIDEO_CODEC_ERROR, "Recovery ignored restart backoff");
+        std::this_thread::sleep_for(std::chrono::milliseconds(270));
+    };
+    Require(decoder->Configure(settings), "Repeated recovery configure failed");
+    decoder->RegisterDecodeCompleteCallback(&sink);
+    // More outages than the restart limit, separated by sustained real output.
+    for (unsigned outage = 0; outage < 5; ++outage) {
+        fail();
+        for (unsigned i = 0; i < 30; ++i) good();
+    }
+    Require(sink.count == 150, "Repeated recovery lost healthy output");
+    decoder->Release();
+    Require(decoder->Configure(settings), "Recovery pressure reconfigure failed");
+    decoder->RegisterDecodeCompleteCallback(&sink);
+    // Even 29 valid pictures between faults must not reopen indefinitely.
+    for (unsigned restart = 0; restart < 3; ++restart) {
+        fail();
+        for (unsigned i = 0; i < 29; ++i) good();
+    }
+    fail();
+    Require(decoder->Decode(key, 0) == WEBRTC_VIDEO_CODEC_UNINITIALIZED, "Unstable video reset bounded restart protection");
+    decoder->Release();
+    std::cout << "Five isolated decoder outages recovered; unstable output retains the three-restart limit, keyframe gate and backoff.\n";
+}
 int main(int argc, char** argv) {
-    try { ResizeWithoutReconfigure(); Run(false); Run(true, true); if (argc > 1 && std::string(argv[1]) == "--gpu") { ResizeWithoutReconfigure(true); Run(true); Recovery(); } return 0; }
+    try { RepeatedRecovery(); ResizeWithoutReconfigure(); Run(false); Run(true, true); if (argc > 1 && std::string(argv[1]) == "--gpu") { ResizeWithoutReconfigure(true); Run(true); Recovery(); } return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

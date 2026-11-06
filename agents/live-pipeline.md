@@ -7,6 +7,16 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-06 decoder recovery: the three-software-rebuild budget now renews after
+30 validated output frames instead of exhausting across the entire configuration.
+Failures reset the healthy count; accepted input without output cannot renew it.
+Retention-pressure drops count as successful decoding. The keyframe gate, 250 ms
+backoff and session hardware quarantine remain. Deterministic output-validation
+faults cover five healthy-separated recoveries and repeated 29-frame unstable
+recoveries that still exhaust the budget. DecoderAdapterTests is now a regular
+application CTest; generated GPU checks remain explicit. This does not establish
+a fix for the laptop's Section-handle growth or hardware output deadlines.
+
 2026-11-06 direct NV12 planes: the software adapter now calls EncodeNv12 with
 bounded plane views, copying directly into the owned MF input sample. The
 temporary per-frame packing vector is gone. Input geometry/strides/minimal last

@@ -12,6 +12,32 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Renew decoder recovery after sustained valid output - 2026-11-06
+
+The MF decoder previously exhausted its three software-rebuild attempts across
+an entire configuration, even when long stretches of healthy video separated
+failures. Thirty validated output frames now renew the budget; any decode error
+clears that healthy count. Accepted/buffered input alone cannot renew it. Valid
+GPU output dropped for consumer retention pressure still counts. The 250 ms
+backoff, keyframe requirement and session-wide hardware quarantine remain.
+
+A real MF regression test uses a complete valid picture with an undersized
+declaration to fail output validation deterministically. It failed on the old
+implementation at the fourth isolated recovery. The fix recovers five outages
+with 30 real output frames between them (150 callbacks); an additional scenario
+with only 29 valid frames between failures still exhausts the three-restart
+budget. No corrupted driver behavior or physical capture is required.
+
+DecoderAdapterTests is now part of ordinary application CTest, bringing the
+suite to 45 tests. Its generated-input --gpu checks also pass: texture pressure,
+retirement, software fallback, malformed-input exhaustion, quarantine across
+reconfiguration/replacement, cropping and retained-frame lifetime. The reported
+laptop Section-handle growth and hardware encoder deadlines remain unresolved.
+
+Release `all` build and all 45 CTests passed (151.39 s); explicit generated GPU
+decoder checks passed, and packaged CLI/UI hashes match. No version bump or
+publication. This is a recovery correctness change, with no performance claim.
+
 ## Follow default host audio routing - 2026-11-06
 
 Default System audio and Microphone capture now register Windows console-role
