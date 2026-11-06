@@ -12,6 +12,50 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Preserve control grants through temporary lag - 2026-11-06
+
+Owner report: released v1.0.12 revoked controller permission when the captured
+game/capture lagged. Two code paths could do this: the 300 ms input watchdog
+fully revoked grants, and expired desktop capture geometry failed mixed-input
+ownership health after one second. The exact physical game incident was not
+reproduced. A regression reproduced watchdog revocation against the old code.
+
+Sink::Pause now neutralizes held input on the input owner while retaining grants,
+devices and slots. Native GamepadSink verifies a zero-state submission without
+Destroy; DesktopSink releases held keys/buttons and delegates pad neutralization.
+After a gap, the host rotates the existing Permission epoch with unchanged
+capabilities, clearing pre-gap queues. Viewer cache clearing/poller recreation
+requires a fresh report, including unchanged physical state; heartbeat alone
+cannot resume a paused sink. Receipt time is independent of delayed backend
+execution, so fresh queued updates prevent an unnecessary watchdog pause.
+
+Actual backend failure, failed/unsupported Pause, source invalidation/change,
+disconnect, explicit release/revoke and reliable-channel pressure retain full
+release/revocation. Source identity survives stale geometry; desktop injection
+and new grants still require fresh Read(), while ownership uses Identity().
+This avoids stale injection and preserves exclusive ownership during capture lag.
+Host UI keeps grant icons checked and shows Input paused; reports include paused.
+
+A second regression caught viewer Release crossing renewal: pending withdrawal
+is now forwarded under the renewed epoch. Unsent zero-capability acknowledgements
+are retained before a newer explicit grant, preserving quick release/regrant.
+Host revoke also wins over a blocked Pause completion. No wire format changes;
+use updated clients at both ends for the complete withdrawal/fresh-video behavior.
+
+Injected tests cover three repeated gaps, allocation/slot retention, stale-token
+rejection, no cache/heartbeat replay, unchanged-report recovery, a delayed owner,
+failed Pause and concurrent revoke. A four-viewer public-room proof stalls runtime
+advancement and resumes transported input without another host grant. The UI
+fixture checks two gaps, checked icons, neutral state and automatic fresh-reader
+resumption; its paused controller card was rendered/inspected. No physical input,
+native virtual-device allocation or physical game/driver-lag qualification.
+
+Release `all` build passed. All 46 CTests passed sequentially (299.20 s),
+including UI, viewer removal, four-viewer input/media and presentation checks.
+The focused controller UI scenario also passed, and the paused grant card was
+visually checked with the existing dark theme. Packaged CLI/UI hashes match.
+No version bump/publication; this fix is unreleased. No performance claim.
+
 ## Keep rooms open after capture source failure - 2026-11-06
 
 A failed acquisition/rebuild or exhausted capture recovery previously terminated

@@ -138,7 +138,9 @@ The host can grant mouse, keyboard and controller permissions independently,
 with or without a viewer request. Room admission does not grant input. The host
 can revoke each permission; the panic shortcut is Ctrl+Alt+Shift+F12. In the UI,
 focus loss releases held input and pauses forwarding without cancelling grants.
-Disconnect, source changes and stale input retain release safeguards. Keyboard
+Temporary input gaps neutralize held controls while keeping the host's grants;
+fresh updates resume control automatically. Disconnect and source changes still
+cancel grants. Keyboard
 control works for display and window sharing. Window mouse and keyboard input pauses
 while the shared window is not focused, releases held input, and resumes with the
 same permission when focus returns. See [controller support](controller-support.md).

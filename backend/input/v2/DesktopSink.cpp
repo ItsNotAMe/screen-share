@@ -26,10 +26,11 @@ bool DesktopSink::Healthy(const std::string& peer) {
     const auto it=owners_.find(peer);if(it==owners_.end())return false;
     const auto& owner=it->second;
     const bool healthy=(!(owner.capabilities&Gamepad) || pads_->Healthy(peer)) &&
-        (!owner.device || (target_->Read().generation==owner.generation && owner.device->Healthy()));
-    // The service polls health even without incoming events. Release held input
-    // on focus loss, but retain ownership so returning to the window resumes it.
-    if(healthy && owner.device && !owner.device->Focused())owner.device->ReleaseHeldInput();
+        (!owner.device || (target_->Identity().generation==owner.generation && owner.device->Healthy()));
+    // Release held input on focus loss or stale geometry, retaining identity and
+    // ownership. Actual invalidation/generation changes still fail health.
+    if(healthy && owner.device && (!owner.device->Focused() || target_->Read().generation!=owner.generation))
+        owner.device->ReleaseHeldInput();
     return healthy;
 }
 bool DesktopSink::Apply(const std::string& peer,const Event& event) {
@@ -38,11 +39,16 @@ bool DesktopSink::Apply(const std::string& peer,const Event& event) {
     if(event.kind==Kind::Pad)return (owner.capabilities&Gamepad) && pads_->Apply(peer,event);
     const uint8_t required=event.kind==Kind::Key?Keyboard:Mouse;
     if(!owner.device || !(owner.capabilities&required) || event.sourceGeneration!=owner.generation)return false;
-    if(!owner.device->Focused()) {
+    if(!owner.device->Focused() || target_->Read().generation!=owner.generation) {
         owner.device->ReleaseHeldInput();
         return true; // Consume and discard; never replay input after focus returns.
     }
     return owner.device->Apply(event);
+}
+bool DesktopSink::Pause(const std::string& peer) {
+    const auto it=owners_.find(peer);if(it==owners_.end())return false;
+    if(it->second.device)it->second.device->ReleaseHeldInput();
+    return !(it->second.capabilities&Gamepad) || (pads_ && pads_->Pause(peer));
 }
 void DesktopSink::Release(const std::string& peer) noexcept {
     const auto it=owners_.find(peer);if(it==owners_.end()) {if(pads_)pads_->Release(peer);return;}

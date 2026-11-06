@@ -84,17 +84,21 @@ int main(int argc, char** argv) {
         Wait([&] { return evidence[0]->responseFrames > 0; });
         inputResponseMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - inputStart).count();
 #endif
-        // Stop runtime advancement, not the input owner: watchdog still releases.
+        // Stop transport advancement, not the input owner: neutralize held input
+        // while keeping the host's grant, then resume with a fresh epoch.
+        uint64_t preGap=0;for(const auto& p:host.Input()->Read())if(p.peer==controllerId)preGap=p.permission;
         evidence[0]->pauseAdvance = true;
         hostEvidence->pauseAdvance = true;
-        Wait([&] { return !granted(host.Input(), controllerId) && hostEvidence->input->releases > 0; });
+        Wait([&] {for(const auto& p:host.Input()->Read())if(p.peer==controllerId)return p.paused && p.granted==capability;return false;});
+        Check(hostEvidence->input->paused>0 && granted(viewers[0]->Input(),hostId)==capability);
         Check(!hostEvidence->input->pressed);
         hostEvidence->pauseAdvance = false;
         evidence[0]->pauseAdvance = false;
-        Wait([&] { return !granted(viewers[0]->Input(), hostId); });
-        Check(!viewers[0]->Input()->Submit(hostId, press));
-        Check(host.Input()->Grant(controllerId, capability));
-        Wait([&] { return granted(viewers[0]->Input(), hostId) == capability; });
+        Wait([&] {for(const auto& p:viewers[0]->Input()->Read())if(p.peer==hostId)return p.granted==capability && p.permission>preGap;return false;});
+        Check(viewers[0]->Input()->Submit(hostId,press));
+        Wait([&]{return hostEvidence->input->pressed.load();});
+        press.down=false;Check(viewers[0]->Input()->Submit(hostId,press));
+        Wait([&]{return !hostEvidence->input->pressed.load();});press.down=true;
         host.Input()->Revoke();
         Wait([&] { return !granted(viewers[0]->Input(), hostId); });
 #ifndef SCREENSHARE_WINDOWS_ROOM_PROOF

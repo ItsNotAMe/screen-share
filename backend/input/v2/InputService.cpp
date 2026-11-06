@@ -62,8 +62,13 @@ struct Service::Impl {
     std::map<std::string, Peer> peers;
     std::jthread worker;
     Impl(bool h, std::shared_ptr<Sink> s) : host(h), sink(std::move(s)) {}
-    void Clear(Peer& p) {
+    void Clear(Peer& p, bool keepReleaseAck = false) {
+        std::optional<Message> ack;
+        if (keepReleaseAck) for (const auto& queued:p.outgoing)
+            if (queued.event.kind==Kind::Permission && !queued.event.capabilities) ack=queued;
+        p.status.paused = false;
         p.incoming.clear(); p.outgoing.clear();
+        if (ack) p.outgoing.push_back(std::move(*ack));
         p.incomingState = {}; p.outgoingState = {}; p.lastPad.reset(); p.blocked = {};
         p.status.queueWaitUs.reset(); p.status.backendApplyUs.reset(); p.measured = {};
     }
@@ -95,6 +100,24 @@ struct Service::Impl {
         if(p.incoming.size()+p.outgoing.size()<64)return true;
         Revoke(p,Reason::Backpressure); return false;
     }
+    void Pause(Peer& p, std::unique_lock<std::mutex>& lock) {
+        const auto permission = p.status.permission;
+        const auto peer = p.status.peer;
+        bool neutral = false;
+        try { neutral = sink && External(lock,[&] {return sink->Pause(peer);}); } catch (...) {}
+        if (p.status.permission != permission || closed) return;
+        if (!neutral) { Revoke(p,Reason::Watchdog); return; }
+        uint8_t denied = 0;
+        for (const auto& queued:p.outgoing) if (queued.event.kind==Kind::RequestDenied) denied|=queued.event.capabilities;
+        Clear(p,true);
+        p.status.paused = true; p.status.reason = Reason::Watchdog;
+        // Keep the host's grant and allocation, but invalidate every pre-gap
+        // packet. Existing clients clear cached input and restart polling when
+        // they receive a new permission epoch with the same capabilities.
+        p.status.permission = ++nextPermission;
+        Event e; e.kind=Kind::Permission; e.capabilities=p.status.granted; Queue(p,e);
+        if (denied) {e.kind=Kind::RequestDenied;e.capabilities=denied;Queue(p,e);}
+    }
     void Apply(Peer& p, const Pending& pending, Clock::time_point now, std::unique_lock<std::mutex>& lock) {
         const auto& m=pending.message; const auto& e=m.event;
         if(!p.status.granted || m.permission!=p.status.permission || now-pending.received>=300ms ||
@@ -113,6 +136,7 @@ struct Service::Impl {
             });
             if (p.status.permission != permission || closed) return;
             if(applied) {
+                p.status.paused = false; p.status.reason = Reason::None;
                 p.status.queueWaitUs = std::chrono::duration_cast<std::chrono::microseconds>(began - pending.received).count();
                 p.status.backendApplyUs = std::chrono::duration_cast<std::chrono::microseconds>(completed - began).count();
                 p.measured = completed; ++p.status.applied; return;
@@ -154,7 +178,7 @@ struct Service::Impl {
                 }
                 uint8_t denied=0;
                 for(const auto& queued:p.outgoing)if(queued.event.kind==Kind::RequestDenied)denied|=queued.event.capabilities;
-                Clear(p); p.status.granted=caps; p.status.requested&=~caps; p.status.grantPending=false;
+                Clear(p,true); p.status.granted=caps; p.status.requested&=~caps; p.status.grantPending=false;
                 p.status.permission=++nextPermission; p.status.reason=Reason::None;
                 p.padSlot=slot; p.lastInput=Clock::now();
                 Event e; e.kind=Kind::Permission; e.capabilities=caps; Queue(p,e);
@@ -163,8 +187,7 @@ struct Service::Impl {
             if(host && p.status.granted) {
                 const auto permission = p.status.permission;
                 bool healthy=false; try { healthy=sink && External(lock,[&] {return sink->Healthy(id);}); } catch(...) {}
-                if (p.status.permission == permission && p.status.granted &&
-                    (!healthy || Clock::now()-p.lastInput>=300ms)) Revoke(p,healthy?Reason::Watchdog:Reason::Backend);
+                if (p.status.permission == permission && p.status.granted && !healthy) Revoke(p,Reason::Backend);
             }
             // Bounded independent owner; no rendering, signaling HTTP or stats work.
             while(host && !p.incoming.empty()) {
@@ -173,6 +196,9 @@ struct Service::Impl {
             for(auto& state:p.incomingState) if(state) {
                 auto pending=std::move(*state); state.reset(); if(host)Apply(p,pending,Clock::now(),lock);
             }
+            // Drain fresh queued input first: a slow owner iteration must not
+            // mistake its own scheduling delay for loss of the viewer's input.
+            if(host && p.status.granted && !p.status.paused && Clock::now()-p.lastInput>=300ms) Pause(p,lock);
             if(!host && p.status.ready && p.status.granted && now-p.lastSend>=100ms) {
                 if((p.status.granted & Gamepad) && p.lastPad) Queue(p,*p.lastPad);
                 Event e; e.kind=Kind::Heartbeat; Queue(p,e); p.lastSend=now;
@@ -246,9 +272,12 @@ bool Service::Grant(const std::string& id,uint8_t caps) {
     std::lock_guard lock(impl_->mutex); auto it=impl_->peers.find(id);
     if(impl_->closed || !impl_->host || !impl_->sink || it==impl_->peers.end() || !it->second.status.ready || !caps || (caps&~impl_->allowed))return false;
     auto& p=it->second; const auto requested=uint8_t(p.status.requested & ~caps);
-    std::deque<Message> denied;
-    for(const auto& queued:p.outgoing)if(queued.event.kind==Kind::RequestDenied)denied.push_back(queued);
-    impl_->Revoke(p,Reason::Revoked,false); p.outgoing=std::move(denied);
+    std::deque<Message> preserved;
+    // A pending release acknowledgement must reach the viewer before a newer
+    // explicit grant; otherwise it is indistinguishable from watchdog renewal.
+    for(const auto& queued:p.outgoing)if(queued.event.kind==Kind::RequestDenied ||
+        (queued.event.kind==Kind::Permission && !queued.event.capabilities))preserved.push_back(queued);
+    impl_->Revoke(p,Reason::Revoked,false); p.outgoing=std::move(preserved);
     p.status.requested=requested; p.grant=caps; p.status.grantPending=true; return true;
 }
 void Service::Deny(const std::string& id, uint8_t caps) {
@@ -302,6 +331,7 @@ void Service::Receive(const std::string& id,bool reliable,std::span<const uint8_
             return;
         }
         if(kind!=Kind::Permission || m->permission<=p.status.permission) {++p.status.rejected;return;}
+        const bool withdrawing=p.status.revokePending;
         uint8_t queuedRequested=0;
         for(const auto& queued:p.outgoing)if(queued.event.kind==Kind::Request)queuedRequested|=queued.event.capabilities;
         const auto requested=uint8_t(m->event.capabilities ? p.status.requested & ~m->event.capabilities :
@@ -309,6 +339,11 @@ void Service::Receive(const std::string& id,bool reliable,std::span<const uint8_
         seen=m->sequence; impl_->Clear(p); p.status.permission=m->permission; p.status.granted=m->event.capabilities;
         p.status.requested=requested;
         p.status.revokePending=false;
+        if(withdrawing && p.status.granted) {
+            // Renewal may cross a viewer's unsent release. Withdraw under the
+            // new epoch too; never turn recovery into renewed local consent.
+            impl_->Revoke(p,Reason::Revoked); return;
+        }
         if(const auto unsent=uint8_t(queuedRequested&requested);unsent) {
             Event request;request.kind=Kind::Request;request.capabilities=unsent;impl_->Queue(p,request);
         }
@@ -321,6 +356,9 @@ void Service::Receive(const std::string& id,bool reliable,std::span<const uint8_
     if(!p.status.granted || m->permission!=p.status.permission) {++p.status.rejected;return;}
     seen=m->sequence;
     Impl::Pending pending{std::move(*m),Clock::now()};
+    // Receipt and device execution are separate clocks. A slow backend may
+    // leave fresh authorized input queued; that is not loss of the viewer.
+    if((Required(kind)&p.status.granted)==Required(kind))p.lastInput=pending.received;
     if(reliable) {if(impl_->Capacity(p))p.incoming.push_back(std::move(pending));}
     else {
         auto& slot=p.incomingState[StateSlot(kind)];

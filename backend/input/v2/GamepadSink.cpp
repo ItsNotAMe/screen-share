@@ -42,6 +42,10 @@ void GamepadSink::Release(const std::string& peer) noexcept {
     it->second.device->Neutralize(); it->second.device->Destroy(); pads_.erase(it);
     if (pads_.empty()) backend_.reset();
 }
+bool GamepadSink::Pause(const std::string& peer) {
+    Event neutral; neutral.kind=Kind::Pad;
+    return Apply(peer,neutral); // Verify submission; retain the same virtual pad/slot.
+}
 bool GamepadSink::Healthy(const std::string& peer) {
     const auto it = pads_.find(peer);
     if (it == pads_.end()) return false;

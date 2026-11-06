@@ -634,6 +634,59 @@ FramePresentationFactory InputProofPresentation() {
     return {};
 #endif
 }
+void ControllerLagKeepsPermission() {
+    using namespace screenshare::input;
+    auto sink=std::make_shared<RecordingGamepadSink>();
+    auto host=std::make_shared<Service>(true,sink),viewer=std::make_shared<Service>(false);
+    host->Bind("viewer","controller-lag",true);viewer->Bind("host","controller-lag",true);
+    auto pump=[&] {
+        for(const auto& packet:host->Drain("viewer",true,true))viewer->Receive("host",packet.reliable,packet.bytes);
+        for(const auto& packet:viewer->Drain("host",true,true))host->Receive("viewer",packet.reliable,packet.bytes);
+    };
+    RoomStatus room;room.phase=RoomPhase::Active;room.stream.capture.state=HostMediaState::Running;
+    room.members={{"host","Host",true},{"viewer","Controller viewer",false}};
+    const auto devices=[] {return std::vector<screenshare::ViewerGamepadDevice>{{"test-pad","Recording controller"}};};
+    const auto read=[](std::string_view)->std::optional<screenshare::RemoteGamepadState>{screenshare::RemoteGamepadState pad;pad.buttons=1;return pad;};
+    RoomGamepadControl hostControls(true,[host]{return host;},[&]{return room;},nullptr,devices,read);
+    hostControls.setObjectName("SessionCard");hostControls.setAttribute(Qt::WA_StyledBackground);
+    hostControls.setStyleSheet(uiStyleSheet());hostControls.layout()->setContentsMargins(16,16,16,16);
+    hostControls.resize(500,180);hostControls.show();
+    QWidget watching;auto* body=new QVBoxLayout(&watching);
+    // Deterministic presentation for the permission/poller lifecycle, without
+    // depending on an offscreen HWND's DXGI availability or injecting OS input.
+    auto* video=new VideoFrameWidget(&watching,[]{return std::make_unique<RecordingInputPresentation>();});
+    body->addWidget(video);
+    auto* controls=new RoomGamepadControl(false,[viewer]{return viewer;},[&]{return room;},&watching,devices,read);
+    controls->SetVideo(video);body->addWidget(controls);watching.resize(500,500);watching.show();watching.activateWindow();
+    bool forwarding=true;
+    QTimer network(&watching);network.setInterval(10);QObject::connect(&network,&QTimer::timeout,[&]{if(forwarding)pump();});network.start();
+    QTimer frames(&watching);frames.setInterval(40);QObject::connect(&frames,&QTimer::timeout,[&]{
+        screenshare::Nv12VideoFrame frame;frame.width=320;frame.height=180;frame.nv12.assign(320*180*3/2,128);
+        Check(video->setVideoFrame(std::move(frame)));
+    });frames.start();
+    QPushButton* grant=nullptr;
+    auto* selected=controls->findChild<QToolButton*>("selectControllerInput");
+    Wait([&]{
+        for(auto* button:hostControls.findChildren<QPushButton*>("PeerCapability"))if(button->property("capability").toUInt()==Gamepad)grant=button;
+        return grant && grant->isEnabled() && selected->isEnabled() && viewer->Read().front().permission && video->hasFreshFrame();
+    });
+    Check(host->Grant("viewer",Gamepad));
+    Wait([&]{return sink->buttons==1 && grant->isChecked() && selected->isChecked();});
+    for(unsigned gap=0;gap<2;++gap) {
+        const auto epoch=viewer->Read().front().permission;forwarding=false;frames.stop();
+        Wait([&]{return host->Read().front().paused && sink->buttons==0 &&
+            hostControls.findChild<QLabel*>("PeerControlState")->text()=="Input paused";});
+        Check(grant->isChecked() && selected->isChecked() && sink->grants==1 && !sink->released);
+        Check(grant->toolTip().contains("permission is kept"));
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty())
+            Check(hostControls.grab().save(QDir(output).filePath("controller-lag-permission-kept.png")));
+        forwarding=true;frames.start();
+        Wait([&]{return viewer->Read().front().permission>epoch && sink->buttons==1 && !host->Read().front().paused &&
+            grant->isChecked() && selected->isChecked();});
+        Check(sink->grants==1 && !sink->released); // No host click, regrant or device allocation.
+    }
+    host->Revoke();Wait([&]{return !viewer->Read().front().granted && !grant->isChecked() && sink->released>0;});
+}
 void ViewerRemovalScenario(const std::string& origin) {
     auto sink=std::make_shared<RecordingGamepadSink>();
     RoomSessionConfig config;config.room.origin=origin;config.room.host=true;
@@ -2589,6 +2642,7 @@ int main(int argc, char** argv) {
             DirectoryStateScenario();DirectoryAvailabilityScenario();ReportExportScenario();SourcePickerSearchScenario();AdmissionFeedbackScenario();
         }
         WindowKeyboardControlScenario();
+        ControllerLagKeepsPermission();
 #ifdef SCREENSHARE_WINDOWS_UI_PROOF
         screenshare::WindowsMediaRuntime mediaRuntime; Check(SUCCEEDED(mediaRuntime.result()));
         NativePresentationRecovery();

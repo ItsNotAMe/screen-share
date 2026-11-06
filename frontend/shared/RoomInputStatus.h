@@ -22,7 +22,7 @@ inline QJsonObject InputStatus(const screenshare::input::Status& state) {
     auto time = [](auto value) -> QJsonValue { return value ? QJsonValue(qint64(*value)) : QJsonValue(QJsonValue::Null); };
     return {{"peer", QString::fromStdString(state.peer)}, {"ready", state.ready},
         {"requested", state.requested}, {"granted", state.granted}, {"pending", state.grantPending},
-        {"revokePending", state.revokePending}, {"reason", int(state.reason)}, {"reasonName", InputReason(state.reason)},
+        {"revokePending", state.revokePending}, {"paused", state.paused}, {"reason", int(state.reason)}, {"reasonName", InputReason(state.reason)},
         {"applied", qint64(state.applied)}, {"rejected", qint64(state.rejected)}, {"coalesced", qint64(state.coalesced)},
         {"reliableQueued", int(state.reliableQueued)}, {"stateQueued", int(state.stateQueued)},
         {"transportBlocked", state.transportBlocked}, {"localQueueWaitUs", time(state.queueWaitUs)},

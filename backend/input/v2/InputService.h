@@ -12,6 +12,7 @@ struct Status {
     bool ready = false;
     bool grantPending = false;
     bool revokePending = false; // Viewer waits for host permission acknowledgement.
+    bool paused = false; // Host neutralized input after a gap; capabilities remain granted.
     Reason reason = Reason::None;
     // Local service observations only, never network or input-to-photon latency.
     // Timings expire after one second and reset on permission/connection changes.
@@ -31,6 +32,9 @@ public:
     virtual bool Apply(const std::string& peer, const Event&) = 0;
     virtual void Release(const std::string& peer) noexcept = 0;
     virtual bool Healthy(const std::string&) { return true; }
+    // Neutralize held input without giving up devices/ownership. Returning false
+    // requires full release/revocation. Runs only on the input owner thread.
+    virtual bool Pause(const std::string&) { return false; }
 };
 // Thread-safe high-frequency port. Kept separate from RoomSession status and HTTP.
 // A true return means bounded local acceptance, never host permission or injection.

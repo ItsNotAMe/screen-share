@@ -2,10 +2,12 @@
 #include "codec/InputMappingSei.h"
 #include "input/WindowsKeyInput.h"
 #include "input/WindowsMouseInput.h"
+#include "RecordingGamepadSink.h"
 #include <dwmapi.h>
 #include <iostream>
 #include <stdexcept>
 #include <source_location>
+#include <thread>
 using namespace screenshare::input;
 void Check(bool value,std::source_location where=std::source_location::current()) {
     if(!value)throw std::runtime_error("Desktop input assertion at "+std::to_string(where.line()));
@@ -111,12 +113,34 @@ void WindowKeyboardWithoutMouseGeometry() {
     sink->Release("combined");
     RemovePropW(window.handle, property.c_str());
 }
+void StaleCaptureKeepsOwnership() {
+    auto state=std::make_shared<DesktopTargetState>();auto evidence=std::make_shared<Evidence>();
+    auto pads=std::make_shared<RecordingGamepadSink>();
+    DesktopSink sink(state,pads,[evidence](auto,uint8_t){return std::make_unique<Device>(evidence);});
+    DesktopTarget target{55,0,0,0,0,640,360};const auto generation=state->Publish(target);
+    Check(sink.Grant("viewer",Mouse|Keyboard|Gamepad,0));
+    Event key;key.kind=Kind::Key;key.key=65;key.down=true;key.sourceGeneration=generation;
+    Check(sink.Apply("viewer",key) && evidence->held);
+    Event pad;pad.kind=Kind::Pad;pad.buttons=1;Check(sink.Apply("viewer",pad) && pads->buttons==1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1050));
+    Check(!state->Read().generation && state->Identity().generation==generation && sink.Healthy("viewer"));
+    Check(!evidence->held && !evidence->released && !sink.Grant("other",Keyboard,0));
+    const auto applied=evidence->applied;
+    Check(sink.Apply("viewer",key) && evidence->applied==applied); // Stale geometry never injects.
+    state->Touch(target);Check(sink.Apply("viewer",key) && evidence->held);
+    Check(sink.Pause("viewer") && !evidence->held && !evidence->released && sink.Healthy("viewer") &&
+        !pads->buttons && pads->grants==1 && !pads->released);
+    Check(sink.Apply("viewer",key));
+    state->Invalidate(target.source);Check(!sink.Healthy("viewer"));sink.Release("viewer");
+    Check(evidence->released==1 && pads->released==1);
+}
 int main() {try {
     const auto relative=screenshare::WindowsRelativeMouseInput(-123,456);
     Check(relative.type==INPUT_MOUSE && relative.mi.dx==-123 && relative.mi.dy==456);
     Check(relative.mi.dwFlags==(MOUSEEVENTF_MOVE|MOUSEEVENTF_MOVE_NOCOALESCE));
     MinimizedKeyboardGrant();
     WindowKeyboardWithoutMouseGeometry();
+    StaleCaptureKeepsOwnership();
     // Inspect Windows payloads without calling SendInput or changing local keys.
     for (const auto [key, scan] : {std::pair{VK_LEFT, 0x14b}, {VK_UP, 0x148},
             {VK_RIGHT, 0x14d}, {VK_DOWN, 0x150}, {VK_RCONTROL, 0x11d},

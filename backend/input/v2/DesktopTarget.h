@@ -47,6 +47,9 @@ public:
         if(std::chrono::steady_clock::now()-seen_>std::chrono::seconds(1))return {};
         return current_;
     }
+    // Ownership identity survives stale pixels. Never use this to inject input;
+    // Read() still gates injection and new grants on fresh captured geometry.
+    Snapshot Identity() const { std::lock_guard lock(mutex_); return current_; }
 private:
     mutable std::mutex mutex_;
     Snapshot current_;

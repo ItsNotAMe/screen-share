@@ -228,6 +228,23 @@ video arrives; focus/click recovery clears it without losing grants. Existing
 recording sinks still require held-state release and blocked input while paused.
 Compact/normal paused-control renders retain the shortcut reminders.
 
+Input-lag regressions stop transport pumping beyond the 300 ms watchdog and
+require neutral input with retained grants. `input-service` checks three gaps,
+renewed epochs, rejected pre-gap packets, no cached-report/heartbeat replay,
+fresh-input recovery, concurrent revoke during blocked Pause and failed Pause
+fallback. It also checks fresh queued input during a delayed device call, viewer
+withdrawal crossing renewal and ordered release acknowledgements before regrant.
+`gamepad-control` verifies the same allocated device/slot remains
+usable and an unchanged controller report resumes through a new epoch-bound
+poller. `desktop-input` lets geometry expire, requiring released keys and no
+stale injection while ownership remains; source invalidation still fails health.
+The UI controller fixture checks two gaps, checked grant icons, Input paused
+guidance and automatic resumption without host action or reallocation. Its
+presentation, device reader and sink are injected. The four-viewer public-room
+proof also stalls runtime advancement, preserves grants and resumes transported
+input with a fresh epoch. None of these tests reproduces a physical game's lag
+or allocates a native virtual controller.
+
 Viewer share-state checks use the production telemetry channel to verify host
 pause/resume while audio continues, two-viewer source closure/replacement and
 minimize/restore. A Live notice with the UI frame consumer temporarily delayed

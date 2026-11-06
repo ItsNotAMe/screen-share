@@ -16,6 +16,7 @@ public:
     bool Apply(const std::string&, const Event&) override;
     void Release(const std::string&) noexcept override;
     bool Healthy(const std::string&) override;
+    bool Pause(const std::string&) override;
 private:
     struct Pad { std::unique_ptr<VirtualGamepadDevice> device; unsigned slot; };
     Factory factory_;

@@ -7,6 +7,19 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-06 controller lag: a 300 ms input gap now neutralizes through Sink::Pause
+without dropping granted capabilities or native controller allocation. The host
+rotates the permission epoch with the existing Permission message, clears pre-gap
+queues and resumes only on fresh input; heartbeat alone leaves the sink paused.
+Client cache clearing and epoch-bound poller recreation prevent stale replay.
+Fresh queued input is processed before timing out a delayed owner iteration.
+Concurrent revoke wins over late Pause completion. Pause failure falls back to
+revocation. DesktopSink separates identity health from stale captured geometry:
+staleness releases held keys/discards input, while fresh geometry permits new
+input again; source invalidation still revokes. Host UI keeps icons checked and
+shows Input paused; diagnostic JSON includes paused. Physical game/driver lag
+is not reproduced by the injected owner, reader, sink and runtime-gap proofs.
+
 2026-11-06 capture failure isolation: a switchable source may abandon failed
 native state on its capture owner and wait for an explicit replacement while
 the room/distribution/peers stay alive. Read errors, rebuild failure, exhausted

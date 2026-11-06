@@ -377,7 +377,7 @@ void RoomGamepadControl::Tick() {
                 (connection->recovery.state==screenshare::media::PeerLifecycleState::Failed ||
                  connection->recovery.state==screenshare::media::PeerLifecycleState::Closed);
             const bool ended=room.phase==v2::RoomPhase::Failed || room.phase==v2::RoomPhase::Stopped;
-            card->findChild<QLabel*>("PeerControlState")->setText(ended?"Room ended — start sharing again":!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->requested?"Requests control":state->granted?"Control granted":
+            card->findChild<QLabel*>("PeerControlState")->setText(ended?"Room ended — start sharing again":!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->paused?"Input paused":state->requested?"Requests control":state->granted?"Control granted":
                 state->reason==input::Reason::Backend?"Input unavailable — check the shared source or controller":
                 state->reason==input::Reason::Ownership?"Selected input is already in use":"Watching");
             QStringList requestedNames;
@@ -397,7 +397,8 @@ void RoomGamepadControl::Tick() {
                     QString("%1 %2 %3 %4").arg(on?"Revoke":"Grant",control,on?"from":"to",name);
                 const auto focusHint=room.capture.selected.kind==media::CaptureKind::Window && (cap&(input::Mouse|input::Keyboard))?
                     QString(" Input pauses while the shared window is not focused."):QString{};
-                const auto availabilityHint=sourceAvailable?QString{}:QString(" Choose a share source before granting control.");
+                const auto availabilityHint=!sourceAvailable?QString(" Choose a share source before granting control."):
+                    ready && state->paused?QString(" Input paused; permission is kept. Fresh input resumes automatically."):QString{};
                 button->setToolTip(label+focusHint+availabilityHint);button->setAccessibleName(label+focusHint+availabilityHint);
             }
         }
@@ -443,6 +444,10 @@ void RoomGamepadControl::Tick() {
             const QSignalBlocker block(consent_);consent_->setChecked(true);actionError_.clear();
         }
         if(granted && (!armed_ || requestedPeer_!=peer)){granted=0;}
+        if(granted && permission!=requestPermission_) {
+            heldInput_.clear(); // The host neutralized the previous permission epoch.
+            requestPermission_=permission;
+        }
         if (poller_ && poller_->permission() != permission) poller_.reset();
         if ((granted & input::Gamepad) && !poller_) {
             poller_ = std::make_unique<input::GamepadPoller>(port, peer, [read = read_, selected=selectedDevice_, paused=inputPaused_, video=videoAvailable_]() -> std::optional<input::Event> {

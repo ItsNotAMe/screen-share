@@ -22,6 +22,7 @@ public:
     bool Grant(const std::string&,uint8_t,int) override;
     bool Apply(const std::string&,const Event&) override;
     bool Healthy(const std::string&) override;
+    bool Pause(const std::string&) override;
     void Release(const std::string&) noexcept override;
 private:
     struct Owner { uint8_t capabilities; uint64_t generation; std::unique_ptr<DesktopDevice> device; };

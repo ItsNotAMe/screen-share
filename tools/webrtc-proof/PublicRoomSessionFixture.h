@@ -40,13 +40,16 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     class InputSink final : public screenshare::input::Sink {
     public:
         std::atomic<unsigned> applied{0}, releases{0};
+        std::atomic<unsigned> paused{0};
         std::atomic<bool> pressed{false};
         bool Grant(const std::string&, uint8_t, int) override { return true; }
         bool Apply(const std::string&, const screenshare::input::Event& e) override {
-            if (e.kind == screenshare::input::Kind::Key) pressed = e.down;
+            if (e.kind == screenshare::input::Kind::Key || e.kind == screenshare::input::Kind::Button ||
+                e.kind == screenshare::input::Kind::RelativeButton) pressed = e.down;
             ++applied; return true;
         }
         void Release(const std::string&) noexcept override { pressed = false; ++releases; }
+        bool Pause(const std::string&) override {pressed=false;++paused;return true;}
     };
     std::shared_ptr<InputSink> input = std::make_shared<InputSink>();
     std::atomic<unsigned> responseFrames{0};

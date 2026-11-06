@@ -13,13 +13,13 @@ using namespace std::chrono_literals;
 void Check(bool value,std::source_location where=std::source_location::current()) {
     if(!value)throw std::runtime_error("Input check failed at line "+std::to_string(where.line()));
 }
-template<class F> void Wait(F fn) {
+template<class F> void Wait(F fn,std::source_location where=std::source_location::current()) {
     const auto end=std::chrono::steady_clock::now()+3s;
-    while(!fn()) { Check(std::chrono::steady_clock::now()<end); std::this_thread::sleep_for(2ms); }
+    while(!fn()) { Check(std::chrono::steady_clock::now()<end,where); std::this_thread::sleep_for(2ms); }
 }
 class RecordingSink final : public Sink {
 public:
-    std::atomic<unsigned> applied{0},releases{0},grants{0};
+    std::atomic<unsigned> applied{0},releases{0},grants{0},pauses{0};
     std::atomic<bool> fail{false},healthy{true};
     std::mutex mutex;
     Event last;
@@ -31,6 +31,10 @@ public:
     }
     void Release(const std::string&) noexcept override { ++releases; }
     bool Healthy(const std::string&) override {return healthy;}
+    bool Pause(const std::string&) override {
+        Check(owner==std::this_thread::get_id());
+        std::lock_guard lock(mutex);last={};++pauses;return !fail;
+    }
 };
 Status Read(Service& service,const std::string& id="viewer") {
     for(const auto& p:service.Read())if(p.peer==id)return p;
@@ -62,6 +66,98 @@ void Protocol() {
     bad.event.x=32768;Check(Encode(bad).empty());
     bad.event.x=std::numeric_limits<float>::infinity();Check(Encode(bad).empty());
     bad.event.kind=Kind::RelativeButton;bad.event.button=5;Check(Encode(bad).empty());
+}
+void WatchdogKeepsGrant() {
+    auto sink=std::make_shared<RecordingSink>(); Service host(true,sink),viewer(false);
+    host.Bind("viewer","lag",true);viewer.Bind("host","lag",true);
+    auto pump=[&] {
+        for(const auto& packet:host.Drain("viewer",true,true))viewer.Receive("host",packet.reliable,packet.bytes);
+        for(const auto& packet:viewer.Drain("host",true,true))host.Receive("viewer",packet.reliable,packet.bytes);
+    };
+    Check(host.Grant("viewer",Gamepad));Wait([&]{pump();return Read(viewer,"host").granted==Gamepad;});
+    Event pad;pad.kind=Kind::Pad;pad.buttons=1;
+    for(unsigned gap=0;gap<3;++gap) {
+        Check(viewer.Submit("host",pad));const auto before=sink->applied.load();
+        Wait([&]{pump();return sink->applied>before;});
+        const auto epoch=Read(host).permission;
+        // Stop transport advancement while the independent watchdog runs.
+        Wait([&]{return Read(host).reason==Reason::Watchdog;});
+        Check(Read(host).granted==Gamepad && Read(host).paused && Read(host).permission>epoch &&
+            sink->grants==1 && !sink->releases && sink->pauses==gap+1);
+        const auto pausedCount=sink->applied.load();
+        host.Receive("viewer",false,Encode({"lag",epoch,10000,pad}));
+        Wait([&]{pump();return Read(viewer,"host").permission==Read(host).permission;});
+        Check(Read(viewer,"host").granted==Gamepad && sink->applied==pausedCount);
+        // Heartbeats and an old cached report cannot restore held state.
+        Check(Read(host).reason==Reason::Watchdog);
+        pad.buttons=uint16_t(gap+2);Check(viewer.Submit("host",pad));
+        Wait([&]{pump();return Read(host).reason==Reason::None && sink->applied>pausedCount;});
+    }
+    host.Bind("viewer","lag",false);Check(!Read(host).granted);
+    Wait([&]{return sink->releases==1;});
+}
+void WatchdogRevalidation() {
+    class DelayedPause final : public Sink {
+    public:
+        std::promise<void> entered,unblock;
+        std::shared_future<void> ready=unblock.get_future().share();
+        std::atomic<unsigned> releases{0};
+        bool Grant(const std::string&,uint8_t,int) override {return true;}
+        bool Apply(const std::string&,const Event&) override {return true;}
+        bool Pause(const std::string&) override {entered.set_value();ready.wait();return true;}
+        void Release(const std::string&) noexcept override {++releases;}
+    };
+    auto sink=std::make_shared<DelayedPause>();Service host(true,sink);host.Bind("viewer","pause",true);
+    Check(host.Grant("viewer",Gamepad));Wait([&]{return Read(host).granted==Gamepad;});
+    const auto epoch=Read(host).permission;auto entered=sink->entered.get_future();
+    const bool began=entered.wait_for(2s)==std::future_status::ready;
+    if(!began){sink->unblock.set_value();Check(false);}
+    auto revoke=std::async(std::launch::async,[&]{host.Revoke();return Read(host);});
+    const bool responsive=revoke.wait_for(200ms)==std::future_status::ready;
+    sink->unblock.set_value();const auto status=revoke.get();
+    Check(responsive && !status.granted && status.permission>epoch);
+    Wait([&]{return sink->releases>0;});Check(!Read(host).granted && !Read(host).paused);
+    auto failed=std::make_shared<RecordingSink>();Service broken(true,failed);broken.Bind("viewer","failed-pause",true);
+    Check(broken.Grant("viewer",Gamepad));Wait([&]{return Read(broken).granted==Gamepad;});
+    failed->fail=true;Wait([&]{return !Read(broken).granted;});
+    Wait([&]{return failed->releases>0;});Check(failed->pauses==1);
+}
+void WithdrawalDuringRenewal() {
+    auto sink=std::make_shared<RecordingSink>();Service host(true,sink),viewer(false);
+    host.Bind("viewer","withdraw",true);viewer.Bind("host","withdraw",true);
+    auto pump=[&] {
+        for(const auto& packet:host.Drain("viewer",true,true))viewer.Receive("host",packet.reliable,packet.bytes);
+        for(const auto& packet:viewer.Drain("host",true,true))host.Receive("viewer",packet.reliable,packet.bytes);
+    };
+    Check(host.Grant("viewer",Gamepad));Wait([&]{pump();return Read(viewer,"host").granted==Gamepad;});
+    Wait([&]{return Read(host).paused;});
+    viewer.Revoke();Check(Read(viewer,"host").revokePending);
+    Wait([&]{pump();return !Read(host).granted && !Read(viewer,"host").granted && !Read(viewer,"host").revokePending;});
+    Wait([&]{return sink->releases==1;});Check(sink->grants==1);
+}
+void DelayedOwnerKeepsFreshInput() {
+    class Delayed final : public Sink {
+    public:
+        std::promise<void> entered,unblock;
+        std::shared_future<void> ready=unblock.get_future().share();
+        std::atomic<unsigned> applied{0},pauses{0};
+        bool Grant(const std::string&,uint8_t,int) override {return true;}
+        bool Apply(const std::string&,const Event&) override {
+            if(applied++==0){entered.set_value();ready.wait();}return true;
+        }
+        bool Pause(const std::string&) override {++pauses;return true;}
+        void Release(const std::string&) noexcept override {}
+    };
+    auto sink=std::make_shared<Delayed>();Service host(true,sink);host.Bind("viewer","owner-gap",true);
+    Check(host.Grant("viewer",Gamepad));Wait([&]{return Read(host).granted==Gamepad;});
+    const auto epoch=Read(host).permission;
+    Event pad;pad.kind=Kind::Pad;pad.buttons=1;
+    auto entered=sink->entered.get_future();host.Receive("viewer",false,Encode({"owner-gap",epoch,1,pad}));
+    if(entered.wait_for(2s)!=std::future_status::ready){sink->unblock.set_value();Check(false);}
+    std::this_thread::sleep_for(350ms);
+    pad.buttons=2;host.Receive("viewer",false,Encode({"owner-gap",epoch,2,pad}));
+    sink->unblock.set_value();Wait([&]{return sink->applied>=2;});
+    Check(Read(host).granted==Gamepad && Read(host).permission==epoch && !Read(host).paused && !sink->pauses);
 }
 void RelativeMotion() {
     auto sink=std::make_shared<RecordingSink>();Service host(true,sink),viewer(false);
@@ -213,7 +309,7 @@ void Safety() {
     });
     // No network pumping: owner watchdog must fire independently of signaling.
     Wait([&] {return Read(host).reason==Reason::Watchdog;});
-    const auto count=sink->applied.load(); Check(!Read(host).granted && Read(host).permission>grant);
+    const auto count=sink->applied.load(); Check(Read(host).granted==7 && Read(host).paused && Read(host).permission>grant);
     host.Receive("viewer",true,Encode(stale)); std::this_thread::sleep_for(15ms); Check(sink->applied==count);
     Check(host.Grant("viewer",Keyboard)); Wait([&] {pump();return Read(viewer,"host").granted==Keyboard;});
     Check(Read(host).permission>grant);
@@ -370,6 +466,6 @@ void StalePollingOwner() {
     Check(!Read(viewer,"host").granted && Read(viewer,"host").revokePending);
 }
 int main() {
-    try {Protocol();RelativeMotion();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();AdditiveRequests();RequestDuringGrant();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
+    try {Protocol();WatchdogKeepsGrant();WatchdogRevalidation();WithdrawalDuringRenewal();DelayedOwnerKeepsFreshInput();RelativeMotion();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();AdditiveRequests();RequestDuringGrant();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

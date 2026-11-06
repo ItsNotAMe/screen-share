@@ -2,6 +2,12 @@
 
 ## Current UI Direction
 
+- A temporary input-watchdog gap keeps grant icons checked. The host shows
+  Input paused and explains that permission remains and fresh input resumes it.
+  Renewal of the input epoch is automatic; it must not require another host
+  click or preserve cached held state. Viewer video freshness/focus gates still
+  apply. Actual source changes/disconnect/backend failures still cancel grants.
+
 - Desktop remote input requires a frame actually presented within two seconds.
   A connected room or accepted decode handoff is insufficient. On a stall, keep
   grants/consent, release held input and show Video interrupted in the established

@@ -23,6 +23,21 @@ instead of building a delayed camera backlog. No Worker deployment is needed.
 
 ## Ownership and threading
 
+The input watchdog separates authorization from held state. A 300 ms input gap
+calls the sink's Pause operation on the input owner, preserving granted
+capabilities and device allocation after successful neutralization. The host
+sends the existing Permission message with unchanged capabilities and a higher
+permission epoch. Pre-gap queued input is discarded; clients clear cached state
+and recreate epoch-bound readers. Heartbeats alone do not resume a paused sink;
+fresh input under the renewed epoch does. No message/schema version changes are
+required. Revoke during neutralization wins over late completion.
+Viewer withdrawal pending during renewal is forwarded under the new epoch;
+renewal cannot cancel the viewer's Release action. A sink that
+cannot neutralize safely falls back to full revocation/release. Backend failure,
+disconnect, source changes and reliable-channel backpressure retain revocation.
+A queued zero-capability release acknowledgement is retained ahead of a newer
+explicit host grant so a quick release/regrant can complete in order.
+
 Native RoomSocket snapshot events include an optional accepted revision together
 with the immutable state payload and transport generation. Use that revision for
 expectedRevision mutations; non-snapshot events carry no state revision. Never
