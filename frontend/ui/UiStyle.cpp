@@ -177,6 +177,31 @@ QString uiStyleSheet()
     return QStringLiteral(R"(
 QWidget { color: #edf5f2; font-family: "Segoe UI"; font-size: 10pt; }
 QDialog, QWidget#RoomBrowser { background: #0c1110; }
+QFileDialog QAbstractItemView {
+    background: #151d1b; alternate-background-color: #18221e; color: #edf5f2;
+    selection-background-color: #21645b; selection-color: #ffffff;
+    border: 1px solid #35473f; border-radius: 6px; outline: 0;
+}
+QFileDialog QAbstractItemView::item { min-height: 28px; padding: 2px 4px; }
+QFileDialog QAbstractItemView::item:hover { background: #20312c; }
+QFileDialog QAbstractItemView::item:selected { background: #21645b; color: #ffffff; }
+QFileDialog QHeaderView { background: #151d1b; }
+QFileDialog QToolButton {
+    background: #151d1b; color: #edf5f2; border: 1px solid #293631;
+    border-radius: 6px; padding: 4px; min-width: 24px; min-height: 24px;
+}
+QFileDialog QToolButton:hover, QFileDialog QToolButton:checked { background: #20312c; border-color: #52746a; }
+QFileDialog QToolButton:focus { border-color: #60786f; }
+QFileDialog QToolButton#backButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-left.svg); }
+QFileDialog QToolButton#forwardButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-right.svg); }
+QFileDialog QToolButton#toParentButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-up.svg); }
+QFileDialog QScrollBar:horizontal { background: #101815; height: 10px; margin: 0; border: 0; }
+QFileDialog QScrollBar::handle:horizontal { background: #40534a; border-radius: 5px; min-width: 24px; }
+QFileDialog QScrollBar::handle:horizontal:hover { background: #60786f; }
+QFileDialog QScrollBar::add-line:horizontal, QFileDialog QScrollBar::sub-line:horizontal { width: 0; border: 0; }
+QFileDialog QScrollBar::add-page:horizontal, QFileDialog QScrollBar::sub-page:horizontal { background: transparent; }
+QFileDialog QAbstractScrollArea::corner { background: #151d1b; }
+QFileDialog QSplitter::handle { background: #0c1110; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
 QScrollBar:vertical { background: #101815; width: 10px; margin: 0; border: 0; }
 QScrollBar::handle:vertical { background: #40534a; border-radius: 5px; min-height: 24px; }

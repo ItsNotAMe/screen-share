@@ -5,6 +5,21 @@
 
 # Project Memory
 
+## Fallback file-picker contrast correction - 2026-11-06
+
+The owner identified the unreadable white file panes in the Save As screenshot.
+The earlier export commit had left Qt's fallback view backgrounds unthemed
+while inheriting pale text. Scoped QFileDialog styling now covers file views,
+sidebar, selection, header, navigation buttons/arrows, scrollbar corners and
+horizontal scrollbars. The standard native-dialog selection policy is unchanged.
+
+The full Release build, focused export fixture and three relevant UI/update
+checks passed. The fixture loads a folder and a JSON file, selects an actual
+model row and requires dark bases/light text across fallback item views.
+Populated renders were inspected after fixing both white panes and remaining
+native arrow/scrollbar contrast. The portable archive matches both executables.
+No native Windows picker interaction, version bump or publication occurred.
+
 ## Diagnostic report Save As - 2026-11-06
 
 Details now opens an asynchronous platform Save As dialog instead of writing

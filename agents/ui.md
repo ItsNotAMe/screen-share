@@ -84,6 +84,9 @@
   cancellation and dismiss the dialog on session close. The folder action always
   remains enabled, creates its directory on demand and opens the log folder
   independently of report-export destination or save success.
+  Theme Qt fallback file lists/sidebar, selected rows, navigation buttons and
+  horizontal scrollbars explicitly; inherited pale text on a native light base
+  is unreadable. Verify with a populated folder rather than an empty picker.
 - Room viewer controls are icon-only Mouse/Keyboard/Controller buttons, all off initially. Clicking requests immediately; amber means requested and teal means granted. Keep tooltips and accessible names. Requests accumulate without revoking existing grants.
 - Host pending icons pulse amber (respect Windows animation preference); clicking opens Allow/Deny for that control only. Requests gather per viewer, while approval and denial remain independent. Denial preserves existing grants and held input. Viewer selection uses fill colors without borders; focus indication appears only for keyboard navigation.
 - Use Qt Widgets for the first real desktop UI.

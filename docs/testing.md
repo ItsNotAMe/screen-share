@@ -30,6 +30,8 @@ for both roles. The main room UI flow requires video frames to continue while
 the picker is open. An injected selected-path race covers write failure and
 retry; redaction and independent log-folder access remain checked. Native
 Windows picker interactions are not exercised by the offscreen proof.
+Populated-folder renders and palette checks cover the fallback picker's file
+views, sidebar and selection contrast, with themed navigation and scrollbars.
 
 Room UI admission feedback uses a local HTTP fixture to cover full, closed,
 missing and rate-limited rooms, plus an ambiguous server failure. It checks typed

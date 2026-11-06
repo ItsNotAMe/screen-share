@@ -52,6 +52,9 @@
 #include <QScrollBar>
 #include <QDialog>
 #include <QFileDialog>
+#include <QTreeView>
+#include <QListView>
+#include <QFileSystemModel>
 #include <QAction>
 #include <QMenu>
 #include <QScrollArea>
@@ -384,6 +387,8 @@ void AcceptReportExport(RoomSessionWindow& window, const QString& path) {
 }
 void ReportExportScenario() {
     QTemporaryDir output; Check(output.isValid());
+    Check(QDir(output.path()).mkdir("Example folder"));
+    { QFile example(output.filePath("previous-report.json")); Check(example.open(QIODevice::WriteOnly)); example.write("{}"); }
     for (bool hosting : {true, false}) {
         RoomSessionConfig config; config.room.origin = "http://127.0.0.1:1"; config.room.host = hosting;
         config.room.roomId = "test-room"; config.room.nickname = "Private nickname";
@@ -395,6 +400,17 @@ void ReportExportScenario() {
         const auto suggested = dialog->selectedFiles().value(0);
         Check(hosting ? suggested == config.reportFile : QFileInfo(suggested).fileName().startsWith("screenshare-viewer-"));
         Check(suggested.endsWith(".json"));
+        dialog->setDirectory(output.path()); dialog->setViewMode(QFileDialog::Detail); dialog->resize(780,480);
+        auto* files = dialog->findChild<QTreeView*>("treeView"); Check(files);
+        auto* model = qobject_cast<QFileSystemModel*>(files->model()); Check(model);
+        Wait([&] { return model->rowCount(files->rootIndex()) >= 2; });
+        for (auto* view : dialog->findChildren<QAbstractItemView*>()) {
+            view->ensurePolished();
+            Check(qGray(view->palette().color(QPalette::Base).rgb()) < 80);
+            Check(qGray(view->palette().color(QPalette::Text).rgb()) > 160);
+        }
+        const auto example = model->index(output.filePath("previous-report.json")); Check(example.isValid());
+        files->setCurrentIndex(example);
         if (const auto previews = qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS"); !previews.isEmpty()) {
             QDir().mkpath(previews); QCoreApplication::processEvents();
             Check(dialog->grab().save(QDir(previews).filePath(QString("report-save-dialog-%1.png").arg(hosting ? "host" : "viewer"))));
