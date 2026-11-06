@@ -82,6 +82,19 @@ scrollbars appear or disappear.
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
 
+`stream-settings-and-adaptation` checks independent viewer preferences and frame
+mapping using CPU buffers. Run `StreamSettingsTests.exe --gpu` explicitly for
+generated-texture GPU coverage, without desktop capture or audible output. Its
+four-viewer comparison uses the same 24 generated 1080p frames and 720p settings:
+separate input wrappers reproduce independent scaling, while one shared input
+exercises production fan-out. It counts actual scaling submissions, CPU
+readbacks and distinct output textures, validates changing pixels and independent
+preset metadata, and retains old output to detect overwritten resources.
+It also verifies that image rectangles produce distinct cached output, the fifth
+geometry evicts the oldest of four entries without invalidating consumers, and
+retired devices cannot return cached output. The existing GPU settings scenarios
+cover independent adaptation, fallback/quarantine and restricted-thread teardown.
+
 `source-pcm-capture` uses an injected clock to check shared-source recovery with
 250 ms–5 s capped backoff, same-target reactivation, immediate source changes,
 fresh PCM, cumulative drop counters and cancellation during startup. Invalid

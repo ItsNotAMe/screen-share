@@ -3,10 +3,12 @@
 #include "api/video/video_frame_buffer.h"
 #include "capture/DesktopCapturer.h"
 #include <atomic>
+#include <array>
 #include <memory>
 #include <mutex>
 #include <span>
 #include <stdexcept>
+#include <vector>
 
 namespace webrtc { class Thread; }
 namespace screenshare::media {
@@ -36,6 +38,7 @@ public:
     uint64_t readbackMicroseconds() const noexcept { return readbackMicroseconds_; }
     uint64_t readbackStagingAllocations() const noexcept { return readbackStagingAllocations_; }
     uint64_t scalingFailures() const noexcept { return scalingFailures_; }
+    uint64_t scalingCount() const noexcept { return scalingCount_; }
     unsigned maximumPendingScales() const noexcept { return maximumPendingScales_; }
 private:
     friend class D3dVideoFrameBuffer;
@@ -52,6 +55,7 @@ private:
     std::atomic<bool> retired_{false};
     std::unique_ptr<D3dNv12Scaler> scaler_;
     std::atomic<uint64_t> scalingFailures_{0};
+    std::atomic<uint64_t> scalingCount_{0};
     std::atomic<unsigned> maximumPendingScales_{0};
 };
 
@@ -74,5 +78,13 @@ private:
     int width_, height_;
     std::mutex mutex_;
     webrtc::scoped_refptr<webrtc::I420BufferInterface> cached_;
+    struct ScaledFrame {
+        std::array<int, 6> geometry;
+        webrtc::scoped_refptr<D3dVideoFrameBuffer> buffer;
+    };
+    // One immutable input is fanned out to independent viewer tracks. Share
+    // matching pixels (and their lazy readback), never track/settings state.
+    // Retain at most four shapes per input, not a cross-frame texture cache.
+    std::vector<ScaledFrame> scaled_;
 };
 }

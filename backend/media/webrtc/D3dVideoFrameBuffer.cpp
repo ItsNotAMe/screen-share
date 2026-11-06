@@ -125,6 +125,7 @@ webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::Scale(ID3D11Texture2D
         try {
             if (!scaler_) scaler_ = std::make_unique<D3dNv12Scaler>(device_.Get());
             auto output = scaler_->Scale(device_.Get(), context_.Get(), input, width, height, left, top, imageWidth, imageHeight);
+            ++scalingCount_;
             maximumPendingScales_ = std::max(maximumPendingScales_.load(), scaler_->pending());
             return webrtc::make_ref_counted<D3dVideoFrameBuffer>(shared_from_this(), std::move(output), width, height);
         } catch (const GpuScalingBusy&) {
@@ -174,6 +175,17 @@ webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoFrameBuffer::Scale(int width,
         imageWidth % 2 || imageHeight % 2 || imageWidth > width || imageHeight > height ||
         left > width - imageWidth || top > height - imageHeight)
         throw std::invalid_argument("Invalid GPU image rectangle");
-    return owner_->Scale(texture_.Get(), width, height, left, top, imageWidth, imageHeight);
+    std::lock_guard lock(mutex_);
+    if (retired() || owner_->scalingFailures()) return nullptr;
+    const std::array geometry{width, height, left, top, imageWidth, imageHeight};
+    for (const auto& entry : scaled_)
+        if (entry.geometry == geometry) return entry.buffer;
+    // Serialize equal concurrent requests so only the first submits GPU work.
+    // Busy/failure results are not cached; the next frame can retry normally.
+    auto output = owner_->Scale(texture_.Get(), width, height, left, top, imageWidth, imageHeight);
+    if (!output || retired()) return nullptr;
+    if (scaled_.size() == 4) scaled_.erase(scaled_.begin());
+    scaled_.push_back({geometry, output});
+    return output;
 }
 }

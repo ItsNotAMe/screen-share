@@ -5,6 +5,28 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Shared scaling across viewers (2026-11-06)
+
+Matching viewers now reuse an immutable frame's GPU-scaled pixels and lazy CPU
+readback. Each captured frame retains at most four output geometries; different
+frames never share cached output. Viewer settings, frame mapping, adaptation and
+encoding remain independent. Device retirement and scaler quarantine bypass the
+cache, and evicting an entry leaves retained consumer frames valid.
+
+The explicit generated-texture test (`StreamSettingsTests.exe --gpu`) delivers
+24 changing 1920×1080 frames concurrently to four 1280×720 viewer sources, using
+the production adaptation/scaling path. Separate wrappers reproduce the former
+work; the shared-input path uses the same settings and pixels. Before the change,
+both paths submitted 96 scales and performed 96 readbacks. Afterward, the shared
+path submits 24 scales and performs 24 readbacks, with one output texture per
+frame instead of four. Pixel and preset checks pass in both paths.
+
+This is a 75% reduction in these operations for matching viewers, not a measured
+75% reduction in total application CPU, memory or end-to-end latency. Codec work,
+transport and receiving are outside this comparison, and differing geometries
+still require separate output. The historical full-session scorecard below has
+not been rerun for this change.
+
 ## UI and preview follow-up (2026-11-05)
 
 A local four-viewer status fixture counted 66 diagnostic snapshots in one second

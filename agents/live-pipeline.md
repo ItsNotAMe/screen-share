@@ -7,6 +7,17 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-06 shared scaling: D3dVideoFrameBuffer retains at most four successful
+scaled outputs keyed by all six canvas/image geometry values, under its existing
+mutex. Shared capture resources let matching viewer tracks reuse immutable GPU
+pixels and their lazy CPU readback. Tracks, adaptation, mapping/preset metadata
+and encoding stay independent. Failed/busy scales are not cached; retirement or
+scaler quarantine bypasses cached output. Eviction does not invalidate consumer
+references. Do not add a cross-frame cache or overwrite published textures.
+The explicit generated-texture StreamSettingsTests --gpu comparison reduced
+four-viewer 1080p-to-720p scales/readbacks from 96/96 to 24/24 over 24 frames.
+This is operation-count evidence, not a new full-session CPU/memory scorecard.
+
 2026-09-25 multi-viewer report: a stalled connection was still processing capture
 frames (including shared-device scaling). NativeRoomRuntime now gates per-viewer
 delivery until negotiation, connection and initial settings are ready; disconnect,

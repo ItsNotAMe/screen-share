@@ -10,6 +10,33 @@ and measured performance improvements ahead of small UI/copy polish during
 open-ended continuation work. Deliver one meaningful improvement at a time and
 commit each separately. Address related UI defects when they block that feature.
 
+## Shared video scaling for matching viewers - 2026-11-06
+
+Immutable D3dVideoFrameBuffer inputs now cache at most four successful scaled
+outputs keyed by canvas size and the complete image rectangle. Matching viewer
+tracks reuse those GPU pixels and their existing lazy CPU conversion, while
+adaptation, settings/preset/mapping metadata and encoding stay independent.
+Eviction retains consumer ownership; new inputs cannot reuse old pixels.
+Retirement/quarantine bypass the cache and busy/failure results are not cached.
+
+The generated-texture GPU proof first failed on unchanged behavior: both
+separate and shared inputs required 96 scales/readbacks for 24 changing 1080p
+frames delivered concurrently to four 720p sources. With caching, shared input
+requires 24 scales/readbacks and one output texture per frame instead of four.
+Pixel freshness, preset isolation, complete geometry keys, four-entry eviction,
+device retirement, independent adaptation, fallback and teardown pass. This
+measures 75% fewer scaling/readback operations for matching outputs, not total
+session CPU/memory/latency. No full-session scorecard was rerun.
+
+The full Release build and package hash checks passed. The existing stream
+settings CPU proof is now included in application CTest (43 tests); its optional
+GPU assertions were corrected to unwrap frame metadata before inspecting the
+underlying pixel buffer. The full parallel run passed 42/43; viewer-removal hit
+the previously recorded controller-resume timeout at RoomUiTests.cpp:685, then
+passed standalone. That intermittent issue is not fixed by this change. The
+explicit StreamSettingsTests --gpu run passed. No physical input/audio, version
+bump or publication occurred.
+
 ## Automatic shared-source audio recovery - 2026-11-06
 
 Shared-source audio now retries temporary endpoint startup/read failures on its
