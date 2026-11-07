@@ -2,6 +2,61 @@
 
 ## Current WebRTC rooms
 
+Default host system-loopback and microphone capture now follow Windows console
+role routing notifications (render and capture flow respectively). Registration
+precedes default resolution so activation races are detected. Callbacks only
+advance an atomic revision; the existing producer worker retires the old native
+endpoint, discards its pending/in-flight PCM, opens the new default and primes
+with paced silence. Room/audio settings revisions remain unchanged. Explicit
+device IDs stay pinned; process capture remains isolated. Mute/Stop cancels
+the producer, including replacement activation. Failed replacement activation
+uses the existing failure policy below, rather than a second retry mechanism.
+
+Shared-source capture now retries failed native capture endpoints on its existing
+producer worker, with 250 ms–5 s capped backoff. The selected resolver remains
+authoritative on every read; no app-to-system fallback is allowed. A new target
+bypasses old backoff, and in-flight PCM spanning a target change is silenced.
+Capture-drop counts survive endpoint retirement. The outer switchable capture
+keeps its 10 ms output clock/silence while activation waits; Mute/Stop retire and
+cancel the old producer.
+
+Explicit system/microphone capture now also recovers through SwitchablePcmCapture
+on its existing producer boundary, with 250 ms–5 s capped backoff. It reuses the
+committed factory/selection, preserving pinned device IDs and room/audio revision.
+A replacement is healthy only after its first PCM arrives; a recovery producer
+has a five-second first-PCM deadline. Factories, activation, processing and teardown
+stay on producer owners. Microphone processing is recreated for every open.
+Manual Retry/source selection/mute supersede automatic activation and backoff;
+Close/Stop prevent further attempts. Old producer queues are discarded and drop
+counts survive replacement. Shared-source mode keeps its inner validated-target
+policy; explicit process IDs retain manual retry rather than following PID reuse.
+Native calls that do not honor cancellation still cannot be preempted in-process.
+
+Viewer output now follows default-device notifications (render/console role)
+on the existing playout worker. Callbacks only advance an atomic revision;
+registration is retained until unregister, and activation races are not lost.
+Explicit devices do not follow defaults. Output failures use 250 ms exponential
+backoff capped at five seconds, with manual updates taking priority and no
+reopen after Close. Recovery preserves settings/revision, primes with silence
+instead of the in-flight pre-activation block, and then resumes live pulls.
+Paced discard continues during outages; do not add a replay queue or pause video.
+
+Native viewer rendering now also detects a full/stuck buffer when WASAPI keeps
+returning success: one 10 ms PCM write has a one-second completion deadline.
+Tiny partial writes and event notifications cannot extend it. Capacity is checked
+before expiry, so a delayed owner can finish into a healthy ready buffer; stop
+wins before another commit. Expiry throws through the existing controlled-output
+failure path above, retiring the endpoint, discarding that in-flight block and
+reopening with silence/fresh pulls. The existing 10 ms event waits, pinned device,
+mute/volume settings and retry policy remain. This cannot preempt a native driver
+call that itself blocks. Supplied-clock render checks and real H264/Opus room
+recovery use simulated endpoint capacity; they do not fault physical audio devices.
+
+Windows ownership/callback rules follow [stream-routing guidance](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing-implementation-considerations)
+and [IMMNotificationClient restrictions](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient).
+Default route flow/role filtering follows [OnDefaultDeviceChanged](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immnotificationclient-ondefaultdevicechanged).
+The injected PCM/UI proofs do not qualify physical hot-plug or every driver.
+
 The shipping room receiver uses WebRTC A/V synchronization. Audio NetEq now has
 a ten-packet limit (200ms at the negotiated 20ms Opus cadence) and fast
 acceleration. The former upstream 200-packet reserve could retain seconds of

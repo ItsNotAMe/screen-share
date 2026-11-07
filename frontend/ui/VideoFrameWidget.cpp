@@ -66,6 +66,7 @@ public:
                 droppedFrames_.fetch_add(1, std::memory_order_relaxed);
             }
             pendingFrame_ = std::move(frame);
+            pendingFrameAt_ = std::chrono::steady_clock::now();
             enqueuedFrames_.fetch_add(1, std::memory_order_relaxed);
             queuedFrames_.store(1, std::memory_order_release);
         }
@@ -106,6 +107,10 @@ public:
             pendingFrame_.reset();
             queuedFrames_.store(0, std::memory_order_release);
             clearPending_ = true;
+            ++generation_;
+            std::lock_guard diagnosticsLock(diagnosticsMutex_);
+            inputMapping_ = {};
+            frameReceivedAt_.reset();
         }
         condition_.notify_one();
     }
@@ -119,7 +124,8 @@ public:
     {
         VideoFrameWidget::PresentationStats snapshot;
         { std::lock_guard lock(diagnosticsMutex_); snapshot.renderer = rendererStatistics_; snapshot.inputMapping = inputMapping_;
-          snapshot.inputViewportWidth=inputViewportWidth_;snapshot.inputViewportHeight=inputViewportHeight_; }
+          snapshot.inputViewportWidth=inputViewportWidth_;snapshot.inputViewportHeight=inputViewportHeight_;
+          snapshot.frameReceivedAt=frameReceivedAt_; }
         snapshot.enqueuedFrames = enqueuedFrames_.load(std::memory_order_relaxed);
         snapshot.presentedFrames = presentedFrames_.load(std::memory_order_relaxed);
         snapshot.droppedFrames = droppedFrames_.load(std::memory_order_relaxed);
@@ -154,6 +160,8 @@ private:
         bool clearPending = false;
         bool lowLatency = false;
         std::optional<screenshare::SessionEvent::VideoFrame> frame;
+        std::chrono::steady_clock::time_point frameAt;
+        uint64_t generation = 0;
     };
 
     static void recordMax(std::atomic<std::uint64_t>& target, std::uint64_t value) noexcept
@@ -169,6 +177,7 @@ private:
         FramePresentationSession presenter(factory);
         bool active = false;
         screenshare::input::FrameMapping bufferedMapping;
+        std::optional<std::chrono::steady_clock::time_point> bufferedFrameAt;
         for (;;) {
             Work work;
             {
@@ -184,11 +193,13 @@ private:
                 work.clearPending = clearPending_;
                 work.lowLatency = lowLatency_;
                 work.frame = std::move(pendingFrame_);
+                work.frameAt = pendingFrameAt_;
+                work.generation = generation_;
                 pendingFrame_.reset();
                 queuedFrames_.store(0, std::memory_order_release);
                 resizePending_ = smoothPending_ = clearPending_ = false;
             }
-            if (work.clearPending) { presenter.Clear(); active = false; bufferedMapping={}; }
+            if (work.clearPending) { presenter.Clear(); active = false; bufferedMapping={}; bufferedFrameAt.reset(); }
             const auto started = std::chrono::steady_clock::now();
             bool presented = false;
             bool redrawn = false;
@@ -204,7 +215,12 @@ private:
             const auto status = presenter.statistics();
             const bool busy = status.outcome==screenshare::PresentationOutcome::Busy;
             if(work.frame)bufferedMapping=(presented || busy)?work.frame->inputMapping:screenshare::input::FrameMapping{};
-            { std::lock_guard lock(diagnosticsMutex_); rendererStatistics_ = status;
+            if(work.frame)bufferedFrameAt=(presented || busy)?std::optional(work.frameAt):std::nullopt;
+            { std::lock_guard workLock(mutex_);
+              std::lock_guard lock(diagnosticsMutex_); rendererStatistics_ = status;
+              // Clear may arrive during a blocked present. Its old completion
+              // must not restore input mapping or make stale video look fresh.
+              if(work.generation == generation_) {
               // A busy swap chain leaves the last presented image visible.
               // Dropping its mapping here also silently drops keyboard events
               // between that skipped frame and the next successful present.
@@ -213,7 +229,11 @@ private:
                   inputMapping_=bufferedMapping;
                   inputViewportWidth_=work.width;inputViewportHeight_=work.height;
               }
-              if(presented) {inputMapping_=work.frame->inputMapping;inputViewportWidth_=work.width;inputViewportHeight_=work.height;} }
+              if(presented) {inputMapping_=work.frame->inputMapping;inputViewportWidth_=work.width;inputViewportHeight_=work.height;}
+              if(presented || (redrawn && status.outcome==screenshare::PresentationOutcome::Presented))
+                  frameReceivedAt_=bufferedFrameAt;
+              }
+            }
             presentErrors_ = status.errors;
             recoveries_ = status.recoveries;
             maximumFrameLatency_ = status.maximumFrameLatency;
@@ -234,8 +254,11 @@ private:
     FramePresentationSession::Statistics rendererStatistics_;
     screenshare::input::FrameMapping inputMapping_;
     uint32_t inputViewportWidth_=0,inputViewportHeight_=0;
+    std::optional<std::chrono::steady_clock::time_point> frameReceivedAt_;
     std::condition_variable condition_;
     std::optional<screenshare::SessionEvent::VideoFrame> pendingFrame_;
+    std::chrono::steady_clock::time_point pendingFrameAt_;
+    uint64_t generation_ = 0;
     HWND hwnd_ = nullptr;
     std::uint32_t width_ = 1;
     std::uint32_t height_ = 1;
@@ -464,6 +487,13 @@ std::uint64_t VideoFrameWidget::presentedFrameCount() const
 VideoFrameWidget::PresentationStats VideoFrameWidget::presentationStats() const
 {
     return framePresenter_ ? framePresenter_->stats() : PresentationStats{};
+}
+
+bool VideoFrameWidget::hasFreshFrame(std::chrono::steady_clock::time_point now) const
+{
+    const auto stats = presentationStats();
+    return d3dSurface_ && d3dSurface_->isVisible() && !stats.terminal && stats.frameReceivedAt &&
+        now >= *stats.frameReceivedAt && now - *stats.frameReceivedAt < FreshFrameTimeout;
 }
 
 screenshare::input::FrameMapping VideoFrameWidget::presentedInputMapping() const

@@ -30,16 +30,31 @@ public:
 class SourceList final : public QListWidget {
 public:
     using QListWidget::QListWidget;
+    void setEmptyMessage(const QString& message) {
+        emptyMessage_=message;setAccessibleDescription(message);viewport()->update();
+    }
 protected:
+    void paintEvent(QPaintEvent* event) override {
+        QListWidget::paintEvent(event);
+        if(!emptyMessage_.isEmpty()) {
+            QPainter painter(viewport());painter.setPen(QColor("#a3b5af"));
+            painter.drawText(viewport()->rect().adjusted(16,16,-16,-16),Qt::AlignCenter|Qt::TextWordWrap,emptyMessage_);
+        }
+    }
     void resizeEvent(QResizeEvent* event) override {
         QListWidget::resizeEvent(event);
         // Reserve scrollbar width even while it is hidden. Using viewport width
         // here made wrapping add/remove the scrollbar and oscillate indefinitely.
-        const int cellWidth=qMax(120,(width()-24)/2);
+        constexpr int minimumCellWidth=210;
+        const int availableWidth=qMax(1,width()-24);
+        const int columns=qBound(1,availableWidth/minimumCellWidth,3);
+        const int cellWidth=qMax(120,availableWidth/columns);
         const QSize cell(cellWidth,qBound(128,(cellWidth-40)*9/16+60,220));
         if (gridSize() == cell) return;
         setGridSize(cell);
         for (int row=0; row<count(); ++row) item(row)->setSizeHint(cell);
     }
+private:
+    QString emptyMessage_;
 };
 

@@ -1,8 +1,8 @@
 # Media Foundation / WebRTC integration
 
 These are private integration headers, not portable session APIs. The independent
-`tools/webrtc-proof` project builds them against the pinned artifact. Normal UI/CLI
-sessions have not switched to this path.
+`tools/webrtc-proof` project and normal UI/CLI rooms build them against the
+pinned artifact. NativeRoomRuntime owns the room integration.
 
 `MfVideoEncoderFactory` exposes H.264 High level 4.2, packetization mode 1,
 up to 1920×1080 / 60 FPS. Supplying an `MfHardwareSession` enables hardware
@@ -12,6 +12,18 @@ is submitted to the transform at a time. Replaced/suspended frames
 generate WebRTC dropped-frame callbacks. No encoded frame queue is introduced.
 Negotiation of a lower level is explicitly rejected until per-level encoder
 limits are implemented; it must not silently encode above the negotiated level.
+
+Normal sharing uses automatic MF software threading to preserve encoding delay
+and frame-time headroom. A two-worker experiment saved CPU but increased encoding
+time, with detailed four-viewer batch p95 exceeding the 60 FPS frame budget.
+Keep worker limits explicit for low-level callers; there is no user-facing
+efficiency mode yet. The optional softwareWorkerThreads config defaults to zero
+(automatic). When explicitly requested, set it before format negotiation to size
+the inbox codec's pool and reapply afterward because negotiation resets its
+reported property. Applying only afterward changes the query without reducing
+the tested pool. `encoder-software-workers` records the queried setting, where
+zero means automatic/unavailable. Restarts and software fallback retain the
+configuration. See [measurements and default decision](../../../docs/performance.md).
 
 WebRTC API calls must remain serialized, as required by its codec contract.
 Initialization, rate changes, callback registration and release use worker
@@ -23,8 +35,13 @@ back into codec lifecycle operations.
 SetRates applies the assigned bitrate directly. Zero suspends even when its FPS
 field is also zero. FPS changes restart the transform and force a keyframe;
 bitrate-only updates do not restart it. Software input must yield exactly one
-encoded packet. Software errors or a completed encode call exceeding 500 ms mark
-the encoder failed. Hardware uses explicit readiness/submission and nonblocking
+encoded packet. A completed software encode exceeding 500 ms drops that late
+output and forces the next fresh picture to be a keyframe, retaining the live
+transform and latest pending input. The dropped picture's reference chain must
+never be used by a receiver. Diagnostics record `encoder-late-frame-dropped`
+with elapsed work milliseconds; cancelled configurations emit no late callback.
+Actual software codec errors still mark the encoder failed.
+Hardware uses explicit readiness/submission and nonblocking
 MF event polling, with a 500 ms deadline and generation cancellation. The old
 hardware queue and multi-second drain loops are not used. Polling waits at most
 one millisecond between checks on the encoder worker, never on signaling/network
@@ -47,8 +64,14 @@ and broader soak/performance evidence remain unfinished.
 `D3dVideoFrameBuffer` retains an independently allocated NV12 texture and its
 device owner. Published textures are never overwritten; the encoder holds them
 through output/cancellation. Same-device hardware submission does not read back
-pixels. Software or cross-device fallback maps on the owner, converts to I420
-and caches the result under a mutex. Readback count/time are exposed for evidence.
+pixels. Software or cross-device fallback maps NV12 on the owner and caches it
+under a mutex, avoiding a redundant I420 round trip. Explicit I420 callers retain
+direct conversion if they request first; requesting a second format derives it
+from cached CPU pixels without another readback. Only requested formats are
+retained. Readback count/time and I420 conversion count are exposed for evidence.
+Software NV12 input copies its planes directly into an owned MF sample, without
+a temporary CapturedFrame pixel vector. The borrowed plane view is consumed
+synchronously; padding is checked and MF retains independently owned bytes.
 MF's internal device-manager operations use D3D multithread protection. D3D COM
 references can be released on another thread after the owner is joined.
 
@@ -100,14 +123,21 @@ so the allocation bound is distinct from the negotiated visible-frame bound.
 
 Unique MF sample IDs associate delayed output with the original RTP/NTP values,
 including RTP wraparound. Errors clear associations, quarantine hardware and
-require a keyframe after 250 ms, with at most three software rebuild attempts per
-configuration. Release discards delayed output; it never emits callbacks
-from a retired stream. The short High-profile lifecycle test observes one delayed
-decoded frame per cycle, discarded on release. This must be included in future
-pipeline latency measurements.
+require a keyframe after 250 ms, with at most three software rebuild attempts
+before sustained healthy decoding. Thirty validated output frames renew that
+budget, so isolated failures cannot exhaust recovery over a long room. Accepted
+input without output does not renew it; hardware quarantine is never reset by
+healthy software output. Consumer retention drops count as valid decoding.
+Release discards delayed output; it never emits callbacks from a retired stream.
+The low-latency lifecycle checks require each complete picture to produce output
+without waiting for a subsequent input picture.
 
 `MfDecoderAdapterTest --gpu` exercises texture ownership, aperture/planes, startup
 fallback, pressure, retired-device recovery and exhausted malformed-input retries.
+The application build also provides `DecoderAdapterTests`; its ordinary CTest
+checks repeated software recovery, restart exhaustion, resize, CPU output and
+injected unavailable-GPU startup fallback. Its `--gpu` option runs the same
+generated-input hardware checks, without capturing the desktop.
 The actual v2 UI/CLI scenarios require native frames and hardware telemetry while
 resizing. See [runtime ownership](../../../docs/architecture.md); physical latency and field acceptance stay open.
 
@@ -194,9 +224,21 @@ as specified by [Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/
 Unknown engine periods are reported as zero, not inferred from buffer capacity.
 Capture delay is an estimate, not a measured capture-to-speaker latency.
 
-Device failures stop that direction and increment diagnostics; they do not
-silently select another device. Microphone processing and device recovery policy
-remain session-integration work. System/process proof tracks disable AEC/AGC/NS.
+In session integration, SwitchablePcmCapture automatically retries committed
+System/Microphone factories after activation/read failure or five seconds without
+fresh PCM, with 250 ms–5 s capped
+backoff and paced silence on the existing 10 ms output timeline. Recovery opens
+on a producer owner, preserving explicit device IDs, settings revision and dropped
+frame totals. First PCM confirms recovery. The missing-PCM deadline covers initial,
+established and manually selected producers as well as recovery attempts. Fresh
+queued PCM is consumed before expiry; valid zero PCM renews the deadline but
+generated replacement silence cannot. Stalled producers must honor cancellation.
+Speech processing is
+recreated for each microphone open. Manual updates/mute supersede automatic work;
+Close/Stop prevent reopening. Shared-source mode retains its validated-target
+recovery, and explicit process IDs retain manual retry. No unrelated device/app
+fallback is introduced. Native driver calls still cannot be safely preempted.
+System/process proof tracks disable AEC/AGC/NS.
 Tests cover synthetic Opus with video, mono/stereo, capture mute, repeated stop,
 callback teardown and invalid device selection. `-AudioDevice` additionally
 plays a quiet tone and captures only the test process, tests physical lifecycle,
@@ -204,8 +246,39 @@ and sends process-loopback audio through Opus alongside H.264. The received audi
 is measured without physical replay to avoid feedback. Physical playout is
 tested separately; other capture devices/modes and full A/V timing remain unverified.
 
-Receiver presentation recovery uses `PresentationRecovery.h`: typed DXGI errors, owner-thread resource release, 250 ms drop-only backoff and at most three rebuilds per presenter lifetime. A fourth error is terminal. No failed frame is retained. Initial attachment and explicit Clear failures still propagate; session startup/shutdown must handle them. Capture/encoder recovery remains pending. Policy tests run by default; `PresentationRecoveryTest --gpu` requires a desktop session and tests injected loss with real resource recreation, not actual driver removal.
+Receiver presentation recovery uses `PresentationRecovery.h`: typed DXGI errors,
+owner-thread resource release, 250 ms drop-only backoff and three rebuilds before
+30 successfully presented incoming frames renew the budget. Redraws and skipped
+presents cannot renew it; a fourth unstable error or a nonrecoverable error is
+terminal. Recovery totals remain cumulative until explicit Clear. No failed frame
+is retained. Initial attachment and explicit Clear failures still propagate;
+session startup/shutdown must handle them. Application `video-frame-input` checks
+healthy renewal, exact 29/30-frame boundaries, skipped output, redraw isolation
+and terminal behavior. The native Windows UI proof additionally injects four
+healthy-separated losses with real GPU resource recreation and no readback.
+`PresentationRecoveryTest --gpu` also requires a desktop session. These injected
+faults do not qualify physical driver removal or native calls that never return.
 
 Device recovery boundary: capture must call MfHardwareSession::RetireDevice before DesktopCapturer::RebuildWindowDevice and before publishing new-device frames. The rebuild retains the original WGC item/closure subscription, supports only owned window capture, and stops on reconstruction failure. Encoders permanently reject old-device native frames without readback and request an IDR from fresh software input. Device retirement is shared across viewers and also detected via GetDeviceRemovedReason. This is an explicit primitive, not automatic session recovery. A coordinator must own replacement-device generations, invalidate all affected sessions, bound retries and suppress old-generation callbacks. Real device removal remains untested.
 
-Automatic recovery proof: CaptureRecovery provides three rebuilds with 250 ms nonblocking backoff and terminal exhaustion. LiveCaptureSource catches typed device loss, retires its current owner, rebuilds the original WGC source, then publishes with a fresh owner/generation. D3dVideoDevice retirement rejects cached CPU pixels too, and encoder retirement checks now apply across replacement generations. Production callback-generation barriers are still pending. Run CaptureRecoveryTest --live in a desktop session; it injects loss without resetting the physical driver.
+Automatic capture recovery: CaptureSession catches typed device loss and repeated
+GPU-frame deadline misses, retires the current owner and rebuilds the source with
+a fresh generation. CaptureRecovery allows three rebuilds with 250 ms nonblocking
+backoff; 30 consecutive valid capture samples renew that allowance. Skipped
+frames and minimized/unavailable sources interrupt the healthy streak. Failed
+reconstruction and exhausted unstable recovery remain terminal for that source.
+D3dVideoDevice retirement rejects cached CPU pixels too, and encoders reject
+old-device input across replacement generations. CaptureSession joins its owner
+and callbacks before destruction. Run CaptureRecoveryTest --live in a desktop
+session to check five healthy-separated injected losses; it does not reset the
+physical driver.
+
+The shipping switchable capture container can abandon a failed native source
+after acquisition/rebuild failure, first-frame timeout or exhausted recovery.
+CaptureSession preserves the room/distribution and the capture-selection mailbox
+in SourceUnavailable, with its failure reason retained. The host chooses the next
+source explicitly. Retirement/destruction stay on the capture owner; abandonment
+advances source generation and gives the next selected source a fresh recovery
+budget. Fresh output clears the failure. Consumer errors, initial Start failures
+and ordinary sources without a replacement mailbox remain terminal. The runtime
+releases held input and blocks new grants while no source is available.

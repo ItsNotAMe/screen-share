@@ -26,6 +26,7 @@ struct RendererEvidence {
     std::atomic<unsigned> calls{0}, resets{0};
     std::atomic_bool destroyed{false}, wrongThread{false};
     std::atomic_bool block{false}, entered{false};
+    std::atomic_bool blockReset{false}, resetEntered{false};
     std::thread::id owner;
 };
 class TestRenderer final : public FramePresentationBackend {
@@ -45,7 +46,13 @@ public:
         return state_->outcome == screenshare::PresentationOutcome::Presented;
     }
     void Update(HWND, uint32_t, uint32_t, bool, bool, screenshare::Nv12D3D11Presenter::ScaleMode) override { CheckThread(); }
-    void Reset() noexcept override { CheckThread(); ++state_->resets; }
+    void Reset() noexcept override {
+        CheckThread(); ++state_->resets;
+        if(state_->blockReset) {
+            state_->resetEntered=true;
+            while(state_->blockReset)std::this_thread::sleep_for(1ms);
+        }
+    }
     uint32_t MaximumFrameLatency() const noexcept override { return 1; }
     screenshare::PresentationOutcome LastOutcome() const noexcept override { return state_->outcome; }
 };
@@ -158,6 +165,43 @@ void NativeGameCaptureScenario() {
     Require(!widget.gameMouseCaptured());
     click();Require(widget.gameMouseCaptured());widget.clearFrame();Require(!widget.gameMouseCaptured());
 }
+void HealthyPresentationRenewsRecovery() {
+    using screenshare::media::PresentationRecovery;
+    PresentationRecovery recovery;
+    auto now = PresentationRecovery::Clock::now();
+    unsigned resets = 0;
+    auto reset = [&] { ++resets; };
+    auto lost = []() -> bool { throw screenshare::PresentationError(DXGI_ERROR_DEVICE_REMOVED, "Isolated presentation outage exhausted the lifetime budget"); };
+    for (unsigned outage = 1; outage <= 5; ++outage) {
+        Require(!recovery.Present(lost, reset, now));
+        Require(recovery.recoveries() == outage && resets == outage);
+        now += 250ms;
+        for (unsigned frame = 0; frame < 30; ++frame)
+            Require(recovery.Present([] { return true; }, reset, now));
+    }
+    // A few valid pictures between errors, redraws of old pixels and skipped
+    // frames must not turn a flapping device into an unlimited rebuild loop.
+    for (unsigned outage = 1; outage <= 3; ++outage) {
+        Require(!recovery.Present(lost, reset, now));
+        now += 250ms;
+        for (unsigned frame = 0; frame < 29; ++frame)
+            Require(recovery.Present([] { return true; }, reset, now));
+        for (unsigned redraw = 0; redraw < 100; ++redraw) {
+            Require(recovery.Present([] { return true; }, reset, now, false));
+            Require(!recovery.Present([] { return false; }, reset, now));
+        }
+    }
+    bool failed = false;
+    try { recovery.Present(lost, reset, now); }
+    catch (const screenshare::PresentationError&) { failed = true; }
+    Require(failed && recovery.recoveries() == 8 && resets == 9);
+    unsigned terminalDraws = 0;
+    failed = false;
+    try { recovery.Present([&] { ++terminalDraws; return true; }, reset, now + 1h); }
+    catch (const std::runtime_error&) { failed = true; }
+    Require(failed && !terminalDraws);
+    std::cout << "Five healthy-separated presentation outages recover; 29-frame bursts, redraws and skips retain the three-rebuild limit.\n";
+}
 void PresentationRecoveryScenario() {
     auto state = std::make_shared<RendererEvidence>();
     const auto mainThread = std::this_thread::get_id();
@@ -181,6 +225,12 @@ void PresentationRecoveryScenario() {
         Require(widget.presentationStats().inputMapping.generation==1);
         using enum screenshare::PresentationOutcome;
         widget.showVideoSurface();QApplication::processEvents();
+        const auto received=widget.presentationStats().frameReceivedAt;Require(received.has_value());
+        Require(widget.hasFreshFrame(*received+VideoFrameWidget::FreshFrameTimeout-1ms));
+        Require(!widget.hasFreshFrame(*received+VideoFrameWidget::FreshFrameTimeout));
+        widget.resize(638,478);QApplication::processEvents();
+        Await([&]{return widget.presentationStats().inputViewportWidth==638;});
+        Require(widget.presentationStats().frameReceivedAt==received); // Redraw is not a new frame.
         unsigned downs=0,ups=0;
         widget.setControlCapture(true,true,true);
         widget.setRemoteInputHandler([&](const auto& value){
@@ -210,9 +260,11 @@ void PresentationRecoveryScenario() {
         widget.setRemoteInputHandler({});
         const auto busyBefore=widget.presentationStats().renderer.busyDrops;
         for (const auto outcome : {Busy, Occluded, Minimized, Unavailable, Unknown}) {
+            const auto priorFrame=widget.presentationStats().frameReceivedAt;
             state->outcome = outcome; send();
             Require(widget.presentationStats().renderer.outcome == outcome);
             Require(widget.presentationStats().inputMapping.Valid()==(outcome==Busy));
+            Require(widget.presentationStats().frameReceivedAt==priorFrame);
         }
         const auto drops = widget.presentationStats().renderer;
         Require(drops.busyDrops == busyBefore+1 && drops.occludedDrops == 1 && drops.minimizedDrops == 1 && drops.unavailableDrops == 1);
@@ -262,7 +314,7 @@ void PresentationRecoveryScenario() {
         for (int frame = 0; frame < 100; ++frame) send();
         Require(state->calls == calls && widget.presentationStats().recoveries == 3);
         Require(widget.presentationStats().renderer.outcome == Failed && widget.presentationStats().renderer.lastError == DXGI_ERROR_DEVICE_RESET);
-        // Only an explicit session clear refreshes the lifetime recovery budget.
+        // Terminal exhaustion still requires an explicit session clear.
         widget.clearFrame(); Await([&] { return !widget.presentationStats().terminal; });
         state->failure = S_OK; send();
         Require(widget.presentationStats().recoveries == 0);
@@ -277,6 +329,83 @@ void PresentationRecoveryScenario() {
         // sleep and destroy the backend on its owning worker.
     }
     Require(state->destroyed && !state->wrongThread);
+}
+void RedrawCannotRenewPresentationRecovery() {
+    auto state = std::make_shared<RendererEvidence>();
+    FramePresentationSession session([state] { return std::make_unique<TestRenderer>(state); });
+    const uint8_t pixels[6]{};
+    const screenshare::Nv12D3D11Presenter::FrameView frame{2, 2, pixels, sizeof(pixels)};
+    auto present = [&] { return session.Present(nullptr, 2, 2, false, true, frame); };
+    using enum screenshare::PresentationOutcome;
+    for (unsigned outage = 1; outage <= 3; ++outage) {
+        state->failure = DXGI_ERROR_DEVICE_REMOVED;
+        Require(!present() && session.statistics().recoveries == outage);
+        state->failure = S_OK;
+        std::this_thread::sleep_for(260ms);
+        for (unsigned picture = 0; picture < 29; ++picture) Require(present());
+        for (auto skipped : {Busy, Occluded, Minimized, Unavailable}) {
+            state->outcome = skipped;
+            for (unsigned redraw = 0; redraw < 30; ++redraw) {
+                Require(session.Update(nullptr, 2, 2, false, true));
+                Require(!present());
+            }
+        }
+        state->outcome = Presented;
+    }
+    state->failure = DXGI_ERROR_DEVICE_RESET;
+    Require(!present() && session.statistics().terminal);
+    Require(session.statistics().recoveries == 3 && session.statistics().errors == 4);
+    session.Clear();
+    state->failure = S_OK;
+    Require(present() && !session.statistics().terminal && session.statistics().recoveries == 0);
+}
+void HealthyWidgetPlaybackRenewsRecovery() {
+    auto state = std::make_shared<RendererEvidence>();
+    VideoFrameWidget widget(nullptr, [state] { return std::make_unique<TestRenderer>(state); });
+    widget.setLowLatency(true);
+    auto send = [&] {
+        screenshare::Nv12VideoFrame frame;
+        frame.width = frame.height = 2; frame.nv12.resize(6);
+        Require(widget.presentVideoFrameAsync(std::move(frame)));
+        Await([&] {
+            const auto stats = widget.presentationStats();
+            return stats.enqueuedFrames == stats.presentedFrames + stats.droppedFrames;
+        });
+    };
+    for (unsigned outage = 1; outage <= 5; ++outage) {
+        state->failure = DXGI_ERROR_DEVICE_REMOVED;
+        send();
+        Require(widget.presentationStats().recoveries == outage && !widget.presentationStats().terminal);
+        state->failure = S_OK;
+        std::this_thread::sleep_for(260ms);
+        const auto before = widget.presentationStats().presentedFrames;
+        for (unsigned picture = 0; picture < 30; ++picture) send();
+        Require(widget.presentationStats().presentedFrames == before + 30);
+    }
+    Require(widget.presentationStats().presentErrors == 5 && widget.presentationStats().recoveries == 5);
+    Require(widget.presentationStats().maximumFrameLatency == 1 && !state->wrongThread);
+}
+void ClearedPresentationCannotResumeInput() {
+    auto state=std::make_shared<RendererEvidence>();
+    VideoFrameWidget widget(nullptr,[state]{return std::make_unique<TestRenderer>(state);});
+    struct Unblock {
+        std::shared_ptr<RendererEvidence> state;
+        ~Unblock(){state->block=false;state->blockReset=false;}
+    } unblock{state};
+    widget.show();widget.showVideoSurface();QApplication::processEvents();
+    state->block=true;
+    screenshare::Nv12VideoFrame frame;frame.width=frame.height=2;frame.nv12.resize(6);
+    frame.inputMapping={1,2,2,0,0,2,2};
+    Require(widget.presentVideoFrameAsync(std::move(frame)));
+    Await([&]{return state->entered.load();});
+    Require(!widget.hasFreshFrame() && !widget.presentationStats().frameReceivedAt);
+    state->blockReset=true;widget.clearFrame();state->block=false;
+    // Hold the queued Clear inside the backend. The preceding blocked present
+    // has completed, but its late result must already have been rejected.
+    Await([&]{return state->resetEntered.load();});
+    const auto afterClear=widget.presentationStats();
+    state->blockReset=false;
+    Require(!afterClear.frameReceivedAt && !afterClear.inputMapping.Valid());
 }
 }
 
@@ -296,7 +425,8 @@ int main(int argc, char** argv)
 {
     QApplication application(argc, argv);
     try {
-        GameMappingScenario();PresentationRecoveryScenario();
+        HealthyPresentationRenewsRecovery();RedrawCannotRenewPresentationRecovery();HealthyWidgetPlaybackRenewsRecovery();
+        GameMappingScenario();PresentationRecoveryScenario();ClearedPresentationCannotResumeInput();
         if(argc==2 && std::string(argv[1])=="--game-mouse")NativeGameCaptureScenario();
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

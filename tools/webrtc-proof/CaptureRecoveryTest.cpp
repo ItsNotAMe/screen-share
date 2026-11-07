@@ -41,7 +41,9 @@ int main(int argc, char** argv) try {
         });
         source.StartDelivery();
         Wait([&] { return source.frames > 2; });
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 5; ++i) {
+            const auto beforeHealthy = source.frames.load();
+            Wait([&] { return source.frames >= beforeHealthy + 35 && !source.HasFailed(); });
             webrtc::scoped_refptr<D3dVideoFrameBuffer> old;
             { std::lock_guard lock(mutex); old = latest; }
             Require(old && old->ToI420(), "Current generation pixels unavailable");
@@ -50,10 +52,8 @@ int main(int argc, char** argv) try {
             Require(old->retired() && !old->ToI420(), "Retired generation exposed cached pixels");
             Wait([&] { std::lock_guard lock(mutex); return latest && !latest->retired(); });
         }
-        source.InjectDeviceLoss();
-        Wait([&] { return source.HasFailed(); });
         source.Stop(); source.Stop();
-        Require(source.generation == 4, "Terminal failure rebuilt again");
+        Require(source.generation == 6, "Healthy-separated capture failures exhausted recovery");
         // Stop during backoff must not wait for the 250 ms retry timer.
         proof::LiveCaptureSource stopping(window.handle(), [](auto) {});
         stopping.InjectDeviceLoss();

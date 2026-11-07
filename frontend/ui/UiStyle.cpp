@@ -177,6 +177,31 @@ QString uiStyleSheet()
     return QStringLiteral(R"(
 QWidget { color: #edf5f2; font-family: "Segoe UI"; font-size: 10pt; }
 QDialog, QWidget#RoomBrowser { background: #0c1110; }
+QFileDialog QAbstractItemView {
+    background: #151d1b; alternate-background-color: #18221e; color: #edf5f2;
+    selection-background-color: #21645b; selection-color: #ffffff;
+    border: 1px solid #35473f; border-radius: 6px; outline: 0;
+}
+QFileDialog QAbstractItemView::item { min-height: 28px; padding: 2px 4px; }
+QFileDialog QAbstractItemView::item:hover { background: #20312c; }
+QFileDialog QAbstractItemView::item:selected { background: #21645b; color: #ffffff; }
+QFileDialog QHeaderView { background: #151d1b; }
+QFileDialog QToolButton {
+    background: #151d1b; color: #edf5f2; border: 1px solid #293631;
+    border-radius: 6px; padding: 4px; min-width: 24px; min-height: 24px;
+}
+QFileDialog QToolButton:hover, QFileDialog QToolButton:checked { background: #20312c; border-color: #52746a; }
+QFileDialog QToolButton:focus { border-color: #60786f; }
+QFileDialog QToolButton#backButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-left.svg); }
+QFileDialog QToolButton#forwardButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-right.svg); }
+QFileDialog QToolButton#toParentButton { qproperty-icon: url(:/screenshare/ui/icons/chevron-up.svg); }
+QScrollBar:horizontal { background: #101815; height: 10px; margin: 0; border: 0; }
+QScrollBar::handle:horizontal { background: #40534a; border-radius: 5px; min-width: 24px; }
+QScrollBar::handle:horizontal:hover { background: #60786f; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; border: 0; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+QAbstractScrollArea::corner { background: #151d1b; }
+QFileDialog QSplitter::handle { background: #0c1110; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
 QScrollBar:vertical { background: #101815; width: 10px; margin: 0; border: 0; }
 QScrollBar::handle:vertical { background: #40534a; border-radius: 5px; min-height: 24px; }
@@ -277,7 +302,7 @@ QPushButton#acceptPeerRequest:hover, QPushButton#controllerAction:hover, QPushBu
 QPushButton#createV2Room:hover, QPushButton#joinV2Room:hover, QPushButton#joinWithPassword:hover { background: #177d70; color: #ffffff; }
 QPushButton#acceptPeerRequest:pressed, QPushButton#controllerAction:pressed, QPushButton#applyStream:pressed, QPushButton#confirmSourceSelection:pressed,
 QPushButton#createV2Room:pressed, QPushButton#joinV2Room:pressed, QPushButton#joinWithPassword:pressed { background: #0d5149; color: #ffffff; }
-QPushButton#controllerAction:disabled { background: #263c35; color: #a3b5af; }
+QPushButton#controllerAction:disabled, QPushButton#confirmSourceSelection:disabled { background: #263c35; color: #a3b5af; }
 QPushButton#PeerCapability, QPushButton#removeRoomViewer { padding: 4px; border-radius: 7px; }
 QPushButton#removeRoomViewer:hover { background: #442b2b; border-color: #9f5b5b; }
 QPushButton#PeerCapability:checked { background: #194b43; border: 1px solid #38d8c8; }
@@ -315,7 +340,12 @@ QPushButton#OptionsDisclosure:hover { background: #263d33; }
 QPushButton#roomBack { background: transparent; border: 0; padding: 6px 10px; color: #b7c8c0; font-size: 14px; }
 QPushButton#roomBack:hover { background: #20312c; }
 QLabel#FormHint { color: #a3b5af; }
+QLabel#gameMouseHint { color: #a3b5af; }
+QLabel#InputShortcutsTitle { color: #a3b5af; font-size: 12px; font-weight: 600; }
+QLabel#InputShortcutAction { color: #b7c8c0; font-size: 12px; }
+QLabel[controlShortcutKey="true"] { color: #d8e7df; background: #1b2822; border: 1px solid #35473f; border-radius: 4px; padding: 2px 6px; font-size: 12px; font-weight: 600; }
 QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
+QLabel#browserError[joinPending="true"] { color: #a3b5af; }
 QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }
 QPushButton#createV2Room, QPushButton#joinV2Room, QPushButton#joinWithPassword {
     background: #126c61; color: #ffffff; font-weight: 650; min-height: 24px;
@@ -583,7 +613,7 @@ QPushButton#clearRoomSearch:hover {
 }
 QPushButton#HomeTinyButton:disabled,
 QPushButton#clearRoomSearch:disabled {
-    color: #4f6865;
+    color: #a3b5af;
     border: 1px solid #2d3c3a;
 }
 QDialog#UpdateDialog {

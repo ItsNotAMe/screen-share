@@ -21,9 +21,8 @@ public:
     ID3D11Texture2D* texture() const override { return frame_.nv12Texture.Get(); }
     std::span<const uint8_t> pixels() const override {
         std::call_once(readback_, [&] {
-            auto planar = buffer_->ToI420();
-            if (!planar) throw std::runtime_error("GPU preview readback failed");
-            auto nv12 = webrtc::NV12Buffer::Copy(*planar);
+            auto nv12 = buffer_->ToNv12();
+            if (!nv12) throw std::runtime_error("GPU preview readback failed");
             pixels_.resize(size_t(buffer_->width()) * buffer_->height() * 3 / 2);
             if (libyuv::NV12Copy(nv12->DataY(), nv12->StrideY(), nv12->DataUV(), nv12->StrideUV(),
                 pixels_.data(), buffer_->width(), pixels_.data() + size_t(buffer_->width()) * buffer_->height(),

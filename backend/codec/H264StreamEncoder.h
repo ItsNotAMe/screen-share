@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <span>
 #include <vector>
 
 #include <mfidl.h>
@@ -41,11 +42,21 @@ struct H264StreamEncoderConfig {
     uint32_t keyframeIntervalFrames = 0;
     // H.264 level_idc; zero retains automatic level selection for legacy callers.
     uint32_t levelIdc = 0;
+    // Software slice workers; zero preserves Media Foundation's automatic count.
+    uint32_t softwareWorkerThreads = 0;
     // The caller owns readiness, submission bounds and output deadlines.
     bool externalHardwareScheduling = false;
     int64_t startFrameIndex = 0;
     H264StreamEncoderBackend backend = H264StreamEncoderBackend::Software;
     Microsoft::WRL::ComPtr<ID3D11Device> d3dDevice;
+};
+
+// Borrowed, potentially padded planes. EncodeNv12 copies them into an owned MF
+// sample before returning; the caller retains the source for the call only.
+struct Nv12FrameView {
+    int width = 0, height = 0;
+    std::span<const uint8_t> y, uv;
+    int strideY = 0, strideUv = 0;
 };
 
 class H264StreamEncoder {
@@ -58,6 +69,7 @@ public:
 
     void Start(const H264StreamEncoderConfig& config);
     std::vector<EncodedPacket> EncodeFrame(const CapturedFrame& frame);
+    std::vector<EncodedPacket> EncodeNv12(const Nv12FrameView& frame);
     std::vector<EncodedPacket> Drain();
     bool TryUpdateBitrate(uint32_t bitrate);
     bool RequestKeyframe();
@@ -74,8 +86,12 @@ public:
     // EncodeFrame completes one submission; no internal raw-frame queue remains.
     [[nodiscard]] size_t queuedInputCount() const noexcept { return 0; }
     [[nodiscard]] uint64_t droppedInputFrames() const noexcept { return 0; }
+    // Requested codec property, queried on the codec owner. Zero means automatic
+    // selection or an implementation that does not expose this optional setting.
+    [[nodiscard]] uint32_t softwareWorkerThreads() const;
 
 private:
+    std::vector<EncodedPacket> EncodeSoftwareSample(IMFSample* sample);
     std::vector<EncodedPacket> ReadAvailablePackets();
     std::vector<EncodedPacket> ReadSyncAvailablePackets();
     std::vector<EncodedPacket> ReadAsyncAvailablePackets();

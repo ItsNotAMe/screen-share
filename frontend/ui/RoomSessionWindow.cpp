@@ -2,6 +2,7 @@
 #include "ui/RoomGamepadControl.h"
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
+#include "shared/RoomEntryError.h"
 #include "shared/RoomProfile.h"
 #include "ui/PeerDiagnosticsWidget.h"
 #include "ui/SessionDetailsWidget.h"
@@ -25,6 +26,9 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QFile>
+#include <QFileDialog>
+#include <QDateTime>
+#include <QStandardPaths>
 #include <QFormLayout>
 #include <QJsonDocument>
 #include <QLabel>
@@ -199,27 +203,39 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         const bool opened=OpenUiLogFolder(folder,QDesktopServices::openUrl);
         reportFeedback(opened?"Opened the log folder.":"Could not open the log folder. Check its location and folder permissions.",!opened);
     });
-    connect(exportReport, &QPushButton::clicked, this, [this, reportResult, reportFeedback, showReport, configured = config.reportFile] {
-        const auto file = configured.isEmpty() ? "room-v2-" + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".json" : configured;
-        const auto path = ResolveUiReportPath(file);
-        const auto input = session_.input();
-        auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
-        report["decodedFrameHandoff"] = FrameQueueDiagnostics(session_.frameStatistics());
-        const auto presentation = video_->presentationStats();
-        auto renderer = PresentationDiagnosticsJson(presentation.renderer);
-        renderer["presented"] = qint64(presentation.presentedFrames);
-        renderer["dropped"] = qint64(presentation.droppedFrames);
-        renderer["queued"] = int(presentation.queuedFrames);
-        renderer["averagePresentMs"] = presentation.averagePresentMs;
-        renderer["maxPresentMs"] = presentation.maxPresentMs;
-        renderer["errors"] = qint64(presentation.presentErrors);
-        renderer["recoveries"] = qint64(presentation.recoveries);
-        renderer["terminal"] = presentation.terminal;
-        report["presentation"] = renderer;
-        const bool saved=WriteRoomDiagnosticReport(path, report);
-        reportFeedback(saved ? "Saved diagnostic report: " + QFileInfo(path).fileName() : "Could not save diagnostic report. Check the destination is writable.",!saved);
-        reportResult->setToolTip(QDir::toNativeSeparators(path));
-        showReport->setProperty("reportPath",saved?path:QString());
+    const auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    reportExportPath_ = config.reportFile.isEmpty() ? QDir(documents.isEmpty() ? DefaultUiReportsDirectory() : documents).filePath(
+        QString("screenshare-%1-%2.json").arg(config.room.host ? "host" : "viewer", QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss'Z'"))) :
+        ResolveUiReportPath(config.reportFile);
+    connect(exportReport, &QPushButton::clicked, this, [this, exportReport, reportResult, reportFeedback, showReport] {
+        auto* dialog = new QFileDialog(this, "Save diagnostic report", reportExportPath_);
+        dialog->setObjectName("saveRoomReportDialog"); dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setAcceptMode(QFileDialog::AcceptSave); dialog->setFileMode(QFileDialog::AnyFile);
+        dialog->setNameFilter("JSON reports (*.json)"); dialog->setDefaultSuffix("json");
+        exportReport->setEnabled(false);
+        connect(dialog, &QDialog::finished, exportReport, [exportReport] { exportReport->setEnabled(true); });
+        connect(dialog, &QFileDialog::fileSelected, this, [this, reportResult, reportFeedback, showReport](const QString& path) {
+            reportExportPath_ = path;
+            const auto input = session_.input();
+            auto report = RoomDiagnosticReport(session_.status(), input ? input->Read() : std::vector<screenshare::input::Status>{});
+            report["decodedFrameHandoff"] = FrameQueueDiagnostics(session_.frameStatistics());
+            const auto presentation = video_->presentationStats();
+            auto renderer = PresentationDiagnosticsJson(presentation.renderer);
+            renderer["presented"] = qint64(presentation.presentedFrames);
+            renderer["dropped"] = qint64(presentation.droppedFrames);
+            renderer["queued"] = int(presentation.queuedFrames);
+            renderer["averagePresentMs"] = presentation.averagePresentMs;
+            renderer["maxPresentMs"] = presentation.maxPresentMs;
+            renderer["errors"] = qint64(presentation.presentErrors);
+            renderer["recoveries"] = qint64(presentation.recoveries);
+            renderer["terminal"] = presentation.terminal;
+            report["presentation"] = renderer;
+            const bool saved=WriteRoomDiagnosticReport(path, report);
+            reportFeedback(saved ? "Saved diagnostic report: " + QFileInfo(path).fileName() : "Could not save diagnostic report. Check the destination is writable.",!saved);
+            reportResult->setToolTip(QDir::toNativeSeparators(path));
+            showReport->setProperty("reportPath",saved?path:QString());
+        });
+        dialog->open();
     });
     auto* roomForm = new QFormLayout;
     roomForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -428,7 +444,8 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     connect(apply_, &QPushButton::clicked, this, [this] {
         error_->clear();streamSaveError_.clear(); settingsState_->setText("Settings pending…"); session_.apply(ReadPreferences());
     });
-    session_.statusChanged = [this, peerDiagnostics, sessionDetails, capacityWarning, host = config.room.host](const auto& value) {
+    session_.statusChanged = [this, peerDiagnostics, sessionDetails, capacityWarning, playbackForm, host = config.room.host](const auto& value) {
+        if (value.phase == RoomPhase::Active) roomWasActive_ = true;
         sessionDetails->Update(value);
         phase_->setText(!host && value.phase == RoomPhase::Active && value.failedPeers ? "Connection failed — leave and rejoin" : Phase(value.phase));
         phase_->setToolTip(QString("%1 media peers, %2 pending, %3 failed").arg(value.activePeers).arg(value.pendingPeers).arg(value.failedPeers));
@@ -460,17 +477,21 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         apply_->setEnabled(host && value.phase == RoomPhase::Active);
         const bool playbackEditable = !host && value.phase == RoomPhase::Active && !session_.playbackPending();
         const bool playbackFailed = value.playback.health.state == AudioEndpointState::Failed;
-        playbackHealth_->setText(playbackFailed ? "Audio output failed. Video continues. Retry playback or select another output." :
+        playbackHealth_->setText(playbackFailed ? "Audio output failed. Retrying automatically while video continues. You can retry now or select another output." :
             value.playback.health.state == AudioEndpointState::Running ? "Audio output active." : "Audio output inactive.");
         applyPlayback_->setText(playbackFailed ? "Retry playback" : "Apply playback settings");
-        applyPlayback_->setVisible(playbackFailed);
+        if (playbackForm->isRowVisible(applyPlayback_) != playbackFailed) playbackForm->setRowVisible(applyPlayback_, playbackFailed);
         applyPlayback_->setEnabled(playbackEditable); refreshPlayback_->setEnabled(playbackEditable);
         playbackDevice_->setEnabled(playbackEditable); playbackVolume_->setEnabled(playbackEditable); playbackMuted_->setEnabled(playbackEditable);
         switchCapture_->setEnabled(host && value.phase == RoomPhase::Active && !session_.capturePending());
         const bool audioEditable = host && value.phase == RoomPhase::Active && !session_.audioPending();
         const bool audioFailed = value.audio.health.state == AudioEndpointState::Failed;
         audioHealth_->setText(value.audio.selected.kind == AudioKind::None ? "Audio is muted. New viewers will join without shared audio." :
-            audioFailed ? "Audio capture failed. Video continues without shared audio. Retry or select another source." :
+            audioFailed ? (value.audio.selected.kind == AudioKind::SharedSource ?
+                "Shared-source audio is unavailable. Retrying automatically while video continues. You can select another source." :
+                value.audio.selected.kind == AudioKind::System || value.audio.selected.kind == AudioKind::Microphone ?
+                "Audio capture failed. Retrying automatically while video continues. You can retry now or select another source." :
+                "Audio capture failed. Video continues without shared audio. Retry or select another source.") :
             value.audio.health.state == AudioEndpointState::Running ? (value.audio.microphoneProcessing ?
                 "Microphone active: noise suppression and digital gain. Echo cancellation is unavailable." : "Audio capture active; speech processing bypassed.") :
             value.audio.health.state == AudioEndpointState::Silent ? "Audio capture disabled." : "Audio capture inactive.");
@@ -500,7 +521,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             const auto application = StreamApplicationJson(value.stream);
             settingsState_->setText(application["rejected"].toInt()?"Some viewers could not apply these settings. Review Details, then change the setting to retry.":application["pending"].toInt()?"Applying settings…":QString());
         }
-        if (value.phase == RoomPhase::Failed) error_->setText("The room session failed. Stop and start a new session to retry.");
+        if (value.phase == RoomPhase::Failed) error_->setText(RoomSessionError(value.error, host, roomWasActive_));
         error_->setVisible(!error_->text().isEmpty());
     };
     session_.settingsAccepted = [this](const auto& result) { if (result.error != StreamUpdateError::None) {streamSaveError_="These settings could not be applied. Change an option to retry.";settingsState_->setText(streamSaveError_);} };
@@ -528,9 +549,6 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     };
     if (!config.room.host && config.preview) session_.frameReady = [this](screenshare::Nv12VideoFrame frame) {
         if(remoteVideoBlocked_)return;
-        if(!remoteVideoMessage_.isEmpty()) {
-            remoteVideoMessage_.clear();video_->setStatusText({});video_->setAccessibleDescription({});
-        }
         if(video_->setVideoFrame(std::move(frame)))gamepad_->SetVideoAvailable(true);
     };
     if (!config.room.host && config.preview) {
@@ -634,6 +652,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         });previewActivity->start();
         auto* sourceSummary=new QLabel; sourceSummary->setObjectName("SessionSourceSummary"); sourceSummary->setWordWrap(true); primary->addWidget(sourceSummary);
         auto* sourceActions=new QHBoxLayout;primary->addLayout(sourceActions);
+        hostSourceActions_=sourceActions;
         auto* changeSource=new QPushButton("Change source"); changeSource->setObjectName("sessionChangeSource"); changeSource->setIcon(uiIcon("display")); sourceActions->addWidget(changeSource);
         connect(changeSource,&QPushButton::clicked,this,[this,loopback]{
             if(auto* existing=findChild<QDialog*>("SourcePickerDialog")){existing->raise();return;}
@@ -660,9 +679,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             else {*previousAudio=current;AudioSelection muted;muted.kind=AudioKind::None;session_.switchAudio(muted);}
         });
         auto* healthRow=new QHBoxLayout;healthRow->setSpacing(8);primary->addLayout(healthRow);
-        auto metric=[healthRow](const QString& title){auto* column=new QVBoxLayout;auto* caption=new QLabel(title);caption->setObjectName("MetricCaption");column->addWidget(caption);auto* value=new QLabel("—");value->setObjectName("MetricValue");column->addWidget(value);healthRow->addLayout(column,1);return value;};
+        auto metric=[healthRow](const QString& title){auto* group=new QWidget;auto* column=new QVBoxLayout(group);column->setContentsMargins(0,0,0,0);auto* caption=new QLabel(title);caption->setObjectName("MetricCaption");column->addWidget(caption);auto* value=new QLabel("—");value->setObjectName("MetricValue");column->addWidget(value);healthRow->addWidget(group,1);return value;};
         auto* health=metric("Stream health");health->setObjectName("SessionHealth");
         auto* bitrate=metric("Actual bitrate");auto* rtt=metric("Network RTT");auto* sentFps=metric("Encoded FPS");healthRow->addWidget(detailsButton);
+        hostRttMetric_=rtt->parentWidget();hostFpsMetric_=sentFps->parentWidget();
         auto previous=session_.statusChanged;
         session_.statusChanged=[this,previous,sourceTitle,sourceSummary,health,bitrate,rtt,sentFps,controlsTitle,muteAudio,pauseVideo,loopback](const auto& status) {
             previous(status);
@@ -691,9 +711,10 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             if(audioMuted)sourceSummary->setText(sourceSummary->text()+"  ·  Audio muted");
             sourceSummary->setToolTip(streamResolution?"Observed stream resolution for the first viewer; per-viewer measurements are in Details.":"Captured source resolution; stream resolution appears when a viewer connects.");
             if (status.stream.capture.state == HostMediaState::SourceUnavailable) {
-                sourceTitle->setText("Shared window closed");
+                const auto message = status.stream.capture.failure == CaptureFailure::None ? "Shared window closed" : "Capture unavailable";
+                sourceTitle->setText(message);
                 sourceSummary->setText("Choose Change source to resume sharing. Everyone stays in the room.");
-                hostPreview_->setText("Shared window closed");
+                hostPreview_->setText(message);
             }
             controlsTitle->setText(QString("Viewers · %1").arg(status.activePeers));
             uint64_t upload=0; bool sampled=false;
@@ -725,6 +746,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         session_.statusChanged=[this,previous,connection,rtt,bitrate](const auto& status){
             previous(status);connection->setText(Phase(status.phase));
             UpdateViewerShareState(status);
+            UpdateViewerVideoFreshness(status);
             rtt->setText(status.stream.receiveRttMs?QString("%1 ms").arg(*status.stream.receiveRttMs,0,'f',0):QString(QChar(0x2014)));
             bitrate->setText(status.stream.receiveBps?QString("%1 Mbps").arg(*status.stream.receiveBps/1000000.0,0,'f',1):QString(QChar(0x2014)));
         };
@@ -923,7 +945,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         connect(playbackVolume_,&QSpinBox::valueChanged,this,[this,volumeDelay]{if(playbackVolume_->hasFocus())volumeDelay->start();});
         connect(playbackMuted_,&QCheckBox::clicked,this,[volumeDelay]{volumeDelay->start();});
         auto* fullscreen=new QPushButton("Fullscreen"); fullscreen->setObjectName("sessionFullscreen");fullscreen->setIcon(uiIcon("fullscreen"));fullscreen->setFixedHeight(42);fullscreen->setIconSize(QSize(20,20));footer->addWidget(fullscreen);
-        fullscreenButton_=fullscreen;fullscreen->setToolTip("Toggle fullscreen: Ctrl+Alt+Shift+F. Escape goes to the game while keyboard control is active.");
+        fullscreenButton_=fullscreen;fullscreen->setToolTip("Toggle fullscreen: Ctrl+Alt+Shift+F.");
         auto* cinema=new QWidget;cinema->setObjectName("StreamFullscreen");auto* cinemaLayout=new QVBoxLayout(cinema);cinemaLayout->setContentsMargins(0,0,0,0);cinemaLayout->setSpacing(0);pages->addWidget(cinema);
         auto previousState=std::make_shared<Qt::WindowStates>();
         qApp->installEventFilter(this);
@@ -938,7 +960,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             *previousState=window()->windowState();streamFullscreen_=true;video_->setCornerRadius(0);cinemaLayout->addWidget(video_);pages->setCurrentWidget(cinema);video_->show();
             if(auto* app=dynamic_cast<AppShellWindow*>(window()))app->setChromeVisible(false);
             window()->showFullScreen();video_->setFocus();
-            Toast::show(window(),"Fullscreen. Ctrl+Alt+Shift+F exits fullscreen. Ctrl+Alt+Shift+Q releases control. With keyboard access, Escape goes to the game.",6500);
+            Toast::show(window(),"Fullscreen. Ctrl+Alt+Shift+F exits fullscreen. Ctrl+Alt+Shift+Q releases control.",6500);
         });
         auto* escape=new QShortcut(QKeySequence(Qt::Key_Escape),this);connect(escape,&QShortcut::activated,this,[this,settingsPage,hideSettings]{if(streamFullscreen_){exitFullscreen_();return;}if(settingsPage->isVisible())hideSettings();});
         auto* toggle=new QPushButton("Controls"); toggle->setObjectName("toggleSessionControls");toggle->setIcon(uiIcon("controls"));toggle->setIconSize(QSize(20,20));toggle->setFixedHeight(42);toggle->setCheckable(true);toggle->setChecked(true);footer->addWidget(toggle);
@@ -979,6 +1001,7 @@ void RoomSessionWindow::UpdateViewerShareState(const RoomStatus& status) {
     }
     if(!message.isEmpty()) {
         remoteVideoBlocked_=true;
+        remoteVideoWasFresh_=false;remoteVideoStalled_=false;
         gamepad_->SetVideoAvailable(false);
         if(remoteVideoMessage_!=message) {video_->clearFrame();video_->setStatusText(message);video_->setAccessibleDescription(message);}
         remoteVideoMessage_=std::move(message);
@@ -987,6 +1010,24 @@ void RoomSessionWindow::UpdateViewerShareState(const RoomStatus& status) {
         // A host's Live notice is intent, not proof that a fresh frame arrived.
         // Keep the status surface until the next decoded frame is consumed.
         remoteVideoMessage_=status.stream.remoteShare.state?"Resuming video…":"Waiting for video…";
+        video_->setStatusText(remoteVideoMessage_);video_->setAccessibleDescription(remoteVideoMessage_);
+    }
+}
+void RoomSessionWindow::UpdateViewerVideoFreshness(const RoomStatus& status) {
+    if(status.phase!=RoomPhase::Active || remoteVideoBlocked_)return;
+    const auto now=std::chrono::steady_clock::now();
+    const auto presentation=video_->presentationStats();
+    if(video_->hasFreshFrame(now)) {
+        remoteVideoWasFresh_=true;remoteVideoStalled_=false;
+        if(!remoteVideoMessage_.isEmpty()) {
+            remoteVideoMessage_.clear();video_->setStatusText({});video_->setAccessibleDescription({});
+        }
+    } else if(remoteVideoWasFresh_ && !remoteVideoStalled_ && !presentation.terminal && presentation.frameReceivedAt &&
+        now-*presentation.frameReceivedAt>=VideoFrameWidget::FreshFrameTimeout) {
+        remoteVideoStalled_=true;
+        gamepad_->SetVideoAvailable(false);
+        video_->clearFrame();
+        remoteVideoMessage_="Video interrupted\nWaiting for new frames. Audio may continue.";
         video_->setStatusText(remoteVideoMessage_);video_->setAccessibleDescription(remoteVideoMessage_);
     }
 }
@@ -1050,6 +1091,13 @@ bool RoomSessionWindow::eventFilter(QObject* watched,QEvent* event) {
 }
 void RoomSessionWindow::resizeEvent(QResizeEvent* event) {
     if(sessionColumns_)sessionColumns_->setDirection(event->size().width()<720?QBoxLayout::TopToBottom:QBoxLayout::LeftToRight);
+    // Preserve the recovery action's complete label in a narrow host column.
+    // Secondary measurements remain available in Details at compact widths.
+    if(hostSourceActions_) {
+        const bool compact=event->size().width()<900;
+        hostSourceActions_->setDirection(compact?QBoxLayout::TopToBottom:QBoxLayout::LeftToRight);
+        hostRttMetric_->setVisible(!compact);hostFpsMetric_->setVisible(!compact);
+    }
     if(settingsDrawer_)QTimer::singleShot(0,this,[this]{settingsDrawer_->setGeometry(settingsDrawer_->parentWidget()->rect());});
     QWidget::resizeEvent(event);
 }
@@ -1118,6 +1166,7 @@ StreamPreferences RoomSessionWindow::ReadPreferences() const {
     return p;
 }
 void RoomSessionWindow::closeEvent(QCloseEvent* event) {
+    for (auto* dialog : findChildren<QFileDialog*>("saveRoomReportDialog")) dialog->reject();
     if(exitFullscreen_)exitFullscreen_();
     if (session_.running()) { closing_ = true; session_.stop(); event->ignore(); }
     else { event->accept(); if (closed) closed(); }

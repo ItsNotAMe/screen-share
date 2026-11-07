@@ -7,6 +7,197 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 viewer render stalls: WASAPI output writes now expire an unfinished
+10 ms PCM block after one second, even if waits succeed or tiny partial writes
+occur. Fresh capacity is checked first; a delayed owner can complete a healthy
+write, and stop wins before committing again. Expiry reuses ControlledPcmPlayout
+retirement/backoff/reopen with silence, preserving the selected output and gain.
+Clock-supplied tests cover stalled/partial buffers and cancellation; the real
+WebRTC room test verifies output recovery, resumed nonzero PCM, continued video
+and joined output ownership using fake buffer capacity. Physical driver calls
+cannot be preempted and physical audio stalls remain unqualified. No CPU claim.
+
+2026-11-07 mouse-monitor shutdown: the shared host-priority mouse hook now owns
+a persistent stop event and joined worker. Shutdown no longer depends on the
+worker publishing an ID, creating a queue or accepting a quit post. The worker
+waits for messages/cancellation without a timer, checks stop before entering the
+message wait and between messages, and unhooks on its owner thread before the
+event is closed. Reference ownership increments only after successful creation.
+Desktop-input regressions cover delayed startup, a full queue, immediate/repeated
+stop, failed hook installation and sent/posted delivery using a private window;
+no physical input is injected. The previous isolated CTest timeout's exact cause
+is unproven; the reproduced lost-stop race is fixed. No CPU/latency claim.
+
+2026-11-07 idle capture: each Windows runtime owns an atomic demand bit, driven
+by actual per-peer deliverFrames eligibility. At least one eligible viewer uses
+the selected cadence; otherwise sample source health/geometry at min(5, FPS).
+Bootstrap remains full-rate until valid pixels exist, and demand wake bypasses
+the idle deadline. Minimized sources advance their polling cadence too. Audio,
+input identity and stop cancellation remain independent. Source replacements
+share their runtime's bit; separate runtimes never share it. WGC closes at most
+two discarded queued frames before converting the newest available one. Portable
+clock/queue tests and real-peer pause/audio/resume tests pass. Generated 1080p
+CaptureSession CPU falls 120.92→15.61 ms/s (87.1%, pairs 74.9–91.7%); this excludes
+native capture/codecs/network/rendering. The compiled native proof could not open
+its test window because WGC reports its service is unavailable, so native pixels,
+minimize/closure and native CPU reduction remain unqualified. See performance.md.
+
+2026-11-07 software encoder default: restored automatic threading for responsive
+sharing after the two-worker experiment saved CPU but increased encoding delay
+and reduced 60 FPS frame-time headroom. Worker limits remain explicit low-level
+options, not a normal-sharing default or a user-facing efficiency mode. Set an
+explicit count before MF format negotiation to size the pool, then reapply after
+negotiation resets the reported property. Diagnostics record
+encoder-software-workers (zero means automatic/unavailable). Rate/FPS restarts,
+resume and software fallback reuse the configuration. See docs/performance.md
+for the retained measurements and default decision. Do not call reduced CPU
+work a general speedup when encoding completion and tail latency get worse.
+
+2026-11-07 host audio stalls: initial, established and manually selected System/
+Microphone producers now expire after five seconds without fresh PCM, even when
+the endpoint reports no error. Fresh queued PCM is consumed before expiry and
+all-zero PCM counts as delivery; replacement filler silence cannot renew it.
+Cancellation/retirement and pinned-target retries reuse the existing capture
+owner and 250 ms..5 s backoff. Shared-source inner recovery and explicit-process
+policy remain. Supplied-clock tests exercise startup/established/selected stalls,
+normal silence, delayed owners, exact timeout/retry boundaries and teardown.
+No physical device-stall or CPU/latency improvement claim.
+
+2026-11-07 minimized restore: minimization now rearms CaptureSession's existing
+first-frame watchdog after previously healthy output. The deadline keeps moving
+while minimized; after restore a valid sample clears it, or missing output times
+out (5 s in production). A switchable source releases failed capture and waits
+for explicit replacement while its session stays alive; an ordinary source
+fails. Tests cover both paths, long minimization, stale-pixel suppression,
+successful restore and replacement after timeout. This is a watchdog fix,
+separate from recovery-budget renewal; no physical WGC failure was injected.
+
+2026-11-07 capture recovery: the three-rebuild allowance renews after 30
+consecutive valid owned capture samples. Device loss, GPU frame skips,
+minimization and source unavailability interrupt the healthy streak. Pending
+rebuilds, empty polls and elapsed time cannot earn credit. Retirement, cumulative
+generations, 250 ms cancellable backoff and terminal reconstruction/unstable-
+capture handling remain. A new real-owner synthetic regression fails with the
+old lifetime budget on the fourth loss and passes five healthy-separated losses;
+exact 29/30-frame and interrupted/pending/terminal boundaries are application
+checks. No physical driver-loss or capture handle-lifetime qualification.
+
+2026-11-07 direct decoder crop: cropped software output copies visible rows from
+the locked MF buffer directly into owned pixels, eliminating the full coded-frame
+temporary vector/copy. A guard unlocks on validation/allocation failure. Uncropped
+output and hardware textures retain their paths. Tests add uncropped 720p among
+cropped/resized/retained frames. Six matched AB/BA pairs against 850fd02 give
+four-decoder median CPU 6.952→6.104 ms/picture (−12.2%) and elapsed 4425→3708 ms
+(−16.2%), with every four-decoder pair improving. Single-decoder CPU is noisy;
+elapsed improves 16.4%. Full-frame checksums/byte counts match. See
+docs/performance.md and its tracked raw runs for scope: decode/copy/crop/checksum,
+not total app CPU, memory or end-to-end latency. Hardware handle lifetime remains
+unqualified.
+
+2026-11-07 presentation recovery: three rebuild attempts now renew after 30
+successfully presented incoming frames, replacing the session-lifetime cap.
+FramePresentationSession passes whether work contains incoming pixels; Update/
+redraw success and skipped output cannot earn health credit. A device fault
+clears the healthy count. Recovery totals stay cumulative until Clear, while
+four rapid/short-recovery faults remain terminal with the existing 250 ms
+drop-only backoff. Five isolated outages and exact 29/30-frame boundaries are
+checked with supplied time; the shared session checks redraw/skip isolation.
+The native Windows UI proof also covers four healthy-separated injected losses
+with actual GPU resources. Physical driver loss/hangs remain unqualified.
+
+2026-11-07 completed software-encode stalls: producing one valid packet after
+more than 500 ms no longer marks that encoder failed. Drop late output, preserve
+the live transform/latest pending frame and force the next fresh picture to an
+IDR so it cannot depend on the missing reference. Cancellation suppresses late
+callbacks and diagnostics. Actual codec errors and asynchronous hardware timeout
+fallback retain their behavior. A real MF regression with three 550 ms input
+mapping delays requires fresh independent-decodable keyframes, original timing/
+mapping, exact pending replacement counts and no hidden transform restarts.
+Release during a fourth stall and reinitialization are covered. This does not
+preempt stuck COM/driver calls or qualify the physical game-lag report.
+
+2026-11-06 software decoder storage: H264StreamDecoder keeps one caller-owned
+CPU output buffer, resetting its length and creating fresh sample metadata on
+each poll. Output vectors remain independent; stream change invalidates storage,
+growth stays within the existing 128 MiB limit, and Stop frees it. MFT-provided
+GPU samples retain their path. Real software tests retain frames across changing
+pixels, 1080 crop, resize and Stop/restart. Six matched AB/BA pairs reduce elapsed
+decode workload time by 6.5% (one decoder) and 10.4% (four); CPU medians improve
+8.4%/7.5% but paired ranges include regressions. Warmed large-buffer allocations
+fall from 1921/7684 to zero for 960 pictures per decoder. See docs/performance.md
+for raw evidence, scope and retained scratch-memory tradeoff. No full-session
+latency, total application CPU or hardware handle-lifetime claim.
+
+2026-11-06 controller lag: a 300 ms input gap now neutralizes through Sink::Pause
+without dropping granted capabilities or native controller allocation. The host
+rotates the permission epoch with the existing Permission message, clears pre-gap
+queues and resumes only on fresh input; heartbeat alone leaves the sink paused.
+Client cache clearing and epoch-bound poller recreation prevent stale replay.
+Fresh queued input is processed before timing out a delayed owner iteration.
+Concurrent revoke wins over late Pause completion. Pause failure falls back to
+revocation. DesktopSink separates identity health from stale captured geometry:
+staleness releases held keys/discards input, while fresh geometry permits new
+input again; source invalidation still revokes. Host UI keeps icons checked and
+shows Input paused; diagnostic JSON includes paused. Physical game/driver lag
+is not reproduced by the injected owner, reader, sink and runtime-gap proofs.
+
+2026-11-06 capture failure isolation: a switchable source may abandon failed
+native state on its capture owner and wait for an explicit replacement while
+the room/distribution/peers stay alive. Read errors, rebuild failure, exhausted
+recovery and first-frame timeout preserve their failure reason in SourceUnavailable.
+Abandonment advances the source generation and clears the retry policy only for
+the next explicit source; it never reopens the failed device. Fresh output clears
+the failure. Consumer failures, ordinary unwrapped sources and initial Start
+failure remain terminal. Runtime disables grants/releases held input on entering
+SourceUnavailable and restores grant availability after capture resumes, without
+implicit regrant. Host copy distinguishes capture failure from window closure.
+Injected four-viewer media and two-viewer UI tests require audio continuity,
+explicit video replacement and unchanged room/connection identity. Physical
+driver removal/hang and deferred native cleanup remain unqualified.
+
+2026-11-06 decoder recovery: the three-software-rebuild budget now renews after
+30 validated output frames instead of exhausting across the entire configuration.
+Failures reset the healthy count; accepted input without output cannot renew it.
+Retention-pressure drops count as successful decoding. The keyframe gate, 250 ms
+backoff and session hardware quarantine remain. Deterministic output-validation
+faults cover five healthy-separated recoveries and repeated 29-frame unstable
+recoveries that still exhaust the budget. DecoderAdapterTests is now a regular
+application CTest; generated GPU checks remain explicit. This does not establish
+a fix for the laptop's Section-handle growth or hardware output deadlines.
+
+2026-11-06 direct NV12 planes: the software adapter now calls EncodeNv12 with
+bounded plane views, copying directly into the owned MF input sample. The
+temporary per-frame packing vector is gone. Input geometry/strides/minimal last
+rows are validated before consuming frame state; I420/hardware paths remain.
+Matched 1080p software-encoder timing against 05582cc (six AB/BA pairs, 480
+measured frames after 30 warmup frames) reduces elapsed time 8.9–17.7%, including
+four-GPU-input encoders 8.486→7.571 ms/input batch (10.8%). CPU-time results are
+mixed/noisy and do not establish general CPU savings. Outputs retain matching
+byte counts/hashes. See docs/performance.md and its tracked raw evidence. Timing
+excludes capture/network/decode/presentation; no full-session scorecard was rerun.
+
+2026-11-06 NV12 software input: MfVideoEncoder consumes CPU NV12 and shared GPU
+NV12 readback without the former NV12-to-I420-to-NV12 round trip. Readback uses
+the first requested format; I420-only callers retain direct conversion and do
+not eagerly retain a second buffer. Requesting both formats derives the second
+from owned CPU pixels without another GPU readback. Device retirement rejects
+new maps, including cached ones. CPU preview materialization uses NV12 too.
+The real four-software-encoder test decodes 32 padded/changing NV12 inputs with
+zero ToI420 calls (32 before); generated GPU input uses eight shared readbacks
+and zero I420 conversions. NV12 packing/MF input copies remain; this is operation
+count evidence, not a new total CPU/memory/latency scorecard.
+
+2026-11-06 shared scaling: D3dVideoFrameBuffer retains at most four successful
+scaled outputs keyed by all six canvas/image geometry values, under its existing
+mutex. Shared capture resources let matching viewer tracks reuse immutable GPU
+pixels and their lazy CPU readback. Tracks, adaptation, mapping/preset metadata
+and encoding stay independent. Failed/busy scales are not cached; retirement or
+scaler quarantine bypasses cached output. Eviction does not invalidate consumer
+references. Do not add a cross-frame cache or overwrite published textures.
+The explicit generated-texture StreamSettingsTests --gpu comparison reduced
+four-viewer 1080p-to-720p scales/readbacks from 96/96 to 24/24 over 24 frames.
+This is operation-count evidence, not a new full-session CPU/memory scorecard.
+
 2026-09-25 multi-viewer report: a stalled connection was still processing capture
 frames (including shared-device scaling). NativeRoomRuntime now gates per-viewer
 delivery until negotiation, connection and initial settings are ready; disconnect,

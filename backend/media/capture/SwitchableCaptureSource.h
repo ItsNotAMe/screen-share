@@ -86,6 +86,10 @@ public:
     bool Minimized() const override { return current_ && current_->Minimized(); }
     CaptureSourceInfo Info() const override { return current_ ? current_->Info() : info_; }
     void Retire() noexcept override { if (current_) current_->Retire(); }
+    bool AbandonFailedSource() noexcept override {
+        if (current_) { current_->Retire(); current_.reset(); }
+        return true; // Keep the mailbox and an in-progress replacement alive.
+    }
     void Rebuild() override {
         if (!current_) return;
         try { current_->Rebuild(); }

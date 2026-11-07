@@ -27,6 +27,14 @@ public:
         status_.microphoneProcessing = bool(microphoneProcessor_) && status_.selected.kind == AudioKind::Microphone;
     }
     Factory Attach() { std::lock_guard lock(mutex_); active_ = !closed_; return factory_; }
+    Factory RecoveryFactory() const {
+        std::lock_guard lock(mutex_);
+        // Shared-source capture has its own validated-target recovery. Explicit
+        // process IDs require a new selection rather than following PID reuse.
+        if (!active_ || closed_ || busy_ || (status_.selected.kind != AudioKind::System &&
+            status_.selected.kind != AudioKind::Microphone)) return {};
+        return factory_;
+    }
     void Detach() { std::lock_guard lock(mutex_); active_ = false; status_.health.state = AudioEndpointState::Inactive; CancelQueued(); }
     void Close() { std::lock_guard lock(mutex_); closed_ = true; status_.health.state = AudioEndpointState::Inactive; CancelQueued(); }
     void Ready() { std::lock_guard lock(mutex_); if (active_ && !closed_) SetReady(); }
@@ -153,15 +161,28 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
     ShortWait outputTimer_;
     uint32_t delay_ = 0;
     uint64_t dropped_ = 0, retiredDropped_ = 0;
-    void Fail() { current_.reset(); delay_ = 0; control_->Failed(); }
+    std::function<std::chrono::steady_clock::time_point()> now_;
+    std::chrono::steady_clock::time_point retryAt_, pcmDeadline_;
+    std::chrono::milliseconds retryDelay_{250};
+    bool recovering_ = false;
+    void Fail() {
+        current_.reset(); recovering_ = false; delay_ = 0;
+        retiredDropped_ = dropped_; control_->Failed();
+        retryAt_ = now_() + retryDelay_;
+        retryDelay_ = std::min(retryDelay_ * 2, std::chrono::milliseconds(5000));
+    }
     void Finish(AudioUpdateError error) { candidate_.reset(); control_->Complete(std::move(request_), error); }
 public:
-    explicit SwitchablePcmCapture(std::shared_ptr<AudioSwitchControl> control) : control_(std::move(control)) {}
+    explicit SwitchablePcmCapture(std::shared_ptr<AudioSwitchControl> control,
+        std::function<std::chrono::steady_clock::time_point()> now = std::chrono::steady_clock::now)
+        : control_(std::move(control)), now_(std::move(now)) {}
     ~SwitchablePcmCapture() override { control_->Detach(); Finish(AudioUpdateError::Cancelled); }
     void Start() override { Start({}); }
     void Start(std::stop_token stop) override {
+        retryDelay_ = std::chrono::milliseconds(250); recovering_ = false;
         try {
-            current_ = std::make_unique<Producer>(control_->Attach(), control_->Diagnostics()); current_->Start(stop); control_->Ready();
+            current_ = std::make_unique<Producer>(control_->Attach(), control_->Diagnostics()); current_->Start(stop);
+            pcmDeadline_ = now_() + std::chrono::seconds(5); control_->Ready();
         } catch (...) {
             current_.reset();
             if (stop.stop_requested()) throw;
@@ -189,6 +210,9 @@ public:
         if (!request_) {
             request_ = control_->Take();
             if (request_) {
+                // A manual change supersedes an automatic activation, including
+                // mute. Cancellation/destruction stays on the producer owner.
+                if (recovering_) { current_.reset(); recovering_ = false; delay_ = 0; }
                 deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
                 try { candidate_ = std::make_unique<Producer>(request_->factory, control_->Diagnostics()); }
                 catch (...) { Finish(AudioUpdateError::Failed); }
@@ -199,14 +223,42 @@ public:
             if (candidate_->Failed()) Finish(AudioUpdateError::Failed);
             else if (candidate_->Pop(block, delay_, lost)) {
                 retiredDropped_ = dropped_; current_ = std::move(candidate_);
-                dropped_ = retiredDropped_ + lost; Finish(AudioUpdateError::None); return true;
+                dropped_ = retiredDropped_ + lost;
+                retryDelay_ = std::chrono::milliseconds(250);
+                pcmDeadline_ = now_() + std::chrono::seconds(5);
+                Finish(AudioUpdateError::None); return true;
             } else if (std::chrono::steady_clock::now() >= deadline_) Finish(AudioUpdateError::Timeout);
         }
+        if (recovering_ && !control_->RecoveryFactory()) { current_.reset(); recovering_ = false; delay_ = 0; }
         if (current_ && current_->Failed()) Fail();
+        if (!current_ && !request_ && !stop.stop_requested() && now_() >= retryAt_) {
+            if (auto factory = control_->RecoveryFactory()) {
+                try {
+                    current_ = std::make_unique<Producer>(std::move(factory), control_->Diagnostics());
+                    recovering_ = true; pcmDeadline_ = now_() + std::chrono::seconds(5);
+                } catch (...) { Fail(); }
+            }
+        }
         if (!current_) { block.fill(0); return true; }
         uint64_t lost = 0;
-        if (current_->Pop(block, delay_, lost)) dropped_ = retiredDropped_ + lost;
-        else { block.fill(0); delay_ = 0; }
+        if (current_->Pop(block, delay_, lost)) {
+            dropped_ = retiredDropped_ + lost;
+            // Valid PCM, including silence, proves delivery. Observe queued
+            // fresh audio before expiring a deadline from a delayed owner tick.
+            pcmDeadline_ = now_() + std::chrono::seconds(5);
+            if (recovering_) {
+                recovering_ = false; retryDelay_ = std::chrono::milliseconds(250);
+                control_->Ready();
+            }
+        }
+        else {
+            block.fill(0); delay_ = 0;
+            // An endpoint may remain open while Read stops supplying blocks.
+            // Bound initial, restored and established recoverable devices.
+            // Shared-source capture owns validated-target recovery itself;
+            // manual selection, Close and nonrecoverable targets retain priority.
+            if (now_() >= pcmDeadline_ && control_->RecoveryFactory()) Fail();
+        }
         return !stop.stop_requested();
     }
     uint32_t DelayMs() const override { return delay_; }

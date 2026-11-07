@@ -73,6 +73,8 @@ private:
     uint64_t roomEditSequence_ = 0, roomSubmittedSequence_ = 0;
     bool autoRoomUpdate_ = false;
     QString streamSaveError_;
+    QString reportExportPath_;
+    bool roomWasActive_ = false;
     bool closing_ = false, streamFullscreen_ = false, swallowEscapeRelease_ = false;
     bool swallowFullscreenRelease_ = false;
     QPushButton* fullscreenButton_ = nullptr;
@@ -81,6 +83,9 @@ private:
     bool applyingProfileNickname_ = false;
     void applyProfileNickname(QString, uint64_t);
     QBoxLayout* sessionColumns_ = nullptr;
+    QBoxLayout* hostSourceActions_ = nullptr;
+    QWidget* hostRttMetric_ = nullptr;
+    QWidget* hostFpsMetric_ = nullptr;
     QLabel* hostPreview_ = nullptr;
     QSize previewSourceSize_;
     QThread* previewWorker_ = nullptr;
@@ -92,7 +97,9 @@ private:
     void RefreshHostPreview();
     void ConfirmViewerRemoval(const QString& peerId);
     void UpdateViewerShareState(const screenshare::v2::RoomStatus&);
+    void UpdateViewerVideoFreshness(const screenshare::v2::RoomStatus&);
     bool remoteVideoBlocked_ = false;
+    bool remoteVideoWasFresh_ = false, remoteVideoStalled_ = false;
     QString remoteVideoMessage_;
 };
 int RunRoomSessionWindow(const QString& configurationPath);

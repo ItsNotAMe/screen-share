@@ -3,8 +3,10 @@
 #include "D3dNv12Scaler.h"
 #include "api/make_ref_counted.h"
 #include "api/video/i420_buffer.h"
+#include "api/video/nv12_buffer.h"
 #include "rtc_base/thread.h"
 #include "libyuv/convert.h"
+#include "libyuv/planar_functions.h"
 #include <d3d10.h>
 #include <algorithm>
 #include <chrono>
@@ -85,8 +87,8 @@ webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::UploadNv12(int width,
     });
     return webrtc::make_ref_counted<D3dVideoFrameBuffer>(shared_from_this(), texture, width, height);
 }
-webrtc::scoped_refptr<webrtc::I420BufferInterface> D3dVideoDevice::Readback(ID3D11Texture2D* texture, int width, int height) {
-    return OnOwner(*owner_, [&]() -> webrtc::scoped_refptr<webrtc::I420BufferInterface> {
+webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3dVideoDevice::Readback(ID3D11Texture2D* texture, int width, int height, bool nv12) {
+    return OnOwner(*owner_, [&]() -> webrtc::scoped_refptr<webrtc::VideoFrameBuffer> {
         if (retired()) return nullptr;
         const auto start = std::chrono::steady_clock::now();
         D3D11_TEXTURE2D_DESC description;
@@ -103,19 +105,28 @@ webrtc::scoped_refptr<webrtc::I420BufferInterface> D3dVideoDevice::Readback(ID3D
             readbackStaging_ = std::move(staging);
             ++readbackStagingAllocations_;
         }
-        auto output = webrtc::I420Buffer::Create(width, height);
+        // Keep I420-only callers on their original direct conversion path;
+        // allocate only the format actually requested by the first consumer.
+        webrtc::scoped_refptr<webrtc::NV12Buffer> outputNv12;
+        webrtc::scoped_refptr<webrtc::I420Buffer> outputI420;
+        if (nv12) outputNv12 = webrtc::NV12Buffer::Create(width, height);
+        else outputI420 = webrtc::I420Buffer::Create(width, height);
         context_->CopyResource(readbackStaging_.Get(), texture);
         D3D11_MAPPED_SUBRESOURCE mapped{};
         Check(context_->Map(readbackStaging_.Get(), 0, D3D11_MAP_READ, 0, &mapped));
         const auto* y = static_cast<const uint8_t*>(mapped.pData);
-        const int result = libyuv::NV12ToI420(y, mapped.RowPitch, y + size_t(mapped.RowPitch) * height,
-            mapped.RowPitch, output->MutableDataY(), output->StrideY(), output->MutableDataU(), output->StrideU(),
-            output->MutableDataV(), output->StrideV(), width, height);
+        const int result = outputNv12 ? libyuv::NV12Copy(y, mapped.RowPitch, y + size_t(mapped.RowPitch) * height,
+            mapped.RowPitch, outputNv12->MutableDataY(), outputNv12->StrideY(), outputNv12->MutableDataUV(), outputNv12->StrideUV(), width, height) :
+            libyuv::NV12ToI420(y, mapped.RowPitch, y + size_t(mapped.RowPitch) * height, mapped.RowPitch,
+                outputI420->MutableDataY(), outputI420->StrideY(), outputI420->MutableDataU(), outputI420->StrideU(),
+                outputI420->MutableDataV(), outputI420->StrideV(), width, height);
         context_->Unmap(readbackStaging_.Get(), 0);
         if (result != 0) throw std::runtime_error("GPU NV12 readback conversion failed");
         ++readbackCount_;
+        if (outputI420) ++i420ConversionCount_;
         readbackMicroseconds_ += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count();
-        return output;
+        if (outputNv12) return outputNv12;
+        return outputI420;
     });
 }
 webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::Scale(ID3D11Texture2D* input,
@@ -125,6 +136,7 @@ webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoDevice::Scale(ID3D11Texture2D
         try {
             if (!scaler_) scaler_ = std::make_unique<D3dNv12Scaler>(device_.Get());
             auto output = scaler_->Scale(device_.Get(), context_.Get(), input, width, height, left, top, imageWidth, imageHeight);
+            ++scalingCount_;
             maximumPendingScales_ = std::max(maximumPendingScales_.load(), scaler_->pending());
             return webrtc::make_ref_counted<D3dVideoFrameBuffer>(shared_from_this(), std::move(output), width, height);
         } catch (const GpuScalingBusy&) {
@@ -152,14 +164,35 @@ webrtc::scoped_refptr<webrtc::I420BufferInterface> D3dVideoFrameBuffer::ToI420()
     std::lock_guard lock(mutex_);
     if (retired()) return nullptr;
     if (!cached_) {
-        try { cached_ = owner_->Readback(texture_.Get(), width_, height_); }
+        try {
+            if (nv12_) {
+                cached_ = nv12_->ToI420();
+                if (cached_) ++owner_->i420ConversionCount_;
+            } else if (auto mapped = owner_->Readback(texture_.Get(), width_, height_, false)) cached_ = mapped->ToI420();
+        }
         catch (...) { return nullptr; }
     }
     return retired() ? nullptr : cached_;
 }
+webrtc::scoped_refptr<webrtc::NV12BufferInterface> D3dVideoFrameBuffer::ToNv12() {
+    std::lock_guard lock(mutex_);
+    if (retired()) return nullptr;
+    if (!nv12_) {
+        try {
+            if (cached_) nv12_ = webrtc::NV12Buffer::Copy(*cached_);
+            else if (auto mapped = owner_->Readback(texture_.Get(), width_, height_, true))
+                nv12_ = static_cast<webrtc::NV12BufferInterface*>(mapped.get());
+        }
+        catch (...) { return nullptr; }
+    }
+    return retired() ? nullptr : nv12_;
+}
 webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3dVideoFrameBuffer::GetMappedFrameBuffer(std::span<Type> types) {
-    if (std::find(types.begin(), types.end(), Type::kI420) == types.end()) return nullptr;
-    return ToI420();
+    for (const auto type : types) {
+        if (type == Type::kNV12) return ToNv12();
+        if (type == Type::kI420) return ToI420();
+    }
+    return nullptr;
 }
 CapturedFrame D3dVideoFrameBuffer::RetainedNv12() const {
     CapturedFrame frame;
@@ -174,6 +207,17 @@ webrtc::scoped_refptr<D3dVideoFrameBuffer> D3dVideoFrameBuffer::Scale(int width,
         imageWidth % 2 || imageHeight % 2 || imageWidth > width || imageHeight > height ||
         left > width - imageWidth || top > height - imageHeight)
         throw std::invalid_argument("Invalid GPU image rectangle");
-    return owner_->Scale(texture_.Get(), width, height, left, top, imageWidth, imageHeight);
+    std::lock_guard lock(mutex_);
+    if (retired() || owner_->scalingFailures()) return nullptr;
+    const std::array geometry{width, height, left, top, imageWidth, imageHeight};
+    for (const auto& entry : scaled_)
+        if (entry.geometry == geometry) return entry.buffer;
+    // Serialize equal concurrent requests so only the first submits GPU work.
+    // Busy/failure results are not cached; the next frame can retry normally.
+    auto output = owner_->Scale(texture_.Get(), width, height, left, top, imageWidth, imageHeight);
+    if (!output || retired()) return nullptr;
+    if (scaled_.size() == 4) scaled_.erase(scaled_.begin());
+    scaled_.push_back({geometry, output});
+    return output;
 }
 }

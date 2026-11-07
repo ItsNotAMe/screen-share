@@ -5,6 +5,1125 @@
 
 # Project Memory
 
+Owner direction (2026-11-06): prioritize substantial core features, reliability
+and measured performance improvements ahead of small UI/copy polish during
+open-ended continuation work. Deliver one meaningful improvement at a time and
+commit each separately. Address related UI defects when they block that feature.
+The owner also requested actual compute-time measurements for optimizations;
+distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
+
+## Release viewer controls through their individual indicators - 2026-11-07
+
+Owner requested removing the separate viewer Release control button. Mouse,
+Keyboard and Controller indicators now request when off, cancel when pending,
+and withdraw their own capability when granted. The Ctrl+Alt+Shift+Q shortcut
+remains Release all. UI tooltips/accessibility describe the next action. Local
+forwarding stops immediately for the withdrawn capability; other requests and
+permissions remain. Clear only removed held-input bookkeeping before focus
+cleanup. Last withdrawal ends local consent without issuing another full revoke.
+
+Input protocol adds a reliable capability-mask Withdraw packet, permitted only
+when the host control channel advertises screenshare-input-v2-selective-release
+through DCEP protocol metadata. Existing packet shapes/labels remain. Old
+viewers can ignore that metadata; new viewers never send the extension to an
+unadvertised host. Unsupported partial release fails unchanged with an update
+hint; last/all release uses the compatible old full-release operation.
+
+Service.Release filters queued input/requests locally and tracks releasePending.
+Incoming permission changes cannot restore withdrawn consent; resend withdrawal
+under a newer epoch if it crosses a host grant/renewal. Requests for a pending
+withdrawn capability wait for acknowledgement. Host Receive only coalesces masks;
+the input owner restricts/neutralizes the sink and advances the permission epoch.
+Other requests arriving during native work survive, and obsolete native completion
+cannot undo a newer host grant. Stale/wrong-lane withdrawals are rejected.
+
+Native desktop/gamepad Restrict paths retain surviving devices and controller
+slots, neutralize held state and stop the mouse hook when mouse is removed.
+Custom sinks without restriction support use release/regrant. Gamepad poller
+cleanup atomically requires both its epoch and Gamepad capability, so removing
+Controller cannot revoke a remaining Keyboard/Mouse grant.
+
+Portable tests cover round trips/malformed extension packets; individual and
+rapid release; unsent/sent pending cancellation; other grants/requests; crossed
+host grants; stale/incorrect-lane messages; legacy negotiation reset/fallback;
+device retention and subset-only restriction. A blocked restriction/new-host-grant
+regression verifies late cleanup does not release the replacement grant. Updated
+real-room desktop/controller UI flows passed (17.19/18.79 s), including held mouse
+release plus focus loss retaining keyboard, pending toggle, controller toggle and
+absence of the old button. Three focused CTests passed in 8.96 s. Final Release
+`all` build, packaged CLI/UI hashes and all 46 serial CTests passed (327.94 s).
+Compact and focus-paused native renders were inspected. No physical input/driver
+actions, version bump or publication; commit this improvement separately.
+
+## Integrate viewer control guidance into the sidebar - 2026-11-07
+
+Owner requested replacing the visually awkward Game mouse/shortcut paragraph.
+RoomGamepadControl now shows a short muted state-dependent hint under Game mouse,
+then an aligned Keyboard shortcuts section with key badges for Fullscreen and
+Release control. Viewer spacing is slightly tighter; captions wrap and badges
+remain intact in compact sidebars. Two hint lines are reserved for stable state
+changes. Pause/video-wait guidance retains its existing meaning and visibility.
+An initial Escape row was rejected by the owner as unnecessary; remove Escape
+explanations entirely from the UI, including toggle/fullscreen tooltips and
+fullscreen toast. Actual key/input behavior is unchanged.
+
+Uses the existing UI/UX skill and native widgets/styles; no generated mockup was
+needed for this scoped edit. Existing desktop-input proof now checks that the
+separate release shortcut stays visible while control is paused. Final native
+renders were inspected at 740/1200 widths and in the focus-paused state; normal
+width no longer requires a sidebar scrollbar. Release `all` build and packaged
+CLI/UI hashes passed. Four focused CTests passed in 45.89 s (Qt room UI, video
+input, update deferral and self-test); device-free desktop-input and controller
+service scenarios passed in 16.29/18.53 s. No physical input was injected. Commit
+this improvement separately, without releasing.
+
+## Recover viewer audio when the render buffer stops draining - 2026-11-07
+
+Separate from prior host-capture PCM watchdogs and output device-error/routing
+recovery. Native WASAPI Playout::Write formerly retried successful full-padding
+queries and 10 ms event waits forever when the engine stopped draining without
+an HRESULT failure. That prevented the existing controlled output from retiring
+and reopening the endpoint. It was a code-path gap, not a diagnosed physical
+driver fault or a repeat of capture/recovery-budget renewal.
+
+PcmRenderLoop now owns that same 480-frame write loop with native callbacks for
+padding, buffer commit and the existing event wait. One unfinished block expires
+after one second; events/tiny writes cannot renew it. Capacity is checked first,
+allowing a delayed worker to finish into a healthy buffer. Stop is checked both
+before polling and after padding, before the next commit. No new owner, queue,
+timer or replay mechanism. PcmRenderStalled propagates through the existing
+ControlledPcmPlayout failure path: retire on the playout worker, paced discard,
+250 ms..5 s capped retry, prime with silence and pull fresh PCM. Selected output,
+volume/mute and revision remain; no fallback from pinned output. Native calls
+that block inside the driver still cannot be preempted in-process.
+
+The extracted old write loop failed the new regression with "Render buffer wait
+remained unbounded"; the one-second deadline passes. Supplied-clock tests cover
+full capacity stalls, exact timeout, tiny-progress bounds, partial sample order,
+999 ms healthy completion, a five-second delayed owner with fresh capacity,
+pre-stop/stop-at-deadline/stop-during-padding and no PCM commit after cancellation.
+Controlled-output tests use the same loop with fake capacity to prove retirement,
+exact retry backoff, pinned settings, silence prime/fresh gain-applied PCM, muted
+stall recovery and owner-thread teardown. The real H264/Opus room regression adds
+a permanently full fake render buffer: video continues through expiry, output
+reopens, nonzero decoded PCM resumes, revisions remain and no peer fails.
+
+Focused NativePcmAudioTests and AvSyncRecoveryTests passed. Release `all` build,
+packaged CLI/UI hashes and all 46 serial CTests passed (314.69 s; expanded A/V
+recovery 36.95 s). No physical device reset/playback/capture was requested; no
+native-driver qualification or CPU/latency improvement claim. Commit locally.
+
+## Make host mouse-monitor shutdown reliable - 2026-11-07
+
+Follow-up to the intermittent desktop-input timeout during idle-capture work.
+The old monitor published its thread ID before creating a Windows message queue,
+waited only 200 ms for startup and ignored a quit-post failure before joining.
+That can lose shutdown during delayed startup or when the queue is full. The
+original timeout's exact cause remains unproven; this change fixes a reproduced
+lifecycle defect, not a diagnosed driver/input-device issue.
+
+HostMouseMonitorThread now owns a manual-reset event created before thread start.
+RequestStop signals it, including before installation or queue creation; teardown
+joins, unhooks on the worker and then closes the event. The worker checks the
+event before entering a message wait and between messages. MsgWaitForMultipleObjectsEx
+blocks on cancellation or messages with MWMO_INPUTAVAILABLE; no polling timer,
+ID-readiness sleep or quit post remains. Existing low-level mouse callback,
+300 ms host-priority policy and last-owner reference counting remain. Event or
+thread creation failure cannot increment the owner count. Hook-install failure
+retains its previous behavior; it is exercised as a shutdown boundary.
+
+The delayed-install regression failed with the extracted legacy quit-message
+implementation ("Mouse monitor lost stop during delayed queue startup") and
+passes with the event implementation. Other checks fill a private thread queue
+to ERROR_NOT_ENOUGH_QUOTA, cancel it before pumping, run 100 immediate/repeated
+stop cycles (including null hook results), and verify sent/posted delivery and
+owner-thread cleanup through a message-only window. These seams install no input
+hook and inject no input; existing desktop grant/health checks still use the
+production composition without Apply/SendInput. This does not qualify physical
+mouse behavior or interrupt a blocked Windows hook-install/uninstall API call.
+
+Windows contracts: [hook owner message loop](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelmouseproc),
+[event/message wait and already-seen input](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-msgwaitformultipleobjectsex).
+Release `all` build and packaged CLI/UI hashes passed. Twenty consecutive
+desktop-input runs passed in 22.26 s, including 2,000 immediate stop cycles plus
+20 delayed-start/full-queue/message-pump scenarios each. All 46 serial application
+checks passed in 313.76 s (desktop-input 1.11 s). Commit locally; no publication
+or version bump. No performance claim.
+
+## Reduce capture work without active video demand - 2026-11-07
+
+Each Windows runtime now owns an atomic captureDemand signal, shared with its
+initial/replacement capture sources. The coordinator sets it from actual per-peer
+deliverFrames eligibility, not membership alone. Empty rooms, connecting-only
+peers, all-video pause or a zero video allowance use min(5, configured FPS) health
+sampling. A returning eligible viewer restores normal cadence without an idle
+deadline wait. Native bootstrap/restore stays full-rate until valid owned pixels
+exist; minimized sources advance cadence too. Audio, input identity, capture
+health and stop cancellation remain independent. No new worker, queue or timer;
+automatic encoder threading remains. Separate runtimes have separate signals.
+
+WGC now closes at most two older queued frames before converting the newest
+available one. The final frame has an outer Close guard, including poll failures
+and source resize/recreation paths. Portable queue tests exercise bounded work,
+discard ownership, empty queues and errors; supplied-clock cadence tests cover
+1/3/30/60/240 FPS, exact idle/active boundaries, immediate wake, no catch-up burst
+and rebuild reset. The real-peer/synthetic-source regression failed before wiring
+the signal with "Connected video did not restore full capture demand". It now
+records six samples in each 1.2 s empty/paused interval, continues audio, resumes
+connected video, ignores a connecting-only viewer and idles after the last leave.
+Stop leaves no source/resource ownership behind. All portable room fixtures now
+exercise optional demand using the production synthetic source/cadence.
+
+Six active/idle AB/BA phase pairs on one generated 1080p CaptureSession owner
+measure median process CPU 120.92→15.61 ms/s (87.1% lower, pairs 74.9–91.7%) and
+120→10 samples per approximately two seconds. Scope: luma generation, capture
+polling and handoff, excluding native WGC, codecs, networking and presentation.
+This is not measured native-game or whole-app CPU savings. Process CPU timing is
+coarse at the low idle load. scripts/measure-idle-capture.py records the raw
+phases and source/executable hashes in docs/benchmarks/idle-capture-2026-11-07.json.
+The final benchmark's hashes match the Release executable and measured sources.
+
+NativeCaptureTests --demand[-check] compiles and covers native pixels on first
+resume, input identity, minimize/restore/closure and optional native CPU phases.
+It could not open its owned generated window: IGraphicsCaptureItemInterop returns
+"The specified service does not exist as an installed service." Those native
+assertions and native capture CPU savings remain unverified. Do not broaden this
+window proof to capture the desktop or claim physical-driver qualification.
+
+Release `all` build and packaged CLI/UI hashes passed. A fresh full serial CTest
+run passed all 46 checks in 314.64 s. No version bump or publication.
+
+The first full CTest run passed 45/46; desktop-input hit its 15 s timeout without
+diagnostic output. Ten isolated repeats then passed in 11.22 s total, followed
+by the clean full-suite rerun above (desktop-input 1.12 s). This test
+does not create a capture source/runtime. Inspection found a pre-existing mouse
+monitor startup/stop ordering risk: it publishes its ID before queue creation,
+waits at most 200 ms for an ID and ignores PostThreadMessage's result before join.
+[Windows requires the destination queue to exist](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postthreadmessagea).
+This is a possible cause, not an established diagnosis of that timeout; recorded
+in the maintenance backlog for separate work. No input lifecycle code changed.
+
+## Restore responsive software encoder defaults - 2026-11-07
+
+Owner asked whether the worker-budget change was faster/slower, then delegated
+the default decision for a professional sharing app. CPU milliseconds sum work
+across threads; elapsed batch time is the wait for encoding completion. Chose
+automatic software threading for normal sharing: the previous two-worker limit
+saved CPU but increased encode delay and detailed four-viewer batch p95 crossed
+the 16.67 ms frame budget. It was not a general speedup or a proven game benefit.
+Do not silently make an efficiency/latency tradeoff the default. There is no
+user-facing efficiency mode; explicit low-level worker requests remain possible.
+
+The factory again leaves softwareWorkerThreads at its default zero/automatic.
+The optional MF setting, two-stage negotiation setup, queried diagnostics and
+benchmark evidence remain. Tests now require automatic defaults for 1/2/16-core
+assignments and after FPS restart/resume, plus larger pictures; separate low-level
+tests verify explicit 1/2-worker requests and invalid counts. The new default
+regression failed against 89b3522 with "Normal sharing inherited an implicit
+CPU-saving worker cap" and passes after restoring automatic threading.
+
+The compatibility comparison passed all 32 runs against the original automatic
+production sources (two AB/BA pairs, smooth/detailed input, CPU/GPU input and 1/4
+encoders, 120 measured pictures each). Encoded hashes/byte counts are identical
+across versions, and process thread counts again match the original automatic
+policy. This is a compatibility check, not a new timing improvement claim;
+short-run CPU measurements are noisy. Local evidence is ignored under
+build/encoder-default-restore/default-compatibility.json. Release `all` build,
+packaged CLI/UI binary hash checks and all 46 sequential application checks
+passed (312.95 s), including the default/explicit-worker regression, recovery,
+multi-viewer media/input, reconnects and UI pause/resume. No version bump or
+publication; unreleased.
+
+Next candidate is idle capture demand (see todo), which could reduce conversions
+without changing active encoding latency. No capture change is committed here.
+Initial incomplete drafts remain ignored under build/idle-capture. Suggested
+composition: one per-runtime atomic demand bit, driven by actual deliverFrames
+eligibility, read on the capture owner; 5 Hz idle health/geometry, immediate
+active resume, and bounded latest-frame draining of WGC's two-frame pool. Keep
+audio/input independent and qualify startup/minimize/replacement/closure behavior.
+
+## Bound software encoder slice workers through 1080p - 2026-11-07
+
+Historical experiment; automatic normal-sharing defaults are restored above.
+
+The WebRTC adapter previously ignored its available-core assignment and let each
+MF software encoder independently choose an automatic slice pool. It now requests
+at most two workers through 1080p (one for a one-core assignment). Larger pictures
+retain automatic threading. Hardware and low-level encoder callers' default
+remain unchanged; the optional config defaults to zero/automatic and rejects
+counts above the documented maximum of 16. Zero available cores is invalid.
+
+Ordering matters in the tested inbox codec: set the worker count before format
+negotiation to size the pool, then reapply after negotiation resets the exposed
+property. Applying only afterward updates GetValue but keeps the old process
+thread count and bitstream. Applying only beforehand sizes the pool but GetValue
+reports zero. The new encoder-software-workers event queries the final property;
+zero means automatic/unavailable. Optional setting rejection keeps compatibility.
+Rate/FPS restarts, resume and software fallback retain the configured budget.
+
+Real MF tests cover 1/2/16-core assignments, reported worker count after FPS
+restart/resume, automatic larger pictures, invalid counts and existing low-latency,
+keyframe, mapping, coalescing, late-output/cancellation and NV12 behavior.
+EncoderComputeBenchmark now checks reconstructed luma/chroma and a deterministic
+detailed moving pattern, records live process resources and batch p95/p99, and
+uses a 16-core assignment to exercise the production cap. Quality checking occurs
+after the CPU/elapsed measurement. The comparison runner keeps bit-exact checking
+by default; explicit --quality-max-loss-db permits different slice bitstreams only
+with bounded Y/UV/minimum-frame PSNR loss and stable output within each version.
+
+All 96 matched runs passed (six AB/BA pairs for two patterns, CPU/GPU input and
+1/4 encoders, 480 measured pictures each after 30 warmup). Every paired CPU
+result improved. Four-encoder median CPU savings are 19.4–23.5%, single-encoder
+25.4–32.9%; four-encoder paired reductions range 12.4–28.2%. Mean batch elapsed
+time increases 1.30–1.69 ms for four encoders and 2.38–2.64 ms for one. Detailed
+GPU/four-encoder batch p95 increases 12.04→16.89 ms and p99 13.50→18.52 ms, so
+do not claim preserved 60 FPS under game load or lower end-to-end latency.
+Smooth-pattern decoded Y/UV PSNR falls 0.217/0.466 dB; detailed improves
+0.747/0.444 dB. Actual VBR rates differ despite the same 12 Mbps assignment;
+bitstreams are stable within each version, not equal across versions. Four-
+encoder process threads drop 57→21 (CPU input), 80→44 (GPU input). Slightly
+lower private bytes belong to this benchmark, not the whole application.
+See docs/performance.md and its tracked raw runs/source/executable hashes.
+
+Release `all` build and packaged CLI/UI binary hash checks passed. Final
+sequential application validation passed all 46 checks (311.47 s), including
+the expanded real-MF worker policy test, audio/capture/decoder recovery,
+multi-viewer media/input, reconnects and UI pause/resume. No version bump or
+publication; unreleased.
+
+## Recover open host audio devices that stop delivering PCM - 2026-11-07
+
+The earlier host-audio recovery handled endpoint errors and a recovery attempt's
+first-PCM deadline, but an initially opened, established or manually switched
+System/Microphone endpoint could remain open with Read blocked indefinitely.
+SwitchablePcmCapture now applies a five-second missing-PCM deadline throughout
+these recoverable endpoints' lifetime. Every fresh queued PCM block renews it,
+including all-zero audio; generated filler silence does not.
+WASAPI's bounded idle read already emits zero PCM after 100 ms without packets,
+so ordinary idle loopback keeps this deadline alive. Fresh queued PCM
+is consumed before checking expiry so a delayed owner tick does not falsely
+retire a working device. On expiry the same existing owner cancels/releases the
+producer and uses the pinned-device 250 ms..5 s retry policy. No new thread,
+queue, default-device substitution or revision change; microphone processing is
+recreated through the existing factory. Manual selection and Close keep priority.
+Shared-source capture retains its inner validated-target recovery, and explicit
+process targets gain no automatic reopening policy.
+
+The real adapter/synthetic-endpoint regression failed against the old code with
+"Open host audio device stalled indefinitely without PCM recovery". Tests cover
+initial/established/manually selected stalls for System and Microphone, exact
+4999/5000 ms expiry and 249/250 ms retry boundaries, zero PCM recovery, owner
+delay with queued fresh PCM, pinned identity/revision, fresh microphone processor,
+nonrecoverable-target policy and worker-thread cleanup. No physical audio device
+or driver stall was injected; this cannot preempt a driver that ignores stop.
+
+An encoder output-buffer reuse candidate was measured and removed before this
+fix: six AB/BA pairs at 1/4 software encoders with CPU/GPU input preserved output
+but gave inconsistent CPU/time results, while retaining about 3.7 MiB per 1080p
+encoder. Raw local experiments remain ignored under build/encoder-output-reuse.
+Do not repeat this candidate assuming fewer allocations prove a CPU improvement.
+
+Release `all` build and packaged CLI/UI binary hash checks passed. All 46
+sequential application checks passed (313.35 s), including the expanded PCM
+checks (15.58 s), multi-viewer media/input, reconnects, capture replacement and
+UI pause/resume. No version bump or publication; unreleased.
+
+## Bound missing output after restoring minimized capture - 2026-11-07
+
+CaptureSession refreshed its first-frame deadline during minimization but left
+awaitingFrame false once the source had previously delivered healthy pixels.
+If restoration produced no frames, it could remain Minimized indefinitely.
+Minimization now rearms that existing watchdog. Its deadline continues moving
+while minimized; the first valid restored sample clears it. A silent restore
+times out after the configured interval (5 s by default). Switchable capture
+releases the failed source and waits for explicit replacement; ordinary capture
+fails. Healthy restoration retains the source and generation. No new timer,
+thread, frame queue or automatic reopening. Recovery and unavailable-source
+paths already rearm the same watchdog; this is separate from budget renewal.
+
+The new real CaptureSession/synthetic-source test failed against the old code
+with "Silent restore never reached its missing-frame timeout". With the fix,
+both ordinary and switchable sources pass a healthy restore followed by a
+silent restore. Each minimization lasts twice the shortened test timeout while
+the source continues producing pixels, checking no stale delivery or premature
+timeout. The test also checks failure classification, owner-thread disposal,
+no implicit rebuild/reopen and successful explicit replacement. This does not
+reproduce a physical WGC/driver stall or make a performance claim.
+
+Release `all` build and packaged CLI/UI binary hash checks passed. All 46
+sequential application checks passed (308.48 s), including multi-viewer media/
+input, reconnects, UI pause/resume and capture replacement. No version bump or
+publication; unreleased.
+
+## Renew capture recovery after healthy output - 2026-11-07
+
+CaptureRecovery previously spent its three rebuild attempts across the entire
+capture session. A fourth device loss stopped an ordinary source or abandoned a
+replaceable one even after healthy video between every outage. The capture owner
+now renews that budget after 30 consecutive valid owned capture samples. Pending
+rebuilds, empty polls, elapsed time and minimized/unavailable sources earn no
+credit. Skipped GPU frames, minimization, unavailability and each loss clear the
+healthy streak. Frame validation precedes credit; delivery need not be enabled
+for capture itself to establish health. No new worker, timer or retained frames.
+
+The three-attempt limit still bounds unstable capture, retirement still happens
+on the terminal loss, failed reconstruction stays terminal, and the existing
+250 ms cancellable backoff remains. Generations remain cumulative across renewed
+budgets. Only explicit replacement resets a terminal source's recovery policy.
+
+The new real CaptureSession/synthetic-source regression failed against the old
+code on the fourth loss ("Healthy capture exhausted its lifetime recovery budget")
+and now recovers five losses separated by healthy capture on the same owner.
+Application tests additionally cover exact 29/30-frame boundaries, no pending/
+time-only credit, interrupted streaks, terminal non-resurrection, replacement
+and the existing rapid-loss/rebuild/consumer/startup failure boundaries. The
+headless capture ownership proof passed 100 stop/restart cycles, including Stop
+during backoff. The optional native capture proof now expects five healthy-
+separated recoveries; it was compiled and its headless policy mode passed, but
+its live Windows capture mode was not run. These injected faults do not qualify
+physical driver loss, WGC cleanup or the reported laptop's handle growth.
+
+Release `all` build and packaged CLI/UI binary hash checks passed. The final
+sequential application suite passed all 46 checks (310.20 s), including the new
+capture regression, four-viewer media/input, reconnects and UI scenarios.
+No version bump or publication; unreleased.
+
+Owner correctly noted this repeats the earlier decoder/presentation budget
+pattern. Capture's history confirms it was a separate missed path, not a
+regression of those commits. Related limits were checked together: decoder and
+presentation already renew after healthy output; ICE uses a rolling one-minute
+budget; viewer settings reset attempts per revision; audio uses capped retry
+delays rather than a lifetime attempt cap. Hardware encoder quarantine remains
+intentionally latched for the session after a backend fault. Check related paths
+together when changing recovery policy rather than presenting each occurrence
+of the same pattern as an unrelated discovery.
+
+## Recover transient viewer settings rejection - 2026-11-07
+
+NativeRoomRuntime previously marked a settings revision attempted before asking
+WebRTC to accept it and never retried a rejection. A rejected resume could leave
+the previously applied paused sender/source indefinitely. ViewerStreamSettings
+now polls per-peer recovery on existing coordinator ticks: up to three attempts,
+250 ms apart, refreshing RTP parameters each time. New revisions bypass backoff;
+success and terminal errors stop polling work. No new threads or queued updates.
+An initial sender rejection retains the peer only during this bounded recovery;
+permanent initial failure still retires it. A partially committed transport-cap
+failure remains terminal. Existing working settings survive permanent rejection.
+Capture delivery also gates directly on requested video pause, even if the RTP
+pause update is rejected. This stops new capture submissions, not already queued
+network packets. Pending retries remain pending in stream status until exhausted.
+
+Deterministic fake-sender/real-source tests cover transient resume rejection,
+fresh parameter reads, retry timing and bounds, another independent viewer,
+immediate superseding pause, permanent rejection, structural/validation/stale
+errors and recovery during initial settings. The UI removal scenario now repeats
+three pause/resume cycles by default (3..30 via SCREENSHARE_PAUSE_CYCLES), can
+hold each pause up to 5 s via SCREENSHARE_PAUSE_HOLD_MS, and prints redacted
+runtime/input plus renderer/freshness/focus evidence if resume times out.
+
+Forty-eight baseline cycles (including twelve held 1.5 s) and twelve updated
+short-pause cycles passed. The first full suite then reproduced the timeout
+(45/46 passed, 319.33 s). Its new failure evidence records fresh presented video,
+Live telemetry, an empty video status, both host settings applied, the controller
+grant retained, and an inactive target with the explicit click-to-resume hint.
+The fixture was waiting for held input without restoring focus; the application's
+focus protection correctly kept input neutral. The test now waits for fresh video
+separately, checks that permission survived, confirms neutral input while inactive
+and reactivates the target before expecting controller output. Alternate cycles
+deliberately focus the survivor to exercise this protection deterministically.
+Application focus protection is unchanged. This diagnoses the captured fixture
+failure; it does not establish the state of older failures without diagnostics.
+The injected rejection regression independently establishes the recovery gap
+fixed in production. No physical input, native-window presentation or actual
+network error-frequency claim.
+
+With the focus-aware fixture, twelve cycles held paused for 1.5 s passed
+(34.74 s), including deliberate focus changes and restoration of the same grant.
+Release `all` build and CLI/UI packaged-binary hash checks passed. No version
+bump or publication; unreleased. The final sequential full suite passed all
+46 checks (301.57 s), including the focus-aware viewer-removal scenario.
+
+## Copy decoded visible pixels directly from MF - 2026-11-07
+
+Cropped CPU decoder output previously allocated/copied the whole coded frame,
+then allocated/copied its visible rows. H264StreamDecoder now copies the crop
+straight from the locked MF buffer into independently owned frame pixels,
+removing that temporary coded-frame vector/copy (about 3 MiB for 1920×1088).
+The visible output allocation remains. An unlock guard covers crop validation/
+allocation exceptions. Uncropped output and GPU texture ownership retain their
+paths. Existing crop geometry validation is reused against actual locked bytes.
+
+Matched 850fd02 versus updated Release executables use the identical benchmark
+and fixed 64-picture 1080p fixture, one worker per decoder, 64 warmup pictures
+then 960 measured pictures each. Six AB/BA pairs each for one/four decoders:
+four-decoder median process CPU 6.952→6.104 ms/picture (−12.2%), elapsed
+4425.46→3708.36 ms (−16.2%). Every four-decoder pair improves CPU (5.9–19.0%)
+and elapsed time (13.3–24.4%). Single-decoder elapsed improves 16.4%, but CPU is
+noisy: median −4.3%, paired range −5.2..32.6% reduction. Decoded byte counts and
+full-frame checksums match across all 24 runs. Source/fixture/benchmark/binary
+hashes are tracked in docs/benchmarks/decoder-visible-copy-2026-11-07.json.
+Both versions already reuse MF scratch buffers; their warmed allocation counter
+stays zero and does not count the removed pixel vector. Scope is decode, output
+copy/crop, full-frame checksum and drain, excluding startup/warmup/teardown,
+capture, transport and presentation. No total application CPU/memory or physical
+input-to-display latency claim; hardware handle lifetime remains unqualified.
+
+Real MF tests now also require uncropped 1280×720 among changing cropped/resized
+outputs, explicitly verify cropped 1080p geometry, and retain earlier frames
+across reuse, resize and Stop/restart. Generated GPU decoding, retained textures,
+pressure, retirement and software fallback passed with the production change;
+the later added geometry assertions also pass in the CPU lifecycle test.
+
+Release `all` build passed and packaged CLI/UI hashes match. The sequential
+full application run passed 45/46 checks (318.82 s): viewer-removal timed out
+at RoomUiTests.cpp:777 waiting for Live video, held controller input and a cleared
+video status after host unpause. This same intermittent pause/resume condition
+was recorded before this change. Its focused rerun passed (11.75 s). Do not
+claim a clean full-suite run or a fix for that timing/runtime issue. The decoder
+regressions, four-viewer media/input, UI and presentation checks passed.
+The final production source and benchmark binary still match recorded hashes.
+No version bump/publication; unreleased.
+
+## Theme the white horizontal scrollbar - 2026-11-07
+
+Owner pointed out the white horizontal scrollbar/end buttons in Stream details.
+Only QFileDialog had horizontal scrollbar rules; the viewer diagnostics table
+inherited Qt's light fallback while vertical scrolling already used the theme.
+Promoted the existing horizontal track/thumb/hover/end-button/page and scroll-area
+corner rules to the shared stylesheet, preserving their geometry and palette.
+This also covers horizontal scrolling elsewhere in the application.
+
+Compact/normal Stream details renders were inspected: the track, rounded thumb
+and corners are dark, with no white end buttons. The focused admission/report-
+export UI scenario passed after the change. Release `all`, all 46 sequential
+application CTests (301.29 s) and packaged CLI/UI hashes passed with both the audio
+recovery and theme changes. No image mockup or layout redesign was needed.
+Committed separately from audio recovery at the owner's request; unreleased.
+
+## Recover host microphone/system capture automatically - 2026-11-07
+
+SwitchablePcmCapture previously stayed silent after a System/Microphone producer
+failed until a manual selection/retry. A regression against b41a474 reproduced
+the missing recovery. It now retries the committed factory with 250 ms–5 s
+capped backoff, preserving explicit device IDs and audio/room revision. Recovery
+starts asynchronously on a producer owner; paced 10 ms silence continues while
+activation waits. First PCM marks Running, and a five-second first-PCM deadline
+retires stalled producers that honor cancellation. Each microphone open recreates
+speech processing. Old PCM queues are discarded and drop counters survive.
+
+Manual Retry bypasses backoff; source changes/mute supersede in-flight automatic
+activation. Close/Stop prevent reopening. Shared-source mode retains its separate
+validated-target policy; explicit process IDs retain manual retry rather than
+following PID reuse. No default-device/app fallback is introduced. Native calls
+that ignore cancellation remain non-preemptible.
+
+The injected-clock/device suite covers repeated activation/read failures,
+capped delays, two capture kinds, pinned selections, unchanged revisions, fresh
+PCM, processor recreation, mute/change/manual-retry priority, first-PCM timeout,
+Close/stop and owner-thread cleanup. The source-switch public UI proof resumes
+default system capture without a Retry click while video continues, preserving
+selection/revision. The synthetic UI factory does not propagate initial native
+device IDs; pinned recovery is covered at the shared control/producer boundary.
+Host recovery messages were rendered/inspected at compact and normal sizes.
+No physical capture, audible output, hot-plug or driver-reset qualification.
+This is reliability work, with no compute-time/latency improvement claim.
+
+Release `all` build passed. All 46 application CTests passed sequentially
+(301.29 s), including the expanded native PCM suite (13.89 s), room media/input,
+CLI and UI. The focused source-switch public UI proof passed (14.02 s), and
+admission-feedback/recovery-message renders passed at compact/normal sizes.
+Packaged CLI/UI hashes match. No version bump or publication; unreleased.
+
+## Renew presentation recovery after healthy playback - 2026-11-07
+
+Presentation previously allowed only three GPU rebuilds across a viewer's whole
+session. A fourth isolated device fault stayed terminal even after healthy video
+between outages. A deterministic regression reproduced this against 82b2fc4.
+Thirty successfully presented incoming frames now renew the attempt budget.
+FramePresentationSession identifies fresh-frame work explicitly; Update/redraw
+success and busy/occluded/minimized/unavailable frames cannot earn health credit.
+Any recoverable device fault clears that health count. The existing 250 ms
+drop-only backoff, failed-frame discard, supported DXGI errors, nonrecoverable
+error handling and terminal exhaustion remain. Diagnostic recoveries stay
+cumulative; only Clear resets that total and can revive terminal presentation.
+
+Supplied-time policy checks recover five isolated outages, then require three
+29-frame recoveries to exhaust on the fourth unstable fault. Redraws/skips cannot
+cross the boundary, and elapsed time alone cannot revive terminal presentation.
+The shared UI/CLI session checks redraw/skip isolation. The actual widget worker
+with an injected renderer recovers five outages with 30 accepted incoming frames
+each, cumulative counters, correct ownership and the one-frame queue setting.
+
+The native Windows UI test was extended with four healthy-separated losses and
+real GPU resource recreation. Two local attempts could not reach the existing
+first-frame assertion: DXGI reported occlusion, zero accepted frames, no renderer
+errors and roughly 925 occluded drops. A test-window visibility experiment did
+not help and was removed. These runs did not reach the new native assertions;
+they do not qualify GPU recovery or physical driver loss. The independent policy,
+shared-session and offscreen-widget checks pass. No physical input/virtual-pad
+allocation or graphics driver reset. This is reliability work, not a CPU or
+end-to-end latency claim.
+
+Release `all` build passed. All 46 application CTests passed sequentially
+(306.68 s), including the expanded policy/shared-session/widget checks (6.89 s),
+CLI, four-viewer media/input and room UI. Packaged CLI/UI hashes match.
+Native GPU recovery remains unqualified for the occlusion reason above.
+No version bump or publication; this improvement is unreleased.
+
+## Keep software video alive after a completed encode stall - 2026-11-07
+
+The software encoder treated a successful encode taking over 500 ms as a fatal
+error, setting failed_ and rejecting subsequent input until reinitialization.
+A real MF regression with a 550 ms input-mapping delay reproduced this against
+7b561f5: "Completed software stall poisoned subsequent encoding".
+
+Late completed output now has a separate nonfatal drop path. Keep the live
+transform/latest pending input, force the next fresh picture to an IDR (the
+receiver never saw the dropped reference), and record encoder-late-frame-dropped
+with elapsed work milliseconds. Generation cancellation suppresses the late
+callback/event. Actual software codec errors retain terminal behavior and
+hardware's missing-output deadline still quarantines/falls back as before.
+
+The regression exercises three completed stalls, including latest-only queued
+input, exact drop accounting, fresh RTP/NTP/mapping and independent decoding of
+each recovered IDR with a new MF decoder. Codec-ready events prove no implicit
+restart during recovery. A fourth stall is cancelled by Release; old callbacks
+stay suppressed and a new configuration produces a clean initial keyframe.
+Generated GPU-readback software encoding also passes. This injects input mapping
+delay, not a physical game/driver hang, and cannot preempt stuck native calls.
+This is a reliability change, with no CPU/latency improvement claim.
+
+Release `all` build passed. All 46 CTests passed sequentially (299.58 s),
+including the extended encoder regression, multi-viewer media, input and UI.
+`EncoderAdapterTests --gpu-readback` passed separately with the final test source;
+packaged CLI/UI hashes match. No physical input or virtual-controller allocation.
+No version bump or publication; this fix is unreleased.
+
+## Reuse software decoder output storage - 2026-11-06
+
+H264StreamDecoder previously allocated a large caller-owned MF output buffer on
+every ProcessOutput poll, including NEED_MORE_INPUT. It now retains one buffer
+per decoder, resets its length and creates a fresh sample on each poll. Published
+CPU pixels still own copies, format changes discard scratch storage, Stop frees
+it and Start resets allocation counters. Existing size limits stay authoritative;
+MFT-supplied hardware samples retain their path. The retained scratch buffer is
+about 3 MiB per idle running 1080p software decoder, at most 128 MiB.
+
+An identical generated 64-picture 1080p fixture and benchmark were compared with
+instrumented ff38fa3 in six alternating AB/BA pairs for one and four independent
+decoder threads: 64 warmup pictures, then 960 measured pictures per decoder.
+Median elapsed time improves 3595.84→3363.89 ms (6.5%) and 5162.26→4623.26 ms
+(10.4%). CPU ms per decoded frame improves 5.916→5.420 (8.4%) and 7.731→7.153
+(7.5%), but paired CPU ranges include regressions: −5.4..17.2% and −1.3..11.2%.
+Every elapsed pair improves. Measured large-buffer allocations fall 1921/7684→0;
+two allocations per decoder occur during warmup. Decoded byte counts and full-
+frame checksums match. Raw runs/source/binary/fixture hashes are tracked in
+docs/benchmarks/decoder-compute-2026-11-06.json; scope is in docs/performance.md.
+This measures decode, owned output copies/crop and checksum, excluding startup,
+warmup, teardown, capture, networking and presentation. No total application CPU,
+input-to-display latency or hardware handle-lifetime claim.
+
+Real software regression checks changing pixels across 320×180→640×360→1080p→
+320×180, bounded allocations, timestamp association, retained immutable frames
+and Stop/restart cleanup. The explicit generated-GPU variant also passes hardware
+resize, retention, pressure and software fallback. No physical desktop capture,
+input injection or virtual-controller allocation is used.
+
+Release `all` build passed. All 46 CTests passed sequentially (299.93 s);
+`DecoderAdapterTests --gpu` passed separately. Packaged CLI/UI hashes match.
+The measured decoder sources, benchmark source and executable still match the
+recorded hashes. No version bump or publication; this improvement is unreleased.
+
+## Preserve control grants through temporary lag - 2026-11-06
+
+Owner report: released v1.0.12 revoked controller permission when the captured
+game/capture lagged. Two code paths could do this: the 300 ms input watchdog
+fully revoked grants, and expired desktop capture geometry failed mixed-input
+ownership health after one second. The exact physical game incident was not
+reproduced. A regression reproduced watchdog revocation against the old code.
+
+Sink::Pause now neutralizes held input on the input owner while retaining grants,
+devices and slots. Native GamepadSink verifies a zero-state submission without
+Destroy; DesktopSink releases held keys/buttons and delegates pad neutralization.
+After a gap, the host rotates the existing Permission epoch with unchanged
+capabilities, clearing pre-gap queues. Viewer cache clearing/poller recreation
+requires a fresh report, including unchanged physical state; heartbeat alone
+cannot resume a paused sink. Receipt time is independent of delayed backend
+execution, so fresh queued updates prevent an unnecessary watchdog pause.
+
+Actual backend failure, failed/unsupported Pause, source invalidation/change,
+disconnect, explicit release/revoke and reliable-channel pressure retain full
+release/revocation. Source identity survives stale geometry; desktop injection
+and new grants still require fresh Read(), while ownership uses Identity().
+This avoids stale injection and preserves exclusive ownership during capture lag.
+Host UI keeps grant icons checked and shows Input paused; reports include paused.
+
+A second regression caught viewer Release crossing renewal: pending withdrawal
+is now forwarded under the renewed epoch. Unsent zero-capability acknowledgements
+are retained before a newer explicit grant, preserving quick release/regrant.
+Host revoke also wins over a blocked Pause completion. No wire format changes;
+use updated clients at both ends for the complete withdrawal/fresh-video behavior.
+
+Injected tests cover three repeated gaps, allocation/slot retention, stale-token
+rejection, no cache/heartbeat replay, unchanged-report recovery, a delayed owner,
+failed Pause and concurrent revoke. A four-viewer public-room proof stalls runtime
+advancement and resumes transported input without another host grant. The UI
+fixture checks two gaps, checked icons, neutral state and automatic fresh-reader
+resumption; its paused controller card was rendered/inspected. No physical input,
+native virtual-device allocation or physical game/driver-lag qualification.
+
+Release `all` build passed. All 46 CTests passed sequentially (299.20 s),
+including UI, viewer removal, four-viewer input/media and presentation checks.
+The focused controller UI scenario also passed, and the paused grant card was
+visually checked with the existing dark theme. Packaged CLI/UI hashes match.
+No version bump/publication; this fix is unreleased. No performance claim.
+
+## Keep rooms open after capture source failure - 2026-11-06
+
+A failed acquisition/rebuild or exhausted capture recovery previously terminated
+the room for all viewers. CaptureSession now lets a switchable source abandon
+its failed native state and enter SourceUnavailable while preserving the source
+selection mailbox and capture distribution. The failure reason remains visible
+until fresh output; abandonment advances the source generation and clears the
+recovery budget for the next explicit selection. It never automatically opens
+a replacement. An already pending replacement survives failure of the old source.
+Native release/destruction stays on the capture owner. Initial Start failures,
+unwrapped sources and consumer errors retain terminal behavior.
+
+NativeRoomRuntime releases held input and disables new grants while capture is
+unavailable; grant availability resumes with fresh capture and no implicit
+regrant. The host sees Capture unavailable plus Change source guidance, with
+disabled grant icons and explanations; normal closed-window copy remains.
+Viewers use the existing source-unavailable feedback, and audio connections stay
+open. This follows the existing UI/UX skill patterns without an image mockup.
+Compact host layouts stack capture actions and leave secondary measurements in
+Details so Change source remains readable; compact and normal renders were
+inspected with the injected failure active.
+
+The new regression failed against the previous capture loop and covers read/
+rebuild failure, exhausted recovery, first-frame timeout, bounded recovery after
+replacement, monotonic identities, failed/pending replacements, cancellation and
+failure boundaries. The four-viewer production-room proof injects read failure,
+requires continued audio and held-input release, then explicit source replacement
+with unchanged room/peer/connection identities. Two-viewer UI coverage exercises
+failure/replacement and grant controls. No physical graphics reset, driver hang
+or reported deferred WGC cleanup behavior is qualified by these injected faults.
+The first full run had a viewer-removal pause/resume timeout; its focused rerun
+and next full run passed. No fix for that intermittent behavior is claimed by
+this source feature. The next run exposed a PCM/status-observation race in the
+public output-recovery proof: audible blocks could precede the cached Running
+status. That proof now waits for both observations before checking recovery.
+Another run exposed the decoder recovery proof's immediate-output assumption;
+it now counts actual valid output with bounded pending associations and checks
+short-burst exhaustion instead of depending on exact input/output simultaneity.
+A presentation backoff test also failed its wall-clock call-count assertion in
+one parallel run; it had passed earlier runs. These intermittent checks are
+recorded separately from the consistently passing capture-failure scenarios.
+
+Release `all` build passed; packaged CLI/UI hashes match. All 46 CTests were
+exercised, but the parallel full runs were not uniformly clean. After the proof
+corrections, the final sequential decoder/capture/four-viewer/presentation checks
+all passed (40.51 s), and the focused two-viewer source-switch UI passed with
+normal/compact renders inspected. Do not report a clean full-suite run or a fix
+for the intermittent viewer pause/presentation timing behavior. No version bump,
+publication or performance claim.
+
+## Renew decoder recovery after sustained valid output - 2026-11-06
+
+The MF decoder previously exhausted its three software-rebuild attempts across
+an entire configuration, even when long stretches of healthy video separated
+failures. Thirty validated output frames now renew the budget; any decode error
+clears that healthy count. Accepted/buffered input alone cannot renew it. Valid
+GPU output dropped for consumer retention pressure still counts. The 250 ms
+backoff, keyframe requirement and session-wide hardware quarantine remain.
+
+A real MF regression test uses a complete valid picture with an undersized
+declaration to fail output validation deterministically. It failed on the old
+implementation at the fourth isolated recovery. The fix recovers five outages
+with 30 real output frames between them (150 callbacks); an additional scenario
+with only 29 valid frames between failures still exhausts the three-restart
+budget. No corrupted driver behavior or physical capture is required.
+
+DecoderAdapterTests is now part of ordinary application CTest, bringing the
+suite to 45 tests. Its generated-input --gpu checks also pass: texture pressure,
+retirement, software fallback, malformed-input exhaustion, quarantine across
+reconfiguration/replacement, cropping and retained-frame lifetime. The reported
+laptop Section-handle growth and hardware encoder deadlines remain unresolved.
+
+Release `all` build and all 45 CTests passed (151.39 s); explicit generated GPU
+decoder checks passed, and packaged CLI/UI hashes match. No version bump or
+publication. This is a recovery correctness change, with no performance claim.
+
+## Follow default host audio routing - 2026-11-06
+
+Default System audio and Microphone capture now register Windows console-role
+default-device notifications before endpoint resolution/activation. Render and
+capture flow filtering share the existing playback notification implementation.
+Callbacks only increment an atomic revision; RoutedPcmCapture retires/reopens
+native endpoints on the existing capture worker, discards old native pending or
+in-flight PCM and primes replacement capture with paced silence. Changes during
+reads/startup are detected, coalesced notifications avoid duplicate activations,
+and cancellation prevents further opens/adoption. Drop counts accumulate across
+endpoint retirement. Explicit device IDs and process capture remain pinned.
+
+This follows healthy default-route changes without changing room/audio settings
+revisions. Replacement failures retain the existing policy: shared-source mode
+retries with capped backoff, explicit System/Microphone failures use manual
+retry. It does not add a separate worker, retry loop or replay queue. Mute/Stop
+retires the producer. Injected tests cover route races, fresh PCM, cumulative
+drops, cancellation, callback roles/flows and factory classification; the four-
+viewer proof requires continued audio/video and stable room/audio state across
+a capture route change. Physical device hot-plug/driver behavior is unqualified.
+
+Release `all` build and all 44 CTests passed (141.15 s). The packaged CLI/UI
+executable hashes match the build. No version bump or publication.
+
+## Direct MF sample input and paired encoder timing - 2026-11-06
+
+Software NV12 now copies plane views directly into an owned MF input sample,
+removing the temporary per-frame CapturedFrame vector and packing copy. The new
+EncodeNv12 API validates dimensions, strides and minimal plane spans before
+consuming frame state. Views are consumed synchronously and MF owns independent
+bytes afterward. I420/hardware routes retain their existing behavior; synchronous
+software submission is shared with the original EncodeFrame path.
+
+The requested timing audit found the preceding NV12 change (2c2a5fa→05582cc)
+reduced CPU-backed elapsed encode time 8–12% across four AB/BA pairs, with no
+clear GPU-backed elapsed gain. CPU time was noisy. The new direct-plane change
+was compared against 05582cc across six AB/BA pairs, 480 measured frames after
+30 warmup frames, using generated changing 1080p NV12 at 60 FPS/12 Mbps settings.
+Elapsed encoder-workload time fell 8.9–17.7%; four GPU-input software encoders
+fell 8.486→7.571 ms/input batch (10.8%), all six pairs faster. CPU readings are
+mixed: four-GPU-input median 16.553→16.036 CPU ms/encoded frame, while one CPU-
+input encoder's median increased. Every paired CPU range includes a regression;
+do not claim general CPU savings. Output byte counts and 64-bit hashes match.
+These unpaced encoder measurements exclude capture/network/decode/presentation.
+
+EncoderComputeBenchmark and compare-encoder-compute.py retain the reproducible
+workload/alternating-run method. The earlier source was built in an isolated Git
+archive snapshot with the same SDK/Release settings; active source was preserved.
+Raw runs, binary hashes and source identities are tracked under docs/benchmarks;
+docs/performance.md contains the full table and limitations. No machine-wide
+scheduling changes or physical input/audio/capture were used.
+
+The final Release build and all 44 CTests passed (141.86 s), including new plane
+boundary/rejection/start/stop checks and valid minimal final rows. Explicit GPU
+NV12 encoder checks passed, packaged executable hashes match, and measured source
+hashes still match the final implementation. No version bump or publication.
+
+## Direct NV12 software encoding and readback - 2026-11-06
+
+The MF adapter now packs CPU NV12 directly, including shared GPU NV12 readback,
+instead of converting to I420 and back to NV12 for each software encoder. Native
+same-device hardware submission is unchanged. GPU readback allocates the first
+requested CPU format only; I420-first callers retain their original direct
+conversion path. A second requested format derives from owned CPU pixels without
+another GPU readback. Mapping follows requested format order, stays under the
+frame mutex and rejects retired devices even when cached. Explicit GPU preview
+CPU materialization also uses NV12 directly. Per-viewer packing/MF sample copies
+remain; no total CPU/memory/latency percentage or zero-copy claim is established.
+
+The new four-encoder test failed before implementation with 32 ToI420 calls for
+eight changing padded NV12 frames delivered to four real software encoders.
+Afterward it reports zero calls, while decoding all 32 outputs validates luma,
+chroma, dimensions, timestamps and input mapping. The generated GPU variant
+encodes the same number of frames with eight shared readbacks and zero I420
+conversions. Additional probes cover preview pixels, both format request orders,
+cache ownership and retirement. The existing encoder lifecycle proof now runs
+in application CTest as encoder-adapter-lifecycle (44 tests total).
+
+The final full Release build and all 44 CTests passed (139.44 s). Explicit
+EncoderAdapterTests --gpu-readback and StreamSettingsTests --gpu runs passed;
+the latter preserves the earlier 96-to-24 shared-scaling/readback result. The
+portable archive matches both executables. Tests use generated pixels and silent
+synthetic endpoints, not physical input/audio or desktop capture. Full-session
+resource benchmarks and broader hardware qualification were not rerun. No
+version bump or publication occurred.
+
+## Pause desktop remote control when video stalls - 2026-11-06
+
+The desktop viewer now requires a frame actually presented within two seconds
+before forwarding remote input. Decode/enqueue acceptance alone cannot enable
+control. Presentation retains each frame's arrival time across redraws; skipped
+presents do not refresh it. Clear immediately invalidates mapping/freshness and
+advances a generation so an in-flight old render cannot restore them afterward.
+The input gate starts closed, releases held mouse/keyboard input and sends neutral
+controller state on a stall, retaining consent and the host's permission. Fresh
+presentation restores availability under the existing focus policy; Game mouse
+requires another click. The blank video surface says Video interrupted. Explicit
+host pause/source notices take priority. This changes the Qt desktop flow, not
+the CLI's input policy.
+
+The new desktop-input scenario failed before implementation, with a live room
+and decoding but a frozen UI consumer. It now checks held releases, blocked clicks,
+retained permission/revision and recovery. Controller neutralization/recovery
+also passes, and unit proofs cover the freshness boundary, redraw/skip behavior
+and a render completing after Clear. Offscreen controller fixtures exposed zero
+successful native presents despite hundreds of enqueues: input/media UI proofs
+now inject the existing recording presenter, including through RoomApplication's
+config constructor. Explicit Windows UI proofs retain native presentation. This
+does not qualify every real renderer or reproduce a specific WAN failure.
+
+The full Release build and all 43 CTests passed (143.17 s). Focused desktop-input,
+controller, viewer-removal and source-switch scenarios passed; compact/normal
+interruption renders were inspected and packaged CLI/UI hashes match. All input
+sinks were synthetic. No version bump or publication occurred.
+
+## Shared video scaling for matching viewers - 2026-11-06
+
+Immutable D3dVideoFrameBuffer inputs now cache at most four successful scaled
+outputs keyed by canvas size and the complete image rectangle. Matching viewer
+tracks reuse those GPU pixels and their existing lazy CPU conversion, while
+adaptation, settings/preset/mapping metadata and encoding stay independent.
+Eviction retains consumer ownership; new inputs cannot reuse old pixels.
+Retirement/quarantine bypass the cache and busy/failure results are not cached.
+
+The generated-texture GPU proof first failed on unchanged behavior: both
+separate and shared inputs required 96 scales/readbacks for 24 changing 1080p
+frames delivered concurrently to four 720p sources. With caching, shared input
+requires 24 scales/readbacks and one output texture per frame instead of four.
+Pixel freshness, preset isolation, complete geometry keys, four-entry eviction,
+device retirement, independent adaptation, fallback and teardown pass. This
+measures 75% fewer scaling/readback operations for matching outputs, not total
+session CPU/memory/latency. No full-session scorecard was rerun.
+
+The full Release build and package hash checks passed. The existing stream
+settings CPU proof is now included in application CTest (43 tests); its optional
+GPU assertions were corrected to unwrap frame metadata before inspecting the
+underlying pixel buffer. The full parallel run passed 42/43; viewer-removal hit
+the previously recorded controller-resume timeout at RoomUiTests.cpp:685, then
+passed standalone. That intermittent issue is not fixed by this change. The
+explicit StreamSettingsTests --gpu run passed. No physical input/audio, version
+bump or publication occurred.
+
+## Automatic shared-source audio recovery - 2026-11-06
+
+Shared-source audio now retries temporary endpoint startup/read failures on its
+existing capture worker, using exponential backoff from 250 ms to five seconds.
+The selected source remains authoritative: unavailable apps produce silence,
+process failures never fall back to system audio, and a changed target bypasses
+old backoff. Reads spanning source changes discard old PCM. Drop counters retain
+retired endpoints' totals. Video and the outer 10 ms audio clock continue during
+recovery; mute/stop cancel the old producer. The UI explains automatic retry.
+Explicit microphone/system/process modes retain manual retry, and healthy host
+default-output changes are outside this change.
+
+The final full Release build and all 42 CTests passed. Fake-clock tests cover
+capped retries, same-target recovery, fresh PCM, source isolation, cumulative
+drops and cancellation during activation. The four-viewer public-session proof
+uses the real shared-source wrapper with synthetic endpoints; audio recovers
+without a command or changed room/audio revision, and muting during a second
+outage leaves no capture endpoint or further retries. Compact/normal recovery
+guidance renders were inspected and packaged CLI/UI hashes match. Native driver
+failure/recovery remains unverified. No version bump or publication occurred.
+
+## Automatic viewer audio continuity - 2026-11-06
+
+Viewer default output now follows render/console endpoint notifications using a
+nonblocking atomic callback. The playout owner retains registration until
+unregister and catches changes during activation or a blocked write. Explicit
+device selections remain pinned. Controlled output retries failures with 250 ms
+exponential backoff capped at five seconds, keeping decoded audio paced/discarded
+instead of queued during outages. Recovery validates with silence then resumes
+fresh PCM, retaining volume, mute, selection and settings revision. Manual
+updates take priority and Close/cancellation prevent further activation.
+
+Playback settings explain automatic retry. Outage rendering exposed an existing
+Retry button using its default 640x480 geometry over other fields: its row was
+hidden with QFormLayout but restored through QWidget only. Status now restores
+the row consistently, with visibility changes guarded to avoid layout churn.
+Output/volume/mute remain reachable and Retry disappears after recovery.
+
+The final full Release build and all 42 CTests passed (139.63 s). Deterministic
+PCM proofs cover capped backoff, repeated failure, startup/write notification
+races, coalescing, mute/gain, manual override, pinned output and Close/stop races.
+The four-viewer public API proof reroutes and recovers one viewer while others
+continue, without changing room identity or playback revision. Older manual-only
+retry expectations were updated. A focused source-switch UI run passed with the
+outage drawer rendered and inspected; packaged CLI/UI hashes match executables.
+Notifications/devices were injected: physical headset hot-plug and all-driver
+qualification remain unverified. No version bump or publication occurred.
+
+## Persistent remote-control pause guidance - 2026-11-06
+
+The viewer's existing Controls hint now reports actual forwarding pauses while
+permissions remain granted. Video unavailability takes priority and says to
+wait for video; a focus/mode pause explains clicking the video to resume. The
+normal Game mouse guidance returns when the gates reopen, and shortcut reminders
+remain in the same label. Input routing, focus policy and grant semantics are
+unchanged; the label is explicitly plain text.
+
+The full Release build, focused local-service desktop/controller scenarios and
+three relevant UI/update checks passed. Tests require pause/recovery text on
+focus and mode changes, held-state release, retained permissions, blocked input
+while paused and video-wait guidance until fresh video. Compact/normal paused
+renders were inspected and the portable archive matches both executables. All
+input sinks/devices were synthetic; no physical input, version bump or
+publication occurred.
+
+## Room entry preflight and editable compact forms - 2026-11-06
+
+Create validates room names with the protocol's existing canonical-name rules
+before allocating a session. UI/admission share the extracted password rule
+(128 UTF-8 bytes, valid Unicode, no ASCII control characters). Invalid drafts
+remain editable and focus moves to the field. Join validates inside its existing
+password popup, with room for wrapped feedback. Its input cap now exceeds the
+admission limit so a long ASCII paste is rejected rather than silently becoming
+a different, admissible password. Valid passwords are never trimmed.
+
+Compact renders exposed squeezed/overlapping Create fields. Minimum-size layout
+constraints on both details and responsive columns propagate content height to
+the scroll area. Tests wait for full-height password/name fields and require
+the password to fit its own card and the viewport at compact/normal sizes.
+
+The full Release build, focused local HTTP fixture and five relevant UI/
+admission/protocol/update checks passed. Coverage rejects invalid drafts without
+sessions/HTTP admissions, accepts boundary Unicode names/passwords, and retries
+inside the Join popup. Rendered feedback was inspected and both packaged
+executables match. One earlier broad run exposed a keyboard proof clicking while
+the button was still disabled after permission acknowledgement; the proof now
+waits for UI readiness before clicking. Final parallel checks pass. This does
+not address the previously recorded viewer-removal resume timeout. No physical
+input, version bump or publication occurred.
+
+## Fallback file-picker contrast correction - 2026-11-06
+
+The owner identified the unreadable white file panes in the Save As screenshot.
+The earlier export commit had left Qt's fallback view backgrounds unthemed
+while inheriting pale text. Scoped QFileDialog styling now covers file views,
+sidebar, selection, header, navigation buttons/arrows, scrollbar corners and
+horizontal scrollbars. The standard native-dialog selection policy is unchanged.
+
+The full Release build, focused export fixture and three relevant UI/update
+checks passed. The fixture loads a folder and a JSON file, selects an actual
+model row and requires dark bases/light text across fallback item views.
+Populated renders were inspected after fixing both white panes and remaining
+native arrow/scrollbar contrast. The portable archive matches both executables.
+No native Windows picker interaction, version bump or publication occurred.
+
+## Diagnostic report Save As - 2026-11-06
+
+Details now opens an asynchronous platform Save As dialog instead of writing
+directly to a preset location. Default JSON suggestions use role/UTC time in
+Documents; an explicit diagnostic path remains the initial suggestion. Each
+session remembers its selected destination, keeps overwrite confirmation and
+disables duplicate exports while the picker is open. Cancellation preserves
+feedback, and session Close rejects open pickers before draining. Reports are
+snapshotted on selection using the existing redaction/atomic writer. Open log
+folder remains independent; ended-session copy no longer promises exports there.
+
+The full Release build, focused host/viewer export fixture and four relevant
+UI/report/update checks passed. Tests cover suggestions/configured paths, chosen
+locations, JSON suffix, cancel/reopen, duplicate actions, dismissal on Close and
+a selected-path write-failure race with retry. Real local-service video frames
+continue while the picker is open. Compact/normal result renders and the Qt
+fallback picker were inspected; the portable archive matches both executables.
+Automation forces nonnative dialogs and does not verify Windows native picker
+interaction. No version bump or publication occurred.
+
+## Room directory availability and capacity - 2026-11-06
+
+Home/Join now retain the directory's viewer limit and typed room availability.
+Rows show occupied/total places, Full for capacity, and Wait… for a reconnecting
+host or unavailable list. Disabled actions provide the specific reason in their
+tooltip/accessibility description, use readable muted text and omit the action
+icon. An authoritative available update restores Join and its icon in place.
+Existing rows and action geometry remain stable; legacy rows without a limit
+retain the count-only display.
+
+The full Release build, focused directory/admission fixture and three relevant
+UI/update checks passed. Coverage includes full/reconnecting/stale/restored
+states, capacity changes, blocked clicks, row identity and both Home/Join
+adapters. Compact/normal renders were inspected and the portable archive matches
+both rebuilt executables. Directory states are synthetic snapshots; no host
+lease expiry, WAN fault, version bump or publication occurred.
+
+## Preserve actionable session failures - 2026-11-06
+
+RoomSessionWindow previously overwrote detailed admission guidance with a generic
+failure on every failed status push. It now renders the typed cause through the
+shared error helpers. Once the room has been active, fatal media/transport errors
+describe that failure and give host Stop/start or viewer Leave/rejoin guidance.
+New terminal failures replace stale action errors rather than preserving them.
+
+An actual host-capacity window regression failed against the previous behavior.
+The final Release build, focused admission fixture and five relevant UI/mutation/
+report/update checks passed. Actual host/viewer windows retain capacity guidance
+through status refresh; synthetic active-room failure pushes cover recovery
+wording and stale-error replacement. Compact/normal failure renders were
+inspected and the portable archive matches both rebuilt executables. No physical
+device/WAN failure was injected, and no version bump or publication occurred.
+
+## Responsive three-column source grid - 2026-11-06
+
+The source picker now uses up to three columns when cells can remain at least
+210 logical pixels wide, with two/one at narrower sizes. Normal picker geometry
+fits six choices fully in view. Thumbnail aspect fitting and full-title tooltips
+remain; scrollbar space is reserved using widget width to avoid wrap oscillation.
+Resize updates cell geometry without rebuilding cards or losing selection.
+
+The full Release build, focused source-grid fixture and three UI/update checks
+passed. Tests inspect actual card rectangles for normal three-column/six-visible
+and compact two-column layouts, selection identity and stable wrapping. Both
+rendered sizes were inspected; the portable archive matches the rebuilt CLI/UI
+executables. No version bump or publication was performed.
+
+## Share-source title search - 2026-11-06
+
+Create/live source pickers share an initially focused search field. Filtering
+updates existing cards case-insensitively without restarting thumbnail capture;
+visible selection stays stable and the draft source is retained through refresh.
+Queries survive tab/refresh changes. An explicit tinted Clear search action
+restores sources. The list centers no-match versus unavailable feedback and
+provides an accessible description. Share rejects hidden/invalid selections and
+has a disabled visual state. Enter from search moves to matching cards without
+sharing or dismissing the picker; normal confirmation/focus return remains.
+
+The full Release build and focused synthetic-source checks passed. Five relevant
+UI/mutation/update checks passed overall; a parallel controller-resume timeout in
+viewer removal passed on the isolated rerun. Final room UI/removal checks passed
+sequentially. Coverage includes title/selection identity, icon updates, no matches,
+tab/refresh retention, clear/Enter behavior and popup control bounds at compact/
+normal sizes with live audio controls. Matched/empty/create/live renders were
+inspected; the portable archive matches both rebuilt executables. Source-search
+fixtures enumerate no desktop sources. No version bump or publication occurred.
+
+## Cancellable room joining - 2026-11-06
+
+Join now shows neutral progress, disables the primary action and reuses Paste
+for Cancel. The invite stays read-only/copyable while pending; directory actions
+cannot replace the in-flight target. Cancellation preserves the invite and waits
+for the existing asynchronous session drain. Home cancels first and navigates
+only after cleanup, avoiding a hidden join that later reopens the session.
+Explicit joining/cancelling/returning-home states reject queued success and
+password-error handling after cancellation. No automatic retry is introduced.
+
+Action widths are measured after stylesheet parenting/polish, and feedback space
+is reserved so pending/idle transitions do not move the invite or directory.
+The full Release build, focused stalled-admission fixture and five relevant UI/
+mutation/update checks passed. Coverage includes repeated actions, target lock,
+cancel/Home drain, a queued success, preserved invites, no media startup, stable
+geometry and recovery from admission failures. Compact/normal renders were
+inspected; the portable archive matches both rebuilt executables. No physical
+input, version bump or publication was performed.
+
+## Room closure feedback - 2026-11-06
+
+Authenticated room.closed reasons survive Stop as a typed optional closeReason;
+reports serialize the bounded protocol vocabulary, with null for local exits.
+The existing removedByHost flag remains compatible. After a viewer session
+finishes cleanup, normal Home and standalone Join show a shared toast explaining
+host departure, expiry or service shutdown. Local Leave and host Stop remain
+quiet; removal retains its existing persistent Join explanation.
+
+The full Release build and seven relevant room/UI/report/protocol/update checks
+passed. A real local-service host Stop checks the retained reason, return Home,
+released keep-awake state and visible notice. Voluntary viewer Leave keeps the
+host active and creates no toast. Removal and all report reason values are
+covered; expiry/service message policy is tested without waiting for real leases.
+The rendered notice was inspected and the portable archive matches both rebuilt
+executables. No physical input, version bump or publication was performed.
+
 ## Version 1.0.12 release preparation - 2026-11-06
 
 The owner requested publication of 1.0.12 after the nine separately committed

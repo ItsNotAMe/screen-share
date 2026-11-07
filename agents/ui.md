@@ -2,10 +2,89 @@
 
 ## Current UI Direction
 
+- Viewer input indicators toggle independently: off requests, pending cancels,
+  granted releases only that capability. Remove the separate viewer Release
+  control button; retain Ctrl+Alt+Shift+Q as Release all in the shortcut list.
+  Pending withdrawal cannot be clicked back into a request before acknowledgement.
+  Keep other grants/requests and focus; the host still approves fresh requests.
+
+- Viewer controls keep the short state-dependent Game mouse/pause hint separate
+  from a compact Keyboard shortcuts reference. Show Fullscreen and Release all
+  as aligned action/key-badge rows, with readable muted styling. Reserve
+  two hint lines to avoid shifts between ordinary states; let longer copy wrap.
+  Owner explicitly prefers no Escape explanation, including tooltips/toasts.
+  Keep the underlying Escape and remote-input behavior unchanged.
+
+- Horizontal scrollbars and scroll-area corners use the shared dark theme
+  throughout the app, including the Stream details viewer table. Keep these
+  rules global instead of limiting them to QFileDialog. The existing 10 px
+  track, rounded thumb and hover treatment match vertical scrolling. Compact/
+  normal Stream details renders were inspected after the white scrollbar fix.
+
+- A temporary input-watchdog gap keeps grant icons checked. The host shows
+  Input paused and explains that permission remains and fresh input resumes it.
+  Renewal of the input epoch is automatic; it must not require another host
+  click or preserve cached held state. Viewer video freshness/focus gates still
+  apply. Actual source changes/disconnect/backend failures still cancel grants.
+
+- Desktop remote input requires a frame actually presented within two seconds.
+  A connected room or accepted decode handoff is insufficient. On a stall, keep
+  grants/consent, release held input and show Video interrupted in the established
+  blank video status surface. Resume only after fresh presentation; Game mouse
+  remains unlocked until another click. Host pause/source guidance takes priority.
+  Redraws retain the original frame arrival time, and Clear invalidates in-flight
+  presentation completions before they can restore mapping/freshness.
+
+- Shared-source capture failures explain automatic retry while video continues.
+  Other audio modes retain their manual retry guidance. Keep the selected app
+  authoritative and allow source changes/mute during recovery.
+
+- Viewer output failures recover automatically with capped retries while video
+  continues. Explain automatic retry in playback settings and keep manual Retry
+  and device selection usable. Restore Retry with QFormLayout::setRowVisible,
+  matching its initial row hide; showing only the button leaves its old default
+  geometry over the other controls. Check full bounds and non-overlap on failure.
+
+- Home/Join directory rows show occupied/total viewer places. Use readable Full
+  or Wait… labels without an action icon when joining is unavailable; provide
+  full/host-reconnecting/list-unavailable reasons in tooltips and accessibility.
+  Restore Join and its icon from the next authoritative available snapshot.
+  Preserve row identity and action geometry through these updates.
+
+- Create/live source pickers share title search. Filter cards in place without
+  restarting previews, retain query through tabs/refresh and keep a valid visible
+  selection. No-match/unavailable feedback is centered and sharing is disabled.
+  Focus search on open; Enter moves to matching cards without confirming a share.
+  Use up to three columns with readable cells (210px minimum), falling back to
+  two/one in compact containers. Base wrapping on widget width with scrollbar
+  space reserved, and retain selected-card identity during resize.
+
+- Pending Join shows neutral progress, disables the Join action and uses the
+  Paste slot for Cancel. Preserve the invite and keep action/list geometry stable.
+  Home cancels and waits for cleanup before navigating; ignore late success or
+  password failures after cancellation. Measure action states after style polish.
+
+- Explain authoritative remote room closure with the existing toast after
+  session cleanup and return Home/Join. Distinguish host departure, expiry and
+  service shutdown; keep local Leave/host Stop quiet and removal's persistent
+  explanation separate. Never infer remote closure from Stopped alone.
+
 - Join failures preserve the invite and explain full/closed/missing rooms, rate
   limits and uncertain outcomes using the shared RoomEntryError guidance.
   Host creation uses service-capacity guidance for the full response. Keep
   password prompts exclusive to validated authorization failures.
+  Session windows must also render the typed terminal cause on every failed
+  status push, using active-room recovery wording after admission. Avoid
+  replacing detailed guidance with a generic failure or keeping stale action errors.
+
+- Validate Create room names and passwords before allocating a session, using
+  the protocol's normalization and admission's shared password validator. Keep
+  the draft and focus the invalid field. Validate Join passwords inside the
+  existing popup so users can correct them without losing the invite or another
+  admission attempt. Unicode character limits and UTF-8 password limits differ;
+  explain long passwords without silently trimming or truncating them.
+  Preserve form-field minimum sizes through both the details layout and the
+  responsive columns; at compact heights, scroll instead of overlapping cards.
 
 - Normal startup remembers windowed size/position and maximized state. Cache
   placement in memory while moving; freeze/save on the first Close before room
@@ -20,6 +99,10 @@
   surface and accessible description. Clear held input before clearing mapping;
   gate remote input until fresh video while preserving grants and focus policy.
   Game mouse must be captured again after the video returns.
+  Use the existing Controls hint to explain paused remote input persistently:
+  wait for fresh video first, then offer click-video recovery for a focus/mode
+  pause. Keep shortcut reminders and use the actual forwarding gates/grants;
+  permission alone does not mean input is currently forwarding.
 
 - Hosts can remove a viewer from that viewer's row after a named confirmation.
   Keep removal icon-only, using user-minus beside the three input icons on one
@@ -50,7 +133,16 @@
 
 
 - Host/viewer Details opens to a readable Overview with labelled connection, video and audio measurements. The host viewer picker and status note stay visible during scrolling; long diagnostics and the per-viewer table live under Advanced. Missing/stale values are explicit, RTT is network round trip, and host encoder output is distinct from viewer-reported decode.
-- Details keeps Open log folder and Save report reachable below both tabs. The folder action always remains enabled, creates its directory on demand and opens the folder independently of report-file existence or save success.
+- Details keeps Open log folder and Save report reachable below both tabs. Save
+  report opens an asynchronous platform Save As dialog, with a role/UTC JSON
+  suggestion in Documents or the configured report path. Remember the selected
+  destination for the session, keep overwrite confirmation, preserve feedback on
+  cancellation and dismiss the dialog on session close. The folder action always
+  remains enabled, creates its directory on demand and opens the log folder
+  independently of report-export destination or save success.
+  Theme Qt fallback file lists/sidebar, selected rows, navigation buttons and
+  horizontal scrollbars explicitly; inherited pale text on a native light base
+  is unreadable. Verify with a populated folder rather than an empty picker.
 - Room viewer controls are icon-only Mouse/Keyboard/Controller buttons, all off initially. Clicking requests immediately; amber means requested and teal means granted. Keep tooltips and accessible names. Requests accumulate without revoking existing grants.
 - Host pending icons pulse amber (respect Windows animation preference); clicking opens Allow/Deny for that control only. Requests gather per viewer, while approval and denial remain independent. Denial preserves existing grants and held input. Viewer selection uses fill colors without borders; focus indication appears only for keyboard navigation.
 - Use Qt Widgets for the first real desktop UI.

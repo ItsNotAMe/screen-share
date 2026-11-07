@@ -3,6 +3,7 @@
 #include "media/audio/PcmAudioEndpoint.h"
 #include "media/audio/SwitchablePcmCapture.h"
 #include "media/audio/PlaybackControl.h"
+#include "media/audio/RoutedPcmCapture.h"
 #include "media/webrtc/MicrophoneCapture.h"
 #include <atomic>
 #include <chrono>
@@ -16,12 +17,15 @@ struct AudioEvidence {
     std::atomic<bool> captureUnavailable{false}, outputUnavailable{false};
     std::atomic<unsigned> captureStarts{0}, outputStarts{0};
     std::atomic<unsigned> liveCaptures{0}, liveOutputs{0};
+    std::atomic<uint64_t> outputRoute{0}, captureRoute{0};
 };
 class ToneCapture final : public screenshare::media::PcmCaptureEndpoint {
 public:
-    explicit ToneCapture(bool silent = false, std::shared_ptr<AudioEvidence> evidence = {}) : silent_(silent), evidence_(std::move(evidence)) { if (evidence_) ++evidence_->liveCaptures; }
+    explicit ToneCapture(bool silent = false, std::shared_ptr<AudioEvidence> evidence = {}, bool followDefault = false)
+        : silent_(silent), evidence_(std::move(evidence)), followDefault_(followDefault) { if (evidence_) ++evidence_->liveCaptures; }
     ~ToneCapture() override { if (evidence_) --evidence_->liveCaptures; }
     void Start() override {
+        route_ = evidence_ ? evidence_->captureRoute.load() : 0;
         if (evidence_) { ++evidence_->captureStarts; if (evidence_->captureUnavailable) throw std::runtime_error("Injected capture startup failure"); }
         next_ = std::chrono::steady_clock::now();
     }
@@ -38,15 +42,24 @@ public:
         return true;
     }
     uint32_t DelayMs() const override { return 0; }
+    bool DeviceChanged() const override { return followDefault_ && evidence_ && evidence_->captureRoute.load() != route_; }
 private:
     bool silent_;
     std::shared_ptr<AudioEvidence> evidence_;
     uint64_t position_ = 0;
     std::chrono::steady_clock::time_point next_;
+    bool followDefault_;
+    uint64_t route_ = 0;
 };
+inline std::unique_ptr<screenshare::media::PcmCaptureEndpoint> SyntheticCapture(bool silent, std::shared_ptr<AudioEvidence> evidence, bool followDefault) {
+    auto factory = [silent, evidence, followDefault] { return std::make_unique<ToneCapture>(silent, evidence, followDefault); };
+    if (followDefault) return std::make_unique<screenshare::media::RoutedPcmCapture>(factory);
+    return factory();
+}
 class MeasuredPlayout final : public screenshare::media::PcmPlayoutEndpoint {
 public:
-    explicit MeasuredPlayout(std::shared_ptr<AudioEvidence> evidence) : evidence_(std::move(evidence)) { ++evidence_->liveOutputs; }
+    explicit MeasuredPlayout(std::shared_ptr<AudioEvidence> evidence, bool followDefault = true)
+        : evidence_(std::move(evidence)), followDefault_(followDefault), route_(evidence_->outputRoute.load()) { ++evidence_->liveOutputs; }
     ~MeasuredPlayout() override { --evidence_->liveOutputs; }
     void Start() override {
         ++evidence_->outputStarts;
@@ -63,18 +76,22 @@ public:
     }
     uint32_t DelayMs() const override { return 0; }
     uint32_t BufferFrames() const override { return 480; }
+    bool DeviceChanged() const override { return followDefault_ && evidence_->outputRoute.load() != route_; }
 private:
     std::shared_ptr<AudioEvidence> evidence_;
+    bool followDefault_;
+    uint64_t route_;
     std::chrono::steady_clock::time_point next_;
 };
 inline screenshare::media::PcmEndpointFactories SyntheticAudio(std::shared_ptr<AudioEvidence> evidence) {
-    return {[evidence] { return std::make_unique<ToneCapture>(false, evidence); },
+    return {[evidence] { return SyntheticCapture(false, evidence, true); },
         [evidence] { return std::make_unique<MeasuredPlayout>(evidence); }};
 }
 inline screenshare::media::AudioSwitchControl::Factory SyntheticAudioSelectionWithEvidence(screenshare::media::AudioSelection selection, std::shared_ptr<AudioEvidence> evidence) {
     return [selection, evidence]() -> std::unique_ptr<screenshare::media::PcmCaptureEndpoint> {
         if (selection.deviceId == L"invalid") throw std::runtime_error("Injected audio startup failure");
-        return std::make_unique<ToneCapture>(selection.kind == screenshare::media::AudioKind::Microphone, evidence);
+        return SyntheticCapture(selection.kind == screenshare::media::AudioKind::Microphone, evidence,
+            selection.deviceId.empty() && (selection.kind == screenshare::media::AudioKind::System || selection.kind == screenshare::media::AudioKind::Microphone));
     };
 }
 inline screenshare::media::AudioSwitchControl::Factory SyntheticAudioSelection(screenshare::media::AudioSelection selection) {
@@ -83,7 +100,7 @@ inline screenshare::media::AudioSwitchControl::Factory SyntheticAudioSelection(s
 inline screenshare::media::PlaybackControl::Factory SyntheticPlayback(screenshare::media::PlaybackSelection selection, std::shared_ptr<AudioEvidence> evidence) {
     return [selection, evidence]() -> std::unique_ptr<screenshare::media::PcmPlayoutEndpoint> {
         if (selection.deviceId == L"invalid") throw std::runtime_error("Injected playback startup failure");
-        return std::make_unique<MeasuredPlayout>(evidence);
+        return std::make_unique<MeasuredPlayout>(evidence, selection.deviceId.empty());
     };
 }
 }

@@ -18,6 +18,7 @@ int main(int argc, char** argv) {
         struct Signal { int destination; RoomPeerSignal value; };
         std::deque<Signal> pendingSignals;
         auto evidence = std::make_shared<Evidence>();
+        auto hostEvidence = std::make_shared<Evidence>();
         auto run = [&](auto work) {
             std::exception_ptr failure;
             auto task = executor.Post([&] { try { work(); } catch (...) { failure = std::current_exception(); } });
@@ -53,12 +54,20 @@ int main(int argc, char** argv) {
                     [&](const auto& peer, auto signal) {
                         if (peer == "stalled" && signal.kind == RoomPeerSignal::Kind::Candidate) return true;
                         pendingSignals.push_back({peer == "healthy" ? 1 : 3, std::move(signal)}); return true;
-                    }, std::make_shared<Evidence>());
+                    }, hostEvidence);
                 healthy = std::make_unique<Runtime>(RoomIdentity{false, "test", "healthy"},
                     [&](const auto&, auto signal) { pendingSignals.push_back({0, std::move(signal)}); return true; }, evidence);
             });
             wait([&] { return host->Ready("healthy") && healthy->Ready("host"); });
+            const auto idleStart = hostEvidence->capture->captured.load();
+            const auto idleUntil = std::chrono::steady_clock::now() + 1200ms;
+            wait([&] { return std::chrono::steady_clock::now() >= idleUntil; });
+            const auto idleFrames = hostEvidence->capture->captured.load() - idleStart;
+            Check(!hostEvidence->captureDemand->load() && idleFrames >= 3 && idleFrames <= 8);
             run([&] { Check(host->Add("healthy")); Check(healthy->Add("host")); });
+            wait([&] { return evidence->frames >= 5; });
+            if (!hostEvidence->captureDemand->load())
+                throw std::runtime_error("Connected video did not restore full capture demand");
             wait([&] { return evidence->frames >= 30; });
             uint64_t revision = 0;
             run([&] {
@@ -80,10 +89,34 @@ int main(int argc, char** argv) {
                     if (peer.peerId == "stalled") return peer.appliedRevision == revision;
                 return false;
             });
+            StreamPreferences preferences;
+            run([&] {
+                preferences = host->StreamSettings().preferences;
+                preferences.videoPaused = true;
+                Check(host->UpdateStreamPreferences(preferences).error == StreamUpdateError::None);
+            });
+            wait([&] { return !hostEvidence->captureDemand->load(); });
+            const auto pausedCapture = hostEvidence->capture->captured.load();
+            const auto audioBefore = evidence->audio->audibleBlocks.load();
+            const auto pausedUntil = std::chrono::steady_clock::now() + 1200ms;
+            wait([&] { return std::chrono::steady_clock::now() >= pausedUntil; });
+            const auto pausedFrames = hostEvidence->capture->captured.load() - pausedCapture;
+            Check(pausedFrames >= 3 && pausedFrames <= 8 && evidence->audio->audibleBlocks > audioBefore + 20);
+            // The pending ICE-only viewer must not force full-rate capture.
+            Check(!hostEvidence->captureDemand->load());
+            const auto resumedFrames = evidence->frames.load();
+            run([&] {
+                preferences.videoPaused = false;
+                const auto update = host->UpdateStreamPreferences(preferences);
+                Check(update.error == StreamUpdateError::None);
+                revision = update.revision;
+            });
+            wait([&] { return hostEvidence->captureDemand->load() && evidence->frames >= resumedFrames + 20; });
             const auto before = evidence->frames.load();
             wait([&] { return evidence->frames >= before + 45; });
             run([&] {
                 const auto status = host->StreamSettings();
+                Check(hostEvidence->captureDemand->load());
                 Check(status.requestedRevision == revision && status.peers.size() == 2);
                 for (const auto& peer : status.peers) {
                     if (peer.peerId == "stalled") {
@@ -120,8 +153,12 @@ int main(int argc, char** argv) {
             });
             const auto after = evidence->frames.load();
             wait([&] { return evidence->frames >= after + 30; });
+            run([&] { host->Remove("healthy"); healthy->Remove("host"); });
+            wait([&] { return !hostEvidence->captureDemand->load(); });
             stop();
-            std::cout << "{\"passed\":true,\"unconnected_peer_capture_isolated\":true}\n";
+            Check(!hostEvidence->captureDemand->load() && hostEvidence->capture->sources == 0 && hostEvidence->capture->resources == 0);
+            std::cout << "{\"passed\":true,\"unconnected_peer_capture_isolated\":true,\"idle_capture_frames\":" << idleFrames
+                << ",\"paused_capture_frames\":" << pausedFrames << ",\"idle_demand_audio_resume\":true}\n";
         } catch (...) { stop(); throw; }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
     webrtc::CleanupSSL();

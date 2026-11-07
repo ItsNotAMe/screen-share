@@ -14,6 +14,7 @@ class QLineEdit;
 class RoomDirectoryWidget;
 
 struct HomeActiveRoom {
+    enum class Availability { Open, Full, Reconnecting };
     QString roomId;
     QString name;
     int peerCount = 0;
@@ -21,6 +22,8 @@ struct HomeActiveRoom {
     qint64 updatedAt = 0;
     bool joinable = true;
     QString hostNickname;
+    int viewerLimit = 0;
+    Availability availability = Availability::Open;
 };
 
 class HomeWindow final : public QWidget {

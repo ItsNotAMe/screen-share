@@ -76,7 +76,7 @@ try {
     & "$PSScriptRoot/create-update-manifest.ps1" -Version $version `
         -ZipPath build/release/ScreenShare-release-windows-x64.zip `
         -InstallerPath "build/release/ScreenShare-Setup-$version-windows-x64.exe" `
-        -OutputPath $manifest -Notes @('Improve audio recovery after playback stalls and prioritize audio workers to reduce interruptions under CPU load.', 'Mute or choose host audio before viewers join. Remove individual viewers with compact controls and a named confirmation.', 'See when host video is paused, minimized or unavailable. Remote input pauses until fresh video returns.', 'Remember window layout, reduce local preview work, and explain room join failures with useful recovery guidance.')
+        -OutputPath $manifest -Notes @('Keep control permissions through temporary lag. Click individual input indicators to request, cancel or release control.', 'Recover interrupted audio and capture without ending the room. Preserve selected devices, volume and mute settings.', 'Reduce redundant video scaling, readback and copying, and reduce capture work when no viewer receives video.', 'Search sharing sources, see three source cards at normal widths, cancel pending joins, and choose where diagnostic reports are saved.')
     & "$PSScriptRoot/sign-update-manifest.ps1" -ManifestPath $manifest -PrivateKeyPath $privateKey -PublicKeyPath $publicKey -PassphraseFile $passphrase
     & "$PSScriptRoot/verify-update-manifest.ps1" -ManifestPath $manifest -PublicKeyPath $publicKey
     if ((& git rev-parse HEAD).Trim() -ne $commit -or (& git status --porcelain)) { throw 'The source changed during the release build.' }

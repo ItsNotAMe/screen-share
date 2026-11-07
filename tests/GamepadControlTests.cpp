@@ -1,6 +1,7 @@
 #include "input/v2/GamepadSink.h"
 #include "input/v2/GamepadPoller.h"
 #include "input/XInputGamepad.h"
+#include "RecordingGamepadSink.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -56,7 +57,10 @@ public:
     bool SubmitIfCurrent(const std::string& peer, uint64_t epoch, Event event) override {
         return permission == epoch && Submit(peer, event);
     }
-    void RevokeIfCurrent(const std::string& peer, uint64_t epoch) override { if(permission == epoch) Revoke(peer); }
+    void RevokeIfCurrent(const std::string& peer, uint64_t epoch, uint8_t required = 0) override {
+        const uint8_t caps=granted?Gamepad:0;
+        if(permission == epoch && (caps&required)==required) Revoke(peer);
+    }
     std::vector<Status> Read() const override { Status s; s.peer = "host"; s.permission = permission; s.granted = granted ? Gamepad : 0; return {s}; }
 };
 class NativeDiagnosticBackend final : public VirtualGamepadBackend {
@@ -75,6 +79,32 @@ public:
         return device;
     }
 };
+void PollerResumesAfterLag() {
+    auto sink=std::make_shared<RecordingGamepadSink>();Service host(true,sink);
+    auto viewer=std::make_shared<Service>(false);
+    host.Bind("viewer","gap",true);viewer->Bind("host","gap",true);
+    auto pump=[&] {
+        for(const auto& packet:host.Drain("viewer",true,true))viewer->Receive("host",packet.reliable,packet.bytes);
+        for(const auto& packet:viewer->Drain("host",true,true))host.Receive("viewer",packet.reliable,packet.bytes);
+    };
+    Check(host.Grant("viewer",Gamepad));Wait([&]{pump();return viewer->Read().front().granted==Gamepad;});
+    auto read=[]()->std::optional<Event>{Event pad;pad.kind=Kind::Pad;pad.buttons=1;return pad;};
+    auto old=std::make_unique<GamepadPoller>(viewer,"host",read);
+    Wait([&]{pump();return sink->buttons==1;});
+    const auto epoch=viewer->Read().front().permission;
+    Wait([&]{return host.Read().front().paused;});
+    Check(sink->buttons==0 && sink->paused==1 && sink->grants==1 && !sink->released);
+    for(const auto& packet:host.Drain("viewer",true,true))viewer->Receive("host",packet.reliable,packet.bytes);
+    Check(viewer->Read().front().permission>epoch && viewer->Read().front().granted==Gamepad);
+    old.reset(); // Late cleanup of the pre-gap poller must not revoke the kept grant.
+    pump();Check(sink->buttons==0 && host.Read().front().paused && viewer->Read().front().granted==Gamepad);
+    {
+        GamepadPoller fresh(viewer,"host",read); // Same physical state, freshly read under the new epoch.
+        Wait([&]{pump();return sink->buttons==1 && !host.Read().front().paused;});
+        Check(sink->grants==1 && !sink->released);
+    }
+    Wait([&]{pump();return !host.Read().front().granted;});
+}
 void NativeNeutralLifecycle() {
     // Explicit opt-in only. Reserve a neutral owned device as the local-slot
     // sentinel; never submit buttons/axes or modify pre-existing controllers.
@@ -124,6 +154,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string(argv[1]) == "--native-neutral") { NativeNeutralLifecycle(); return 0; }
         Check(argc == 1);
+        PollerResumesAfterLag();
         auto state = std::make_shared<Evidence>(); state->slots = {0};
         GamepadSink sink([state] { return std::make_unique<Backend>(state); }, [state] { return std::vector<int>(state->slots.begin(), state->slots.end()); });
         Check(!sink.Grant("key", Keyboard, 0));
@@ -131,6 +162,14 @@ int main(int argc, char** argv) {
         Check(!sink.Grant("four", Gamepad, 2) && state->slots.size() == 4 && state->slots.contains(0));
         Event value; value.kind = Kind::Pad; value.buttons = 0x1000; value.axes = {-32768, 32767, 0, 42};
         Check(sink.Apply("one", value) && state->last.controllerSlot == 1 && state->last.thumbLX == -32768);
+        const auto allocated=state->created;
+        Check(sink.Restrict("one",Gamepad) && state->created==allocated && !state->destroyed &&
+            !state->last.buttons && !sink.Restrict("one",Gamepad|Mouse));
+        Check(sink.Apply("one",value));
+        Check(sink.Pause("one") && sink.Healthy("one") && state->created==allocated && !state->destroyed &&
+            state->last.controllerSlot==1 && !state->last.buttons && !state->last.leftTrigger && !state->last.rightTrigger &&
+            !state->last.thumbLX && !state->last.thumbLY && !state->last.thumbRX && !state->last.thumbRY);
+        Check(sink.Apply("one",value)); // The same device/slot resumes without another Grant.
         sink.Release("two"); Check(state->neutral == 1 && state->destroyed == 1 && sink.Healthy("one") && sink.Healthy("three"));
         Check(sink.Grant("replacement", Gamepad, 1));
         state->fail = true; Check(!sink.Apply("one", value)); sink.Release("one");

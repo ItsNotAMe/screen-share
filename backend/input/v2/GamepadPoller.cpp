@@ -23,12 +23,12 @@ GamepadPoller::GamepadPoller(std::shared_ptr<Port> port, std::string peer, Read 
             } catch (...) { break; }
             std::this_thread::sleep_for(std::chrono::milliseconds(4));
         }
-        port_->RevokeIfCurrent(peer_, permission_);
+        port_->RevokeIfCurrent(peer_, permission_, Gamepad);
     });
 }
 GamepadPoller::~GamepadPoller() {
     worker_.request_stop();
     if (worker_.joinable()) worker_.join();
-    port_->RevokeIfCurrent(peer_, permission_);
+    port_->RevokeIfCurrent(peer_, permission_, Gamepad);
 }
 }

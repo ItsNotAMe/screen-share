@@ -23,6 +23,56 @@ off-screen geometry simulates a missing monitor, without physically unplugging o
 
 Build tests with the same native toolchain as the application; see [build](build.md).
 
+`capture-source-failure` injects acquisition failure, failed rebuild, exhausted
+three-rebuild recovery and first-frame timeout into a replaceable capture source.
+It requires source retirement/destruction on its owner, persistent failure reason,
+no automatic reactivation or stale delivery, failed replacement handling,
+successful replacement with monotonic sequence/generation, a new bounded recovery
+budget and cancellation of pending replacement on Stop. Ordinary sources, initial
+Start failures and consumer errors retain terminal behavior.
+An in-progress replacement must survive failure of the original source and
+commit when its first frame arrives.
+The four-viewer `room-v2-input-media` proof requires continued audio, released held
+input, rejected grants during the outage, unchanged room/peer identities and
+connection generations, then resumed video after explicit source replacement.
+The focused UI `source-switch` scenario checks two viewers, cleared failure
+messages on recovery, available Change source and disabled grant actions during
+failure. Set `SCREENSHARE_UI_PREVIEWS` to save host/viewer and compact host renders.
+These use injected capture failures, without resetting a physical graphics driver.
+
+`decoder-adapter-lifecycle` first checks caller-owned output-buffer reuse with
+changing pixels across 320×180, 640×360, 1280×720, 1920×1080 and back to 320×180.
+It covers direct visible-row copying from MF buffers as well as uncropped 720p
+output, bounded allocations per format, visible cropping and timestamp association,
+unchanged retained frames after later decoding/Stop, released scratch storage
+on Stop and an empty cache/counter on restart.
+`DecoderComputeBenchmark` is an explicit performance tool, outside CTest; see
+[the direct visible-copy comparison](performance.md#direct-visible-frame-copy-in-software-decoding-2026-11-07)
+and [the earlier scratch-buffer comparison](performance.md#reused-software-decoder-output-storage-2026-11-06).
+
+`decoder-adapter-lifecycle` also runs real MF software decoding and injected
+unavailable-GPU startup fallback. A valid encoded picture with an undersized
+dimension declaration triggers deterministic output-validation failure. Five
+outages separated by at least 30 valid output frames must recover without
+reconfiguration; short bursts between failures must still exhaust the three-
+restart limit. The recovery proof counts actual output and tolerates bounded
+buffered delivery, discarding outstanding RTP expectations on failure. Checks
+retain the 250 ms backoff and keyframe requirement, RTP/NTP association, immediate
+output, visible cropping, dynamic resize and repeated release/configure cycles.
+`DecoderAdapterTests --gpu` additionally exercises generated-input hardware
+retirement, software fallback, malformed-input exhaustion and retained textures.
+Neither mode captures the desktop or qualifies the reported laptop driver issue.
+
+Report export checks use Qt's nonnative file picker for deterministic automation.
+They cover configured/suggested filenames, a chosen destination, JSON suffix,
+cancellation, remembered paths, duplicate actions and session-close dismissal
+for both roles. The main room UI flow requires video frames to continue while
+the picker is open. An injected selected-path race covers write failure and
+retry; redaction and independent log-folder access remain checked. Native
+Windows picker interactions are not exercised by the offscreen proof.
+Populated-folder renders and palette checks cover the fallback picker's file
+views, sidebar and selection contrast, with themed navigation and scrollbars.
+
 Room UI admission feedback uses a local HTTP fixture to cover full, closed,
 missing and rate-limited rooms, plus an ambiguous server failure. It checks typed
 session errors, preserved invites, retry availability, no password prompt for
@@ -30,13 +80,175 @@ these failures, and no media runtime startup. A standalone host checks service
 capacity guidance. Run it alone with `RoomUiTests.exe http://127.0.0.1:1
 admission-feedback` and `QT_QPA_PLATFORM=offscreen`; no external service is used.
 
+The same fixture holds admission responses to check joining progress, Cancel,
+Home-after-cleanup, preserved invites and blocked duplicate/other-room actions.
+A queued success status after cancellation cannot reopen the session. It also
+checks stable control/list geometry through pending/cancelled states and that
+cancelled requests start no media runtime.
+
+Form preflight checks reject blank/overlong/direction-control room names and
+overlong or control-character passwords without starting a session or sending
+an admission request. They retain drafts and focus the offending field. Valid
+64-character Unicode names and 128-byte non-English passwords reach the local
+HTTP fixture unchanged. Join password correction stays in the existing popup;
+compact/normal feedback renders are captured. Backend admission and UI password
+checks share the same validator; wire normalization remains authoritative.
+Create resize checks require full-height fields inside both their card and the
+visible scroll viewport, so sibling cards cannot cover the focused password.
+
+The admission fixture also opens actual host/viewer session windows and checks
+that capacity guidance survives terminal status refreshes. Synthetic active-room
+failure pushes check media/transport guidance, host/viewer recovery actions, and
+replacement of stale action errors. These message-policy checks do not inject a
+physical device or WAN failure.
+
+Room UI closure checks stop a real local-service host and require the viewer to
+return Home with a room-ended notice after cleanup. Voluntary Leave stays quiet
+and keeps the host active. Removal retains its separate explanation. Policy
+checks cover expiry/service-closure notices and quiet host/local exits; report
+checks cover every bounded closure reason and the absent-reason case.
+
+Source-picker checks use synthetic titles and diagnostic selections without
+desktop enumeration. They cover filtering, selected-card identity, thumbnail
+updates, no-match versus unavailable states, explicit Clear search, query retention
+across tabs/refresh, disabled sharing and Enter/focus behavior. The room UI also
+checks that the live host's search/audio/action controls fit the compact and
+normal popup layouts. Source-search checks run in the default room UI flow and
+the focused `admission-feedback` mode.
+Grid checks require three columns and six fully visible choices at normal size,
+two columns at compact size, preserved selection and stable wrapping while
+scrollbars appear or disappear.
+
 Ordinary tests use generated media and injected input sinks. Keep physical
 input, driver allocation and audible-output tests explicit.
+
+`encoder-adapter-lifecycle` includes four simultaneous software encoders fed
+eight changing NV12 buffers with unequal padded plane strides. All 32 outputs
+are decoded to validate luma/chroma, dimensions, timestamps and input mapping;
+instrumented buffers must receive no ToI420 calls. Existing cases also cover
+rate changes, zero-rate suspension, keyframes, coalescing and repeated release.
+The completed-stall regression delays software input mapping for 550 ms three
+times through the real MF encoder. Late pictures must be dropped without codec
+reinitialization or terminal failure. Fresh input must resume automatically with
+its original RTP/NTP and input mapping; a new real decoder must decode each
+recovery keyframe independently. Pending input still coalesces to the latest
+frame, with exact drop accounting. Release during a fourth stall suppresses old
+callbacks, and a new configuration starts cleanly. This injects mapping delay;
+it does not reproduce a physical GPU hang or preempt a stuck native call.
+The direct-plane entry point rejects truncated planes, invalid strides and
+dimensions, and use before startup/after Stop; rejected inputs must not consume
+the first frame's timestamp. Minimal final rows need no trailing padding.
+Run `EncoderAdapterTests.exe --gpu-readback` explicitly for generated GPU input:
+four encoders share one readback per source frame without I420 conversion. It
+checks CPU preview materialization, both CPU format request orders, cached
+ownership and rejection of new mappings after device retirement. No desktop
+capture, physical input or audible output is used by this test.
+
+`EncoderComputeBenchmark` is an explicit timing tool, excluded from CTest. It
+warms codecs before measuring aggregate process CPU and elapsed workload time,
+checks exact delivered-frame counts and no drops, forces fresh GPU readback
+wrappers per input frame, and hashes encoded output. See [performance](performance.md)
+for the paired-run command, results and limitations.
+
+`video-frame-input` also checks five isolated renderer outages separated by 30
+successful incoming presents. Recovery totals remain cumulative. Twenty-nine
+valid frames between losses still exhaust the three-rebuild budget; old-frame
+redraws, busy/occluded/minimized/unavailable output and backoff cannot renew it.
+Terminal failure stays terminal until Clear, and nonrecoverable errors retain
+their behavior. Supplied time keeps the policy boundary deterministic; the shared
+UI/CLI session separately checks redraw isolation with an injected backend.
+The actual widget worker also recovers five healthy-separated outages with an
+injected renderer, preserving cumulative totals and the one-frame queue setting.
+`RoomUiWindowsTests` additionally runs four healthy-separated injected losses
+through the actual native presentation worker and GPU resource recreation,
+retaining the one-frame queue and zero readback. It injects an HRESULT after GPU
+work, without resetting the physical graphics driver.
+
+`video-frame-input` checks the two-second presentation freshness boundary with
+supplied timestamps, verifies that resize/redraw and skipped presents cannot
+refresh old video, and holds a render across Clear to reject late input mapping
+and freshness updates. The desktop-input UI scenario suppresses only the video
+consumer while real transport/decoding continue, checks held mouse/key release,
+blocked input, retained permissions and automatic recovery, and can save compact
+and normal interrupted-video renders. The viewer-removal scenario additionally
+checks controller neutralization and recovery under its existing grant during
+that consumer stall. Synthetic input UI proofs inject a successful presenter:
+offscreen Qt HWNDs can be unavailable to DXGI. Explicit Windows UI proofs retain
+the native renderer. These injections do not reproduce a particular WAN outage.
+
+`stream-settings-and-adaptation` checks independent viewer preferences and frame
+mapping using CPU buffers. Run `StreamSettingsTests.exe --gpu` explicitly for
+generated-texture GPU coverage, without desktop capture or audible output. Its
+four-viewer comparison uses the same 24 generated 1080p frames and 720p settings:
+separate input wrappers reproduce independent scaling, while one shared input
+exercises production fan-out. It counts actual scaling submissions, CPU
+readbacks and distinct output textures, validates changing pixels and independent
+preset metadata, and retains old output to detect overwritten resources.
+It also verifies that image rectangles produce distinct cached output, the fifth
+geometry evicts the oldest of four entries without invalidating consumers, and
+retired devices cannot return cached output. The existing GPU settings scenarios
+cover independent adaptation, fallback/quarantine and restricted-thread teardown.
+
+`source-pcm-capture` uses an injected clock to check shared-source recovery with
+250 ms–5 s capped backoff, same-target reactivation, immediate source changes,
+fresh PCM, cumulative drop counters and cancellation during startup. Invalid
+targets remain silent and process failures never fall back to system capture.
+The four-viewer public-session proof uses the real shared-source wrapper around
+synthetic endpoints: capture resumes without a source-change command, audio/
+room revisions remain stable, and muting during a second outage leaves no live
+capture endpoint or later retry. Native driver failure/recovery is not injected.
+
+Default host capture routing is covered in `native-pcm-audio` with injected
+endpoint notifications. Tests exercise changes before/during reads and
+activation, coalesced events, silence before fresh PCM, cumulative drops,
+unrelated failures, cancellation, and the existing shared-source retry policy.
+Callback checks filter render/capture flows and communications roles. Factory
+checks verify that default system/microphone capture follows routing while
+explicit device IDs and process capture remain isolated, without opening native
+devices. The four-viewer public-session proof injects a live default capture
+change and requires audio/video progress, one live capture, stable room/audio
+revision and no failure; a muted route change must not activate capture. These
+tests do not qualify physical device switching or driver activation failures.
+
+Automatic host System/Microphone recovery is covered in `native-pcm-audio` by
+`CaptureAudioRecoveryTest.h`: supplied time checks 250 ms–5 s capped retries,
+repeated startup/read failures, pinned selections, fresh PCM, unchanged settings
+revision, cumulative drops and microphone-processor recreation. It checks manual
+Retry during backoff, mute/source replacement during blocked activation, the
+five-second first-PCM deadline, Close/stop and owner-thread teardown. Explicit
+process IDs and shared-source mode cannot enter this second retry mechanism.
+The source-switch UI proof requires host capture to recover without clicking
+Retry while video continues, retaining the audio selection/revision. Host failure
+messages are rendered at compact/normal sizes for shared, system and microphone
+modes; explicit process mode keeps manual guidance. These use injected devices
+and synthetic media, without native capture, audible output or physical hot-plug.
+
+Automatic output recovery is covered in `native-pcm-audio` with an injected
+clock/device. It checks capped 250 ms–5 s backoff, repeat outages, fresh PCM after
+activation, mute/volume retention, unchanged settings revision, manual override,
+pinned-device isolation, failed first writes and Close/cancellation races.
+Default-output callback tests filter capture/communications roles, retain
+loss/arrival notifications and exercise activation races and event coalescing.
+The local-service source-switch UI scenario requires audio to resume without a
+Retry click while video and room identity continue. These are injected endpoint
+and notification tests; they do not qualify physical headset unplug/replug or
+all audio drivers.
+The four-viewer public-session proof reroutes one default output and requires
+continued media for that viewer and the others, with stable room identity and
+playback revision. The UI also keeps output/volume/mute controls reachable during
+failure: Retry must occupy its form row instead of overlaying other fields, and
+its row disappears after automatic recovery.
 
 `room-status-cadence` uses the local Worker and an instrumented four-viewer
 runtime to require about ten diagnostic snapshots per second while media/control
 advance independently. Room UI checks also cover access-badge/icon changes,
 keyboard focus retention, no-match search recovery and stale directory rows.
+Directory availability checks cover occupied/total capacity, full/reconnecting
+reasons, disabled actions, stale-list guidance and restoration after capacity or
+connection changes. Synthetic directory snapshots pass through both Home and
+Join adapters, with compact/normal renders and action bounds checked. They run
+in the default UI flow and focused `admission-feedback` mode; no network fault
+or host lease expiry is injected by these message-policy checks.
 Room UI audio checks select a source and mute before the first viewer, require
 received silence with no host capture endpoint opened, then restore the exact
 source on unmute. An outstanding automatic source edit cannot override Mute.
@@ -54,6 +266,29 @@ build/release/RoomUiTests.exe build/viewer-removal-evidence media viewer-removal
 and `QT_QPA_PLATFORM=offscreen`.
 It uses its own local service so the larger UI run does not exhaust the
 production admission rate budget within one minute.
+
+Desktop/controller UI checks require persistent pause guidance on focus loss,
+mode changes and host video pause. Video-wait guidance has priority until fresh
+video arrives; focus/click recovery clears it without losing grants. Existing
+recording sinks still require held-state release and blocked input while paused.
+Compact/normal paused-control renders retain the shortcut reminders.
+
+Input-lag regressions stop transport pumping beyond the 300 ms watchdog and
+require neutral input with retained grants. `input-service` checks three gaps,
+renewed epochs, rejected pre-gap packets, no cached-report/heartbeat replay,
+fresh-input recovery, concurrent revoke during blocked Pause and failed Pause
+fallback. It also checks fresh queued input during a delayed device call, viewer
+withdrawal crossing renewal and ordered release acknowledgements before regrant.
+`gamepad-control` verifies the same allocated device/slot remains
+usable and an unchanged controller report resumes through a new epoch-bound
+poller. `desktop-input` lets geometry expire, requiring released keys and no
+stale injection while ownership remains; source invalidation still fails health.
+The UI controller fixture checks two gaps, checked grant icons, Input paused
+guidance and automatic resumption without host action or reallocation. Its
+presentation, device reader and sink are injected. The four-viewer public-room
+proof also stalls runtime advancement, preserves grants and resumes transported
+input with a fresh epoch. None of these tests reproduces a physical game's lag
+or allocates a native virtual controller.
 
 Viewer share-state checks use the production telemetry channel to verify host
 pause/resume while audio continues, two-viewer source closure/replacement and

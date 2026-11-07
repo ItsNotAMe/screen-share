@@ -10,10 +10,33 @@ Fullscreen viewing and minimization are temporary. Off-screen saved placement is
 adjusted for the available display using [Qt's geometry restoration](https://doc.qt.io/qt-6.10/restoring-geometry.html).
 Invalid layout settings fall back to the normal startup layout.
 
+When the host ends a room, viewers return Home with a brief explanation. A room
+that expires after the host disconnects or closes with the service has its own
+notice. Leaving a room yourself stays quiet.
+
 Join errors explain whether a room is full, closed or missing, or requests were
 rate limited. Your invite stays in the form so you can correct it or retry.
 An unconfirmed outcome asks you to wait before trying again. Room creation
 distinguishes a full service from a room's viewer limit.
+Session windows retain these specific failure explanations through status
+refreshes. If an active room loses its service connection or its audio/video
+fails, the message explains the failure and how the host or viewer can retry.
+
+While joining, the form shows progress and offers **Cancel** in place of Paste.
+Cancel preserves the invite so you can edit it or try again. Choosing Home also
+cancels the pending attempt and waits for cleanup before returning. The invite
+and other room actions stay locked until that attempt finishes.
+
+Create checks the room name and password before starting a session, keeps invalid
+input for editing and focuses the field that needs attention. Room names allow
+1–64 Unicode characters after normalization and trimming. Long passwords may
+need fewer non-English letters or symbols to fit the service limit. The Join
+password dialog explains invalid input in place without restarting the attempt.
+
+Home and Join show each room's viewer count and limit (for example, **2 / 4**).
+Full rooms show **Full**; a reconnecting host or unavailable directory shows
+**Wait…**. Hover over the disabled action for the reason. The action returns to
+**Join** automatically when the room list confirms that joining is available.
 
 ## Command line
 
@@ -31,6 +54,19 @@ playback device, mute/volume and preview. `--seconds N` bounds a CLI session;
 Ctrl+C requests orderly shutdown. Configuration-file automation remains available
 as `ScreenShare --room-v2 CONFIG.json`.
 
+The source picker in Create room and Change source can search display/window
+titles. Search is case insensitive and stays in place when changing tabs or
+refreshing. Clear search restores the available sources. With no matches, sharing
+is disabled; Enter from search moves to the matching cards without sharing.
+The picker uses three columns at normal widths and two at compact widths so
+more choices fit while previews and titles remain readable.
+
+If capture fails or its recovery cannot complete, the room and audio connections
+stay open. The host sees **Capture unavailable** and can use **Change source** to
+resume sharing. Viewers see that the host needs to choose a source. Held input
+is released, and new control grants wait until capture resumes. Grant controls
+again after choosing the replacement; everyone keeps the same room connection.
+
 See [CLI configuration and options](cli.md) for complete schemas and ranges.
 Shared source audio is the default: window sharing captures the selected app's
 audio and its child processes; display sharing captures system audio. It follows
@@ -40,8 +76,25 @@ For apps that render sound in helpers (including Miyomu's WebView2 player),
 shared source audio follows the app's render sessions and targets their smallest
 common process subtree. It refreshes as playback starts or helpers restart and
 does not include sessions belonging to another app.
+Shared-source capture retries temporary startup/read failures automatically,
+with delays capped at five seconds. Video continues during recovery. An
+unavailable app stays silent; recovery never substitutes unrelated system audio.
+Changing the selected source bypasses the previous source's retry delay, and
+muting or stopping ends recovery for the old source.
 App audio needs Windows build 20348 or later (including Windows 11). If capture
 fails, video continues with silence. Choose System audio to share all apps instead.
+
+Host system audio and microphone capture follow Windows' default device when
+no specific device is selected. Changing the default speakers or microphone
+reroutes capture during the room without rejoining or changing the audio
+selection. A specific device stays selected, and app capture stays with its
+selected process. System audio and Microphone automatically retry activation or
+capture failures with a delay capped at five seconds. A specific device remains
+pinned: capture resumes when that device becomes available, without selecting a
+different microphone or speakers. Video continues with silence during recovery.
+Retry starts another attempt immediately; muting or changing the audio source
+cancels recovery of the old source. Explicit app-process capture retains its
+manual retry action; shared-source mode uses its validated app/window recovery.
 
 Hosts can mute audio or choose a different audio source while a room is empty.
 Mute audio applies to current and future viewers; Share audio restores the last
@@ -52,9 +105,27 @@ a viewer connects; an unavailable source stays silent and reports the failure.
 With current clients at both ends, viewers see an explanation when the host
 pauses video, minimizes the shared window, loses the source or recovers capture.
 The old picture clears during these states. A resuming message remains until a
-new decoded frame arrives. Audio and room controls remain available.
+new frame is presented. Audio and room controls remain available.
 Held keys and buttons are released, and remote input pauses until fresh video
 arrives. Host permissions are kept. Click the video again to recapture Game mouse.
+The Controls hint explains when remote control is waiting for video or paused
+after a focus/mode change. Click the video to resume a focus/mode pause; the
+video-wait hint clears after fresh video arrives. Shortcut reminders stay visible.
+
+The desktop viewer also pauses remote control after two seconds without a fresh
+presented frame, even while the room remains connected. Held mouse buttons and
+keys are released, the controller sends neutral input, and the video area shows
+**Video interrupted**. Mouse/keyboard/controller permissions remain granted.
+Fresh presentation restores availability without rejoining; Game mouse needs a
+new click to capture again. Audio and room controls can continue during the gap.
+Queued/decoded frames and redraws of an old picture do not count as fresh video.
+
+Viewer playback follows Windows' default output when **Default** is selected,
+including switching to a new default headset or speakers during a room. If the
+output is temporarily unavailable, playback retries automatically while video
+and the room continue. Volume and mute are preserved. An explicitly selected
+device stays selected and is retried without substituting another output. You
+can still choose a different device or use **Retry playback** immediately.
 
 Shared audio negotiates stereo between current versions. At 100% viewer volume,
 the app applies no playback attenuation. System capture from 5.1/7.1 outputs
@@ -70,8 +141,16 @@ not credentials or an arbitrary server address.
 The host can grant mouse, keyboard and controller permissions independently,
 with or without a viewer request. Room admission does not grant input. The host
 can revoke each permission; the panic shortcut is Ctrl+Alt+Shift+F12. In the UI,
-focus loss releases held input and pauses forwarding without cancelling grants.
-Disconnect, source changes and stale input retain release safeguards. Keyboard
+viewers click an input indicator to request it, click a pending indicator to
+cancel that request, or click a granted indicator to release just that control.
+Other permissions and requests remain in place. Ctrl+Alt+Shift+Q releases all
+controls. Individual release needs a host that supports it; with an older host,
+the viewer explains when the host needs updating instead of releasing unrelated
+controls. Releasing the last control and the release-all shortcut remain compatible.
+Focus loss releases held input and pauses forwarding without cancelling grants.
+Temporary input gaps neutralize held controls while keeping the host's grants;
+fresh updates resume control automatically. Disconnect and source changes still
+cancel grants. Keyboard
 control works for display and window sharing. Window mouse and keyboard input pauses
 while the shared window is not focused, releases held input, and resumes with the
 same permission when focus returns. See [controller support](controller-support.md).

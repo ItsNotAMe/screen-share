@@ -15,6 +15,7 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     try {
         using namespace screenshare::media;
+        using screenshare::v2::RoomCloseReason;
         // Missing old-OS codec interfaces/properties are compatible. Supported
         // properties that fail to apply must retain their real native error.
         unsigned calls = 0;
@@ -103,6 +104,13 @@ int main(int argc, char** argv) {
         screenshare::input::Status input; input.peer = peer.peerId; input.reason = screenshare::input::Reason::Backpressure;
         input.transportBlocked = true; input.reliableQueued = 2;
         auto report = RoomDiagnosticReport(status, {input});
+        Check(report["closeReason"].isNull());
+        for (const auto& [reason, name] : {std::pair{RoomCloseReason::HostLeft, "host_left"},
+            std::pair{RoomCloseReason::HostExpired, "host_expired"}, std::pair{RoomCloseReason::RemovedByHost, "kicked"},
+            std::pair{RoomCloseReason::ServerShutdown, "server_shutdown"}}) {
+            auto ended=status;ended.closeReason=reason;
+            Check(RoomDiagnosticReport(ended)["closeReason"]==name);
+        }
         Check(report["remoteShare"].toObject()["state"].isNull() && !report["remoteShare"].toObject()["stale"].toBool());
         auto paused=status;paused.stream.remoteShare={HostShareState::VideoPaused,false,1};
         const auto pausedShare=RoomDiagnosticReport(paused)["remoteShare"].toObject();

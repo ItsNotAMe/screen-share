@@ -11,6 +11,7 @@ public:
     using Clock = std::chrono::steady_clock;
     template<class Retire>
     void Lost(Retire&& retire, Clock::time_point now = Clock::now()) {
+        Interrupted();
         retire(); // Invalidate even the terminal generation before returning.
         if (terminal_ || pending_ || attempts_ == 3) {
             terminal_ = true;
@@ -31,10 +32,24 @@ public:
         ++generation_;
         return true;
     }
+    // A rebuilt device must produce valid frames before earning a fresh budget.
+    // Polling, elapsed time and minimized/unavailable sources are not health.
+    void FrameCaptured() noexcept {
+        if (terminal_ || pending_ || !attempts_) return;
+        if (++healthyFrames_ == 30) { attempts_ = 0; healthyFrames_ = 0; }
+    }
+    void Interrupted() noexcept { healthyFrames_ = 0; }
     uint64_t generation() const noexcept { return generation_; }
+    // The failed native source has been abandoned. Wait for an explicit source
+    // selection; this never reactivates the failed device or retries it forever.
+    void AwaitReplacement() noexcept {
+        attempts_ = healthyFrames_ = 0; pending_ = terminal_ = false; readyAt_ = {};
+        ++generation_;
+    }
 private:
     Clock::time_point readyAt_{};
     unsigned attempts_ = 0;
+    unsigned healthyFrames_ = 0;
     uint64_t generation_ = 1;
     bool pending_ = false;
     bool terminal_ = false;

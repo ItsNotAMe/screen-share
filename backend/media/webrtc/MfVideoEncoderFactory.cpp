@@ -10,6 +10,7 @@
 #include "rtc_base/thread.h"
 #include "rtc_base/logging.h"
 #include "libyuv/convert_from.h"
+#include "libyuv/planar_functions.h"
 
 #include <algorithm>
 #include <chrono>
@@ -20,6 +21,7 @@
 namespace screenshare::media {
 namespace {
 struct RetiredVideoFrame {};
+struct LateEncodedFrame { int64_t elapsedMilliseconds; };
 class MfVideoEncoder final : public webrtc::VideoEncoder {
 public:
     explicit MfVideoEncoder(std::shared_ptr<MfHardwareSession> hardware, int level, std::shared_ptr<DiagnosticHistory> diagnostics)
@@ -28,11 +30,11 @@ public:
         if (!worker_->Start()) throw std::runtime_error("MF encoder worker startup failed");
     }
     ~MfVideoEncoder() override { Release(); worker_->Stop(); }
-    int InitEncode(const webrtc::VideoCodec* codec, const Settings&) override {
+    int InitEncode(const webrtc::VideoCodec* codec, const Settings& settings) override {
         if (!codec || codec->codecType != webrtc::kVideoCodecH264 ||
             codec->width < 16 || codec->height < 16 || codec->width > (level_ >= 52 ? 3840 : 1920) || codec->height > (level_ >= 52 ? 2160 : 1080) ||
             codec->width % 2 || codec->height % 2 || codec->maxFramerate == 0 || codec->maxFramerate > 60 ||
-            codec->numberOfSimulcastStreams > 1 || codec->startBitrate > 40'000)
+            codec->numberOfSimulcastStreams > 1 || codec->startBitrate > 40'000 || settings.number_of_cores < 1)
             return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
         CancelPending();
         return worker_->BlockingCall([&] {
@@ -45,6 +47,9 @@ public:
             maximumFps_ = codec->maxFramerate;
             config_.bitrate = codec->startBitrate * 1000;
             config_.levelIdc = config_.width > 1920 || config_.height > 1080 ? level_ : 42;
+            // Automatic threading preserves interactive encode-time headroom.
+            // A small slice pool saves CPU but increases frame latency; keep
+            // that tradeoff explicit for low-level callers rather than default.
             try {
                 encoder_ = std::make_unique<H264StreamEncoder>();
                 if (config_.bitrate) StartTransform();
@@ -197,7 +202,10 @@ private:
             catch (const std::exception& error) { CodecFailure(diagnostics_, "encoder-hardware-failed", error); SoftwareFallback(error.what()); return; }
         }
         encoder_->Start(config_);
-        if (diagnostics_) diagnostics_->Event("encoder-software-ready", config_.width, config_.height);
+        if (diagnostics_) {
+            diagnostics_->Event("encoder-software-ready", config_.width, config_.height);
+            diagnostics_->Event("encoder-software-workers", encoder_->softwareWorkerThreads());
+        }
     }
     CapturedFrame RawFrame(const webrtc::VideoFrame& frame) {
         if (IsRetiredFrame(frame)) throw RetiredVideoFrame{};
@@ -207,24 +215,37 @@ private:
                 if (raw.d3dDevice.Get() == config_.d3dDevice.Get()) return raw;
             }
         }
-        auto pixels = frame.video_frame_buffer()->ToI420();
-        if (!pixels) throw std::runtime_error("I420 frame unavailable");
+        auto input = Unwrap(frame.video_frame_buffer());
+        if (auto* native = dynamic_cast<D3dVideoFrameBuffer*>(input.get())) {
+            input = native->ToNv12();
+            if (!input) throw std::runtime_error("NV12 frame unavailable");
+        }
         CapturedFrame raw;
         raw.width = raw.sourceWidth = config_.width;
         raw.height = raw.sourceHeight = config_.height;
         raw.nv12Pixels.resize(size_t(raw.width) * raw.height * 3 / 2);
         auto* y = reinterpret_cast<uint8_t*>(raw.nv12Pixels.data());
-        if (libyuv::I420ToNV12(pixels->DataY(), pixels->StrideY(), pixels->DataU(), pixels->StrideU(),
-            pixels->DataV(), pixels->StrideV(), y, raw.width, y + raw.width * raw.height,
-            raw.width, raw.width, raw.height) != 0) throw std::runtime_error("NV12 conversion failed");
+        if (input->type() == webrtc::VideoFrameBuffer::Type::kNV12) {
+            const auto* pixels = input->GetNV12();
+            if (libyuv::NV12Copy(pixels->DataY(), pixels->StrideY(), pixels->DataUV(), pixels->StrideUV(),
+                y, raw.width, y + raw.width * raw.height, raw.width, raw.width, raw.height) != 0)
+                throw std::runtime_error("NV12 packing failed");
+        } else {
+            auto pixels = input->ToI420();
+            if (!pixels) throw std::runtime_error("I420 frame unavailable");
+            if (libyuv::I420ToNV12(pixels->DataY(), pixels->StrideY(), pixels->DataU(), pixels->StrideU(),
+                pixels->DataV(), pixels->StrideV(), y, raw.width, y + raw.width * raw.height,
+                raw.width, raw.width, raw.height) != 0) throw std::runtime_error("NV12 conversion failed");
+        }
         return raw;
     }
     EncodedPacket EncodePacket(const webrtc::VideoFrame& frame, bool keyframe, uint64_t generation) {
         const auto start = std::chrono::steady_clock::now();
         if (Cancelled(generation)) throw HardwareFrameCancelled();
-        auto raw = RawFrame(frame);
+        if (IsRetiredFrame(frame)) throw RetiredVideoFrame{};
         if (keyframe && !encoder_->RequestKeyframe()) throw std::runtime_error("MF keyframe request rejected");
         if (hardwareActive_) {
+            auto raw = RawFrame(frame);
             const auto before = std::chrono::steady_clock::now();
             auto packet = HardwarePacket(raw, generation);
             ++hardware_->hardwareFrames;
@@ -233,10 +254,25 @@ private:
             while (previous < age && !hardware_->maxFrameMicroseconds.compare_exchange_weak(previous, age)) {}
             return packet;
         }
-        auto packets = encoder_->EncodeFrame(raw);
+        auto input = Unwrap(frame.video_frame_buffer());
+        if (auto* native = dynamic_cast<D3dVideoFrameBuffer*>(input.get())) {
+            input = native->ToNv12();
+            if (!input) throw std::runtime_error("NV12 frame unavailable");
+        }
+        std::vector<EncodedPacket> packets;
+        if (input->type() == webrtc::VideoFrameBuffer::Type::kNV12) {
+            const auto* pixels = input->GetNV12();
+            if (pixels->StrideY() < config_.width || pixels->StrideUV() < config_.width)
+                throw std::runtime_error("NV12 input stride is too small");
+            packets = encoder_->EncodeNv12({config_.width, config_.height,
+                {pixels->DataY(), size_t(pixels->StrideY()) * (config_.height - 1) + config_.width},
+                {pixels->DataUV(), size_t(pixels->StrideUV()) * (config_.height / 2 - 1) + config_.width},
+                pixels->StrideY(), pixels->StrideUV()});
+        } else packets = encoder_->EncodeFrame(RawFrame(frame));
         if (packets.size() != 1) throw std::runtime_error("MF software retained output");
-        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(500))
-            throw std::runtime_error("MF software encode exceeded 500 ms");
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > std::chrono::milliseconds(500))
+            throw LateEncodedFrame{std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()};
         return std::move(packets.front());
     }
     void CancelPending() {
@@ -309,6 +345,20 @@ private:
                 info.codecType = webrtc::kVideoCodecH264;
                 info.codecSpecific.H264.packetization_mode = webrtc::H264PacketizationMode::NonInterleaved;
                 if (callback_) callback_->OnEncodedImage(image, &info);
+            } catch (const LateEncodedFrame& late) {
+                // The transform produced valid output; temporary scheduling or
+                // readback delay must not poison future encoding. Drop stale
+                // output and replace its missing reference chain with an IDR.
+                bool current;
+                {
+                    std::lock_guard lock(mutex_);
+                    current = generation == generation_;
+                    if (current) keyframe_ = true;
+                }
+                if (current) {
+                    if (diagnostics_) diagnostics_->Event("encoder-late-frame-dropped", late.elapsedMilliseconds);
+                    if (callback_) callback_->OnFrameDropped(frame->rtp_timestamp(), 0, true);
+                }
             } catch (const RetiredVideoFrame&) {
                 // Keep the encoder alive for fresh input from capture recovery.
                 // Its first output must replace the receiver's old references.

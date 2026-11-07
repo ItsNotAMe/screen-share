@@ -15,6 +15,7 @@
 #include "media/webrtc/MfVideoDecoderFactory.h"
 #include "media/webrtc/PcmAudioDeviceModule.h"
 #include "SyntheticAudio.h"
+#include "media/audio/SourcePcmCapture.h"
 #include "ObservedCaptureSource.h"
 #include "api/make_ref_counted.h"
 #include "rtc_base/ssl_adapter.h"
@@ -35,16 +36,20 @@ void Check(bool ok, std::source_location location = std::source_location::curren
 HWND captureWindow = nullptr;
 #endif
 struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
+    bool sharedSourceAudio = false;
     class InputSink final : public screenshare::input::Sink {
     public:
         std::atomic<unsigned> applied{0}, releases{0};
+        std::atomic<unsigned> paused{0};
         std::atomic<bool> pressed{false};
         bool Grant(const std::string&, uint8_t, int) override { return true; }
         bool Apply(const std::string&, const screenshare::input::Event& e) override {
-            if (e.kind == screenshare::input::Kind::Key) pressed = e.down;
+            if (e.kind == screenshare::input::Kind::Key || e.kind == screenshare::input::Kind::Button ||
+                e.kind == screenshare::input::Kind::RelativeButton) pressed = e.down;
             ++applied; return true;
         }
         void Release(const std::string&) noexcept override { pressed = false; ++releases; }
+        bool Pause(const std::string&) override {pressed=false;++paused;return true;}
     };
     std::shared_ptr<InputSink> input = std::make_shared<InputSink>();
     std::atomic<unsigned> responseFrames{0};
@@ -55,12 +60,14 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<unsigned> offers{0};
     std::atomic<unsigned> smallFrames{0};
     std::shared_ptr<proof::CaptureLifetime> capture = std::make_shared<proof::CaptureLifetime>();
+    std::shared_ptr<std::atomic<bool>> captureDemand = std::make_shared<std::atomic<bool>>(false);
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     std::optional<PcmEndpointFactories> audioEndpoints;
     std::shared_ptr<PcmAudioDiagnostics> audioDiagnostics = std::make_shared<PcmAudioDiagnostics>();
     MediaEngine::PacketFactory packetFactory;
     MediaEngine::EventLogFactory eventLogFactory;
     CaptureSession::Factory captureFactory;
+    bool switchableCapture = false;
     std::optional<StreamPreferences> preferences;
     bool fastAudioExperiment = false; // Retained proof/report flag; the engine now enables fast recovery by default.
     bool localizedInputResponse = false;
@@ -99,13 +106,26 @@ public:
         native_ = WindowsRoomRuntimeFactory(std::move(windows))(identity, std::move(send));
 #else
         NativeRoomRuntimeOptions options;
+        options.captureDemand = evidence_->captureDemand;
         options.audioDiagnostics = evidence_->audioDiagnostics;
         options.inputSink = evidence_->input;
         auto endpoints = evidence_->audioEndpoints.value_or(proof::SyntheticAudio(evidence_->audio));
         if (identity.host) {
-            options.audioSwitch = std::make_shared<AudioSwitchControl>(screenshare::media::AudioSelection{}, endpoints.capture, ProcessMicrophone);
+            auto health = std::make_shared<std::weak_ptr<AudioSwitchControl>>();
+            AudioSwitchControl::Factory sharedSource = [audio = evidence_->audio, health] {
+                return std::make_unique<SourcePcmCapture>([] { return screenshare::media::AudioSelection{AudioKind::Process, {}, 11}; },
+                    [audio](screenshare::media::AudioSelection selection) -> std::unique_ptr<PcmCaptureEndpoint> {
+                        Check(selection.kind == AudioKind::Process && selection.processId == 11);
+                        return std::make_unique<proof::ToneCapture>(false, audio);
+                    }, [health](bool ready) { if (auto control = health->lock()) { if (ready) control->Ready(); else control->Failed(); } });
+            };
+            options.audioSwitch = std::make_shared<AudioSwitchControl>(evidence_->sharedSourceAudio ? screenshare::media::AudioSelection{AudioKind::SharedSource} : screenshare::media::AudioSelection{},
+                evidence_->sharedSourceAudio ? sharedSource : endpoints.capture, ProcessMicrophone);
+            *health = options.audioSwitch;
             endpoints.capture = [control = options.audioSwitch] { return std::make_unique<SwitchablePcmCapture>(control); };
-            options.audioForSelection = [audio = evidence_->audio](auto selection) { return proof::SyntheticAudioSelectionWithEvidence(selection, audio); };
+            options.audioForSelection = [audio = evidence_->audio, sharedSource](auto selection) {
+                return selection.kind == AudioKind::SharedSource ? sharedSource : proof::SyntheticAudioSelectionWithEvidence(selection, audio);
+            };
         } else {
             options.playback = std::make_shared<PlaybackControl>(PlaybackSelection{}, endpoints.playout);
             endpoints.playout = [control = options.playback] { return std::make_unique<ControlledPcmPlayout>(control); };
@@ -115,8 +135,11 @@ public:
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
                 diagnostics), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>(), packetFactory, eventLogFactory);
         };
-        options.capture = [lifetime = evidence_->capture] { return std::make_unique<proof::ObservedCaptureSource>(lifetime); };
+        options.capture = [lifetime = evidence_->capture, demand = evidence_->captureDemand] { return std::make_unique<proof::ObservedCaptureSource>(lifetime, demand); };
         if (evidence_->captureFactory) options.capture = evidence_->captureFactory;
+        if (evidence_->switchableCapture) options.captureForSelection = [lifetime = evidence_->capture, demand = evidence_->captureDemand](auto) -> CaptureSession::Factory {
+            return [lifetime, demand] { return std::make_unique<proof::ObservedCaptureSource>(lifetime, demand); };
+        };
         options.deliver = [evidence = evidence_](auto& source, const auto& sample) {
             if (evidence->failDelivery.exchange(false)) throw std::runtime_error("Injected viewer delivery failure");
             if (evidence->input->pressed) {
@@ -151,6 +174,8 @@ public:
     std::vector<std::string> FailedPeers() const override { return native_->FailedPeers(); }
     StreamUpdateResult UpdateStreamPreferences(const StreamPreferences& preferences) override { return native_->UpdateStreamPreferences(preferences); }
     StreamStatus StreamSettings() const override { return native_->StreamSettings(); }
+    std::future<CaptureUpdateResult> SwitchCaptureSource(screenshare::media::CaptureSelection selection) override { return native_->SwitchCaptureSource(selection); }
+    CaptureSelectionStatus CaptureSelection() const override { return native_->CaptureSelection(); }
     std::future<AudioUpdateResult> SwitchAudioSource(screenshare::media::AudioSelection selection) override { return native_->SwitchAudioSource(std::move(selection)); }
     AudioSelectionStatus AudioSelection() const override { return native_->AudioSelection(); }
     std::future<AudioUpdateResult> UpdatePlayback(screenshare::media::PlaybackSelection selection) override { return native_->UpdatePlayback(std::move(selection)); }

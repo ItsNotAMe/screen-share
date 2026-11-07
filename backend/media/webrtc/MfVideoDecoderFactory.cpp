@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <atomic>
 #include <chrono>
+#include <algorithm>
 
 namespace screenshare::media {
 namespace {
@@ -132,6 +133,7 @@ public:
                 std::memcpy(packet.bytes.data(), image.data(), image.size());
                 timestamps_.emplace(packet.timestamp100ns, Timing{image.RtpTimestamp(), image.NtpTimeMs(), maxWidth_, maxHeight_,
                     input::ReadMappingSei({image.data(),image.size()})});
+                unsigned decodedFrames = 0;
                 for (auto& output : decoder_->DecodePacket(packet)) {
                     auto timestamp = timestamps_.find(output.timestamp100ns);
                     if (timestamp == timestamps_.end()) throw std::runtime_error("MF decoder lost timestamp association");
@@ -139,6 +141,7 @@ public:
                         (!output.texture && output.data.size() < size_t(output.width) * output.height * 3 / 2))
                         throw std::runtime_error("MF decoder returned invalid visible buffer " + std::to_string(output.width) + "x" +
                             std::to_string(output.height) + " bound " + std::to_string(timestamp->second.width) + "x" + std::to_string(timestamp->second.height));
+                    ++decodedFrames;
                     webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer;
                     if (output.texture) {
                         if (retained_->load() >= 8) { timestamps_.erase(timestamp); continue; }
@@ -150,6 +153,13 @@ public:
                         .set_rtp_timestamp(timestamp->second.rtp).set_ntp_time_ms(timestamp->second.ntp).build());
                     timestamps_.erase(timestamp);
                 }
+                // Count validated output, not accepted input: MF can buffer bad
+                // pictures without failing immediately. Sustained healthy video
+                // earns a new recovery budget; short recoveries cannot spin up
+                // the transform indefinitely. Consumer retention drops still
+                // count as successful decoding. Hardware stays quarantined.
+                healthyFrames_ = std::min(30u, healthyFrames_ + decodedFrames);
+                if (healthyFrames_ == 30) restarts_ = 0;
                 needsKeyframe_ = false;
                 return WEBRTC_VIDEO_CODEC_OK;
             } catch (const std::exception& error) {
@@ -157,9 +167,11 @@ public:
                 RTC_LOG(LS_WARNING) << "MF decode failed: " << error.what();
                 frames.clear();
                 timestamps_.clear();
+                healthyFrames_ = 0;
                 needsKeyframe_ = true;
                 // Retire hardware for this configuration. Rebuild only on a new
-                // keyframe, at most three times; corrupt input cannot spin MF up.
+                // keyframe, at most three times before sustained healthy output;
+                // corrupt input cannot spin MF up.
                 decoder_->Stop();
                 if (gpu_) *hardwareQuarantined_ = true;
                 gpu_.reset(); hardware_ = false;
@@ -194,7 +206,7 @@ private:
         decoder_.reset();
         gpu_.reset(); hardware_ = false;
         retained_ = std::make_shared<std::atomic<unsigned>>(0);
-        restarts_ = 0; restartPending_ = false;
+        restarts_ = 0; healthyFrames_ = 0; restartPending_ = false;
         timestamps_.clear();
         sampleId_ = 0;
         needsKeyframe_ = true;
@@ -209,6 +221,7 @@ private:
     std::shared_ptr<std::atomic<unsigned>> retained_ = std::make_shared<std::atomic<unsigned>>(0);
     std::atomic<bool> hardware_{false};
     unsigned restarts_ = 0;
+    unsigned healthyFrames_ = 0;
     bool restartPending_ = false;
     std::chrono::steady_clock::time_point retryAfter_{};
     // Decoder output can lag an incoming resize keyframe. Validate against the

@@ -14,6 +14,7 @@ public:
     virtual void ReleaseHeldInput() noexcept=0;
     virtual bool Apply(const Event&)=0;
     virtual void Release() noexcept=0;
+    virtual bool Restrict(uint8_t) { return false; }
 };
 class DesktopSink final : public Sink {
 public:
@@ -22,6 +23,8 @@ public:
     bool Grant(const std::string&,uint8_t,int) override;
     bool Apply(const std::string&,const Event&) override;
     bool Healthy(const std::string&) override;
+    bool Pause(const std::string&) override;
+    bool Restrict(const std::string&,uint8_t) override;
     void Release(const std::string&) noexcept override;
 private:
     struct Owner { uint8_t capabilities; uint64_t generation; std::unique_ptr<DesktopDevice> device; };

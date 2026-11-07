@@ -1,4 +1,5 @@
 #include "ui/RoomApplication.h"
+#include "ui/Toast.h"
 #include <QLayout>
 #include <QStackedWidget>
 #include <QTimer>
@@ -34,13 +35,19 @@ RoomApplication::RoomApplication(QUrl origin, QtRoomSession::Factory factory,
             browser_->directory().Start(origin_);
         };
         home_ = std::make_unique<HomeWindow>(std::move(actions));
-        browser_->back = browser_->returnFromSession = [this] { ShowHome(); };
+        browser_->back = [this] { ShowHome(); };
+        browser_->returnFromSession = [this](const QString& notice) {
+            ShowHome();
+            if (!notice.isEmpty()) Toast::show(&shell_, notice, 6500);
+        };
         browser_->ShowBackButton();
         browser_->directoryChanged = [this](const auto& state) {
             using Directory = screenshare::room::qt::RoomDirectory;
             QVector<HomeActiveRoom> rooms;
             for (const auto& room : state.rooms)
-                rooms.push_back({room.id, room.name, room.viewers, room.password, 0, room.status == "open", room.hostNickname});
+                rooms.push_back({room.id, room.name, room.viewers, room.password, 0, room.status == "open", room.hostNickname, room.limit,
+                    room.status == "full" ? HomeActiveRoom::Availability::Full : room.status == "reconnecting" ?
+                        HomeActiveRoom::Availability::Reconnecting : HomeActiveRoom::Availability::Open});
             home_->setPushedRooms(rooms, state.phase == Directory::Phase::Ready ? QString{} :
                 state.phase == Directory::Phase::Failed ? "Room list unavailable. Reconnect to try again." : "Connecting to room list…");
         };
@@ -60,9 +67,10 @@ void RoomApplication::OpenRoom(bool host, const QString& roomId) {
     Present(browser_.get());
 }
 
-RoomApplication::RoomApplication(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback) {
+RoomApplication::RoomApplication(RoomSessionConfig config, QtRoomSession::Factory factory, bool loopback, FramePresentationFactory presentation) {
     Initialize();
-    session_ = std::make_unique<RoomSessionWindow>(std::move(config), std::move(factory), loopback);
+    session_ = std::make_unique<RoomSessionWindow>(std::move(config), std::move(factory), loopback, nullptr,
+        screenshare::ViewerGamepad::ConnectedDevices, screenshare::ViewerGamepad::ReadState, std::move(presentation));
     session_->closed = [this] { Finish(); };
     Present(session_.get());
 }

@@ -79,6 +79,7 @@ class NativeRoomRuntime final : public v2::RoomRuntime {
     // Destroy the registry before native entries it references.
     std::unique_ptr<HostPeerRegistry> owner_;
     bool stopping_ = false, stopped_ = false;
+    bool captureInputUnavailable_ = false;
     std::chrono::steady_clock::time_point startupDeadline_ = std::chrono::steady_clock::now() + 20s;
     std::promise<void> stoppedPromise_;
     std::shared_future<void> stoppedFuture_ = stoppedPromise_.get_future().share();
@@ -94,6 +95,7 @@ public:
         // the captured target and pauses window input while it is unfocused.
         input_->Configure(input::Mouse | input::Keyboard | input::Gamepad, 0);
         if (identity_.host) {
+            if (options_.captureDemand) options_.captureDemand->store(false, std::memory_order_relaxed);
             if (options_.captureForSelection) {
                 captureSwitch_ = options_.captureSwitch ? options_.captureSwitch : std::make_shared<CaptureSwitchControl>(options_.initialCapture);
                 starting_ = capture_.Start([initial = options_.capture, control = captureSwitch_] {
@@ -107,6 +109,7 @@ public:
         }
     }
     ~NativeRoomRuntime() override {
+        if (identity_.host && options_.captureDemand) options_.captureDemand->store(false, std::memory_order_relaxed);
         input_->Close();
         if (owner_) owner_->Stop(); // Final teardown fallback; normal Stop already drained.
         owner_.reset(); peers_.clear(); audio_ = nullptr; engine_.reset();
@@ -214,7 +217,7 @@ public:
             auto factory = options_.captureForSelection(selection);
             // Revoke every grant. The Windows sink additionally requires fresh
             // captured geometry and pauses window input while unfocused.
-            input_->Configure(7, 0);
+            input_->Configure(captureInputUnavailable_ ? 0 : 7, 0);
             return captureSwitch_->Submit(selection, std::move(factory));
         }
         catch (...) { return CaptureUpdateReady(CaptureUpdateError::Invalid); }
@@ -299,6 +302,7 @@ public:
             if (identity_.host) {
                 const auto capture = capture_.snapshot();
                 sample.numbers["captureState"] = int(capture.state);
+                if (options_.captureDemand) sample.numbers["captureVideoDemand"] = options_.captureDemand->load(std::memory_order_relaxed);
                 sample.numbers["captureFailure"] = int(capture.captureFailure);
                 sample.numbers["captureGeneration"] = double(capture.sourceGeneration);
             }
@@ -371,6 +375,12 @@ public:
         }
         owner_->Tick(PeerConnectionLifecycle::Clock::now());
         const auto delivery = identity_.host ? capture_.snapshot() : HostMediaSnapshot{};
+        if (identity_.host && captureInputUnavailable_ != (delivery.state == HostMediaState::SourceUnavailable)) {
+            captureInputUnavailable_ = delivery.state == HostMediaState::SourceUnavailable;
+            // No held input or new grants may survive an unavailable source.
+            // Restore availability only after capture resumes, with fresh grants.
+            input_->Configure(captureInputUnavailable_ ? 0 : 7, 0);
+        }
         const auto share = delivery.state==HostMediaState::SourceUnavailable || delivery.state==HostMediaState::SourceClosed ? HostShareState::SourceUnavailable :
             delivery.state==HostMediaState::Minimized ? HostShareState::SourceMinimized :
             delivery.state==HostMediaState::Recovering ? HostShareState::Recovering :
@@ -382,6 +392,7 @@ public:
             allocatedViewers_ = viewers;
             if (identity_.host && options_.preferences.aggregateUploadLimitBps) ++settingsRevision_;
         }
+        bool videoDemand = false;
         for (auto it = peers_.begin(); it != peers_.end();) {
             auto& entry = *it->second;
             if (entry.retired) { it = peers_.erase(it); continue; }
@@ -399,33 +410,37 @@ public:
                 std::none_of(delivery.viewers.begin(), delivery.viewers.end(), [&](const auto& viewer) {
                     return viewer.viewer == entry.generation && viewer.connectionGeneration == entry.generation;
                 })) failed_.insert(it->first);
-            if (!entry.removing && identity_.host && entry.negotiation->ready() && entry.attemptedRevision != settingsRevision_) {
-                entry.attemptedRevision = settingsRevision_;
-                entry.settingsError = entry.settings.Apply(*entry.sender, *entry.source, options_.preferences, settingsRevision_,
-                    AllocateViewerVideo(options_.preferences, allocatedViewers_));
-                if (entry.settingsError == SettingsApplyError::None) {
-                    // RTP limits alone leave GoogCC's probing maximum at its
-                    // 5 Mbps fallback. Match the connection budget to this
-                    // viewer's video allowance plus the reserved audio budget.
-                    // Never reset its start estimate or impose a bitrate floor.
-                    webrtc::BitrateSettings transport;
-                    transport.max_bitrate_bps = entry.settings.appliedVideoBitrateBps() + kViewerAudioAllowanceBps;
-                    if (!entry.peer->connection->SetBitrate(transport).ok()) {
-                        // RTP/source settings have committed: do not continue
-                        // with a partially applied transport contract.
-                        entry.settingsError = SettingsApplyError::SenderRejected;
-                        failed_.insert(it->first);
+            if (!entry.removing && !failed_.contains(it->first) && identity_.host && entry.negotiation->ready()) {
+                if (const auto applied = entry.settings.Update(*entry.sender, *entry.source, options_.preferences, settingsRevision_, now,
+                        AllocateViewerVideo(options_.preferences, allocatedViewers_))) {
+                    entry.attemptedRevision = settingsRevision_;
+                    entry.settingsError = *applied;
+                    if (entry.settingsError == SettingsApplyError::None) {
+                        // RTP limits alone leave GoogCC's probing maximum at its
+                        // 5 Mbps fallback. Match the connection budget to this
+                        // viewer's video allowance plus the reserved audio budget.
+                        // Never reset its start estimate or impose a bitrate floor.
+                        webrtc::BitrateSettings transport;
+                        transport.max_bitrate_bps = entry.settings.appliedVideoBitrateBps() + kViewerAudioAllowanceBps;
+                        if (!entry.peer->connection->SetBitrate(transport).ok()) {
+                            // RTP/source settings have committed: do not continue
+                            // with a partially applied transport contract.
+                            entry.settingsError = SettingsApplyError::SenderRejected;
+                            failed_.insert(it->first);
+                        }
                     }
+                    entry.settingsRejected = entry.settingsError != SettingsApplyError::None && !entry.settings.pending();
+                    // An RTP update rejection preserves the previously working sender.
+                    // Only exhaust the initial contract after bounded recovery.
+                    if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
                 }
-                entry.settingsRejected = entry.settingsError != SettingsApplyError::None;
-                // An RTP update rejection preserves the previously working sender.
-                // An initial rejection cannot satisfy the initial stream contract.
-                if (entry.settingsRejected && !entry.settings.revision()) failed_.insert(it->first);
             }
-            entry.deliverFrames->store(identity_.host && !entry.removing && !failed_.contains(it->first) &&
+            // Stop new capture delivery on pause even if RTP rejected the update.
+            entry.deliverFrames->store(identity_.host && !options_.preferences.videoPaused && !entry.removing && !failed_.contains(it->first) &&
                 entry.negotiation->ready() && status && !status->peerClosed &&
                 status->state == PeerLifecycleState::Connected && entry.settings.revision() != 0 &&
                 entry.settings.appliedVideoBitrateBps() > 0, std::memory_order_relaxed);
+            videoDemand |= entry.deliverFrames->load(std::memory_order_relaxed);
             if (!entry.removing && !entry.negotiation->closed()) {
                 bool request = false;
                 { std::lock_guard lock(entry.sendRate->mutex);
@@ -468,8 +483,10 @@ public:
             }
             ++it;
         }
+        if (identity_.host && options_.captureDemand) options_.captureDemand->store(videoDemand, std::memory_order_relaxed);
     }
     std::shared_future<void> BeginStop() override {
+        if (identity_.host && options_.captureDemand) options_.captureDemand->store(false, std::memory_order_relaxed);
         for (auto& [id, entry] : peers_) entry->deliverFrames->store(false, std::memory_order_relaxed);
         input_->Close();
         if (options_.playback) options_.playback->Close();

@@ -24,6 +24,10 @@ int main(int argc, char** argv) {
         captureWindow = window.handle();
 #endif
         auto hostEvidence = std::make_shared<Evidence>();
+#ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
+        hostEvidence->sharedSourceAudio = true;
+        hostEvidence->switchableCapture = true;
+#endif
         auto factory = [](auto evidence) { return [evidence](auto identity, auto send) { return std::make_unique<Runtime>(identity, std::move(send), evidence); }; };
         RoomOptions hostOptions; hostOptions.origin = argv[1]; hostOptions.host = true; hostOptions.nickname = "FacadeHost"; hostOptions.name = "Facade media";
         RoomSession host(factory(hostEvidence), diagnosticPlaintext);
@@ -80,19 +84,100 @@ int main(int argc, char** argv) {
         Wait([&] { return evidence[0]->responseFrames > 0; });
         inputResponseMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - inputStart).count();
 #endif
-        // Stop runtime advancement, not the input owner: watchdog still releases.
+        // Stop transport advancement, not the input owner: neutralize held input
+        // while keeping the host's grant, then resume with a fresh epoch.
+        uint64_t preGap=0;for(const auto& p:host.Input()->Read())if(p.peer==controllerId)preGap=p.permission;
         evidence[0]->pauseAdvance = true;
         hostEvidence->pauseAdvance = true;
-        Wait([&] { return !granted(host.Input(), controllerId) && hostEvidence->input->releases > 0; });
+        Wait([&] {for(const auto& p:host.Input()->Read())if(p.peer==controllerId)return p.paused && p.granted==capability;return false;});
+        Check(hostEvidence->input->paused>0 && granted(viewers[0]->Input(),hostId)==capability);
         Check(!hostEvidence->input->pressed);
         hostEvidence->pauseAdvance = false;
         evidence[0]->pauseAdvance = false;
-        Wait([&] { return !granted(viewers[0]->Input(), hostId); });
-        Check(!viewers[0]->Input()->Submit(hostId, press));
-        Check(host.Input()->Grant(controllerId, capability));
-        Wait([&] { return granted(viewers[0]->Input(), hostId) == capability; });
+        Wait([&] {for(const auto& p:viewers[0]->Input()->Read())if(p.peer==hostId)return p.granted==capability && p.permission>preGap;return false;});
+        Check(viewers[0]->Input()->Submit(hostId,press));
+        Wait([&]{return hostEvidence->input->pressed.load();});
+        press.down=false;Check(viewers[0]->Input()->Submit(hostId,press));
+        Wait([&]{return !hostEvidence->input->pressed.load();});press.down=true;
         host.Input()->Revoke();
         Wait([&] { return !granted(viewers[0]->Input(), hostId); });
+#ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
+        // A failed source must not disconnect any peer or stop shared audio.
+        Check(host.Input()->Grant(controllerId, capability));
+        Wait([&] { return granted(viewers[0]->Input(), hostId) == capability; });
+        Check(viewers[0]->Input()->Submit(hostId, press));
+        Wait([&] { return hostEvidence->input->pressed.load(); });
+        const auto beforeSourceFailure = host.Status();
+        hostEvidence->capture->failRead = true;
+        Wait([&] {
+            Check(host.Status().phase == RoomPhase::Active);
+            if (host.Status().stream.capture.state != HostMediaState::SourceUnavailable || hostEvidence->input->pressed) return false;
+            for (auto& viewer : viewers) if (viewer->Status().stream.remoteShare.state != HostShareState::SourceUnavailable) return false;
+            return !granted(host.Input(), controllerId) && !granted(viewers[0]->Input(), hostId);
+        });
+        Check(host.Status().stream.capture.failure == CaptureFailure::Source && hostEvidence->capture->sources == 0 &&
+            !host.Input()->Grant(controllerId, capability));
+        std::array<uint64_t,4> failureAudio;
+        std::array<unsigned,4> failureFrames;
+        for (size_t i=0;i<4;++i) { failureAudio[i]=evidence[i]->audio->audibleBlocks; failureFrames[i]=evidence[i]->frames; }
+        Wait([&] { for (size_t i=0;i<4;++i) if (evidence[i]->audio->audibleBlocks<failureAudio[i]+10) return false; return true; });
+        auto replacement = host.SwitchCaptureSource({CaptureKind::Display,0,0,30});
+        Check(Get(replacement).error == CaptureUpdateError::None);
+        Wait([&] {
+            for (size_t i=0;i<4;++i) if (evidence[i]->frames<failureFrames[i]+10 || viewers[i]->Status().stream.remoteShare.state!=HostShareState::Live) return false;
+            return host.Status().stream.capture.failure==CaptureFailure::None;
+        });
+        const auto afterSourceFailure = host.Status();
+        Check(afterSourceFailure.roomId==beforeSourceFailure.roomId && afterSourceFailure.peerId==beforeSourceFailure.peerId &&
+            afterSourceFailure.revision==beforeSourceFailure.revision && afterSourceFailure.activePeers==4 &&
+            afterSourceFailure.audio.revision==beforeSourceFailure.audio.revision &&
+            afterSourceFailure.capture.revision==beforeSourceFailure.capture.revision+1 && hostEvidence->capture->sources==1);
+        for (const auto& old : beforeSourceFailure.stream.connections) {
+            const auto current = std::find_if(afterSourceFailure.stream.connections.begin(),afterSourceFailure.stream.connections.end(),
+                [&](const auto& peer) {return peer.peerId==old.peerId;});
+            Check(current!=afterSourceFailure.stream.connections.end() && current->generation==old.generation);
+        }
+        Check(!granted(host.Input(),controllerId));
+        Check(host.Input()->Grant(controllerId,capability));
+        Wait([&] {return granted(viewers[0]->Input(),hostId)==capability;});
+        host.Input()->Revoke(); Wait([&] {return !granted(viewers[0]->Input(),hostId);});
+#endif
+        const auto beforeRoute = viewers[0]->Status();
+        const auto routeStarts = evidence[0]->audio->outputStarts.load();
+        const auto routeFrames = evidence[0]->frames.load();
+        const auto routeAudio = evidence[0]->audio->audibleBlocks.load();
+        const auto otherRouteAudio = evidence[1]->audio->audibleBlocks.load();
+        ++evidence[0]->audio->outputRoute;
+        Wait([&] { return evidence[0]->audio->outputStarts > routeStarts && evidence[0]->frames >= routeFrames + 5 &&
+            evidence[0]->audio->audibleBlocks >= routeAudio + 5 && evidence[1]->audio->audibleBlocks >= otherRouteAudio + 5; });
+        const auto routed = viewers[0]->Status();
+        Check(routed.roomId == beforeRoute.roomId && routed.peerId == beforeRoute.peerId &&
+            routed.playback.revision == beforeRoute.playback.revision && routed.playback.health.failures == 0 &&
+            host.Status().activePeers == 4);
+        // Route a live default host capture while all four viewers keep media.
+        const auto savedAudio = host.Status().audio.selected;
+        if (savedAudio.kind != AudioKind::System || !savedAudio.deviceId.empty()) {
+            auto useDefault = host.SwitchAudioSource({}); Check(Get(useDefault).error == AudioUpdateError::None);
+        }
+        const auto beforeCaptureRoute = host.Status();
+        const auto captureRouteStarts = hostEvidence->audio->captureStarts.load();
+        std::array<unsigned,4> captureRouteFrames;
+        std::array<uint64_t,4> captureRouteAudio;
+        for(size_t i=0;i<4;++i){captureRouteFrames[i]=evidence[i]->frames;captureRouteAudio[i]=evidence[i]->audio->audibleBlocks;}
+        ++hostEvidence->audio->captureRoute;
+        Wait([&]{
+            if(hostEvidence->audio->captureStarts<=captureRouteStarts)return false;
+            for(size_t i=0;i<4;++i)if(evidence[i]->frames<captureRouteFrames[i]+5 || evidence[i]->audio->audibleBlocks<captureRouteAudio[i]+5)return false;
+            return true;
+        });
+        const auto afterCaptureRoute=host.Status();
+        Check(afterCaptureRoute.audio.revision==beforeCaptureRoute.audio.revision &&
+            afterCaptureRoute.audio.health.failures==beforeCaptureRoute.audio.health.failures &&
+            afterCaptureRoute.audio.health.state==AudioEndpointState::Running && afterCaptureRoute.roomId==beforeCaptureRoute.roomId &&
+            afterCaptureRoute.activePeers==4 && hostEvidence->audio->liveCaptures==1);
+        if (savedAudio.kind != AudioKind::System || !savedAudio.deviceId.empty()) {
+            auto restoreAudio = host.SwitchAudioSource(savedAudio); Check(Get(restoreAudio).error == AudioUpdateError::None);
+        }
         const auto beforeAudioFailure = host.Status();
         hostEvidence->audio->captureUnavailable = true;
         Wait([&] {
@@ -103,27 +188,46 @@ int main(int argc, char** argv) {
         std::array<unsigned, 4> silentFrames;
         for (size_t i = 0; i < evidence.size(); ++i) silentFrames[i] = evidence[i]->frames;
         Wait([&] { for (size_t i = 0; i < evidence.size(); ++i) if (evidence[i]->frames < silentFrames[i] + 10) return false; return true; });
-        Check(hostEvidence->audio->captureStarts == 1 && host.Status().audio.revision == beforeAudioFailure.audio.revision);
+        Check(host.Status().audio.revision == beforeAudioFailure.audio.revision);
+        const auto startsBeforeCaptureRecovery = hostEvidence->audio->captureStarts.load();
         hostEvidence->audio->captureUnavailable = false;
         std::array<uint64_t, 4> quietAudio;
         for (size_t i = 0; i < evidence.size(); ++i) quietAudio[i] = evidence[i]->audio->audibleBlocks;
-        auto recoveredCapture = host.SwitchAudioSource({}); Check(Get(recoveredCapture).error == AudioUpdateError::None);
+        if (!hostEvidence->sharedSourceAudio) {
+            auto recoveredCapture = host.SwitchAudioSource({}); Check(Get(recoveredCapture).error == AudioUpdateError::None);
+        }
         Wait([&] { for (size_t i = 0; i < evidence.size(); ++i) if (evidence[i]->audio->audibleBlocks < quietAudio[i] + 10) return false; return true; });
-        Check(hostEvidence->audio->captureStarts == 2 && host.Status().audio.health.failures == 1 && host.Status().revision == beforeAudioFailure.revision);
+        Check(hostEvidence->audio->captureStarts > startsBeforeCaptureRecovery && host.Status().audio.health.failures == 1 &&
+            host.Status().revision == beforeAudioFailure.revision && host.Status().activePeers == 4 &&
+            host.Status().audio.selected.kind == (hostEvidence->sharedSourceAudio ? AudioKind::SharedSource : AudioKind::System));
+        if (hostEvidence->sharedSourceAudio) Check(host.Status().audio.revision == beforeAudioFailure.audio.revision);
+        const auto beforeOutputFailure = viewers[0]->Status();
+        const auto outputStartsBeforeFailure = evidence[0]->audio->outputStarts.load();
         evidence[0]->audio->outputUnavailable = true;
         Wait([&] { return viewers[0]->Status().playback.health.state == AudioEndpointState::Failed; });
         const auto failedOutputFrames = evidence[0]->frames.load();
         const auto healthyAudio = evidence[1]->audio->audibleBlocks.load();
         Wait([&] { return evidence[0]->frames >= failedOutputFrames + 10 && evidence[1]->audio->audibleBlocks >= healthyAudio + 10; });
-        Check(evidence[0]->audio->outputStarts == 1 && host.Status().activePeers == 4);
+        Check(host.Status().activePeers == 4 && viewers[0]->Status().playback.revision == beforeOutputFailure.playback.revision);
         evidence[0]->audio->outputUnavailable = false;
         const auto outputBeforeRetry = evidence[0]->audio->audibleBlocks.load();
-        auto recoveredOutput = viewers[0]->UpdatePlayback({}); Check(Get(recoveredOutput).error == AudioUpdateError::None);
-        Wait([&] { return evidence[0]->audio->audibleBlocks >= outputBeforeRetry + 10; });
-        Check(evidence[0]->audio->outputStarts == 2 && viewers[0]->Status().playback.health.failures == 1);
+        // The existing room/output selection must recover without a command.
+        // Native PCM and the public status snapshot advance independently.
+        Wait([&] { return evidence[0]->audio->audibleBlocks >= outputBeforeRetry + 10 &&
+            viewers[0]->Status().playback.health.state == AudioEndpointState::Running; });
+        Check(evidence[0]->audio->outputStarts > outputStartsBeforeFailure && viewers[0]->Status().playback.health.failures == 1 &&
+            viewers[0]->Status().playback.health.state == AudioEndpointState::Running &&
+            viewers[0]->Status().playback.revision == beforeOutputFailure.playback.revision &&
+            viewers[0]->Status().peerId == beforeOutputFailure.peerId && viewers[0]->Status().roomId == beforeOutputFailure.roomId);
         const auto beforeAudioSwitch = host.Status();
+        if (hostEvidence->sharedSourceAudio) {
+            hostEvidence->audio->captureUnavailable = true;
+            Wait([&] { return host.Status().audio.health.state == AudioEndpointState::Failed; });
+        }
         auto audioSwitch = host.SwitchAudioSource({AudioKind::None});
         Check(Get(audioSwitch).error == AudioUpdateError::None);
+        const auto mutedCaptureStarts = hostEvidence->audio->captureStarts.load();
+        hostEvidence->audio->captureUnavailable = false;
         // Observe real decoded silence instead of assuming a fixed jitter/codec
         // drain time. This is a correctness deadline, not a gaming latency gate.
         const auto quietDeadline = std::chrono::steady_clock::now() + 3s;
@@ -133,7 +237,9 @@ int main(int argc, char** argv) {
         std::array<uint64_t, 4> quietBlocks;
         std::array<unsigned, 4> playingFrames;
         for (size_t i = 0; i < 4; ++i) { quietBlocks[i] = evidence[i]->audio->audibleBlocks; playingFrames[i] = evidence[i]->frames; }
+        ++hostEvidence->audio->captureRoute; // A muted default source must not reopen.
         std::this_thread::sleep_for(300ms);
+        Check(hostEvidence->audio->liveCaptures == 0 && hostEvidence->audio->captureStarts == mutedCaptureStarts);
         for (size_t i = 0; i < 4; ++i) {
             if (evidence[i]->audio->audibleBlocks != quietBlocks[i] || evidence[i]->frames <= playingFrames[i])
                 std::cerr << "Audio switch viewer " << i << " nonzero blocks " << quietBlocks[i] << '/' << evidence[i]->audio->audibleBlocks

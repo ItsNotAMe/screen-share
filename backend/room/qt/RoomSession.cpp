@@ -199,7 +199,17 @@ struct RoomSession::Impl {
                 else { terminal = true; Schedule(); }
             }
             if (event.kind == RoomSocket::EventKind::Closed) {
-                { std::lock_guard lock(mutex); status.removedByHost = event.value["payload"].toObject()["reason"] == "kicked"; }
+                const auto value = event.value["payload"].toObject()["reason"].toString();
+                std::optional<RoomCloseReason> reason;
+                if (value == "host_left") reason = RoomCloseReason::HostLeft;
+                else if (value == "host_expired") reason = RoomCloseReason::HostExpired;
+                else if (value == "kicked") reason = RoomCloseReason::RemovedByHost;
+                else if (value == "server_shutdown") reason = RoomCloseReason::ServerShutdown;
+                {
+                    std::lock_guard lock(mutex);
+                    status.closeReason = reason;
+                    status.removedByHost = reason == RoomCloseReason::RemovedByHost;
+                }
                 terminal = true; terminalError = RoomError::None; Schedule();
             }
         }

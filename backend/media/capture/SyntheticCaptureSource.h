@@ -1,5 +1,7 @@
 #pragma once
 #include "CaptureSession.h"
+#include "CaptureCadence.h"
+#include <atomic>
 #include <vector>
 
 namespace screenshare::media {
@@ -11,18 +13,17 @@ struct SyntheticCaptureResource final : CaptureResource {
 // Falling behind drops missed production opportunities rather than catching up.
 class SyntheticCaptureSource final : public ICaptureSource {
 public:
-    SyntheticCaptureSource(int width = 640, int height = 360, int fps = 60)
-        : width_(width), height_(height) {
+    SyntheticCaptureSource(int width = 640, int height = 360, int fps = 60,
+        std::shared_ptr<std::atomic<bool>> demand = {})
+        : width_(width), height_(height), demand_(std::move(demand)), cadence_(fps) {
         if (width < 2 || height < 2 || width > 3840 || height > 2160 || fps < 1 || fps > 240)
             throw std::invalid_argument("Invalid synthetic capture dimensions/rate");
-        period_ = std::chrono::nanoseconds(1000000000 / fps);
     }
-    void Start() override { next_ = std::chrono::steady_clock::now(); }
+    void Start() override { cadence_.Reset(); }
     std::optional<CaptureSample> Poll() override {
         const auto now = std::chrono::steady_clock::now();
-        if (now < next_) return std::nullopt;
-        next_ += period_;
-        if (next_ <= now) next_ = now + period_;
+        if (!cadence_.Due(now, !demand_ || demand_->load(std::memory_order_relaxed))) return std::nullopt;
+        cadence_.Sampled(now);
         auto frame = std::make_shared<SyntheticCaptureResource>();
         frame->width = width_; frame->height = height_;
         frame->luma.resize(static_cast<size_t>(width_) * height_);
@@ -39,7 +40,7 @@ public:
 private:
     int width_, height_;
     uint64_t index_ = 0;
-    std::chrono::nanoseconds period_{};
-    std::chrono::steady_clock::time_point next_{};
+    const std::shared_ptr<std::atomic<bool>> demand_;
+    CaptureCadence cadence_;
 };
 }

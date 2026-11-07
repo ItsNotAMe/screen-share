@@ -24,6 +24,16 @@ struct RoomOptions {
     int viewerLimit = 4;
 };
 enum class RoomPhase { Idle, Admitting, Connecting, Active, Reconnecting, Stopping, Stopped, Failed };
+enum class RoomCloseReason { HostLeft, HostExpired, RemovedByHost, ServerShutdown };
+inline const char* RoomCloseReasonName(RoomCloseReason reason) {
+    switch (reason) {
+    case RoomCloseReason::HostLeft: return "host_left";
+    case RoomCloseReason::HostExpired: return "host_expired";
+    case RoomCloseReason::RemovedByHost: return "kicked";
+    case RoomCloseReason::ServerShutdown: return "server_shutdown";
+    }
+    return "unknown";
+}
 enum class RoomError { None, Busy, Cancelled, Admission, Transport, Media, AdmissionDenied,
                        RoomNotFound, RoomFull, RoomClosed, RateLimited, AdmissionUnconfirmed };
 struct RoomResult { RoomError error = RoomError::None; bool outcomeUnconfirmed = false; };
@@ -80,6 +90,7 @@ struct RoomStatus {
     bool host = false;
     bool removedByHost = false; // Explicit authenticated room.closed reason; retained after Stop.
     media::DiagnosticHistorySnapshot sessionEvents;
+    std::optional<RoomCloseReason> closeReason; // Authenticated room.closed only; retained after Stop.
 };
 // Private media implementations are injected without leaking Qt/WebRTC types
 // into the public control API. All runtime methods execute on owned signaling.

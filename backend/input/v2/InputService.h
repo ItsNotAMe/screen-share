@@ -12,6 +12,9 @@ struct Status {
     bool ready = false;
     bool grantPending = false;
     bool revokePending = false; // Viewer waits for host permission acknowledgement.
+    bool selectiveRelease = false; // Advertised by the host's control-channel protocol.
+    uint8_t releasePending = 0; // Locally withdrawn controls awaiting host acknowledgement.
+    bool paused = false; // Host neutralized input after a gap; capabilities remain granted.
     Reason reason = Reason::None;
     // Local service observations only, never network or input-to-photon latency.
     // Timings expire after one second and reset on permission/connection changes.
@@ -31,6 +34,12 @@ public:
     virtual bool Apply(const std::string& peer, const Event&) = 0;
     virtual void Release(const std::string& peer) noexcept = 0;
     virtual bool Healthy(const std::string&) { return true; }
+    // Neutralize held input without giving up devices/ownership. Returning false
+    // requires full release/revocation. Runs only on the input owner thread.
+    virtual bool Pause(const std::string&) { return false; }
+    // Neutralize held state and retain only a subset, keeping surviving devices
+    // allocated. False uses the existing release/regrant compatibility path.
+    virtual bool Restrict(const std::string&, uint8_t) { return false; }
 };
 // Thread-safe high-frequency port. Kept separate from RoomSession status and HTTP.
 // A true return means bounded local acceptance, never host permission or injection.
@@ -42,11 +51,14 @@ public:
     virtual bool Grant(const std::string&, uint8_t) = 0;
     virtual void Deny(const std::string&, uint8_t capabilities = 7) = 0; // Dismiss these requests; current grants remain active.
     virtual void Revoke(const std::string& peer = {}) = 0;
+    // Withdraw only these grants/requests; never adds permission. False leaves
+    // state unchanged when an older host cannot acknowledge selective release.
+    virtual bool Release(const std::string&, uint8_t) { return false; }
     virtual bool Submit(const std::string&, Event) = 0;
     // Polling owners are tied to one grant. A late read/cleanup from an old
     // owner must neither submit into nor revoke a newer permission epoch.
     virtual bool SubmitIfCurrent(const std::string&, uint64_t permission, Event) = 0;
-    virtual void RevokeIfCurrent(const std::string&, uint64_t permission) = 0;
+    virtual void RevokeIfCurrent(const std::string&, uint64_t permission, uint8_t requiredCapabilities = 0) = 0;
     virtual std::vector<Status> Read() const = 0;
 };
 struct Packet { bool reliable; std::vector<uint8_t> bytes; };
@@ -56,7 +68,7 @@ public:
     ~Service() override;
     // Native transport binds the authenticated peer to each negotiated connection.
     // Binding changes and ready=false invalidate grants; no implicit regrant.
-    void Bind(const std::string& peer, const std::string& connection, bool ready);
+    void Bind(const std::string& peer, const std::string& connection, bool ready, bool selectiveRelease = false);
     void Remove(const std::string& peer);
     void Receive(const std::string& peer, bool reliable, std::span<const uint8_t>);
     std::vector<Packet> Drain(const std::string& peer, bool reliableWritable, bool stateWritable);
@@ -70,9 +82,10 @@ public:
     bool Grant(const std::string&, uint8_t) override;
     void Deny(const std::string&, uint8_t capabilities = 7) override;
     void Revoke(const std::string& peer = {}) override;
+    bool Release(const std::string&, uint8_t) override;
     bool Submit(const std::string&, Event) override;
     bool SubmitIfCurrent(const std::string&, uint64_t permission, Event) override;
-    void RevokeIfCurrent(const std::string&, uint64_t permission) override;
+    void RevokeIfCurrent(const std::string&, uint64_t permission, uint8_t requiredCapabilities = 0) override;
     std::vector<Status> Read() const override;
 private:
     bool SubmitImpl(const std::string&, Event, std::optional<uint64_t> permission);

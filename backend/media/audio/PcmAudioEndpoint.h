@@ -19,6 +19,8 @@ public:
     virtual bool Read(PcmBlock&, std::stop_token) = 0;
     virtual uint32_t DelayMs() const = 0;
     virtual uint64_t DroppedFrames() const { return 0; }
+    // Default endpoint routing changed. Only its capture worker may reopen it.
+    virtual bool DeviceChanged() const { return false; }
 };
 class PcmPlayoutEndpoint {
 public:
@@ -29,6 +31,9 @@ public:
     virtual uint32_t BufferFrames() const = 0;
     // Zero means the endpoint cannot report the actual engine period.
     virtual uint32_t EnginePeriodUs() const { return 0; }
+    // The current endpoint no longer matches its routing selection. The owner
+    // reopens it on the playout worker; notification callbacks never do I/O.
+    virtual bool DeviceChanged() const { return false; }
 };
 struct PcmEndpointFactories {
     std::function<std::unique_ptr<PcmCaptureEndpoint>()> capture;

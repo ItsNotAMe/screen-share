@@ -7,6 +7,7 @@
 #include "media/audio/SwitchablePcmCapture.h"
 #include "media/audio/PlaybackControl.h"
 #include "PcmAudioDeviceModule.h"
+#include <atomic>
 
 namespace screenshare::media {
 class CaptureSwitchControl;
@@ -17,6 +18,9 @@ struct NativeRoomRuntimeOptions {
     std::function<std::unique_ptr<MediaEngine>()> engine;
     std::function<bool()> engineReady; // Optional first-capture-device barrier.
     CaptureSession::Factory capture;
+    // Optional per-runtime signal to its capture owner. False permits idle
+    // health sampling; true requires normal cadence. Never shared across rooms.
+    std::shared_ptr<std::atomic<bool>> captureDemand;
     CaptureSelection initialCapture;
     std::function<CaptureSession::Factory(CaptureSelection)> captureForSelection;
     std::shared_ptr<CaptureSwitchControl> captureSwitch;

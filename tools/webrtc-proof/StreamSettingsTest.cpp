@@ -11,6 +11,7 @@
 #include <limits>
 #include <future>
 #include "SettingsFailureTest.h"
+#include "SharedFrameScalingTest.h"
 
 using namespace screenshare::media;
 void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
@@ -259,6 +260,7 @@ int main(int argc, char** argv) try {
     if (argc == 2) {
         screenshare::WindowsMediaRuntime runtime;
         Require(SUCCEEDED(runtime.result()), "MTA lease failed");
+        SharedFrameScalingTest();
         auto device = std::make_shared<D3dVideoDevice>();
         std::vector<uint8_t> nv12(640 * 360 * 3 / 2, 128);
         std::fill_n(nv12.begin(), 640 * 360, uint8_t(80));
@@ -314,7 +316,7 @@ int main(int argc, char** argv) try {
         // Auto must not upscale a source merely because its configured maximum is larger.
         preferences.resolution = ResolutionMode::Auto; preferences.width = 1280; preferences.height = 720;
         gpuSource->Configure(preferences, 4); push();
-        Require(gpuSink.last.get() == texture.get() && gpuSource->settingsStats().scalingPath == SourceScalingPath::Unchanged,
+        Require(Unwrap(gpuSink.last).get() == texture.get() && gpuSource->settingsStats().scalingPath == SourceScalingPath::Unchanged,
             "Auto upscaled native source");
         webrtc::VideoSinkWants reduced;
         reduced.max_pixel_count = 160 * 90; reduced.is_active = true;
@@ -347,7 +349,7 @@ int main(int argc, char** argv) try {
         preferences.resolution = ResolutionMode::Fixed; preferences.width = 320; preferences.height = 240;
         gpuSource->Configure(preferences, 5);
         gpuSource->PushBuffer(unsupportedFrame, at); at += std::chrono::milliseconds(100);
-        Require(gpuSink.last->type() == webrtc::VideoFrameBuffer::Type::kI420 && device->scalingFailures() == 1 &&
+        Require(Unwrap(gpuSink.last)->type() == webrtc::VideoFrameBuffer::Type::kI420 && device->scalingFailures() == 1 &&
             gpuSource->settingsStats().scalingPath == SourceScalingPath::CpuReadback, "Failed GPU scaler did not fall back");
         push();
         gpuFallbacks = gpuSource->settingsStats().gpuReadbackFallbacks;

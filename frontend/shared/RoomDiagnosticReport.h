@@ -61,6 +61,7 @@ inline QJsonObject RoomDiagnosticReport(const screenshare::v2::RoomStatus& statu
         {"createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
         {"appVersion", RoomReportBuildVersion()}, {"phase", int(status.phase)}, {"error", int(status.error)},
         {"removedByHost", status.removedByHost},
+        {"closeReason", status.closeReason ? QJsonValue(screenshare::v2::RoomCloseReasonName(*status.closeReason)) : QJsonValue(QJsonValue::Null)},
         {"remoteShare", QJsonObject{{"state", status.stream.remoteShare.state?
             QJsonValue(screenshare::media::HostShareStateName(*status.stream.remoteShare.state)):QJsonValue(QJsonValue::Null)},
             {"stale", status.stream.remoteShare.stale},

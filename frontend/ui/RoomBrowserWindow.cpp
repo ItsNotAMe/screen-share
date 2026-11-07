@@ -3,6 +3,9 @@
 #include "ui/RoomApplication.h"
 #include "shared/RoomLink.h"
 #include "shared/RoomEntryError.h"
+#include "shared/RoomEndNotice.h"
+#include "room/protocol/RoomProtocol.h"
+#include "ui/Toast.h"
 #include "ui/UiStyle.h"
 #include "ui/SourcePickerDialog.h"
 #include "ui/SourcePreviewLabel.h"
@@ -42,6 +45,7 @@
 #include <QAction>
 #include <QThread>
 #include <QStyledItemDelegate>
+#include <QStyle>
 #include <QFrame>
 #include <QHideEvent>
 #include <QKeyEvent>
@@ -123,6 +127,12 @@ QIcon entryIcon(const QString& name, const QByteArray& color = "#b7c8c0") {
 QLabel* fieldLabel(const QString& text) {
     auto* label = new QLabel(text); label->setObjectName("OptionLabel"); return label;
 }
+QString passwordError(const QString& value) {
+    if (screenshare::room::wire::ValidRoomPassword(value)) return {};
+    return value.toUtf8().size() > 128 ?
+        QStringLiteral("This password is too long. Try a shorter password; some letters and symbols take more space.") :
+        QStringLiteral("Remove unsupported or control characters from the password.");
+}
 QWidget* optionField(const QString& text, QWidget* control) {
     auto* field = new QWidget;
     auto* layout = new QVBoxLayout(field); layout->setContentsMargins(0,0,0,0); layout->setSpacing(6);
@@ -183,8 +193,10 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* content = new QWidget; auto* body = new QVBoxLayout(content); body->setContentsMargins(0,0,0,0); body->setSpacing(UiSpacing::SectionGap);
     scroll->setWidget(content); layout->addWidget(scroll, 1);
     createPanel_ = new QWidget; createColumns_ = new QBoxLayout(QBoxLayout::TopToBottom, createPanel_);
+    createColumns_->setSizeConstraint(QLayout::SetMinimumSize);
     createColumns_->setContentsMargins(0,0,0,0); createColumns_->setSpacing(UiSpacing::SectionGap);
     auto* details = new QWidget; details->setObjectName("FormCard"); detailsBody_ = new QVBoxLayout(details); createColumns_->addWidget(details, 1);
+    detailsBody_->setSizeConstraint(QLayout::SetMinimumSize);
     detailsBody_->setContentsMargins(UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset,UiSpacing::CardInset); detailsBody_->setSpacing(UiSpacing::SectionGap);
     auto* detailsHeading = new QLabel("Room details"); detailsHeading->setObjectName("SectionHeading"); detailsBody_->addWidget(detailsHeading);
     name_ = new QLineEdit("My room"); name_->setObjectName("roomName"); name_->setMaxLength(256); detailsBody_->addWidget(optionField("Room name", name_));
@@ -315,9 +327,11 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     roomId_->addAction(entryIcon("link"), QLineEdit::LeadingPosition);
     auto* linkRow = new QHBoxLayout; linkRow->setSpacing(10); linkRow->addWidget(roomId_, 1);
     auto* paste = new QPushButton("Paste"); paste->setObjectName("pasteRoomLink"); paste->setIcon(entryIcon("paste")); linkRow->addWidget(paste);
-    connect(paste, &QPushButton::clicked, this, [this] { roomId_->setText(QApplication::clipboard()->text().trimmed().left(512)); roomId_->setFocus(); });
+    connect(paste, &QPushButton::clicked, this, [this] {
+        if (joinState_ != JoinState::Idle) { CancelJoin(); return; }
+        roomId_->setText(QApplication::clipboard()->text().trimmed().left(512)); roomId_->setFocus();
+    });
     auto* join = new QPushButton("Join room"); join->setObjectName("joinV2Room"); linkRow->addWidget(join); joinBody_->addLayout(linkRow);
-    for (auto* control : {static_cast<QWidget*>(roomId_), static_cast<QWidget*>(paste), static_cast<QWidget*>(join)}) control->setFixedHeight(42);
     body->addWidget(joinPanel_);
     rooms_ = new RoomDirectoryWidget([this] { directory_.Stop(); directory_.Start(origin_); },
         [this](const QString& id) { JoinListedRoom(id); }, this);
@@ -328,6 +342,7 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     auto* actions = new QHBoxLayout(actionFooter_); actions->setContentsMargins(0,0,0,0); actions->addWidget(error_, 1);
     auto* create = new QPushButton("Create && start sharing"); create->setObjectName("createV2Room"); actions->addWidget(create);
     layout->addWidget(actionFooter_);
+    error_->ensurePolished();error_->setMinimumHeight(error_->fontMetrics().lineSpacing()*2);
     connect(create, &QPushButton::clicked, this, [this] { Launch(true); });
     connect(join, &QPushButton::clicked, this, [this] { Launch(false); });
     directory_.changed = [this](const auto& value) {
@@ -337,6 +352,13 @@ RoomBrowserWindow::RoomBrowserWindow(QUrl origin, QtRoomSession::Factory factory
     };
     for (auto* optionForm : findChildren<QFormLayout*>()) alignOptionRows(optionForm);
     for (auto* combo : findChildren<QComboBox*>()) styleComboPopup(combo);
+    // Measure after parenting/polish, including stylesheet fonts and padding.
+    // Reserve the widest action states so progress never moves the invite.
+    for(auto* control:{static_cast<QWidget*>(roomId_),static_cast<QWidget*>(paste),static_cast<QWidget*>(join)})control->ensurePolished();
+    paste->setText("Cancel");paste->setMinimumWidth(paste->sizeHint().width());paste->setText("Paste");
+    join->setText("Cancelling…");join->setMinimumWidth(join->sizeHint().width());join->setText("Join room");
+    const auto actionHeight=std::max({42,roomId_->sizeHint().height(),paste->sizeHint().height(),join->sizeHint().height()});
+    for(auto* control:{static_cast<QWidget*>(roomId_),static_cast<QWidget*>(paste),static_cast<QWidget*>(join)})control->setFixedHeight(actionHeight);
     OpenCreate();
 }
 RoomBrowserWindow::~RoomBrowserWindow() = default;
@@ -439,6 +461,7 @@ void RoomBrowserWindow::RefreshSources() {
     if (!source_->count()) SetError("No capture sources available. Refresh to try again.");
 }
 void RoomBrowserWindow::JoinListedRoom(const QString& id) {
+    if (active_ || closing_) return;
     SetError();
     if (roomId_->text() != id) password_->clear();
     roomId_->setText(id);
@@ -447,11 +470,15 @@ void RoomBrowserWindow::JoinListedRoom(const QString& id) {
 void RoomBrowserWindow::PromptPassword() {
     if(findChild<QDialog*>("RoomPasswordDialog"))return;
     if(presentPage)presentPage(this);else show();
-    auto* dialog=new SessionPopup("Room password",this);dialog->setObjectName("RoomPasswordDialog");dialog->setAttribute(Qt::WA_DeleteOnClose);dialog->setPanelSize(QSize(440,260));
+    auto* dialog=new SessionPopup("Room password",this);dialog->setObjectName("RoomPasswordDialog");dialog->setAttribute(Qt::WA_DeleteOnClose);dialog->setPanelSize(QSize(480,300));
     connect(dialog,&QDialog::finished,dialog,&QObject::deleteLater);
     auto* body=dialog->body;
-    auto* title=new QLabel(passwordRejected_?"Incorrect password. Try again.":"Enter room password");body->addWidget(title);
-    auto* field = new QLineEdit; field->setObjectName("joinPassword"); field->setEchoMode(QLineEdit::Password); field->setMaxLength(128);
+    auto* title=new QLabel(passwordRejected_?"Incorrect password. Try again.":"Enter room password");
+    title->setObjectName("joinPasswordFeedback");title->setTextFormat(Qt::PlainText);title->setWordWrap(true);
+    title->setMinimumHeight(title->fontMetrics().lineSpacing()*2);body->addWidget(title);
+    auto* field = new QLineEdit; field->setObjectName("joinPassword"); field->setEchoMode(QLineEdit::Password); field->setMaxLength(256);
+    // Keep over-limit pastes invalid instead of silently turning them into a
+    // different, admissible 128-byte password before validation.
     field->setPlaceholderText("Password"); passwordEye(field); body->addWidget(field);
     auto* actions = new QHBoxLayout; actions->addStretch();
     auto* cancel = new QPushButton("Cancel"); cancel->setObjectName("cancelRoomPassword");
@@ -459,8 +486,10 @@ void RoomBrowserWindow::PromptPassword() {
     for (auto* button : {cancel, join}) { button->setFixedSize(110,42); actions->addWidget(button); }
     body->addLayout(actions);
     connect(cancel, &QPushButton::clicked, dialog, &QDialog::reject);
-    connect(join, &QPushButton::clicked, dialog, [this, dialog, field] {
+    connect(join, &QPushButton::clicked, dialog, [this, dialog, field, title] {
         if (field->text().isEmpty()) { field->setFocus(); return; }
+        const auto message=passwordError(field->text());
+        if (!message.isEmpty()) { title->setText(message);field->setFocus();return; }
         password_->setText(field->text()); field->clear(); dialog->accept(); Launch(false);
     });
     dialog->open(); field->setFocus();
@@ -471,11 +500,38 @@ void RoomBrowserWindow::ShowBackButton() {
     auto* body = static_cast<QVBoxLayout*>(layout()); body->removeWidget(heading_);
     auto* header = new QHBoxLayout; header->setSpacing(20); header->addWidget(button); header->addWidget(heading_); header->addStretch();
     body->insertLayout(0,header);
-    connect(button, &QPushButton::clicked, this, [this] { password_->clear(); if (back) back(); });
+    connect(button, &QPushButton::clicked, this, [this] {
+        password_->clear();
+        if (joinState_ != JoinState::Idle) { CancelJoin(true); return; }
+        if (back) back();
+    });
 }
 void RoomBrowserWindow::SetError(const QString& message) {
     error_->setText(message);
-    actionFooter_->setVisible(!createPanel_->isHidden() || !message.isEmpty());
+    error_->setProperty("joinPending", joinState_ != JoinState::Idle);
+    error_->style()->unpolish(error_);error_->style()->polish(error_);error_->update();
+    actionFooter_->show(); // Reserve feedback space on Join as well as Create.
+}
+void RoomBrowserWindow::SetJoinState(JoinState state) {
+    joinState_ = state;
+    const bool pending = state != JoinState::Idle;
+    roomId_->setReadOnly(pending); rooms_->setEnabled(!pending);
+    auto* join = findChild<QPushButton*>("joinV2Room");
+    join->setText(!pending?"Join room":state==JoinState::Joining?"Joining…":"Cancelling…");
+    join->setEnabled(!pending);
+    auto* cancel = findChild<QPushButton*>("pasteRoomLink");
+    cancel->setText(pending?"Cancel":"Paste");cancel->setIcon(entryIcon(pending?"window-close":"paste"));
+    cancel->setAccessibleName(pending?"Cancel joining room":"Paste room invite");
+    cancel->setToolTip(pending?"Cancel this join attempt":"Paste a room link or room ID");
+    cancel->setEnabled(!pending || state==JoinState::Joining);
+    SetError(!pending?QString{}:state==JoinState::Joining?"Joining room…":"Cancelling join…");
+    if (state==JoinState::Joining) cancel->setFocus();
+}
+void RoomBrowserWindow::CancelJoin(bool returnHome) {
+    if (joinState_==JoinState::Idle || !active_) return;
+    SetJoinState(returnHome || joinState_==JoinState::ReturningHome ? JoinState::ReturningHome : JoinState::Cancelling);
+    passwordRetry_=false;passwordRejected_=false;joinFailure_.clear();password_->clear();
+    active_->close();
 }
 void RoomBrowserWindow::OpenCreate() {
     setWindowTitle("ScreenShare — Create room"); heading_->setText("Create a room");
@@ -497,7 +553,9 @@ void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
     QVector<HomeActiveRoom> rooms;
     for (const auto& room : state.rooms)
         rooms.push_back({room.id,room.name,room.viewers,room.password,0,
-            state.phase == RoomDirectory::Phase::Ready && room.status == "open", room.hostNickname});
+            state.phase == RoomDirectory::Phase::Ready && room.status == "open", room.hostNickname, room.limit,
+            room.status == "full" ? HomeActiveRoom::Availability::Full : room.status == "reconnecting" ?
+                HomeActiveRoom::Availability::Reconnecting : HomeActiveRoom::Availability::Open});
     QString message;
     switch (state.phase) {
     case RoomDirectory::Phase::Stopped: message = "Room list paused."; break;
@@ -511,13 +569,20 @@ void RoomBrowserWindow::Refresh(const RoomDirectory::Status& state) {
 void RoomBrowserWindow::Launch(bool host) {
     if (active_ || closing_) return;
     if (host && source_->currentIndex() < 0) { SetError("Choose an available capture source before sharing."); return; }
+    QString roomName;
+    if (host) {
+        roomName=screenshare::room::wire::NormalizeRoomName(name_->text());
+        if (roomName.isEmpty()) { SetError("Use a room name with 1–64 characters and no control or direction-changing characters.");name_->setFocus();return; }
+    }
+    const auto invalidPassword=passwordError(password_->text());
+    if (!invalidPassword.isEmpty()) { SetError(invalidPassword);password_->setFocus();return; }
     const auto nickname = RoomProfile::normalizeNickname(profile_.nickname());
     const auto roomId = ParseRoomReference(roomId_->text().trimmed());
     if (!nickname || (!host && !roomId)) { SetError("Enter a valid room ID or room link."); return; }
     if(!host && password_->text().isEmpty()) {
         for(const auto& room:directory_.status().rooms)if(room.id==*roomId && room.password){passwordRejected_=false;PromptPassword();return;}
     }
-    QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", name_->text()},
+    QJsonObject input{{"origin", origin_.toString()}, {"host", host}, {"nickname", *nickname}, {"name", host ? roomName : name_->text()},
         {"roomId", host ? QString{} : *roomId}, {"password", password_->text()}, {"public", public_->isChecked()}, {"viewerLimit", viewerLimit_->value()},
         {"capture", QJsonObject::fromVariantMap(source_->currentData().toMap())},
         {"audio", QJsonObject{{"source", audio_->currentIndex() == 0 ? "shared" : audio_->currentIndex() == 1 ? "microphone" : audio_->currentIndex() == 2 ? "none" : "system"}}}};
@@ -547,9 +612,11 @@ void RoomBrowserWindow::Launch(bool host) {
         SetError();
         active_ = std::make_unique<RoomSessionWindow>(std::move(config), factory_, loopback_, &profile_);
         if (!host) {
+            SetJoinState(JoinState::Joining);
             auto update = active_->session().statusChanged;
             active_->session().statusChanged = [this, update, suppliedPassword = !password_->text().isEmpty(), admitted = false](const auto& status) mutable {
                 if (update) update(status);
+                if (joinState_==JoinState::Cancelling || joinState_==JoinState::ReturningHome) return;
                 if(!closing_ && active_ && status.removedByHost && status.phase==v2::RoomPhase::Stopped && joinFailure_.isEmpty()) {
                     joinFailure_="The host removed you from the room.";
                     QTimer::singleShot(0,this,[this]{if(active_)active_->close();});
@@ -558,6 +625,7 @@ void RoomBrowserWindow::Launch(bool host) {
                     // Admission opens the viewer once. Later status updates must not
                     // navigate away from profile or application settings.
                     admitted = true;
+                    SetJoinState(JoinState::Idle);
                     if(presentPage)presentPage(active_.get());else {active_->show();hide();}
                 }
                 if(!closing_ && active_ && !admitted && status.phase==v2::RoomPhase::Failed && status.error!=v2::RoomError::AdmissionDenied) {
@@ -572,24 +640,33 @@ void RoomBrowserWindow::Launch(bool host) {
             };
         }
         active_->closed = [this] { QTimer::singleShot(0, this, [this] {
+            const auto notice = active_ ? RoomEndNotice(active_->session().status()) : QString{};
+            const auto joining = joinState_;
             active_.reset();
-            if (passwordRetry_ && !closing_) {
+            SetJoinState(JoinState::Idle);
+            if (closing_) { close(); return; }
+            if (joining==JoinState::Cancelling || joining==JoinState::ReturningHome) {
+                if (joining==JoinState::ReturningHome && back) back(); else roomId_->setFocus();
+                return;
+            }
+            if (passwordRetry_) {
                 passwordRetry_ = false;
                 if (presentPage) presentPage(this); else show();
                 PromptPassword(); return;
             }
-            if(!joinFailure_.isEmpty()&&!closing_) {if(presentPage)presentPage(this);else show();SetError(joinFailure_);joinFailure_.clear();return;}
-            if (closing_) close();
-            else if (returnFromSession) returnFromSession();
-            else if (presentPage) presentPage(this);
-            else show();
+            if(!joinFailure_.isEmpty()) {if(presentPage)presentPage(this);else show();SetError(joinFailure_);joinFailure_.clear();return;}
+            if (returnFromSession) returnFromSession(notice);
+            else {
+                if (presentPage) presentPage(this); else show();
+                if (!notice.isEmpty()) Toast::show(window(), notice, 6500);
+            }
         }); };
         password_->clear();
         if(host) {
             if (presentPage) presentPage(active_.get());
             else { active_->show(); hide(); }
         }
-    } catch (...) { SetError("Invalid room or capture settings."); }
+    } catch (...) { SetJoinState(JoinState::Idle);SetError("Invalid room or capture settings."); }
 }
 void RoomBrowserWindow::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);

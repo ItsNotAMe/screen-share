@@ -331,7 +331,10 @@ void RoomDirectoryWidget::setPushedRooms(const QVector<HomeActiveRoom>& rooms, c
     directoryStatus_->setVisible(!unavailable.isEmpty());
     if (unavailable.isEmpty() || !rooms.empty()) updateRooms(rooms);
     else filterRooms();
-    if (!unavailable.isEmpty()) for (auto* button : findChildren<QPushButton*>("HomeTinyButton")) button->setEnabled(false);
+    if (!unavailable.isEmpty()) for (auto* button : findChildren<QPushButton*>("HomeTinyButton")) {
+        button->setEnabled(false); button->setText("Wait…"); button->setIcon({});
+        button->setToolTip(unavailable); button->setAccessibleDescription(unavailable);
+    }
     refreshRoomsButton_->setEnabled(true);
 }
 
@@ -359,11 +362,27 @@ void RoomDirectoryWidget::updateRooms(const QVector<HomeActiveRoom>& rooms)
         if (!row) { row = buildRoomRow(room); roomListLayout_->insertWidget(roomListLayout_->indexOf(emptyState_), row); }
         row->setProperty("searchName", room.name);
         row->findChild<QLabel*>("HomeInfoPrimary")->setText(room.name);
-        row->findChild<QLabel*>("HomeViewerCount")->setText(QString::number(room.peerCount));
+        auto* viewers = row->findChild<QLabel*>("HomeViewerCount");
+        viewers->setText(room.viewerLimit > 0 ? QString("%1 / %2").arg(room.peerCount).arg(room.viewerLimit) : QString::number(room.peerCount));
+        const auto capacity = room.viewerLimit > 0 ? QString("%1 of %2 viewer places occupied").arg(room.peerCount).arg(room.viewerLimit) :
+            QString("%1 viewers").arg(room.peerCount);
+        viewers->setToolTip(capacity); viewers->setAccessibleName(capacity);
         auto* host = row->findChild<QLabel*>("HomeHostNickname");
         host->setText(host->fontMetrics().elidedText(room.hostNickname.isEmpty() ? QStringLiteral("\u2014") : room.hostNickname, Qt::ElideRight, host->width()));
         host->setToolTip(room.hostNickname);
-        row->findChild<QPushButton*>("HomeTinyButton")->setEnabled(room.joinable);
+        auto* join = row->findChild<QPushButton*>("HomeTinyButton");
+        const bool full = room.availability == HomeActiveRoom::Availability::Full;
+        const bool reconnecting = room.availability == HomeActiveRoom::Availability::Reconnecting;
+        const bool available = room.joinable && !full && !reconnecting;
+        join->setEnabled(available);
+        join->setText(full ? "Full" : reconnecting || !room.joinable ? "Wait…" : "Join");
+        if (!available) join->setIcon({});
+        else if (join->icon().isNull()) join->setIcon(QIcon(renderSvgResource(":/screenshare/ui/icons/watch.svg", QSize(18,18), "#ffffff")));
+        const auto reason = full ? QStringLiteral("This room is full. Wait for a viewer to leave or for the host to increase the limit.") :
+            reconnecting ? QStringLiteral("The host is reconnecting. Joining will be available when the host returns.") :
+            !room.joinable ? QStringLiteral("This room is temporarily unavailable.") : QStringLiteral("Join this room");
+        join->setToolTip(reason); join->setAccessibleDescription(reason);
+        join->setAccessibleName(QString("Join room %1").arg(room.name));
         auto* badge = row->findChild<QLabel*>("HomeLockedStatus");
         if (!badge) badge = row->findChild<QLabel*>("HomePublicStatus");
         badge->setText(room.passwordProtected ? "Password required" : "Public");

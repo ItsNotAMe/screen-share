@@ -9,12 +9,13 @@
 #include <Windows.h>
 #include "input/WindowsKeyInput.h"
 #include "input/WindowsMouseInput.h"
+#include "input/HostMouseMonitorThread.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <mutex>
-#include <thread>
+#include <memory>
 
 namespace screenshare {
 namespace {
@@ -27,8 +28,7 @@ constexpr DWORD kHostMouseCooldownMs = 300;
 std::atomic<DWORD> g_lastPhysicalMouseTick{0};
 std::mutex g_monitorMutex;
 int g_monitorRefcount = 0;
-std::thread g_monitorThread;
-std::atomic<DWORD> g_monitorThreadId{0};
+std::unique_ptr<HostMouseMonitorThread> g_monitorThread;
 
 LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam)
 {
@@ -41,43 +41,23 @@ LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam)
     return CallNextHookEx(nullptr, code, wParam, lParam);
 }
 
-void MonitorThreadMain()
-{
-    g_monitorThreadId.store(GetCurrentThreadId(), std::memory_order_release);
-    const HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, GetModuleHandleW(nullptr), 0);
-    MSG message;
-    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-        // Pump the message queue; WM_QUIT (posted on stop) breaks the loop.
-    }
-    if (hook != nullptr) {
-        UnhookWindowsHookEx(hook);
-    }
-}
-
 void StartHostMouseMonitor()
 {
     std::lock_guard<std::mutex> lock(g_monitorMutex);
-    if (g_monitorRefcount++ == 0) {
+    if (g_monitorRefcount == 0) {
         g_lastPhysicalMouseTick.store(0, std::memory_order_relaxed);
-        g_monitorThreadId.store(0, std::memory_order_release);
-        g_monitorThread = std::thread(MonitorThreadMain);
+        g_monitorThread = std::make_unique<HostMouseMonitorThread>(
+            [] { return SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, GetModuleHandleW(nullptr), 0); },
+            [](HHOOK hook) { UnhookWindowsHookEx(hook); });
     }
+    ++g_monitorRefcount; // Commit ownership only after event/thread creation succeeds.
 }
 
 void StopHostMouseMonitor()
 {
     std::lock_guard<std::mutex> lock(g_monitorMutex);
     if (g_monitorRefcount > 0 && --g_monitorRefcount == 0) {
-        for (int waited = 0; waited < 200 && g_monitorThreadId.load(std::memory_order_acquire) == 0; ++waited) {
-            Sleep(1);
-        }
-        const DWORD threadId = g_monitorThreadId.load(std::memory_order_acquire);
-        if (threadId != 0) {
-            PostThreadMessageW(threadId, WM_QUIT, 0, 0);
-        }
-        if (g_monitorThread.joinable()) {
-            g_monitorThread.join();
-        }
+        g_monitorThread.reset();
     }
 }
 

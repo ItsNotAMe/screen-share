@@ -222,6 +222,7 @@ H264StreamDecoder::~H264StreamDecoder()
 void H264StreamDecoder::Start(int maxWidth, int maxHeight, ID3D11Device* device)
 {
     Stop();
+    outputBufferAllocations_ = 0;
     if (maxWidth <= 0 || maxHeight <= 0 || maxWidth > 16384 || maxHeight > 16384) {
         throw std::invalid_argument("Invalid H264 decoder dimension limit");
     }
@@ -320,6 +321,7 @@ void H264StreamDecoder::Stop()
 {
     transform_.Reset();
     manager_.Reset(); device_.Reset();
+    outputStorage_.Reset(); outputStorageBytes_ = 0;
     outputWidth_ = 0;
     outputHeight_ = 0;
     outputVisibleLeft_ = 0;
@@ -406,7 +408,16 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             Microsoft::WRL::ComPtr<IMFMediaBuffer> outputBuffer;
             Microsoft::WRL::ComPtr<IMFSample> outputSample;
             if (!(streamInfo.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES)) {
-                ThrowIfFailed(MFCreateMemoryBuffer(outputBufferBytes, &outputBuffer), "MFCreateMemoryBuffer(decoder output)");
+                if (!outputStorage_ || outputStorageBytes_ < outputBufferBytes) {
+                    Microsoft::WRL::ComPtr<IMFMediaBuffer> storage;
+                    ThrowIfFailed(MFCreateMemoryBuffer(outputBufferBytes, &storage), "MFCreateMemoryBuffer(decoder output)");
+                    outputStorage_ = std::move(storage); outputStorageBytes_ = outputBufferBytes;
+                    ++outputBufferAllocations_;
+                }
+                outputBuffer = outputStorage_;
+                ThrowIfFailed(outputBuffer->SetCurrentLength(0), "Reset decoder output length");
+                // Keep sample metadata fresh even while its large storage is
+                // reused. Returned CPU frames own copies before the next poll.
                 ThrowIfFailed(MFCreateSample(&outputSample), "MFCreateSample(decoder output)");
                 ThrowIfFailed(outputSample->AddBuffer(outputBuffer.Get()), "IMFSample::AddBuffer(decoder output)");
             }
@@ -427,6 +438,7 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
                 return frames;
             }
             if (outputResult == MF_E_TRANSFORM_STREAM_CHANGE) {
+                outputStorage_.Reset(); outputStorageBytes_ = 0;
                 outputTypeConfigured_ = false;
                 outputWidth_ = 0;
                 outputHeight_ = 0;
@@ -502,26 +514,34 @@ std::vector<DecodedFrameInfo> H264StreamDecoder::ReadAvailableFrames()
             DWORD currentLength = 0;
             ThrowIfFailed(contiguousBuffer->GetCurrentLength(&currentLength), "IMFMediaBuffer::GetCurrentLength(decoder output)");
             frame.bytes = currentLength;
-            frame.data.resize(currentLength);
+            const bool cropped = frame.width != frame.codedWidth || frame.height != frame.codedHeight ||
+                outputVisibleLeft_ != 0 || outputVisibleTop_ != 0;
+            if (!cropped) frame.data.resize(currentLength);
 
             BYTE* source = nullptr;
             DWORD maxLength = 0;
             DWORD lockedCurrentLength = 0;
             ThrowIfFailed(contiguousBuffer->Lock(&source, &maxLength, &lockedCurrentLength), "IMFMediaBuffer::Lock(decoder output)");
-            std::memcpy(frame.data.data(), source, std::min(currentLength, lockedCurrentLength));
-            ThrowIfFailed(contiguousBuffer->Unlock(), "IMFMediaBuffer::Unlock(decoder output)");
-
-            if (frame.width != frame.codedWidth ||
-                frame.height != frame.codedHeight ||
-                outputVisibleLeft_ != 0 ||
-                outputVisibleTop_ != 0) {
+            // Cropping allocates/validates while the MF buffer is locked. Always
+            // unlock on failure, including allocation failure, before retirement.
+            struct UnlockOnFailure {
+                IMFMediaBuffer* buffer;
+                ~UnlockOnFailure() { if (buffer) static_cast<void>(buffer->Unlock()); }
+            } unlock{contiguousBuffer.Get()};
+            if (cropped) {
+                // Copy visible rows directly into independently owned output.
+                // A full coded-frame vector would add an allocation and copy
+                // before this crop (notably 1920x1088 -> 1920x1080).
                 frame.data = CopyVisibleNv12(
-                    frame.data,
+                    {reinterpret_cast<const std::byte*>(source), std::min(currentLength, lockedCurrentLength)},
                     frame.codedWidth,
                     frame.codedHeight,
                     VisibleFrameArea{outputVisibleLeft_, outputVisibleTop_, frame.width, frame.height});
                 frame.bytes = static_cast<uint32_t>(frame.data.size());
-            }
+            } else std::memcpy(frame.data.data(), source, std::min(currentLength, lockedCurrentLength));
+            const HRESULT unlocked = contiguousBuffer->Unlock();
+            unlock.buffer = nullptr;
+            ThrowIfFailed(unlocked, "IMFMediaBuffer::Unlock(decoder output)");
 
             frames.push_back(std::move(frame));
             break;

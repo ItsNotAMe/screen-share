@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFocusEvent>
+#include <QFrame>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
@@ -57,10 +58,11 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
     consent_->setObjectName("controllerConsent"); layout->addWidget(consent_);
     action_ = host ? new QPushButton("Grant selected control", this) : nullptr;
     if(action_) {action_->setObjectName("controllerAction"); action_->setEnabled(false); layout->addWidget(action_);}
-    auto* revoke = new QPushButton(host ? "Revoke all control" : "Release control", this);
-    revoke->setObjectName("revokeController"); layout->addWidget(revoke);
-    if(!host){auto policy=revoke->sizePolicy();policy.setRetainSizeWhenHidden(true);revoke->setSizePolicy(policy);}
-    connect(revoke, &QPushButton::clicked, this, [this] { Revoke(); });
+    QPushButton* revoke = nullptr;
+    if(host) {
+        revoke=new QPushButton("Revoke all control",this);revoke->setObjectName("revokeController");layout->addWidget(revoke);
+        connect(revoke,&QPushButton::clicked,this,[this]{Revoke();});
+    }
     if (host) {
         auto* selected = new QPushButton("Revoke selected controller", this);
         selected->setObjectName("revokeSelectedController"); layout->addWidget(selected);
@@ -131,6 +133,7 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
             });pulse->start();
         }
     } else {
+        layout->setSpacing(10);
         peers_->hide();
         consent_->hide();
         refresh->hide();
@@ -153,15 +156,35 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
             connect(button,&QToolButton::clicked,this,[this,cap=uint8_t(entry.second)]{RequestControl(cap);});
         }
         layout->insertWidget(layout->indexOf(consent_),selection);
-        auto* hint=new QLabel("Click an input to ask the host for control.",this);hint->setObjectName("FormHint");hint->setWordWrap(true);
+        auto* hint=new QLabel("Click an input to request or release control.",this);hint->setObjectName("FormHint");hint->setWordWrap(true);
         layout->insertWidget(layout->indexOf(selection),hint);
         gameMouseMode_=new QCheckBox("Game mouse",this);gameMouseMode_->setObjectName("gameMouseMode");
         gameMouseMode_->setProperty("roomSwitch",true);
-        gameMouseMode_->setToolTip("For 3D camera control: click the video to lock the cursor. Ctrl+Alt+Shift+Q releases control. Escape goes to the game; Ctrl+Alt+Shift+F toggles fullscreen.");
+        gameMouseMode_->setToolTip("For 3D camera control: click the video to lock the cursor. Ctrl+Alt+Shift+Q releases control; Ctrl+Alt+Shift+F toggles fullscreen.");
         layout->insertWidget(layout->indexOf(selection)+1,gameMouseMode_);
         auto* gameHint=new QLabel(this);
-        gameHint->setObjectName("gameMouseHint");gameHint->setWordWrap(true);
+        gameHint->setObjectName("gameMouseHint");gameHint->setTextFormat(Qt::PlainText);gameHint->setWordWrap(true);
+        gameHint->setAlignment(Qt::AlignLeft|Qt::AlignTop);
+        gameHint->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+        gameHint->setMinimumHeight(gameHint->fontMetrics().lineSpacing()*2);
         layout->insertWidget(layout->indexOf(gameMouseMode_)+1,gameHint);
+        auto* shortcuts=new QWidget(this);shortcuts->setObjectName("InputShortcuts");
+        auto* shortcutLayout=new QVBoxLayout(shortcuts);shortcutLayout->setContentsMargins(0,0,0,0);shortcutLayout->setSpacing(6);
+        auto* divider=new QFrame(shortcuts);divider->setObjectName("SettingsDivider");divider->setFixedHeight(1);shortcutLayout->addWidget(divider);
+        auto* shortcutTitle=new QLabel("Keyboard shortcuts",shortcuts);shortcutTitle->setObjectName("InputShortcutsTitle");shortcutLayout->addWidget(shortcutTitle);
+        auto shortcut=[&](const char* action,const char* keys,const char* name,const char* explanation) {
+            auto* row=new QHBoxLayout;row->setSpacing(8);
+            auto* caption=new QLabel(action,shortcuts);caption->setObjectName("InputShortcutAction");caption->setWordWrap(true);
+            auto* key=new QLabel(keys,shortcuts);key->setObjectName(name);key->setProperty("controlShortcutKey",true);
+            key->setTextFormat(Qt::PlainText);key->setAlignment(Qt::AlignCenter);
+            key->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Preferred);
+            key->setAccessibleName(QString("%1: %2").arg(action,keys));
+            caption->setToolTip(explanation);key->setToolTip(explanation);
+            row->addWidget(caption,1);row->addWidget(key);shortcutLayout->addLayout(row);
+        };
+        shortcut("Fullscreen","Ctrl+Alt+Shift+F","fullscreenShortcut","Toggle fullscreen without sending this shortcut to the game.");
+        shortcut("Release all","Ctrl+Alt+Shift+Q","releaseControlShortcut","Release all remote control and unlock the mouse.");
+        layout->insertWidget(layout->indexOf(gameHint)+1,shortcuts);
         connect(gameMouseMode_,&QCheckBox::toggled,this,[this](bool enabled){
             PauseInput();if(video_)video_->setGameMouseMode(enabled);
         });
@@ -177,8 +200,24 @@ void RoomGamepadControl::RequestControl(uint8_t capability) {
     const auto port=port_();const auto peer=peers_->currentData().toString().toStdString();
     if(!port || peer.empty())return;
     for(const auto& state:port->Read())if(state.peer==peer) {
-        // Keep requested/granted buttons focusable without sending duplicates.
-        if((state.granted|state.requested)&capability){Tick();return;}
+        if(state.releasePending&capability){Tick();return;}
+        if((state.granted|state.requested)&capability) {
+            if(port->Release(peer,capability)) {
+                actionError_.clear();
+                for(auto held=heldInput_.begin();held!=heldInput_.end();) {
+                    const auto kind=held->second.first.kind;
+                    if(capability & (kind==input::Kind::Key?input::Keyboard:input::Mouse))held=heldInput_.erase(held);
+                    else ++held;
+                }
+                if(!((state.granted|state.requested)&~capability)) {
+                    armed_=false;capturingDesktop_=false;requestedPeer_.clear();heldInput_.clear();poller_.reset();
+                    if(video_)video_->setControlCapture(false,false,false);
+                    const QSignalBlocker block(consent_);consent_->setChecked(false);
+                }
+            }
+            else actionError_="Update the host to release controls individually. Ctrl+Alt+Shift+Q releases all control.";
+            Tick();return;
+        }
         requestPermission_=state.permission;
     }
     if(port->Request(peer,capability)) {
@@ -232,13 +271,8 @@ void RoomGamepadControl::RespondToRequest(const QString& peer, uint8_t capabilit
     Tick();
 }
 void RoomGamepadControl::SetVideoAvailable(bool available) {
-    if(host_ || videoAvailable_->exchange(available)==available)return;
-    if(!available) {
-        // Release under the original frame mapping before the video is cleared.
-        // Availability is independent of focus; keep the existing focus policy
-        // so a focused viewer can resume with the same grant after fresh video.
-        const bool paused=inputPaused_->load();PauseInput();inputPaused_->store(paused);
-    }
+    if(host_ || videoAllowed_==available)return;
+    videoAllowed_=available;
     Tick();
 }
 void RoomGamepadControl::Revoke(const QString& explanation) {
@@ -286,8 +320,7 @@ bool RoomGamepadControl::eventFilter(QObject* watched, QEvent* event) {
     if(auto* button=qobject_cast<QToolButton*>(watched);button && button->property("inputChoice").toBool() && isAncestorOf(button)) {
         if(event->type()==QEvent::FocusIn || event->type()==QEvent::FocusOut) {
             const auto reason=static_cast<QFocusEvent*>(event)->reason();
-            // Hiding Release also produces TabFocusReason. Only actual keyboard
-            // navigation should show a focus ring on the next control.
+            // Only actual keyboard navigation should show a focus ring.
             button->setProperty("keyboardFocus",keyboardNavigation_ && event->type()==QEvent::FocusIn &&
                 (reason==Qt::TabFocusReason || reason==Qt::BacktabFocusReason || reason==Qt::ShortcutFocusReason));
             button->style()->unpolish(button);button->style()->polish(button);button->update();
@@ -307,8 +340,17 @@ bool RoomGamepadControl::eventFilter(QObject* watched, QEvent* event) {
     return QWidget::eventFilter(watched, event);
 }
 void RoomGamepadControl::Tick() {
+    if(!host_) {
+        const bool available=videoAllowed_ && video_ && video_->hasFreshFrame();
+        if(videoAvailable_->exchange(available) && !available) {
+            // Release held input before its old mapping is cleared. Preserve
+            // focus/consent so fresh presentation can resume the same grant.
+            const bool paused=inputPaused_->load();PauseInput();inputPaused_->store(paused);
+        }
+    }
     const auto port = port_(); const auto states = port ? port->Read() : std::vector<input::Status>{};
     const auto room = room_(); const auto selected = peers_->currentData().toString();
+    const bool sourceAvailable = room.stream.capture.state != media::HostMediaState::SourceUnavailable;
     if(host_) {
         const auto removing = removingViewer ? removingViewer() : QString{};
         QStringList present;
@@ -373,12 +415,13 @@ void RoomGamepadControl::Tick() {
                 (connection->recovery.state==screenshare::media::PeerLifecycleState::Failed ||
                  connection->recovery.state==screenshare::media::PeerLifecycleState::Closed);
             const bool ended=room.phase==v2::RoomPhase::Failed || room.phase==v2::RoomPhase::Stopped;
-            card->findChild<QLabel*>("PeerControlState")->setText(ended?"Room ended — start sharing again":!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->requested?"Requests control":state->granted?"Control granted":
+            card->findChild<QLabel*>("PeerControlState")->setText(ended?"Room ended — start sharing again":!ready?(failed?"Connection failed — leave and rejoin":"Connecting…"):state->grantPending?"Applying control…":state->revokePending?"Releasing control…":state->paused?"Input paused":state->requested?"Requests control":state->granted?"Control granted":
                 state->reason==input::Reason::Backend?"Input unavailable — check the shared source or controller":
                 state->reason==input::Reason::Ownership?"Selected input is already in use":"Watching");
             QStringList requestedNames;
             if(ready)for(const auto& entry:{std::pair{input::Mouse,"mouse"},std::pair{input::Keyboard,"keyboard"},std::pair{input::Gamepad,"controller"}})if(state->requested&entry.first)requestedNames<<entry.second;
-            if(!requestedNames.empty())card->findChild<QLabel*>("PeerControlState")->setText("Requests " + requestedNames.join(", "));
+            if(ready && !sourceAvailable)card->findChild<QLabel*>("PeerControlState")->setText("No source");
+            else if(!requestedNames.empty())card->findChild<QLabel*>("PeerControlState")->setText("Requests " + requestedNames.join(", "));
             for(auto* button:card->findChildren<QPushButton*>("PeerCapability")) {
                 const auto cap=button->property("capability").toUInt();const bool on=ready&&(state->granted&cap);
                 const bool waiting=ready&&(state->requested&cap);
@@ -386,13 +429,15 @@ void RoomGamepadControl::Tick() {
                     button->setProperty("pendingRequest",waiting);button->setProperty("requestPulse",false);
                     button->style()->unpolish(button);button->style()->polish(button);button->update();
                 }
-                button->setChecked(on);button->setEnabled(ready&&!state->grantPending&&!state->revokePending && removing!=id);
+                button->setChecked(on);button->setEnabled(ready&&sourceAvailable&&!state->grantPending&&!state->revokePending && removing!=id);
                 const auto control=cap==input::Mouse?"mouse":cap==input::Keyboard?"keyboard":"controller";
                 const auto label=waiting?QString("%1 requested %2. Click to allow or deny %2.").arg(name,control):
                     QString("%1 %2 %3 %4").arg(on?"Revoke":"Grant",control,on?"from":"to",name);
                 const auto focusHint=room.capture.selected.kind==media::CaptureKind::Window && (cap&(input::Mouse|input::Keyboard))?
                     QString(" Input pauses while the shared window is not focused."):QString{};
-                button->setToolTip(label+focusHint);button->setAccessibleName(label+focusHint);
+                const auto availabilityHint=!sourceAvailable?QString(" Choose a share source before granting control."):
+                    ready && state->paused?QString(" Input paused; permission is kept. Fresh input resumes automatically."):QString{};
+                button->setToolTip(label+focusHint+availabilityHint);button->setAccessibleName(label+focusHint+availabilityHint);
             }
         }
         for(const auto& id:peerCards_.keys())if(!present.contains(id))delete peerCards_.take(id);
@@ -412,14 +457,15 @@ void RoomGamepadControl::Tick() {
     }
     const auto peer = peers_->currentData().toString().toStdString();
     const auto caps=uint8_t(capabilities_->currentData().toUInt());
-    uint8_t granted = 0, requested = 0; uint64_t permission = 0; input::Reason reason = input::Reason::Unavailable;
+    uint8_t granted = 0, requested = 0, releasing = 0; uint64_t permission = 0; input::Reason reason = input::Reason::Unavailable;
     bool pending = false, revoking = false;
     QStringList active;
     diagnostics_->setText("No selected peer observations.");
     for (const auto& state : states) {
         if (state.granted) active << QString::fromStdString(state.peer);
         if (state.peer == peer) {
-            granted = state.granted; requested = state.requested; permission = state.permission; reason = state.reason; pending = state.grantPending; revoking = state.revokePending;
+            granted = state.granted; requested = state.requested; releasing = state.releasePending;
+            permission = state.permission; reason = state.reason; pending = state.grantPending; revoking = state.revokePending || releasing;
             auto time = [](auto value) { return value ? QString::number(*value) + " us" : QString("unknown"); };
             diagnostics_->setText(QString("Selected peer: %1\nReason: %2; transport blocked: %3\nQueued transitions: %4; states: %5\nApplied: %6; rejected: %7; coalesced: %8\nLocal queue wait: %9; backend apply: %10\nLocal timings only; not network or input-to-display latency.")
                 .arg(QString::fromStdString(state.peer), frontend::InputReason(state.reason), state.transportBlocked ? "yes" : "no")
@@ -428,7 +474,7 @@ void RoomGamepadControl::Tick() {
         }
     }
     if (!host_) {
-        if (armed_ && !granted && (permission > requestPermission_ || (!requested && !revoking)))
+        if (armed_ && !granted && !requested && !revoking)
             Revoke("Host permission ended. Request fresh permission to resume.");
         // The host's explicit grant is authoritative; asking for another input
         // leaves existing grants and their polling owners in place.
@@ -437,7 +483,12 @@ void RoomGamepadControl::Tick() {
             const QSignalBlocker block(consent_);consent_->setChecked(true);actionError_.clear();
         }
         if(granted && (!armed_ || requestedPeer_!=peer)){granted=0;}
+        if(granted && permission!=requestPermission_) {
+            heldInput_.clear(); // The host neutralized the previous permission epoch.
+            requestPermission_=permission;
+        }
         if (poller_ && poller_->permission() != permission) poller_.reset();
+        if (!(granted&input::Gamepad) && poller_) poller_.reset();
         if ((granted & input::Gamepad) && !poller_) {
             poller_ = std::make_unique<input::GamepadPoller>(port, peer, [read = read_, selected=selectedDevice_, paused=inputPaused_, video=videoAvailable_]() -> std::optional<input::Event> {
                 input::Event event;event.kind=input::Kind::Pad;
@@ -454,7 +505,7 @@ void RoomGamepadControl::Tick() {
         capturingDesktop_=!inputPaused_->load() && videoAvailable_->load() && bool(granted&(input::Mouse|input::Keyboard));
         if(video_)video_->setControlCapture(capturingDesktop_,granted&input::Mouse,granted&input::Keyboard);
     }
-    if(action_)action_->setEnabled(room.phase == v2::RoomPhase::Active && caps && consent_->isChecked() && !peer.empty());
+    if(action_)action_->setEnabled(room.phase == v2::RoomPhase::Active && sourceAvailable && caps && consent_->isChecked() && !peer.empty());
     status_->setText(!actionError_.isEmpty()?actionError_:pending ? "Starting selected input…" : granted ? (host_?"Control active":"Host granted control") :
         reason == input::Reason::Backend ? "Input unavailable. Check the shared source, foreground window, or controller driver and slots." :
         reason == input::Reason::Ownership ? "Selected input is already in use." :
@@ -468,25 +519,28 @@ void RoomGamepadControl::Tick() {
     if(host_)status_->setVisible(!actionError_.isEmpty());
     else {
         status_->hide();
-        const auto mouseState=!gameMouseMode_->isChecked()?QString("For 3D games, enable Game mouse above, then click the video."):
-            !(granted&input::Mouse)?QString("Game mouse: request mouse access, then click the video."):
-            video_ && video_->gameMouseCaptured()?QString("Game mouse captured — cursor hidden and locked."):
-            QString("Game mouse ready — click the video to hide and lock the cursor.");
-        findChild<QLabel*>("gameMouseHint")->setText(mouseState+"\nCtrl+Alt+Shift+F: toggle fullscreen\nCtrl+Alt+Shift+Q: release control\nWith keyboard access, Escape goes to the game.");
+        const auto mouseState=!gameMouseMode_->isChecked()?QString("Lock the cursor for 3D camera control."):
+            !(granted&input::Mouse)?QString("Request mouse access, then click the video."):
+            video_ && video_->gameMouseCaptured()?QString("Cursor locked. Release control to unlock."):
+            QString("Click the video to hide and lock the cursor.");
+        const auto controlHint=granted && !videoAvailable_->load()?QString("Remote control paused until video resumes."):
+            granted && inputPaused_->load()?QString("Remote control paused. Click the video to resume."):mouseState;
+        findChild<QLabel*>("gameMouseHint")->setText(controlHint);
         for(const auto& entry:{std::pair{"Mouse","mouse"},std::pair{"Keyboard","keyboard"},std::pair{"Controller","gamepad"}}) {
             auto* button=findChild<QToolButton*>(QString("select%1Input").arg(entry.first));
             const bool allowed=granted & button->property("capability").toUInt();
             const bool selected=allowed || (requested & button->property("capability").toUInt());
+            const bool withdrawing=releasing & button->property("capability").toUInt();
             const QSignalBlocker blocker(button);button->setChecked(selected);
             // Disabling the clicked button moves Qt's focus to the next input,
             // making Keyboard appear highlighted after requesting Mouse.
-            button->setEnabled(room.phase==v2::RoomPhase::Active && permission && !peer.empty() && !revoking);
-            if(!button->property("initialized").toBool() || button->property("granted").toBool()!=allowed || button->property("selected").toBool()!=selected) {
+            button->setEnabled(room.phase==v2::RoomPhase::Active && permission && !peer.empty() && (!revoking || releasing));
+            if(!button->property("initialized").toBool() || button->property("granted").toBool()!=allowed || button->property("selected").toBool()!=selected || button->property("withdrawing").toBool()!=withdrawing) {
                 button->setIcon(uiIcon(entry.second,allowed?"#8ce4d5":selected?"#efc977":"#a3b5af"));
-                button->setProperty("initialized",true);button->setProperty("granted",allowed);button->setProperty("selected",selected);
-                button->setProperty("controlState",allowed?"granted":selected?"requested":"off");
+                button->setProperty("initialized",true);button->setProperty("granted",allowed);button->setProperty("selected",selected);button->setProperty("withdrawing",withdrawing);
+                button->setProperty("controlState",withdrawing?"releasing":allowed?"granted":selected?"requested":"off");
                 button->style()->unpolish(button);button->style()->polish(button);button->update();
-                const auto description=QString("%1: %2").arg(entry.first,allowed?"Permission granted":selected?"Waiting for host permission":"Click to request control");
+                const auto description=QString("%1: %2").arg(entry.first,withdrawing?"Releasing control":allowed?"Click to release control":selected?"Click to cancel request":"Click to request control");
                 button->setAccessibleName(description);
                 button->setToolTip(entry.first==QStringLiteral("Keyboard")?description+". For window sharing, input pauses while the shared window is not focused.":description);
             }
@@ -496,6 +550,5 @@ void RoomGamepadControl::Tick() {
             if(isVisible() && (!actionError_.isEmpty() || granted || armed_ || requested))Toast::show(window(),notice,3500);
             lastNotice_=notice;
         }
-        findChild<QPushButton*>("revokeController")->setVisible(granted||requested||armed_);
     }
 }

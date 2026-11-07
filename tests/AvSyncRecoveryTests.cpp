@@ -1,23 +1,38 @@
 #include "../tools/webrtc-proof/PublicRoomSessionFixture.h"
 #include "media/audio/PcmBlockPacer.h"
+#include "media/audio/PcmRenderLoop.h"
 #include "media/SignalingExecutor.h"
 #include <deque>
 
 namespace {
-struct OutputState { std::atomic<unsigned> stallMs{0}, stalls{0}; };
+struct OutputState {
+    std::atomic<unsigned> stallMs{0}, stalls{0}, created{0}, live{0}, audibleBlocks{0};
+    std::atomic<bool> wedge{false}, wrongThread{false};
+};
 class Output final : public PcmPlayoutEndpoint {
     std::shared_ptr<OutputState> state_;
     PcmBlockPacer pacer_;
+    std::thread::id owner_ = std::this_thread::get_id();
 public:
-    explicit Output(std::shared_ptr<OutputState> state) : state_(std::move(state)) {}
+    explicit Output(std::shared_ptr<OutputState> state) : state_(std::move(state)) { ++state_->created; ++state_->live; }
+    ~Output() override { if (owner_ != std::this_thread::get_id()) state_->wrongThread = true; --state_->live; }
     void Start() override { pacer_.Start(); }
-    void Write(const PcmBlock&, std::stop_token stop) override {
+    void Write(const PcmBlock& block, std::stop_token stop) override {
+        if (state_->wedge.exchange(false)) {
+            // The production render loop sees a permanently full buffer while
+            // all native-style waits succeed. No physical output/device reset.
+            WritePcmRenderBlock(stop, [] { return 0u; }, [](auto, auto) { Check(false); },
+                [] { std::this_thread::sleep_for(10ms); });
+            return;
+        }
         if (const auto ms = state_->stallMs.exchange(0)) {
             const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
             while (!stop.stop_requested() && std::chrono::steady_clock::now() < end) std::this_thread::sleep_for(1ms);
             pacer_.Start(); ++state_->stalls;
         }
         pacer_.Wait(stop);
+        if (!stop.stop_requested() && std::any_of(block.begin(), block.end(), [](auto sample) { return sample != 0; }))
+            ++state_->audibleBlocks;
     }
     uint32_t DelayMs() const override { return 0; }
     uint32_t BufferFrames() const override { return 480; }
@@ -148,11 +163,29 @@ int main(int argc, char** argv) {
                     Check(viewerEvidence->audioDiagnostics->maxPlayoutWriteUs >= uint64_t(stall) * 1000);
                 }
             }
+            const auto outputsBefore = output->created.load(), framesBefore = video->frames.load();
+            const auto audibleBefore = output->audibleBlocks.load();
+            const auto playbackBefore = viewer->Playback();
+            output->wedge = true;
+            wait([&] { return viewer->Playback().health.state == AudioEndpointState::Failed; });
+            Check(video->frames >= framesBefore + 10);
+            wait([&] {
+                return output->created == outputsBefore + 1 && viewer->Playback().health.state == AudioEndpointState::Running &&
+                    output->audibleBlocks >= audibleBefore + 10;
+            });
+            run([&] {
+                const auto playback = viewer->Playback();
+                Check(playback.revision == playbackBefore.revision && playback.health.failures == playbackBefore.health.failures + 1);
+                Check(host->FailedPeers().empty() && viewer->FailedPeers().empty());
+            });
+            Check(video->frames >= framesBefore + 25 && output->live == 1);
+            std::cout << "Wedged render buffer: output reopened, audible PCM resumed, video continued without peer failure" << std::endl;
             const auto events = viewerEvidence->audioDiagnostics->events->Read().records;
             Check(std::any_of(events->begin(), events->end(), [](const auto& event) {
                 return event.labels.at("event") == "audio-playout-stall" && event.numbers.at("writeUs") >= 400000;
             }));
             stop();
+            Check(output->live == 0 && !output->wrongThread);
             Check(viewerEvidence->audioDiagnostics->playoutTiming.Read().stage == AudioPlayoutStage::Stopped);
         } catch (...) { stop(); throw; }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }

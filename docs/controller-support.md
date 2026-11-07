@@ -36,9 +36,14 @@ one of XInput's four player slots for local play. Therefore no more than three r
 granted, and fewer are allowed when multiple local controllers are already connected.
 
 Each virtual device belongs to a stable viewer identity. Complete state snapshots are encrypted and
-replay-protected by the existing control channel. A 300 ms keepalive timeout, revoke, panic hotkey,
-viewer disconnect, backend error, or session shutdown submits neutral input and
-destroys only the affected virtual device.
+replay-protected by the existing control channel. After 300 ms without input,
+the host submits neutral state while retaining the grant and virtual device.
+A renewed input token rejects packets from before the gap and restarts the
+viewer's controller reader; fresh input resumes without another host grant.
+Use updated clients on both computers for the complete recovery behavior.
+If neutralization fails, control is revoked and the device is released. Explicit
+release, host revoke, panic hotkey, source changes, viewer disconnect, backend
+failure and session shutdown still release the affected virtual device.
 
 ## Long-term signed backend
 
@@ -59,8 +64,9 @@ releases held input without cancelling permissions. Keyboard grants support disp
 and window capture. For window capture, mouse and keyboard input pauses while the
 shared window is not focused; held input is released and permission is retained.
 Returning focus resumes new input without replaying discarded events.
-Explicit release, host revoke, source changes, disconnect and stale input
-retain their release safeguards. The CLI keeps its explicit focused-preview consent
+Temporary capture-geometry staleness also releases held desktop input and blocks
+injection until fresh geometry returns, keeping ownership of the same source.
+Source invalidation or identity changes still cancel control. The CLI keeps its explicit focused-preview consent
 workflow; see [CLI controls](cli.md#cli-workflow).
 
 Multi-controller native allocation remains a known failed qualification despite

@@ -12,4 +12,7 @@ struct Validation {
 };
 Validation ValidateClientCommand(const QByteArray& bytes, bool directory = false);
 Validation ValidateServerEvent(const QByteArray& bytes, bool directory = false);
+// Shared entry-form/admission rules. Empty room-name result means invalid.
+QString NormalizeRoomName(const QString&);
+bool ValidRoomPassword(const QString&);
 }

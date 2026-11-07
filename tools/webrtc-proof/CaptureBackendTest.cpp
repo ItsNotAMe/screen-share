@@ -10,6 +10,7 @@
 #include <cstring>
 #include <iostream>
 #include <string_view>
+#include <iomanip>
 
 using namespace screenshare;
 using namespace screenshare::media;
@@ -200,6 +201,93 @@ void StaticCadence() {
         Wait([&]{frame=source.Poll();return frame.has_value();});
     }
 }
+double CaptureCpuMs() {
+    FILETIME created{}, exited{}, kernel{}, user{};
+    Require(GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user), "Capture CPU query failed");
+    auto ticks = [](FILETIME value) { return (uint64_t(value.dwHighDateTime) << 32) | value.dwLowDateTime; };
+    return double(ticks(kernel) + ticks(user)) / 10000.;
+}
+void CaptureDemand(bool benchmark) {
+    using namespace std::chrono_literals;
+    WindowsMediaRuntime runtime;
+    Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
+    proof::TestWindow window;
+    window.Invoke([&] {
+        SetWindowLongPtrW(window.handle(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(window.handle(), nullptr, 0, 0, 1280, 720,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        SetTimer(window.handle(), 1, 10, nullptr);
+    });
+    auto demand = std::make_shared<std::atomic<bool>>(false);
+    auto target = std::make_shared<input::DesktopTargetState>();
+    CaptureConfig config; config.sourceType = CaptureSourceType::Window;
+    config.windowHandle = reinterpret_cast<uint64_t>(window.handle()); config.targetFps = 60;
+    WindowsCaptureSource source(config, target, {}, demand); source.Start();
+    std::optional<CaptureSample> sample;
+    Wait([&] { sample = source.Poll(); return sample.has_value(); });
+    ShortWait timer;
+    auto pump = [&](std::chrono::milliseconds duration, unsigned& samples, unsigned& converted) {
+        auto previous = sample->resource;
+        const auto until = std::chrono::steady_clock::now() + duration;
+        while (std::chrono::steady_clock::now() < until) {
+            if (auto frame = source.Poll()) {
+                ++samples; converted += frame->resource != previous; previous = frame->resource; sample = std::move(frame);
+            }
+            timer.Wait();
+        }
+        Require(target->Read().generation != 0, "Idle capture let input geometry expire");
+    };
+    if (benchmark) for (unsigned pair = 0; pair < 6; ++pair) {
+        for (bool active : {pair % 2 == 0, pair % 2 != 0}) {
+            *demand = active;
+            unsigned ignored = 0, ignoredConversions = 0; pump(500ms, ignored, ignoredConversions);
+            unsigned samples = 0, converted = 0;
+            const auto cpu = CaptureCpuMs(); const auto begin = std::chrono::steady_clock::now();
+            pump(2000ms, samples, converted);
+            const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            const auto used = CaptureCpuMs() - cpu;
+            Require(active ? samples >= 95 && samples <= 135 : samples >= 8 && samples <= 12,
+                "Native capture demand did not control sample cadence");
+            std::cout << std::fixed << std::setprecision(4) << "CAPTURE_DEMAND {\"pair\":" << pair
+                << ",\"active\":" << (active ? "true" : "false") << ",\"cpuMs\":" << used
+                << ",\"wallMs\":" << elapsed << ",\"samples\":" << samples << ",\"converted\":" << converted << "}\n" << std::flush;
+        }
+    }
+    // Queue two distinct paints without polling, then wake before the 200 ms
+    // idle slot. The very first resumed sample must contain the newest paint.
+    auto paint = [&](int shade) { window.Invoke([&] {
+        KillTimer(window.handle(), 1); SetWindowLongPtrW(window.handle(), GWLP_USERDATA, shade - 70);
+        RedrawWindow(window.handle(), nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+    }); };
+    auto center = [&] {
+        const auto resource = std::static_pointer_cast<WindowsCaptureResource>(sample->resource);
+        const auto pixels = resource->buffer->ToNv12(); Require(bool(pixels), "Demand proof readback failed");
+        return pixels->DataY()[(pixels->height() / 2) * pixels->StrideY() + pixels->width() / 2];
+    };
+    *demand = false; paint(80);
+    Wait([&] { if (auto frame = source.Poll()) sample = std::move(frame); return center() >= 80 && center() <= 95; });
+    const auto identity = target->Read().generation;
+    paint(110); std::this_thread::sleep_for(50ms);
+    paint(170); std::this_thread::sleep_for(60ms);
+    *demand = true;
+    const auto awake = std::chrono::steady_clock::now(); sample = source.Poll();
+    Require(bool(sample), "Active capture waited for the idle frame slot");
+    const auto wakeMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - awake).count();
+    Require(center() >= 150, "Resumed capture converted an older queued WGC frame");
+    Require(target->Read().generation == identity, "Demand change rotated the input identity");
+    *demand = false;
+    window.Invoke([&] { ShowWindow(window.handle(), SW_MINIMIZE); });
+    Wait([&] { source.Poll(); return source.Minimized(); });
+    unsigned ignored = 0, ignoredConversions = 0; pump(1200ms, ignored, ignoredConversions);
+    Require(!source.Poll() && target->Read().generation == identity, "Idle minimization replayed pixels or lost input identity");
+    window.Invoke([&] { ShowWindow(window.handle(), SW_SHOWNOACTIVATE); });
+    Wait([&] { sample = source.Poll(); return sample.has_value(); });
+    window.Close();
+    Wait([&] { source.Poll(); return source.Closed(); });
+    Require(target->Read().generation == 0, "Idle source closure retained input geometry");
+    std::cout << "Capture demand: newest first frame, immediate wake (" << wakeMs
+        << " ms), input identity, minimize/restore and close passed\n";
+}
 void SourceSwitches() {
     WindowsMediaRuntime runtime;
     Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
@@ -291,6 +379,8 @@ int main(int argc, char** argv) try {
     if (argc > 1 && std::string_view(argv[1]) == "--live") WindowLifecycle();
     if (argc > 1 && std::string_view(argv[1]) == "--display") DisplayRebuild();
     if (argc > 1 && std::string_view(argv[1]) == "--cadence") StaticCadence();
+    if (argc > 1 && std::string_view(argv[1]) == "--demand") CaptureDemand(true);
+    if (argc > 1 && std::string_view(argv[1]) == "--demand-check") CaptureDemand(false);
     if (argc > 1 && std::string_view(argv[1]) == "--switch") SourceSwitches();
     if (argc > 1 && std::string_view(argv[1]) == "--preview") PreviewReadback();
     std::cout << "Capture backend checks passed\n"; return 0;

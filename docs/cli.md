@@ -265,12 +265,15 @@ F11/Alt-Enter fullscreen, Escape, mute/volume callbacks, first-frame sizing and 
 legacy/retained NV12 entry points. Invalid shapes are rejected before window sizing.
 Redraw is separate from fresh-frame accounting; minimized frames are discarded.
 
-Device-loss recovery permits three rebuilds, with 250 ms drop-only backoff. Good
-frames do not replenish the budget; a fourth or nonrecoverable failure becomes
-terminal. The title then displays a rejoin instruction, and the shipped v2 CLI emits
+Device-loss recovery permits three rebuilds, with 250 ms drop-only backoff.
+Thirty successfully presented incoming frames replenish the budget; redraws and
+skipped presents do not count. A fourth failure before healthy recovery, or a
+nonrecoverable error, becomes terminal. The title then displays a rejoin
+instruction, and the shipped v2 CLI emits
 a bounded `presentation-status` record per error transition. Audio and membership
 continue. The final `presentation` record now includes `errors`, `recoveries` and
-`terminal`. Ordinary status updates cannot overwrite the terminal title.
+`terminal`. Recovery totals remain cumulative until ClearFrame. Ordinary status
+updates cannot overwrite the terminal title.
 
 Explicit ClearFrame resets resources and the session recovery budget. Native
 resources are released before window destruction. Closing a preview no longer

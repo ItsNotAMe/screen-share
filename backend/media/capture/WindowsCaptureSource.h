@@ -1,5 +1,6 @@
 #pragma once
 #include "CaptureSession.h"
+#include "CaptureCadence.h"
 #include "media/webrtc/D3dVideoFrameBuffer.h"
 #include "input/v2/DesktopTarget.h"
 #include "media/DiagnosticHistory.h"
@@ -14,7 +15,8 @@ struct WindowsCaptureResource final : CaptureResource {
 // factory. WindowsMediaRuntime must outlive the joined session.
 class WindowsCaptureSource final : public ICaptureSource {
 public:
-    explicit WindowsCaptureSource(CaptureConfig config, std::shared_ptr<input::DesktopTargetState> target = {}, std::shared_ptr<DiagnosticHistory> diagnostics = {}) : config_(config), target_(std::move(target)), sourceId_((uint64_t(GetCurrentProcessId())<<32)|++nextSource_), property_(input::WindowIdentityProperty(sourceId_)), diagnostics_(std::move(diagnostics)) {
+    explicit WindowsCaptureSource(CaptureConfig config, std::shared_ptr<input::DesktopTargetState> target = {}, std::shared_ptr<DiagnosticHistory> diagnostics = {},
+        std::shared_ptr<std::atomic<bool>> demand = {}) : config_(config), target_(std::move(target)), sourceId_((uint64_t(GetCurrentProcessId())<<32)|++nextSource_), property_(input::WindowIdentityProperty(sourceId_)), diagnostics_(std::move(diagnostics)), demand_(std::move(demand)), cadence_(std::max(1, config.targetFps)) {
         config_.allowDisplayFallback = true;
         config_.includeNv12 = config_.ownedNv12 = true;
         config_.includeNv12Readback = config_.includeBgraReadback = false;
@@ -36,12 +38,16 @@ public:
     std::optional<CaptureSample> Poll() override {
         try {
             const auto now = std::chrono::steady_clock::now();
-            if (now < nextFrame_) return std::nullopt;
+            // Bootstrap/restore promptly until valid pixels are owned. Idle
+            // throttling must not delay the first capture-device/frame barrier.
+            const bool bootstrap = !retained_ && !Minimized();
+            if (!cadence_.Due(now, bootstrap || !demand_ || demand_->load(std::memory_order_relaxed))) return std::nullopt;
             // WGC/DXGI may stop producing frames when the desktop is unchanged.
             // Sample the last owned texture at the configured cadence instead
             // of waiting for damage (or WebRTC's slow idle refresh).
             auto frame = capture_.TryCaptureFrame(std::chrono::milliseconds(0));
             if (Closed()) { retained_.reset(); if (target_) target_->Invalidate(sourceId_); return std::nullopt; }
+            cadence_.Sampled(now);
             if (Minimized()) {
                 retained_.reset();
                 // A fullscreen game may minimize when the host opens the Grant
@@ -57,9 +63,6 @@ public:
                 }
                 return std::nullopt;
             }
-            const auto period = std::chrono::nanoseconds(1000000000 / std::max(1, config_.targetFps));
-            nextFrame_ += period;
-            if(nextFrame_ <= now)nextFrame_ = now + period; // Skip missed slots, without accumulating poll jitter.
             if (!frame) {
                 if(target_) {
                     if(inputTarget_) {
@@ -103,7 +106,7 @@ public:
             CaptureImplementation::WindowsGraphicsCapture : CaptureImplementation::DesktopDuplication, capture_.displayFallback()};
     }
     void Retire() noexcept override { retained_.reset(); if(target_)target_->Invalidate(sourceId_); if (device_) device_->Retire(); }
-    void Rebuild() override { retained_.reset(); nextFrame_={}; capture_.RebuildDevice(); device_.reset(); }
+    void Rebuild() override { retained_.reset(); cadence_.Reset(); capture_.RebuildDevice(); device_.reset(); }
 private:
     std::optional<input::DesktopTarget> Target(int width,int height) const {
         const auto bounds=capture_.InputBounds();
@@ -129,6 +132,7 @@ private:
     std::optional<input::DesktopTarget> inputTarget_;
     std::shared_ptr<DiagnosticHistory> diagnostics_;
     int inputAvailability_ = -1;
-    std::chrono::steady_clock::time_point nextFrame_;
+    const std::shared_ptr<std::atomic<bool>> demand_;
+    CaptureCadence cadence_;
 };
 }
