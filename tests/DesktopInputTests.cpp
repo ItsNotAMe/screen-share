@@ -2,15 +2,103 @@
 #include "codec/InputMappingSei.h"
 #include "input/WindowsKeyInput.h"
 #include "input/WindowsMouseInput.h"
+#include "input/HostMouseMonitorThread.h"
 #include "RecordingGamepadSink.h"
 #include <dwmapi.h>
 #include <iostream>
 #include <stdexcept>
 #include <source_location>
 #include <thread>
+#include <future>
+#include <atomic>
+#include <cstdlib>
 using namespace screenshare::input;
 void Check(bool value,std::source_location where=std::source_location::current()) {
     if(!value)throw std::runtime_error("Desktop input assertion at "+std::to_string(where.line()));
+}
+void JoinMouseMonitor(std::unique_ptr<screenshare::HostMouseMonitorThread> monitor, const char* failure) {
+    auto stopped = std::async(std::launch::async, [owner = std::move(monitor)]() mutable { owner.reset(); });
+    if (stopped.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+        std::cerr << failure << '\n' << std::flush;
+        std::_Exit(1); // A stuck join must produce a useful test failure, not hang.
+    }
+    stopped.get();
+}
+void MouseMonitorDelayedStartup() {
+    // No hook/SendInput. Hold installation before the thread creates a queue,
+    // request stop, then let startup finish. Shutdown must retain that request.
+    std::promise<void> entered, resume;
+    auto resumed = resume.get_future();
+    std::atomic<unsigned> removed{0};
+    auto monitor = std::make_unique<screenshare::HostMouseMonitorThread>([&] {
+        entered.set_value(); resumed.wait(); return reinterpret_cast<HHOOK>(1);
+    }, [&](HHOOK hook) { if (hook == reinterpret_cast<HHOOK>(1)) ++removed; });
+    entered.get_future().get();
+    monitor->RequestStop();
+    resume.set_value();
+    JoinMouseMonitor(std::move(monitor), "Mouse monitor lost stop during delayed queue startup");
+    Check(removed == 1);
+}
+void MouseMonitorFullQueue() {
+    std::promise<DWORD> entered;
+    std::promise<void> resume;
+    auto resumed = resume.get_future();
+    std::atomic<unsigned> removed{0};
+    auto monitor = std::make_unique<screenshare::HostMouseMonitorThread>([&] {
+        MSG message{}; PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE);
+        entered.set_value(GetCurrentThreadId()); resumed.wait();
+        return reinterpret_cast<HHOOK>(1);
+    }, [&](HHOOK) { ++removed; });
+    const auto thread = entered.get_future().get();
+    unsigned queued = 0;
+    while (queued < 100000 && PostThreadMessageW(thread, WM_APP, 0, 0)) ++queued;
+    const auto error = GetLastError();
+    // Always release startup before an assertion can unwind the owner.
+    monitor->RequestStop(); resume.set_value();
+    JoinMouseMonitor(std::move(monitor), "Mouse monitor could not stop with a full message queue");
+    Check(queued > 0 && queued < 100000 && error == ERROR_NOT_ENOUGH_QUOTA && removed == 1);
+}
+void MouseMonitorImmediateStop() {
+    for (unsigned cycle = 0; cycle < 100; ++cycle) {
+        std::atomic<unsigned> installed{0}, removed{0};
+        DWORD owner = 0;
+        auto monitor = std::make_unique<screenshare::HostMouseMonitorThread>([&] {
+            owner = GetCurrentThreadId(); ++installed;
+            return cycle % 2 ? nullptr : reinterpret_cast<HHOOK>(1);
+        }, [&](HHOOK) { if (owner == GetCurrentThreadId()) ++removed; });
+        monitor->RequestStop(); monitor->RequestStop();
+        JoinMouseMonitor(std::move(monitor), "Immediate mouse monitor stop did not join");
+        Check(installed == 1 && removed == (cycle % 2 ? 0u : 1u));
+    }
+}
+void MouseMonitorMessagePump() {
+    constexpr auto name = L"ScreenShareMouseMonitorPumpTest";
+    WNDCLASSW type{}; type.hInstance = GetModuleHandleW(nullptr); type.lpszClassName = name;
+    type.lpfnWndProc = [](HWND window, UINT message, WPARAM w, LPARAM l) -> LRESULT {
+        if (message == WM_NCCREATE)
+            SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams));
+        if (message == WM_APP) {
+            ++*reinterpret_cast<std::atomic<unsigned>*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+            return 37;
+        }
+        return DefWindowProcW(window, message, w, l);
+    };
+    Check(RegisterClassW(&type));
+    struct Class { const wchar_t* name; ~Class() { UnregisterClassW(name, GetModuleHandleW(nullptr)); } } registered{name};
+    std::promise<HWND> created;
+    std::atomic<unsigned> messages{0}, removed{0};
+    auto monitor = std::make_unique<screenshare::HostMouseMonitorThread>([&] {
+        const auto window = CreateWindowExW(0, name, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, type.hInstance, &messages);
+        created.set_value(window); return reinterpret_cast<HHOOK>(window);
+    }, [&](HHOOK hook) { if (DestroyWindow(reinterpret_cast<HWND>(hook))) ++removed; });
+    const auto window = created.get_future().get();
+    DWORD_PTR result = 0;
+    const bool sent = window && SendMessageTimeoutW(window, WM_APP, 0, 0, SMTO_ABORTIFHUNG, 1000, &result);
+    const bool posted = window && PostMessageW(window, WM_APP, 0, 0);
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (messages < 2 && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    JoinMouseMonitor(std::move(monitor), "Mouse monitor could not stop after processing messages");
+    Check(sent && result == 37 && posted && messages == 2 && removed == 1);
 }
 struct Evidence {unsigned applied=0,released=0,neutralized=0;bool healthy=true,focused=true,held=false,fail=false;};
 class Device final:public DesktopDevice {
@@ -135,6 +223,10 @@ void StaleCaptureKeepsOwnership() {
     Check(evidence->released==1 && pads->released==1);
 }
 int main() {try {
+    MouseMonitorDelayedStartup();
+    MouseMonitorFullQueue();
+    MouseMonitorImmediateStop();
+    MouseMonitorMessagePump();
     const auto relative=screenshare::WindowsRelativeMouseInput(-123,456);
     Check(relative.type==INPUT_MOUSE && relative.mi.dx==-123 && relative.mi.dy==456);
     Check(relative.mi.dwFlags==(MOUSEEVENTF_MOVE|MOUSEEVENTF_MOVE_NOCOALESCE));

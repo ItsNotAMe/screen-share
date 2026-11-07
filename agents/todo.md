@@ -18,9 +18,6 @@ Details and prior measured limits: [known limitations](../docs/known-limitations
 - [ ] Investigate hardware decoder Section-handle lifetime and hardware encoder
   output deadlines in code; preserve the software compatibility option and fallback.
 - [ ] Investigate capture resource ownership and deferred WGC/RPC cleanup in code.
-- [ ] Investigate intermittent desktop-input shutdown timeout: mouse monitor
-  publishes its thread ID before creating its message queue and ignores the quit
-  post result; establish startup/stop ordering before changing this lifecycle.
 - [ ] Reduce four-viewer software CPU and memory usage.
 
 ## Future work driven by reports

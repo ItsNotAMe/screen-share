@@ -12,6 +12,43 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Make host mouse-monitor shutdown reliable - 2026-11-07
+
+Follow-up to the intermittent desktop-input timeout during idle-capture work.
+The old monitor published its thread ID before creating a Windows message queue,
+waited only 200 ms for startup and ignored a quit-post failure before joining.
+That can lose shutdown during delayed startup or when the queue is full. The
+original timeout's exact cause remains unproven; this change fixes a reproduced
+lifecycle defect, not a diagnosed driver/input-device issue.
+
+HostMouseMonitorThread now owns a manual-reset event created before thread start.
+RequestStop signals it, including before installation or queue creation; teardown
+joins, unhooks on the worker and then closes the event. The worker checks the
+event before entering a message wait and between messages. MsgWaitForMultipleObjectsEx
+blocks on cancellation or messages with MWMO_INPUTAVAILABLE; no polling timer,
+ID-readiness sleep or quit post remains. Existing low-level mouse callback,
+300 ms host-priority policy and last-owner reference counting remain. Event or
+thread creation failure cannot increment the owner count. Hook-install failure
+retains its previous behavior; it is exercised as a shutdown boundary.
+
+The delayed-install regression failed with the extracted legacy quit-message
+implementation ("Mouse monitor lost stop during delayed queue startup") and
+passes with the event implementation. Other checks fill a private thread queue
+to ERROR_NOT_ENOUGH_QUOTA, cancel it before pumping, run 100 immediate/repeated
+stop cycles (including null hook results), and verify sent/posted delivery and
+owner-thread cleanup through a message-only window. These seams install no input
+hook and inject no input; existing desktop grant/health checks still use the
+production composition without Apply/SendInput. This does not qualify physical
+mouse behavior or interrupt a blocked Windows hook-install/uninstall API call.
+
+Windows contracts: [hook owner message loop](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelmouseproc),
+[event/message wait and already-seen input](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-msgwaitformultipleobjectsex).
+Release `all` build and packaged CLI/UI hashes passed. Twenty consecutive
+desktop-input runs passed in 22.26 s, including 2,000 immediate stop cycles plus
+20 delayed-start/full-queue/message-pump scenarios each. All 46 serial application
+checks passed in 313.76 s (desktop-input 1.11 s). Commit locally; no publication
+or version bump. No performance claim.
+
 ## Reduce capture work without active video demand - 2026-11-07
 
 Each Windows runtime now owns an atomic captureDemand signal, shared with its

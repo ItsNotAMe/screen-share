@@ -7,6 +7,17 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 mouse-monitor shutdown: the shared host-priority mouse hook now owns
+a persistent stop event and joined worker. Shutdown no longer depends on the
+worker publishing an ID, creating a queue or accepting a quit post. The worker
+waits for messages/cancellation without a timer, checks stop before entering the
+message wait and between messages, and unhooks on its owner thread before the
+event is closed. Reference ownership increments only after successful creation.
+Desktop-input regressions cover delayed startup, a full queue, immediate/repeated
+stop, failed hook installation and sent/posted delivery using a private window;
+no physical input is injected. The previous isolated CTest timeout's exact cause
+is unproven; the reproduced lost-stop race is fixed. No CPU/latency claim.
+
 2026-11-07 idle capture: each Windows runtime owns an atomic demand bit, driven
 by actual per-peer deliverFrames eligibility. At least one eligible viewer uses
 the selected cadence; otherwise sample source health/geometry at min(5, FPS).
