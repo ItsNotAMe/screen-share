@@ -2,6 +2,7 @@
 #include "ui/QtRoomSession.h"
 #include "ui/RoomGamepadControl.h"
 #include "render/FramePresentationBackend.h"
+#include "ui/CapturePreviewImage.h"
 #include <QWidget>
 class QLabel;
 class QLineEdit;
@@ -88,6 +89,7 @@ private:
     QWidget* hostFpsMetric_ = nullptr;
     QLabel* hostPreview_ = nullptr;
     QSize previewSourceSize_;
+    HostPreviewCaptureSize previewCaptureSize_;
     QThread* previewWorker_ = nullptr;
     screenshare::media::CaptureSelection previewSource_;
     uint64_t previewRevision_ = 0;

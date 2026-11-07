@@ -647,6 +647,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         hostPreview_->setPixmap(uiIcon("display").pixmap(80,80));primary->addWidget(hostPreview_,1);
         auto* previewActivity=new QTimer(this);previewActivity->setInterval(100);
         connect(previewActivity,&QTimer::timeout,this,[this,loopback] {
+            previewCaptureSize_.Update(hostPreview_->size(),hostPreview_->devicePixelRatioF());
             const bool active=!loopback&&!closing_&&hostPreview_->isVisible()&&window()->isActiveWindow()&&!window()->isMinimized()&&!session_.status().stream.preferences.videoPaused&&session_.status().stream.capture.state!=HostMediaState::SourceUnavailable;
             if(active!=previewActive_){previewActive_=active;RefreshHostPreview();}
         });previewActivity->start();
@@ -1117,16 +1118,18 @@ void RoomSessionWindow::RefreshHostPreview() {
     auto pending=std::make_shared<std::atomic_bool>(false);
     previewWorker_=QThread::create([this,source,revision,pending] {
         try {
-            screenshare::CaptureConfig capture;ConfigureCapturePreview(capture,{640,360});capture.allowDisplayFallback=false;
+            screenshare::CaptureConfig capture;ConfigureCapturePreview(capture,previewCaptureSize_.Size());capture.targetFps=30;capture.allowDisplayFallback=false;
             capture.backend=screenshare::CaptureBackend::WindowsGraphicsCapture;
             capture.sourceType=source.kind==CaptureKind::Window?screenshare::CaptureSourceType::Window:screenshare::CaptureSourceType::Display;
             capture.windowHandle=source.window;capture.displayIndex=source.display;
             screenshare::DesktopCapturer capturer;capturer.Start(capture);
             while(!QThread::currentThread()->isInterruptionRequested()) {
-                const auto nextFrame=std::chrono::steady_clock::now()+CapturePreviewInterval;
+                const auto nextFrame=std::chrono::steady_clock::now()+HostCapturePreviewInterval;
+                const auto target=previewCaptureSize_.Size();
+                capturer.SetTargetSize(target.width(),target.height());
                 auto frame=capturer.TryCaptureFrame(std::chrono::milliseconds(30));
                 if(frame&&!frame->pixels.empty()&&!pending->exchange(true)) {
-                    auto image=CapturePreviewImage(*frame,{640,360});
+                    auto image=CapturePreviewImage(*frame,{frame->width,frame->height});
                     const QSize sourceSize(frame->sourceWidth,frame->sourceHeight);
                     QMetaObject::invokeMethod(this,[this,image,sourceSize,revision,pending]{pending->store(false);if(revision==previewRevision_&&previewActive_){previewSourceSize_=sourceSize;hostPreview_->setPixmap(QPixmap::fromImage(image));}},Qt::QueuedConnection);
                 }

@@ -124,6 +124,12 @@ public:
     static std::vector<WindowCaptureInfo> EnumerateWindows();
 
     void Start(const CaptureConfig& config);
+    // Capture-owner thread only. Resize output without reopening the capture item.
+    // Existing fitWithinTarget/no-upscale policy still applies.
+    void SetTargetSize(int width, int height) {
+        config_.targetWidth = width;
+        config_.targetHeight = height;
+    }
     void Stop();
     // Owner thread only. Preserve the original WGC item, never reselect by HWND.
     // Caller must retire encoders using the old device before invoking this.

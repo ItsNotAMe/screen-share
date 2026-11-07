@@ -3,9 +3,30 @@
 #include <QImage>
 #include <QThread>
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <thread>
 
 inline constexpr std::chrono::milliseconds CapturePreviewInterval{200};
+inline constexpr std::chrono::milliseconds HostCapturePreviewInterval{33};
+
+// Publish viewport pixels from the UI thread; capture resizes on its owner thread.
+// Bound readback cost on large/high-DPI desktops, without reopening WGC on resize.
+class HostPreviewCaptureSize {
+public:
+    void Update(QSize viewport, qreal devicePixelRatio) {
+        const auto width = std::clamp(int(std::ceil(viewport.width() * devicePixelRatio)), 1, 2560);
+        const auto height = std::clamp(int(std::ceil(viewport.height() * devicePixelRatio)), 1, 1440);
+        pixels_.store((uint64_t(width) << 32) | uint32_t(height));
+    }
+    QSize Size() const {
+        const auto pixels = pixels_.load();
+        return {int(pixels >> 32), int(pixels & 0xffffffff)};
+    }
+private:
+    std::atomic<uint64_t> pixels_{(uint64_t(640) << 32) | 360};
+};
+
 inline void ConfigureCapturePreview(screenshare::CaptureConfig& config, QSize maximum) {
     config.targetWidth = maximum.width(); config.targetHeight = maximum.height();
     config.fitWithinTarget = true; config.targetFps = 5;

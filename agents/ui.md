@@ -117,9 +117,12 @@
   restores the exact prior selection. An explicit mute cancels pending automatic
   source edits; an idle audio choice saves configuration without opening devices.
 
-- Local create/host monitoring previews run at five FPS and fit on the GPU before
-  BGRA readback (640 × 360; chooser thumbnails 320 × 180). Preserve source aspect
-  ratio and original size metadata. Preview waits must honor worker interruption.
+- Host monitoring previews run at 30 FPS and fit to the preview's physical pixel
+  bounds before BGRA readback, capped at 2560 × 1440. Resize on the capture owner
+  without reopening WGC; paint original pixels directly for high-DPI detail.
+  Create previews stay at five FPS/640 × 360; chooser thumbnails at 320 × 180.
+  Preserve source aspect ratio and original size metadata. Preview waits must
+  honor worker interruption; inactive/minimized host previews remain suspended.
 - Home and Join preserve room rows/focus during directory pushes. Access changes
   update both the icon and badge styling; no-match search shows a Clear search
   action and differs from a genuinely empty directory.

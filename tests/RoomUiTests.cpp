@@ -1,5 +1,6 @@
 #include "ui/RoomSessionWindow.h"
 #include "ui/SourcePickerDialog.h"
+#include "ui/SourcePreviewLabel.h"
 #include "ui/RoomGamepadControl.h"
 #include "ui/SessionDetailsWidget.h"
 #include "ui/PeerDiagnosticsWidget.h"
@@ -1857,6 +1858,32 @@ void CapturePreviewOwnership() {
         Check(image.copy().pixel(0,0)==expected);
     }
 }
+void HostPreviewQuality() {
+    HostPreviewCaptureSize requested;
+    requested.Update({900,600},2);Check(requested.Size()==QSize(1800,1200));
+    requested.Update({600,400},1);Check(requested.Size()==QSize(600,400));
+    requested.Update({4000,2500},2);Check(requested.Size()==QSize(2560,1440));
+    // A one-device-pixel pattern must survive presentation at both normal and
+    // high DPI. Scaling through logical pixels first destroys the 2x pattern.
+    for(const int scale:{1,2}) {
+        QImage source(600*scale,300*scale,QImage::Format_RGB32);source.fill(QColor("#15251f"));
+        for(int y=0;y<16*scale;++y)for(int x=0;x<source.width();++x)
+            source.setPixelColor(x,y,x%2?Qt::white:Qt::black);
+        {
+            QPainter text(&source);text.scale(scale,scale);text.setPen(Qt::white);
+            QFont font("Segoe UI",14);text.setFont(font);
+            text.drawText(QRect(24,40,550,220),Qt::AlignLeft|Qt::TextWordWrap,
+                "Host preview\nReadable source text at the displayed resolution.\nFine detail should survive high-DPI presentation.");
+        }
+        SourcePreviewLabel label;label.resize(600,300);label.setPixmap(QPixmap::fromImage(source));
+        QImage rendered(source.size(),QImage::Format_RGB32);rendered.setDevicePixelRatio(scale);rendered.fill(Qt::red);
+        label.render(&rendered);
+        for(int x=32;x<64;++x)Check(rendered.pixelColor(x,8)==source.pixelColor(x,8));
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);Check(rendered.save(QDir(output).filePath(QString("host-preview-%1x.png").arg(scale))));
+        }
+    }
+}
 QJsonArray SourceSwitchScenario(const std::string& origin) {
     QJsonArray steadySamples;
     RoomSessionConfig config; config.room.origin = origin; config.room.host = true;
@@ -2704,6 +2731,10 @@ int main(int argc, char** argv) {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs); // Deterministic file-picker interaction in UI proofs.
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
     QApplication::setStyle("Fusion");
+    if(argc==2 && std::string(argv[1])=="--preview-quality") {
+        try { HostPreviewQuality();std::cout<<"{\"passed\":true,\"preview_quality\":true}\n";return 0; }
+        catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+    }
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
     // Qt's offscreen backend does not enumerate the Windows font directory.
     const auto fonts = QDir(qEnvironmentVariable("WINDIR", "C:/Windows")).filePath("Fonts");
@@ -2716,6 +2747,7 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         CapturePreviewOwnership();
+        HostPreviewQuality();
         WindowPlacementChecks();
         RoomEndNoticePolicyChecks();
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
