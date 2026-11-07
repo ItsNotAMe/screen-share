@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFocusEvent>
+#include <QFrame>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
@@ -131,6 +132,7 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
             });pulse->start();
         }
     } else {
+        layout->setSpacing(10);
         peers_->hide();
         consent_->hide();
         refresh->hide();
@@ -157,11 +159,31 @@ RoomGamepadControl::RoomGamepadControl(bool host, std::function<std::shared_ptr<
         layout->insertWidget(layout->indexOf(selection),hint);
         gameMouseMode_=new QCheckBox("Game mouse",this);gameMouseMode_->setObjectName("gameMouseMode");
         gameMouseMode_->setProperty("roomSwitch",true);
-        gameMouseMode_->setToolTip("For 3D camera control: click the video to lock the cursor. Ctrl+Alt+Shift+Q releases control. Escape goes to the game; Ctrl+Alt+Shift+F toggles fullscreen.");
+        gameMouseMode_->setToolTip("For 3D camera control: click the video to lock the cursor. Ctrl+Alt+Shift+Q releases control; Ctrl+Alt+Shift+F toggles fullscreen.");
         layout->insertWidget(layout->indexOf(selection)+1,gameMouseMode_);
         auto* gameHint=new QLabel(this);
         gameHint->setObjectName("gameMouseHint");gameHint->setTextFormat(Qt::PlainText);gameHint->setWordWrap(true);
+        gameHint->setAlignment(Qt::AlignLeft|Qt::AlignTop);
+        gameHint->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+        gameHint->setMinimumHeight(gameHint->fontMetrics().lineSpacing()*2);
         layout->insertWidget(layout->indexOf(gameMouseMode_)+1,gameHint);
+        auto* shortcuts=new QWidget(this);shortcuts->setObjectName("InputShortcuts");
+        auto* shortcutLayout=new QVBoxLayout(shortcuts);shortcutLayout->setContentsMargins(0,0,0,0);shortcutLayout->setSpacing(6);
+        auto* divider=new QFrame(shortcuts);divider->setObjectName("SettingsDivider");divider->setFixedHeight(1);shortcutLayout->addWidget(divider);
+        auto* shortcutTitle=new QLabel("Keyboard shortcuts",shortcuts);shortcutTitle->setObjectName("InputShortcutsTitle");shortcutLayout->addWidget(shortcutTitle);
+        auto shortcut=[&](const char* action,const char* keys,const char* name,const char* explanation) {
+            auto* row=new QHBoxLayout;row->setSpacing(8);
+            auto* caption=new QLabel(action,shortcuts);caption->setObjectName("InputShortcutAction");caption->setWordWrap(true);
+            auto* key=new QLabel(keys,shortcuts);key->setObjectName(name);key->setProperty("controlShortcutKey",true);
+            key->setTextFormat(Qt::PlainText);key->setAlignment(Qt::AlignCenter);
+            key->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Preferred);
+            key->setAccessibleName(QString("%1: %2").arg(action,keys));
+            caption->setToolTip(explanation);key->setToolTip(explanation);
+            row->addWidget(caption,1);row->addWidget(key);shortcutLayout->addLayout(row);
+        };
+        shortcut("Fullscreen","Ctrl+Alt+Shift+F","fullscreenShortcut","Toggle fullscreen without sending this shortcut to the game.");
+        shortcut("Release control","Ctrl+Alt+Shift+Q","releaseControlShortcut","Release remote control and unlock the mouse.");
+        layout->insertWidget(layout->indexOf(gameHint)+1,shortcuts);
         connect(gameMouseMode_,&QCheckBox::toggled,this,[this](bool enabled){
             PauseInput();if(video_)video_->setGameMouseMode(enabled);
         });
@@ -479,13 +501,13 @@ void RoomGamepadControl::Tick() {
     if(host_)status_->setVisible(!actionError_.isEmpty());
     else {
         status_->hide();
-        const auto mouseState=!gameMouseMode_->isChecked()?QString("For 3D games, enable Game mouse above, then click the video."):
-            !(granted&input::Mouse)?QString("Game mouse: request mouse access, then click the video."):
-            video_ && video_->gameMouseCaptured()?QString("Game mouse captured — cursor hidden and locked."):
-            QString("Game mouse ready — click the video to hide and lock the cursor.");
+        const auto mouseState=!gameMouseMode_->isChecked()?QString("Lock the cursor for 3D camera control."):
+            !(granted&input::Mouse)?QString("Request mouse access, then click the video."):
+            video_ && video_->gameMouseCaptured()?QString("Cursor locked. Release control to unlock."):
+            QString("Click the video to hide and lock the cursor.");
         const auto controlHint=granted && !videoAvailable_->load()?QString("Remote control paused until video resumes."):
             granted && inputPaused_->load()?QString("Remote control paused. Click the video to resume."):mouseState;
-        findChild<QLabel*>("gameMouseHint")->setText(controlHint+"\nCtrl+Alt+Shift+F: toggle fullscreen\nCtrl+Alt+Shift+Q: release control\nWith keyboard access, Escape goes to the game.");
+        findChild<QLabel*>("gameMouseHint")->setText(controlHint);
         for(const auto& entry:{std::pair{"Mouse","mouse"},std::pair{"Keyboard","keyboard"},std::pair{"Controller","gamepad"}}) {
             auto* button=findChild<QToolButton*>(QString("select%1Input").arg(entry.first));
             const bool allowed=granted & button->property("capability").toUInt();

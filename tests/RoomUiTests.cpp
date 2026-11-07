@@ -2491,7 +2491,8 @@ void DesktopInputScenario(const std::string& origin) {
     QEvent hostFocused(QEvent::WindowDeactivate);QApplication::sendEvent(&viewer,&hostFocused);
     auto* controlHint=viewer.findChild<QLabel*>("gameMouseHint");Check(controlHint && controlHint->isVisible());
     Wait([&]{return controlHint->text().startsWith("Remote control paused. Click the video");});
-    Check(controlHint->text().contains("Ctrl+Alt+Shift+Q"));
+    auto* releaseShortcut=viewer.findChild<QLabel*>("releaseControlShortcut");
+    Check(releaseShortcut && releaseShortcut->isVisible() && releaseShortcut->text()=="Ctrl+Alt+Shift+Q");
     if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
         QDir().mkpath(output);Check(viewer.grab().save(QDir(output).filePath("viewer-control-focus-paused.png")));
     }

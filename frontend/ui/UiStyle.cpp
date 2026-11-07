@@ -340,6 +340,10 @@ QPushButton#OptionsDisclosure:hover { background: #263d33; }
 QPushButton#roomBack { background: transparent; border: 0; padding: 6px 10px; color: #b7c8c0; font-size: 14px; }
 QPushButton#roomBack:hover { background: #20312c; }
 QLabel#FormHint { color: #a3b5af; }
+QLabel#gameMouseHint { color: #a3b5af; }
+QLabel#InputShortcutsTitle { color: #a3b5af; font-size: 12px; font-weight: 600; }
+QLabel#InputShortcutAction { color: #b7c8c0; font-size: 12px; }
+QLabel[controlShortcutKey="true"] { color: #d8e7df; background: #1b2822; border: 1px solid #35473f; border-radius: 4px; padding: 2px 6px; font-size: 12px; font-weight: 600; }
 QLabel#browserError, QLabel#profileError, QLabel#playbackError { color: #ffafa6; }
 QLabel#browserError[joinPending="true"] { color: #a3b5af; }
 QWidget#HomeRoomHeader { background: #202b26; border-top-left-radius: 8px; border-top-right-radius: 8px; }

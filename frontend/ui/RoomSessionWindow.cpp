@@ -945,7 +945,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         connect(playbackVolume_,&QSpinBox::valueChanged,this,[this,volumeDelay]{if(playbackVolume_->hasFocus())volumeDelay->start();});
         connect(playbackMuted_,&QCheckBox::clicked,this,[volumeDelay]{volumeDelay->start();});
         auto* fullscreen=new QPushButton("Fullscreen"); fullscreen->setObjectName("sessionFullscreen");fullscreen->setIcon(uiIcon("fullscreen"));fullscreen->setFixedHeight(42);fullscreen->setIconSize(QSize(20,20));footer->addWidget(fullscreen);
-        fullscreenButton_=fullscreen;fullscreen->setToolTip("Toggle fullscreen: Ctrl+Alt+Shift+F. Escape goes to the game while keyboard control is active.");
+        fullscreenButton_=fullscreen;fullscreen->setToolTip("Toggle fullscreen: Ctrl+Alt+Shift+F.");
         auto* cinema=new QWidget;cinema->setObjectName("StreamFullscreen");auto* cinemaLayout=new QVBoxLayout(cinema);cinemaLayout->setContentsMargins(0,0,0,0);cinemaLayout->setSpacing(0);pages->addWidget(cinema);
         auto previousState=std::make_shared<Qt::WindowStates>();
         qApp->installEventFilter(this);
@@ -960,7 +960,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             *previousState=window()->windowState();streamFullscreen_=true;video_->setCornerRadius(0);cinemaLayout->addWidget(video_);pages->setCurrentWidget(cinema);video_->show();
             if(auto* app=dynamic_cast<AppShellWindow*>(window()))app->setChromeVisible(false);
             window()->showFullScreen();video_->setFocus();
-            Toast::show(window(),"Fullscreen. Ctrl+Alt+Shift+F exits fullscreen. Ctrl+Alt+Shift+Q releases control. With keyboard access, Escape goes to the game.",6500);
+            Toast::show(window(),"Fullscreen. Ctrl+Alt+Shift+F exits fullscreen. Ctrl+Alt+Shift+Q releases control.",6500);
         });
         auto* escape=new QShortcut(QKeySequence(Qt::Key_Escape),this);connect(escape,&QShortcut::activated,this,[this,settingsPage,hideSettings]{if(streamFullscreen_){exitFullscreen_();return;}if(settingsPage->isVisible())hideSettings();});
         auto* toggle=new QPushButton("Controls"); toggle->setObjectName("toggleSessionControls");toggle->setIcon(uiIcon("controls"));toggle->setIconSize(QSize(20,20));toggle->setFixedHeight(42);toggle->setCheckable(true);toggle->setChecked(true);footer->addWidget(toggle);

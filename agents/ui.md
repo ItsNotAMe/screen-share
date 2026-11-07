@@ -2,6 +2,13 @@
 
 ## Current UI Direction
 
+- Viewer controls keep the short state-dependent Game mouse/pause hint separate
+  from a compact Keyboard shortcuts reference. Show Fullscreen and Release
+  control as aligned action/key-badge rows, with readable muted styling. Reserve
+  two hint lines to avoid shifts between ordinary states; let longer copy wrap.
+  Owner explicitly prefers no Escape explanation, including tooltips/toasts.
+  Keep the underlying Escape and remote-input behavior unchanged.
+
 - Horizontal scrollbars and scroll-area corners use the shared dark theme
   throughout the app, including the Stream details viewer table. Keep these
   rules global instead of limiting them to QFileDialog. The existing 10 px

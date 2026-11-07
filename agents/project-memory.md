@@ -12,6 +12,28 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Integrate viewer control guidance into the sidebar - 2026-11-07
+
+Owner requested replacing the visually awkward Game mouse/shortcut paragraph.
+RoomGamepadControl now shows a short muted state-dependent hint under Game mouse,
+then an aligned Keyboard shortcuts section with key badges for Fullscreen and
+Release control. Viewer spacing is slightly tighter; captions wrap and badges
+remain intact in compact sidebars. Two hint lines are reserved for stable state
+changes. Pause/video-wait guidance retains its existing meaning and visibility.
+An initial Escape row was rejected by the owner as unnecessary; remove Escape
+explanations entirely from the UI, including toggle/fullscreen tooltips and
+fullscreen toast. Actual key/input behavior is unchanged.
+
+Uses the existing UI/UX skill and native widgets/styles; no generated mockup was
+needed for this scoped edit. Existing desktop-input proof now checks that the
+separate release shortcut stays visible while control is paused. Final native
+renders were inspected at 740/1200 widths and in the focus-paused state; normal
+width no longer requires a sidebar scrollbar. Release `all` build and packaged
+CLI/UI hashes passed. Four focused CTests passed in 45.89 s (Qt room UI, video
+input, update deferral and self-test); device-free desktop-input and controller
+service scenarios passed in 16.29/18.53 s. No physical input was injected. Commit
+this improvement separately, without releasing.
+
 ## Recover viewer audio when the render buffer stops draining - 2026-11-07
 
 Separate from prior host-capture PCM watchdogs and output device-error/routing
