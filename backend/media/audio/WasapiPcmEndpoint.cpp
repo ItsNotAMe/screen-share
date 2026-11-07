@@ -3,6 +3,7 @@
 #include "StereoDownmix.h"
 #include "DefaultAudioDeviceNotification.h"
 #include "RoutedPcmCapture.h"
+#include "PcmRenderLoop.h"
 #include <algorithm>
 #include <cstring>
 #include <deque>
@@ -153,26 +154,23 @@ public:
         Check(client_->Start());
     }
     void Write(const PcmBlock& block, std::stop_token stop) override {
-        uint32_t offset = 0;
-        while (offset < 480 && !stop.stop_requested()) {
+        WritePcmRenderBlock(stop, [&] {
             // A route change during a blocked write must also release its owner.
             // Throw rather than returning unpaced silence to a raw ADM caller.
             if (DeviceChanged()) throw std::runtime_error("Default audio output changed");
             UINT32 padding;
             Check(client_->GetCurrentPadding(&padding));
             delayMs_ = padding / 48;
-            const auto frames = std::min(480u - offset, bufferFrames_ - std::min(padding, bufferFrames_));
-            if (frames) {
-                BYTE* destination;
-                Check(render_->GetBuffer(frames, &destination));
-                std::memcpy(destination, block.data() + offset * 2, frames * 4);
-                Check(render_->ReleaseBuffer(frames, 0));
-                offset += frames;
-            } else {
-                const auto result = WaitForSingleObject(event_, 10);
-                if (result != WAIT_OBJECT_0 && result != WAIT_TIMEOUT) throw std::runtime_error("WASAPI render wait failed");
-            }
-        }
+            return bufferFrames_ - std::min(padding, bufferFrames_);
+        }, [&](uint32_t offset, uint32_t frames) {
+            BYTE* destination;
+            Check(render_->GetBuffer(frames, &destination));
+            std::memcpy(destination, block.data() + offset * 2, frames * 4);
+            Check(render_->ReleaseBuffer(frames, 0));
+        }, [&] {
+            const auto result = WaitForSingleObject(event_, 10);
+            if (result != WAIT_OBJECT_0 && result != WAIT_TIMEOUT) throw std::runtime_error("WASAPI render wait failed");
+        });
     }
     uint32_t DelayMs() const override { return delayMs_; }
     uint32_t BufferFrames() const override { return bufferFrames_; }

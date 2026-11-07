@@ -41,6 +41,17 @@ reopen after Close. Recovery preserves settings/revision, primes with silence
 instead of the in-flight pre-activation block, and then resumes live pulls.
 Paced discard continues during outages; do not add a replay queue or pause video.
 
+Native viewer rendering now also detects a full/stuck buffer when WASAPI keeps
+returning success: one 10 ms PCM write has a one-second completion deadline.
+Tiny partial writes and event notifications cannot extend it. Capacity is checked
+before expiry, so a delayed owner can finish into a healthy ready buffer; stop
+wins before another commit. Expiry throws through the existing controlled-output
+failure path above, retiring the endpoint, discarding that in-flight block and
+reopening with silence/fresh pulls. The existing 10 ms event waits, pinned device,
+mute/volume settings and retry policy remain. This cannot preempt a native driver
+call that itself blocks. Supplied-clock render checks and real H264/Opus room
+recovery use simulated endpoint capacity; they do not fault physical audio devices.
+
 Windows ownership/callback rules follow [stream-routing guidance](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing-implementation-considerations)
 and [IMMNotificationClient restrictions](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient).
 Default route flow/role filtering follows [OnDefaultDeviceChanged](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immnotificationclient-ondefaultdevicechanged).

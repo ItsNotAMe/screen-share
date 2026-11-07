@@ -7,6 +7,16 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 viewer render stalls: WASAPI output writes now expire an unfinished
+10 ms PCM block after one second, even if waits succeed or tiny partial writes
+occur. Fresh capacity is checked first; a delayed owner can complete a healthy
+write, and stop wins before committing again. Expiry reuses ControlledPcmPlayout
+retirement/backoff/reopen with silence, preserving the selected output and gain.
+Clock-supplied tests cover stalled/partial buffers and cancellation; the real
+WebRTC room test verifies output recovery, resumed nonzero PCM, continued video
+and joined output ownership using fake buffer capacity. Physical driver calls
+cannot be preempted and physical audio stalls remain unqualified. No CPU claim.
+
 2026-11-07 mouse-monitor shutdown: the shared host-priority mouse hook now owns
 a persistent stop event and joined worker. Shutdown no longer depends on the
 worker publishing an ID, creating a queue or accepting a quit post. The worker

@@ -12,6 +12,42 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Recover viewer audio when the render buffer stops draining - 2026-11-07
+
+Separate from prior host-capture PCM watchdogs and output device-error/routing
+recovery. Native WASAPI Playout::Write formerly retried successful full-padding
+queries and 10 ms event waits forever when the engine stopped draining without
+an HRESULT failure. That prevented the existing controlled output from retiring
+and reopening the endpoint. It was a code-path gap, not a diagnosed physical
+driver fault or a repeat of capture/recovery-budget renewal.
+
+PcmRenderLoop now owns that same 480-frame write loop with native callbacks for
+padding, buffer commit and the existing event wait. One unfinished block expires
+after one second; events/tiny writes cannot renew it. Capacity is checked first,
+allowing a delayed worker to finish into a healthy buffer. Stop is checked both
+before polling and after padding, before the next commit. No new owner, queue,
+timer or replay mechanism. PcmRenderStalled propagates through the existing
+ControlledPcmPlayout failure path: retire on the playout worker, paced discard,
+250 ms..5 s capped retry, prime with silence and pull fresh PCM. Selected output,
+volume/mute and revision remain; no fallback from pinned output. Native calls
+that block inside the driver still cannot be preempted in-process.
+
+The extracted old write loop failed the new regression with "Render buffer wait
+remained unbounded"; the one-second deadline passes. Supplied-clock tests cover
+full capacity stalls, exact timeout, tiny-progress bounds, partial sample order,
+999 ms healthy completion, a five-second delayed owner with fresh capacity,
+pre-stop/stop-at-deadline/stop-during-padding and no PCM commit after cancellation.
+Controlled-output tests use the same loop with fake capacity to prove retirement,
+exact retry backoff, pinned settings, silence prime/fresh gain-applied PCM, muted
+stall recovery and owner-thread teardown. The real H264/Opus room regression adds
+a permanently full fake render buffer: video continues through expiry, output
+reopens, nonzero decoded PCM resumes, revisions remain and no peer fails.
+
+Focused NativePcmAudioTests and AvSyncRecoveryTests passed. Release `all` build,
+packaged CLI/UI hashes and all 46 serial CTests passed (314.69 s; expanded A/V
+recovery 36.95 s). No physical device reset/playback/capture was requested; no
+native-driver qualification or CPU/latency improvement claim. Commit locally.
+
 ## Make host mouse-monitor shutdown reliable - 2026-11-07
 
 Follow-up to the intermittent desktop-input timeout during idle-capture work.
