@@ -1,6 +1,8 @@
 #include "media/capture/SwitchableCaptureSource.h"
 #include "media/capture/SyntheticCaptureSource.h"
 #include "media/capture/CaptureRecovery.h"
+#include "media/capture/CaptureCadence.h"
+#include "capture/LatestQueuedFrame.h"
 #include <atomic>
 #include <iostream>
 #include <thread>
@@ -275,7 +277,53 @@ void FailureBoundaries() {
     state->silent = false; Replace(timeout, control, state); timeout.Stop();
     Check(!state->live && !state->wrongThread, "Failure boundary cleanup escaped its owner");
 }
+void DemandCadence() {
+    for (const int fps : {1, 3, 30, 60, 240}) {
+        CaptureCadence cadence(fps);
+        auto now = CaptureCadence::Clock::time_point{} + 1h;
+        Check(cadence.Due(now, false), "Idle startup waited for a frame slot");
+        cadence.Sampled(now);
+        const auto idlePeriod = std::chrono::nanoseconds(1'000'000'000 / std::min(fps, 5));
+        Check(!cadence.Due(now + idlePeriod - 1ns, false) && cadence.Due(now + idlePeriod, false),
+            "Idle capture cadence exceeded its source cap");
+        cadence.Sampled(now + idlePeriod);
+        now += idlePeriod + 1ms;
+        Check(cadence.Due(now, true), "Viewer demand waited for an idle slot");
+        cadence.Sampled(now);
+        const auto activePeriod = std::chrono::nanoseconds(1'000'000'000 / fps);
+        Check(!cadence.Due(now + activePeriod - 1ns) && cadence.Due(now + activePeriod),
+            "Active capture cadence changed");
+        now += 1h; Check(cadence.Due(now), "Delayed capture did not resume"); cadence.Sampled(now);
+        Check(!cadence.Due(now), "Delayed capture replayed missed slots");
+        cadence.Reset(); Check(cadence.Due(now, false), "Capture rebuild retained an old frame deadline");
+    }
+}
+void LatestQueuedFrame() {
+    struct Frame {
+        unsigned id = 0;
+        std::vector<unsigned>* closed = nullptr;
+        explicit operator bool() const { return id != 0; }
+        void Close() { Check(id != 0, "Discarded capture frame closed twice"); closed->push_back(id); id = 0; }
+    };
+    std::vector<unsigned> closed;
+    Frame frame{1, &closed}; unsigned next = 2;
+    screenshare::SelectLatestQueuedFrame(frame, [&] { return Frame{next++, &closed}; });
+    Check(frame.id == 3 && next == 4 && closed == std::vector<unsigned>({1, 2}),
+        "Capture did not select the newest bounded queued frame");
+    frame.Close(); Check(closed == std::vector<unsigned>({1, 2, 3}), "Latest capture frame ownership was lost");
+    unsigned polls = 0;
+    screenshare::SelectLatestQueuedFrame(frame, [&] { ++polls; return Frame{}; });
+    Check(polls == 0, "Empty capture frame polled an unbounded queue");
+    frame = {4, &closed};
+    screenshare::SelectLatestQueuedFrame(frame, [&] { ++polls; return Frame{}; });
+    Check(frame.id == 4 && polls == 1, "Capture dropped its only available frame");
+    bool failed = false;
+    try { screenshare::SelectLatestQueuedFrame(frame, []() -> Frame { throw std::runtime_error("Queue failure"); }); }
+    catch (const std::runtime_error&) { failed = true; }
+    Check(failed && frame.id == 4, "Queue error lost the frame owned by the caller"); frame.Close();
+}
 int main() try {
+    DemandCadence(); LatestQueuedFrame();
     MinimizedRestore(); RecoveryBudgetBoundaries(); HealthyRecoveries(); ReadFailure(); RecoveryFailure(false); RecoveryFailure(true); PendingReplacement(); FailureBoundaries();
     std::cout << "Capture: minimized restore/timeout, renewed/bounded recovery, read/rebuild failure, replacement, cancellation and failure boundaries passed.\n";
     return 0;

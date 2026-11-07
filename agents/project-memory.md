@@ -12,6 +12,59 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Reduce capture work without active video demand - 2026-11-07
+
+Each Windows runtime now owns an atomic captureDemand signal, shared with its
+initial/replacement capture sources. The coordinator sets it from actual per-peer
+deliverFrames eligibility, not membership alone. Empty rooms, connecting-only
+peers, all-video pause or a zero video allowance use min(5, configured FPS) health
+sampling. A returning eligible viewer restores normal cadence without an idle
+deadline wait. Native bootstrap/restore stays full-rate until valid owned pixels
+exist; minimized sources advance cadence too. Audio, input identity, capture
+health and stop cancellation remain independent. No new worker, queue or timer;
+automatic encoder threading remains. Separate runtimes have separate signals.
+
+WGC now closes at most two older queued frames before converting the newest
+available one. The final frame has an outer Close guard, including poll failures
+and source resize/recreation paths. Portable queue tests exercise bounded work,
+discard ownership, empty queues and errors; supplied-clock cadence tests cover
+1/3/30/60/240 FPS, exact idle/active boundaries, immediate wake, no catch-up burst
+and rebuild reset. The real-peer/synthetic-source regression failed before wiring
+the signal with "Connected video did not restore full capture demand". It now
+records six samples in each 1.2 s empty/paused interval, continues audio, resumes
+connected video, ignores a connecting-only viewer and idles after the last leave.
+Stop leaves no source/resource ownership behind. All portable room fixtures now
+exercise optional demand using the production synthetic source/cadence.
+
+Six active/idle AB/BA phase pairs on one generated 1080p CaptureSession owner
+measure median process CPU 120.92→15.61 ms/s (87.1% lower, pairs 74.9–91.7%) and
+120→10 samples per approximately two seconds. Scope: luma generation, capture
+polling and handoff, excluding native WGC, codecs, networking and presentation.
+This is not measured native-game or whole-app CPU savings. Process CPU timing is
+coarse at the low idle load. scripts/measure-idle-capture.py records the raw
+phases and source/executable hashes in docs/benchmarks/idle-capture-2026-11-07.json.
+The final benchmark's hashes match the Release executable and measured sources.
+
+NativeCaptureTests --demand[-check] compiles and covers native pixels on first
+resume, input identity, minimize/restore/closure and optional native CPU phases.
+It could not open its owned generated window: IGraphicsCaptureItemInterop returns
+"The specified service does not exist as an installed service." Those native
+assertions and native capture CPU savings remain unverified. Do not broaden this
+window proof to capture the desktop or claim physical-driver qualification.
+
+Release `all` build and packaged CLI/UI hashes passed. A fresh full serial CTest
+run passed all 46 checks in 314.64 s. No version bump or publication.
+
+The first full CTest run passed 45/46; desktop-input hit its 15 s timeout without
+diagnostic output. Ten isolated repeats then passed in 11.22 s total, followed
+by the clean full-suite rerun above (desktop-input 1.12 s). This test
+does not create a capture source/runtime. Inspection found a pre-existing mouse
+monitor startup/stop ordering risk: it publishes its ID before queue creation,
+waits at most 200 ms for an ID and ignores PostThreadMessage's result before join.
+[Windows requires the destination queue to exist](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postthreadmessagea).
+This is a possible cause, not an established diagnosis of that timeout; recorded
+in the maintenance backlog for separate work. No input lifecycle code changed.
+
 ## Restore responsive software encoder defaults - 2026-11-07
 
 Owner asked whether the worker-budget change was faster/slower, then delegated

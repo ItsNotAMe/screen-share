@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "scope": "Generated 1920x1080 luma capture via production CaptureSession, 60 FPS active / 5 FPS idle; excludes native WGC, codecs, network and presentation",
+  "measurement": "Six alternating AB/BA phase pairs on one joined source owner; 500 ms settle and 2000 ms measurement per phase; process CPU includes capture and main threads",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "logicalProcessors": 16,
+  "executableSha256": "829d340251ac4ac31087c5f3b57e3edd26332fe45c0d3479220746a7b7b8b3fa",
+  "sourceSha256": {
+    "backend/media/capture/CaptureCadence.h": "1e48e0bf639c9e024502f3811fdd05353a8ce2b449ec44d34eb26eca37815ffc",
+    "backend/media/capture/SyntheticCaptureSource.h": "dce485808b9484aa9475936b2f51d0d02e6a9d61552bd72afc5276ecbe39c7bd",
+    "backend/media/capture/CaptureSession.cpp": "78aff8fed2b550dc5fc89932a89ca4caffbe111df413cec6849db0645a6cc789",
+    "tools/webrtc-proof/CaptureDemandBenchmark.cpp": "a9f050a123cfb5559604083c6bdcb93627f9478d9ea4ded14cd5c584fffde287"
+  },
+  "runs": [
+    {
+      "pair": 0,
+      "active": true,
+      "cpuMs": 234.375,
+      "wallMs": 2001.1185,
+      "samples": 120
+    },
+    {
+      "pair": 0,
+      "active": false,
+      "cpuMs": 46.875,
+      "wallMs": 2003.3778,
+      "samples": 10
+    },
+    {
+      "pair": 1,
+      "active": false,
+      "cpuMs": 62.5,
+      "wallMs": 2000.0636,
+      "samples": 10
+    },
+    {
+      "pair": 1,
+      "active": true,
+      "cpuMs": 250.0,
+      "wallMs": 2004.5228,
+      "samples": 121
+    },
+    {
+      "pair": 2,
+      "active": true,
+      "cpuMs": 328.125,
+      "wallMs": 2003.0986,
+      "samples": 120
+    },
+    {
+      "pair": 2,
+      "active": false,
+      "cpuMs": 31.25,
+      "wallMs": 2001.5468,
+      "samples": 10
+    },
+    {
+      "pair": 3,
+      "active": false,
+      "cpuMs": 15.625,
+      "wallMs": 2006.9179,
+      "samples": 11
+    },
+    {
+      "pair": 3,
+      "active": true,
+      "cpuMs": 187.5,
+      "wallMs": 2003.7314,
+      "samples": 121
+    },
+    {
+      "pair": 4,
+      "active": true,
+      "cpuMs": 187.5,
+      "wallMs": 2007.5751,
+      "samples": 120
+    },
+    {
+      "pair": 4,
+      "active": false,
+      "cpuMs": 31.25,
+      "wallMs": 2003.52,
+      "samples": 10
+    },
+    {
+      "pair": 5,
+      "active": false,
+      "cpuMs": 31.25,
+      "wallMs": 2008.4985,
+      "samples": 10
+    },
+    {
+      "pair": 5,
+      "active": true,
+      "cpuMs": 296.875,
+      "wallMs": 2009.9715,
+      "samples": 120
+    }
+  ],
+  "summary": {
+    "activeCpuMsPerSecond": 120.91998116034698,
+    "idleCpuMsPerSecond": 15.605236639399315,
+    "cpuReductionPercent": 87.0945756940651,
+    "pairedCpuReductionRange": [
+      74.94426177247564,
+      91.67989798353652
+    ],
+    "activeMedianSamples": 120.0,
+    "idleMedianSamples": 10.0
+  }
+}

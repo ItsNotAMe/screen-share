@@ -7,6 +7,20 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 idle capture: each Windows runtime owns an atomic demand bit, driven
+by actual per-peer deliverFrames eligibility. At least one eligible viewer uses
+the selected cadence; otherwise sample source health/geometry at min(5, FPS).
+Bootstrap remains full-rate until valid pixels exist, and demand wake bypasses
+the idle deadline. Minimized sources advance their polling cadence too. Audio,
+input identity and stop cancellation remain independent. Source replacements
+share their runtime's bit; separate runtimes never share it. WGC closes at most
+two discarded queued frames before converting the newest available one. Portable
+clock/queue tests and real-peer pause/audio/resume tests pass. Generated 1080p
+CaptureSession CPU falls 120.92→15.61 ms/s (87.1%, pairs 74.9–91.7%); this excludes
+native capture/codecs/network/rendering. The compiled native proof could not open
+its test window because WGC reports its service is unavailable, so native pixels,
+minimize/closure and native CPU reduction remain unqualified. See performance.md.
+
 2026-11-07 software encoder default: restored automatic threading for responsive
 sharing after the two-worker experiment saved CPU but increased encoding delay
 and reduced 60 FPS frame-time headroom. Worker limits remain explicit low-level

@@ -60,6 +60,7 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<unsigned> offers{0};
     std::atomic<unsigned> smallFrames{0};
     std::shared_ptr<proof::CaptureLifetime> capture = std::make_shared<proof::CaptureLifetime>();
+    std::shared_ptr<std::atomic<bool>> captureDemand = std::make_shared<std::atomic<bool>>(false);
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     std::optional<PcmEndpointFactories> audioEndpoints;
     std::shared_ptr<PcmAudioDiagnostics> audioDiagnostics = std::make_shared<PcmAudioDiagnostics>();
@@ -105,6 +106,7 @@ public:
         native_ = WindowsRoomRuntimeFactory(std::move(windows))(identity, std::move(send));
 #else
         NativeRoomRuntimeOptions options;
+        options.captureDemand = evidence_->captureDemand;
         options.audioDiagnostics = evidence_->audioDiagnostics;
         options.inputSink = evidence_->input;
         auto endpoints = evidence_->audioEndpoints.value_or(proof::SyntheticAudio(evidence_->audio));
@@ -133,10 +135,10 @@ public:
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
                 diagnostics), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>(), packetFactory, eventLogFactory);
         };
-        options.capture = [lifetime = evidence_->capture] { return std::make_unique<proof::ObservedCaptureSource>(lifetime); };
+        options.capture = [lifetime = evidence_->capture, demand = evidence_->captureDemand] { return std::make_unique<proof::ObservedCaptureSource>(lifetime, demand); };
         if (evidence_->captureFactory) options.capture = evidence_->captureFactory;
-        if (evidence_->switchableCapture) options.captureForSelection = [lifetime = evidence_->capture](auto) -> CaptureSession::Factory {
-            return [lifetime] { return std::make_unique<proof::ObservedCaptureSource>(lifetime); };
+        if (evidence_->switchableCapture) options.captureForSelection = [lifetime = evidence_->capture, demand = evidence_->captureDemand](auto) -> CaptureSession::Factory {
+            return [lifetime, demand] { return std::make_unique<proof::ObservedCaptureSource>(lifetime, demand); };
         };
         options.deliver = [evidence = evidence_](auto& source, const auto& sample) {
             if (evidence->failDelivery.exchange(false)) throw std::runtime_error("Injected viewer delivery failure");

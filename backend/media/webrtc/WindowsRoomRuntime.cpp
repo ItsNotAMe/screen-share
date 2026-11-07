@@ -21,6 +21,7 @@ struct DeviceState {
     std::shared_ptr<MfHardwareSession> hardware;
     std::shared_ptr<DiagnosticHistory> diagnostics = std::make_shared<DiagnosticHistory>();
     std::weak_ptr<AudioSwitchControl> audioControl;
+    std::shared_ptr<std::atomic<bool>> captureDemand = std::make_shared<std::atomic<bool>>(false);
     std::shared_ptr<MfHardwareSession> Get() { std::lock_guard lock(mutex); return hardware; }
 };
 class DeviceCapture final : public ICaptureSource {
@@ -35,7 +36,7 @@ class DeviceCapture final : public ICaptureSource {
         catch (...) { state_->diagnostics->Event(operation, -1); throw; }
     }
 public:
-    DeviceCapture(CaptureConfig config, std::shared_ptr<DeviceState> state, std::shared_ptr<input::DesktopTargetState> target) : source_(config,std::move(target),state->diagnostics), state_(std::move(state)) {}
+    DeviceCapture(CaptureConfig config, std::shared_ptr<DeviceState> state, std::shared_ptr<input::DesktopTargetState> target) : source_(config,std::move(target),state->diagnostics,state->captureDemand), state_(std::move(state)) {}
     void Start() override { Observe("capture-start-failed", [&] { source_.Start(); }); }
     std::optional<CaptureSample> Poll() override {
         auto sample = Observe("capture-poll-failed", [&] { return source_.Poll(); });
@@ -61,6 +62,7 @@ v2::RoomRuntimeFactory WindowsRoomRuntimeFactory(WindowsRoomRuntimeOptions optio
             options.inputSink || options.enableDesktopInput ? std::make_shared<input::DesktopTargetState>() : nullptr;
         NativeRoomRuntimeOptions native;
         native.diagnostics = state->diagnostics;
+        native.captureDemand = state->captureDemand;
         native.audioDiagnostics = std::make_shared<PcmAudioDiagnostics>();
         native.audioDiagnostics->events = native.diagnostics;
         native.initialCapture = {options.capture.sourceType == CaptureSourceType::Window ? CaptureKind::Window : CaptureKind::Display,

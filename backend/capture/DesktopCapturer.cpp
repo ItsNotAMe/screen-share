@@ -1,4 +1,5 @@
 #include "capture/DesktopCapturer.h"
+#include "capture/LatestQueuedFrame.h"
 #include "core/ShortWait.h"
 #include <dwmapi.h>
 #include "capture/WindowsCaptureDispatcher.h"
@@ -1714,17 +1715,21 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (true) {
         capture::Direct3D11CaptureFrame captureFrame{nullptr};
+        struct CloseFrame {
+            capture::Direct3D11CaptureFrame& frame;
+            ~CloseFrame() { try { if (frame) frame.Close(); } catch (const winrt::hresult_error&) {} }
+        } closeFrame{captureFrame};
         try {
             captureFrame = wgc_->framePool.TryGetNextFrame();
+            // The two-frame pool may contain older pictures after idle polling
+            // or a scheduling stall. Convert only the newest queued picture;
+            // bound draining even if the producer keeps adding frames.
+            SelectLatestQueuedFrame(captureFrame, [&] { return wgc_->framePool.TryGetNextFrame(); });
         } catch (const winrt::hresult_error& error) {
             ThrowIfFailed(error.code(), "Direct3D11CaptureFramePool::TryGetNextFrame");
         }
 
         if (captureFrame) {
-            struct CloseFrame {
-                capture::Direct3D11CaptureFrame& frame;
-                ~CloseFrame() { try { if (frame) frame.Close(); } catch (const winrt::hresult_error&) {} }
-            } closeFrame{captureFrame};
             const graphics::SizeInt32 contentSize = captureFrame.ContentSize();
             if (contentSize.Width <= 0 || contentSize.Height <= 0) {
                 return std::nullopt;

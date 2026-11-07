@@ -5,6 +5,52 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Idle capture demand (2026-11-07)
+
+The host now requests full capture cadence only when at least one connected,
+configured viewer can receive video. Empty rooms, connecting-only peers and video
+pause use at most five health samples per second (respecting lower source caps).
+Bootstrap runs at the requested cadence until valid native pixels are owned.
+Renewed viewer demand wakes capture without waiting for the 200 ms idle slot.
+Audio, input identity and source monitoring remain independent; stop still checks
+cancellation on the existing capture loop. No new worker, queue or encoder policy.
+
+Six alternating active/idle phase pairs on one production CaptureSession owner,
+with generated changing 1920×1080 luma, measured:
+
+| Measure | Active | Idle |
+| --- | --- | --- |
+| Median process CPU ms per second | 120.92 | 15.61 |
+| Median delivered samples in about two seconds | 120 | 10 |
+
+Median CPU work falls **87.1%** in this generated capture workload; individual
+pairs improve 74.9–91.7%. CPU includes the capture worker and measurement thread,
+with 500 ms settling followed by 2000 ms measurement per phase. Windows process
+CPU timing is coarse at this low idle load. This measures luma generation,
+capture polling and callback handoff, excluding WGC, codecs, transport and
+rendering. It is not a measured native-game or whole-application CPU reduction.
+[Raw phase runs and source/executable hashes](benchmarks/idle-capture-2026-11-07.json).
+
+The real-peer/synthetic-source regression records six capture samples in each
+1.2-second empty/paused interval, preserves audio during video pause, restores
+normal capture for a connected viewer and idles again after the last viewer
+leaves. A merely connecting peer cannot keep capture at full rate. Supplied-clock
+checks cover source caps, exact active/idle boundaries, immediate demand wake,
+missed-slot skipping and rebuild reset. Queued WGC selection is bounded to two
+newer-frame polls and explicitly closes discarded frames before conversion.
+Portable tests check newest-frame selection, ownership and bounded/error cases.
+
+The native window proof (`NativeCaptureTests --demand-check` or `--demand`) also
+checks the first resumed pixels, input identity, minimize/restore and closure.
+It compiles, but could not open its generated test window here: Windows Graphics
+Capture reports that its service does not exist. These native assertions and
+native capture CPU savings remain unverified; no desktop capture was substituted.
+
+Reproduce the generated measurement with
+`python scripts/measure-idle-capture.py --program build/release/CaptureDemandBenchmark.exe
+--output RESULTS.json`. Active source cadence and automatic encoder threading
+remain unchanged. There is no claim of lower active-sharing latency.
+
 ## Software encoder slice-worker experiment (2026-11-07)
 
 **Default decision:** normal sharing uses automatic software threading. The
