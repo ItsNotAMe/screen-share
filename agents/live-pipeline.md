@@ -7,6 +7,18 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 software encoder workers: the WebRTC adapter requests at most two
+slice workers through 1080p, or one when only one core is available. Larger
+pictures retain automatic threading; hardware and low-level callers' default
+policy remain. Set the count before MF format negotiation to size the pool,
+then reapply afterward because negotiation resets the reported property. Setting
+only afterward changes the query without reducing the pool/bitstream in the
+tested inbox codec. Diagnostics record encoder-software-workers (zero means
+automatic/unavailable). Rate/FPS restarts, resume and software fallback reuse the
+configuration. See docs/performance.md for CPU, quality and timing evidence;
+this exchanges encoding parallelism for lower CPU consumption, not uniformly
+lower latency or identical pixels.
+
 2026-11-07 host audio stalls: initial, established and manually selected System/
 Microphone producers now expire after five seconds without fresh PCM, even when
 the endpoint reports no error. Fresh queued PCM is consumed before expiry and

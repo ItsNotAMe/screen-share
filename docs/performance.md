@@ -5,6 +5,80 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Software encoder slice-worker budget (2026-11-07)
+
+The WebRTC software encoder now requests at most two slice workers for pictures
+through 1080p, respecting a one-core assignment. Previously each encoder chose
+its own automatic pool. Larger pictures keep automatic threading; hardware and
+low-level encoder callers' default remain unchanged. Microsoft's
+[worker-count property](https://learn.microsoft.com/en-us/windows/win32/medfound/codecapi-avencnumworkerthreads)
+controls this setting. In the tested inbox codec it must be set before format
+negotiation to size the pool, then reapplied afterward because negotiation resets
+the reported property. Applying only afterward changed the query but retained
+the original thread count and bitstream. Diagnostics report the final queried
+setting, with zero meaning automatic/unavailable. Optional rejection remains
+compatible, and rate/FPS restarts and software fallback retain the request.
+
+This trades encoding parallelism for lower CPU consumption. Six alternating
+AB/BA pairs for each pattern/input/encoder count, against unmodified `de0d90f`,
+gave these four-encoder medians:
+
+| Generated pattern | Input | CPU ms per encoded picture, before → after | CPU reduction | Mean elapsed ms per four-picture batch, before → after |
+| --- | --- | --- | --- | --- |
+| Smooth moving pattern | CPU NV12 | 15.059 → 11.523 | 23.5% | 6.132 → 7.435 |
+| Smooth moving pattern | GPU NV12/readback | 14.962 → 11.511 | 23.1% | 6.241 → 7.930 |
+| Detailed moving pattern | CPU NV12 | 14.392 → 11.344 | 21.2% | 5.687 → 7.256 |
+| Detailed moving pattern | GPU NV12/readback | 14.677 → 11.833 | 19.4% | 6.622 → 8.023 |
+
+Every paired CPU result improved; four-encoder paired reductions ranged from
+12.4% to 28.2%. One-encoder median CPU reductions were 25.4–32.9%, with mean
+elapsed time increasing by 2.38–2.64 ms per picture. Four-encoder live process
+thread counts fell from 57 to 21 for CPU input and 80 to 44 for GPU input;
+these counts include all benchmark/driver threads. Private-byte medians also
+fell slightly, but this is not a full-application memory measurement.
+
+Longer encode times matter. With four encoders and detailed GPU input, median
+batch p95 rose from 12.04 to 16.89 ms and p99 from 13.50 to 18.52 ms. Some batches
+exceed the 16.67 ms budget of 60 FPS. These unpaced tests do not establish
+unchanged 60 FPS delivery under game load or lower input-to-display latency.
+
+Bitstreams change with the slice layout. Decoding the first 16 measured pictures
+from each encoder, including their warmup/reference chain, gives these PSNRs:
+
+| Pattern | Luma dB, before → after | Combined chroma dB, before → after |
+| --- | --- | --- |
+| Smooth | 53.061 → 52.844 | 54.242 → 53.776 |
+| Detailed | 45.092 → 45.839 | 45.446 → 45.890 |
+
+Thus smooth-pattern quality decreases slightly and detailed-pattern quality
+improves in this fixture; quality is not universally unchanged. Both use the same
+12 Mbps assignment, but actual VBR output differs: smooth output is about
+7.46 → 6.82 Mbps and detailed output 12.85 → 12.88 Mbps over the nominal eight
+seconds of measured input. Output hashes/byte counts are
+stable within each version. The runner permits these differences only with an
+explicit decoded-quality bound (0.5 dB here); its default remains bit-exact.
+
+All 96 runs use identical benchmark source and Release options on one
+16-logical-processor Windows machine: generated changing 1920×1080 NV12, 60 FPS
+settings, 30 warmup frames and 480 measured frames per encoder, with at most one
+frame in flight per encoder. Timed work includes preparation/readback, encoding,
+callback handoff and encoded-byte hashing. Process CPU includes all codec threads.
+Fixture generation, startup, warmup, resource snapshots, post-run decoding/quality
+checks and teardown are excluded. Capture, transport, rendering and physical game
+performance are outside the comparison. The full-room scorecard is unchanged.
+[Raw runs, quality/resource checks, source and executable hashes](benchmarks/encoder-thread-budget-2026-11-07.json).
+
+Reproduce with `EncoderComputeBenchmark.exe cpu 4 480` or add `detailed` as its
+fourth argument; `gpu` selects generated GPU input for software encoding. Build
+the identical benchmark against each production revision, then run
+`python scripts/compare-encoder-compute.py --before BEFORE.exe --after AFTER.exe
+--output RESULTS.json --samples 6 --frames 480 --patterns both
+--quality-max-loss-db 0.5 --baseline-commit de0d90f --before-source BASELINE_SOURCES`.
+The baseline directory contains the three named encoder/factory sources recorded
+in the raw report. Real-MF checks cover 1/2/16-core assignments, property readback,
+FPS restart/resume, automatic larger pictures, invalid counts and the existing
+keyframe, mapping, coalescing, late-output and cancellation behavior.
+
 ## Direct visible-frame copy in software decoding (2026-11-07)
 
 Cropped software output now copies visible Y/UV rows straight from the locked MF

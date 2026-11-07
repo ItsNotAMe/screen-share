@@ -42,6 +42,8 @@ struct H264StreamEncoderConfig {
     uint32_t keyframeIntervalFrames = 0;
     // H.264 level_idc; zero retains automatic level selection for legacy callers.
     uint32_t levelIdc = 0;
+    // Software slice workers; zero preserves Media Foundation's automatic count.
+    uint32_t softwareWorkerThreads = 0;
     // The caller owns readiness, submission bounds and output deadlines.
     bool externalHardwareScheduling = false;
     int64_t startFrameIndex = 0;
@@ -84,6 +86,9 @@ public:
     // EncodeFrame completes one submission; no internal raw-frame queue remains.
     [[nodiscard]] size_t queuedInputCount() const noexcept { return 0; }
     [[nodiscard]] uint64_t droppedInputFrames() const noexcept { return 0; }
+    // Requested codec property, queried on the codec owner. Zero means automatic
+    // selection or an implementation that does not expose this optional setting.
+    [[nodiscard]] uint32_t softwareWorkerThreads() const;
 
 private:
     std::vector<EncodedPacket> EncodeSoftwareSample(IMFSample* sample);

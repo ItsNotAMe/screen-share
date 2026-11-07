@@ -30,11 +30,11 @@ public:
         if (!worker_->Start()) throw std::runtime_error("MF encoder worker startup failed");
     }
     ~MfVideoEncoder() override { Release(); worker_->Stop(); }
-    int InitEncode(const webrtc::VideoCodec* codec, const Settings&) override {
+    int InitEncode(const webrtc::VideoCodec* codec, const Settings& settings) override {
         if (!codec || codec->codecType != webrtc::kVideoCodecH264 ||
             codec->width < 16 || codec->height < 16 || codec->width > (level_ >= 52 ? 3840 : 1920) || codec->height > (level_ >= 52 ? 2160 : 1080) ||
             codec->width % 2 || codec->height % 2 || codec->maxFramerate == 0 || codec->maxFramerate > 60 ||
-            codec->numberOfSimulcastStreams > 1 || codec->startBitrate > 40'000)
+            codec->numberOfSimulcastStreams > 1 || codec->startBitrate > 40'000 || settings.number_of_cores < 1)
             return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
         CancelPending();
         return worker_->BlockingCall([&] {
@@ -47,6 +47,11 @@ public:
             maximumFps_ = codec->maxFramerate;
             config_.bitrate = codec->startBitrate * 1000;
             config_.levelIdc = config_.width > 1920 || config_.height > 1080 ? level_ : 42;
+            // Independent viewer encoders otherwise each ask MF for an automatic
+            // slice pool. Bound CPU contention through 1080p while respecting
+            // WebRTC's available cores. Larger pictures keep MF's latency policy.
+            config_.softwareWorkerThreads = config_.width * config_.height <= 1920 * 1080
+                ? std::min(settings.number_of_cores, 2) : 0;
             try {
                 encoder_ = std::make_unique<H264StreamEncoder>();
                 if (config_.bitrate) StartTransform();
@@ -199,7 +204,10 @@ private:
             catch (const std::exception& error) { CodecFailure(diagnostics_, "encoder-hardware-failed", error); SoftwareFallback(error.what()); return; }
         }
         encoder_->Start(config_);
-        if (diagnostics_) diagnostics_->Event("encoder-software-ready", config_.width, config_.height);
+        if (diagnostics_) {
+            diagnostics_->Event("encoder-software-ready", config_.width, config_.height);
+            diagnostics_->Event("encoder-software-workers", encoder_->softwareWorkerThreads());
+        }
     }
     CapturedFrame RawFrame(const webrtc::VideoFrame& frame) {
         if (IsRetiredFrame(frame)) throw RetiredVideoFrame{};

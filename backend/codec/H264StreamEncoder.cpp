@@ -168,8 +168,13 @@ void ConfigureLowLatencyEncoderOptions(IMFTransform* transform, const H264Stream
     // Our output profile is High. The inbox software default disables CABAC,
     // wasting the constrained real-time budget on dense motion and forcing the
     // transport controller to drop frames. Keep hardware's existing policy.
-    if (config.backend == H264StreamEncoderBackend::Software)
+    if (config.backend == H264StreamEncoderBackend::Software) {
         TrySetCodecApiBool(codecApi.Get(), CODECAPI_AVEncH264CABACEnable, true);
+        // Size the slice pool before type negotiation. Applying only afterward
+        // changes GetValue's report but leaves the automatic pool/bitstream.
+        if (config.softwareWorkerThreads)
+            TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncNumWorkerThreads, config.softwareWorkerThreads);
+    }
     TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncCommonMeanBitRate, config.bitrate);
     TrySetCodecApiUInt32(codecApi.Get(), CODECAPI_AVEncMPVDefaultBPictureCount, 0);
     if (config.keyframeIntervalFrames > 0) {
@@ -633,6 +638,8 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     if (config.startFrameIndex < 0) {
         throw std::invalid_argument("H264StreamEncoder start frame index must be non-negative");
     }
+    if (config.softwareWorkerThreads > 16)
+        throw std::invalid_argument("H264StreamEncoder software worker count exceeds 16");
 
     config_ = config;
     backend_ = config.backend;
@@ -662,6 +669,10 @@ void H264StreamEncoder::Start(const H264StreamEncoderConfig& config)
     } else {
         transform_ = CreateSoftwareEncoder(config_);
         ConfigureEncoderTypes(transform_.Get(), config_, inputStreamId_, outputStreamId_);
+        // Negotiation resets the exposed property to zero. Reapply before
+        // streaming so the active request and diagnostic query agree.
+        if (config_.softwareWorkerThreads)
+            TrySetCodecApiUInt32(QueryCodecApi(transform_.Get()).Get(), CODECAPI_AVEncNumWorkerThreads, config_.softwareWorkerThreads);
         encoderName_ = "Microsoft H.264 Encoder MFT";
     }
 
@@ -851,6 +862,18 @@ bool H264StreamEncoder::TrySubmitHardwareFrame(const CapturedFrame& frame, int64
     lastInputMode_ = gpu ? H264StreamEncoderInputMode::Direct3D : H264StreamEncoderInputMode::Memory;
     // No hidden raw queue and no transport timestamp map in this path.
     return true;
+}
+
+uint32_t H264StreamEncoder::softwareWorkerThreads() const
+{
+    if (!transform_ || backend_ != H264StreamEncoderBackend::Software) return 0;
+    auto api = QueryCodecApi(transform_.Get());
+    if (!api) return 0;
+    VARIANT value{};
+    const auto result = api->GetValue(&CODECAPI_AVEncNumWorkerThreads, &value);
+    const auto threads = SUCCEEDED(result) && value.vt == VT_UI4 ? value.ulVal : 0u;
+    VariantClear(&value);
+    return threads;
 }
 
 void H264StreamEncoder::Stop()

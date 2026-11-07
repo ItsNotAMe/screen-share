@@ -12,6 +12,53 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Bound software encoder slice workers through 1080p - 2026-11-07
+
+The WebRTC adapter previously ignored its available-core assignment and let each
+MF software encoder independently choose an automatic slice pool. It now requests
+at most two workers through 1080p (one for a one-core assignment). Larger pictures
+retain automatic threading. Hardware and low-level encoder callers' default
+remain unchanged; the optional config defaults to zero/automatic and rejects
+counts above the documented maximum of 16. Zero available cores is invalid.
+
+Ordering matters in the tested inbox codec: set the worker count before format
+negotiation to size the pool, then reapply after negotiation resets the exposed
+property. Applying only afterward updates GetValue but keeps the old process
+thread count and bitstream. Applying only beforehand sizes the pool but GetValue
+reports zero. The new encoder-software-workers event queries the final property;
+zero means automatic/unavailable. Optional setting rejection keeps compatibility.
+Rate/FPS restarts, resume and software fallback retain the configured budget.
+
+Real MF tests cover 1/2/16-core assignments, reported worker count after FPS
+restart/resume, automatic larger pictures, invalid counts and existing low-latency,
+keyframe, mapping, coalescing, late-output/cancellation and NV12 behavior.
+EncoderComputeBenchmark now checks reconstructed luma/chroma and a deterministic
+detailed moving pattern, records live process resources and batch p95/p99, and
+uses a 16-core assignment to exercise the production cap. Quality checking occurs
+after the CPU/elapsed measurement. The comparison runner keeps bit-exact checking
+by default; explicit --quality-max-loss-db permits different slice bitstreams only
+with bounded Y/UV/minimum-frame PSNR loss and stable output within each version.
+
+All 96 matched runs passed (six AB/BA pairs for two patterns, CPU/GPU input and
+1/4 encoders, 480 measured pictures each after 30 warmup). Every paired CPU
+result improved. Four-encoder median CPU savings are 19.4–23.5%, single-encoder
+25.4–32.9%; four-encoder paired reductions range 12.4–28.2%. Mean batch elapsed
+time increases 1.30–1.69 ms for four encoders and 2.38–2.64 ms for one. Detailed
+GPU/four-encoder batch p95 increases 12.04→16.89 ms and p99 13.50→18.52 ms, so
+do not claim preserved 60 FPS under game load or lower end-to-end latency.
+Smooth-pattern decoded Y/UV PSNR falls 0.217/0.466 dB; detailed improves
+0.747/0.444 dB. Actual VBR rates differ despite the same 12 Mbps assignment;
+bitstreams are stable within each version, not equal across versions. Four-
+encoder process threads drop 57→21 (CPU input), 80→44 (GPU input). Slightly
+lower private bytes belong to this benchmark, not the whole application.
+See docs/performance.md and its tracked raw runs/source/executable hashes.
+
+Release `all` build and packaged CLI/UI binary hash checks passed. Final
+sequential application validation passed all 46 checks (311.47 s), including
+the expanded real-MF worker policy test, audio/capture/decoder recovery,
+multi-viewer media/input, reconnects and UI pause/resume. No version bump or
+publication; unreleased.
+
 ## Recover open host audio devices that stop delivering PCM - 2026-11-07
 
 The earlier host-audio recovery handled endpoint errors and a recovery attempt's
