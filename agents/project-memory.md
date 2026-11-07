@@ -12,6 +12,33 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Bound missing output after restoring minimized capture - 2026-11-07
+
+CaptureSession refreshed its first-frame deadline during minimization but left
+awaitingFrame false once the source had previously delivered healthy pixels.
+If restoration produced no frames, it could remain Minimized indefinitely.
+Minimization now rearms that existing watchdog. Its deadline continues moving
+while minimized; the first valid restored sample clears it. A silent restore
+times out after the configured interval (5 s by default). Switchable capture
+releases the failed source and waits for explicit replacement; ordinary capture
+fails. Healthy restoration retains the source and generation. No new timer,
+thread, frame queue or automatic reopening. Recovery and unavailable-source
+paths already rearm the same watchdog; this is separate from budget renewal.
+
+The new real CaptureSession/synthetic-source test failed against the old code
+with "Silent restore never reached its missing-frame timeout". With the fix,
+both ordinary and switchable sources pass a healthy restore followed by a
+silent restore. Each minimization lasts twice the shortened test timeout while
+the source continues producing pixels, checking no stale delivery or premature
+timeout. The test also checks failure classification, owner-thread disposal,
+no implicit rebuild/reopen and successful explicit replacement. This does not
+reproduce a physical WGC/driver stall or make a performance claim.
+
+Release `all` build and packaged CLI/UI binary hash checks passed. All 46
+sequential application checks passed (308.48 s), including multi-viewer media/
+input, reconnects, UI pause/resume and capture replacement. No version bump or
+publication; unreleased.
+
 ## Renew capture recovery after healthy output - 2026-11-07
 
 CaptureRecovery previously spent its three rebuild attempts across the entire

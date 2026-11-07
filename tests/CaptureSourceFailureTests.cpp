@@ -8,17 +8,17 @@
 using namespace screenshare::media;
 using namespace std::chrono_literals;
 void Check(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
-template<class F> void Wait(F condition) {
+template<class F> void Wait(F condition, const char* message = "Capture failure scenario timed out") {
     const auto deadline = std::chrono::steady_clock::now() + 3s;
     while (!condition()) {
-        Check(std::chrono::steady_clock::now() < deadline, "Capture failure scenario timed out");
+        Check(std::chrono::steady_clock::now() < deadline, message);
         std::this_thread::sleep_for(1ms);
     }
 }
 enum class Fault { None, Read, Lost };
 struct State {
     std::atomic<Fault> fault{Fault::None};
-    std::atomic<bool> failStart{false}, failRebuild{false}, silent{false}, wrongThread{false};
+    std::atomic<bool> failStart{false}, failRebuild{false}, silent{false}, minimized{false}, wrongThread{false};
     std::atomic<unsigned> live{0}, starts{0}, retired{0}, rebuilt{0};
 };
 class Source final : public ICaptureSource {
@@ -44,6 +44,7 @@ public:
         return state_->silent ? std::nullopt : pixels_.Poll();
     }
     bool Closed() const override { return false; }
+    bool Minimized() const override { return state_->minimized; }
     void Retire() noexcept override { Owner(); ++state_->retired; pixels_.Retire(); }
     void Rebuild() override {
         Owner(); ++state_->rebuilt;
@@ -185,6 +186,58 @@ void HealthyRecoveries() {
     Check(state->rebuilt == 5 && state->retired == 5 && state->starts == 1 && !state->live && !state->wrongThread,
         "Healthy capture recovery lost its owner or restarted the session");
 }
+void MinimizedRestore() {
+    for (const bool replaceable : {false, true}) {
+        auto state = std::make_shared<State>();
+        auto control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
+        CaptureSession capture(9, [=]() -> std::unique_ptr<ICaptureSource> {
+            if (replaceable) return std::make_unique<SwitchableCaptureSource>(Factory(state), control);
+            return std::make_unique<Source>(state);
+        }, [](auto) {}, 200ms);
+        capture.EnableDelivery(); Wait([&] { return capture.status().delivered >= 3; });
+        const auto generation = capture.status().generation;
+        for (const bool resume : {true, false}) {
+            state->minimized = true;
+            Wait([&] { return capture.status().state == CaptureState::Minimized; });
+            const auto delivered = capture.status().delivered;
+            // Poll still produces pixels: minimization must suppress them, and
+            // may last longer than the first-frame deadline without failing.
+            std::this_thread::sleep_for(400ms);
+            Check(capture.status().state == CaptureState::Minimized && capture.status().delivered == delivered,
+                "Minimized capture timed out or delivered stale pixels");
+            state->silent = true;
+            state->minimized = false;
+            if (resume) {
+                std::this_thread::sleep_for(50ms);
+                Check(capture.status().delivered == delivered && state->live == 1,
+                    "Restoring capture delivered stale pixels or failed before its deadline");
+                state->silent = false;
+                Wait([&] { return capture.status().delivered >= delivered + 3; });
+                Check(capture.status().state == CaptureState::Running && capture.status().failure == CaptureFailure::None
+                    && capture.status().generation == generation && state->rebuilt == 0,
+                    "Healthy restore did not resume the existing capture source");
+            } else {
+                const auto expected = replaceable ? CaptureState::Unavailable : CaptureState::Failed;
+                Wait([&] { return capture.status().state == expected; },
+                    "Silent restore never reached its missing-frame timeout");
+                Check(capture.status().failure == CaptureFailure::StartupTimeout && capture.status().delivered == delivered,
+                    "Silent restore lost its failure reason or published stale pixels");
+                Wait([&] { return state->live == 0; });
+                Check(state->retired == 1 && state->starts == 1 && state->rebuilt == 0,
+                    "Silent restore retained or repeatedly reopened the failed source");
+                if (replaceable) {
+                    auto replacement = std::make_shared<State>();
+                    Replace(capture, control, replacement);
+                    capture.Stop();
+                    Check(!replacement->live && !replacement->wrongThread,
+                        "Restore replacement teardown escaped its owner");
+                }
+            }
+        }
+        capture.Stop(); capture.Stop();
+        Check(!state->live && !state->wrongThread, "Minimized source teardown escaped its owner");
+    }
+}
 void PendingReplacement() {
     auto old = std::make_shared<State>(), next = std::make_shared<State>(); next->silent = true;
     auto control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
@@ -223,7 +276,7 @@ void FailureBoundaries() {
     Check(!state->live && !state->wrongThread, "Failure boundary cleanup escaped its owner");
 }
 int main() try {
-    RecoveryBudgetBoundaries(); HealthyRecoveries(); ReadFailure(); RecoveryFailure(false); RecoveryFailure(true); PendingReplacement(); FailureBoundaries();
-    std::cout << "Replaceable capture: renewed/bounded recovery, read/rebuild failure, replacement, cancellation and failure boundaries passed.\n";
+    MinimizedRestore(); RecoveryBudgetBoundaries(); HealthyRecoveries(); ReadFailure(); RecoveryFailure(false); RecoveryFailure(true); PendingReplacement(); FailureBoundaries();
+    std::cout << "Capture: minimized restore/timeout, renewed/bounded recovery, read/rebuild failure, replacement, cancellation and failure boundaries passed.\n";
     return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

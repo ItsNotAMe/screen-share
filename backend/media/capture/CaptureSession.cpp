@@ -75,6 +75,7 @@ struct CaptureSession::Impl {
                             // including before its first frame. Resume gets a fresh
                             // startup deadline; do not deliver queued old pixels.
                             deadline = std::chrono::steady_clock::now() + startupTimeout;
+                            awaitingFrame = true;
                             std::lock_guard lock(mutex);
                             status.state = CaptureState::Minimized;
                         } else if (sample) {

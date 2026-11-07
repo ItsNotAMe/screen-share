@@ -7,6 +7,15 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 minimized restore: minimization now rearms CaptureSession's existing
+first-frame watchdog after previously healthy output. The deadline keeps moving
+while minimized; after restore a valid sample clears it, or missing output times
+out (5 s in production). A switchable source releases failed capture and waits
+for explicit replacement while its session stays alive; an ordinary source
+fails. Tests cover both paths, long minimization, stale-pixel suppression,
+successful restore and replacement after timeout. This is a watchdog fix,
+separate from recovery-budget renewal; no physical WGC failure was injected.
+
 2026-11-07 capture recovery: the three-rebuild allowance renews after 30
 consecutive valid owned capture samples. Device loss, GPU frame skips,
 minimization and source unavailability interrupt the healthy streak. Pending
