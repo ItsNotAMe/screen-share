@@ -12,7 +12,7 @@ inline void Check(bool value, std::source_location at = std::source_location::cu
 }
 struct Evidence {
     std::atomic<bool> unavailable{true}, wrongThread{false}, blockActivation{false}, activating{false}, blockRead{false}, reading{false};
-    std::atomic<unsigned> created{0}, live{0}, processors{0};
+    std::atomic<unsigned> created{0}, live{0}, processors{0}, blocks{0};
     std::atomic<int16_t> marker{1200};
 };
 class Capture final : public PcmCaptureEndpoint {
@@ -41,7 +41,7 @@ public:
         }
         if (!pace_.Read(block, stop)) return false;
         if (evidence_->unavailable) throw std::runtime_error("Capture invalidated");
-        block.fill(evidence_->marker); return true;
+        block.fill(evidence_->marker); ++evidence_->blocks; return true;
     }
     uint32_t DelayMs() const override { return 10; }
     uint64_t DroppedFrames() const override { return 7; }
@@ -167,8 +167,89 @@ inline void ExcludedSelections() {
         Check(evidence->created == 1 && evidence->live == 0);
     }
 }
+inline void MissingPcm() {
+    for (const auto kind : {AudioKind::System, AudioKind::Microphone}) {
+        for (const unsigned stage : {0u, 1u, 2u}) {
+            const bool initiallyStalled = stage == 0;
+            auto evidence = std::make_shared<Evidence>();
+            evidence->unavailable = false; evidence->blockRead = initiallyStalled;
+            auto control = std::make_shared<AudioSwitchControl>(AudioSelection{kind, L"pinned-stalled"},
+                [evidence] { return std::make_unique<Capture>(evidence); },
+                [evidence](std::unique_ptr<PcmCaptureEndpoint> endpoint) { ++evidence->processors; return endpoint; });
+            auto now = std::chrono::steady_clock::time_point{};
+            {
+                SwitchablePcmCapture capture(control, [&] { return now; }); capture.Start();
+                PcmBlock block{};
+                unsigned attempts = 1;
+                uint64_t revision = 1;
+                std::wstring deviceId = L"pinned-stalled";
+                if (!initiallyStalled) {
+                    Pump(capture, block, [&] { return block.front() == evidence->marker; });
+                    if (stage == 2) {
+                        deviceId = L"selected-stalled";
+                        auto selected = control->Submit({kind, deviceId}, [evidence] { return std::make_unique<Capture>(evidence); });
+                        Pump(capture, block, [&] { return selected.wait_for(0ms) == std::future_status::ready; });
+                        Check(selected.get().error == AudioUpdateError::None);
+                        attempts = 2; revision = 2;
+                    }
+                    evidence->blockRead = true;
+                }
+                Pump(capture, block, [&] { return evidence->reading.load(); });
+                // Consume any blocks produced just before Read stalled. Empty
+                // polls must not keep the missing-PCM deadline alive.
+                for (int i = 0; i < 8; ++i) Check(capture.Read(block, {}));
+                now += 4999ms;
+                Check(capture.Read(block, {}) && block.front() == 0 && evidence->live == 1 && evidence->created == attempts);
+                now += 1ms; Check(capture.Read(block, {}));
+                if (control->Status().health.state != AudioEndpointState::Failed || evidence->live != 0)
+                    throw std::runtime_error("Open host audio device stalled indefinitely without PCM recovery");
+                Check(block.front() == 0 && capture.DelayMs() == 0 && control->Status().health.failures == 1);
+                evidence->blockRead = false;
+                // Zero-valued PCM is real audio delivery and must also recover.
+                evidence->marker = 0;
+                now += 249ms; Check(capture.Read(block, {}) && evidence->created == attempts);
+                now += 1ms;
+                Pump(capture, block, [&] { return control->Status().health.state == AudioEndpointState::Running; });
+                Check(evidence->created == attempts + 1 && block.front() == 0 && control->Status().revision == revision
+                    && control->Status().selected.deviceId == deviceId);
+                Check(evidence->processors == (kind == AudioKind::Microphone ? attempts + 1 : 0u));
+
+                // A delayed owner must consume newly queued PCM before checking
+                // its old deadline. Otherwise scheduler stalls cause false resets.
+                const auto produced = evidence->blocks.load();
+                const auto waitUntil = std::chrono::steady_clock::now() + 2s;
+                while (evidence->blocks < produced + 2) {
+                    Check(std::chrono::steady_clock::now() < waitUntil);
+                    std::this_thread::sleep_for(1ms);
+                }
+                now += 1h;
+                Check(capture.Read(block, {}) && control->Status().health.state == AudioEndpointState::Running
+                    && evidence->created == attempts + 1 && evidence->live == 1);
+            }
+            Check(evidence->live == 0 && !evidence->wrongThread);
+        }
+    }
+    for (const auto selection : {AudioSelection{AudioKind::Process, {}, 123}, AudioSelection{AudioKind::SharedSource}}) {
+        auto evidence = std::make_shared<Evidence>(); evidence->unavailable = false; evidence->blockRead = true;
+        auto control = std::make_shared<AudioSwitchControl>(selection, [evidence] { return std::make_unique<Capture>(evidence); });
+        auto now = std::chrono::steady_clock::time_point{};
+        {
+            SwitchablePcmCapture capture(control, [&] { return now; }); capture.Start(); PcmBlock block{};
+            Pump(capture, block, [&] { return evidence->reading.load(); });
+            // Shared-source owns its inner recovery and explicit process IDs
+            // must not acquire a new automatic-reopen policy from this watchdog.
+            now += 5s; Check(capture.Read(block, {}) && evidence->live == 1
+                && control->Status().health.state == AudioEndpointState::Running);
+            now += 1h; Check(capture.Read(block, {}) && evidence->created == 1 && block.front() == 0);
+            auto muted = control->Submit({AudioKind::None}, {});
+            Pump(capture, block, [&] { return muted.wait_for(0ms) == std::future_status::ready; });
+            Check(muted.get().error == AudioUpdateError::None && control->Status().health.state == AudioEndpointState::Silent);
+        }
+        Check(evidence->live == 0 && !evidence->wrongThread);
+    }
+}
 inline void Run() {
-    Recovery(); OverridesAndTimeout(); ExcludedSelections();
-    std::cout << "Host audio recovery: capped retries, pinned targets, fresh PCM, microphone processor renewal, mute/change/close priority and activation timeout passed.\n";
+    MissingPcm(); Recovery(); OverridesAndTimeout(); ExcludedSelections();
+    std::cout << "Host audio recovery: initial/established/switched PCM stalls, fresh silence, capped retries, pinned targets, microphone processor renewal, mute/change/close priority and activation timeout passed.\n";
 }
 }

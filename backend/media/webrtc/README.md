@@ -213,11 +213,15 @@ Unknown engine periods are reported as zero, not inferred from buffer capacity.
 Capture delay is an estimate, not a measured capture-to-speaker latency.
 
 In session integration, SwitchablePcmCapture automatically retries committed
-System/Microphone factories after activation/read failure, with 250 ms–5 s capped
+System/Microphone factories after activation/read failure or five seconds without
+fresh PCM, with 250 ms–5 s capped
 backoff and paced silence on the existing 10 ms output timeline. Recovery opens
 on a producer owner, preserving explicit device IDs, settings revision and dropped
-frame totals. First PCM confirms recovery; a five-second first-PCM deadline
-retires stalled recovery producers that honor cancellation. Speech processing is
+frame totals. First PCM confirms recovery. The missing-PCM deadline covers initial,
+established and manually selected producers as well as recovery attempts. Fresh
+queued PCM is consumed before expiry; valid zero PCM renews the deadline but
+generated replacement silence cannot. Stalled producers must honor cancellation.
+Speech processing is
 recreated for each microphone open. Manual updates/mute supersede automatic work;
 Close/Stop prevent reopening. Shared-source mode retains its validated-target
 recovery, and explicit process IDs retain manual retry. No unrelated device/app

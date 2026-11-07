@@ -12,6 +12,43 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Recover open host audio devices that stop delivering PCM - 2026-11-07
+
+The earlier host-audio recovery handled endpoint errors and a recovery attempt's
+first-PCM deadline, but an initially opened, established or manually switched
+System/Microphone endpoint could remain open with Read blocked indefinitely.
+SwitchablePcmCapture now applies a five-second missing-PCM deadline throughout
+these recoverable endpoints' lifetime. Every fresh queued PCM block renews it,
+including all-zero audio; generated filler silence does not.
+WASAPI's bounded idle read already emits zero PCM after 100 ms without packets,
+so ordinary idle loopback keeps this deadline alive. Fresh queued PCM
+is consumed before checking expiry so a delayed owner tick does not falsely
+retire a working device. On expiry the same existing owner cancels/releases the
+producer and uses the pinned-device 250 ms..5 s retry policy. No new thread,
+queue, default-device substitution or revision change; microphone processing is
+recreated through the existing factory. Manual selection and Close keep priority.
+Shared-source capture retains its inner validated-target recovery, and explicit
+process targets gain no automatic reopening policy.
+
+The real adapter/synthetic-endpoint regression failed against the old code with
+"Open host audio device stalled indefinitely without PCM recovery". Tests cover
+initial/established/manually selected stalls for System and Microphone, exact
+4999/5000 ms expiry and 249/250 ms retry boundaries, zero PCM recovery, owner
+delay with queued fresh PCM, pinned identity/revision, fresh microphone processor,
+nonrecoverable-target policy and worker-thread cleanup. No physical audio device
+or driver stall was injected; this cannot preempt a driver that ignores stop.
+
+An encoder output-buffer reuse candidate was measured and removed before this
+fix: six AB/BA pairs at 1/4 software encoders with CPU/GPU input preserved output
+but gave inconsistent CPU/time results, while retaining about 3.7 MiB per 1080p
+encoder. Raw local experiments remain ignored under build/encoder-output-reuse.
+Do not repeat this candidate assuming fewer allocations prove a CPU improvement.
+
+Release `all` build and packaged CLI/UI binary hash checks passed. All 46
+sequential application checks passed (313.35 s), including the expanded PCM
+checks (15.58 s), multi-viewer media/input, reconnects, capture replacement and
+UI pause/resume. No version bump or publication; unreleased.
+
 ## Bound missing output after restoring minimized capture - 2026-11-07
 
 CaptureSession refreshed its first-frame deadline during minimization but left

@@ -7,6 +7,16 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-07 host audio stalls: initial, established and manually selected System/
+Microphone producers now expire after five seconds without fresh PCM, even when
+the endpoint reports no error. Fresh queued PCM is consumed before expiry and
+all-zero PCM counts as delivery; replacement filler silence cannot renew it.
+Cancellation/retirement and pinned-target retries reuse the existing capture
+owner and 250 ms..5 s backoff. Shared-source inner recovery and explicit-process
+policy remain. Supplied-clock tests exercise startup/established/selected stalls,
+normal silence, delayed owners, exact timeout/retry boundaries and teardown.
+No physical device-stall or CPU/latency improvement claim.
+
 2026-11-07 minimized restore: minimization now rearms CaptureSession's existing
 first-frame watchdog after previously healthy output. The deadline keeps moving
 while minimized; after restore a valid sample clears it, or missing output times

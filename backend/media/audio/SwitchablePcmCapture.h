@@ -162,7 +162,7 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
     uint32_t delay_ = 0;
     uint64_t dropped_ = 0, retiredDropped_ = 0;
     std::function<std::chrono::steady_clock::time_point()> now_;
-    std::chrono::steady_clock::time_point retryAt_, recoveryDeadline_;
+    std::chrono::steady_clock::time_point retryAt_, pcmDeadline_;
     std::chrono::milliseconds retryDelay_{250};
     bool recovering_ = false;
     void Fail() {
@@ -181,7 +181,8 @@ public:
     void Start(std::stop_token stop) override {
         retryDelay_ = std::chrono::milliseconds(250); recovering_ = false;
         try {
-            current_ = std::make_unique<Producer>(control_->Attach(), control_->Diagnostics()); current_->Start(stop); control_->Ready();
+            current_ = std::make_unique<Producer>(control_->Attach(), control_->Diagnostics()); current_->Start(stop);
+            pcmDeadline_ = now_() + std::chrono::seconds(5); control_->Ready();
         } catch (...) {
             current_.reset();
             if (stop.stop_requested()) throw;
@@ -224,16 +225,17 @@ public:
                 retiredDropped_ = dropped_; current_ = std::move(candidate_);
                 dropped_ = retiredDropped_ + lost;
                 retryDelay_ = std::chrono::milliseconds(250);
+                pcmDeadline_ = now_() + std::chrono::seconds(5);
                 Finish(AudioUpdateError::None); return true;
             } else if (std::chrono::steady_clock::now() >= deadline_) Finish(AudioUpdateError::Timeout);
         }
         if (recovering_ && !control_->RecoveryFactory()) { current_.reset(); recovering_ = false; delay_ = 0; }
-        if (current_ && (current_->Failed() || (recovering_ && now_() >= recoveryDeadline_))) Fail();
+        if (current_ && current_->Failed()) Fail();
         if (!current_ && !request_ && !stop.stop_requested() && now_() >= retryAt_) {
             if (auto factory = control_->RecoveryFactory()) {
                 try {
                     current_ = std::make_unique<Producer>(std::move(factory), control_->Diagnostics());
-                    recovering_ = true; recoveryDeadline_ = now_() + std::chrono::seconds(5);
+                    recovering_ = true; pcmDeadline_ = now_() + std::chrono::seconds(5);
                 } catch (...) { Fail(); }
             }
         }
@@ -241,12 +243,22 @@ public:
         uint64_t lost = 0;
         if (current_->Pop(block, delay_, lost)) {
             dropped_ = retiredDropped_ + lost;
+            // Valid PCM, including silence, proves delivery. Observe queued
+            // fresh audio before expiring a deadline from a delayed owner tick.
+            pcmDeadline_ = now_() + std::chrono::seconds(5);
             if (recovering_) {
                 recovering_ = false; retryDelay_ = std::chrono::milliseconds(250);
                 control_->Ready();
             }
         }
-        else { block.fill(0); delay_ = 0; }
+        else {
+            block.fill(0); delay_ = 0;
+            // An endpoint may remain open while Read stops supplying blocks.
+            // Bound initial, restored and established recoverable devices.
+            // Shared-source capture owns validated-target recovery itself;
+            // manual selection, Close and nonrecoverable targets retain priority.
+            if (now_() >= pcmDeadline_ && control_->RecoveryFactory()) Fail();
+        }
         return !stop.stop_requested();
     }
     uint32_t DelayMs() const override { return delay_; }
