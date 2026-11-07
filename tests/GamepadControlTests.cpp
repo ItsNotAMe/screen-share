@@ -57,7 +57,10 @@ public:
     bool SubmitIfCurrent(const std::string& peer, uint64_t epoch, Event event) override {
         return permission == epoch && Submit(peer, event);
     }
-    void RevokeIfCurrent(const std::string& peer, uint64_t epoch) override { if(permission == epoch) Revoke(peer); }
+    void RevokeIfCurrent(const std::string& peer, uint64_t epoch, uint8_t required = 0) override {
+        const uint8_t caps=granted?Gamepad:0;
+        if(permission == epoch && (caps&required)==required) Revoke(peer);
+    }
     std::vector<Status> Read() const override { Status s; s.peer = "host"; s.permission = permission; s.granted = granted ? Gamepad : 0; return {s}; }
 };
 class NativeDiagnosticBackend final : public VirtualGamepadBackend {
@@ -160,6 +163,9 @@ int main(int argc, char** argv) {
         Event value; value.kind = Kind::Pad; value.buttons = 0x1000; value.axes = {-32768, 32767, 0, 42};
         Check(sink.Apply("one", value) && state->last.controllerSlot == 1 && state->last.thumbLX == -32768);
         const auto allocated=state->created;
+        Check(sink.Restrict("one",Gamepad) && state->created==allocated && !state->destroyed &&
+            !state->last.buttons && !sink.Restrict("one",Gamepad|Mouse));
+        Check(sink.Apply("one",value));
         Check(sink.Pause("one") && sink.Healthy("one") && state->created==allocated && !state->destroyed &&
             state->last.controllerSlot==1 && !state->last.buttons && !state->last.leftTrigger && !state->last.rightTrigger &&
             !state->last.thumbLX && !state->last.thumbLY && !state->last.thumbRX && !state->last.thumbRY);

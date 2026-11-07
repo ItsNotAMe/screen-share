@@ -35,6 +35,7 @@ public:
         Check(owner==std::this_thread::get_id());
         std::lock_guard lock(mutex);last={};++pauses;return !fail;
     }
+    bool Restrict(const std::string& peer,uint8_t) override {return Pause(peer);}
 };
 Status Read(Service& service,const std::string& id="viewer") {
     for(const auto& p:service.Read())if(p.peer==id)return p;
@@ -44,7 +45,7 @@ void Protocol() {
     Message golden{"x",0x0102030405060708ULL,0x1112131415161718ULL,{}};
     const std::vector<uint8_t> expected{'S','I','N',2,3,1,1,2,3,4,5,6,7,8,17,18,19,20,21,22,23,24,'x'};
     Check(Encode(golden)==expected);
-    for(unsigned k=0;k<=uint8_t(Kind::RelativeWheel);++k) {
+    for(unsigned k=0;k<=uint8_t(Kind::Withdraw);++k) {
         Message m{"connection_restart_7",9,12,{}}; auto& e=m.event;
         e.kind=Kind(k); e.capabilities=7; e.x=.25f; e.y=.75f; e.button=4; e.down=true;
         e.key=65; e.scan=0x11e; e.wheelX=-1200; e.wheelY=1200;
@@ -465,7 +466,97 @@ void StalePollingOwner() {
     viewer.RevokeIfCurrent("host", current);
     Check(!Read(viewer,"host").granted && Read(viewer,"host").revokePending);
 }
+void SelectiveRelease() {
+    auto sink=std::make_shared<RecordingSink>(); Service host(true,sink),viewer(false);
+    host.Bind("viewer","selective",true,true);viewer.Bind("host","selective",true,true);
+    auto pump=[&] {
+        for(const auto& p:host.Drain("viewer",true,true))viewer.Receive("host",p.reliable,p.bytes);
+        for(const auto& p:viewer.Drain("host",true,true))host.Receive("viewer",p.reliable,p.bytes);
+    };
+    Wait([&]{pump();return Read(viewer,"host").permission>0;});
+    Check(host.Grant("viewer",7));Wait([&]{pump();return Read(viewer,"host").granted==7;});
+    Event key;key.kind=Kind::Key;key.key=65;key.down=true;
+    Event mouse;mouse.kind=Kind::Button;mouse.down=true;
+    Event pad;pad.kind=Kind::Pad;pad.buttons=1;
+    Check(viewer.Submit("host",key) && viewer.Submit("host",mouse) && viewer.Submit("host",pad));
+    Wait([&]{pump();return sink->applied>=3;});
+    const auto old=Read(viewer,"host").permission;
+    const auto originalGrants=sink->grants.load();
+    Check(viewer.Release("host",Mouse));
+    Check(Read(viewer,"host").granted==(Keyboard|Gamepad) && Read(viewer,"host").releasePending==Mouse);
+    Check(!viewer.Submit("host",mouse) && !viewer.Request("host",Mouse));
+    Check(viewer.Release("host",Mouse));
+    Wait([&]{pump();return !Read(viewer,"host").releasePending && Read(host).granted==(Keyboard|Gamepad);});
+    Check(Read(viewer,"host").granted==(Keyboard|Gamepad) && Read(viewer,"host").permission>old);
+    Check(sink->grants==originalGrants && sink->pauses>0);
+    Check(viewer.Submit("host",key) && viewer.Submit("host",pad));
+    // Poller teardown must not revoke keyboard after controller withdrawal.
+    const auto beforePad=Read(viewer,"host").permission;
+    Check(viewer.Release("host",Gamepad));viewer.RevokeIfCurrent("host",beforePad,Gamepad);
+    Check(Read(viewer,"host").granted==Keyboard && !Read(viewer,"host").revokePending);
+    Wait([&]{pump();return !Read(viewer,"host").releasePending && Read(host).granted==Keyboard;});
+    // Cancel one pending request without losing other requests or grants.
+    for(const bool sent:{false,true}) {
+        Check(viewer.Request("host",Mouse) && viewer.Request("host",Gamepad));
+        if(sent){pump();Check(Read(host).requested==(Mouse|Gamepad));}
+        Check(viewer.Release("host",Mouse));
+        Wait([&]{pump();return !Read(viewer,"host").releasePending;});
+        Check(Read(host).requested==Gamepad && Read(viewer,"host").requested==Gamepad && Read(host).granted==Keyboard);
+        Check(viewer.Release("host",Gamepad));Wait([&]{pump();return !Read(viewer,"host").releasePending;});
+        Check(!Read(host).requested && Read(host).granted==Keyboard);
+    }
+    // A grant already in flight cannot restore withdrawn consent.
+    Check(host.Grant("viewer",7));Wait([&]{pump();return Read(viewer,"host").granted==7;});
+    Check(viewer.Release("host",Mouse));Check(host.Grant("viewer",7));
+    Wait([&]{pump();Check(!(Read(viewer,"host").granted&Mouse));return !Read(viewer,"host").releasePending && Read(host).granted==(Keyboard|Gamepad);});
+    const auto stale=Read(host).permission;
+    Check(host.Grant("viewer",7));Wait([&]{pump();return Read(viewer,"host").granted==7;});
+    host.Receive("viewer",true,Encode({"selective",stale,10000,{Kind::Withdraw,Keyboard}}));
+    host.Receive("viewer",false,Encode({"selective",Read(host).permission,10001,{Kind::Withdraw,Keyboard}}));
+    Check(Read(host).granted==7);
+    Check(viewer.Release("host",Mouse) && viewer.Release("host",Keyboard) && viewer.Release("host",Gamepad));
+    Wait([&]{pump();return !Read(viewer,"host").releasePending && !Read(host).granted;});
+    Check(!Read(viewer,"host").granted && !Read(viewer,"host").revokePending);
+    // Legacy hosts never receive a new packet. Last/all release still works.
+    host.Bind("viewer","old",true);viewer.Bind("host","old",true);pump();
+    Check(!Read(viewer,"host").selectiveRelease && !Read(viewer,"host").releasePending);
+    Check(host.Grant("viewer",Mouse|Keyboard));Wait([&]{pump();return Read(viewer,"host").granted==(Mouse|Keyboard);});
+    Check(!viewer.Release("host",Mouse) && Read(viewer,"host").granted==(Mouse|Keyboard));
+    Check(viewer.Release("host",Mouse|Keyboard));pump();pump();Check(!Read(host).granted);
+    Check(!host.Release("viewer",Mouse) && !viewer.Release("host",0) && !viewer.Release("host",8));
+}
+void WithdrawalCrossesNewGrant() {
+    struct State {std::promise<void> entered,resume;std::atomic<uint8_t> active{0};};
+    auto state=std::make_shared<State>();auto resumed=state->resume.get_future();
+    class Device final:public Sink {
+        std::shared_ptr<State> state_;std::future<void>& resumed_;
+    public:
+        Device(std::shared_ptr<State> state,std::future<void>& resumed):state_(std::move(state)),resumed_(resumed){}
+        bool Grant(const std::string&,uint8_t caps,int) override {state_->active=caps;return true;}
+        bool Apply(const std::string&,const Event&) override {return true;}
+        void Release(const std::string&) noexcept override {state_->active=0;}
+        bool Healthy(const std::string&) override {return state_->active!=0;}
+        bool Restrict(const std::string&,uint8_t caps) override {
+            state_->entered.set_value();resumed_.wait();state_->active=caps;return true;
+        }
+    };
+    Service host(true,std::make_shared<Device>(state,resumed)),viewer(false);
+    struct Resume {std::promise<void>& value;~Resume(){try{value.set_value();}catch(const std::future_error&){}}} resume{state->resume};
+    host.Bind("viewer","crossed",true,true);viewer.Bind("host","crossed",true,true);
+    auto pump=[&]{
+        for(const auto& packet:host.Drain("viewer",true,true))viewer.Receive("host",packet.reliable,packet.bytes);
+        for(const auto& packet:viewer.Drain("host",true,true))host.Receive("viewer",packet.reliable,packet.bytes);
+    };
+    Check(host.Grant("viewer",7));Wait([&]{pump();return Read(viewer,"host").granted==7;});
+    auto entered=state->entered.get_future();Check(viewer.Release("host",Mouse));
+    Wait([&]{pump();return entered.wait_for(0ms)==std::future_status::ready;});
+    const bool granted=host.Grant("viewer",Keyboard);state->resume.set_value();Check(granted);
+    Wait([&]{pump();return Read(viewer,"host").granted==Keyboard && !Read(viewer,"host").releasePending;});
+    const auto until=std::chrono::steady_clock::now()+50ms;
+    Wait([&]{pump();return std::chrono::steady_clock::now()>=until;});
+    Check(state->active==Keyboard && Read(host).granted==Keyboard);
+}
 int main() {
-    try {Protocol();WatchdogKeepsGrant();WatchdogRevalidation();WithdrawalDuringRenewal();DelayedOwnerKeepsFreshInput();RelativeMotion();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();AdditiveRequests();RequestDuringGrant();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
+    try {Protocol();SelectiveRelease();WithdrawalCrossesNewGrant();WatchdogKeepsGrant();WatchdogRevalidation();WithdrawalDuringRenewal();DelayedOwnerKeepsFreshInput();RelativeMotion();Safety();Allocation();Congestion();DelayedDriverGrant();RepeatedRevoke();AdditiveRequests();RequestDuringGrant();Observations();StalePollingOwner();std::cout<<"{\"passed\":true,\"physical_input\":false}\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

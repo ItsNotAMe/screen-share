@@ -52,6 +52,9 @@ bool GamepadSink::Healthy(const std::string& peer) {
     // Do not mistake a disconnected/reassigned virtual device for a local pad.
     return it->second.device->UserIndex() == it->second.slot;
 }
+bool GamepadSink::Restrict(const std::string& peer,uint8_t caps) {
+    return caps==Gamepad && Healthy(peer) && Pause(peer);
+}
 std::shared_ptr<Sink> CreateWindowsGamepadSink() {
     return std::make_shared<GamepadSink>([] { return CreateVirtualGamepadBackend(); }, [] { return XInputGamepad::ConnectedSlots(); });
 }

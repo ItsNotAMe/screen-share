@@ -113,6 +113,7 @@ public:
     }
     bool Apply(const Event& event) override {++evidence_->applied;evidence_->held=event.down;return !evidence_->fail;}
     void Release() noexcept override {++evidence_->released;}
+    bool Restrict(uint8_t) override {ReleaseHeldInput();return !evidence_->fail;}
 };
 void MinimizedKeyboardGrant() {
     // Use a real minimized HWND and the production Windows device, but never
@@ -201,6 +202,24 @@ void WindowKeyboardWithoutMouseGeometry() {
     sink->Release("combined");
     RemovePropW(window.handle, property.c_str());
 }
+void RestrictKeepsDevices() {
+    auto target=std::make_shared<DesktopTargetState>();
+    const auto epoch=target->Publish({57,0,0,0,0,640,360});
+    auto evidence=std::make_shared<Evidence>();auto pads=std::make_shared<RecordingGamepadSink>();
+    unsigned devices=0;
+    DesktopSink sink(target,pads,[&](auto,uint8_t){++devices;return std::make_unique<Device>(evidence);});
+    Check(sink.Grant("viewer",Mouse|Keyboard|Gamepad,0));
+    Event key;key.kind=Kind::Key;key.key=65;key.down=true;key.sourceGeneration=epoch;
+    Check(sink.Apply("viewer",key) && evidence->held);
+    Check(sink.Restrict("viewer",Keyboard|Gamepad));
+    Check(devices==1 && !evidence->released && !evidence->held && pads->grants==1 && !pads->released);
+    Event mouse;mouse.kind=Kind::Pointer;mouse.sourceGeneration=epoch;
+    Check(!sink.Apply("viewer",mouse) && sink.Apply("viewer",key));
+    Check(!sink.Restrict("viewer",7)); // Cannot add back a withdrawn control.
+    Check(sink.Restrict("viewer",Gamepad));
+    Check(evidence->released==1 && pads->grants==1 && !pads->released && sink.Healthy("viewer"));
+    sink.Release("viewer");Check(pads->released==1);
+}
 void StaleCaptureKeepsOwnership() {
     auto state=std::make_shared<DesktopTargetState>();auto evidence=std::make_shared<Evidence>();
     auto pads=std::make_shared<RecordingGamepadSink>();
@@ -227,6 +246,7 @@ int main() {try {
     MouseMonitorFullQueue();
     MouseMonitorImmediateStop();
     MouseMonitorMessagePump();
+    RestrictKeepsDevices();
     const auto relative=screenshare::WindowsRelativeMouseInput(-123,456);
     Check(relative.type==INPUT_MOUSE && relative.mi.dx==-123 && relative.mi.dy==456);
     Check(relative.mi.dwFlags==(MOUSEEVENTF_MOVE|MOUSEEVENTF_MOVE_NOCOALESCE));

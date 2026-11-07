@@ -2292,7 +2292,7 @@ void ControllerScenario(const std::string& origin, bool physicalReader = false) 
             "; viewer=" + viewer.findChild<QLabel*>("controllerStatus")->text().toStdString()); }
     };
     Check(!viewerConsent->isVisible() && !grant->isEnabled()); authorize();
-    host.revokeControl();
+    request->click(); // The controller indicator also releases its active grant.
     Wait([&]{return sink->buttons==0&&!viewerConsent->isChecked();});
     QPushButton* directGrant=nullptr;
     Wait([&] {
@@ -2396,8 +2396,11 @@ void DesktopInputScenario(const std::string& origin) {
             if(entry.first==screenshare::input::Mouse) {
                 Check(QApplication::focusWidget()==request);
                 Check(!viewer.findChild<QToolButton*>("selectKeyboardInput")->isChecked());
-                request->click(); // Pending buttons stay focusable; no duplicate/toggle.
-                Check(request->isChecked() && QApplication::focusWidget()==request);
+                request->click(); // The same indicator cancels this request.
+                Wait([&]{for(const auto& state:viewer.session().input()->Read())if(!state.releasePending && !(state.requested&screenshare::input::Mouse))return true;return false;});
+                Check(!request->isChecked() && QApplication::focusWidget()==request);
+                request->click();
+                Wait([&]{return request->isChecked();});
                 Check(!request->property("keyboardFocus").toBool());
             }
         }
@@ -2454,8 +2457,20 @@ void DesktopInputScenario(const std::string& origin) {
     RespondToInputRequest(host,screenshare::input::Mouse);
     Wait([&]{return viewer.session().input()->Read().front().granted==caps;});
     viewer.activateWindow();Wait([&]{return QApplication::activeWindow()==&viewer;});
-    auto* releaseControl=viewer.findChild<QPushButton*>("revokeController");
-    releaseControl->setFocus(Qt::MouseFocusReason);releaseControl->click();
+    Check(!viewer.findChild<QPushButton*>("revokeController"));
+    Wait([&]{return video->hasMouseTracking();});
+    const auto selectiveReleases=evidence->released.load(), selectiveApplied=evidence->applied.load();
+    const QPointF heldPoint(video->width()/2.0,video->height()/2.0);
+    QMouseEvent selectiveHold(QEvent::MouseButtonPress,heldPoint,heldPoint,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+    QApplication::sendEvent(video,&selectiveHold);
+    Wait([&]{return evidence->applied>selectiveApplied;});
+    requestMouse->setFocus(Qt::MouseFocusReason);requestMouse->click();
+    QEvent selectiveFocusLoss(QEvent::WindowDeactivate);QApplication::sendEvent(&viewer,&selectiveFocusLoss);
+    Wait([&]{return viewer.session().input()->Read().front().granted==screenshare::input::Keyboard && !viewer.session().input()->Read().front().releasePending;});
+    Check(host.session().input()->Read().front().granted==screenshare::input::Keyboard);
+    Wait([&]{return evidence->released>selectiveReleases;});
+    Check(requestKeyboard->property("granted").toBool());
+    requestKeyboard->click();
     Wait([&]{return !viewer.session().input()->Read().front().granted && !viewer.session().input()->Read().front().revokePending;});
     Wait([&]{return requestMouse->property("controlState").toString()=="off" && requestKeyboard->property("controlState").toString()=="off";});
     Check(!requestMouse->isChecked() && !requestKeyboard->isChecked() && !requestMouse->property("keyboardFocus").toBool());

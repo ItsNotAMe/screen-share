@@ -1,6 +1,7 @@
 #include "media/webrtc/MediaEngine.h"
 #include "media/webrtc/MediaNetworkPolicy.h"
 #include "media/webrtc/SharedAudioCodecs.h"
+#include "input/v2/InputProtocol.h"
 #include "api/audio_codecs/audio_decoder_factory_template.h"
 #include "api/audio_codecs/audio_encoder_factory_template.h"
 #include "api/create_modular_peer_connection_factory.h"
@@ -108,6 +109,7 @@ MediaEngine::CreateHostChannels(webrtc::PeerConnectionInterface& peer) {
     for (size_t i = 0; i < channels.size(); ++i) {
         webrtc::DataChannelInit options;
         if (i) { options.ordered = false; options.maxRetransmits = 0; }
+        else options.protocol = input::SelectiveReleaseProtocol;
         auto result = peer.CreateDataChannelOrError(labels[i], &options);
         if (!result.ok()) {
             for (auto& channel : channels) if (channel) channel->Close();

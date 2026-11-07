@@ -21,7 +21,8 @@ class InputChannels final {
     bool ready_=false;
     webrtc::scoped_refptr<webrtc::DataChannelInterface> control_,state_;
     static bool Open(const auto& channel) { return channel && channel->state()==webrtc::DataChannelInterface::kOpen; }
-    void Refresh() { service_->Bind(peer_,connection_,ready_ && Open(control_) && Open(state_)); }
+    void Refresh() { service_->Bind(peer_,connection_,ready_ && Open(control_) && Open(state_),
+        control_ && control_->protocol()==input::SelectiveReleaseProtocol); }
 public:
     InputChannels(std::shared_ptr<input::Service> service,std::string peer) : service_(std::move(service)),peer_(std::move(peer)) {}
     ~InputChannels() {

@@ -12,6 +12,49 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Release viewer controls through their individual indicators - 2026-11-07
+
+Owner requested removing the separate viewer Release control button. Mouse,
+Keyboard and Controller indicators now request when off, cancel when pending,
+and withdraw their own capability when granted. The Ctrl+Alt+Shift+Q shortcut
+remains Release all. UI tooltips/accessibility describe the next action. Local
+forwarding stops immediately for the withdrawn capability; other requests and
+permissions remain. Clear only removed held-input bookkeeping before focus
+cleanup. Last withdrawal ends local consent without issuing another full revoke.
+
+Input protocol adds a reliable capability-mask Withdraw packet, permitted only
+when the host control channel advertises screenshare-input-v2-selective-release
+through DCEP protocol metadata. Existing packet shapes/labels remain. Old
+viewers can ignore that metadata; new viewers never send the extension to an
+unadvertised host. Unsupported partial release fails unchanged with an update
+hint; last/all release uses the compatible old full-release operation.
+
+Service.Release filters queued input/requests locally and tracks releasePending.
+Incoming permission changes cannot restore withdrawn consent; resend withdrawal
+under a newer epoch if it crosses a host grant/renewal. Requests for a pending
+withdrawn capability wait for acknowledgement. Host Receive only coalesces masks;
+the input owner restricts/neutralizes the sink and advances the permission epoch.
+Other requests arriving during native work survive, and obsolete native completion
+cannot undo a newer host grant. Stale/wrong-lane withdrawals are rejected.
+
+Native desktop/gamepad Restrict paths retain surviving devices and controller
+slots, neutralize held state and stop the mouse hook when mouse is removed.
+Custom sinks without restriction support use release/regrant. Gamepad poller
+cleanup atomically requires both its epoch and Gamepad capability, so removing
+Controller cannot revoke a remaining Keyboard/Mouse grant.
+
+Portable tests cover round trips/malformed extension packets; individual and
+rapid release; unsent/sent pending cancellation; other grants/requests; crossed
+host grants; stale/incorrect-lane messages; legacy negotiation reset/fallback;
+device retention and subset-only restriction. A blocked restriction/new-host-grant
+regression verifies late cleanup does not release the replacement grant. Updated
+real-room desktop/controller UI flows passed (17.19/18.79 s), including held mouse
+release plus focus loss retaining keyboard, pending toggle, controller toggle and
+absence of the old button. Three focused CTests passed in 8.96 s. Final Release
+`all` build, packaged CLI/UI hashes and all 46 serial CTests passed (327.94 s).
+Compact and focus-paused native renders were inspected. No physical input/driver
+actions, version bump or publication; commit this improvement separately.
+
 ## Integrate viewer control guidance into the sidebar - 2026-11-07
 
 Owner requested replacing the visually awkward Game mouse/shortcut paragraph.

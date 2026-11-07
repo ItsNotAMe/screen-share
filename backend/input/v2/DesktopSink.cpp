@@ -56,6 +56,19 @@ void DesktopSink::Release(const std::string& peer) noexcept {
     if((it->second.capabilities&Gamepad) && pads_)pads_->Release(peer);
     owners_.erase(it);
 }
+bool DesktopSink::Restrict(const std::string& peer,uint8_t caps) {
+    const auto it=owners_.find(peer);
+    if(it==owners_.end() || !caps || (caps&~it->second.capabilities))return false;
+    auto& owner=it->second;
+    if(!Pause(peer))return false;
+    if(owner.device) {
+        if(caps&(Mouse|Keyboard)) {
+            if(!owner.device->Restrict(caps&3))return false;
+        } else {owner.device->Release();owner.device.reset();}
+    }
+    if((owner.capabilities&Gamepad) && !(caps&Gamepad))pads_->Release(peer);
+    owner.capabilities=caps;return true;
+}
 namespace {
 class WindowsDesktopDevice final : public DesktopDevice {
     DesktopTarget target_;
@@ -113,6 +126,11 @@ public:
         return false;
     }
     void Release() noexcept override {injector_.ReleaseAllInjectedInput();injector_.SetMouseMonitoringEnabled(false);}
+    bool Restrict(uint8_t caps) override {
+        if(!caps || (caps&~caps_))return false;
+        injector_.ReleaseAllInjectedInput();injector_.SetMouseMonitoringEnabled(caps&Mouse);
+        caps_=caps;return true;
+    }
 };
 }
 std::shared_ptr<Sink> CreateWindowsDesktopSink(std::shared_ptr<DesktopTargetState> target) {

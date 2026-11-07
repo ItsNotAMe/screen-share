@@ -141,7 +141,13 @@ not credentials or an arbitrary server address.
 The host can grant mouse, keyboard and controller permissions independently,
 with or without a viewer request. Room admission does not grant input. The host
 can revoke each permission; the panic shortcut is Ctrl+Alt+Shift+F12. In the UI,
-focus loss releases held input and pauses forwarding without cancelling grants.
+viewers click an input indicator to request it, click a pending indicator to
+cancel that request, or click a granted indicator to release just that control.
+Other permissions and requests remain in place. Ctrl+Alt+Shift+Q releases all
+controls. Individual release needs a host that supports it; with an older host,
+the viewer explains when the host needs updating instead of releasing unrelated
+controls. Releasing the last control and the release-all shortcut remain compatible.
+Focus loss releases held input and pauses forwarding without cancelling grants.
 Temporary input gaps neutralize held controls while keeping the host's grants;
 fresh updates resume control automatically. Disconnect and source changes still
 cancel grants. Keyboard

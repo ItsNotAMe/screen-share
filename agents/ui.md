@@ -2,9 +2,15 @@
 
 ## Current UI Direction
 
+- Viewer input indicators toggle independently: off requests, pending cancels,
+  granted releases only that capability. Remove the separate viewer Release
+  control button; retain Ctrl+Alt+Shift+Q as Release all in the shortcut list.
+  Pending withdrawal cannot be clicked back into a request before acknowledgement.
+  Keep other grants/requests and focus; the host still approves fresh requests.
+
 - Viewer controls keep the short state-dependent Game mouse/pause hint separate
-  from a compact Keyboard shortcuts reference. Show Fullscreen and Release
-  control as aligned action/key-badge rows, with readable muted styling. Reserve
+  from a compact Keyboard shortcuts reference. Show Fullscreen and Release all
+  as aligned action/key-badge rows, with readable muted styling. Reserve
   two hint lines to avoid shifts between ordinary states; let longer copy wrap.
   Owner explicitly prefers no Escape explanation, including tooltips/toasts.
   Keep the underlying Escape and remote-input behavior unchanged.
