@@ -13,16 +13,17 @@ generate WebRTC dropped-frame callbacks. No encoded frame queue is introduced.
 Negotiation of a lower level is explicitly rejected until per-level encoder
 limits are implemented; it must not silently encode above the negotiated level.
 
-Software pictures through 1080p request at most two MF slice workers, respecting
-WebRTC's available-core count (one core uses one worker). Larger pictures retain
-automatic threading; hardware and low-level callers' default remain unchanged.
-The inbox codec sizes its pool before format negotiation, then resets the exposed
-property: set before negotiation and reapply afterward. Applying only afterward
-changes its reported setting without reducing the tested pool. The optional
-property may be unavailable; `encoder-software-workers` records the queried
-setting, where zero means automatic/unavailable. Restarts and software fallback
-retain the budget. This reduces CPU consumption while increasing encode time;
-see [measurements and quality tradeoffs](../../../docs/performance.md).
+Normal sharing uses automatic MF software threading to preserve encoding delay
+and frame-time headroom. A two-worker experiment saved CPU but increased encoding
+time, with detailed four-viewer batch p95 exceeding the 60 FPS frame budget.
+Keep worker limits explicit for low-level callers; there is no user-facing
+efficiency mode yet. The optional softwareWorkerThreads config defaults to zero
+(automatic). When explicitly requested, set it before format negotiation to size
+the inbox codec's pool and reapply afterward because negotiation resets its
+reported property. Applying only afterward changes the query without reducing
+the tested pool. `encoder-software-workers` records the queried setting, where
+zero means automatic/unavailable. Restarts and software fallback retain the
+configuration. See [measurements and default decision](../../../docs/performance.md).
 
 WebRTC API calls must remain serialized, as required by its codec contract.
 Initialization, rate changes, callback registration and release use worker

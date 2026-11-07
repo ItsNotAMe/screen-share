@@ -19,6 +19,10 @@ Details and prior measured limits: [known limitations](../docs/known-limitations
   output deadlines in code; preserve the software compatibility option and fallback.
 - [ ] Investigate capture resource ownership and deferred WGC/RPC cleanup in code.
 - [ ] Reduce four-viewer software CPU and memory usage.
+- [ ] Reduce native capture/conversion work while no viewer can receive video
+  (empty room, all paused or connecting). Preserve source health/input freshness,
+  immediate full-rate resume and newest-frame selection from the bounded WGC
+  pool. Measure capture CPU time; avoid changing active-sharing frame cadence.
 
 ## Future work driven by reports
 

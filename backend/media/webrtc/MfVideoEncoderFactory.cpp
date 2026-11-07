@@ -47,11 +47,9 @@ public:
             maximumFps_ = codec->maxFramerate;
             config_.bitrate = codec->startBitrate * 1000;
             config_.levelIdc = config_.width > 1920 || config_.height > 1080 ? level_ : 42;
-            // Independent viewer encoders otherwise each ask MF for an automatic
-            // slice pool. Bound CPU contention through 1080p while respecting
-            // WebRTC's available cores. Larger pictures keep MF's latency policy.
-            config_.softwareWorkerThreads = config_.width * config_.height <= 1920 * 1080
-                ? std::min(settings.number_of_cores, 2) : 0;
+            // Automatic threading preserves interactive encode-time headroom.
+            // A small slice pool saves CPU but increases frame latency; keep
+            // that tradeoff explicit for low-level callers rather than default.
             try {
                 encoder_ = std::make_unique<H264StreamEncoder>();
                 if (config_.bitrate) StartTransform();

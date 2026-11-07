@@ -60,7 +60,7 @@ void Rate(webrtc::VideoEncoder& encoder, uint32_t bitrate) {
     // Exercise an FPS-driven transform restart as well as bitrate assignment.
     encoder.SetRates({allocation, bitrate ? 30.0 : 0.0});
 }
-void SoftwareThreadBudget() {
+void SoftwareThreadDefaults() {
     using namespace screenshare::media;
     auto diagnostics = std::make_shared<DiagnosticHistory>();
     MfVideoEncoderFactory factory({}, diagnostics);
@@ -74,27 +74,27 @@ void SoftwareThreadBudget() {
     for (const int cores : {1, 2, 16}) {
         const auto prior = diagnostics->Read().records->size();
         Require(encoder->InitEncode(&codec, {webrtc::VideoEncoder::Capabilities(false), cores, 1200}) == 0,
-            "Software worker budget could not initialize");
+            "Software encoder could not initialize");
         encoder->RegisterEncodeCompleteCallback(&sink);
         const auto count = sink.images.size();
-        Require(encoder->Encode(Frame(1), nullptr) == 0, "Budgeted encoder rejected input");
+        Require(encoder->Encode(Frame(1), nullptr) == 0, "Software encoder rejected input");
         sink.Wait(count + 1);
-        Rate(*encoder, 1000000); // FPS restart must retain the budget.
+        Rate(*encoder, 1000000); // FPS restart must retain automatic threading.
         Rate(*encoder, 0); Rate(*encoder, 1000000);
         unsigned configured = 0;
         const auto records = diagnostics->Read().records;
         for (size_t i = prior; i < records->size(); ++i) {
             const auto event = records->at(i).labels.find("event");
             if (event != records->at(i).labels.end() && event->second == "encoder-software-workers") {
-                Require(records->at(i).numbers.at("code") == std::min(cores, 2),
-                    "MF worker budget was ignored or lost on restart/resume");
+                Require(records->at(i).numbers.at("code") == 0,
+                    "Normal sharing inherited an implicit CPU-saving worker cap");
                 ++configured;
             }
         }
         Require(configured == 2, "Software worker configuration evidence missing");
         encoder->Release();
     }
-    // Preserve automatic threading above 1080p; this tuning is measured at 1080p.
+    // Larger pictures also retain the automatic default.
     codec.width = 2560; codec.height = 1440;
     Require(encoder->InitEncode(&codec, {webrtc::VideoEncoder::Capabilities(false), 16, 1200}) == 0,
         "Larger software picture could not initialize");
@@ -106,7 +106,13 @@ void SoftwareThreadBudget() {
     bool rejected = false;
     try { raw.Start(config); } catch (const std::invalid_argument&) { rejected = true; }
     Require(rejected && !raw.isRunning() && raw.softwareWorkerThreads() == 0, "Invalid MF worker count was accepted");
-    std::cout << "Software worker budget: 1/2/16-core assignments, restart/resume, larger-picture automatic policy and invalid counts passed.\n";
+    // Explicit low-level requests remain available, and survive negotiation.
+    for (const unsigned workers : {1u, 2u}) {
+        config.softwareWorkerThreads = workers; raw.Start(config);
+        Require(raw.softwareWorkerThreads() == workers, "Explicit software worker request was lost during negotiation");
+        raw.Stop(); Require(raw.softwareWorkerThreads() == 0, "Stopped encoder retained a worker setting");
+    }
+    std::cout << "Software threading: automatic sharing defaults/restart/resume, explicit low-level budgets and invalid counts passed.\n";
 }
 class CountedNv12 : public webrtc::NV12BufferInterface {
     webrtc::scoped_refptr<webrtc::NV12Buffer> pixels_;
@@ -516,7 +522,7 @@ int main(int argc, char** argv) {
         }
         Require(!gpuInput || hardware, "--gpu-input requires --hardware");
         Require(!gpuReadback || !hardware,"--gpu-readback requires software encoding");
-        if (!hardware) { SoftwareThreadBudget();Nv12PlaneValidation();DirectNv12Input();if(gpuReadback)DirectNv12Input(true);UnavailableFrameRate();CompletedStallRecovery(); }
+        if (!hardware) { SoftwareThreadDefaults();Nv12PlaneValidation();DirectNv12Input();if(gpuReadback)DirectNv12Input(true);UnavailableFrameRate();CompletedStallRecovery(); }
         StableFrameRate(hardware);
         proof::LifecycleSample(0, 0);
         for (int cycle = 1; cycle <= cycles; ++cycle) {

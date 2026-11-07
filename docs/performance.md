@@ -5,12 +5,18 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
-## Software encoder slice-worker budget (2026-11-07)
+## Software encoder slice-worker experiment (2026-11-07)
 
-The WebRTC software encoder now requests at most two slice workers for pictures
-through 1080p, respecting a one-core assignment. Previously each encoder chose
-its own automatic pool. Larger pictures keep automatic threading; hardware and
-low-level encoder callers' default remain unchanged. Microsoft's
+**Default decision:** normal sharing uses automatic software threading. The
+two-worker limit introduced in `89b3522` is removed from that default because it
+increases encoding completion time and reduces frame-time headroom. Lower CPU
+work does not mean lower stream delay. An efficiency tradeoff should be an
+explicit choice; there is no user-facing efficiency mode yet. The optional
+low-level worker setting and the evidence below remain available.
+
+The experiment requested at most two slice workers through 1080p, respecting a
+one-core assignment, instead of each encoder choosing an automatic pool. Larger
+pictures, hardware and low-level callers' default were unchanged. Microsoft's
 [worker-count property](https://learn.microsoft.com/en-us/windows/win32/medfound/codecapi-avencnumworkerthreads)
 controls this setting. In the tested inbox codec it must be set before format
 negotiation to size the pool, then reapplied afterward because negotiation resets
@@ -69,8 +75,11 @@ performance are outside the comparison. The full-room scorecard is unchanged.
 [Raw runs, quality/resource checks, source and executable hashes](benchmarks/encoder-thread-budget-2026-11-07.json).
 
 Reproduce with `EncoderComputeBenchmark.exe cpu 4 480` or add `detailed` as its
-fourth argument; `gpu` selects generated GPU input for software encoding. Build
-the identical benchmark against each production revision, then run
+fourth argument; `gpu` selects generated GPU input for software encoding. To
+reproduce this experiment, use the benchmark source from `89b3522` on both
+sides: production `de0d90f` for the automatic baseline and `89b3522` for the
+limited-worker candidate. The current sharing default again uses automatic
+threading. Build those benchmark executables, then run
 `python scripts/compare-encoder-compute.py --before BEFORE.exe --after AFTER.exe
 --output RESULTS.json --samples 6 --frames 480 --patterns both
 --quality-max-loss-db 0.5 --baseline-commit de0d90f --before-source BASELINE_SOURCES`.

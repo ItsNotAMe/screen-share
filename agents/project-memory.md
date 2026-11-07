@@ -12,7 +12,48 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Restore responsive software encoder defaults - 2026-11-07
+
+Owner asked whether the worker-budget change was faster/slower, then delegated
+the default decision for a professional sharing app. CPU milliseconds sum work
+across threads; elapsed batch time is the wait for encoding completion. Chose
+automatic software threading for normal sharing: the previous two-worker limit
+saved CPU but increased encode delay and detailed four-viewer batch p95 crossed
+the 16.67 ms frame budget. It was not a general speedup or a proven game benefit.
+Do not silently make an efficiency/latency tradeoff the default. There is no
+user-facing efficiency mode; explicit low-level worker requests remain possible.
+
+The factory again leaves softwareWorkerThreads at its default zero/automatic.
+The optional MF setting, two-stage negotiation setup, queried diagnostics and
+benchmark evidence remain. Tests now require automatic defaults for 1/2/16-core
+assignments and after FPS restart/resume, plus larger pictures; separate low-level
+tests verify explicit 1/2-worker requests and invalid counts. The new default
+regression failed against 89b3522 with "Normal sharing inherited an implicit
+CPU-saving worker cap" and passes after restoring automatic threading.
+
+The compatibility comparison passed all 32 runs against the original automatic
+production sources (two AB/BA pairs, smooth/detailed input, CPU/GPU input and 1/4
+encoders, 120 measured pictures each). Encoded hashes/byte counts are identical
+across versions, and process thread counts again match the original automatic
+policy. This is a compatibility check, not a new timing improvement claim;
+short-run CPU measurements are noisy. Local evidence is ignored under
+build/encoder-default-restore/default-compatibility.json. Release `all` build,
+packaged CLI/UI binary hash checks and all 46 sequential application checks
+passed (312.95 s), including the default/explicit-worker regression, recovery,
+multi-viewer media/input, reconnects and UI pause/resume. No version bump or
+publication; unreleased.
+
+Next candidate is idle capture demand (see todo), which could reduce conversions
+without changing active encoding latency. No capture change is committed here.
+Initial incomplete drafts remain ignored under build/idle-capture. Suggested
+composition: one per-runtime atomic demand bit, driven by actual deliverFrames
+eligibility, read on the capture owner; 5 Hz idle health/geometry, immediate
+active resume, and bounded latest-frame draining of WGC's two-frame pool. Keep
+audio/input independent and qualify startup/minimize/replacement/closure behavior.
+
 ## Bound software encoder slice workers through 1080p - 2026-11-07
+
+Historical experiment; automatic normal-sharing defaults are restored above.
 
 The WebRTC adapter previously ignored its available-core assignment and let each
 MF software encoder independently choose an automatic slice pool. It now requests
