@@ -35,7 +35,11 @@ back into codec lifecycle operations.
 SetRates applies the assigned bitrate directly. Zero suspends even when its FPS
 field is also zero. FPS changes restart the transform and force a keyframe;
 bitrate-only updates do not restart it. Software input must yield exactly one
-encoded packet. A completed software encode exceeding 500 ms drops that late
+encoded packet. If source pixels are unreadable before submission, drop that
+frame and carry any requested keyframe forward. The transform keeps its valid
+references and hardware input failures at this stage do not quarantine it.
+`encoder-input-unavailable` records frame preparation failures separately.
+A completed software encode exceeding 500 ms drops that late
 output and forces the next fresh picture to be a keyframe, retaining the live
 transform and latest pending input. The dropped picture's reference chain must
 never be used by a receiver. Diagnostics record `encoder-late-frame-dropped`

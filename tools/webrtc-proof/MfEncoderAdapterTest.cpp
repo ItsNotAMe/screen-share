@@ -504,6 +504,65 @@ void CompletedStallRecovery() {
     Require(lateEvents == 3 && starts == 2, "Late-output diagnostics missing or stall recovery rebuilt the codec");
     std::cout << "Completed software stalls: three late drops, fresh independent IDRs, bounded pending replacement and cancellation/restart passed.\n";
 }
+
+class UnreadableInput : public webrtc::VideoFrameBuffer {
+public:
+    explicit UnreadableInput(bool throwOnRead) : throwOnRead_(throwOnRead) {}
+    Type type() const override { return Type::kNative; }
+    int width() const override { return 640; }
+    int height() const override { return 360; }
+    webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override {
+        if (throwOnRead_) throw std::runtime_error("Injected frame readback error");
+        return nullptr;
+    }
+private:
+    bool throwOnRead_;
+};
+
+void UnreadableInputRecovery() {
+    using namespace screenshare::media;
+    auto diagnostics = std::make_shared<DiagnosticHistory>();
+    MfVideoEncoderFactory factory({}, diagnostics);
+    Sink sink;
+    auto encoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    webrtc::VideoCodec codec;
+    codec.codecType = webrtc::kVideoCodecH264;
+    codec.width = 640; codec.height = 360; codec.maxFramerate = 30; codec.startBitrate = 1000;
+    Require(encoder->InitEncode(&codec, {webrtc::VideoEncoder::Capabilities(false), 2, 1200}) == 0,
+        "Unreadable-input fixture could not start");
+    encoder->RegisterEncodeCompleteCallback(&sink);
+    Require(encoder->Encode(Frame(1), nullptr) == 0, "Initial input rejected");
+    sink.Wait(1);
+
+    const std::vector wantKey{webrtc::VideoFrameType::kVideoFrameKey};
+    for (uint32_t failure = 0; failure < 2; ++failure) {
+        const uint32_t badTimestamp = 21 + failure * 2;
+        auto unreadable = Frame(badTimestamp);
+        unreadable.set_video_frame_buffer(webrtc::make_ref_counted<UnreadableInput>(failure != 0));
+        Require(encoder->Encode(unreadable, failure ? &wantKey : nullptr) == 0, "Unreadable input was not queued");
+        Rate(*encoder, 1000000); // Finish the read before submitting a new frame.
+        Require(sink.dropped == failure + 1 && sink.images.size() == failure + 1,
+            "Unreadable input did not report exactly one drop");
+        Require(encoder->Encode(Frame(badTimestamp + 1), nullptr) == 0,
+            "One unreadable frame disabled healthy software encoding");
+        sink.Wait(failure + 2);
+        Rate(*encoder, 1000000);
+        const auto& image = sink.images.back();
+        Require(image.RtpTimestamp() == badTimestamp + 1 &&
+            image._frameType == (failure ? webrtc::VideoFrameType::kVideoFrameKey : webrtc::VideoFrameType::kVideoFrameDelta),
+            "Recovery did not encode the fresh frame with the expected keyframe policy");
+    }
+    const auto records = diagnostics->Read().records;
+    const auto count = [&](const char* event) {
+        return std::count_if(records->begin(), records->end(), [event](const auto& record) {
+            const auto label = record.labels.find("event");
+            return label != record.labels.end() && label->second == event;
+        });
+    };
+    Require(count("encoder-input-unavailable") == 2 && count("encoder-software-ready") == 1 &&
+        count("encoder-terminal-failure") == 0, "Read failure diagnostics lost a drop or restarted the encoder");
+    std::cout << "Unreadable input drops preserve the live software encoder and pending keyframe requests.\n";
+}
 }
 int main(int argc, char** argv) {
     try {
@@ -522,7 +581,15 @@ int main(int argc, char** argv) {
         }
         Require(!gpuInput || hardware, "--gpu-input requires --hardware");
         Require(!gpuReadback || !hardware,"--gpu-readback requires software encoding");
-        if (!hardware) { SoftwareThreadDefaults();Nv12PlaneValidation();DirectNv12Input();if(gpuReadback)DirectNv12Input(true);UnavailableFrameRate();CompletedStallRecovery(); }
+        if (!hardware) {
+            SoftwareThreadDefaults();
+            Nv12PlaneValidation();
+            DirectNv12Input();
+            if (gpuReadback) DirectNv12Input(true);
+            UnavailableFrameRate();
+            CompletedStallRecovery();
+            UnreadableInputRecovery();
+        }
         StableFrameRate(hardware);
         proof::LifecycleSample(0, 0);
         for (int cycle = 1; cycle <= cycles; ++cycle) {

@@ -7,6 +7,16 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 unreadable encoder input: a failed pixel read or conversion before
+MF submission drops just that frame. The transform keeps its reference chain
+and any pending keyframe request carries forward. Input failures get a separate
+diagnostic and do not trigger hardware quarantine. Actual transform failures
+retain their existing handling. The regression reproduces permanent loss of
+video on the old path and verifies the next frame after both null and thrown
+reads, with normal delta output and requested keyframe output respectively.
+The native encoder checks also passed for shared GPU readback and hardware
+texture submission. These checks use generated inputs.
+
 2026-11-07 viewer render stalls: WASAPI output writes now expire an unfinished
 10 ms PCM block after one second, even if waits succeed or tiny partial writes
 occur. Fresh capacity is checked first; a delayed owner can complete a healthy
