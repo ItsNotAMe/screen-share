@@ -7,6 +7,13 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 capture startup: after admission, a failed initial source construction
+or Start now enters SourceUnavailable with its failure reason. The room and
+selection mailbox survive. The capture owner releases partial native state and
+waits for an explicit replacement. Ordinary sources and consumer faults retain
+terminal handling. Regression coverage checks rejected and successful replacements,
+and the loopback room proof uses a first-device barrier with waiting viewers.
+
 2026-11-23 unreadable encoder input: a failed pixel read or conversion before
 MF submission drops just that frame. The transform keeps its reference chain
 and any pending keyframe request carries forward. Input failures get a separate

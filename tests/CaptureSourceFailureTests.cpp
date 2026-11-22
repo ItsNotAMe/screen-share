@@ -257,6 +257,39 @@ void PendingReplacement() {
         "Pending replacement did not clear source failure");
     capture.Stop(); Check(!next->live && !old->wrongThread && !next->wrongThread, "Pending replacement cleanup escaped its owner");
 }
+void FailedInitialSelection() {
+    for (const bool failDuringStart : {false, true}) {
+        auto failed = std::make_shared<State>();
+        failed->failStart = true;
+        auto control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
+        std::atomic<unsigned> opens{0};
+        CaptureSession capture(8, [&, control] {
+            return std::make_unique<SwitchableCaptureSource>([&]() -> std::unique_ptr<ICaptureSource> {
+                ++opens;
+                if (!failDuringStart) throw std::runtime_error("Injected initial source construction failure");
+                return std::make_unique<Source>(failed);
+            }, control);
+        }, [](auto) {});
+        capture.EnableDelivery();
+        Unavailable(capture, CaptureFailure::Source);
+        Check(opens == 1 && !failed->live && failed->retired == unsigned(failDuringStart) &&
+            capture.status().delivered == 0 && control->Status().revision == 1,
+            "Initial failure retained native state or changed the selected source");
+
+        auto rejected = control->Submit({}, Factory(failed));
+        Check(rejected.wait_for(1s) == std::future_status::ready && rejected.get().error == CaptureUpdateError::Failed,
+            "A bad replacement did not resolve after failed startup");
+        Check(control->Status().revision == 1 && capture.status().state == CaptureState::Unavailable,
+            "Bad replacement changed the unavailable state or selection");
+
+        auto healthy = std::make_shared<State>();
+        Replace(capture, control, healthy);
+        Check(opens == 1 && control->Status().revision == 2, "The initial source retried or the replacement did not commit");
+        capture.Stop();
+        Check(!failed->live && !healthy->live && !failed->wrongThread && !healthy->wrongThread,
+            "Initial failure or replacement cleanup escaped the capture owner");
+    }
+}
 void FailureBoundaries() {
     auto state = std::make_shared<State>();
     CaptureSession ordinary(3, Factory(state), [](auto) {});
@@ -268,9 +301,10 @@ void FailureBoundaries() {
         [](auto) { throw std::runtime_error("Injected consumer failure"); });
     consumer.EnableDelivery(); Wait([&] { return consumer.status().state == CaptureState::Failed; }); consumer.Stop();
     Check(consumer.status().failure == CaptureFailure::Consumer, "Consumer failure was hidden as source unavailability");
-    state->failStart = true; control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
-    CaptureSession startup(5, [=] { return std::make_unique<SwitchableCaptureSource>(Factory(state), control); }, [](auto) {});
+    state->failStart = true;
+    CaptureSession startup(5, Factory(state), [](auto) {});
     Wait([&] { return startup.status().state == CaptureState::Failed; }); startup.Stop();
+    Check(startup.status().failure == CaptureFailure::Source, "Ordinary startup failure was hidden");
     state->failStart = false; state->silent = true; control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
     CaptureSession timeout(6, [=] { return std::make_unique<SwitchableCaptureSource>(Factory(state), control); }, [](auto) {}, 40ms);
     timeout.EnableDelivery(); Unavailable(timeout, CaptureFailure::StartupTimeout);
@@ -323,6 +357,7 @@ void LatestQueuedFrame() {
     Check(failed && frame.id == 4, "Queue error lost the frame owned by the caller"); frame.Close();
 }
 int main() try {
+    FailedInitialSelection();
     DemandCadence(); LatestQueuedFrame();
     MinimizedRestore(); RecoveryBudgetBoundaries(); HealthyRecoveries(); ReadFailure(); RecoveryFailure(false); RecoveryFailure(true); PendingReplacement(); FailureBoundaries();
     std::cout << "Capture: minimized restore/timeout, renewed/bounded recovery, read/rebuild failure, replacement, cancellation and failure boundaries passed.\n";

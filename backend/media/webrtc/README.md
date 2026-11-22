@@ -278,11 +278,14 @@ session to check five healthy-separated injected losses; it does not reset the
 physical driver.
 
 The shipping switchable capture container can abandon a failed native source
-after acquisition/rebuild failure, first-frame timeout or exhausted recovery.
+after opening or starting it fails, acquisition/rebuild failure, first-frame
+timeout or exhausted recovery.
 CaptureSession preserves the room/distribution and the capture-selection mailbox
 in SourceUnavailable, with its failure reason retained. The host chooses the next
 source explicitly. Retirement/destruction stay on the capture owner; abandonment
 advances source generation and gives the next selected source a fresh recovery
-budget. Fresh output clears the failure. Consumer errors, initial Start failures
-and ordinary sources without a replacement mailbox remain terminal. The runtime
-releases held input and blocks new grants while no source is available.
+budget. Fresh output clears the failure. Consumer errors and failures of sources
+without a replacement mailbox remain terminal. The runtime releases held input
+and blocks new grants while no source is available. If opening the initial
+source fails before the Windows capture device is ready, the room stays open
+and media starts when a replacement delivers its first frame.

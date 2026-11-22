@@ -37,6 +37,7 @@ private:
 };
 class SwitchableCaptureSource final : public ICaptureSource {
     std::shared_ptr<CaptureSwitchControl> control_;
+    CaptureSession::Factory initial_;
     std::unique_ptr<ICaptureSource> current_, candidate_;
     std::unique_ptr<CaptureSwitchControl::Request> request_;
     CaptureSourceInfo info_;
@@ -44,9 +45,17 @@ class SwitchableCaptureSource final : public ICaptureSource {
     void Finish(CaptureUpdateError error) { candidate_.reset(); control_->Complete(std::move(request_), error); }
 public:
     SwitchableCaptureSource(CaptureSession::Factory initial, std::shared_ptr<CaptureSwitchControl> control)
-        : control_(std::move(control)), current_(initial()) { if (!current_) throw std::runtime_error("Missing initial capture source"); }
+        : control_(std::move(control)), initial_(std::move(initial)) {}
     ~SwitchableCaptureSource() override { control_->Close(); Finish(CaptureUpdateError::Cancelled); }
-    void Start() override { current_->Start(); info_ = current_->Info(); }
+    void Start() override {
+        // Keep the switch control alive even if the first source cannot be
+        // constructed. Consume its factory once on the capture owner.
+        auto initial = std::move(initial_);
+        current_ = initial();
+        if (!current_) throw std::runtime_error("Missing initial capture source");
+        current_->Start();
+        info_ = current_->Info();
+    }
     std::optional<CaptureSample> Poll() override {
         if (!request_) request_ = control_->Take();
         if (request_) {
