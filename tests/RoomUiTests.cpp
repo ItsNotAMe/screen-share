@@ -1845,6 +1845,52 @@ void SourcePickerSearchScenario() {
     }
     owner.close();
 }
+void SourcePickerWheelScenario() {
+    QWidget owner;
+    owner.setStyleSheet(uiStyleSheet());
+    owner.resize(1000,820);
+    owner.show();
+    CaptureSelection current;
+    current.kind=CaptureKind::Window;
+    current.window=42;
+    SourcePickerDialog picker(current,false,&owner);
+    picker.open();
+    auto* cards=picker.findChild<QListWidget*>("SourceCards");
+    auto* selected=cards->currentItem();
+    Check(selected);
+    for(int index=1;index<=30;++index) {
+        auto* item=new QListWidgetItem(*selected);
+        item->setText(QString("Window %1").arg(index));
+        cards->addItem(item);
+    }
+
+    auto* bar=cards->verticalScrollBar();
+    auto* viewport=cards->viewport();
+    const auto wheel=[viewport](QPoint pixels,QPoint angle) {
+        const auto point=viewport->rect().center();
+        QWheelEvent event(point,viewport->mapToGlobal(point),pixels,angle,
+            Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+        QApplication::sendEvent(viewport,&event);
+    };
+    const int previousLines=QApplication::wheelScrollLines();
+    QApplication::setWheelScrollLines(3);
+    for(const QSize size:{QSize(1000,820),QSize(740,600)}) {
+        owner.resize(size);
+        QCoreApplication::processEvents();
+        Wait([&]{return bar->maximum()>viewport->height();});
+        bar->setValue(bar->minimum());
+        const int start=cards->visualItemRect(selected).top();
+        wheel({},QPoint(0,-120));
+        const int distance=start-cards->visualItemRect(selected).top();
+        Check(distance>0 && distance<cards->gridSize().height());
+        wheel(QPoint(0,-12),QPoint(0,-120));
+        Check(start-cards->visualItemRect(selected).top()==distance+12);
+        wheel(QPoint(0,7),{});
+        Check(start-cards->visualItemRect(selected).top()==distance+5);
+        Check(cards->currentItem()==selected);
+    }
+    QApplication::setWheelScrollLines(previousLines);
+}
 void CapturePreviewOwnership() {
     // The exact-size path used to queue a QImage backed by freed frame pixels.
     for (const QSize size : {QSize(320,180),QSize(640,360),QSize(800,450)}) {
@@ -2731,6 +2777,10 @@ int main(int argc, char** argv) {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs); // Deterministic file-picker interaction in UI proofs.
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
     QApplication::setStyle("Fusion");
+    if(argc==2 && std::string(argv[1])=="--source-picker-wheel") {
+        try { SourcePickerWheelScenario();std::cout<<"{\"passed\":true,\"source_picker_wheel\":true}\n";return 0; }
+        catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+    }
     if(argc==2 && std::string(argv[1])=="--preview-quality") {
         try { HostPreviewQuality();std::cout<<"{\"passed\":true,\"preview_quality\":true}\n";return 0; }
         catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
@@ -2752,7 +2802,7 @@ int main(int argc, char** argv) {
         RoomEndNoticePolicyChecks();
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
         if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback")) {
-            DirectoryStateScenario();DirectoryAvailabilityScenario();ReportExportScenario();SourcePickerSearchScenario();AdmissionFeedbackScenario();
+            DirectoryStateScenario();DirectoryAvailabilityScenario();ReportExportScenario();SourcePickerSearchScenario();SourcePickerWheelScenario();AdmissionFeedbackScenario();
         }
         WindowKeyboardControlScenario();
         ControllerLagKeepsPermission();
