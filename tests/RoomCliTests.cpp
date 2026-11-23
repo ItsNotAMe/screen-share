@@ -358,6 +358,11 @@ void CommandScenario() {
     Reject([&] { ParseRoomCommand(hostAudio + QStringList{"--audio", "shared", "--process-id", "12"}); });
     Reject([&] { ParseRoomCommand(hostAudio + QStringList{"--audio", "shared", "--audio-device", "output"}); });
     const QStringList base{"--backend", "v2", "--signal-server", "https://example.test", "--create-room"};
+    const auto thirtyFps = ParseRoomCommand(base + QStringList{"--fps", "30"});
+    Check(thirtyFps.media.preferences.fps == 30 && thirtyFps.media.capture.targetFps == 60);
+    const QJsonObject cappedCapture{{"origin", "https://example.test"}, {"host", true},
+        {"stream", QJsonObject{{"fps", 30}}}, {"capture", QJsonObject{{"fps", 45}}}};
+    Check(ParseRoomSessionConfig(cappedCapture).media.capture.targetFps == 45);
     auto config = ParseRoomCommand(base + QStringList{"--nickname", "  Player  ", "--resolution", "1920x1080", "--fps", "144", "--bitrate", "9000000"});
     Check(config.room.host && config.room.nickname == "Player" && config.media.preferences.resolution == ResolutionMode::Fixed &&
         config.media.preferences.width == 1920 && config.media.preferences.fps == 144 &&

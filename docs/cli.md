@@ -117,8 +117,9 @@ membership credentials.
 Capture accepts `display` (enumerated index) or `window` (a decimal/hex HWND string,
 e.g. `"0x123456"`), never both. Use existing `--list`/UI enumeration to identify
 sources. Native capture dimensions are retained; per-viewer adaptation controls
-output dimensions. Capture FPS defaults to initial stream FPS; set `capture.fps`
-high enough for scheduled changes. Live settings do not reconfigure the device.
+output dimensions. The capture ceiling defaults to 60 FPS. Live stream FPS
+changes adjust capture cadence within that ceiling without reopening the source.
+Set `capture.fps` to explicitly cap the capture source.
 
 Audio fields are `source: shared|system|microphone|process|none`, optional `deviceId`, optional
 `playbackDeviceId`, and a required positive `processId` for process output. Device
