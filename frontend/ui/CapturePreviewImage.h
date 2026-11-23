@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <memory>
 #include <thread>
+#include <utility>
 
 inline constexpr std::chrono::milliseconds CapturePreviewInterval{200};
 inline constexpr std::chrono::milliseconds HostCapturePreviewInterval{33};
@@ -47,4 +49,19 @@ inline QImage CapturePreviewImage(const screenshare::CapturedFrame& frame, QSize
     return QImage(reinterpret_cast<const uchar*>(frame.pixels.data()), frame.width, frame.height,
                   frame.rowPitch, QImage::Format_RGB32)
         .scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation).copy();
+}
+
+// Host preview capture already produces viewport-sized pixels. Keep the
+// readback buffer alive through the queued image and the displayed pixmap.
+inline QImage TakeHostPreviewImage(screenshare::CapturedFrame&& frame) {
+    if (frame.width <= 0 || frame.height <= 0 || frame.rowPitch % 4 ||
+        frame.rowPitch < uint64_t(frame.width) * 4 ||
+        frame.pixels.size() < uint64_t(frame.rowPitch) * frame.height) return {};
+
+    auto pixels = std::make_unique<std::vector<std::byte>>(std::move(frame.pixels));
+    QImage image(reinterpret_cast<uchar*>(pixels->data()), frame.width, frame.height,
+        frame.rowPitch, QImage::Format_RGB32,
+        [](void* owner) { delete static_cast<std::vector<std::byte>*>(owner); }, pixels.get());
+    if (!image.isNull()) pixels.release();
+    return image;
 }

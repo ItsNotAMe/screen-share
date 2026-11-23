@@ -5,6 +5,27 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Host preview handoff at 1080p (2026-11-23)
+
+The active Windows host preview transfers its viewport-sized BGRA readback to
+Qt. The displayed pixmap can retain those pixels through Qt's image cleanup
+callback. [Qt image buffer ownership](https://doc.qt.io/qt-6/qimage.html) ·
+[Qt pixmap conversion](https://doc.qt.io/qt-6/qpixmap.html#fromImage-1)
+
+Six alternating pairs used a generated 1920×1080 WGC window and 60 frames per
+phase at the host's 30 FPS preview cadence. The measurements cover the handoff
+from CPU pixels to a pixmap on the native Windows Qt platform.
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Median handoff time per frame | 0.945 ms | 0.198 ms |
+| Median CPU cycles per 60 frames | 263.42 million | 55.74 million |
+| Pixmaps reusing the original readback buffer across all pairs | 0 / 360 | 360 / 360 |
+
+GPU readback, Qt event dispatch, painting, encoding and transport are outside
+the measured interval. The preview regression checks padded scanlines, delayed
+UI delivery and exact pixels at 1x and 2x display scale.
+
 ## GPU completion checks at 60 FPS (2026-11-23)
 
 Owned NV12 capture reuses the completed Direct3D event query on the same device.

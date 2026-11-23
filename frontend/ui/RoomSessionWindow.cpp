@@ -1135,10 +1135,16 @@ void RoomSessionWindow::RefreshHostPreview() {
                 const auto target=previewCaptureSize_.Size();
                 capturer.SetTargetSize(target.width(),target.height());
                 auto frame=capturer.TryCaptureFrame(std::chrono::milliseconds(30));
-                if(frame&&!frame->pixels.empty()&&!pending->exchange(true)) {
-                    auto image=CapturePreviewImage(*frame,{frame->width,frame->height});
-                    const QSize sourceSize(frame->sourceWidth,frame->sourceHeight);
-                    QMetaObject::invokeMethod(this,[this,image,sourceSize,revision,pending]{pending->store(false);if(revision==previewRevision_&&previewActive_){previewSourceSize_=sourceSize;hostPreview_->setPixmap(QPixmap::fromImage(image));}},Qt::QueuedConnection);
+                if (frame && !frame->pixels.empty() && !pending->exchange(true)) {
+                    const QSize sourceSize(frame->sourceWidth, frame->sourceHeight);
+                    auto image = TakeHostPreviewImage(std::move(*frame));
+                    QMetaObject::invokeMethod(this, [this, image = std::move(image), sourceSize, revision, pending]() mutable {
+                        pending->store(false);
+                        if (revision == previewRevision_ && previewActive_ && !image.isNull()) {
+                            previewSourceSize_ = sourceSize;
+                            hostPreview_->setPixmap(QPixmap::fromImage(std::move(image)));
+                        }
+                    }, Qt::QueuedConnection);
                 }
                 WaitForCapturePreview(nextFrame);
             }

@@ -1921,7 +1921,26 @@ void HostPreviewQuality() {
             text.drawText(QRect(24,40,550,220),Qt::AlignLeft|Qt::TextWordWrap,
                 "Host preview\nReadable source text at the displayed resolution.\nFine detail should survive high-DPI presentation.");
         }
-        SourcePreviewLabel label;label.resize(600,300);label.setPixmap(QPixmap::fromImage(source));
+        SourcePreviewLabel label;
+        label.resize(600, 300);
+        {
+            screenshare::CapturedFrame frame;
+            frame.width = source.width(); frame.height = source.height();
+            frame.rowPitch = frame.width * 4 + 16;
+            frame.pixels.resize(size_t(frame.rowPitch) * frame.height);
+            for (int y = 0; y < frame.height; ++y) {
+                const auto* row = reinterpret_cast<const std::byte*>(source.constScanLine(y));
+                std::copy_n(row, frame.width * 4, frame.pixels.data() + size_t(frame.rowPitch) * y);
+            }
+            const auto* readback = reinterpret_cast<const uchar*>(frame.pixels.data());
+            auto image = TakeHostPreviewImage(std::move(frame));
+            Check(image.constBits() == readback && image.bytesPerLine() == frame.rowPitch);
+            Check(QMetaObject::invokeMethod(&label, [&label, image = std::move(image)]() mutable {
+                label.setPixmap(QPixmap::fromImage(std::move(image)));
+            }, Qt::QueuedConnection));
+        }
+        QCoreApplication::sendPostedEvents(&label, QEvent::MetaCall);
+        Check(label.pixmap().toImage().convertToFormat(QImage::Format_RGB32) == source);
         QImage rendered(source.size(),QImage::Format_RGB32);rendered.setDevicePixelRatio(scale);rendered.fill(Qt::red);
         label.render(&rendered);
         for(int x=32;x<64;++x)Check(rendered.pixelColor(x,8)==source.pixelColor(x,8));
