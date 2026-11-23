@@ -7,6 +7,13 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 room signaling recovery: count one outage from a transport failure
+or timeout until the next authoritative snapshot. Failed handshake retries
+share its 35-second deadline. Four distinct outages in a rolling minute still
+end the session. The loopback proof refuses the first three retry handshakes
+and verifies reattachment, resumed media and input, and isolation of a healthy
+viewer. The previous logic ended the room before a fourth retry could connect.
+
 2026-11-23 viewer audio startup: acknowledge WebRTC playout startup before
 opening the Windows output. The first write opens and primes the device with
 silence on the same playout worker, then subsequent writes use current PCM.

@@ -321,6 +321,7 @@ int main(int argc, char** argv) {
                 return false;
             };
             QNetworkAccessManager network;
+            bool refuseRetries = true;
             for (const auto& reconnecting : {controllerId, controllerId, hostId}) {
                 const auto oldHost = generation(host, controllerId);
                 const auto oldViewer = generation(*viewers[0], hostId);
@@ -329,11 +330,14 @@ int main(int argc, char** argv) {
                 const auto healthyOffers = evidence[1]->offers.load();
                 QUrl url(QString::fromLocal8Bit(argv[1]));
                 url.setPath(QString::fromStdString("/test/reconnect/" + host.Status().roomId + "/" + reconnecting));
+                if (refuseRetries) url.setQuery("outage=1");
                 auto* reply = network.get(QNetworkRequest(url));
                 Wait([&] { QCoreApplication::processEvents(); return reply->isFinished(); });
                 Check(reply->error() == QNetworkReply::NoError && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 204);
                 reply->deleteLater();
                 Wait([&] {
+                    if (viewers[0]->Status().phase == RoomPhase::Failed || host.Status().phase == RoomPhase::Failed)
+                        throw std::runtime_error("Room failed during a recoverable signaling outage");
                     if (generation(host, controllerId) <= oldHost || generation(*viewers[0], hostId) <= oldViewer ||
                         evidence[0]->frames < before + 30 || evidence[1]->frames < healthyBefore + 30 ||
                         host.Status().activePeers != 4 || !ready(host, controllerId) || !ready(*viewers[0], hostId)) return false;
@@ -356,6 +360,7 @@ int main(int argc, char** argv) {
                 Wait([&] { return hostEvidence->input->applied > applied; });
                 host.Input()->Revoke();
                 Wait([&] { return !granted(viewers[0]->Input(), hostId); });
+                refuseRetries = false;
             }
         }
         live.resolution = ResolutionMode::Fixed; live.width = 320; live.height = 180;
