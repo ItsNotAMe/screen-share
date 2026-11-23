@@ -50,7 +50,7 @@ public:
     void setLowLatency(bool enabled);
     [[nodiscard]] std::uint64_t presentedFrameCount() const;
     [[nodiscard]] PresentationStats presentationStats() const;
-    static constexpr auto FreshFrameTimeout = std::chrono::seconds(2);
+    static constexpr auto FreshFrameTimeout = screenshare::kVideoFrameFreshnessTimeout;
     [[nodiscard]] bool hasFreshFrame(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) const;
     void clearFrame();
     [[nodiscard]] screenshare::input::FrameMapping presentedInputMapping() const;

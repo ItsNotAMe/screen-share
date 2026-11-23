@@ -65,8 +65,8 @@ public:
             if (pendingFrame_.has_value()) {
                 droppedFrames_.fetch_add(1, std::memory_order_relaxed);
             }
+            pendingFrameAt_ = frame.receivedAt.value_or(std::chrono::steady_clock::now());
             pendingFrame_ = std::move(frame);
-            pendingFrameAt_ = std::chrono::steady_clock::now();
             enqueuedFrames_.fetch_add(1, std::memory_order_relaxed);
             queuedFrames_.store(1, std::memory_order_release);
         }
@@ -190,6 +190,8 @@ private:
                 work.width = width_;
                 work.height = height_;
                 work.smoothScaling = smoothScaling_;
+                work.resizePending = resizePending_;
+                work.smoothPending = smoothPending_;
                 work.clearPending = clearPending_;
                 work.lowLatency = lowLatency_;
                 work.frame = std::move(pendingFrame_);
@@ -201,6 +203,11 @@ private:
             }
             if (work.clearPending) { presenter.Clear(); active = false; bufferedMapping={}; bufferedFrameAt.reset(); }
             const auto started = std::chrono::steady_clock::now();
+            const bool expired = work.frame && started - work.frameAt >= VideoFrameWidget::FreshFrameTimeout;
+            if (expired) {
+                work.frame.reset();
+                ++droppedFrames_;
+            }
             bool presented = false;
             bool redrawn = false;
             if (work.frame) {
@@ -209,7 +216,7 @@ private:
                 presented = presenter.Present(work.hwnd, work.width, work.height, work.smoothScaling,
                     work.lowLatency, {work.frame->width, work.frame->height, pixels.data(), pixels.size(),
                         work.frame->native ? work.frame->native->texture() : nullptr});
-            } else if (active) {
+            } else if (active && (!expired || work.resizePending || work.smoothPending)) {
                 redrawn = presenter.Update(work.hwnd, work.width, work.height, work.smoothScaling, work.lowLatency);
             }
             const auto status = presenter.statistics();

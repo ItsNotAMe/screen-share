@@ -7,6 +7,14 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 viewer frame age: carry local decoder receipt time through the
+latest-frame queue and renderer. Frames that reach two seconds in these queues
+expire before conversion or upload. Delayed presentation or redraw cannot make
+an old image count as fresh for remote input. The CLI preview also checks age
+before upload, and handoff reports count expired frames separately. Tests cover
+the originally refreshed timestamp, stale-frame drops and fresh-frame recovery.
+This measures local decoded-frame age only.
+
 2026-11-23 host audio startup: begin the PCM timeline while the existing producer
 opens the initial device. WebRTC can start video and send paced silence while
 activation is pending. The five-second missing-audio deadline now includes the

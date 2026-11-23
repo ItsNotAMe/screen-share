@@ -359,6 +359,34 @@ void RedrawCannotRenewPresentationRecovery() {
     state->failure = S_OK;
     Require(present() && !session.statistics().terminal && session.statistics().recoveries == 0);
 }
+void ExpiredQueuedFrameIsNotPresented() {
+    auto state = std::make_shared<RendererEvidence>();
+    VideoFrameWidget widget(nullptr, [state] { return std::make_unique<TestRenderer>(state); });
+    widget.show(); widget.showVideoSurface(); QApplication::processEvents();
+    auto send = [&](auto received, uint64_t generation) {
+        screenshare::Nv12VideoFrame frame;
+        frame.width = frame.height = 2; frame.nv12.resize(6);
+        frame.inputMapping = {generation, 2, 2, 0, 0, 2, 2};
+        frame.receivedAt = received;
+        Require(widget.presentVideoFrameAsync(std::move(frame)));
+        Await([&] {
+            const auto stats = widget.presentationStats();
+            return stats.enqueuedFrames == stats.presentedFrames + stats.droppedFrames;
+        });
+    };
+    const auto first = std::chrono::steady_clock::now() - 250ms;
+    send(first, 1);
+    auto stats = widget.presentationStats();
+    Require(stats.presentedFrames == 1 && stats.frameReceivedAt == first);
+    const auto before = state->calls.load();
+    send(std::chrono::steady_clock::now() - 3s, 2);
+    stats = widget.presentationStats();
+    Require(stats.droppedFrames == 1 && state->calls == before && stats.frameReceivedAt == first && stats.inputMapping.generation == 1);
+    const auto resumed = std::chrono::steady_clock::now();
+    send(resumed, 3);
+    stats = widget.presentationStats();
+    Require(stats.presentedFrames == 2 && stats.frameReceivedAt == resumed && stats.inputMapping.generation == 3);
+}
 void HealthyWidgetPlaybackRenewsRecovery() {
     auto state = std::make_shared<RendererEvidence>();
     VideoFrameWidget widget(nullptr, [state] { return std::make_unique<TestRenderer>(state); });
@@ -425,6 +453,7 @@ int main(int argc, char** argv)
 {
     QApplication application(argc, argv);
     try {
+        ExpiredQueuedFrameIsNotPresented();
         HealthyPresentationRenewsRecovery();RedrawCannotRenewPresentationRecovery();HealthyWidgetPlaybackRenewsRecovery();
         GameMappingScenario();PresentationRecoveryScenario();ClearedPresentationCannotResumeInput();
         if(argc==2 && std::string(argv[1])=="--game-mouse")NativeGameCaptureScenario();

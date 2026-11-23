@@ -44,7 +44,7 @@ private:
 class LatestRoomVideoFrame final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
     struct Statistics { uint64_t received = 0, replaced = 0, delivered = 0, retained = 0, converted = 0, repacked = 0, rejectedAfterStop = 0,
-        gpuRetained = 0, gpuReadbacks = 0, discardedOnStop = 0, failed = 0, inFlight = 0, pending = 0;
+        gpuRetained = 0, gpuReadbacks = 0, discardedOnStop = 0, expired = 0, failed = 0, inFlight = 0, pending = 0;
         std::optional<uint64_t> pendingAgeUs, lastWaitUs;
         uint64_t maxWaitUs = 0;
     };
@@ -70,15 +70,17 @@ public:
     }
     std::optional<screenshare::Nv12VideoFrame> Take() {
         std::optional<webrtc::VideoFrame> frame;
+        std::chrono::steady_clock::time_point receivedAt;
         {
             std::lock_guard lock(mutex_); frame.swap(pending_);
-            if (frame) {
-                ++stats_.inFlight;
-                stats_.lastWaitUs = Age(pendingAt_);
-                stats_.maxWaitUs = std::max(stats_.maxWaitUs, *stats_.lastWaitUs);
-            }
+            if (!frame) return {};
+            receivedAt = pendingAt_;
+            const auto wait = std::chrono::steady_clock::now() - receivedAt;
+            stats_.lastWaitUs = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(wait).count());
+            stats_.maxWaitUs = std::max(stats_.maxWaitUs, *stats_.lastWaitUs);
+            if (wait >= screenshare::kVideoFrameFreshnessTimeout) { ++stats_.expired; return {}; }
+            ++stats_.inFlight;
         }
-        if (!frame) return {};
         // Keep ownership accounting exact even when validation/conversion throws.
         struct Completion {
             LatestRoomVideoFrame& owner;
@@ -95,13 +97,13 @@ public:
             frame->rotation() != webrtc::kVideoRotation_0 || frame->timestamp_us() > std::numeric_limits<int64_t>::max() / 10 ||
             frame->timestamp_us() < std::numeric_limits<int64_t>::min() / 10)
             throw std::runtime_error("Unsupported preview dimensions");
-        const auto mapping = screenshare::media::Mapping(frame->video_frame_buffer());
+        screenshare::Nv12VideoFrame result;
+        result.width = result.codedWidth = width; result.height = result.codedHeight = height;
+        result.timestamp100ns = frame->timestamp_us() * 10;
+        result.inputMapping = screenshare::media::Mapping(frame->video_frame_buffer());
+        result.receivedAt = receivedAt;
         auto buffer = screenshare::media::Unwrap(frame->video_frame_buffer());
         if (auto* gpu = dynamic_cast<screenshare::media::D3dVideoFrameBuffer*>(buffer.get())) {
-            screenshare::Nv12VideoFrame result;
-            result.width = result.codedWidth = width; result.height = result.codedHeight = height;
-            result.timestamp100ns = frame->timestamp_us() * 10;
-            result.inputMapping = mapping;
             result.native = std::make_shared<RetainedRoomGpuFrame>(webrtc::scoped_refptr<screenshare::media::D3dVideoFrameBuffer>(gpu), readbacks_);
             { std::lock_guard lock(mutex_); ++stats_.retained; ++stats_.gpuRetained; }
             completion.success = true;
@@ -118,10 +120,6 @@ public:
         }
         if (!pixels || pixels->width() != width || pixels->height() != height || pixels->StrideY() < width || pixels->StrideUV() < width ||
             !pixels->DataY() || !pixels->DataUV()) throw std::runtime_error("Invalid preview planes");
-        screenshare::Nv12VideoFrame result;
-        result.width = result.codedWidth = width; result.height = result.codedHeight = height;
-        result.timestamp100ns = frame->timestamp_us() * 10;
-        result.inputMapping = mapping;
         const auto size = static_cast<size_t>(width) * height * 3 / 2;
         if (pixels->StrideY() == width && pixels->StrideUV() == width && pixels->DataUV() == pixels->DataY() + size_t(width) * height) {
             auto owner = std::make_shared<webrtc::scoped_refptr<webrtc::VideoFrameBuffer>>(std::move(buffer));
