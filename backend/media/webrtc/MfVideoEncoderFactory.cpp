@@ -28,7 +28,8 @@ struct LateEncodedFrame { int64_t elapsedMilliseconds; };
 class MfVideoEncoder final : public webrtc::VideoEncoder {
 public:
     explicit MfVideoEncoder(std::shared_ptr<MfHardwareSession> hardware, int level, std::shared_ptr<DiagnosticHistory> diagnostics)
-        : worker_(webrtc::Thread::Create()), hardware_(std::move(hardware)), diagnostics_(std::move(diagnostics)), level_(level) {
+        : worker_(webrtc::Thread::Create()), hardware_(std::move(hardware)),
+          hardwareDevice_(hardware_ ? hardware_->device : nullptr), diagnostics_(std::move(diagnostics)), level_(level) {
         worker_->SetName("MF encoder", nullptr);
         if (!worker_->Start()) throw std::runtime_error("MF encoder worker startup failed");
     }
@@ -153,11 +154,14 @@ private:
         std::lock_guard lock(mutex_);
         return generation != generation_;
     }
+    bool HardwareDeviceRetired() const noexcept {
+        return hardwareDevice_ == hardware_->device ? hardware_->DeviceRetired() : hardwareDevice_->retired();
+    }
     EncodedPacket HardwarePacket(const CapturedFrame& raw, uint64_t generation) {
         const int64_t timestamp = ++hardwareSampleId_ * 10'000'000 / config_.fps;
         return WaitForHardwareFrame(timestamp,
             [&] {
-                if (hardware_->DeviceRetired()) throw std::runtime_error("Encoder graphics device retired");
+                if (HardwareDeviceRetired()) throw std::runtime_error("Encoder graphics device retired");
                 return hardware_->PollOutput(*encoder_);
             },
             [&] { return encoder_->TrySubmitHardwareFrame(raw, timestamp); },
@@ -182,11 +186,11 @@ private:
         config_.backend = H264StreamEncoderBackend::Software;
         config_.externalHardwareScheduling = false;
         config_.d3dDevice.Reset();
-        if (hardware_ && hardware_->device && !hardware_->DeviceRetired() && !hardware_->quarantined) {
+        if (hardwareDevice_ && !HardwareDeviceRetired() && !hardware_->quarantined) {
             try {
                 config_.backend = H264StreamEncoderBackend::Hardware;
                 config_.externalHardwareScheduling = true;
-                config_.d3dDevice = hardware_->device->device();
+                config_.d3dDevice = hardwareDevice_->device();
                 encoder_->Start(config_);
                 // Probe actual configured size, two rate assignments and keyframes
                 // before reporting hardware capability. Synthetic input only.
@@ -307,6 +311,18 @@ private:
         const auto* native = dynamic_cast<D3dVideoFrameBuffer*>(Unwrap(frame.video_frame_buffer()).get());
         return native && native->retired();
     }
+    bool RebindHardwareInput(const webrtc::VideoFrame& frame, uint64_t generation) {
+        if (!hardwareActive_ || hardware_->quarantined) return false;
+        const auto buffer = Unwrap(frame.video_frame_buffer());
+        const auto* native = dynamic_cast<D3dVideoFrameBuffer*>(buffer.get());
+        if (!native || native->deviceOwner() == hardwareDevice_ || native->retired()) return false;
+        if (Cancelled(generation)) throw HardwareFrameCancelled();
+        // A committed source switch produces frames on another device. Bind
+        // the transform there to keep GPU input and start a fresh reference chain.
+        hardwareDevice_ = native->deviceOwner();
+        StartTransform();
+        return true;
+    }
     void Process(uint64_t generation) {
         std::optional<webrtc::VideoFrame> frame;
         bool keyframe;
@@ -322,7 +338,8 @@ private:
         if (frame) {
             try {
                 if (failed) throw std::runtime_error("Encoder requires reinitialization");
-                if (hardwareActive_ && hardware_->DeviceRetired()) SoftwareFallback("Capture device retired");
+                if (hardwareActive_ && HardwareDeviceRetired()) SoftwareFallback("Capture device retired");
+                if (RebindHardwareInput(*frame, generation)) keyframe = true;
                 EncodedPacket packet;
                 try { packet = EncodePacket(*frame, keyframe, generation); }
                 catch (const HardwareFrameCancelled&) { throw; }
@@ -404,6 +421,7 @@ private:
     }
     std::unique_ptr<webrtc::Thread> worker_;
     std::shared_ptr<MfHardwareSession> hardware_;
+    std::shared_ptr<D3dVideoDevice> hardwareDevice_;
     std::shared_ptr<DiagnosticHistory> diagnostics_;
     std::atomic<bool> hardwareActive_{false};
     int64_t hardwareSampleId_ = 0;

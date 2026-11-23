@@ -5,6 +5,28 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Hardware encoding after a live source switch (2026-11-23)
+
+When a new capture source delivers frames on a different Direct3D device, a
+healthy hardware encoder binds to that device and starts with a keyframe. The
+encoder retains its existing software fallback for device or transform failure.
+
+Six alternating pairs switched between two generated 1920×1080 WGC windows
+while one hardware H.264 encoder was running at 60 FPS and 4 Mbps. Each run
+measured the first replacement frame and 60 fresh frames after eight warm-up
+frames. Elapsed encode time runs from submission to the encoded callback.
+
+| Median per run | Before | After |
+| --- | ---: | ---: |
+| GPU readbacks per 60 steady frames | 60 | 0 |
+| Median steady encode time | 3.576 ms | 2.543 ms |
+| 95th-percentile steady encode time | 4.102 ms | 2.677 ms |
+| First replacement frame | 4.020 ms | 62.494 ms |
+
+The first replacement frame includes the one-time hardware startup and probes.
+The measurements cover the encoder path including any input readback. Capture,
+transport and viewer presentation are outside the measured interval.
+
 ## Shared Direct3D context during live capture (2026-11-23)
 
 Room capture releases the shared context lock after submitting the NV12 draw,

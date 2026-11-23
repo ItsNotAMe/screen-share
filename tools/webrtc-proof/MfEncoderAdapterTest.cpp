@@ -333,6 +333,39 @@ void Run(bool useHardware, bool gpuInput) {
     Require(!gpuInput || hardware->device->readbackCount() == 0, "Owned GPU encoding performed CPU readback");
     std::cout << "MF encoder: zero-rate/resume, keyframe, 100-frame burst coalescing and three reset/release cycles passed.\n";
 }
+void SwitchHardwareInputDevice() {
+    using namespace screenshare::media;
+    auto original = std::make_shared<D3dVideoDevice>();
+    auto replacement = std::make_shared<D3dVideoDevice>();
+    auto hardware = std::make_shared<MfHardwareSession>(original);
+    MfVideoEncoderFactory factory(hardware);
+    auto encoder = factory.Create(webrtc::CreateEnvironment(), factory.GetSupportedFormats().front());
+    Sink sink;
+    struct Cleanup { webrtc::VideoEncoder& encoder; ~Cleanup() { encoder.Release(); } } cleanup{*encoder};
+    webrtc::VideoCodec codec; codec.codecType = webrtc::kVideoCodecH264;
+    codec.width = 640; codec.height = 360; codec.maxFramerate = 30; codec.startBitrate = 1000;
+    Require(encoder->InitEncode(&codec, {webrtc::VideoEncoder::Capabilities(false), 2, 1200}) == 0 &&
+        encoder->GetEncoderInfo().is_hardware_accelerated, "Source-switch hardware initialization failed");
+    encoder->RegisterEncodeCompleteCallback(&sink);
+    const std::vector<uint8_t> pixels(640 * 360 * 3 / 2, 128);
+    uint32_t timestamp = 0;
+    for (const auto& device : {original, replacement, replacement, original, original}) {
+        auto frame = Frame(++timestamp);
+        frame.set_video_frame_buffer(device->UploadNv12(640, 360, pixels));
+        Require(encoder->Encode(frame, nullptr) == 0, "Source-switch frame rejected");
+        sink.Wait(timestamp);
+        Rate(*encoder, 1000000);
+        Require(!device->readbackCount(), "Hardware source switch read GPU pixels back to the CPU");
+        const bool keyframe = timestamp == 1 || timestamp == 2 || timestamp == 4;
+        Require(sink.images.back().RtpTimestamp() == timestamp &&
+            (sink.images.back()._frameType == webrtc::VideoFrameType::kVideoFrameKey) == keyframe,
+            "Source-switch keyframe or timestamp was lost");
+    }
+    Require(encoder->GetEncoderInfo().is_hardware_accelerated && !hardware->quarantined &&
+        !hardware->softwareFallbacks && hardware->hardwareFrames == 5 && !sink.dropped,
+        "Source switch lost hardware encoding or dropped frames");
+    std::cout << "Hardware source switch: GPU input, keyframes and RTP continuity across devices passed.\n";
+}
 void StableFrameRate(bool useHardware) {
     auto hardware = useHardware ? std::make_shared<screenshare::media::MfHardwareSession>(
         std::make_shared<screenshare::media::D3dVideoDevice>()) : nullptr;
@@ -581,6 +614,7 @@ int main(int argc, char** argv) {
         }
         Require(!gpuInput || hardware, "--gpu-input requires --hardware");
         Require(!gpuReadback || !hardware,"--gpu-readback requires software encoding");
+        if (gpuInput) SwitchHardwareInputDevice();
         if (!hardware) {
             SoftwareThreadDefaults();
             Nv12PlaneValidation();

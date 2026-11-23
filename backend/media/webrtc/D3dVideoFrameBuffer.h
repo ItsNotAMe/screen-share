@@ -76,6 +76,7 @@ public:
     // Null means GPU scaling is unavailable; the caller may use ToI420().
     webrtc::scoped_refptr<D3dVideoFrameBuffer> Scale(int width, int height,
         int left, int top, int imageWidth, int imageHeight);
+    const std::shared_ptr<D3dVideoDevice>& deviceOwner() const noexcept { return owner_; }
     bool retired() const noexcept { return owner_->retired(); }
 private:
     std::shared_ptr<D3dVideoDevice> owner_;
