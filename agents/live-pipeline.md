@@ -7,6 +7,14 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 oversized sources: room capture fits its GPU output within the
+3840x2160 stream limit before retaining NV12. Very wide and tall sources keep
+their aspect ratio to even-pixel precision. WGC/DXGI input mapping still uses
+the original capture bounds. The ceiling applies on initial capture, resize
+and source replacement. Preview and legacy capture retain their own bounds.
+`NativeCaptureTests --large-source` verifies owned NV12 from a generated WGC
+window at 5120x1440 and after resizing it to 1280x720, including input geometry.
+
 2026-11-23 viewer frame age: carry local decoder receipt time through the
 latest-frame queue and renderer. Frames that reach two seconds in these queues
 expire before conversion or upload. Delayed presentation or redraw cannot make

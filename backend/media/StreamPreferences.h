@@ -26,12 +26,14 @@ struct StreamLimits {
     StreamDegradation degradation;
 };
 inline constexpr int kViewerAudioAllowanceBps = 128000;
+inline constexpr int kMaxStreamWidth = 3840;
+inline constexpr int kMaxStreamHeight = 2160;
 inline StreamLimits ValidateStreamPreferences(const StreamPreferences& value) {
     if ((value.preset != StreamPreset::Gaming && value.preset != StreamPreset::Quality) ||
         (value.resolution != ResolutionMode::Auto && value.resolution != ResolutionMode::Fixed && value.resolution != ResolutionMode::Native) ||
         (value.fpsMode != SettingMode::Auto && value.fpsMode != SettingMode::Manual) ||
         (value.bitrateMode != SettingMode::Auto && value.bitrateMode != SettingMode::Manual) ||
-        value.width < 2 || value.height < 2 || value.width > 3840 || value.height > 2160 ||
+        value.width < 2 || value.height < 2 || value.width > kMaxStreamWidth || value.height > kMaxStreamHeight ||
         value.width % 2 || value.height % 2 || value.fps < 1 || value.fps > 240 ||
         (value.bitrateMode == SettingMode::Manual && !value.bitrateLimitBps) ||
         (value.bitrateLimitBps && (*value.bitrateLimitBps < 1000 || *value.bitrateLimitBps > 100000000)) ||

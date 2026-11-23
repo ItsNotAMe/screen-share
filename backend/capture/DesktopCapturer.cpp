@@ -1789,21 +1789,30 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
     }
 }
 
+std::pair<int, int> CaptureConfig::OutputSize(int sourceWidth, int sourceHeight) const
+{
+    int width = sourceWidth;
+    int height = sourceHeight;
+    const auto fit = [&](int maxWidth, int maxHeight) {
+        const double scale = std::min({1.0, double(maxWidth) / width, double(maxHeight) / height});
+        width = std::max(1, int(width * scale));
+        height = std::max(1, int(height * scale));
+    };
+    if (fitWithinTarget && targetWidth > 0 && targetHeight > 0) {
+        fit(targetWidth, targetHeight);
+    } else {
+        if (targetWidth > 0) width = targetWidth;
+        if (targetHeight > 0) height = targetHeight;
+    }
+    if (maxOutputWidth > 0 && maxOutputHeight > 0) fit(maxOutputWidth, maxOutputHeight);
+    if (includeNv12) return {PositiveEvenDimension(width), PositiveEvenDimension(height)};
+    return {width, height};
+}
+
 ID3D11Texture2D* DesktopCapturer::ScaleFrameIfNeeded(ID3D11Texture2D* sourceTexture, const D3D11_TEXTURE2D_DESC& sourceDesc)
 {
     lastColorConversionMode_ = 0;
-    int outputWidth = config_.targetWidth > 0 ? config_.targetWidth : static_cast<int>(sourceDesc.Width);
-    int outputHeight = config_.targetHeight > 0 ? config_.targetHeight : static_cast<int>(sourceDesc.Height);
-    if (config_.fitWithinTarget && config_.targetWidth > 0 && config_.targetHeight > 0) {
-        const double scale = std::min({1.0, double(config_.targetWidth) / sourceDesc.Width,
-            double(config_.targetHeight) / sourceDesc.Height});
-        outputWidth = std::max(1, int(sourceDesc.Width * scale));
-        outputHeight = std::max(1, int(sourceDesc.Height * scale));
-    }
-    if (config_.includeNv12) {
-        outputWidth = PositiveEvenDimension(outputWidth);
-        outputHeight = PositiveEvenDimension(outputHeight);
-    }
+    const auto [outputWidth, outputHeight] = config_.OutputSize(sourceDesc.Width, sourceDesc.Height);
     const uint32_t colorConversionMode = ColorConversionMode(sourceDesc.Format, outputColorSpace_, config_.hdrToSdr, outputHdrActive_);
     const bool needsColorTransform = colorConversionMode != 0;
     const bool needsTransform =

@@ -4,6 +4,7 @@
 #include "media/webrtc/D3dVideoFrameBuffer.h"
 #include "input/v2/DesktopTarget.h"
 #include "media/DiagnosticHistory.h"
+#include "media/StreamPreferences.h"
 #include <atomic>
 
 namespace screenshare::media {
@@ -11,16 +12,22 @@ struct WindowsCaptureResource final : CaptureResource {
     webrtc::scoped_refptr<D3dVideoFrameBuffer> buffer;
     std::shared_ptr<D3dVideoDevice> device;
 };
+inline CaptureConfig ConfigureWindowsRoomCapture(CaptureConfig config) {
+    config.allowDisplayFallback = true;
+    config.includeNv12 = config.ownedNv12 = true;
+    config.includeNv12Readback = config.includeBgraReadback = false;
+    // Fit large windows and displays before creating the owned NV12 texture.
+    // The captured source dimensions still describe the original input target.
+    config.maxOutputWidth = kMaxStreamWidth;
+    config.maxOutputHeight = kMaxStreamHeight;
+    return config;
+}
 // Windows/WebRTC implementation boundary. Create only through the session's
 // factory. WindowsMediaRuntime must outlive the joined session.
 class WindowsCaptureSource final : public ICaptureSource {
 public:
     explicit WindowsCaptureSource(CaptureConfig config, std::shared_ptr<input::DesktopTargetState> target = {}, std::shared_ptr<DiagnosticHistory> diagnostics = {},
-        std::shared_ptr<std::atomic<bool>> demand = {}) : config_(config), target_(std::move(target)), sourceId_((uint64_t(GetCurrentProcessId())<<32)|++nextSource_), property_(input::WindowIdentityProperty(sourceId_)), diagnostics_(std::move(diagnostics)), demand_(std::move(demand)), cadence_(std::max(1, config.targetFps)) {
-        config_.allowDisplayFallback = true;
-        config_.includeNv12 = config_.ownedNv12 = true;
-        config_.includeNv12Readback = config_.includeBgraReadback = false;
-    }
+        std::shared_ptr<std::atomic<bool>> demand = {}) : config_(ConfigureWindowsRoomCapture(config)), target_(std::move(target)), sourceId_((uint64_t(GetCurrentProcessId())<<32)|++nextSource_), property_(input::WindowIdentityProperty(sourceId_)), diagnostics_(std::move(diagnostics)), demand_(std::move(demand)), cadence_(std::max(1, config.targetFps)) {}
     ~WindowsCaptureSource() override {
         if(target_)target_->Invalidate(sourceId_);
         const auto window=reinterpret_cast<HWND>(config_.windowHandle);

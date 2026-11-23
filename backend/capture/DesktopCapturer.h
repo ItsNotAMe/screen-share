@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <d3d11.h>
@@ -74,6 +75,9 @@ struct CaptureConfig {
     // Treat both target dimensions as upper bounds, preserving aspect ratio
     // without upscaling. Used for small BGRA previews before GPU readback.
     bool fitWithinTarget = false;
+    // Optional output ceiling, applied after the requested resize.
+    int maxOutputWidth = 0;
+    int maxOutputHeight = 0;
     int targetFps = 60;
     CaptureBackend backend = CaptureBackend::WindowsGraphicsCapture;
     bool allowDisplayFallback = false;
@@ -86,6 +90,7 @@ struct CaptureConfig {
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
     float hdrSdrBgraExposure = 0.88f;
+    [[nodiscard]] std::pair<int, int> OutputSize(int sourceWidth, int sourceHeight) const;
 };
 
 struct CapturedFrame {

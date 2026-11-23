@@ -374,6 +374,43 @@ void PreviewReadback() {
         capture.Stop();
     }
 }
+void OversizedSource() {
+    WindowsMediaRuntime runtime;
+    Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
+    proof::TestWindow window;
+    const auto resize = [&](int width, int height) {
+        window.Invoke([&] {
+            SetWindowLongPtrW(window.handle(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
+            Require(SetWindowPos(window.handle(), nullptr, 0, 0, width, height,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED), "Proof window resize failed");
+        });
+    };
+    resize(5120, 1440);
+    CaptureConfig config;
+    config.sourceType = CaptureSourceType::Window;
+    config.windowHandle = reinterpret_cast<uint64_t>(window.handle());
+    auto target = std::make_shared<input::DesktopTargetState>();
+    WindowsCaptureSource source(config, target);
+    source.Start();
+    const auto verify = [&](int width, int height, int outputWidth, int outputHeight) {
+        Wait([&] {
+            const auto sample = source.Poll();
+            if (!sample) return false;
+            const auto geometry = target->Read();
+            if (geometry.target.width != width || geometry.target.height != height) return false;
+            const auto resource = std::static_pointer_cast<WindowsCaptureResource>(sample->resource);
+            Require(resource->buffer->width() == outputWidth && resource->buffer->height() == outputHeight,
+                "Oversized capture produced incorrect NV12 dimensions");
+            Require(geometry.generation && geometry.generation == resource->inputGeneration && geometry.target.mouseMapped,
+                "Capture resize lost the original input geometry");
+            return true;
+        });
+        std::cout << "Room capture " << width << 'x' << height << " -> " << outputWidth << 'x' << outputHeight << '\n';
+    };
+    verify(5120, 1440, 3840, 1080);
+    resize(1280, 720);
+    verify(1280, 720, 1280, 720);
+}
 int main(int argc, char** argv) try {
     Policy(); CursorPixels();
     if (argc > 1 && std::string_view(argv[1]) == "--live") WindowLifecycle();
@@ -383,5 +420,6 @@ int main(int argc, char** argv) try {
     if (argc > 1 && std::string_view(argv[1]) == "--demand-check") CaptureDemand(false);
     if (argc > 1 && std::string_view(argv[1]) == "--switch") SourceSwitches();
     if (argc > 1 && std::string_view(argv[1]) == "--preview") PreviewReadback();
+    if (argc > 1 && std::string_view(argv[1]) == "--large-source") OversizedSource();
     std::cout << "Capture backend checks passed\n"; return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
