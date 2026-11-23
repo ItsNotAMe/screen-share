@@ -7,6 +7,14 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 viewer audio startup: acknowledge WebRTC playout startup before
+opening the Windows output. The first write opens and primes the device with
+silence on the same playout worker, then subsequent writes use current PCM.
+Initial failure uses the existing bounded retry delay. A default-route change
+during activation discards the outdated output without counting a failure.
+The loopback regression delays initial activation until five video frames
+arrive, then checks audible audio. The old path blocks those frames.
+
 2026-11-23 oversized sources: room capture fits its GPU output within the
 3840x2160 stream limit before retaining NV12. Very wide and tall sources keep
 their aspect ratio to even-pixel precision. WGC/DXGI input mapping still uses

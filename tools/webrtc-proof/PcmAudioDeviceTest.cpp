@@ -322,6 +322,8 @@ void AutomaticPlaybackRecovery() {
     {
         ControlledPcmPlayout output(control, [&] { return now; }); output.Start();
         PcmBlock block; block.fill(2000);
+        Require(evidence->created == 0, "Playback start waited on output activation");
+        output.Write(block, {});
         Require(evidence->created == 1 && evidence->live == 0, "Unavailable output retained resources");
         for (auto delay : {250ms,500ms,1000ms,2000ms,4000ms,5000ms,5000ms}) {
             const auto attempts = evidence->created.load();
@@ -352,18 +354,18 @@ void AutomaticPlaybackRecovery() {
     Require(evidence->live == 0 && !evidence->wrongThread, "Automatic recovery leaked/crossed endpoint ownership");
 
     evidence = std::make_shared<PlaybackEvidence>(); evidence->unavailable = true;
-    bool closeDuringRecovery = false;
+    bool closeDuringActivation = false;
     PlaybackControl::Factory closingFactory = [&] {
-        if (closeDuringRecovery) control->Close();
+        if (closeDuringActivation) control->Close();
         return std::make_unique<Output>(evidence);
     };
     control = std::make_shared<PlaybackControl>(PlaybackSelection{}, closingFactory);
     {
         ControlledPcmPlayout output(control, [&] { return now; }); output.Start();
-        closeDuringRecovery = true; evidence->unavailable = false; evidence->sample = -1; now += 250ms;
+        closeDuringActivation = true; evidence->unavailable = false; evidence->sample = -1;
         output.Write(PcmBlock{}, {});
         Require(evidence->live == 0 && evidence->sample == -1 && control->Status().health.state == AudioEndpointState::Inactive,
-            "Close during activation installed/wrote a recovered endpoint");
+            "Close during initial activation installed or wrote an endpoint");
     }
 
     auto route = std::make_shared<std::atomic<uint64_t>>(0);
@@ -377,6 +379,7 @@ void AutomaticPlaybackRecovery() {
     control = std::make_shared<PlaybackControl>(PlaybackSelection{}, routed);
     {
         ControlledPcmPlayout output(control, [&] { return now; }); output.Start(); PcmBlock block; block.fill(3000);
+        output.Write(block, {});
         output.Write(block, {});
         Require(evidence->created == 2 && evidence->live == 1 && evidence->sample == 0,
             "Default route change during startup was lost");
@@ -434,7 +437,8 @@ void Playback() {
     }
     Require(evidence->live == 0 && !evidence->wrongThread, "Output ownership leaked");
     {
-        ControlledPcmPlayout output(control); output.Start(); PcmBlock block; block.fill(2000); output.Write(block, {});
+        ControlledPcmPlayout output(control); output.Start(); PcmBlock block; block.fill(2000);
+        output.Write(block, {}); output.Write(block, {});
         Require(evidence->sample == 1000 && control->Status().selected.deviceId == L"next", "Playback settings lost on restart");
         auto pending = control->Submit({}, good); control->Close();
         Require(pending.get().error == AudioUpdateError::Cancelled && control->Submit({}, good).get().error == AudioUpdateError::Unavailable, "Output close ordering failed");
@@ -495,6 +499,7 @@ void AudioRecovery() {
         // Keep this manual-retry proof independent of wall-clock load; automatic
         // backoff and recovery are exercised with an advanced clock separately.
         ControlledPcmPlayout output(playback, [] { return std::chrono::steady_clock::time_point{}; }); output.Start(); block.fill(2000);
+        output.Write(block, {});
         Require(playback->Status().health.state == AudioEndpointState::Failed && evidence->live == 0, "Initial output failure killed recovery or retained device");
         for (int i = 0; i < 10; ++i) output.Write(block, {});
         Require(evidence->created == 1 && evidence->sample == 0 && output.BufferFrames() == 0, "Discard path retried, played or buffered failed output");

@@ -52,7 +52,8 @@ private:
 
 // Runs entirely on the existing ADM playout worker, without an extra audio queue.
 // Healthy output owns pacing; paced discard keeps callbacks alive after failure.
-// Device initialization can pause local playout; it never blocks video/signaling.
+// Open on the first write, after the ADM has acknowledged StartPlayout. Slow
+// device activation then affects only local audio, without blocking negotiation.
 class ControlledPcmPlayout final : public PcmPlayoutEndpoint {
     std::shared_ptr<PlaybackControl> control_;
     std::unique_ptr<PcmPlayoutEndpoint> device_;
@@ -89,10 +90,7 @@ public:
     void Start() override {
         auto [selected, factory] = control_->Attach(); selected_ = std::move(selected);
         factory_ = std::move(factory);
-        if (!control_->CanRecover()) { discard_.Start(); return; }
-        try {
-            device_ = Open(factory_); control_->Ready();
-        } catch (...) { Fail(); }
+        Reroute();
     }
     void Write(const PcmBlock& block, std::stop_token stop) override {
         if (stop.stop_requested()) return;
@@ -116,16 +114,23 @@ public:
             }
         }
         if (!device_ && now_() >= retryAt_ && control_->CanRecover()) {
+            std::unique_ptr<PcmPlayoutEndpoint> replacement;
             try {
-                auto replacement = Open(factory_);
+                replacement = Open(factory_);
                 if (stop.stop_requested() || !control_->CanRecover()) return;
                 // Activation may have blocked. Drop that in-flight audio and
                 // validate with silence; the next callback supplies live PCM.
                 replacement->Write(PcmBlock{}, stop);
                 if (stop.stop_requested() || !control_->CanRecover()) return;
-                device_ = std::move(replacement); retryDelay_ = std::chrono::milliseconds(250);
-                control_->Ready(); return;
-            } catch (...) { if (stop.stop_requested()) return; Fail(); }
+                if (!replacement->DeviceChanged()) {
+                    device_ = std::move(replacement); retryDelay_ = std::chrono::milliseconds(250);
+                    control_->Ready(); return;
+                }
+                Reroute();
+            } catch (...) {
+                if (stop.stop_requested() || !control_->CanRecover()) return;
+                if (replacement && replacement->DeviceChanged()) Reroute(); else Fail();
+            }
         }
         if (device_) {
             try { device_->Write(Apply(block, selected_), stop); return; }

@@ -93,6 +93,8 @@ inline void Recovery() {
     {
         ControlledPcmPlayout output(control, [&] { return state->now; }); output.Start();
         PcmBlock block{}; block.fill(2400); output.Write(block, {});
+        Check(state->samples.size() == 960 && state->samples.back() == 0, "Initial output replayed audio from before activation");
+        state->samples.clear(); output.Write(block, {});
         Check(state->samples.size() == 960 && state->samples.back() == 600, "Initial output gain failed");
         state->stalled.insert(1); state->samples.clear(); output.Write(block, {});
         Check(control->Status().health.state == AudioEndpointState::Failed && control->Status().health.failures == 1 &&
