@@ -5,6 +5,29 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Shared Direct3D context during live capture (2026-11-23)
+
+Room capture releases the shared context lock after submitting the NV12 draw,
+snapshot copy and completion query. Encoders and scalers can use the context
+while capture polls the query. Each frame still waits for GPU completion before
+publication. [Direct3D multithread protection](https://learn.microsoft.com/en-us/windows/win32/api/d3d10/nf-d3d10-id3d10multithread-enter) ·
+[Query completion](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-getdata)
+
+Six alternating before/after pairs used a generated 2560×1440 WGC window,
+500 ms of settling and three seconds of capture polling at 60 Hz per run. A
+second thread sampled acquisition time for the same context lock at about 1 kHz.
+
+| Median per run | Before | After |
+| --- | ---: | ---: |
+| 99th-percentile lock wait | 1.086 ms | 0.012 ms |
+| Lock waits longer than 0.5 ms | 161 | 0 |
+| New frames captured | 164 | 166 |
+| 95th-percentile gap between captured frames | 33.19 ms | 33.16 ms |
+
+The probe measures contention for the context lock. Encoder processing time
+and viewer latency are outside its scope. The separate 1080p check delivered 120
+frames to the video track in two seconds, including retained frames.
+
 ## Host preview handoff at 1080p (2026-11-23)
 
 The active Windows host preview transfers its viewport-sized BGRA readback to

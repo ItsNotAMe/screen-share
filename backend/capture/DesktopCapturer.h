@@ -171,7 +171,10 @@ private:
     void EnsureNv12InputTexture(const D3D11_TEXTURE2D_DESC& bgraDesc);
     void EnsureNv12Textures(int width, int height);
     ID3D11Texture2D* ScaleFrameIfNeeded(ID3D11Texture2D* sourceTexture, const D3D11_TEXTURE2D_DESC& sourceDesc);
-    void GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D11_TEXTURE2D_DESC& bgraDesc, CapturedFrame& frame);
+    Microsoft::WRL::ComPtr<ID3D11Query> GenerateNv12Frame(ID3D11Texture2D* bgraTexture,
+        const D3D11_TEXTURE2D_DESC& bgraDesc, CapturedFrame& frame);
+    void CompleteNv12Frame(Microsoft::WRL::ComPtr<ID3D11Query> completion, CapturedFrame& frame);
+    void ReadNv12Pixels(CapturedFrame& frame);
     std::optional<CapturedFrame> ReadTextureFrame(
         ID3D11Texture2D* sourceTexture,
         const D3D11_TEXTURE2D_DESC& sourceDesc,
